@@ -65,6 +65,12 @@ async function handleUpgrade(lastVersion: string, currentVersion: string) {
         setPref('runCollectionSync', true);
         ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flag set for collection sync.`);
     }
+
+    // Upgrade to 0.8.3 or newer
+    if (compareVersions(lastVersion, '0.8.3') < 0 && compareVersions(currentVersion, '0.8.3') >= 0) {
+        setPref('runWebDAVSync', true);
+        ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flag set for WebDAV sync.`);
+    }
 }
 
 async function onStartup() {
@@ -267,6 +273,9 @@ async function onShutdown(): Promise<void> {
 	
 	// Unregister keyboard shortcuts
 	BeaverUIFactory.unregisterShortcuts();
+
+    // Close separate window if open
+    BeaverUIFactory.closeBeaverWindow();
 	
 	// Unload stylesheets
 	unloadKatexStylesheet();

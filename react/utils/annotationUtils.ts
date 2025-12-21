@@ -368,7 +368,8 @@ export const createBoundingBoxHighlights = async (
     if (boundingBoxData.length === 0) return [];
     
     try {
-        const reader = await getCurrentReaderAndWaitForView();
+        // Wait for PDF document to be loaded (required for getPageViewportInfo)
+        const reader = await getCurrentReaderAndWaitForView(undefined, true);
         if (!reader || !reader._internalReader) {
             logger('createBoundingBoxHighlights: No active reader found for creating bounding box highlights');
             return [];

@@ -12,8 +12,8 @@ import { logger } from '../../src/utils/logger';
 import { ExternalReference } from '../types/externalReferences';
 import { formatExternalCitation } from '../atoms/externalReferences';
 
-// Regex for citation syntax
-const citationRegex = /<citation\s+([^>]+?)\s*(\/>|>.*?<\/citation>)/g;
+// Regex for citation syntax - matches self-closing (/>) and non-self-closing (>) with or without closing tag
+const citationRegex = /<citation\s+([^>]+?)\s*(\/>|>(?:.*?<\/citation>)?)/g;
 const attributeRegex = /(\w+)\s*=\s*"([^"]*)"/g;
 
 /**
@@ -31,15 +31,37 @@ function parseAttributes(attrString: string) {
 }
 
 /**
- * Extracts libraryID and itemKey from the id attribute.
- * @param id - The raw id string from the citation.
- * @returns An object with libraryID and itemKey.
+ * Extracts libraryID and itemKey from an id attribute value.
+ * Format: "libraryID-itemKey" (may have 'user-content-' prefix from sanitization)
+ * @param id - The raw id string from the citation attribute
+ * @returns An object with libraryID and itemKey
  */
-function parseId(id: string): { libraryID: number; itemKey: string } {
+function parseItemReference(id: string): { libraryID: number; itemKey: string } {
     const cleanedId = id.replace('user-content-', '');
-    const [libraryIDString, itemKey] = cleanedId.includes('-') ? cleanedId.split('-') : [cleanedId, cleanedId];
-    const libraryID = parseInt(libraryIDString, 10) || 1;
-    return { libraryID, itemKey };
+    const dashIndex = cleanedId.indexOf('-');
+    if (dashIndex > 0) {
+        const libraryIDString = cleanedId.substring(0, dashIndex);
+        const itemKey = cleanedId.substring(dashIndex + 1);
+        return { libraryID: parseInt(libraryIDString, 10) || 1, itemKey };
+    }
+    // Fallback for malformed reference
+    return { libraryID: 1, itemKey: cleanedId };
+}
+
+/**
+ * Get the Zotero item reference from citation attributes.
+ * Priority: att_id > item_id (attachment_id is normalized to att_id)
+ */
+function getItemReferenceFromAttrs(attrs: Record<string, string>): { libraryID: number; itemKey: string } | null {
+    // Normalize attachment_id to att_id
+    const attId = attrs.att_id || attrs.attachment_id;
+    if (attId) {
+        return parseItemReference(attId);
+    }
+    if (attrs.item_id) {
+        return parseItemReference(attrs.item_id);
+    }
+    return null;
 }
 
 /**
@@ -48,8 +70,8 @@ function parseId(id: string): { libraryID: number; itemKey: string } {
  * @returns Processed markdown with note tags replaced by headers/lines
  */
 export function preprocessNoteContent(text: string): string {
-    // Clean up backticks around complete citations
-    text = text.replace(/`(<citation[^>]*\/>)`/g, '$1');
+    // Clean up backticks around complete citations (handles both /> and > endings)
+    text = text.replace(/`(<citation[^>]*\/?>)`/g, '$1');
 
     // Remove note tags (keep content), add title as markdown header if present
     return text.replace(/(\s*)<note\s+([^>]*?)>(\s*)/g, (match, before, attrString, after) => {
@@ -86,25 +108,24 @@ export function renderToMarkdown(
     const formattedContent = text.replace(citationRegex, (match: string, attrString: string): string => {
         // Parse the attributes
         const attrs = parseAttributes(attrString);
-        if (!attrs.id && !attrs.external_id) {
-            logger(`renderToMarkdown: Citation tag missing 'id' attribute: ${match}`);
-            return '';
-        }
-
-        const isExternalReference = attrs.external_id && !attrs.id;
+        
+        // Get item reference from attributes (att_id, item_id, or external_id)
+        let itemRef = getItemReferenceFromAttrs(attrs);
+        const isExternalReference = !!attrs.external_id && !itemRef;
         const isExternalReferenceMappedToZoteroItem = isExternalReference && !!externalItemMapping[attrs.external_id];
 
-        // 1. External reference ---------------------------------------------------
+        // 1. External reference (not mapped to Zotero) ---------------------------------------------------
         if (isExternalReference && !isExternalReferenceMappedToZoteroItem) {
-            const citationMetadata = citationMetadataMap[attrs.cid || ''];
-            if (!citationMetadata) {
+            // Look up external reference data
+            const externalRef = externalReferenceMapping[attrs.external_id];
+            if (!externalRef) {
                 logger(`renderToMarkdown: No external reference found for external_id: ${attrs.external_id}`);
                 return '';
             }
-            if (attrs.external_id && attrs.external_id in externalReferenceMapping) {
-                externalReferences.push(externalReferenceMapping[attrs.external_id]);
-            }
-            return citationMetadata.author_year ? `(${citationMetadata.author_year})` : '';
+            externalReferences.push(externalRef);
+            // Use author_year from external reference
+            const authorYear = formatExternalCitation(externalRef);
+            return authorYear ? `(${authorYear})` : '';
         }
 
         // 2. External reference mapped to Zotero item ---------------------------------------------------
@@ -114,13 +135,17 @@ export function renderToMarkdown(
                 logger(`renderToMarkdown: No Zotero item found for external_id: ${attrs.external_id}`);
                 return '';
             }
-            attrs.id = `${mappedZoteroItem.library_id}-${mappedZoteroItem.zotero_key}`;
+            // Use the mapped Zotero item
+            itemRef = { libraryID: mappedZoteroItem.library_id, itemKey: mappedZoteroItem.zotero_key };
         }
 
         // 3. Zotero item ---------------------------------------------------
-
-        // Parse the id to get libraryID and itemKey
-        const { libraryID, itemKey } = parseId(attrs.id);
+        if (!itemRef) {
+            logger(`renderToMarkdown: Citation tag missing item reference: ${match}`);
+            return '';
+        }
+        
+        const { libraryID, itemKey } = itemRef;
 
         // Get the Zotero item
         const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);

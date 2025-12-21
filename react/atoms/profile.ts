@@ -9,6 +9,10 @@ export const isProfileInvalidAtom = atom<boolean>(false);
 export const isProfileLoadedAtom = atom<boolean>(false);
 export const profileWithPlanAtom = atom<SafeProfileWithPlan | null>(null);
 
+// Data migration state
+export const isMigratingDataAtom = atom<boolean>(false);
+export const requiredDataVersionAtom = atom<number>(0);
+
 // Device authorization state
 const { localUserKey } = getZoteroUserIdentifier();
 export const isDeviceAuthorizedAtom = selectAtom(

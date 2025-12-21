@@ -14,8 +14,11 @@ pref("statefulChat", true);
 pref("addSelectedItemsOnOpen", true);
 pref("addSelectedItemsOnNewThread", true);
 pref("annotationToolEnabled", true);
-pref("autoApplyAnnotations", true);
 pref("maxAddAttachmentToMessage", 3);
+
+// Agent actions
+pref("autoApplyAnnotations", true);
+pref("autoImportItems", false);
 
 // AI settings
 pref("customInstructions", "");
@@ -45,4 +48,5 @@ pref("skippedItems", "[]")
 // Flags to show notifications, run consistency check and collection sync on upgrade
 pref("runConsistencyCheck", false);
 pref("runCollectionSync", false);
+pref("runWebDAVSync", false);
 pref("pendingVersionNotifications", "[]");

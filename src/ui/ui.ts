@@ -11,9 +11,13 @@ interface BeaverWindow extends Window {
     BeaverReact?: {
         renderAiSidebar: (container: Element, location: string) => any;
         renderGlobalInitializer: (container: Element) => any;
+        renderWindowSidebar: (container: Element) => any;
         unmountFromElement: (container: Element) => boolean;
     };
 }
+
+// Window name for the separate Beaver window
+const BEAVER_WINDOW_NAME = 'beaver-separate-window';
 
 export class BeaverUIFactory {
     // Store root references per window
@@ -274,5 +278,56 @@ export class BeaverUIFactory {
      */
     static unregisterShortcuts() {
         keyboardManager.unregisterAll();
+    }
+
+    /**
+     * Find an existing Beaver separate window
+     * @returns The window if found, undefined otherwise
+     */
+    static findBeaverWindow(): Window | undefined {
+        const wm = Services.wm;
+        const enumerator = wm.getEnumerator('beaver:window');
+        while (enumerator.hasMoreElements()) {
+            const win = enumerator.getNext() as Window;
+            if (win.name === BEAVER_WINDOW_NAME) {
+                return win;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * Open Beaver in a separate window
+     * If window already exists, focus it instead
+     */
+    static openBeaverWindow(): void {
+        // Check if window already exists
+        const existingWindow = this.findBeaverWindow();
+        if (existingWindow) {
+            existingWindow.focus();
+            Zotero.debug("Beaver: Focusing existing separate window");
+            return;
+        }
+
+        // Open new window
+        const mainWindow = Zotero.getMainWindow();
+        mainWindow.openDialog(
+            'chrome://beaver/content/beaverWindow.xhtml',
+            BEAVER_WINDOW_NAME,
+            'chrome,resizable,centerscreen,dialog=false',
+            {}
+        );
+        Zotero.debug("Beaver: Opened separate window");
+    }
+
+    /**
+     * Close the Beaver separate window if it exists
+     */
+    static closeBeaverWindow(): void {
+        const existingWindow = this.findBeaverWindow();
+        if (existingWindow) {
+            existingWindow.close();
+            Zotero.debug("Beaver: Closed separate window");
+        }
     }
 }

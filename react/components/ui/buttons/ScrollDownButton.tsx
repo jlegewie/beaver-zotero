@@ -1,19 +1,23 @@
 import React from 'react';
 import { Icon, ArrowDownIcon } from '../../icons/icons';
-import { activePreviewAtom, userScrolledAtom, activeDialogAtom } from '../../../atoms/ui';
+import { activePreviewAtom, userScrolledAtom, windowUserScrolledAtom, activeDialogAtom, popupMessagesAtom } from '../../../atoms/ui';
 import { useAtomValue } from 'jotai';
-import { popupMessagesAtom } from '../../../atoms/ui';
 
 interface ScrollDownButtonProps extends React.HTMLProps<HTMLButtonElement> {
     onClick: () => void;
+    /** Whether this is rendered in the separate window (uses independent scroll state) */
+    isWindow?: boolean;
 }
 
 export const ScrollDownButton: React.FC<ScrollDownButtonProps> = ({
     onClick,
     className,
     style,
+    isWindow = false,
 }) => {
-    const userScrolled = useAtomValue(userScrolledAtom);
+    // Select the correct atom based on whether we're in the separate window
+    const scrolledAtom = isWindow ? windowUserScrolledAtom : userScrolledAtom;
+    const userScrolled = useAtomValue(scrolledAtom);
     const activePreview = useAtomValue(activePreviewAtom);
     const popupMessages = useAtomValue(popupMessagesAtom);
     const activeDialog = useAtomValue(activeDialogAtom);

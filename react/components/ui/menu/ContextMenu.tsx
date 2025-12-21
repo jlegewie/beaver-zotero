@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, ReactNode } from 'react';
 import React from 'react';
 import ReactDOM from 'react-dom';
 import { Icon } from '../../icons/icons';
+import { getWindowFromElement, getDocumentFromElement } from '../../../utils/windowContext';
 
 /**
 * Menu item interface
@@ -131,6 +132,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     useEffect(() => {
         if (!isOpen) return;
         
+        // Get the correct window/document context for this component
+        const doc = getDocumentFromElement(menuRef.current);
+        
         // Prevent scroll on all elements when context menu is open except for the menu itself
         const preventScroll = (e: Event) => {
             // Check if the event originated from within the menu
@@ -145,23 +149,23 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         };
         
         // Get all scrollable containers
-        const messagesArea = Zotero.getMainWindow().document.getElementById('beaver-messages');
+        const messagesArea = doc.getElementById('beaver-messages');
         if (messagesArea) {
             messagesArea.addEventListener('wheel', preventScroll, { passive: false });
             messagesArea.addEventListener('touchmove', preventScroll, { passive: false });
         }
         
         // Also prevent on document for safety
-        Zotero.getMainWindow().document.addEventListener('wheel', preventScroll, { capture: true, passive: false });
-        Zotero.getMainWindow().document.addEventListener('touchmove', preventScroll, { capture: true, passive: false });
+        doc.addEventListener('wheel', preventScroll, { capture: true, passive: false });
+        doc.addEventListener('touchmove', preventScroll, { capture: true, passive: false });
         
         return () => {
             if (messagesArea) {
                 messagesArea.removeEventListener('wheel', preventScroll);
                 messagesArea.removeEventListener('touchmove', preventScroll);
             }
-            Zotero.getMainWindow().document.removeEventListener('wheel', preventScroll, { capture: true });
-            Zotero.getMainWindow().document.removeEventListener('touchmove', preventScroll, { capture: true });
+            doc.removeEventListener('wheel', preventScroll, { capture: true });
+            doc.removeEventListener('touchmove', preventScroll, { capture: true });
         };
     }, [isOpen]);
     
@@ -169,9 +173,12 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     useEffect(() => {
         if (!isOpen || !menuRef.current) return;
         
+        // Get the correct window context for this component
+        const win = getWindowFromElement(menuRef.current);
+        
         // Get viewport dimensions
-        const viewportWidth = Zotero.getMainWindow().innerWidth;
-        const viewportHeight = Zotero.getMainWindow().innerHeight;
+        const viewportWidth = win.innerWidth;
+        const viewportHeight = win.innerHeight;
         
         // Get menu dimensions
         const menuRect = menuRef.current.getBoundingClientRect();
@@ -242,6 +249,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     useEffect(() => {
         if (!isOpen) return;
         
+        // Get the correct document context for this component
+        const doc = getDocumentFromElement(menuRef.current);
+        
         const handleClickOutside = (e: MouseEvent) => {
             if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
                 onClose();
@@ -256,18 +266,21 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             }
         };
         
-        Zotero.getMainWindow().document.addEventListener('mousedown', handleClickOutside);
-        Zotero.getMainWindow().document.addEventListener('keydown', handleEscape);
+        doc.addEventListener('mousedown', handleClickOutside);
+        doc.addEventListener('keydown', handleEscape);
         
         return () => {
-            Zotero.getMainWindow().document.removeEventListener('mousedown', handleClickOutside);
-            Zotero.getMainWindow().document.removeEventListener('keydown', handleEscape);
+            doc.removeEventListener('mousedown', handleClickOutside);
+            doc.removeEventListener('keydown', handleEscape);
         };
     }, [isOpen, onClose, onAfterClose]);
     
     // Handle keyboard navigation
     useEffect(() => {
         if (!isOpen || menuItems.length === 0) return;
+        
+        // Get the correct document context for this component
+        const doc = getDocumentFromElement(menuRef.current);
         
         const handleKeyNav = (e: KeyboardEvent) => {
             switch (e.key) {
@@ -308,8 +321,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             }
         };
         
-        Zotero.getMainWindow().document.addEventListener('keydown', handleKeyNav);
-        return () => Zotero.getMainWindow().document.removeEventListener('keydown', handleKeyNav);
+        doc.addEventListener('keydown', handleKeyNav);
+        return () => doc.removeEventListener('keydown', handleKeyNav);
     }, [isOpen, menuItems, focusedIndex, onClose, onAfterClose]);
     
     // Set initial focus
@@ -464,9 +477,11 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     // Handle portal rendering if requested
     if (usePortal) {
         // Using React Portal to render outside the current DOM hierarchy
+        // Use the correct document context for this component
+        const doc = getDocumentFromElement(menuRef.current);
         return ReactDOM.createPortal(
             menuElement,
-            Zotero.getMainWindow().document.body
+            doc.body
         );
     }
     

@@ -11,10 +11,10 @@ import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { syncWithZoteroAtom } from '../../react/atoms/profile';
 import { SyncMethod } from '../../react/atoms/sync';
 import { SyncLogsRecord } from '../services/database';
-import { isAttachmentOnServer, getFileHashes } from './webAPI';
+import { isAttachmentOnServer } from './webAPI';
 import { getServerOnlyAttachmentCount } from './libraries';
-import { skippedItemsManager } from '../services/skippedItemsManager';
-import { serializeCollection, serializeItem, serializeAttachment, NEEDS_HASH } from './zoteroSerializers';
+import { serializeCollection, serializeItem, serializeAttachment } from './zoteroSerializers';
+import { safeIsInTrash } from './zoteroUtils';
 
 
 const MAX_SERVER_FILES = 100;
@@ -92,7 +92,15 @@ export const isSupportedItem = (item: Zotero.Item | false) => {
 export const syncingItemFilter: ItemFilterFunction = (item: Zotero.Item | false, collectionIds?: number[]) => {
     if (!item) return false;
     if (!isSupportedItem(item)) return false;
-    if (item.isInTrash()) return false;
+    const trashState = safeIsInTrash(item);
+    if (trashState === null) {
+        logger(
+            `syncingItemFilter: Item missing isInTrash, skipping. id=${item?.id ?? "unknown"} key=${item?.key ?? "unknown"} library=${item?.libraryID ?? "unknown"} type=${item?.itemType ?? "unknown"}`,
+            2
+        );
+        return false;
+    }
+    if (trashState) return false;
     if (collectionIds) {
         const itemCollections = new Set(item.getCollections());
         return collectionIds.some(id => itemCollections.has(id));
@@ -436,7 +444,7 @@ export async function syncItemsToBackend(
                    `versions: ${batchDateRange.versions[0]} to ${batchDateRange.versions[1]}`);
             
             // ------- Serialize items and attachments -------
-            const [batchItemsData, tempBatchAttachmentsData] = await Promise.all([
+            const [batchItemsData, batchAttachmentsData] = await Promise.all([
                 Promise.all(
                     regularItems.map(item => serializeItem(item, clientDateModifiedMap.get(item.id)))
                 ).then(data => data.filter(item => item !== null) as ItemData[]),
@@ -444,30 +452,6 @@ export async function syncItemsToBackend(
                     attachmentItems.map(item => serializeAttachment(item, clientDateModifiedMap.get(item.id)))
                 ).then(data => data.filter(att => att !== null) as AttachmentDataWithMimeType[])
             ]);
-            let batchAttachmentsData = tempBatchAttachmentsData;
-
-            // ------- Fetch file hashes for attachments that need them -------
-            const attachmentsNeedingHashes = batchAttachmentsData.filter(att => att.file_hash === NEEDS_HASH);
-            const attachmentsWithHashes = batchAttachmentsData.filter(att => att.file_hash !== NEEDS_HASH);
-
-            if (attachmentsNeedingHashes.length > 0) {
-                const updatedAttachments = await fetchRemoteFileHashes(attachmentsNeedingHashes, syncSessionId);
-
-                const successfullyUpdated = updatedAttachments.filter(att => att.file_hash !== NEEDS_HASH);
-                const itemsWithMissingHash = updatedAttachments.filter(att => att.file_hash === NEEDS_HASH);
-                
-                if (itemsWithMissingHash.length > 0) {
-                    logger(`Beaver Sync '${syncSessionId}':     Failed to fetch file hashes for ${itemsWithMissingHash.length} attachments`, 1);
-                    const itemReferences = itemsWithMissingHash.map(att => ({
-                        zotero_key: att.zotero_key,
-                        library_id: att.library_id,
-                    } as ZoteroItemReference));
-                    skippedItemsManager.batchUpsert(itemReferences, 'Failed to fetch file hashes from server');
-                    skippedItems.push(...itemReferences);
-                }
-
-                batchAttachmentsData = [...attachmentsWithHashes, ...successfullyUpdated];
-            }
 
             // Combine all deletions
             const allDeletions = [...itemDeleteData, ...collectionsToDeleteData];
@@ -1463,61 +1447,4 @@ async function getCollectionMetadataForSync(
     });
     
     return results;
-}
-
-/**
- * Fetches file hashes from the server for attachments that need them
- * @param attachmentsNeedingHashes Array of attachment data that need file hashes
- * @param syncSessionId Session ID for logging
- * @returns Promise resolving to new array of attachment data with updated file hashes
- */
-async function fetchRemoteFileHashes(
-    attachmentsNeedingHashes: AttachmentDataWithMimeType[],
-    syncSessionId: string
-): Promise<AttachmentDataWithMimeType[]> {
-    if (attachmentsNeedingHashes.length === 0) {
-        return [];
-    }
-
-    logger(`Beaver Sync '${syncSessionId}':     Fetching file hashes for ${attachmentsNeedingHashes.length} attachments from server`, 4);
-    
-    try {
-        // Fetch items that need hashes
-        const itemPromises = attachmentsNeedingHashes.map(att => 
-            Zotero.Items.getByLibraryAndKeyAsync(att.library_id, att.zotero_key).catch(error => {
-                logger(`Beaver Sync '${syncSessionId}':     Failed to fetch item ${att.zotero_key}: ${error.message}`, 2);
-                return null;
-            })
-        );
-        
-        const items = (await Promise.all(itemPromises)).filter(item => item !== null) as Zotero.Item[];
-        
-        if (items.length > 0) {
-            // Get file hashes from server
-            const fileHashes = await getFileHashes(items);
-            
-            // Create a map for efficient lookup
-            const hashMap = new Map(fileHashes.map(hash => [hash.key, hash.md5]));
-            
-            // Create new array with updated file hashes
-            let updatedCount = 0;
-            const updatedAttachments = attachmentsNeedingHashes.map(att => {
-                // return att;
-                const md5 = hashMap.get(att.zotero_key);
-                if (md5) {
-                    updatedCount++;
-                    return { ...att, file_hash: md5 };
-                }
-                return att; // Keep original if no hash found
-            });
-            
-            logger(`Beaver Sync '${syncSessionId}':     Successfully fetched ${updatedCount} file hashes from server`, 4);
-            return updatedAttachments;
-        }
-    } catch (error: any) {
-        logger(`Beaver Sync '${syncSessionId}':     Error fetching file hashes: ${error.message}`, 2);
-    }
-
-    // Return original array if no updates were made
-    return attachmentsNeedingHashes;
 }

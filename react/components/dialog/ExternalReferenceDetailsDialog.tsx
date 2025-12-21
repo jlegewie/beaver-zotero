@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { 
     isExternalReferenceDetailsDialogVisibleAtom, 
@@ -7,10 +7,12 @@ import {
 import ExternalReferenceDetails from '../externalReferences/ExternalReferenceDetails';
 import { CancelIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
+import { getDocumentFromElement } from '../../utils/windowContext';
 
 const ExternalReferenceDetailsDialog: React.FC = () => {
     const [isVisible, setIsVisible] = useAtom(isExternalReferenceDetailsDialogVisibleAtom);
     const item = useAtomValue(selectedExternalReferenceAtom);
+    const containerRef = useRef<HTMLDivElement>(null);
 
     // Handle ESC key to close dialog
     useEffect(() => {
@@ -21,8 +23,10 @@ const ExternalReferenceDetailsDialog: React.FC = () => {
         };
 
         if (isVisible) {
-            Zotero.getMainWindow().document.addEventListener('keydown', handleKeyDown);
-            return () => Zotero.getMainWindow().document.removeEventListener('keydown', handleKeyDown);
+            // Get the correct document context for this component
+            const doc = getDocumentFromElement(containerRef.current);
+            doc.addEventListener('keydown', handleKeyDown);
+            return () => doc.removeEventListener('keydown', handleKeyDown);
         }
     }, [isVisible, setIsVisible]);
 
@@ -30,6 +34,7 @@ const ExternalReferenceDetailsDialog: React.FC = () => {
 
     return (
         <div 
+            ref={containerRef}
             className="relative display-flex flex-col rounded-md bg-quaternary shadow-md shadow-md-top overflow-hidden"
             style={{ width: '90%', maxHeight: '80vh' }}
             onClick={(e) => e.stopPropagation()}

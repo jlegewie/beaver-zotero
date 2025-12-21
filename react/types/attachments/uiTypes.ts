@@ -25,18 +25,3 @@ export interface ItemMetadataAttachmentWithId extends ItemMetadataAttachment {
     item?: Zotero.Item;
 }
 
-export type MessageAttachmentWithId =
-    | SourceAttachmentWithId
-    | AnnotationAttachmentWithId
-    | NoteAttachmentWithId
-    | ItemMetadataAttachmentWithId;
-
-/**
- * Type guard for attachments that have an item loaded.
- * Use this when you need to guarantee the item exists.
- */
-export type MessageAttachmentWithRequiredItem = MessageAttachmentWithId & { item: Zotero.Item };
-
-export function getUniqueKey(attachment: MessageAttachment | MessageAttachmentWithId): string {
-    return `${attachment.library_id}-${attachment.zotero_key}`;
-}

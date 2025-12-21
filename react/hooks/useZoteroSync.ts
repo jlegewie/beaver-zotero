@@ -7,8 +7,8 @@ import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, pl
 import { store } from "../store";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
-import { threadProposedActionsAtom, undoProposedActionAtom } from "../atoms/proposedActions";
-import { getZoteroItemReferenceFromProposedAction } from "../types/proposedActions/base";
+import { threadAgentActionsAtom, undoAgentActionAtom, getZoteroItemReferenceFromAgentAction, isCreateItemAgentAction, AgentAction } from "../agents/agentActions";
+import { markExternalReferenceDeletedAtom } from "../atoms/externalReferences";
 
 const DEBOUNCE_MS = 2000;
 const LIBRARY_SYNC_DELAY_MS = 4000; // Delay before calling syncZoteroDatabase for changed libraries
@@ -225,23 +225,32 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                                 if (extraData && extraData[id]) {
                                     const { libraryID, key } = extraData[id];
                                     if (libraryID && key && syncLibraryIds.includes(libraryID)) {
-                                        // Check if this item was created by a proposed action
-                                        const proposedActions = store.get(threadProposedActionsAtom);
-                                        const matchingActions = proposedActions
-                                            .filter((action) => {
-                                                const itemRef = getZoteroItemReferenceFromProposedAction(action);
+                                        // Check if this item was created by an agent action
+                                        const agentActions = store.get(threadAgentActionsAtom);
+                                        const matchingAgentActions = agentActions
+                                            .filter((action: AgentAction) => {
+                                                const itemRef = getZoteroItemReferenceFromAgentAction(action);
                                                 return itemRef && itemRef.library_id === libraryID && itemRef.zotero_key === key;
                                             });
                                         
-                                        if (matchingActions.length > 0) {
-                                            logger(`useZoteroSync: Skipping delete event for proposed action(s), marking as undone: ${matchingActions.map(a => a.id).join(', ')}`, 3);
-                                            matchingActions.forEach(action => {
-                                                store.set(undoProposedActionAtom, action.id);
+                                        // If item was created by an agent action, mark those actions as undone
+                                        if (matchingAgentActions.length > 0) {
+                                            logger(`useZoteroSync: Marking agent action(s) as undone: ${matchingAgentActions.map((a: AgentAction) => a.id).join(', ')}`, 3);
+                                            matchingAgentActions.forEach((action: AgentAction) => {
+                                                store.set(undoAgentActionAtom, action.id);
+                                                
+                                                // Also mark the external reference as deleted for create_item actions
+                                                if (isCreateItemAgentAction(action)) {
+                                                    const sourceId = action.proposed_data.item?.source_id;
+                                                    if (sourceId) {
+                                                        logger(`useZoteroSync: Marking external reference as deleted for source_id: ${sourceId}`, 3);
+                                                        store.set(markExternalReferenceDeletedAtom, sourceId);
+                                                    }
+                                                }
                                             });
-                                            // Return early to avoid queueing for backend deletion
-                                            return;
                                         }
-                                        // Queue for backend deletion
+                                        
+                                        // Queue for backend deletion (item may have been synced before deletion)
                                         eventsRef.current.delete.set(id, { libraryID, key });
                                     } else {
                                         logger(`useZoteroSync: Missing libraryID or key in extraData for permanently deleted item ID ${id}. Cannot queue for backend deletion.`, 2);

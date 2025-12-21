@@ -1,13 +1,12 @@
 import React, { useEffect, useState }  from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { currentThreadIdAtom, recentThreadsAtom, loadThreadAtom } from '../../../atoms/threads';
+import { currentThreadIdAtom, recentThreadsAtom, loadThreadAtom, ThreadData } from '../../../atoms/threads';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import { threadService } from '../../../../src/services/threadService';
-import { ThreadData } from '../../../types/chat/uiTypes';
 import { ChattingIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
-import { userAtom, userIdAtom } from '../../../atoms/auth';
+import { userAtom } from '../../../atoms/auth';
 import Spinner from '../../icons/Spinner';
 import { getDateGroup } from '../../../utils/dateUtils';
 import { getPref } from '../../../../src/utils/prefs';

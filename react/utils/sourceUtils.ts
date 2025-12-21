@@ -1,13 +1,13 @@
 import { truncateText } from './stringUtils';
 import { syncingItemFilter, syncingItemFilterAsync, isSupportedItem, isLibraryValidForSync } from '../../src/utils/sync';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
-import { MessageAttachmentWithId } from '../types/attachments/uiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
 import { CitationData } from '../types/citations';
 import { ZoteroItemReference } from '../types/zotero';
 import { syncLibraryIdsAtom, syncWithZoteroAtom} from '../atoms/profile';
 import { store } from '../store';
 import { userIdAtom } from '../atoms/auth';
+import { isAttachmentOnServer } from '../../src/utils/webAPI';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -54,7 +54,7 @@ export function getReferenceFromItem(item: Zotero.Item): string {
 /**
 * Source method: Get the Zotero item from a Source
 */
-export function getZoteroItem(source: MessageAttachmentWithId | SourceAttachment | CitationData): Zotero.Item | null {
+export function getZoteroItem(source: SourceAttachment | CitationData): Zotero.Item | null {
     try {
         let libId: number;
         let itemKeyValue: string;
@@ -75,14 +75,14 @@ export function getZoteroItem(source: MessageAttachmentWithId | SourceAttachment
     }
 }
 
-/*
-* Check if an item was added before the last sync
-* @param item The item to check
-* @param syncWithZotero Whether to use Zotero sync
-* @param userID The user ID
-* @returns True if the item was added before the last sync
-*/
-async function wasItemAddedBeforeLastSync(item: Zotero.Item, syncWithZotero: boolean, userID: string): Promise<boolean> {
+/**
+ * Check if an item was added before the last sync
+ * @param item The item to check
+ * @param syncWithZotero Whether to use Zotero sync
+ * @param userID The user ID
+ * @returns True if the item was added before the last sync
+ */
+export async function wasItemAddedBeforeLastSync(item: Zotero.Item, syncWithZotero: boolean, userID: string): Promise<boolean> {
     let syncLog = null;
     if (syncWithZotero) {
         syncLog = await Zotero.Beaver.db.getSyncLogWithHighestVersion(userID, item.libraryID);
@@ -174,17 +174,22 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         if (item.isInTrash()) return {valid: false, error: "Item is in trash"};
 
         
-        // (c) Use comprehensive syncing filter
+        // (c) Check if file exists locally or on server
+        if (!(await item.fileExists()) && !isAttachmentOnServer(item)) {
+            return {valid: false, error: "File unavailable locally and on server"};
+        }
+
+        // (d) Use comprehensive syncing filter
         if (!(await syncingItemFilterAsync(item))) {
             return {valid: false, error: "Attachment not synced with Beaver"};
         }
         
-        // (d) If syncWithZotero is true, check whether item has been synced with Zotero
+        // (e) If syncWithZotero is true, check whether item has been synced with Zotero
         if (syncWithZotero && item.version === 0 && !item.synced) {
             return {valid: false, error: "Attachment not yet synced with Zotero and therefore not available in Beaver."};
         }
 
-        // (e) Check whether attachment was added after the last sync
+        // (f) Check whether attachment was added after the last sync
         if (!(await wasItemAddedBeforeLastSync(item, syncWithZotero, userID))) {
             return {valid: false, error: "Attachment not yet synced with Beaver. Please wait for sync to complete or sync manually in settings."};
         }

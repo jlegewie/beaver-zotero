@@ -930,8 +930,9 @@ export class FileUploader {
 
 /**
  * Utility function to retry uploads by calling the backend and restarting the uploader
+ * @param resetAll If true, retry all failed uploads for the user, including 'failed_user' status
  */
-export const retryUploads = async (): Promise<void> => {
+export const retryUploads = async (resetAll: boolean = false): Promise<void> => {
     try {
         // check authentication status
         const isAuthenticated = store.get(isAuthenticatedAtom);
@@ -943,7 +944,7 @@ export const retryUploads = async (): Promise<void> => {
         }
 
         // -------- (1) Retry uploads in backend --------
-        const results: FileHashReference[] = await attachmentsService.retryUploads();
+        const results: FileHashReference[] = await attachmentsService.retryUploads(resetAll);
         logger(`File Uploader: Backend retried ${results.length} uploads.`, 3);
         store.set(zoteroServerDownloadErrorAtom, false);
         store.set(zoteroServerCredentialsErrorAtom, false);

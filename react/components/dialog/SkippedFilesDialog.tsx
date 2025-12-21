@@ -1,10 +1,11 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { isSkippedFilesDialogVisibleAtom } from '../../atoms/ui';
 import { fileStatusSummaryAtom } from '../../atoms/files';
 import { CancelIcon, InformationCircleIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
 import PaginatedFailedProcessingList from '../status/PaginatedFailedProcessingList';
+import { getDocumentFromElement } from '../../utils/windowContext';
 
 /**
  * Skipped files dialog component
@@ -12,6 +13,7 @@ import PaginatedFailedProcessingList from '../status/PaginatedFailedProcessingLi
 const SkippedFilesDialog: React.FC = () => {
     const [isVisible, setIsVisible] = useAtom(isSkippedFilesDialogVisibleAtom);
     const fileStats = useAtomValue(fileStatusSummaryAtom);
+    const containerRef = useRef<HTMLDivElement>(null);
 
     // Handle ESC key to close dialog
     useEffect(() => {
@@ -22,8 +24,10 @@ const SkippedFilesDialog: React.FC = () => {
         };
 
         if (isVisible) {
-            Zotero.getMainWindow().document.addEventListener('keydown', handleKeyDown);
-            return () => Zotero.getMainWindow().document.removeEventListener('keydown', handleKeyDown);
+            // Get the correct document context for this component
+            const doc = getDocumentFromElement(containerRef.current);
+            doc.addEventListener('keydown', handleKeyDown);
+            return () => doc.removeEventListener('keydown', handleKeyDown);
         }
     }, [isVisible]);
 
@@ -35,6 +39,7 @@ const SkippedFilesDialog: React.FC = () => {
 
     return (
         <div
+            ref={containerRef}
             className="bg-sidepane border-popup rounded-lg shadow-lg mx-3 w-full overflow-hidden pointer-events-auto"
             style={{
                 background: 'var(--material-mix-quarternary)',

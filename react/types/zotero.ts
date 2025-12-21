@@ -188,3 +188,42 @@ export interface AttachmentModel extends AttachmentData {
     is_primary?: boolean | null;
     user_override_primary: boolean;
 }
+
+/**
+ * Status information about why an item/attachment might not be available in the backend.
+ * 
+ * The frontend knows:
+ * 1. Whether the item's library is configured to sync
+ * 2. Whether the item is in trash
+ * 3. Whether the item passes all sync filters (PDF only, etc.)
+ * 4. Whether the item was modified after the last sync (= pending)
+ */
+export interface ZoteroItemStatus {
+    /** Whether the item's library is configured to sync with Beaver */
+    is_synced_library: boolean;
+    /** Whether the item is in Zotero trash (filtered out of sync) */
+    is_in_trash: boolean;
+    /** Whether the item is available locally or on server */
+    available_locally_or_on_server: boolean;
+    /** Whether item passes all sync filters (library synced, not in trash, is PDF, etc.) */
+    passes_sync_filters: boolean;
+    /**
+     * Whether item was added/modified after the last sync time.
+     * - true: Item is newer than last sync (pending sync)
+     * - false: Item is older than last sync (should have synced already)
+     * - null: Unable to determine (no modification time or last sync time)
+     */
+    is_pending_sync: boolean | null;
+}
+
+/** Item data with sync status information */
+export interface ItemDataWithStatus {
+    item: ItemData;
+    status: ZoteroItemStatus;
+}
+
+/** Attachment data with sync status information */
+export interface AttachmentDataWithStatus {
+    attachment: AttachmentDataWithMimeType;
+    status: ZoteroItemStatus;
+}

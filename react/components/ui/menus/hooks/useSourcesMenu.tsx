@@ -36,6 +36,16 @@ export const useSourcesMenu = ({
 }: UseSourcesMenuOptions): UseSourcesMenuResult => {
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
 
+    const getEffectiveLibraryId = (libraryId: number | null): number | null => {
+        if (libraryId && syncLibraryIds.includes(libraryId)) {
+            return libraryId;
+        }
+        if (syncLibraryIds.includes(1)) {
+            return 1;
+        }
+        return null;
+    };
+
     useEffect(() => {
         if (!isActive) {
             setMenuItems([]);
@@ -54,28 +64,28 @@ export const useSourcesMenu = ({
 
             await loadFullItemData(allItems);
 
-            const currentLibraryId = activeZoteroLibraryId ?? getActiveZoteroLibraryId();
+            const activeLibraryIdRaw = activeZoteroLibraryId ?? getActiveZoteroLibraryId();
+            const effectiveLibraryId = getEffectiveLibraryId(activeLibraryIdRaw);
             let collectionIds: number[] = [];
 
             let hasTagsInLibrary = false;
 
-            if (currentLibraryId) {
+            if (effectiveLibraryId) {
                 try {
-                    collectionIds = await Zotero.Collections.getAllIDs(currentLibraryId);
+                    collectionIds = await Zotero.Collections.getAllIDs(effectiveLibraryId);
                 } catch {
                     collectionIds = [];
                 }
                 try {
-                    const hasTags = await Zotero.Tags.getAll(currentLibraryId);
-                    hasTagsInLibrary = Boolean(hasTags);
+                    const tags = await Zotero.Tags.getAll(effectiveLibraryId);
+                    hasTagsInLibrary = Array.isArray(tags) && tags.length > 0;
                 } catch {
                     hasTagsInLibrary = false;
                 }
             }
 
             const canSelectCollections = Boolean(
-                currentLibraryId &&
-                syncLibraryIds.includes(currentLibraryId) &&
+                effectiveLibraryId &&
                 collectionIds.some((id) => {
                     try {
                         const collection = Zotero.Collections.get(id);
@@ -86,8 +96,7 @@ export const useSourcesMenu = ({
                 })
             );
             const canSelectTags = Boolean(
-                currentLibraryId &&
-                syncLibraryIds.includes(currentLibraryId) &&
+                effectiveLibraryId &&
                 hasTagsInLibrary
             );
 
@@ -116,11 +125,12 @@ export const useSourcesMenu = ({
             filterItems.unshift({
                 label: '"Select Collections"',
                 onClick: async () => {
-                    const latestLibraryId = getActiveZoteroLibraryId();
-                    if (!latestLibraryId || !syncLibraryIds.includes(latestLibraryId)) {
+                    const latestLibraryIdRaw = getActiveZoteroLibraryId();
+                    const latestEffectiveLibraryId = getEffectiveLibraryId(latestLibraryIdRaw);
+                    if (!latestEffectiveLibraryId) {
                         return;
                     }
-                    onNavigateToCollections(latestLibraryId);
+                    onNavigateToCollections(latestEffectiveLibraryId);
                 },
                 disabled: !canSelectCollections,
                 customContent: (
@@ -140,11 +150,12 @@ export const useSourcesMenu = ({
             filterItems.unshift({
                 label: '"Select Tags"',
                 onClick: async () => {
-                    const latestLibraryId = getActiveZoteroLibraryId();
-                    if (!latestLibraryId || !syncLibraryIds.includes(latestLibraryId)) {
+                    const latestLibraryIdRaw = getActiveZoteroLibraryId();
+                    const latestEffectiveLibraryId = getEffectiveLibraryId(latestLibraryIdRaw);
+                    if (!latestEffectiveLibraryId) {
                         return;
                     }
-                    onNavigateToTags(latestLibraryId);
+                    onNavigateToTags(latestEffectiveLibraryId);
                 },
                 disabled: !canSelectTags,
                 customContent: (

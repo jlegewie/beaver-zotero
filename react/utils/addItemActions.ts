@@ -1,4 +1,4 @@
-import { CreateItemProposedAction, CreateItemResultData } from '../types/proposedActions/items';
+import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
 import { ExternalReference, NormalizedPublicationType } from '../types/externalReferences';
 import { logger } from '../../src/utils/logger';
 
@@ -213,35 +213,55 @@ async function createItemManually(itemData: ExternalReference): Promise<Zotero.I
 }
 
 /**
+ * Wraps a promise with a timeout that rejects if the promise takes too long
+ * Only use this for operations that are safe to timeout (e.g., non-item-creating operations)
+ */
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
+    return Promise.race([
+        promise,
+        new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error(`${operation} timed out after ${timeoutMs}ms`)), timeoutMs)
+        )
+    ]);
+}
+
+/**
  * Creates a Zotero item from a ExternalReference object.
  * Tries to use Zotero's built-in translation (via DOI/Identifiers) first.
  * Falls back to manual creation if translation fails.
  * After item creation, uses Zotero's "Find Full Text" logic to find PDFs.
+ * 
+ * Note: We don't use timeouts on import methods because Zotero's translation
+ * system cannot be canceled. A timed-out import could still complete and create
+ * a duplicate item after we've fallen back to manual creation.
  */
 export async function createZoteroItem(reference: ExternalReference): Promise<Zotero.Item> {
     let item: Zotero.Item | null = null;
 
     // 1. Try to import using identifiers (DOI, arXiv, ISBN, etc.)
+    // No timeout here - let Zotero's translation complete or fail naturally
+    // to avoid duplicate items if the translation completes after timeout
     if (reference.identifiers) {
         try {
             item = await tryImportFromIdentifiers(reference.identifiers);
             if (item) {
                 logger("createZoteroItem: Successfully imported item via identifiers", 2);
             }
-        } catch (e) {
-            logger(`createZoteroItem: Failed to import via identifier: ${e}`, 1);
+        } catch (e: any) {
+            logger(`createZoteroItem: Failed to import via identifier: ${e?.message || e}`, 1);
         }
     }
 
     // 2. Try URL Translation (Semantic Scholar / Article Page)
+    // No timeout here for the same reason as above
     if (!item && reference.url) {
         try {
             item = await importFromUrl(reference.url);
             if (item) {
                 logger("createZoteroItem: Successfully imported item via URL", 2);
             }
-        } catch (e) {
-            logger(`createZoteroItem: Failed to import via URL: ${e}`, 1);
+        } catch (e: any) {
+            logger(`createZoteroItem: Failed to import via URL: ${e?.message || e}`, 1);
         }
     }
 
@@ -253,6 +273,7 @@ export async function createZoteroItem(reference: ExternalReference): Promise<Zo
 
     // 4. Try to find PDF using Zotero's "Find Full Text" logic
     // This uses all methods: doi (visits publisher page), url, oa (Unpaywall), custom resolvers
+    // Timeout is safe here because PDF finding doesn't create items, just attachments
     const attachmentIds = await item.getAttachments();
     const attachmentPromises = attachmentIds.map(async (attachmentId: number) => {
         return await Zotero.Items.getAsync(attachmentId);
@@ -262,20 +283,30 @@ export async function createZoteroItem(reference: ExternalReference): Promise<Zo
     if (!pdfAttachments || pdfAttachments.length === 0) {
         try {
             // addAvailableFile uses the same logic as "Find Full Text" button in Zotero UI
-            const attachment = await (Zotero.Attachments as any).addAvailableFile(item);
+            // Timeout after 30 seconds to prevent hanging on PDF downloads
+            // This is safe because the item already exists and we're just adding an attachment
+            const attachment = await withTimeout(
+                (Zotero.Attachments as any).addAvailableFile(item),
+                30000,
+                'Find PDF'
+            );
             if (attachment) {
                 logger("createZoteroItem: Found PDF via addAvailableFile", 2);
             }
-        } catch (e) {
-            logger(`createZoteroItem: addAvailableFile failed: ${e}`, 1);
+        } catch (e: any) {
+            logger(`createZoteroItem: addAvailableFile failed: ${e?.message || e}`, 1);
         }
     }
 
     return item;
 }
 
-export async function applyCreateItem(action: CreateItemProposedAction): Promise<CreateItemResultData> {
-    const itemData = action.proposed_data.item;
+/**
+ * Creates a Zotero item from CreateItemProposedData with full post-processing.
+ * Handles extra fields, collections, tags, and attachments.
+ */
+export async function applyCreateItemData(proposedData: CreateItemProposedData): Promise<CreateItemResultData> {
+    const itemData = proposedData.item;
     const libraryId = Zotero.Libraries.userLibraryID;
 
     // Create or Import the item
@@ -299,8 +330,8 @@ export async function applyCreateItem(action: CreateItemProposedAction): Promise
         }
     }
 
-    if (action.proposed_data.reason) {
-        extraLines.push(`Beaver Reason: ${action.proposed_data.reason}`);
+    if (proposedData.reason) {
+        extraLines.push(`Beaver Reason: ${proposedData.reason}`);
     }
 
     if (extraLines.length > 0) {
@@ -310,9 +341,9 @@ export async function applyCreateItem(action: CreateItemProposedAction): Promise
     }
 
     // Collections
-    if (action.proposed_data.collection_keys && action.proposed_data.collection_keys.length > 0) {
+    if (proposedData.collection_keys && proposedData.collection_keys.length > 0) {
         const collectionIds: number[] = [];
-        for (const key of action.proposed_data.collection_keys) {
+        for (const key of proposedData.collection_keys) {
              const collection = Zotero.Collections.getByLibraryAndKey(libraryId, key);
              if (collection) collectionIds.push(collection.id);
         }
@@ -324,8 +355,8 @@ export async function applyCreateItem(action: CreateItemProposedAction): Promise
     }
     
     // Tags
-    if (action.proposed_data.suggested_tags) {
-        for (const tag of action.proposed_data.suggested_tags) {
+    if (proposedData.suggested_tags) {
+        for (const tag of proposedData.suggested_tags) {
             item.addTag(tag);
         }
         await item.saveTx();
@@ -336,10 +367,10 @@ export async function applyCreateItem(action: CreateItemProposedAction): Promise
     const attachments = await item.getAttachments();
     let attachmentKeys = '';
     
-    if ((!attachments || attachments.length === 0) && action.proposed_data.file_available) {
-         const url = itemData.open_access_url || action.proposed_data.downloaded_url || itemData.url;
+    if ((!attachments || attachments.length === 0) && proposedData.file_available) {
+         const url = itemData.open_access_url || proposedData.downloaded_url || itemData.url;
          if (url) {
-             logger(`applyCreateItem: Attaching file from ${url} (post-creation)`, 2);
+             logger(`applyCreateItemData: Attaching file from ${url} (post-creation)`, 2);
              await attachPdfFromUrl(item, url);
          }
     }
@@ -358,6 +389,13 @@ export async function applyCreateItem(action: CreateItemProposedAction): Promise
         zotero_key: item.key,
         attachment_keys: attachmentKeys
     };
+}
+
+/**
+ * @deprecated Use applyCreateItemData instead
+ */
+export async function applyCreateItem(action: CreateItemProposedAction): Promise<CreateItemResultData> {
+    return applyCreateItemData(action.proposed_data);
 }
 
 export async function deleteAddedItem(action: CreateItemProposedAction): Promise<void> {

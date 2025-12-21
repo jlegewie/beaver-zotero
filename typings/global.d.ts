@@ -28,6 +28,9 @@ declare const ZOTERO_CONFIG: {
 };
 
 declare namespace Zotero {
+    /** Shared Jotai store for Beaver plugin across all windows */
+    let __beaverJotaiStore: any;
+
     namespace Beaver {
         const pluginVersion: string;
 
@@ -53,7 +56,7 @@ declare namespace Zotero {
              * @param name Optional name for the thread
              * @returns The complete ThreadData for the newly created thread
              */
-            createThread(user_id: string, name?: string): Promise<import("../react/types/chat/uiTypes").ThreadData>;
+            createThread(user_id: string, name?: string): Promise<import("../react/atoms/threads").ThreadData>;
 
             /**
              * Retrieve a thread by its ID.
@@ -61,7 +64,7 @@ declare namespace Zotero {
              * @param id The ID of the thread to retrieve
              * @returns The ThreadData if found, otherwise null
              */
-            getThread(user_id: string, id: string): Promise<import("../react/types/chat/uiTypes").ThreadData | null>;
+            getThread(user_id: string, id: string): Promise<import("../react/atoms/threads").ThreadData | null>;
 
             /**
              * Get a paginated list of threads.
@@ -74,7 +77,7 @@ declare namespace Zotero {
                 user_id: string,
                 limit: number,
                 offset: number
-            ): Promise<{ threads: import("../react/types/chat/uiTypes").ThreadData[]; has_more: boolean }>;
+            ): Promise<{ threads: import("../react/atoms/threads").ThreadData[]; has_more: boolean }>;
 
             /**
              * Delete a thread and all its messages.
@@ -100,64 +103,8 @@ declare namespace Zotero {
             updateThread(
                 user_id: string,
                 id: string,
-                updates: Partial<Omit<import("../react/types/chat/uiTypes").ThreadData, 'id' | 'createdAt'>>
+                updates: Partial<Omit<import("../react/atoms/threads").ThreadData, 'id' | 'createdAt'>>
             ): Promise<void>;
-
-            // --- Message Methods ---
-
-            /**
-             * Retrieve all messages from a specific thread, ordered by creation date.
-             * @param user_id The user_id of the thread
-             * @param threadId The ID of the thread
-             * @returns An array of MessageModel objects
-             */
-            getMessagesFromThread(user_id: string, threadId: string): Promise<import("../react/types/chat/apiTypes").MessageModel[]>;
-
-            /**
-             * Reset a thread from a specific message.
-             * @param user_id The user_id of the thread
-             * @param thread_id The ID of the thread
-             * @param message_id The ID of the message to reset from
-             * @param messages List of messages to operate on
-             * @param keep_message If true, keeps the message with message_id and deletes only subsequent messages
-             */
-            resetFromMessage(
-                user_id: string,
-                thread_id: string,
-                message_id: string,
-                messages: import("../react/types/chat/apiTypes").MessageModel[],
-                keep_message: boolean
-            ): Promise<import("../react/types/chat/apiTypes").MessageModel[]>;
-
-            /**
-             * Upsert a message in the database.
-             * Inserts a new message or updates an existing one based on the message ID.
-             * @param user_id The user_id of the message
-             * @param message The complete message object to upsert
-             */
-            upsertMessage(user_id: string, message: import("../react/types/chat/apiTypes").MessageModel): Promise<void>;
-
-            /**
-             * Update an existing message.
-             * @param user_id The user_id of the message
-             * @param id The ID of the message to update
-             * @param updates A partial message object with fields to update
-             */
-            updateMessage(user_id: string, id: string, updates: Partial<import("../react/types/chat/apiTypes").MessageModel>): Promise<void>;
-
-            /**
-             * Delete a message by its ID.
-             * @param id The ID of the message to delete
-             */
-            deleteMessage(user_id: string, id: string): Promise<void>;
-
-            /**
-             * Retrieve a message by its ID.
-             * @param user_id The user_id of the message
-             * @param id The ID of the message to retrieve
-             * @returns The MessageModel if found, otherwise null
-             */
-            getMessage(user_id: string, id: string): Promise<import("../react/types/chat/apiTypes").MessageModel | null>;
 
             // --- Sync Logs Methods ---
 
@@ -373,5 +320,10 @@ declare namespace _ZoteroTypes {
         BrowserOfflineException: new (...args: any[]) => Error;
         TimeoutException: new (...args: any[]) => Error;
         SecurityException: new (...args: any[]) => Error;
+    }
+
+    interface Zotero {
+        /** Shared Jotai store for Beaver plugin across all windows */
+        __beaverJotaiStore?: import('jotai').createStore extends () => infer R ? R : never;
     }
 }

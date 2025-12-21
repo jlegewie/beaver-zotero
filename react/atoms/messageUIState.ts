@@ -137,6 +137,35 @@ export const setThinkingVisibilityAtom = atom(
 );
 
 // ---------------------------------------------------------------------------
+// Run error visibility
+// ---------------------------------------------------------------------------
+
+/**
+ * Tracks visibility of run error details by runId
+ */
+export const runErrorVisibilityAtom = atom<BooleanMap>({});
+
+/**
+ * Toggle visibility of a run's error details
+ */
+export const toggleRunErrorVisibilityAtom = atom(
+    null,
+    (get, set, runId: string) => {
+        const current = get(runErrorVisibilityAtom);
+        const next = !(current[runId] ?? false);
+        set(runErrorVisibilityAtom, { ...current, [runId]: next });
+    }
+);
+
+export const setRunErrorVisibilityAtom = atom(
+    null,
+    (get, set, { runId, visible }: { runId: string; visible: boolean }) => {
+        const current = get(runErrorVisibilityAtom);
+        set(runErrorVisibilityAtom, { ...current, [runId]: visible });
+    }
+);
+
+// ---------------------------------------------------------------------------
 // Annotation groups (button + busy states)
 // ---------------------------------------------------------------------------
 
@@ -245,26 +274,10 @@ export const resetMessageUIStateAtom = atom(
         set(searchToolVisibilityAtom, {});
         set(messageSourcesVisibilityAtom, {});
         set(thinkingVisibilityAtom, {});
+        set(runErrorVisibilityAtom, {});
         set(annotationPanelStateAtom, {});
         set(annotationBusyAtom, {});
         set(annotationAttachmentTitlesAtom, {});
         set(notePanelStateAtom, {});
-    }
-);
-
-/**
- * Clear UI state for a specific message (used when deleting a message)
- */
-export const clearMessageUIStateAtom = atom(
-    null,
-    (get, set, messageId: string) => {
-        const prefix = `${messageId}:`;
-        set(searchToolVisibilityAtom, removeEntriesWithPrefix(get(searchToolVisibilityAtom), prefix));
-        set(annotationPanelStateAtom, removeEntriesWithPrefix(get(annotationPanelStateAtom), prefix));
-        set(annotationBusyAtom, removeEntriesWithPrefix(get(annotationBusyAtom), prefix));
-        set(annotationAttachmentTitlesAtom, removeEntriesWithPrefix(get(annotationAttachmentTitlesAtom), prefix));
-        set(notePanelStateAtom, removeEntriesWithPrefix(get(notePanelStateAtom), prefix));
-        set(messageSourcesVisibilityAtom, removeEntry(get(messageSourcesVisibilityAtom), messageId));
-        set(thinkingVisibilityAtom, removeEntry(get(thinkingVisibilityAtom), messageId));
     }
 );

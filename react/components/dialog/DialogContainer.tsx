@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import {
     activeDialogAtom,
@@ -13,6 +13,7 @@ import {
 import ErrorReportDialog from './ErrorReportDialog';
 import SkippedFilesDialog from './SkippedFilesDialog';
 import ExternalReferenceDetailsDialog from './ExternalReferenceDetailsDialog';
+import { getDocumentFromElement } from '../../utils/windowContext';
 
 const dialogs: Record<Exclude<DialogType, null>, React.ComponentType<any>> = {
     errorReport: ErrorReportDialog,
@@ -21,6 +22,7 @@ const dialogs: Record<Exclude<DialogType, null>, React.ComponentType<any>> = {
 };
 
 const DialogContainer: React.FC = () => {
+    const containerRef = useRef<HTMLDivElement>(null);
     const activeDialog = useAtomValue(activeDialogAtom);
     const isSendingError = useAtomValue(isErrorReportSendingAtom);
     const setIsErrorReportDialogVisible = useSetAtom(isErrorReportDialogVisibleAtom);
@@ -50,8 +52,10 @@ const DialogContainer: React.FC = () => {
         };
 
         if (activeDialog) {
-            Zotero.getMainWindow().document.addEventListener('keydown', handleKeyDown);
-            return () => Zotero.getMainWindow().document.removeEventListener('keydown', handleKeyDown);
+            // Get the correct document context for this component
+            const doc = getDocumentFromElement(containerRef.current);
+            doc.addEventListener('keydown', handleKeyDown);
+            return () => doc.removeEventListener('keydown', handleKeyDown);
         }
     }, [activeDialog, isSendingError]);
 
@@ -61,6 +65,7 @@ const DialogContainer: React.FC = () => {
 
     return (
         <div
+            ref={containerRef}
             className="absolute inset-0 z-50 pointer-events-auto"
             onClick={handleClose}
         >

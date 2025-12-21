@@ -5,20 +5,24 @@ import { ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../atoms/ui';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
-import { isStreamingAtom } from '../../atoms/threads';
-import { generateResponseAtom } from '../../atoms/generateMessages';
+import { isStreamingAtom } from '../../agents/atoms';
+import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atoms/messageComposition";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import FileStatusDisplay from "../status/FileStatusDisplay";
 
+interface HomePageProps {
+    isWindow?: boolean;
+}
 
-const HomePage: React.FC = () => {
+const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
+    const isPending = useAtomValue(isWSChatPendingAtom);
     const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
-    const generateResponse = useSetAtom(generateResponseAtom);
+    const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
 
     // Realtime listening for file status updates
@@ -28,16 +32,11 @@ const HomePage: React.FC = () => {
     const handleCustomPrompt = async (
         prompt: CustomPrompt
     ) => {
-        if (isStreaming || prompt.text.length === 0) return;
+        if (isPending || isStreaming || prompt.text.length === 0) return;
         if (prompt.requiresAttachment && currentMessageItems.length === 0) return;
 
-        // Generate response
-        generateResponse({
-            content: prompt.text,
-            items: currentMessageItems
-        });
-
-        // console.log('Chat completion:', prompt.text);
+        // Send message via WebSocket
+        await sendWSMessage(prompt.text);
     };
 
     const prompts: CustomPrompt[] = getCustomPromptsFromPreferences();
@@ -67,7 +66,7 @@ const HomePage: React.FC = () => {
                         key={index}
                         variant="ghost-secondary"
                         onClick={() => handleCustomPrompt(prompt)}
-                        disabled={prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment}
+                        disabled={isPending || (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment)}
                     >
                         <span className={`text-sm mr-2 ${prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
                             {`${shortcutKey}${prompt.index}`}
@@ -83,23 +82,25 @@ const HomePage: React.FC = () => {
             )}
             
             {/* File Processing Status */}
-            <div className="display-flex flex-row justify-between items-center mt-4">
-                <Button
-                    variant="ghost-secondary"
-                    onClick={() => setShowFileStatusDetails(!showFileStatusDetails)}
-                    rightIcon={showFileStatusDetails ? ArrowDownIcon : ArrowRightIcon}
-                    iconClassName="mr-0 scale-14"
-                >
-                    <span className="font-semibold text-lg mb-1" style={{ marginLeft: '-3px' }}>
-                        File Status
-                    </span>
-                </Button>
-                {!showFileStatusDetails && (
-                    <FileStatusButton showFileStatus={showFileStatusDetails} setShowFileStatus={setShowFileStatusDetails}/>
-                )}
-            </div>
+            {!isWindow && (
+                <div className="display-flex flex-row justify-between items-center mt-4">
+                    <Button
+                        variant="ghost-secondary"
+                        onClick={() => setShowFileStatusDetails(!showFileStatusDetails)}
+                        rightIcon={showFileStatusDetails ? ArrowDownIcon : ArrowRightIcon}
+                        iconClassName="mr-0 scale-14"
+                    >
+                        <span className="font-semibold text-lg mb-1" style={{ marginLeft: '-3px' }}>
+                            File Status
+                        </span>
+                    </Button>
+                    {!showFileStatusDetails && (
+                        <FileStatusButton showFileStatus={showFileStatusDetails} setShowFileStatus={setShowFileStatusDetails}/>
+                    )}
+                </div>
+            )}
             
-            {showFileStatusDetails && (
+            {!isWindow && showFileStatusDetails && (
                 <div className="display-flex flex-col gap-4 min-w-0 w-full">
                     <FileStatusDisplay connectionStatus={connectionStatus}/>
                 </div>

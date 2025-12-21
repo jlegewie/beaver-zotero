@@ -8,12 +8,6 @@ import {
 } from './apiTypes';
 import { ZoteroItemReference } from '../zotero';
 
-export function getAnnotationsFromItem(item: Zotero.Item): Annotation[] {
-    if(!item.isAttachment()) return [];
-    const annotations = item.getAnnotations();
-    if(!annotations) return [];
-    return annotations.map(toAnnotation).filter(Boolean) as Annotation[];
-}
 
 export function toAnnotation(item: Zotero.Item): Annotation | null {
     if(!item.isAnnotation()) return null;

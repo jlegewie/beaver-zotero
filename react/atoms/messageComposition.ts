@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { truncateText } from "../utils/stringUtils";
-import { userAttachmentKeysAtom } from "./threads";
+import { allUserAttachmentKeysAtom } from "../agents/atoms";
 import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
 import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom } from "../utils/popupMessageUtils";
@@ -110,30 +110,6 @@ export const currentReaderAttachmentKeyAtom = atom<string | null>((get) => {
  * Current reader text selection
 */
 export const readerTextSelectionAtom = atom<TextSelection | null>(null);
-
-/**
-* Count of input attachments
-* 
-* Counts the number of attachments in the current sources and reader attachment.
-* The reader attachment is only counted if it's not already in the user-added sources.
-* 
-*/
-export const inputAttachmentCountAtom = atom<number>((get) => {
-    // Input attachments
-    const itemKeys = get(currentMessageItemsAtom)
-        .filter((item => item.isRegularItem() || item.isAttachment()))
-        .map((item) => item.key);
-    // Reader attachment
-    const readerAttachmentKey = get(currentReaderAttachmentKeyAtom);
-    if (readerAttachmentKey) {
-        itemKeys.push(readerAttachmentKey);
-    }
-    // Exclude user-added sources already in thread
-    const userAddedAttachmentKeys = get(userAttachmentKeysAtom);
-    const filteredInputAttachmentKeys = itemKeys.filter((key) => !userAddedAttachmentKeys.includes(key));
-    // Return total of attachments
-    return [...new Set(filteredInputAttachmentKeys)].length;
-});
 
 /**
 * Remove a library from the current selection
@@ -414,14 +390,20 @@ async function validateItemsInBackground(
 
 /**
 * Update sources based on Zotero selection
+* Filters out items that are already in the thread (by zotero_key)
 */
 export const updateMessageItemsFromZoteroSelectionAtom = atom(
     null,
     async (get, set, limit?: number) => {
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
         const itemsFiltered = items.filter((item) => item.isRegularItem() || item.isAttachment());
-        if (!limit || itemsFiltered.length <= limit) {
-            await set(addItemsToCurrentMessageItemsAtom, itemsFiltered.slice(0, limit));
+        
+        // Filter out items already in the thread
+        const existingKeys = get(allUserAttachmentKeysAtom);
+        const newItems = itemsFiltered.filter((item) => !existingKeys.has(item.key));
+        
+        if (!limit || newItems.length <= limit) {
+            await set(addItemsToCurrentMessageItemsAtom, newItems.slice(0, limit));
         }
     }
 );

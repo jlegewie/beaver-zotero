@@ -1,25 +1,28 @@
-import { ChatMessage } from '../../react/types/chat/uiTypes';
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { MessageModel } from '../../react/types/chat/apiTypes';
-import { toMessageUI } from '../../react/types/chat/converters';
-import { MessageAttachmentWithId } from '../../react/types/attachments/uiTypes';
-import { ThreadModel } from '../../react/types/chat/apiTypes';
-import { CitationMetadata } from '../../react/types/citations';
-import { ProposedAction, toProposedAction } from '../../react/types/proposedActions/base';
 
 
-// Based on backend MessageModel
+/**
+ * Interface for the 'threads' table row
+ * 
+ * Table stores chat threads, mirroring the backend postgres structure.
+ * Corresponds to the ThreadModel and threads table in the backend.
+ * 
+ */
+export interface ThreadModel {
+    id: string;
+    user_id: string;
+    name?: string;
+    created_at: string;
+    updated_at: string;
+}
+
+
+// Based on backend ThreadModel
 export interface PaginatedThreadsResponse {
     data: ThreadModel[];
     next_cursor: string | null;
     has_more: boolean;
-}
-
-// Based on backend ThreadMessagesResponse
-export interface ThreadMessagesResponse {
-    messages: MessageModel[];
-    proposed_actions?: Record<string, any>[];
 }
 
 /**
@@ -49,55 +52,6 @@ export class ThreadService extends ApiService {
      */
     async getThread(threadId: string): Promise<ThreadModel> {
         return this.get<ThreadModel>(`/api/v1/threads/${threadId}`);
-    }
-
-    /**
-     * Fetches messages for a specific thread
-     * @param threadId The ID of the thread
-     * @returns Promise with an array of messages
-     */
-    async getThreadMessages(
-        threadId: string
-    ): Promise<{
-        messages: ChatMessage[],
-        userAttachments: MessageAttachmentWithId[],
-        toolAttachments: MessageAttachmentWithId[],
-        citationMetadata: CitationMetadata[],
-        proposedActions: ProposedAction[]
-    }> {
-        // Get thread messages from backend using new endpoint
-        const response = await this.get<ThreadMessagesResponse>(`/api/v1/threads/${threadId}/messages-with-proposed-actions`);
-        const messages = response.messages;
-        const proposedActions = response.proposed_actions?.map(toProposedAction) || [];
-        
-        // Convert backend MessageModel to frontend ChatMessage format
-        const chatMessages = messages.map(toMessageUI);
-
-        // Get citation metadata from thread messages
-        const citationMetadata = messages.flatMap(message => {
-            const messageCitations = (message.metadata?.citations || []);
-            return messageCitations.map(citation => ({ ...citation, message_id: message.id }));
-        });
-        
-        // Get user attachments from thread messages
-        const userAttachments: MessageAttachmentWithId[] = [];
-        const toolAttachments: MessageAttachmentWithId[] = [];
-
-        for (const message of messages) {
-            if (message.role === 'user') {
-                for (const attachment of message.attachments || []) {
-                    userAttachments.push({ ...attachment, messageId: message.id } as MessageAttachmentWithId);
-                }
-            }
-        }
-
-        return {
-            messages: chatMessages,
-            userAttachments: userAttachments,
-            toolAttachments: toolAttachments,
-            citationMetadata: citationMetadata,
-            proposedActions: proposedActions
-        };
     }
 
     /**

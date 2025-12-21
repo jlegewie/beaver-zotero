@@ -6,6 +6,7 @@ import AnnotationPreviewContent from './AnnotationPreviewContent';
 import ItemPreviewContent from './ItemPreviewContent';
 import ItemsSummaryPreviewContent from './ItemsSummaryPreviewContent';
 import { removePopupMessageAtom } from '../../utils/popupMessageUtils';
+import { getWindowFromElement, getDocumentFromElement } from '../../utils/windowContext';
 
 interface PreviewContainerProps {
     className?: string;
@@ -34,9 +35,12 @@ const PreviewContainer: React.FC<PreviewContainerProps> = ({ className, hasAbove
 
     // Calculate available space
     useEffect(() => {
+        // Get the correct window/document context for this component
+        const doc = getDocumentFromElement(previewRef.current);
+        const win = getWindowFromElement(previewRef.current);
+        
         const calculateAvailableSpace = () => {
             try {
-                const doc = Zotero.getMainWindow().document;
                 const header = doc.getElementById('beaver-header');
                 const prompt = doc.getElementById('beaver-prompt');
                 
@@ -59,7 +63,6 @@ const PreviewContainer: React.FC<PreviewContainerProps> = ({ className, hasAbove
         };
 
         calculateAvailableSpace();
-        const win = Zotero.getMainWindow();
         win.addEventListener('resize', calculateAvailableSpace);
         
         return () => {
@@ -70,14 +73,18 @@ const PreviewContainer: React.FC<PreviewContainerProps> = ({ className, hasAbove
     // Timer management
     const cancelCloseTimer = () => {
         if (previewCloseTimeout) {
-            Zotero.getMainWindow().clearTimeout(previewCloseTimeout);
+            // Get the correct window context for this component
+            const win = getWindowFromElement(previewRef.current);
+            win.clearTimeout(previewCloseTimeout);
             setPreviewCloseTimeout(null);
         }
     };
 
     const startCloseTimer = () => {
         cancelCloseTimer(); // Clear existing timer before starting a new one
-        const newTimeout = Zotero.getMainWindow().setTimeout(() => {
+        // Get the correct window context for this component
+        const win = getWindowFromElement(previewRef.current);
+        const newTimeout = win.setTimeout(() => {
             setActivePreview(null);
             setPreviewCloseTimeout(null);
         }, HIDE_DELAY); // Delay before closing
@@ -102,7 +109,8 @@ const PreviewContainer: React.FC<PreviewContainerProps> = ({ className, hasAbove
             }
         };
 
-        const doc = Zotero.getMainWindow().document;
+        // Get the correct document context for this component
+        const doc = getDocumentFromElement(previewRef.current);
         doc.addEventListener('keydown', handleEscape);
 
         return () => {

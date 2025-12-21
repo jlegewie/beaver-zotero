@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { fileUploader } from '../../src/services/FileUploader';
-import { isProfileInvalidAtom, isProfileLoadedAtom, profileWithPlanAtom } from '../atoms/profile';
+import { isProfileInvalidAtom, isProfileLoadedAtom, profileWithPlanAtom, isMigratingDataAtom, requiredDataVersionAtom } from '../atoms/profile';
 import { isAuthenticatedAtom, logoutAtom, userAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
 import { logger } from '../../src/utils/logger';
@@ -23,6 +23,8 @@ export const useProfileSync = () => {
     const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
     const setIsProfileInvalid = useSetAtom(isProfileInvalidAtom);
     const setModels = useSetAtom(setModelsAtom);
+    const setIsMigratingData = useSetAtom(isMigratingDataAtom);
+    const setRequiredDataVersion = useSetAtom(requiredDataVersionAtom);
     const logout = useSetAtom(logoutAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const user = useAtomValue(userAtom);
@@ -35,10 +37,42 @@ export const useProfileSync = () => {
         logger(`useProfileSync: Fetching profile and plan for ${userId}.`);
         try {
             const profileData = await accountService.getProfileWithPlan();
-            setProfileWithPlan(profileData.profile);
+            
+            // Store required data version
+            setRequiredDataVersion(profileData.required_data_version);
+
+            // Check if data migration is needed
+            if (profileData.profile.data_version < profileData.required_data_version) {
+                logger(`useProfileSync: Data migration required (current: ${profileData.profile.data_version}, required: ${profileData.required_data_version})`);
+                setIsMigratingData(true);
+                
+                try {
+                    const migrationResult = await accountService.migrateData();
+                    logger(`useProfileSync: Migration completed - ${migrationResult.threads_migrated} threads migrated, ${migrationResult.runs_created} runs created`);
+                    
+                    if (migrationResult.errors.length > 0) {
+                        logger(`useProfileSync: Migration had errors: ${migrationResult.errors.join(', ')}`, 2);
+                    }
+                    
+                    // Re-fetch profile to get updated data_version
+                    const updatedProfileData = await accountService.getProfileWithPlan();
+                    setProfileWithPlan(updatedProfileData.profile);
+                    setModels(updatedProfileData.model_configs);
+                } catch (migrationError: any) {
+                    logger(`useProfileSync: Migration failed: ${migrationError?.message}`, 3);
+                    // Continue with original profile data even if migration fails
+                    setProfileWithPlan(profileData.profile);
+                    setModels(profileData.model_configs);
+                } finally {
+                    setIsMigratingData(false);
+                }
+            } else {
+                setProfileWithPlan(profileData.profile);
+                setModels(profileData.model_configs);
+            }
+
             setIsProfileLoaded(true);
             setIsProfileInvalid(false);
-            setModels(profileData.model_configs);
             lastRefreshRef.current = new Date();
             logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
 
@@ -74,7 +108,7 @@ export const useProfileSync = () => {
                 setIsProfileLoaded(false);
             }
         }
-    }, [setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid, setModels, logout]);
+    }, [setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid, setModels, setIsMigratingData, setRequiredDataVersion, logout]);
 
     const refreshProfile = useCallback(async (force = false) => {
         if (!user) return;

@@ -5,8 +5,7 @@ import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, get
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
-
-export const NEEDS_HASH = '[needs_hash]';
+import { safeIsInTrash } from './zoteroUtils';
 
 export interface FileData {
     // filename: string;
@@ -226,7 +225,17 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
         identifiers: getIdentifiersFromItem(item),
         language: item.getField('language'),
         formatted_citation: Zotero.Beaver.citationService.formatBibliography(item) ?? '',
-        deleted: item.isInTrash(),
+        deleted: (() => {
+            const trashState = safeIsInTrash(item);
+            if (trashState === null) {
+                logger(
+                    `serializeItem: Item missing isInTrash, marking deleted. id=${item?.id ?? "unknown"} key=${item?.key ?? "unknown"} library=${item?.libraryID ?? "unknown"} type=${item?.itemType ?? "unknown"}`,
+                    2
+                );
+                return true;
+            }
+            return trashState;
+        })(),
         tags: item.getTags().length > 0 ? item.getTags() : null,
         collections: getCollectionKeysFromItem(item),
         citation_key: await getCitationKeyFromItem(item),
@@ -281,41 +290,39 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
 export async function serializeAttachment(
     item: Zotero.Item,
     clientDateModified: string | undefined,
-    options?: { skipFileHash?: boolean }
+    options?: { skipFileHash?: boolean, skipSyncingFilter?: boolean }
 ): Promise<AttachmentDataWithMimeType | null> {
     const skipFileHash = options?.skipFileHash || false;
+    const skipSyncingFilter = options?.skipSyncingFilter || false;
 
     // 1. File: Confirm that the item is an attachment and passes the syncing filter (exists locally or on server)
-    if (!item.isAttachment() || !(await syncingItemFilterAsync(item))) {
-        if(item.isAttachment()) skippedItemsManager.upsert(item, 'not available locally or on server');
+    const passesSyncingFilter = skipSyncingFilter ? true : (await syncingItemFilterAsync(item));
+    if (!item.isAttachment() || !passesSyncingFilter) {
+        if(item.isAttachment()) {
+            logger(`serializeAttachment: Attachment ${item.key} not available locally or on server. Skipping.`, 1);
+            skippedItemsManager.upsert(item, 'not available locally or on server');
+        }
         return null;
     }
     
-    // 2. Get the file hash
+    // 2. Get the file hash (local file hash takes precedence, then synced hash from server)
     let file_hash: string = '';
-    let needs_hash: boolean = false;
 
-    // Determine local availability
-    const existsLocal = await item.fileExists();
-    const existsServer = isAttachmentOnServer(item);
-
-    // Get the file hash
     if (!skipFileHash) {
-        // Hash from local file
-        if(existsLocal) {
-            file_hash = await item.attachmentHash;
+        const existsLocal = await item.fileExists();
         
-        // Hash from server
-        } else if (existsServer) {
-            needs_hash = true;
+        if (existsLocal) {
+            file_hash = await item.attachmentHash;
+        } else if (isAttachmentOnServer(item)) {
+            // isAttachmentOnServer returns true only when attachmentSyncedHash is available
+            file_hash = item.attachmentSyncedHash;
         }
-    }
 
-    if (!file_hash && !needs_hash && !skipFileHash) {
-        // TODO: silent failure for example when user doesn't sync and local file was removed
-        logger(`Beaver Sync: Attachment ${item.key} unavailable (local: ${existsLocal}, server: ${existsServer}). Skipping.`, 1);
-        skippedItemsManager.upsert(item, 'not available locally or on server');
-        return null;
+        if (!file_hash) {
+            logger(`Beaver Sync: Attachment ${item.key} has no file hash available. Skipping.`, 1);
+            skippedItemsManager.upsert(item, 'no file hash available locally or on server');
+            return null;
+        }
     }
 
     // 2. Metadata: Prepare the object containing only fields for hashing
@@ -327,7 +334,17 @@ export async function serializeAttachment(
         link_mode: item.attachmentLinkMode,
         tags: item.getTags().length > 0 ? item.getTags() : null,
         collections: getCollectionKeysFromItem(item),
-        deleted: item.isInTrash(),
+        deleted: (() => {
+            const trashState = safeIsInTrash(item);
+            if (trashState === null) {
+                logger(
+                    `serializeAttachment: Attachment missing isInTrash, marking deleted. id=${item?.id ?? "unknown"} key=${item?.key ?? "unknown"} library=${item?.libraryID ?? "unknown"}`,
+                    2
+                );
+                return true;
+            }
+            return trashState;
+        })(),
         title: item.getField('title'),
         filename: item.attachmentFilename,
     };
@@ -352,11 +369,11 @@ export async function serializeAttachment(
         }
     }
 
-    // 4. AttachmentData: Construct final AttachmentData object (with optional placeholder flag)
+    // 4. AttachmentData: Construct final AttachmentData object
     const attachmentData: AttachmentDataWithMimeType = {
         ...hashedFields,
         // Add non-hashed fields
-        file_hash: needs_hash ? NEEDS_HASH : file_hash,
+        file_hash,
         mime_type: await getMimeType(item),
         date_added: Zotero.Date.sqlToISO8601(item.dateAdded),
         date_modified: finalDateModified,
