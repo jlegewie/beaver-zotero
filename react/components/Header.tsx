@@ -16,7 +16,7 @@ import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { planFeaturesAtom, hasCompletedOnboardingAtom } from '../atoms/profile';
 import Button from './ui/Button';
 import { getWindowFromElement } from '../utils/windowContext';
-import { PDFExtractor } from '../../src/services/pdf';
+import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../../src/services/pdf';
 
 interface HeaderProps {
     onClose?: () => void;
@@ -84,7 +84,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
 
             const pdfData = await IOUtils.read(filePath);
             const extractor = new PDFExtractor();
-            const result = await extractor.extract(pdfData, { checkTextLayer: false });
+            const result = await extractor.extract(pdfData, { checkTextLayer: true });
 
             console.log("[PDF Test] Extraction complete!");
             console.log("[PDF Test] Page count:", result.analysis.pageCount);
@@ -92,7 +92,24 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
             console.log("[PDF Test] Full text (first 2000 chars):", result.fullText.slice(0, 2000));
             console.log("[PDF Test] Full result:", result);
         } catch (error) {
-            console.error("[PDF Test] Extraction failed:", error);
+            // Handle specific extraction errors
+            if (error instanceof ExtractionError) {
+                switch (error.code) {
+                    case ExtractionErrorCode.ENCRYPTED:
+                        console.warn("[PDF Test] Document is encrypted:", error.message);
+                        break;
+                    case ExtractionErrorCode.NO_TEXT_LAYER:
+                        console.warn("[PDF Test] Document has no text layer (needs OCR):", error.message);
+                        break;
+                    case ExtractionErrorCode.INVALID_PDF:
+                        console.error("[PDF Test] Invalid PDF:", error.message);
+                        break;
+                    default:
+                        console.error("[PDF Test] Extraction error:", error.code, error.message);
+                }
+            } else {
+                console.error("[PDF Test] Extraction failed:", error);
+            }
         }
     }, []);
 

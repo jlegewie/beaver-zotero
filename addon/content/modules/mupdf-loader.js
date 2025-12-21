@@ -53,6 +53,16 @@ var MuPDFLoader = {
         const wasmURL = `${base}lib/mupdf-wasm.wasm`;
         const wasmLoaderURL = `${base}lib/mupdf-wasm.mjs`;
 
+        // Set up required global functions for MuPDF WASM
+        // These are callbacks the WASM module expects for font loading
+        if (typeof globalThis.$libmupdf_load_font_file !== "function") {
+            globalThis.$libmupdf_load_font_file = function (name) {
+                // Return null to indicate no external font file available
+                // MuPDF will use built-in fonts or substitute
+                return null;
+            };
+        }
+
         // Pre-load WASM bytes using Zotero-compatible APIs
         // chrome:// URLs don't work well with standard fetch/XHR in extension context
         const wasmBinary = await this._loadWasmBinary(wasmURL);
@@ -231,6 +241,39 @@ var MuPDFLoader = {
                     throw new Error("Failed to open document");
                 }
                 return new Document(docPtr);
+            }
+
+            /**
+             * Check if the document requires a password to access.
+             * Uses metadata check since _wasm_needs_password may not be available.
+             * @returns {boolean} True if password is required
+             */
+            needsPassword() {
+                // Try the WASM function if available
+                if (typeof libmupdf._wasm_needs_password === "function") {
+                    return libmupdf._wasm_needs_password(this.pointer) !== 0;
+                }
+                // Fallback: check encryption metadata
+                // If document is encrypted, opening it without a password typically fails,
+                // but some encrypted PDFs allow opening with restrictions.
+                // Check the "encryption" metadata field.
+                const encryption = this.getMetadata("encryption");
+                // If encryption metadata exists and isn't empty/None, document has encryption
+                return encryption !== undefined && encryption !== "" && encryption !== "None";
+            }
+
+            /**
+             * Attempt to authenticate with a password.
+             * @param {string} password - Password to try
+             * @returns {number} Authentication result:
+             *   0 = failed, 1 = user password, 2 = owner password, 4 = full access
+             */
+            authenticatePassword(password) {
+                if (typeof libmupdf._wasm_authenticate_password === "function") {
+                    return libmupdf._wasm_authenticate_password(this.pointer, STRING(password));
+                }
+                // Function not available - return 0 (failed)
+                return 0;
             }
 
             countPages() {
@@ -510,7 +553,10 @@ var MuPDFLoader = {
                         for (const block of blocks) {
                             if (block.type === "text") {
                                 for (const line of block.lines || []) {
-                                    textLength += (line.text || "").length;
+                                    // Strip whitespace/non-printable chars before counting
+                                    // Handles cases where "text" is just newlines/spaces
+                                    const cleanText = (line.text || "").replace(/\s+/g, "").trim();
+                                    textLength += cleanText.length;
                                 }
                             } else if (block.type === "image") {
                                 hasImages = true;

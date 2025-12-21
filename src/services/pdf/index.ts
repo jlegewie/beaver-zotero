@@ -4,30 +4,34 @@
  * Main entry point for PDF text extraction.
  * Orchestrates the extraction pipeline:
  *   1. Open document with MuPDFService
- *   2. Analyze document structure with DocumentAnalyzer
- *   3. Build style profile with StyleAnalyzer
- *   4. Extract pages with PageExtractor
+ *   2. Extract raw structured text (single pass)
+ *   3. Analyze document (text layer, styles, margins)
+ *   4. Process pages with filtering
  *   5. Combine results
  */
 
 import { MuPDFService, disposeMuPDF } from "./MuPDFService";
 import { DocumentAnalyzer } from "./DocumentAnalyzer";
 import { StyleAnalyzer } from "./StyleAnalyzer";
+import { MarginFilter } from "./MarginFilter";
 import { PageExtractor } from "./PageExtractor";
 import {
     ExtractionSettings,
     ExtractionResult,
+    DocumentAnalysis,
     ProcessedPage,
+    RawDocumentData,
     ExtractionError,
     ExtractionErrorCode,
     DEFAULT_EXTRACTION_SETTINGS,
 } from "./types";
 
-// Re-export types for convenience
+// Re-export types and classes for convenience
 export * from "./types";
 export { MuPDFService, disposeMuPDF } from "./MuPDFService";
 export { DocumentAnalyzer } from "./DocumentAnalyzer";
 export { StyleAnalyzer } from "./StyleAnalyzer";
+export { MarginFilter } from "./MarginFilter";
 export { PageExtractor } from "./PageExtractor";
 
 /**
@@ -42,14 +46,9 @@ export { PageExtractor } from "./PageExtractor";
  */
 export class PDFExtractor {
     private mupdf: MuPDFService;
-    private analyzer: DocumentAnalyzer | null = null;
-    private styleAnalyzer: StyleAnalyzer;
-    private pageExtractor: PageExtractor;
 
     constructor() {
         this.mupdf = new MuPDFService();
-        this.styleAnalyzer = new StyleAnalyzer();
-        this.pageExtractor = new PageExtractor();
     }
 
     /**
@@ -68,58 +67,77 @@ export class PDFExtractor {
         try {
             // 1. Open the document
             await this.mupdf.open(pdfData);
-            this.analyzer = new DocumentAnalyzer(this.mupdf);
+            const docAnalyzer = new DocumentAnalyzer(this.mupdf);
 
-            // 2. Analyze the document
-            const analysis = this.analyzer.analyze(opts.checkTextLayer);
+            // 2. Check text layer if requested
+            if (opts.checkTextLayer) {
+                const hasTextLayer = docAnalyzer.hasTextLayer({
+                    minTextPerPage: opts.minTextPerPage,
+                });
 
-            if (opts.checkTextLayer && !analysis.hasTextLayer) {
-                throw new ExtractionError(
-                    ExtractionErrorCode.NO_TEXT_LAYER,
-                    "Document has no text layer and may require OCR"
-                );
+                if (!hasTextLayer) {
+                    throw new ExtractionError(
+                        ExtractionErrorCode.NO_TEXT_LAYER,
+                        "Document has no text layer and may require OCR"
+                    );
+                }
             }
 
             // 3. Determine pages to extract
-            const pageCount = analysis.pageCount;
+            const pageCount = docAnalyzer.getPageCount();
             const pageIndices = opts.pages?.length
                 ? opts.pages.filter(i => i >= 0 && i < pageCount)
-                : Array.from({ length: pageCount }, (_, i) => i);
+                : undefined; // undefined = all pages
 
-            // 4. First pass: collect raw pages for style analysis
-            const rawPages = this.mupdf.extractRawPages(pageIndices);
-            this.styleAnalyzer.reset();
-            this.styleAnalyzer.addPages(rawPages);
-            const styleProfile = this.styleAnalyzer.buildProfile();
+            // 4. EXTRACTION PASS: Get all raw data in one pass
+            console.log("[PDFExtractor] Starting extraction pass...");
+            const rawData = this.mupdf.extractRawPages(pageIndices);
+            console.log(`[PDFExtractor] Extracted ${rawData.pages.length} pages`);
 
-            // Update analysis with computed style profile
-            analysis.styleProfile = styleProfile;
+            // 5. DOCUMENT ANALYSIS
 
-            // 5. Configure page extractor
-            if (opts.removeRepeatedElements) {
-                this.pageExtractor.setRepeatedElements(analysis.repeatedElements);
-            }
-            this.pageExtractor.setStyleProfile(styleProfile);
+            // 5a. Style analysis
+            console.log("[PDFExtractor] Analyzing styles...");
+            const styleAnalyzer = new StyleAnalyzer();
+            const styleProfile = styleAnalyzer.analyze(
+                rawData.pages,
+                4, // minChars
+                0.15, // thresholdPerc
+                opts.styleSampleSize
+            );
+            StyleAnalyzer.logStyleProfile(styleProfile);
 
-            // 6. Process each page
-            const pages: ProcessedPage[] = [];
-            for (let i = 0; i < rawPages.length; i++) {
-                const pageIndex = pageIndices[i];
-                const bounds = this.mupdf.getPageBounds(pageIndex);
-                const label = this.mupdf.getPageLabel(pageIndex);
+            // 5b. Margin analysis (smart filtering - collect elements)
+            console.log("[PDFExtractor] Analyzing margins...");
+            const marginAnalysis = MarginFilter.collectMarginElements(
+                rawData.pages,
+                opts.marginZone
+            );
+            MarginFilter.logMarginAnalysis(marginAnalysis);
 
-                const processed = this.pageExtractor.extractPage(
-                    rawPages[i],
-                    pageIndex,
-                    bounds.width,
-                    bounds.height,
-                    label
-                );
-                pages.push(processed);
-            }
+            // 6. PAGE PROCESSING: Process each page with filtering
+            console.log("[PDFExtractor] Processing pages...");
+            const pageExtractor = new PageExtractor({
+                styleProfile,
+                margins: opts.margins, // Simple margin filtering
+            });
 
-            // 7. Combine full text
+            const pages: ProcessedPage[] = rawData.pages.map(rawPage =>
+                pageExtractor.extractPage(rawPage)
+            );
+
+            // 7. Combine results
             const fullText = pages.map(p => p.content).join("\n\n");
+
+            const analysis: DocumentAnalysis = {
+                pageCount: rawData.pageCount,
+                hasTextLayer: true, // We checked earlier
+                styleProfile,
+                marginAnalysis,
+            };
+
+            console.log("[PDFExtractor] Extraction complete!");
+            console.log(`[PDFExtractor] Total text length: ${fullText.length} chars`);
 
             return {
                 pages,
@@ -127,7 +145,7 @@ export class PDFExtractor {
                 fullText,
                 metadata: {
                     extractedAt: new Date().toISOString(),
-                    version: "1.0.0",
+                    version: "2.0.0",
                     settings: opts,
                 },
             };
@@ -156,7 +174,7 @@ export class PDFExtractor {
         try {
             await this.mupdf.open(pdfData);
             const analyzer = new DocumentAnalyzer(this.mupdf);
-            return !analyzer.hasNoTextLayer();
+            return analyzer.hasTextLayer();
         } finally {
             this.mupdf.close();
         }
@@ -169,6 +187,22 @@ export class PDFExtractor {
         try {
             await this.mupdf.open(pdfData);
             return this.mupdf.getPageCount();
+        } finally {
+            this.mupdf.close();
+        }
+    }
+
+    /**
+     * Get raw document data without processing.
+     * Useful for debugging or custom processing.
+     */
+    async extractRaw(
+        pdfData: Uint8Array | ArrayBuffer,
+        pageIndices?: number[]
+    ): Promise<RawDocumentData> {
+        try {
+            await this.mupdf.open(pdfData);
+            return this.mupdf.extractRawPages(pageIndices);
         } finally {
             this.mupdf.close();
         }
@@ -213,4 +247,3 @@ export async function extractTextFromZoteroItem(
     const result = await extractFromZoteroItem(item);
     return result?.fullText ?? null;
 }
-

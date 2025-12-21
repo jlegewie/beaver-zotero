@@ -5,60 +5,85 @@
  * Handles:
  * - Line joining and hyphenation
  * - Block classification
- * - Header/footer removal
+ * - Margin-based filtering
  * - Paragraph reconstruction
+ *
+ * TODO: Column detection (future implementation)
  */
 
 import type {
     RawPageData,
     RawBlock,
+    RawLine,
+    RawBBox,
     ProcessedPage,
     ProcessedBlock,
     ProcessedLine,
-    RepeatedElement,
     StyleProfile,
-    BBox,
+    TextStyle,
+    MarginSettings,
 } from "./types";
+import { styleToKey } from "./types";
 import { StyleAnalyzer } from "./StyleAnalyzer";
+import { MarginFilter } from "./MarginFilter";
 
 /** Options for page extraction */
 export interface PageExtractorOptions {
-    /** Elements to filter out (headers/footers) */
-    repeatedElements?: RepeatedElement[];
     /** Style profile for classification */
     styleProfile?: StyleProfile;
+    /** Margin settings for filtering */
+    margins?: MarginSettings;
+}
+
+/**
+ * Extract TextStyle from a line's font information.
+ */
+function extractStyle(line: RawLine): TextStyle {
+    const font = line.font;
+    if (!font) {
+        return { size: 12, font: "unknown", bold: false, italic: false };
+    }
+
+    const fontName = font.name || "unknown";
+    const fontNameLower = fontName.toLowerCase();
+
+    return {
+        size: Math.round(font.size || 12),
+        font: fontName,
+        bold: font.weight === "bold" || fontNameLower.includes("bold"),
+        italic: font.style === "italic" || fontNameLower.includes("italic"),
+    };
 }
 
 /**
  * Page Extractor class for processing individual pages.
  */
 export class PageExtractor {
-    private repeatedElements: RepeatedElement[];
     private styleProfile: StyleProfile | null;
+    private margins: MarginSettings | null;
 
     constructor(options: PageExtractorOptions = {}) {
-        this.repeatedElements = options.repeatedElements || [];
         this.styleProfile = options.styleProfile || null;
+        this.margins = options.margins || null;
     }
 
     /**
      * Process a raw page into structured output.
      */
-    extractPage(
-        rawPage: RawPageData,
-        pageIndex: number,
-        pageWidth: number,
-        pageHeight: number,
-        pageLabel?: string
-    ): ProcessedPage {
-        const blocks = this.processBlocks(rawPage.blocks, pageHeight);
+    extractPage(rawPage: RawPageData): ProcessedPage {
+        // Apply margin filtering if configured
+        const pageToProcess = this.margins
+            ? MarginFilter.filterPageByMargins(rawPage, this.margins)
+            : rawPage;
+
+        const blocks = this.processBlocks(pageToProcess.blocks);
         const content = this.buildContent(blocks);
 
         return {
-            index: pageIndex,
-            label: pageLabel,
-            width: pageWidth,
-            height: pageHeight,
+            index: rawPage.pageIndex,
+            label: rawPage.label,
+            width: rawPage.width,
+            height: rawPage.height,
             blocks,
             content,
         };
@@ -67,12 +92,11 @@ export class PageExtractor {
     /**
      * Process raw blocks into structured blocks.
      */
-    private processBlocks(rawBlocks: RawBlock[], pageHeight: number): ProcessedBlock[] {
+    private processBlocks(rawBlocks: RawBlock[]): ProcessedBlock[] {
         const processed: ProcessedBlock[] = [];
 
         for (const block of rawBlocks) {
-            if (block.type !== "text") continue;
-            if (this.shouldFilterBlock(block, pageHeight)) continue;
+            if (block.type !== "text" || !block.lines) continue;
 
             const processedBlock = this.processBlock(block);
             if (processedBlock.text.trim()) {
@@ -84,37 +108,6 @@ export class PageExtractor {
     }
 
     /**
-     * Check if a block should be filtered (header/footer).
-     */
-    private shouldFilterBlock(block: RawBlock, pageHeight: number): boolean {
-        if (!this.repeatedElements.length) return false;
-
-        const blockText = this.getBlockText(block);
-        const blockY = block.bbox[1];
-        const isTop = blockY < pageHeight * 0.1;
-        const isBottom = blockY > pageHeight * 0.9;
-
-        for (const elem of this.repeatedElements) {
-            if (elem.position === "header" && isTop && blockText.includes(elem.text)) {
-                return true;
-            }
-            if (elem.position === "footer" && isBottom && blockText.includes(elem.text)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Get plain text from a raw block.
-     */
-    private getBlockText(block: RawBlock): string {
-        if (!block.lines) return "";
-        return block.lines.map(l => l.text || "").join(" ");
-    }
-
-    /**
      * Process a single block.
      */
     private processBlock(block: RawBlock): ProcessedBlock {
@@ -123,10 +116,7 @@ export class PageExtractor {
 
         for (const line of block.lines || []) {
             const text = line.text || "";
-            const style = StyleAnalyzer.parseStyle(
-                line.font || "unknown",
-                line.size || 12
-            );
+            const style = extractStyle(line);
 
             lines.push({
                 text,
@@ -156,10 +146,20 @@ export class PageExtractor {
             return "body";
         }
 
-        // Use the first line's style for classification
         const firstStyle = lines[0].style;
-        const analyzer = new StyleAnalyzer();
-        return analyzer.classifyRole(firstStyle, this.styleProfile);
+        const bodySize = this.styleProfile.primaryBodyStyle.size;
+
+        if (firstStyle.size > bodySize * 1.2) {
+            return "heading";
+        }
+        if (firstStyle.size < bodySize * 0.85) {
+            return "footnote";
+        }
+        if (firstStyle.size < bodySize * 0.95) {
+            return "caption";
+        }
+
+        return "body";
     }
 
     /**
@@ -177,10 +177,9 @@ export class PageExtractor {
     }
 
     /**
-     * Update the repeated elements to filter.
+     * Update the margins used for filtering.
      */
-    setRepeatedElements(elements: RepeatedElement[]): void {
-        this.repeatedElements = elements;
+    setMargins(margins: MarginSettings): void {
+        this.margins = margins;
     }
 }
-

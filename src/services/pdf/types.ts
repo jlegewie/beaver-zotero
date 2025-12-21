@@ -8,78 +8,236 @@
 // Settings & Options
 // ============================================================================
 
+/** Margin thresholds in PDF points (1 point = 1/72 inch) */
+export interface MarginSettings {
+    /** Left margin threshold */
+    left: number;
+    /** Top margin threshold */
+    top: number;
+    /** Right margin threshold */
+    right: number;
+    /** Bottom margin threshold */
+    bottom: number;
+}
+
+/** Default margin settings (in PDF points) */
+export const DEFAULT_MARGINS: MarginSettings = {
+    left: 25,
+    top: 40,
+    right: 25,
+    bottom: 40,
+};
+
+/** Margin zone for smart filtering (larger area to collect candidates) */
+export const DEFAULT_MARGIN_ZONE: MarginSettings = {
+    left: 50,
+    top: 72,   // ~1 inch
+    right: 50,
+    bottom: 72,
+};
+
 /** Options for text extraction */
 export interface ExtractionSettings {
     /** Page indices to extract (0-based). If undefined, extracts all pages. */
     pages?: number[];
-    /** Whether to remove detected headers/footers */
-    removeRepeatedElements?: boolean;
     /** Whether to check for text layer before processing */
     checkTextLayer?: boolean;
     /** Minimum text per page to consider it has a text layer */
     minTextPerPage?: number;
+    /** Simple margin filtering thresholds (exclude content outside these) */
+    margins?: MarginSettings;
+    /** Margin zone for smart filtering (collect elements for analysis) */
+    marginZone?: MarginSettings;
+    /** Number of pages to sample for style analysis (0 = all pages) */
+    styleSampleSize?: number;
 }
 
 /** Default extraction settings */
 export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     pages: [],
-    removeRepeatedElements: true,
     checkTextLayer: true,
     minTextPerPage: 100,
+    margins: DEFAULT_MARGINS,
+    marginZone: DEFAULT_MARGIN_ZONE,
+    styleSampleSize: 100,
 };
 
 // ============================================================================
-// Raw MuPDF Data Structures (from WASM)
+// Raw MuPDF Data Structures (from WASM JSON output)
 // ============================================================================
 
-/** Bounding box [x0, y0, x1, y1] */
-export type BBox = [number, number, number, number];
-
-/** Raw line data from MuPDF */
-export interface RawLine {
-    text: string;
-    bbox: BBox;
-    /** Font can be string, object, or undefined depending on PDF structure */
-    font?: unknown;
-    size?: number;
+/**
+ * Bounding box from MuPDF structured text JSON.
+ * Format: { x, y, w, h } where x,y is top-left corner
+ */
+export interface RawBBox {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
 }
 
-/** Raw block data from MuPDF */
+/** Convert RawBBox to tuple format [x0, y0, x1, y1] */
+export function bboxToTuple(bbox: RawBBox): [number, number, number, number] {
+    return [bbox.x, bbox.y, bbox.x + bbox.w, bbox.y + bbox.h];
+}
+
+/**
+ * Font information from MuPDF structured text JSON.
+ */
+export interface RawFont {
+    name: string;
+    family: string;
+    weight: "normal" | "bold" | string;
+    style: "normal" | "italic" | string;
+    size: number;
+}
+
+/**
+ * Raw line data from MuPDF structured text JSON.
+ * Each line contains text with uniform styling.
+ */
+export interface RawLine {
+    /** Writing mode: 0 = horizontal, 1 = vertical */
+    wmode: number;
+    /** Bounding box */
+    bbox: RawBBox;
+    /** Font information */
+    font: RawFont;
+    /** Baseline X coordinate */
+    x: number;
+    /** Baseline Y coordinate */
+    y: number;
+    /** Text content */
+    text: string;
+}
+
+/**
+ * Raw block data from MuPDF structured text JSON.
+ */
 export interface RawBlock {
+    /** Block type: "text" or "image" */
     type: "text" | "image";
-    bbox: BBox;
+    /** Bounding box */
+    bbox: RawBBox;
+    /** Lines (only for text blocks) */
     lines?: RawLine[];
 }
 
-/** Raw page data from MuPDF */
+/**
+ * Raw page data extracted from MuPDF.
+ */
 export interface RawPageData {
+    /** 0-based page index */
+    pageIndex: number;
+    /** 1-based page number */
     pageNumber: number;
+    /** Page width in points */
+    width: number;
+    /** Page height in points */
+    height: number;
+    /** Page label (e.g., "iv", "220") */
+    label?: string;
+    /** Structured text blocks */
     blocks: RawBlock[];
+}
+
+/**
+ * Complete raw document data from extraction pass.
+ */
+export interface RawDocumentData {
+    /** Total page count */
+    pageCount: number;
+    /** Raw page data for all extracted pages */
+    pages: RawPageData[];
+}
+
+// ============================================================================
+// Style Analysis Types
+// ============================================================================
+
+/**
+ * Text style key for grouping spans.
+ * Based on font properties that define visual appearance.
+ */
+export interface TextStyle {
+    /** Rounded font size */
+    size: number;
+    /** Font name */
+    font: string;
+    /** Is bold (from font weight or name) */
+    bold: boolean;
+    /** Is italic (from font style or name) */
+    italic: boolean;
+}
+
+/** Create a unique key string for a TextStyle */
+export function styleToKey(style: TextStyle): string {
+    return `${style.size}-${style.font}-${style.bold}-${style.italic}`;
+}
+
+/**
+ * Style profile computed from document analysis.
+ * Identifies body text styles by character frequency.
+ */
+export interface StyleProfile {
+    /** Primary body text style (highest character count) */
+    primaryBodyStyle: TextStyle;
+    /** All styles considered "body text" (above threshold) */
+    bodyStyles: TextStyle[];
+    /** Map of style key -> character count */
+    styleCounts: Map<string, { count: number; style: TextStyle }>;
+}
+
+// ============================================================================
+// Margin Analysis Types
+// ============================================================================
+
+/** Position of an element relative to page margins */
+export type MarginPosition = "top" | "bottom" | "left" | "right";
+
+/**
+ * Element found in a margin zone.
+ * Used for smart header/footer detection.
+ */
+export interface MarginElement {
+    /** The text content */
+    text: string;
+    /** Which margin zone it's in */
+    position: MarginPosition;
+    /** Bounding box */
+    bbox: RawBBox;
+    /** Page index where this appears */
+    pageIndex: number;
+    /** Full line data for context */
+    line: RawLine;
+}
+
+/**
+ * Margin analysis results.
+ */
+export interface MarginAnalysis {
+    /** Elements found in margin zones, grouped by position */
+    elements: Map<MarginPosition, MarginElement[]>;
+    /** Total elements found per zone */
+    counts: Record<MarginPosition, number>;
 }
 
 // ============================================================================
 // Processed Data Structures
 // ============================================================================
 
-/** Style information for a text element */
-export interface TextStyle {
-    fontName: string;
-    fontSize: number;
-    isBold: boolean;
-    isItalic: boolean;
-}
-
 /** A processed text line with style information */
 export interface ProcessedLine {
     text: string;
-    bbox: BBox;
+    bbox: RawBBox;
     style: TextStyle;
 }
 
 /** A processed text block */
 export interface ProcessedBlock {
     type: "text" | "image";
-    bbox: BBox;
+    bbox: RawBBox;
     lines: ProcessedLine[];
     text: string;
     /** Semantic role detected by style analysis */
@@ -112,21 +270,9 @@ export interface RepeatedElement {
     /** Approximate Y position (top or bottom of page) */
     position: "header" | "footer";
     /** Bounding box pattern */
-    bbox: BBox;
+    bbox: RawBBox;
     /** Pages where this element appears */
     pageIndices: number[];
-}
-
-/** Style statistics across the document */
-export interface StyleProfile {
-    /** Most common font size (likely body text) */
-    bodyFontSize: number;
-    /** Detected heading font sizes (larger than body) */
-    headingFontSizes: number[];
-    /** Most common font name */
-    primaryFont: string;
-    /** All fonts used in the document */
-    fonts: Map<string, number>;
 }
 
 /** Document analysis results */
@@ -135,10 +281,10 @@ export interface DocumentAnalysis {
     pageCount: number;
     /** Whether the document has a text layer */
     hasTextLayer: boolean;
-    /** Detected repeated elements */
-    repeatedElements: RepeatedElement[];
     /** Style profile */
     styleProfile: StyleProfile;
+    /** Margin analysis (elements in margin zones) */
+    marginAnalysis: MarginAnalysis;
 }
 
 // ============================================================================
@@ -185,4 +331,3 @@ export class ExtractionError extends Error {
         this.name = "ExtractionError";
     }
 }
-

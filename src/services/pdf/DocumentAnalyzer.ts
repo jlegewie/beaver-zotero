@@ -3,12 +3,11 @@
  *
  * Performs document-wide analysis including:
  * - Text layer detection (OCR check)
- * - Header/footer detection
- * - Cross-page pattern recognition
+ * - Coordinates document-level analysis pipeline
  */
 
 import type { MuPDFService } from "./MuPDFService";
-import type { DocumentAnalysis, RepeatedElement, StyleProfile, RawBlock } from "./types";
+import type { RawDocumentData, RawPageData } from "./types";
 
 /** Options for text layer detection */
 export interface TextLayerCheckOptions {
@@ -57,7 +56,9 @@ export class DocumentAnalyzer {
             for (const block of rawPage.blocks) {
                 if (block.type === "text") {
                     for (const line of block.lines || []) {
-                        textLength += (line.text || "").length;
+                        // Strip whitespace before counting
+                        const cleanText = (line.text || "").replace(/\s+/g, "").trim();
+                        textLength += cleanText.length;
                     }
                 } else if (block.type === "image") {
                     hasImages = true;
@@ -97,41 +98,16 @@ export class DocumentAnalyzer {
     }
 
     /**
-     * Detect repeated elements (headers/footers) across pages.
-     * TODO: Implement cross-page pattern matching
+     * Get the page count of the document.
      */
-    detectRepeatedElements(): RepeatedElement[] {
-        // Placeholder - will implement header/footer detection
-        return [];
+    getPageCount(): number {
+        return this.mupdf.getPageCount();
     }
 
     /**
-     * Build a style profile from the document.
-     * TODO: Implement font frequency analysis
+     * Quick check: Does the document have a text layer?
      */
-    buildStyleProfile(): StyleProfile {
-        // Placeholder - will implement style analysis
-        return {
-            bodyFontSize: 12,
-            headingFontSizes: [],
-            primaryFont: "unknown",
-            fonts: new Map(),
-        };
-    }
-
-    /**
-     * Perform full document analysis.
-     */
-    analyze(checkTextLayer = true): DocumentAnalysis {
-        const pageCount = this.mupdf.getPageCount();
-        const hasTextLayer = checkTextLayer ? !this.hasNoTextLayer() : true;
-
-        return {
-            pageCount,
-            hasTextLayer,
-            repeatedElements: this.detectRepeatedElements(),
-            styleProfile: this.buildStyleProfile(),
-        };
+    hasTextLayer(options: TextLayerCheckOptions = {}): boolean {
+        return !this.hasNoTextLayer(options);
     }
 }
-
