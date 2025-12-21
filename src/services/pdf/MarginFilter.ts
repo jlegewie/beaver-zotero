@@ -17,16 +17,23 @@ import type {
 } from "./types";
 
 /**
- * Check if a bounding box is within a specific margin zone.
+ * Check if a bounding box is ENTIRELY within a specific margin zone.
+ * The element must be fully contained in the margin area.
+ *
+ * For margins:
+ * - Left: entire element (including right edge) must be within left margin
+ * - Right: entire element (including left edge) must be within right margin
+ * - Top: entire element (including bottom edge) must be within top margin
+ * - Bottom: entire element (including top edge) must be within bottom margin
  *
  * @param bbox - Element bounding box
  * @param pageWidth - Page width in points
  * @param pageHeight - Page height in points
  * @param margins - Margin thresholds
  * @param position - Which margin to check (or undefined for any)
- * @returns true if element is in the specified margin zone
+ * @returns true if element is entirely within the specified margin zone
  */
-function isInMarginZone(
+function isEntirelyInMarginZone(
     bbox: RawBBox,
     pageWidth: number,
     pageHeight: number,
@@ -38,11 +45,15 @@ function isInMarginZone(
     const x1 = bbox.x + bbox.w;
     const y1 = bbox.y + bbox.h;
 
-    // Check each margin zone
-    const inTop = y0 < margins.top;
-    const inBottom = y1 > pageHeight - margins.bottom;
-    const inLeft = x0 < margins.left;
-    const inRight = x1 > pageWidth - margins.right;
+    // Check if element is ENTIRELY within each margin zone
+    // For top: bottom edge (y1) must be within top margin
+    const inTop = y1 <= margins.top;
+    // For bottom: top edge (y0) must be within bottom margin zone
+    const inBottom = y0 >= pageHeight - margins.bottom;
+    // For left: right edge (x1) must be within left margin
+    const inLeft = x1 <= margins.left;
+    // For right: left edge (x0) must be within right margin zone
+    const inRight = x0 >= pageWidth - margins.right;
 
     if (position) {
         switch (position) {
@@ -57,8 +68,9 @@ function isInMarginZone(
 }
 
 /**
- * Determine which margin zone(s) an element is in.
+ * Determine which margin zone an element is ENTIRELY within.
  * Returns the primary position (prioritizes top/bottom over left/right).
+ * Element must be fully contained in the margin zone.
  */
 function getMarginPosition(
     bbox: RawBBox,
@@ -72,10 +84,11 @@ function getMarginPosition(
     const x1 = bbox.x + bbox.w;
 
     // Prioritize top/bottom (more common for headers/footers)
-    if (y0 < margins.top) return "top";
-    if (y1 > pageHeight - margins.bottom) return "bottom";
-    if (x0 < margins.left) return "left";
-    if (x1 > pageWidth - margins.right) return "right";
+    // Element must be ENTIRELY within the margin zone
+    if (y1 <= margins.top) return "top";
+    if (y0 >= pageHeight - margins.bottom) return "bottom";
+    if (x1 <= margins.left) return "left";
+    if (x0 >= pageWidth - margins.right) return "right";
 
     return null;
 }
@@ -85,7 +98,7 @@ function getMarginPosition(
  */
 export class MarginFilter {
     /**
-     * Simple filter: Check if a line is inside the content area (not in margins).
+     * Simple filter: Check if a line is inside the content area (not entirely in margins).
      *
      * @param line - The line to check
      * @param pageWidth - Page width in points
@@ -99,7 +112,7 @@ export class MarginFilter {
         pageHeight: number,
         margins: MarginSettings
     ): boolean {
-        return !isInMarginZone(line.bbox, pageWidth, pageHeight, margins);
+        return !isEntirelyInMarginZone(line.bbox, pageWidth, pageHeight, margins);
     }
 
     /**
@@ -164,6 +177,10 @@ export class MarginFilter {
                 if (block.type !== "text" || !block.lines) continue;
 
                 for (const line of block.lines) {
+                    // Skip empty or whitespace-only text
+                    const trimmedText = (line.text || "").trim();
+                    if (!trimmedText) continue;
+
                     const position = getMarginPosition(
                         line.bbox,
                         page.width,
@@ -173,7 +190,7 @@ export class MarginFilter {
 
                     if (position) {
                         const element: MarginElement = {
-                            text: line.text,
+                            text: trimmedText,
                             position,
                             bbox: line.bbox,
                             pageIndex: page.pageIndex,

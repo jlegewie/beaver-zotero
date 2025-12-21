@@ -20,7 +20,7 @@ export interface MarginSettings {
     bottom: number;
 }
 
-/** Default margin settings (in PDF points) */
+/** Default margin settings for simple filtering (in PDF points) */
 export const DEFAULT_MARGINS: MarginSettings = {
     left: 25,
     top: 40,
@@ -30,10 +30,10 @@ export const DEFAULT_MARGINS: MarginSettings = {
 
 /** Margin zone for smart filtering (larger area to collect candidates) */
 export const DEFAULT_MARGIN_ZONE: MarginSettings = {
-    left: 50,
-    top: 72,   // ~1 inch
-    right: 50,
-    bottom: 72,
+    left: 60,
+    top: 80,
+    right: 60,
+    bottom: 80,
 };
 
 /** Options for text extraction */

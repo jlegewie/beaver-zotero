@@ -105,7 +105,7 @@ export class PDFExtractor {
                 0.15, // thresholdPerc
                 opts.styleSampleSize
             );
-            StyleAnalyzer.logStyleProfile(styleProfile);
+            console.log('[PDFExtractor] styleProfile', styleProfile);
 
             // 5b. Margin analysis (smart filtering - collect elements)
             console.log("[PDFExtractor] Analyzing margins...");
