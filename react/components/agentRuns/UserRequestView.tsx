@@ -90,6 +90,10 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     useEffect(() => {
         if (!isEditing) return;
 
+        // Get the document from the container element (works in both sidebar and separate window)
+        const doc = containerRef.current?.ownerDocument;
+        if (!doc) return;
+
         const handleClickOutside = (event: MouseEvent) => {
             const target = event.target as Node;
             
@@ -108,9 +112,9 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         };
 
         // Use capture phase to catch events before they bubble
-        document.addEventListener('mousedown', handleClickOutside, true);
+        doc.addEventListener('mousedown', handleClickOutside, true);
         return () => {
-            document.removeEventListener('mousedown', handleClickOutside, true);
+            doc.removeEventListener('mousedown', handleClickOutside, true);
         };
     }, [isEditing]);
 
