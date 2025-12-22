@@ -6,7 +6,15 @@
  */
 
 import { logger } from "../../src/utils/logger";
-import { MuPDFService, detectColumns, Rect, RawPageData } from "../../src/services/pdf";
+import { 
+    MuPDFService, 
+    detectColumns, 
+    detectLinesOnPage,
+    lineBBoxToRect,
+    Rect, 
+    RawPageData,
+    PageLineResult,
+} from "../../src/services/pdf";
 import { getCurrentReaderAndWaitForView } from "./readerUtils";
 import { getPageViewportInfo } from "./pdfUtils";
 import { BeaverTemporaryAnnotations, ZoteroReader } from "./annotationUtils";
@@ -14,6 +22,7 @@ import { ZoteroItemReference } from "../types/zotero";
 
 // Colors for visualization
 const COLUMN_COLOR = "#00bbff"; // Blue for columns
+const LINE_COLOR = "#ff9500";   // Orange for lines
 
 /**
  * Convert MuPDF Rect (top-left origin, x/y/w/h) to Zotero rect format (bottom-left origin, [x1, y1, x2, y2])
@@ -117,6 +126,97 @@ async function createColumnAnnotations(
             zotero_key: tempId,
             library_id: (reader as any)._item.libraryID,
         });
+    }
+    
+    // Add annotations to reader
+    if (tempAnnotations.length > 0) {
+        (reader as any)._internalReader.setAnnotations(
+            Components.utils.cloneInto(tempAnnotations, (reader as any)._iframeWindow)
+        );
+    }
+    
+    return annotationReferences;
+}
+
+/**
+ * Create temporary highlight annotations for detected lines
+ * 
+ * @param lineResult Line detection result for the page
+ * @param pageHeight Page height for coordinate conversion
+ * @param reader Zotero reader instance
+ * @param viewBoxLL Optional view box lower-left offset
+ * @returns Array of annotation references for tracking
+ */
+async function createLineAnnotations(
+    lineResult: PageLineResult,
+    pageHeight: number,
+    reader: ZoteroReader,
+    viewBoxLL: [number, number] = [0, 0]
+): Promise<ZoteroItemReference[]> {
+    const annotationReferences: ZoteroItemReference[] = [];
+    const tempAnnotations: any[] = [];
+    
+    let lineNumber = 0;
+    
+    for (const colResult of lineResult.columnResults) {
+        for (let i = 0; i < colResult.lines.length; i++) {
+            lineNumber++;
+            const line = colResult.lines[i];
+            
+            // Convert LineBBox to Rect format, then to Zotero format
+            const lineRect = lineBBoxToRect(line.bbox);
+            const rect = rectToZoteroFormat(lineRect, pageHeight, viewBoxLL);
+            
+            // Create unique IDs
+            const tempId = `line_${Date.now()}_${lineNumber}_${Math.random().toString(36).substr(2, 9)}`;
+            
+            // Truncate text for display
+            const textPreview = line.text.length > 50 
+                ? line.text.slice(0, 50) + "..." 
+                : line.text;
+            
+            // Create annotation object
+            const tempAnnotation = {
+                id: tempId,
+                key: tempId,
+                libraryID: (reader as any)._item.libraryID,
+                type: "highlight",
+                color: LINE_COLOR,
+                sortIndex: `${lineResult.pageIndex.toString().padStart(5, "0")}|${String(Math.round(rect[1])).padStart(6, "0")}|${String(Math.round(rect[0])).padStart(5, "0")}`,
+                position: {
+                    pageIndex: lineResult.pageIndex,
+                    rects: [rect],
+                },
+                tags: [],
+                comment: `Line ${lineNumber} (Col ${colResult.columnIndex + 1}): ${textPreview}`,
+                text: textPreview,
+                authorName: "Beaver Visualizer",
+                pageLabel: (lineResult.pageIndex + 1).toString(),
+                isExternal: false,
+                readOnly: false,
+                lastModifiedByUser: "",
+                dateModified: new Date().toISOString(),
+                annotationType: "highlight",
+                annotationAuthorName: "Beaver Visualizer",
+                annotationText: textPreview,
+                annotationComment: `Line ${lineNumber} (Col ${colResult.columnIndex + 1})`,
+                annotationColor: LINE_COLOR,
+                annotationPageLabel: (lineResult.pageIndex + 1).toString(),
+                annotationSortIndex: `${lineResult.pageIndex.toString().padStart(5, "0")}|${String(Math.round(rect[1])).padStart(6, "0")}|${String(Math.round(rect[0])).padStart(5, "0")}`,
+                annotationPosition: JSON.stringify({
+                    pageIndex: lineResult.pageIndex,
+                    rects: [rect],
+                }),
+                annotationIsExternal: false,
+                isTemporary: true,
+            };
+            
+            tempAnnotations.push(tempAnnotation);
+            annotationReferences.push({
+                zotero_key: tempId,
+                library_id: (reader as any)._item.libraryID,
+            });
+        }
     }
     
     // Add annotations to reader
@@ -263,6 +363,160 @@ export async function visualizeCurrentPageColumns(): Promise<{
         return {
             success: false,
             message: `Visualization failed: ${errorMessage}`,
+        };
+    }
+}
+
+/**
+ * Visualize line detection results for the current page in the reader
+ * 
+ * Creates temporary orange highlight annotations showing detected lines,
+ * with line numbers and text preview in the comment field.
+ * 
+ * @returns Object with success status and details
+ */
+export async function visualizeCurrentPageLines(): Promise<{
+    success: boolean;
+    message: string;
+    lines?: number;
+    columns?: number;
+    pageIndex?: number;
+}> {
+    // Import MarginFilter here to avoid circular dependencies
+    const { MarginFilter, DEFAULT_MARGINS, logLineDetection } = await import("../../src/services/pdf");
+    
+    try {
+        // 1. Get the current reader
+        const reader = await getCurrentReaderAndWaitForView(undefined, true);
+        if (!reader || !reader._internalReader) {
+            return {
+                success: false,
+                message: "No active PDF reader found",
+            };
+        }
+        
+        if (reader.type !== "pdf") {
+            return {
+                success: false,
+                message: "Current reader is not a PDF",
+            };
+        }
+        
+        // Get current page (0-based)
+        const pdfViewer = reader._internalReader._primaryView?._iframeWindow?.PDFViewerApplication?.pdfViewer;
+        if (!pdfViewer) {
+            return {
+                success: false,
+                message: "Could not access PDF viewer",
+            };
+        }
+        const currentPageIndex = pdfViewer.currentPageNumber - 1;
+        
+        // 2. Get the PDF item and file path
+        const item = Zotero.Items.get(reader.itemID);
+        if (!item) {
+            return {
+                success: false,
+                message: "Could not find Zotero item",
+            };
+        }
+        
+        const filePath = await item.getFilePathAsync();
+        if (!filePath) {
+            return {
+                success: false,
+                message: "Could not find PDF file",
+            };
+        }
+        
+        // 3. Clean up any existing temporary annotations
+        await BeaverTemporaryAnnotations.cleanupAll(reader as ZoteroReader);
+        
+        // 4. Load PDF and extract raw page data
+        logger(`[Visualizer] Loading PDF and detecting lines on page ${currentPageIndex + 1}...`);
+        const pdfData = await IOUtils.read(filePath);
+        
+        const mupdf = new MuPDFService();
+        await mupdf.open(pdfData);
+        
+        let rawPage: RawPageData;
+        try {
+            rawPage = mupdf.extractRawPage(currentPageIndex);
+        } finally {
+            mupdf.close();
+        }
+        
+        // 5. Apply margin filtering
+        const filteredPage = MarginFilter.filterPageByMargins(rawPage, DEFAULT_MARGINS);
+        
+        // 6. Run column detection first
+        logger(`[Visualizer] Detecting columns on page ${currentPageIndex + 1}...`);
+        const columnResult = detectColumns(filteredPage);
+        
+        if (columnResult.columns.length === 0) {
+            return {
+                success: true,
+                message: `No columns detected on page ${currentPageIndex + 1}`,
+                lines: 0,
+                columns: 0,
+                pageIndex: currentPageIndex,
+            };
+        }
+        
+        // 7. Run line detection
+        logger(`[Visualizer] Detecting lines in ${columnResult.columns.length} column(s)...`);
+        const lineResult = detectLinesOnPage(filteredPage, columnResult.columns);
+        
+        // Log results
+        logLineDetection(lineResult);
+        
+        if (lineResult.allLines.length === 0) {
+            return {
+                success: true,
+                message: `No lines detected on page ${currentPageIndex + 1}`,
+                lines: 0,
+                columns: columnResult.columns.length,
+                pageIndex: currentPageIndex,
+            };
+        }
+        
+        // 8. Get viewport info for coordinate conversion
+        const { viewBox } = await getPageViewportInfo(reader as ZoteroReader, currentPageIndex);
+        const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
+        
+        // Use the page height from MuPDF for coordinate conversion
+        const pageHeight = rawPage.height;
+        
+        // 9. Create annotations
+        logger(`[Visualizer] Creating ${lineResult.allLines.length} line annotations...`);
+        
+        const annotationRefs = await createLineAnnotations(
+            lineResult,
+            pageHeight,
+            reader as ZoteroReader,
+            viewBoxLL
+        );
+        
+        // Track annotations for cleanup
+        BeaverTemporaryAnnotations.addToTracking(annotationRefs);
+        
+        const message = `Page ${currentPageIndex + 1}: ${lineResult.allLines.length} lines in ${columnResult.columns.length} column(s)`;
+        
+        logger(`[Visualizer] ${message}`);
+        
+        return {
+            success: true,
+            message,
+            lines: lineResult.allLines.length,
+            columns: columnResult.columns.length,
+            pageIndex: currentPageIndex,
+        };
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger(`[Visualizer] Error: ${errorMessage}`);
+        return {
+            success: false,
+            message: `Line visualization failed: ${errorMessage}`,
         };
     }
 }

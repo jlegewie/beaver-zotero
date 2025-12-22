@@ -37,6 +37,20 @@ export { MarginFilter } from "./MarginFilter";
 export { PageExtractor } from "./PageExtractor";
 export { detectColumns, logColumnDetection } from "./ColumnDetector";
 export type { Rect, ColumnDetectionResult, ColumnDetectionOptions } from "./ColumnDetector";
+export {
+    detectLinesInColumn,
+    detectLinesOnPage,
+    logLineDetection,
+    lineBBoxToRect,
+} from "./LineDetector";
+export type {
+    LineBBox,
+    DetectedSpan,
+    PageLine,
+    ColumnLineResult,
+    PageLineResult,
+    LineDetectionOptions,
+} from "./LineDetector";
 
 /**
  * PDFExtractor - High-level API for extracting text from PDFs.

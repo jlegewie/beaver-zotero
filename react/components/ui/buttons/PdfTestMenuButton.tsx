@@ -5,6 +5,7 @@ import PdfIcon from '../../icons/PdfIcon';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../../../../src/services/pdf';
 import { 
     visualizeCurrentPageColumns, 
+    visualizeCurrentPageLines,
     clearVisualizationAnnotations,
     extractCurrentPageContent
 } from '../../../utils/extractionVisualizer';
@@ -98,6 +99,17 @@ const PdfTestMenuButton: React.FC<PdfTestMenuButtonProps> = ({
         }
     };
 
+    // Visualize detected lines on current page
+    const handleVisualizeLines = async () => {
+        console.log("[PDF Visualizer] Visualizing lines on current page...");
+        const result = await visualizeCurrentPageLines();
+        if (result.success) {
+            console.log(`[PDF Visualizer] ${result.message}`);
+        } else {
+            console.warn(`[PDF Visualizer] ${result.message}`);
+        }
+    };
+
     // Clear visualization annotations
     const handleClearVisualization = async () => {
         console.log("[PDF Visualizer] Clearing visualization annotations...");
@@ -137,8 +149,14 @@ const PdfTestMenuButton: React.FC<PdfTestMenuButtonProps> = ({
             disabled: false,
         },
         {
-            label: "Visualize Columns (current page)",
+            label: "Visualize Columns",
             onClick: handleVisualizeColumns,
+            icon: PdfIcon,
+            disabled: false,
+        },
+        {
+            label: "Visualize Lines",
+            onClick: handleVisualizeLines,
             icon: PdfIcon,
             disabled: false,
         },
