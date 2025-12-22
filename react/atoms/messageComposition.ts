@@ -400,7 +400,7 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
         
         // Filter out items already in the thread
         const existingKeys = get(allUserAttachmentKeysAtom);
-        const newItems = itemsFiltered.filter((item) => !existingKeys.has(item.key));
+        const newItems = itemsFiltered.filter((item) => !existingKeys.has(`${item.libraryID}-${item.key}`));
         
         if (!limit || newItems.length <= limit) {
             await set(addItemsToCurrentMessageItemsAtom, newItems.slice(0, limit));

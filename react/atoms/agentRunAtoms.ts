@@ -412,7 +412,7 @@ async function handleMissingZoteroData(
             reason: await determineMissingReason(item, userId)
         }))
     );
-    console.log('handleMissingZoteroData: reasons', reasons);
+    logger('handleMissingZoteroData: reasons', reasons, 1);
 
     // Count reasons
     const reasonCounts = new Map<MissingItemReason, number>();
@@ -526,35 +526,32 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
 function createWSCallbacks(set: Setter): WSCallbacks {
     return {
         onReady: (data: WSReadyData) => {
-            logger(`WS onReady: mode=${data.processingMode}, indexing=${data.indexingComplete}`, 1);
-            console.log('[WS] Ready event received:', data);
+            logger('WS onReady:', data, 1);
             set(isWSReadyAtom, true);
             set(wsReadyDataAtom, data);
         },
 
         onRequestAck: (data: WSRequestAckData) => {
-            logger(`WS onRequestAck: runId=${data.runId}, model=${data.modelName}, charge=${data.chargeType}`, 1);
-            console.log('[WS] Request acknowledged:', data);
+            logger('WS onRequestAck:', data, 1);
             set(wsRequestAckDataAtom, data);
         },
 
         onPart: (event: WSPartEvent) => {
-            const partKind = event.part.part_kind;
-            console.log('[WS] Part event:', {
+            logger('WS onPart:', {
                 runId: event.run_id,
                 messageIndex: event.message_index,
                 partIndex: event.part_index,
-                partKind,
+                partKind: event.part.part_kind,
             });
             set(activeRunAtom, (prev) => prev ? updateRunWithPart(prev, event) : prev);
         },
 
         onToolReturn: async (event: WSToolReturnEvent) => {
-            console.log('[WS] Tool return event:', {
+            logger('WS onToolReturn:', {
                 runId: event.run_id,
                 messageIndex: event.message_index,
-                toolName: event.part.tool_name,
-                toolCallId: event.part.tool_call_id,
+                toolName: event.part.part_kind === "tool-return" ? event.part.tool_name : undefined,
+                toolCallId: event.part.part_kind === "tool-return" ? event.part.tool_call_id : undefined,
             });
 
             // Process tool return results
@@ -570,14 +567,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onRunComplete: (event: WSRunCompleteEvent) => {
-            logger(`WS onRunComplete: ${event.run_id}`, 1);
-            console.log('[WS] Run complete event:', {
+            logger('WS onRunComplete:', {
                 runId: event.run_id,
                 usage: event.usage,
                 cost: event.cost,
                 citationsCount: event.citations?.length ?? 0,
                 actionsCount: event.agent_actions?.length ?? 0,
-            });
+            }, 1);
             set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
             // Clear retry state when run completes
             set(wsRetryAtom, null);
@@ -607,15 +603,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onThread: (newThreadId: string) => {
-            logger(`WS onThread: ${newThreadId}`, 1);
-            console.log('[WS] Thread event:', { threadId: newThreadId });
+            logger('WS onThread:', { threadId: newThreadId }, 1);
             set(currentThreadIdAtom, newThreadId);
             set(activeRunAtom, (prev) => prev ? { ...prev, thread_id: newThreadId } : prev);
         },
 
         onDone: () => {
             logger('WS onDone: Request fully complete', 1);
-            console.log('[WS] Done event: Full request finished');
 
             // Move active run to completed runs
             set(activeRunAtom, (prev) => {
@@ -635,8 +629,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onError: (event: WSErrorEvent) => {
-            logger(`WS onError: ${event.type} - ${event.message}`, 1);
-            console.error('[WS] Error event:', event);
+            logger('WS onError:', event, 1);
             set(wsErrorAtom, event);
             set(activeRunAtom, (prev) => prev ? {
                 ...prev,
@@ -656,8 +649,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onWarning: (event: WSWarningEvent) => {
-            logger(`WS onWarning: ${event.type} - ${event.message}`, 1);
-            console.warn('[WS] Warning event:', event);
+            logger('WS onWarning:', event, 1);
             set(wsWarningAtom, event);
             // Add to dismissable warnings
             set(addWarningAtom, {
@@ -669,8 +661,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onRetry: (event: WSRetryEvent) => {
-            logger(`WS onRetry: attempt ${event.attempt}/${event.max_attempts} - ${event.reason}`, 1);
-            console.log('[WS] Retry event:', event);
+            logger('WS onRetry:', event, 1);
             set(wsRetryAtom, {
                 runId: event.run_id,
                 attempt: event.attempt,
@@ -687,11 +678,10 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onAgentActions: (event: WSAgentActionsEvent) => {
-            logger(`WS onAgentActions: ${event.actions.length} actions for run ${event.run_id}`, 1);
-            console.log('[WS] Agent actions event:', {
+            logger('WS onAgentActions:', {
                 runId: event.run_id,
                 actionsCount: event.actions.length,
-            });
+            }, 1);
             const actions = event.actions.map(toAgentAction);
             set(addAgentActionsAtom, actions);
             // Load item data for agent actions (fire and forget)
@@ -703,12 +693,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onMissingZoteroData: (event: WSMissingZoteroDataEvent) => {
-            logger(`WS onMissingZoteroData: ${event.items.length} items missing for run ${event.run_id}`, 1);
-            console.log('[WS] Missing Zotero data event:', {
+            logger('WS onMissingZoteroData:', {
                 runId: event.run_id,
                 itemCount: event.items.length,
                 items: event.items,
-            });
+            }, 1);
             // Get userId from store for pending sync check
             const userId = store.get(userIdAtom);
             // Process asynchronously to determine reasons and add warning
@@ -723,7 +712,6 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
         onOpen: () => {
             logger('WS onOpen: Connection established, waiting for ready...', 1);
-            console.log('[WS] Connection opened, awaiting server validation...');
             set(isWSConnectedAtom, true);
         },
 
@@ -750,13 +738,12 @@ async function executeWSRequest(
     const callbacks = createWSCallbacks(set);
 
     try {
-        console.log('[WS] Starting connection for run:', run.id);
+        logger('WS Starting connection for run:', run.id);
         const frontendVersion = Zotero.Beaver.pluginVersion || '';
         await agentService.connect(request, callbacks, frontendVersion);
-        console.log('[WS] Connection established and ready');
+        logger('WS Connection established and ready');
     } catch (error) {
-        logger(`WS connection error: ${error}`, 1);
-        console.error('[WS] Connection failed:', error);
+        logger('WS connection error:', error, 1);
         const errorMessage = error instanceof Error ? error.message : 'Connection failed';
         set(wsErrorAtom, {
             event: 'error',
@@ -810,21 +797,21 @@ export const sendWSMessageAtom = atom(
             const model = get(selectedModelAtom);
             const modelOptions = buildModelSelectionOptions(model);
 
-        // Log model and model selection info
-        console.log('[WS] Selected model:', model ? {
-            id: model.id,
-            access_id: model.access_id,
-            name: model.name,
-            provider: model.provider,
-            is_custom: model.is_custom,
-            use_app_key: model.use_app_key,
-        } : null);
-        console.log('[WS] Model selection options:', {
-            access_id: modelOptions.access_id || '(not set - using custom model or plan default)',
-            hasApiKey: !!modelOptions.api_key,
-        });
+            // Log model and model selection info
+            logger('Selected model:', model ? {
+                id: model.id,
+                access_id: model.access_id,
+                name: model.name,
+                provider: model.provider,
+                is_custom: model.is_custom,
+                use_app_key: model.use_app_key,
+            } : null);
+            logger('Model selection options:', {
+                access_id: modelOptions.access_id || '(not set - using custom model or plan default)',
+                hasApiKey: !!modelOptions.api_key,
+            });
 
-        // Custom instructions (if any)
+            // Custom instructions (if any)
         const customInstructions = getPref('customInstructions') || undefined;
 
         // Build attachments from current message items
@@ -840,22 +827,22 @@ export const sendWSMessageAtom = atom(
         const readerAttachment = get(currentReaderAttachmentAtom);
         if (readerAttachment && readerState) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
-            console.log('reader att: allUserAttachmentKeys', allUserAttachmentKeys);
             const existingKeys = new Set([
                 ...attachments.map(att => `${att.library_id}-${att.zotero_key}`),
                 ...allUserAttachmentKeys
             ]);
-            console.log('reader att: existingKeys', existingKeys);
+            logger(`sendWSMessageAtom: Handeling reader attachment - existingKeys: ${JSON.stringify(existingKeys)}`, 1);
             const readerKey = `${readerAttachment.libraryID}-${readerAttachment.key}`;
-            console.log('reader att: readerKey', readerKey);
-            if (!existingKeys.has(readerAttachment.key)) {
-                console.log('reader att: adding readerKey', readerKey);
+            if (!existingKeys.has(readerKey)) {
+                logger(`sendWSMessageAtom: Handeling reader attachment - Adding reader attachment: ${readerKey}`, 1);
                 attachments.push({
                     library_id: readerAttachment.libraryID,
                     zotero_key: readerAttachment.key,
                     type: 'source',
                     include: 'fulltext'
                 } as SourceAttachment);
+            } else {
+                logger(`sendWSMessageAtom: Handeling reader attachment - Skipping reader attachment: ${readerKey}`, 1);
             }
         }
 
@@ -914,7 +901,7 @@ export const sendWSMessageAtom = atom(
             // Get user ID for the run
             const userId = get(userIdAtom);
             if (!userId) {
-                console.error('[WS] User ID not found');
+                logger('User ID not found', 1);
                 set(isWSChatPendingAtom, false);
                 return;
             }
@@ -943,8 +930,7 @@ export const sendWSMessageAtom = atom(
             await executeWSRequest(run, request, set);
         } catch (error) {
             // Catch any unexpected errors during message preparation
-            logger(`sendWSMessageAtom: Unexpected error: ${error}`, 1);
-            console.error('[WS] Unexpected error in sendWSMessageAtom:', error);
+            logger('sendWSMessageAtom: Unexpected error:', error, 1);
             set(wsErrorAtom, {
                 event: 'error',
                 type: 'preparation_error',
@@ -1076,12 +1062,135 @@ export const regenerateFromRunAtom = atom(
             await executeWSRequest(newRun, request, set);
         } catch (error) {
             // Catch any unexpected errors during regeneration
-            logger(`regenerateFromRunAtom: Unexpected error: ${error}`, 1);
-            console.error('[WS] Unexpected error in regenerateFromRunAtom:', error);
+            logger('regenerateFromRunAtom: Unexpected error:', error, 1);
             set(wsErrorAtom, {
                 event: 'error',
                 type: 'regeneration_error',
                 message: error instanceof Error ? error.message : 'Failed to regenerate response',
+                is_retryable: true,
+            });
+            set(activeRunAtom, null);
+            set(isWSChatPendingAtom, false);
+        }
+    }
+);
+
+/**
+ * Regenerate from a run with an edited user prompt.
+ * Similar to regenerateFromRunAtom but accepts a modified user prompt.
+ */
+export const regenerateWithEditedPromptAtom = atom(
+    null,
+    async (get, set, params: { runId: string; editedPrompt: BeaverAgentPrompt }) => {
+        const { runId, editedPrompt } = params;
+        logger(`regenerateWithEditedPromptAtom: Regenerating run ${runId} with edited prompt`, 1);
+
+        try {
+            // Get current model
+            const model = get(selectedModelAtom);
+            if (!model) {
+                logger('regenerateWithEditedPromptAtom: No model selected', 1);
+                return;
+            }
+
+            // Get user ID
+            const userId = get(userIdAtom);
+            if (!userId) {
+                logger('regenerateWithEditedPromptAtom: No user ID found', 1);
+                return;
+            }
+
+            // Find the run - check both threadRuns and activeRun
+            const threadRuns = get(threadRunsAtom);
+            const activeRun = get(activeRunAtom);
+            
+            let targetRun: AgentRun | null = null;
+            let runIndex = threadRuns.findIndex(r => r.id === runId);
+            
+            if (runIndex >= 0) {
+                targetRun = threadRuns[runIndex];
+            } else if (activeRun?.id === runId) {
+                // The run is currently active - cancel it and resubmit
+                targetRun = activeRun;
+                runIndex = threadRuns.length;
+                await agentService.cancel();
+                set(activeRunAtom, null);
+                set(isWSChatPendingAtom, false);
+            }
+            
+            if (!targetRun) {
+                logger(`regenerateWithEditedPromptAtom: Run ${runId} not found`, 1);
+                return;
+            }
+
+            // Get thread ID from the target run
+            const threadId = get(currentThreadIdAtom) || targetRun.thread_id;
+
+            // Collect run IDs that will be removed (target run and all subsequent)
+            const runIdsToRemove = threadRuns.slice(runIndex).map(r => r.id);
+
+            // Find applied annotation actions for runs being removed
+            const allAgentActions = get(threadAgentActionsAtom);
+            const actionsToDelete = allAgentActions
+                .filter(a => runIdsToRemove.includes(a.run_id))
+                .filter(isAnnotationAgentAction)
+                .filter(hasAppliedZoteroItem);
+
+            // Prompt user to confirm deletion of applied actions
+            if (actionsToDelete.length > 0) {
+                const shouldDelete = confirmDeleteAppliedActions(actionsToDelete);
+                if (shouldDelete) {
+                    await deleteAppliedZoteroItems(actionsToDelete);
+                }
+            }
+
+            // Truncate runs - keep only runs before the target
+            const truncatedRuns = threadRuns.slice(0, runIndex);
+            set(threadRunsAtom, truncatedRuns);
+
+            // Clear agent actions for removed runs
+            set(threadAgentActionsAtom, (prev) => 
+                prev.filter(a => !runIdsToRemove.includes(a.run_id))
+            );
+
+            // Clear citations for removed runs
+            set(citationMetadataAtom, (prev) => 
+                prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
+            );
+            set(updateCitationDataAtom);
+
+            // Reset WS state and set pending
+            set(resetWSStateAtom);
+            set(isWSChatPendingAtom, true);
+
+            // Build model selection options
+            const modelOptions = buildModelSelectionOptions(model);
+            const customInstructions = getPref('customInstructions') || undefined;
+
+            // Create new AgentRun shell with the EDITED user_prompt
+            const { run: newRun, request } = createAgentRunShell(
+                editedPrompt,
+                threadId,
+                userId,
+                model.name,
+                modelOptions,
+                model.provider,
+                customInstructions,
+                model.is_custom ? model.custom_model : undefined,
+                targetRun.id, // ask backend to rewrite thread from this run forward
+            );
+
+            // Set active run - UI now shows user message + spinner
+            set(activeRunAtom, newRun);
+
+            // Execute the WebSocket request
+            await executeWSRequest(newRun, request, set);
+        } catch (error) {
+            logger('regenerateWithEditedPromptAtom: Unexpected error:', error, 1);
+            set(wsErrorAtom, {
+                event: 'error',
+                type: 'regeneration_error',
+                message: error instanceof Error ? error.message : 'Failed to regenerate with edited prompt',
                 is_retryable: true,
             });
             set(activeRunAtom, null);
@@ -1186,8 +1295,7 @@ export const resumeFromRunAtom = atom(
             await executeWSRequest(newRun, request, set);
         } catch (error) {
             // Catch any unexpected errors during resume
-            logger(`resumeFromRunAtom: Unexpected error: ${error}`, 1);
-            console.error('[WS] Unexpected error in resumeFromRunAtom:', error);
+            logger('resumeFromRunAtom: Unexpected error:', error, 1);
             set(wsErrorAtom, {
                 event: 'error',
                 type: 'resume_error',

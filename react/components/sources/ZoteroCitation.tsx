@@ -179,7 +179,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const isInvalid = displayState === 'invalid';
 
     // Get or assign numeric marker using the thread-scoped atom (resets when thread changes)
-    const numericMarker = useCitationMarker(citationKey);
+    const numericMarker = useCitationMarker(citationKey, exportRendering);
 
     // Cleanup effect for when component unmounts or citation changes
     useEffect(() => {

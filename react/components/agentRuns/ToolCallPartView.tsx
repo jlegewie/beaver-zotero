@@ -45,7 +45,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     create_zotero_item: DocumentValidationIcon,
 
     // Read tool result
-    read_tool_result: TextAlignLeftIcon,
+    read_file: TextAlignLeftIcon,
 };
 
 /**
@@ -101,7 +101,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         result?.part_kind === 'tool-return' &&
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (resultCount === null || resultCount > 0) &&
-        part.tool_name !== 'read_tool_result';
+        part.tool_name !== 'read_file';
 
     const effectiveExpanded = isExpanded && canExpand;
 
