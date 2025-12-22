@@ -417,11 +417,13 @@ export interface OCRDetectionOptions {
     minTextPerPage?: number;
     /** Initial pages to sample for analysis (default: 6) */
     sampleSize?: number;
-    /** Expanded sample size for confirmation (default: 20) */
+    /** Expanded sample size when uncertain (default: 20) */
     expandedSampleSize?: number;
-    /** Percentage of problematic pages to trigger expanded sampling (default: 0.8) */
-    expandThreshold?: number;
-    /** Final threshold percentage to confirm OCR needed (default: 0.15) */
+    /** Lower bound of "uncertain zone" - expand if issue ratio is above this (default: 0.1 = 10%) */
+    expandLowerThreshold?: number;
+    /** Upper bound of "uncertain zone" - don't expand if issue ratio is above this (default: 0.8 = 80%) */
+    expandUpperThreshold?: number;
+    /** Final threshold to confirm OCR needed - requires majority agreement (default: 0.5 = 50%) */
     confirmationThreshold?: number;
 
     // Text quality thresholds
@@ -498,8 +500,9 @@ export const DEFAULT_OCR_DETECTION_OPTIONS: Required<OCRDetectionOptions> = {
     minTextPerPage: 100,
     sampleSize: 6,
     expandedSampleSize: 20,
-    expandThreshold: 0.8,
-    confirmationThreshold: 0.15,
+    expandLowerThreshold: 0.1,   // Expand if >10% issues (uncertain)
+    expandUpperThreshold: 0.8,   // Don't expand if >80% issues (clearly bad)
+    confirmationThreshold: 0.5,  // Require majority (50%) to confirm OCR needed
 
     maxWhitespaceRatio: 0.7,
     maxNewlineRatio: 0.6,

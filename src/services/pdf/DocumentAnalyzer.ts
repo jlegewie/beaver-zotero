@@ -408,8 +408,15 @@ export class DocumentAnalyzer {
         const issuesCount = pageAnalyses.filter((p) => p.hasIssues).length;
         let issueRatio = initialSampleSize > 0 ? issuesCount / initialSampleSize : 0;
 
-        // Expand sample if threshold is met
-        if (issueRatio >= opts.expandThreshold && availablePages > initialSampleSize) {
+        // Expand sample if we're in the "uncertain zone"
+        // - Below lower threshold (e.g., <10%): Clearly OK, no expansion needed
+        // - Between thresholds (e.g., 10-80%): Uncertain, expand to confirm
+        // - Above upper threshold (e.g., >80%): Clearly bad, no expansion needed
+        const isInUncertainZone =
+            issueRatio >= opts.expandLowerThreshold &&
+            issueRatio < opts.expandUpperThreshold;
+
+        if (isInUncertainZone && availablePages > initialSampleSize) {
             const expandedSampleSize = Math.min(availablePages, opts.expandedSampleSize);
 
                 for (let i = startPage + initialSampleSize; i < startPage + expandedSampleSize; i++) {
@@ -503,8 +510,10 @@ export class DocumentAnalyzer {
                 (options as OCRDetectionOptions).sampleSize,
             expandedSampleSize: (options as TextLayerCheckOptions).expandSampleLimit ??
                 (options as OCRDetectionOptions).expandedSampleSize,
-            expandThreshold: (options as TextLayerCheckOptions).scanThreshold ??
-                (options as OCRDetectionOptions).expandThreshold,
+            // Legacy scanThreshold maps to expandUpperThreshold (old behavior)
+            expandUpperThreshold: (options as TextLayerCheckOptions).scanThreshold ??
+                (options as OCRDetectionOptions).expandUpperThreshold,
+            expandLowerThreshold: (options as OCRDetectionOptions).expandLowerThreshold,
             confirmationThreshold: (options as TextLayerCheckOptions).confirmationThreshold ??
                 (options as OCRDetectionOptions).confirmationThreshold,
         };
