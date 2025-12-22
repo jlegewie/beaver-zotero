@@ -39,6 +39,12 @@ export interface ColumnDetectionOptions {
     edgeTolerance?: number;
     /** Maximum vertical gap for joining blocks (default: 10pt) */
     maxVerticalGap?: number;
+    /** Maximum height for a bridge element (default: 50pt) */
+    maxBridgeHeight?: number;
+    /** Maximum vertical gap when using bridge merging (default: 30pt) */
+    bridgeVerticalGap?: number;
+    /** Enable debug logging for column detection */
+    debug?: boolean;
 }
 
 const DEFAULT_OPTIONS: Required<ColumnDetectionOptions> = {
@@ -46,6 +52,9 @@ const DEFAULT_OPTIONS: Required<ColumnDetectionOptions> = {
     footerMargin: 50,
     edgeTolerance: 3,
     maxVerticalGap: 10,
+    maxBridgeHeight: 50,
+    bridgeVerticalGap: 30,
+    debug: false,
 };
 
 // ============================================================================
@@ -71,6 +80,40 @@ function rectsIntersect(r1: Rect, r2: Rect): boolean {
         r1.y + r1.h <= r2.y ||
         r2.y + r2.h <= r1.y
     );
+}
+
+/** Check if r1 is horizontally contained within r2 (r1 fits inside r2's x-range) */
+function isHorizontallyContained(
+    inner: Rect,
+    outer: Rect,
+    tolerance: number
+): boolean {
+    // Inner's left edge is at or after outer's left edge
+    const leftOk = inner.x >= outer.x - tolerance;
+    // Inner's right edge is at or before outer's right edge
+    const rightOk = inner.x + inner.w <= outer.x + outer.w + tolerance;
+    return leftOk && rightOk;
+}
+
+/** Check if two rectangles have significant horizontal overlap */
+function hasSignificantXOverlap(r1: Rect, r2: Rect, minOverlapRatio: number = 0.5): boolean {
+    const overlapLeft = Math.max(r1.x, r2.x);
+    const overlapRight = Math.min(r1.x + r1.w, r2.x + r2.w);
+    const overlapWidth = Math.max(0, overlapRight - overlapLeft);
+
+    // Check if overlap is significant relative to the narrower block
+    const minWidth = Math.min(r1.w, r2.w);
+    return overlapWidth >= minWidth * minOverlapRatio;
+}
+
+/** Check if two blocks are in the same column (share a common edge) */
+function areInSameColumn(r1: Rect, r2: Rect, tolerance: number): boolean {
+    // Same left edge
+    const sameLeft = Math.abs(r1.x - r2.x) <= tolerance;
+    // Same right edge
+    const sameRight = Math.abs((r1.x + r1.w) - (r2.x + r2.w)) <= tolerance;
+    // Both conditions for strict column match
+    return sameLeft || sameRight;
 }
 
 /** Check if two rectangles are equal (within tolerance) */
@@ -156,6 +199,257 @@ export function pageIsBroken(
     return false;
 }
 
+/**
+ * Merge bridge elements into adjacent column fragments.
+ *
+ * A "bridge" is a short-height element (like a section heading) that is
+ * horizontally contained within both the block above and below it. When
+ * the blocks above and below have similar edges (same column), we can
+ * merge all three into one column rectangle.
+ *
+ * This handles cases like:
+ *   [Full-width paragraph text]
+ *   [  DATA AND METHODS  ]     <- narrower heading (bridge)
+ *   [Full-width paragraph text]
+ *
+ * The heading doesn't span the full column width, but it's contained within
+ * the paragraphs above and below, so they should all be one column.
+ */
+function mergeBridgeElements(
+    blocks: Rect[],
+    opts: Required<ColumnDetectionOptions>
+): Rect[] {
+    if (blocks.length < 3) return blocks;
+
+    // Iterate until no more merges can be done
+    // This handles cases with multiple consecutive bridge elements
+    let current = [...blocks];
+    let changed = true;
+    let iterations = 0;
+    const maxIterations = 20; // Safety limit
+
+    while (changed && iterations < maxIterations) {
+        changed = false;
+        iterations++;
+
+        const result = mergeBridgeElementsOnce(current, opts, opts.debug);
+
+        if (result.length < current.length) {
+            changed = true;
+            current = result;
+            if (opts.debug) {
+                console.log(`[Bridge] Iteration ${iterations}: merged ${current.length + 2} -> ${result.length} blocks`);
+            }
+        }
+    }
+
+    return current;
+}
+
+/**
+ * Single pass of bridge element merging.
+ *
+ * Uses a two-pass approach:
+ * 1. First pass: identify all bridges and record merge operations
+ * 2. Second pass: build the result, applying merges
+ */
+function mergeBridgeElementsOnce(
+    blocks: Rect[],
+    opts: Required<ColumnDetectionOptions>,
+    debug: boolean = false
+): Rect[] {
+    if (blocks.length < 3) return blocks;
+
+    // Sort by vertical position
+    const sorted = [...blocks].sort((a, b) => a.y - b.y);
+
+    // First pass: identify all merge operations
+    // Each merge is: { bridgeIdx, aboveIdx, belowIdx, mergedRect }
+    interface MergeOp {
+        bridgeIdx: number;
+        aboveIdx: number;
+        belowIdx: number;
+        mergedRect: Rect;
+    }
+    const mergeOps: MergeOp[] = [];
+    const alreadyInMerge = new Set<number>(); // Indices already part of a merge
+
+    for (let i = 0; i < sorted.length; i++) {
+        // Skip if this block is already part of another merge
+        if (alreadyInMerge.has(i)) continue;
+
+        const block = sorted[i];
+
+        // Check if this block could be a bridge (limited height)
+        if (block.h <= opts.maxBridgeHeight) {
+            // Find potential neighbors above and below (excluding already-merged blocks)
+            const neighborAbove = findClosestBlockAbove(sorted, i, opts, alreadyInMerge);
+            const neighborBelow = findClosestBlockBelow(sorted, i, opts, alreadyInMerge);
+
+            if (debug) {
+                console.log(`[Bridge] Checking block ${i} (h=${block.h.toFixed(0)}): ` +
+                    `above=${neighborAbove}, below=${neighborBelow}`);
+            }
+
+            if (neighborAbove !== null && neighborBelow !== null) {
+                const above = sorted[neighborAbove];
+                const below = sorted[neighborBelow];
+
+                // Check if bridge has significant x-overlap with both neighbors
+                const overlapWithAbove = hasSignificantXOverlap(block, above, 0.5);
+                const overlapWithBelow = hasSignificantXOverlap(block, below, 0.5);
+
+                // Also check if bridge is contained within the WIDER neighbor
+                const widerNeighbor = above.w >= below.w ? above : below;
+                const containedInWider = isHorizontallyContained(
+                    block,
+                    widerNeighbor,
+                    opts.edgeTolerance
+                );
+
+                if (debug) {
+                    console.log(`  overlapWithAbove=${overlapWithAbove}, overlapWithBelow=${overlapWithBelow}`);
+                    console.log(`  containedInWider=${containedInWider} (wider=${above.w >= below.w ? 'above' : 'below'})`);
+                    console.log(`  block: x=${block.x.toFixed(0)}-${(block.x + block.w).toFixed(0)}, w=${block.w.toFixed(0)}`);
+                    console.log(`  above: x=${above.x.toFixed(0)}-${(above.x + above.w).toFixed(0)}, w=${above.w.toFixed(0)}`);
+                    console.log(`  below: x=${below.x.toFixed(0)}-${(below.x + below.w).toFixed(0)}, w=${below.w.toFixed(0)}`);
+                }
+
+                // Merge if bridge overlaps with neighbors OR is contained in wider
+                if ((overlapWithAbove && overlapWithBelow) || containedInWider) {
+                    // Check that neighbors are in the same column
+                    const sameLeftEdge =
+                        Math.abs(above.x - below.x) <= opts.edgeTolerance;
+                    const sameRightEdge =
+                        Math.abs(above.x + above.w - (below.x + below.w)) <=
+                        opts.edgeTolerance;
+                    const neighborsOverlap = hasSignificantXOverlap(above, below, 0.7);
+
+                    if (debug) {
+                        console.log(`  sameLeftEdge=${sameLeftEdge}, sameRightEdge=${sameRightEdge}, neighborsOverlap=${neighborsOverlap}`);
+                    }
+
+                    if (sameLeftEdge || (sameRightEdge && neighborsOverlap)) {
+                        // Create merged rect
+                        const mergedRect = unionRect(
+                            unionRect(above, block),
+                            below
+                        );
+
+                        // Check that merged doesn't intersect other blocks
+                        const intersectsOthers = sorted.some((other, idx) => {
+                            if (idx === i || idx === neighborAbove || idx === neighborBelow)
+                                return false;
+                            if (alreadyInMerge.has(idx)) return false;
+                            return rectsIntersect(mergedRect, other);
+                        });
+
+                        if (debug) {
+                            console.log(`  intersectsOthers=${intersectsOthers}`);
+                        }
+
+                        if (!intersectsOthers) {
+                            // Record this merge operation
+                            mergeOps.push({
+                                bridgeIdx: i,
+                                aboveIdx: neighborAbove,
+                                belowIdx: neighborBelow,
+                                mergedRect,
+                            });
+
+                            // Mark all three indices as part of a merge
+                            alreadyInMerge.add(i);
+                            alreadyInMerge.add(neighborAbove);
+                            alreadyInMerge.add(neighborBelow);
+
+                            if (debug) {
+                                console.log(`  ✓ WILL MERGE: blocks ${neighborAbove}, ${i}, ${neighborBelow}`);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Second pass: build the result
+    const result: Rect[] = [];
+
+    // Add all blocks that weren't merged
+    for (let i = 0; i < sorted.length; i++) {
+        if (!alreadyInMerge.has(i)) {
+            result.push(sorted[i]);
+        }
+    }
+
+    // Add all merged rects
+    for (const op of mergeOps) {
+        result.push(op.mergedRect);
+    }
+
+    if (debug && mergeOps.length > 0) {
+        console.log(`[Bridge] Pass complete: ${sorted.length} blocks -> ${result.length} blocks (${mergeOps.length} merges)`);
+    }
+
+    return result;
+}
+
+/**
+ * Find the closest block above the given index that hasn't been merged.
+ */
+function findClosestBlockAbove(
+    sorted: Rect[],
+    index: number,
+    opts: Required<ColumnDetectionOptions>,
+    merged: Set<number>
+): number | null {
+    const block = sorted[index];
+
+    for (let i = index - 1; i >= 0; i--) {
+        if (merged.has(i)) continue;
+
+        const candidate = sorted[i];
+        // Candidate must end before block starts
+        if (candidate.y + candidate.h > block.y) continue;
+
+        // Gap must be within threshold
+        const gap = block.y - (candidate.y + candidate.h);
+        if (gap > opts.bridgeVerticalGap) return null;
+
+        return i;
+    }
+
+    return null;
+}
+
+/**
+ * Find the closest block below the given index that hasn't been merged.
+ */
+function findClosestBlockBelow(
+    sorted: Rect[],
+    index: number,
+    opts: Required<ColumnDetectionOptions>,
+    merged: Set<number>
+): number | null {
+    const block = sorted[index];
+
+    for (let i = index + 1; i < sorted.length; i++) {
+        if (merged.has(i)) continue;
+
+        const candidate = sorted[i];
+        // Candidate must start after block ends
+        if (candidate.y < block.y + block.h) continue;
+
+        // Gap must be within threshold
+        const gap = candidate.y - (block.y + block.h);
+        if (gap > opts.bridgeVerticalGap) return null;
+
+        return i;
+    }
+
+    return null;
+}
+
 // ============================================================================
 // Column Detection
 // ============================================================================
@@ -185,8 +479,28 @@ export function detectColumns(
     // Phase 2: Merge blocks into columns
     const mergedBlocks = mergeBlocks(filteredBlocks, opts);
 
-    // Phase 3: Join & sort for reading order
-    const sortedColumns = joinAndSort(mergedBlocks, opts);
+    // Phase 3: Join rectangles and normalize edges
+    const joinedBlocks = joinAndSort(mergedBlocks, opts);
+
+    if (opts.debug) {
+        console.log(`[ColumnDetector] Page ${page.pageIndex}: After Phase 3 (join): ${joinedBlocks.length} blocks`);
+        for (const b of joinedBlocks) {
+            console.log(`    x=${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)}, y=${b.y.toFixed(0)}, h=${b.h.toFixed(0)}`);
+        }
+    }
+
+    // Phase 4: Merge bridge elements (headings contained within column fragments)
+    const bridgeMerged = mergeBridgeElements(joinedBlocks, opts);
+
+    if (opts.debug && bridgeMerged.length !== joinedBlocks.length) {
+        console.log(`[ColumnDetector] Page ${page.pageIndex}: After Phase 4 (bridge): ${bridgeMerged.length} blocks`);
+        for (const b of bridgeMerged) {
+            console.log(`    x=${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)}, y=${b.y.toFixed(0)}, h=${b.h.toFixed(0)}`);
+        }
+    }
+
+    // Phase 5: Final reading order sort
+    const sortedColumns = sortForReadingOrder(bridgeMerged, opts);
 
     return {
         columns: sortedColumns,
@@ -298,7 +612,60 @@ function isPlotSymbolBlock(block: RawBlock): boolean {
 }
 
 /**
+ * Check if two blocks have similar edges (same column structure).
+ * This is stricter than just x-overlap - requires similar left AND right edges.
+ */
+function hasSimilarEdges(
+    block1: Rect,
+    block2: Rect,
+    tolerance: number
+): boolean {
+    const leftMatch = Math.abs(block1.x - block2.x) <= tolerance;
+    const rightMatch = Math.abs((block1.x + block1.w) - (block2.x + block2.w)) <= tolerance;
+    return leftMatch && rightMatch;
+}
+
+/**
+ * Check if two blocks have significant x-overlap AND similar widths.
+ * This prevents full-width blocks from merging with column blocks.
+ */
+function canMergeBlocks(
+    block1: Rect,
+    block2: Rect,
+    tolerance: number
+): boolean {
+    // First check: do they have x-overlap?
+    const xOverlap = !(
+        block1.x + block1.w < block2.x ||
+        block2.x + block2.w < block1.x
+    );
+    if (!xOverlap) return false;
+
+    // Second check: do they have similar edges (same column)?
+    // This prevents full-width headers from merging with column blocks
+    if (hasSimilarEdges(block1, block2, tolerance)) {
+        return true;
+    }
+
+    // Third check: is one block contained within the other horizontally?
+    // Allow merging if smaller block is fully within larger block's x-range
+    const block1ContainsBlock2 = 
+        block1.x <= block2.x && (block1.x + block1.w) >= (block2.x + block2.w);
+    const block2ContainsBlock1 = 
+        block2.x <= block1.x && (block2.x + block2.w) >= (block1.x + block1.w);
+
+    // Only merge if widths are similar (within 20% of each other)
+    const widthRatio = Math.min(block1.w, block2.w) / Math.max(block1.w, block2.w);
+    if ((block1ContainsBlock2 || block2ContainsBlock1) && widthRatio > 0.8) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
  * Phase 2: Merge adjacent blocks into columns.
+ * Uses stricter criteria to prevent full-width blocks from merging with columns.
  */
 function mergeBlocks(
     blocks: Rect[],
@@ -316,12 +683,10 @@ function mergeBlocks(
         for (let j = 0; j < mergedBlocks.length; j++) {
             const existingBlock = mergedBlocks[j];
 
-            // Check if blocks have x-overlap
-            const xOverlap = !(
-                block.x + block.w < existingBlock.x ||
-                existingBlock.x + existingBlock.w < block.x
-            );
-            if (!xOverlap) continue;
+            // Check if blocks can be merged (similar edges or contained)
+            if (!canMergeBlocks(block, existingBlock, opts.edgeTolerance)) {
+                continue;
+            }
 
             // Try to union the blocks
             const unionBlock = unionRect(existingBlock, block);
@@ -378,7 +743,8 @@ function mergeBlocks(
 }
 
 /**
- * Phase 3: Join rectangles and sort for reading order.
+ * Phase 3: Join rectangles and normalize edges.
+ * Does NOT do final reading order sorting - that's done in Phase 5.
  */
 function joinAndSort(
     blocks: Rect[],
@@ -405,31 +771,94 @@ function joinAndSort(
         blocks[i].w = maxX - minX;
     }
 
-    // Join vertically adjacent rectangles
-    const joined: Rect[] = [{ ...blocks[0] }];
+    // Join vertically adjacent rectangles with similar edges
+    // This is more thorough - try to join with ANY existing block, not just previous
+    const joined: Rect[] = [];
 
-    for (let i = 1; i < blocks.length; i++) {
-        const block = blocks[i];
-        const prevBlock = joined[joined.length - 1];
+    for (const block of blocks) {
+        let mergedWithExisting = false;
 
-        // Check if vertically adjacent with similar edges
-        const sameLeftEdge = Math.abs(block.x - prevBlock.x) <= opts.edgeTolerance;
-        const sameRightEdge =
-            Math.abs(block.x + block.w - (prevBlock.x + prevBlock.w)) <= opts.edgeTolerance;
-        const verticalGap = block.y - (prevBlock.y + prevBlock.h);
+        for (let j = 0; j < joined.length; j++) {
+            const existingBlock = joined[j];
 
-        if (sameLeftEdge && sameRightEdge && verticalGap <= opts.maxVerticalGap) {
-            // Merge with previous block
-            joined[joined.length - 1] = unionRect(prevBlock, block);
-        } else {
+            // Check if blocks have similar left and right edges
+            const sameLeftEdge = Math.abs(block.x - existingBlock.x) <= opts.edgeTolerance;
+            const sameRightEdge =
+                Math.abs(block.x + block.w - (existingBlock.x + existingBlock.w)) <= opts.edgeTolerance;
+
+            if (!sameLeftEdge || !sameRightEdge) continue;
+
+            // Check vertical adjacency (block is below existing, with small gap)
+            const gapBelow = block.y - (existingBlock.y + existingBlock.h);
+            const gapAbove = existingBlock.y - (block.y + block.h);
+
+            if (gapBelow >= 0 && gapBelow <= opts.maxVerticalGap) {
+                // Block is below existing, merge
+                joined[j] = unionRect(existingBlock, block);
+                mergedWithExisting = true;
+                break;
+            } else if (gapAbove >= 0 && gapAbove <= opts.maxVerticalGap) {
+                // Block is above existing, merge
+                joined[j] = unionRect(existingBlock, block);
+                mergedWithExisting = true;
+                break;
+            }
+        }
+
+        if (!mergedWithExisting) {
             joined.push({ ...block });
         }
     }
 
-    // Sort for proper reading order (critical for multi-column)
-    const sortedBlocks = joined.map(block => {
+    // Second pass: try to merge any joined blocks that can now be combined
+    // (after first pass, some blocks may have grown and can now be merged)
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (let i = 0; i < joined.length; i++) {
+            for (let j = i + 1; j < joined.length; j++) {
+                const block1 = joined[i];
+                const block2 = joined[j];
+
+                // Check if blocks have similar edges
+                const sameLeftEdge = Math.abs(block1.x - block2.x) <= opts.edgeTolerance;
+                const sameRightEdge =
+                    Math.abs(block1.x + block1.w - (block2.x + block2.w)) <= opts.edgeTolerance;
+
+                if (!sameLeftEdge || !sameRightEdge) continue;
+
+                // Check if they're vertically adjacent now
+                const gapBelow = block2.y - (block1.y + block1.h);
+                const gapAbove = block1.y - (block2.y + block2.h);
+
+                if ((gapBelow >= 0 && gapBelow <= opts.maxVerticalGap) ||
+                    (gapAbove >= 0 && gapAbove <= opts.maxVerticalGap)) {
+                    // Merge blocks
+                    joined[i] = unionRect(block1, block2);
+                    joined.splice(j, 1);
+                    changed = true;
+                    break;
+                }
+            }
+            if (changed) break;
+        }
+    }
+
+    return joined;
+}
+
+/**
+ * Phase 5: Sort blocks for proper reading order (critical for multi-column).
+ */
+function sortForReadingOrder(
+    blocks: Rect[],
+    _opts: Required<ColumnDetectionOptions>
+): Rect[] {
+    if (blocks.length === 0) return [];
+
+    const sortedBlocks = blocks.map(block => {
         // Find blocks to the left that vertically overlap
-        const leftBlocks = joined.filter(other => {
+        const leftBlocks = blocks.filter(other => {
             // Must be to the left
             if (other.x + other.w >= block.x) return false;
 
