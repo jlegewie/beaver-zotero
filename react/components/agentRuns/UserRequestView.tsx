@@ -110,6 +110,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             }
 
             setIsEditing(false);
+            setEditedContent(userPrompt.content);
         };
 
         // Use capture phase to catch events before they bubble
