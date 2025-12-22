@@ -205,15 +205,13 @@ export class PageExtractor {
             }
         }
 
-        // Handle any unassigned blocks (shouldn't happen normally)
-        for (let idx = 0; idx < allBlocks.length; idx++) {
-            if (!assignedBlocks.has(idx)) {
-                const block = allBlocks[idx];
-                const processedBlock = this.processBlock(block);
-                if (processedBlock.text.trim()) {
-                    orderedBlocks.push(processedBlock);
-                }
-            }
+        // Log unassigned blocks for debugging (these are typically in header/footer areas
+        // outside the column detection region and should be excluded)
+        const unassignedCount = allBlocks.length - assignedBlocks.size;
+        if (unassignedCount > 0) {
+            console.debug(
+                `[PageExtractor] Page ${rawPage.pageIndex}: ${unassignedCount} block(s) not in any column (excluded)`
+            );
         }
 
         // Build content from ordered blocks
