@@ -278,6 +278,18 @@ export interface ProcessedBlock {
     role?: "heading" | "body" | "caption" | "footnote";
 }
 
+/** Column bounding box (for output) */
+export interface ColumnBBox {
+    /** Left edge */
+    l: number;
+    /** Top edge */
+    t: number;
+    /** Right edge */
+    r: number;
+    /** Bottom edge */
+    b: number;
+}
+
 /** A fully processed page */
 export interface ProcessedPage {
     /** 0-based page index */
@@ -289,8 +301,10 @@ export interface ProcessedPage {
     height: number;
     /** Processed text blocks */
     blocks: ProcessedBlock[];
-    /** Plain text content */
+    /** Plain text content (in reading order) */
     content: string;
+    /** Detected columns (in reading order) */
+    columns?: ColumnBBox[];
 }
 
 // ============================================================================

@@ -3,12 +3,11 @@
  *
  * Processes raw page data into clean, structured text.
  * Handles:
+ * - Column-aware text extraction (reading order)
  * - Line joining and hyphenation
  * - Block classification
  * - Margin-based filtering
  * - Paragraph reconstruction
- *
- * TODO: Column detection (future implementation)
  */
 
 import type {
@@ -22,10 +21,77 @@ import type {
     StyleProfile,
     TextStyle,
     MarginSettings,
+    ColumnBBox,
 } from "./types";
 import { styleToKey } from "./types";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 import { MarginFilter } from "./MarginFilter";
+import type { Rect, ColumnDetectionResult } from "./ColumnDetector";
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Calculate the overlap ratio between a block and a column.
+ * Returns the fraction of the block's area that falls within the column.
+ */
+function calculateOverlapRatio(blockBBox: RawBBox, column: Rect): number {
+    // Calculate intersection
+    const xOverlapStart = Math.max(blockBBox.x, column.x);
+    const xOverlapEnd = Math.min(blockBBox.x + blockBBox.w, column.x + column.w);
+    const yOverlapStart = Math.max(blockBBox.y, column.y);
+    const yOverlapEnd = Math.min(blockBBox.y + blockBBox.h, column.y + column.h);
+
+    // No overlap if any dimension is negative
+    if (xOverlapEnd <= xOverlapStart || yOverlapEnd <= yOverlapStart) {
+        return 0;
+    }
+
+    const overlapArea = (xOverlapEnd - xOverlapStart) * (yOverlapEnd - yOverlapStart);
+    const blockArea = blockBBox.w * blockBBox.h;
+
+    return blockArea > 0 ? overlapArea / blockArea : 0;
+}
+
+/**
+ * Check if a block belongs to a column.
+ * Uses overlap ratio - block must have at least minOverlap of its area in the column.
+ * Default 0.5 (50%) is a good balance between precision and tolerance.
+ */
+function blockBelongsToColumn(
+    blockBBox: RawBBox,
+    column: Rect,
+    minOverlap: number = 0.5
+): boolean {
+    return calculateOverlapRatio(blockBBox, column) >= minOverlap;
+}
+
+/**
+ * Convert Rect to ColumnBBox format.
+ */
+function rectToColumnBBox(rect: Rect): ColumnBBox {
+    return {
+        l: rect.x,
+        t: rect.y,
+        r: rect.x + rect.w,
+        b: rect.y + rect.h,
+    };
+}
+
+/**
+ * Clean text by normalizing whitespace and removing control characters.
+ */
+function cleanText(text: string): string {
+    return text
+        .replace(/\s+/g, " ")
+        .replace(/[\u0000-\u001F]/g, "")
+        .trim();
+}
+
+// ============================================================================
+// Types and Classes
+// ============================================================================
 
 /** Options for page extraction */
 export interface PageExtractorOptions {
@@ -68,7 +134,8 @@ export class PageExtractor {
     }
 
     /**
-     * Process a raw page into structured output.
+     * Process a raw page into structured output (without column detection).
+     * Use extractPageWithColumns for column-aware extraction.
      */
     extractPage(rawPage: RawPageData): ProcessedPage {
         // Apply margin filtering if configured
@@ -86,6 +153,85 @@ export class PageExtractor {
             height: rawPage.height,
             blocks,
             content,
+        };
+    }
+
+    /**
+     * Process a raw page with column detection for correct reading order.
+     *
+     * @param rawPage - The raw page data (already filtered if needed)
+     * @param columnResult - Column detection result with columns in reading order
+     * @param includeColumns - Whether to include column bboxes in output
+     */
+    extractPageWithColumns(
+        rawPage: RawPageData,
+        columnResult: ColumnDetectionResult,
+        includeColumns: boolean = true
+    ): ProcessedPage {
+        const columns = columnResult.columns;
+        
+        // If no columns detected, fall back to regular extraction
+        if (columns.length === 0) {
+            return this.extractPage(rawPage);
+        }
+
+        // Get all text blocks from the page
+        const allBlocks = rawPage.blocks.filter(b => b.type === "text" && b.lines);
+
+        // Track which blocks have been assigned to a column
+        const assignedBlocks = new Set<number>();
+        const orderedBlocks: ProcessedBlock[] = [];
+
+        // Process each column in reading order
+        for (const column of columns) {
+            // Find blocks that belong to this column (by center point)
+            const blocksInColumn = allBlocks
+                .map((block, idx) => ({ block, idx }))
+                .filter(({ block, idx }) => {
+                    if (assignedBlocks.has(idx)) return false;
+                    return blockBelongsToColumn(block.bbox, column);
+                });
+
+            // Sort blocks within column by y-position (top to bottom)
+            blocksInColumn.sort((a, b) => a.block.bbox.y - b.block.bbox.y);
+
+            // Process each block
+            for (const { block, idx } of blocksInColumn) {
+                assignedBlocks.add(idx);
+                const processedBlock = this.processBlock(block);
+                if (processedBlock.text.trim()) {
+                    orderedBlocks.push(processedBlock);
+                }
+            }
+        }
+
+        // Handle any unassigned blocks (shouldn't happen normally)
+        for (let idx = 0; idx < allBlocks.length; idx++) {
+            if (!assignedBlocks.has(idx)) {
+                const block = allBlocks[idx];
+                const processedBlock = this.processBlock(block);
+                if (processedBlock.text.trim()) {
+                    orderedBlocks.push(processedBlock);
+                }
+            }
+        }
+
+        // Build content from ordered blocks
+        const content = this.buildContent(orderedBlocks);
+
+        // Convert columns to output format
+        const columnBBoxes: ColumnBBox[] | undefined = includeColumns
+            ? columns.map(rectToColumnBBox)
+            : undefined;
+
+        return {
+            index: rawPage.pageIndex,
+            label: rawPage.label,
+            width: rawPage.width,
+            height: rawPage.height,
+            blocks: orderedBlocks,
+            content,
+            columns: columnBBoxes,
         };
     }
 

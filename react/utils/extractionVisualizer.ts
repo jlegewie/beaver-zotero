@@ -281,3 +281,128 @@ export async function clearVisualizationAnnotations(): Promise<void> {
     }
 }
 
+/**
+ * Result from extracting a single page's content
+ */
+export interface PageExtractionResult {
+    success: boolean;
+    message: string;
+    pageIndex?: number;
+    pageNumber?: number;
+    content?: string;
+    columnCount?: number;
+    columns?: Array<{ l: number; t: number; r: number; b: number }>;
+}
+
+/**
+ * Extract content from the current page in reading order using column detection
+ * 
+ * @returns Object with extracted content and metadata
+ */
+export async function extractCurrentPageContent(): Promise<PageExtractionResult> {
+    // Import PageExtractor here to avoid circular dependencies
+    const { PageExtractor } = await import("../../src/services/pdf/PageExtractor");
+    const { MarginFilter, DEFAULT_MARGINS, DEFAULT_MARGIN_ZONE } = await import("../../src/services/pdf");
+
+    try {
+        // 1. Get the current reader
+        const reader = await getCurrentReaderAndWaitForView(undefined, true);
+        if (!reader || !reader._internalReader) {
+            return {
+                success: false,
+                message: "No active PDF reader found",
+            };
+        }
+        
+        if (reader.type !== "pdf") {
+            return {
+                success: false,
+                message: "Current reader is not a PDF",
+            };
+        }
+        
+        // Get current page (0-based)
+        const pdfViewer = reader._internalReader._primaryView?._iframeWindow?.PDFViewerApplication?.pdfViewer;
+        if (!pdfViewer) {
+            return {
+                success: false,
+                message: "Could not access PDF viewer",
+            };
+        }
+        const currentPageIndex = pdfViewer.currentPageNumber - 1;
+        
+        // 2. Get the PDF item and file path
+        const item = Zotero.Items.get(reader.itemID);
+        if (!item) {
+            return {
+                success: false,
+                message: "Could not find Zotero item",
+            };
+        }
+        
+        const filePath = await item.getFilePathAsync();
+        if (!filePath) {
+            return {
+                success: false,
+                message: "Could not find PDF file",
+            };
+        }
+        
+        // 3. Load PDF and extract raw page data
+        logger(`[Extractor] Loading PDF and extracting page ${currentPageIndex + 1}...`);
+        const pdfData = await IOUtils.read(filePath);
+        
+        const mupdf = new MuPDFService();
+        await mupdf.open(pdfData);
+        
+        let rawPage: RawPageData;
+        try {
+            rawPage = mupdf.extractRawPage(currentPageIndex);
+        } finally {
+            mupdf.close();
+        }
+        
+        // 4. Apply margin filtering (both simple and smart removal for this page)
+        // Note: For single page, we can't do smart removal (needs document-level analysis)
+        // So we just apply simple margin filtering
+        const filteredPage = MarginFilter.filterPageByMargins(rawPage, DEFAULT_MARGINS);
+        
+        // 5. Run column detection
+        logger(`[Extractor] Detecting columns on page ${currentPageIndex + 1}...`);
+        const columnResult = detectColumns(filteredPage);
+        
+        logger(`[Extractor] Found ${columnResult.columns.length} column(s)`);
+        for (let i = 0; i < columnResult.columns.length; i++) {
+            const col = columnResult.columns[i];
+            logger(`  Column ${i + 1}: x=${col.x.toFixed(0)}, y=${col.y.toFixed(0)}, w=${col.w.toFixed(0)}, h=${col.h.toFixed(0)}`);
+        }
+        
+        // 6. Extract content using column-aware extraction
+        const pageExtractor = new PageExtractor({});
+        const processedPage = pageExtractor.extractPageWithColumns(
+            filteredPage,
+            columnResult,
+            true // include column bboxes
+        );
+        
+        logger(`[Extractor] Page ${currentPageIndex + 1} content extracted (${processedPage.content.length} chars)`);
+        
+        return {
+            success: true,
+            message: `Extracted ${processedPage.content.length} characters from page ${currentPageIndex + 1}`,
+            pageIndex: currentPageIndex,
+            pageNumber: currentPageIndex + 1,
+            content: processedPage.content,
+            columnCount: columnResult.columns.length,
+            columns: processedPage.columns,
+        };
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger(`[Extractor] Error: ${errorMessage}`);
+        return {
+            success: false,
+            message: `Extraction failed: ${errorMessage}`,
+        };
+    }
+}
+

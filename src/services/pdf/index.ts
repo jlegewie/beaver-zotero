@@ -129,6 +129,8 @@ export class PDFExtractor {
 
             // 6. PAGE PROCESSING: Process each page with smart filtering and column detection
             console.log("[PDFExtractor] Processing pages with smart margin removal and column detection...");
+            const pageExtractor = new PageExtractor({ styleProfile });
+
             const pages: ProcessedPage[] = rawData.pages.map(rawPage => {
                 // Apply smart margin filtering
                 const filteredPage = MarginFilter.filterPageWithSmartRemoval(
@@ -142,10 +144,12 @@ export class PDFExtractor {
                 const columnResult = detectColumns(filteredPage);
                 logColumnDetection(rawPage.pageIndex, columnResult);
 
-                // Use PageExtractor for additional processing
-                // TODO: Use column detection results to order text extraction
-                const pageExtractor = new PageExtractor({ styleProfile });
-                return pageExtractor.extractPage(filteredPage);
+                // Extract page content using column detection for correct reading order
+                return pageExtractor.extractPageWithColumns(
+                    filteredPage,
+                    columnResult,
+                    true // include column bboxes in output
+                );
             });
 
             // 7. Combine results

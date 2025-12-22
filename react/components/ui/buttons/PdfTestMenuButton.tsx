@@ -3,7 +3,11 @@ import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import PdfIcon from '../../icons/PdfIcon';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../../../../src/services/pdf';
-import { visualizeCurrentPageColumns, clearVisualizationAnnotations } from '../../../utils/extractionVisualizer';
+import { 
+    visualizeCurrentPageColumns, 
+    clearVisualizationAnnotations,
+    extractCurrentPageContent
+} from '../../../utils/extractionVisualizer';
 
 interface PdfTestMenuButtonProps {
     className?: string;
@@ -101,11 +105,34 @@ const PdfTestMenuButton: React.FC<PdfTestMenuButtonProps> = ({
         console.log("[PDF Visualizer] Annotations cleared");
     };
 
+    // Extract current page content
+    const handleExtractCurrentPage = async () => {
+        console.log("[PDF Extractor] Extracting current page content...");
+        const result = await extractCurrentPageContent();
+        
+        if (result.success) {
+            console.log(`[PDF Extractor] ${result.message}`);
+            console.log(`[PDF Extractor] Page ${result.pageNumber}: ${result.columnCount} column(s)`);
+            console.log("[PDF Extractor] Columns:", result.columns);
+            console.log("[PDF Extractor] === CONTENT START ===");
+            console.log(result.content);
+            console.log("[PDF Extractor] === CONTENT END ===");
+        } else {
+            console.warn(`[PDF Extractor] ${result.message}`);
+        }
+    };
+
     // Create menu items for PDF testing functions
     const menuItems: MenuItem[] = [
         {
             label: "Test PDF Extraction",
             onClick: handleTestPdfExtraction,
+            icon: PdfIcon,
+            disabled: false,
+        },
+        {
+            label: "Extract Current Page",
+            onClick: handleExtractCurrentPage,
             icon: PdfIcon,
             disabled: false,
         },
