@@ -541,7 +541,8 @@ var MuPDFLoader = {
             const isScanLikePage = (pageIdx) => {
                 const page = doc.loadPage(pageIdx);
                 try {
-                    const stext = page.toStructuredText("preserve-whitespace");
+                    // Include images so we can detect scanned pages
+                    const stext = page.toStructuredText("preserve-whitespace,preserve-images");
                     try {
                         const json = JSON.parse(stext.asJSON());
                         const blocks = json.blocks || [];

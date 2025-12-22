@@ -49,7 +49,8 @@ export class DocumentAnalyzer {
         const startPage = pageCount > 3 ? 1 : 0;
 
         const isScanLikePage = (pageIdx: number): boolean => {
-            const rawPage = this.mupdf.extractRawPage(pageIdx);
+            // Include images in extraction so we can detect scanned pages
+            const rawPage = this.mupdf.extractRawPage(pageIdx, { includeImages: true });
             let textLength = 0;
             let hasImages = false;
 

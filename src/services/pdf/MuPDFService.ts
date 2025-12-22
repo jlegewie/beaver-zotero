@@ -25,6 +25,7 @@ import { ExtractionError, ExtractionErrorCode } from "./types";
  * may not have direct JS equivalents - behavior varies by MuPDF version.
  */
 const STRUCTURED_TEXT_OPTIONS = "preserve-whitespace";
+const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES = "preserve-whitespace,preserve-images";
 
 // ============================================================================
 // MuPDF API Types
@@ -226,8 +227,11 @@ export class MuPDFService {
     /**
      * Extract raw structured text data from a single page.
      * Returns complete page data including dimensions.
+     * @param pageIndex - Page index (0-based)
+     * @param options - Extraction options
+     * @param options.includeImages - Include image blocks (for text layer detection)
      */
-    extractRawPage(pageIndex: number): RawPageData {
+    extractRawPage(pageIndex: number, options?: { includeImages?: boolean }): RawPageData {
         this.ensureOpen();
         const page = this.doc!.loadPage(pageIndex);
 
@@ -246,7 +250,10 @@ export class MuPDFService {
             }
 
             // Extract structured text
-            const stext = page.toStructuredText(STRUCTURED_TEXT_OPTIONS);
+            const stextOptions = options?.includeImages
+                ? STRUCTURED_TEXT_OPTIONS_WITH_IMAGES
+                : STRUCTURED_TEXT_OPTIONS;
+            const stext = page.toStructuredText(stextOptions);
             try {
                 const json = JSON.parse(stext.asJSON());
                 return {
