@@ -43,7 +43,6 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const [isEditing, setIsEditing] = useState(false);
     const [isHovered, setIsHovered] = useState(false);
     const [editedContent, setEditedContent] = useState(userPrompt.content);
-    const [editedItems, setEditedItems] = useState<Zotero.Item[]>([]);
     const [needsFade, setNeedsFade] = useState(false);
 
     // Atoms
@@ -70,13 +69,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             .filter((a): a is { attachment: typeof userPrompt.attachments[0]; item: Zotero.Item } => a !== null);
     }, [userPrompt.attachments]);
 
-    // Initialize edited items from attachments when opening edit mode
+    // Initialize edited content when opening edit mode
     useEffect(() => {
         if (isEditing) {
             setEditedContent(userPrompt.content);
-            setEditedItems(attachmentItems.map(a => a.item));
         }
-    }, [isEditing, userPrompt.content, attachmentItems]);
+    }, [isEditing, userPrompt.content]);
 
     // Check if content needs fade effect
     useEffect(() => {
@@ -157,10 +155,6 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         }
     }, [isEditing]);
 
-    const handleRemoveItem = useCallback((item: Zotero.Item) => {
-        setEditedItems(prev => prev.filter(i => i.key !== item.key));
-    }, []);
-
     const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent) => {
         e.preventDefault();
         if (isPending || editedContent.length === 0) return;
@@ -169,17 +163,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         const editedPrompt: BeaverAgentPrompt = {
             ...userPrompt,
             content: editedContent,
-            // Convert edited items back to attachments format
-            attachments: editedItems.map(item => ({
-                library_id: item.libraryID,
-                zotero_key: item.key,
-                type: 'item' as const,
-            })),
         };
 
         setIsEditing(false);
         await regenerateWithEditedPrompt({ runId, editedPrompt });
-    }, [isPending, editedContent, editedItems, userPrompt, runId, regenerateWithEditedPrompt]);
+    }, [isPending, editedContent, userPrompt, runId, regenerateWithEditedPrompt]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Submit on Enter (without Shift)
@@ -277,8 +265,8 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                     className="user-request-edit-overlay user-message-display"
                     onClick={(e) => e.stopPropagation()}
                 >
-                    {/* Attachments and filters display (editable attachments, read-only filters) */}
-                    {(editedItems.length > 0 || hasFiltersOrAttachments) && (
+                    {/* Attachments and filters display (read-only) */}
+                    {hasFiltersOrAttachments && (
                         <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
                             {/* Library filters (read-only in edit mode) */}
                             {userPrompt.filters?.libraries && (
@@ -305,12 +293,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                 <TagButton key={tag.id} tag={tag} canEdit={false} />
                             ))}
 
-                            {/* Editable attachments */}
-                            {editedItems.map((item) => (
+                            {/* Attachments (read-only in edit mode) */}
+                            {attachmentItems.map(({ item }) => (
                                 <MessageItemButton
                                     key={item.key}
                                     item={item}
-                                    onRemove={handleRemoveItem}
+                                    canEdit={false}
                                 />
                             ))}
                         </div>
