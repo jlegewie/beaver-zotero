@@ -12,6 +12,7 @@ import Button from '../ui/Button';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../atoms/models';
+import { isStreamingAtom } from '../../agents/atoms';
 
 interface UserRequestViewProps {
     userPrompt: BeaverAgentPrompt;
@@ -52,6 +53,10 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const regenerateWithEditedPrompt = useSetAtom(regenerateWithEditedPromptAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
+    const isStreaming = useAtomValue(isStreamingAtom);
+    
+    // Editing is only allowed when canEdit is true AND no run is streaming
+    const canEditNow = canEdit && !isStreaming;
 
     const {
         isMenuOpen: isSelectionMenuOpen, 
@@ -179,10 +184,10 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         (userPrompt.filters?.tags && userPrompt.filters.tags.length > 0);
 
     const handleClick = useCallback(() => {
-        if (!isEditing && canEdit) {
+        if (!isEditing && canEditNow) {
             setIsEditing(true);
         }
-    }, [isEditing, canEdit]);
+    }, [isEditing, canEditNow]);
 
     const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent) => {
         e.preventDefault();
@@ -216,11 +221,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             {/* Main display (always in DOM for layout) */}
             <div 
                 id={`user-request-${runId}`} 
-                className={`user-message-display user-request-view ${isHovered && !isEditing && canEdit ? 'user-request-view-hover' : ''} ${isEditing ? 'user-request-view-editing' : ''}`}
-                onMouseEnter={() => canEdit && setIsHovered(true)}
+                className={`user-message-display user-request-view ${isHovered && !isEditing && canEditNow ? 'user-request-view-hover' : ''} ${isEditing ? 'user-request-view-editing' : ''}`}
+                onMouseEnter={() => canEditNow && setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
                 onClick={handleClick}
-                style={{ cursor: canEdit ? 'pointer' : 'default' }}
+                style={{ cursor: canEditNow ? 'pointer' : 'default' }}
             >
                 {/* Message attachments and filters */}
                 {hasFiltersOrAttachments && (
@@ -277,7 +282,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                 </div>
 
                 {/* Edit icon (visible on hover) */}
-                {isHovered && !isEditing && canEdit && (
+                {isHovered && !isEditing && canEditNow && (
                     <div className="user-request-edit-icon">
                         <LinkBackwardIcon width={14} height={14} />
                     </div>
