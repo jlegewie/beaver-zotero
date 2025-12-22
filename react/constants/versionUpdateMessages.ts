@@ -135,8 +135,8 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 description: "In addition to the Zotero sidebar, you can now open Beaver in its own separate window.",
             },
             {
-                title: "Improved item search",
-                description: "More accurate item search results and improved performance.",
+                title: "Better Message Controls",
+                description: "Edit and resubmit previous messages, resume interrupted conversations, and other handy improvements."
             }
         ]
     },
