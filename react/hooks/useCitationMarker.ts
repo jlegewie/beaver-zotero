@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { citationKeyToMarkerAtom, getOrAssignCitationMarkerAtom } from '../atoms/citations';
 import { useIsomorphicLayoutEffect } from './useIsomorphicLayoutEffect';
@@ -24,19 +25,24 @@ import { useIsomorphicLayoutEffect } from './useIsomorphicLayoutEffect';
  * - Markers reset when thread changes (new thread, load thread, clear thread)
  * 
  * @param citationKey Unique key for the citation (e.g., "zotero:1-ABC123" or "external:xyz")
+ * @param isStaticRender Whether the component is being rendered to static markup (e.g. for note export)
  * @returns Numeric marker string (e.g., "1", "2", "3")
  */
-export function useCitationMarker(citationKey: string): string {
+export function useCitationMarker(citationKey: string, isStaticRender: boolean = false): string {
     const markerMap = useAtomValue(citationKeyToMarkerAtom);
     const assignMarker = useSetAtom(getOrAssignCitationMarkerAtom);
     
     const existingMarker = markerMap[citationKey];
     
+    // Choose effect hook based on render mode
+    // In static render (export), useLayoutEffect warns, so we use useEffect (which doesn't run but avoids warning)
+    const useIsomorphicEffect = isStaticRender ? useEffect : useIsomorphicLayoutEffect;
+    
     // Use layout effect to assign marker synchronously after render (before paint)
     // This ensures no visual flicker - the assignment happens before the browser paints
-    // Uses isomorphic version to avoid SSR warnings during renderToStaticMarkup
-    // Note: Effects don't run during SSR; the fallback prediction below handles this
-    useIsomorphicLayoutEffect(() => {
+    // Uses isomorphic version to avoid SSR warnings during renderToStaticMarkup (when not flagged as static)
+    // Note: Effects don't run during SSR/static render; the fallback prediction below handles this
+    useIsomorphicEffect(() => {
         if (!existingMarker && citationKey && citationKey !== 'unknown') {
             assignMarker(citationKey);
         }

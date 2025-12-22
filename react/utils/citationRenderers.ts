@@ -4,9 +4,10 @@ import { Provider, createStore } from 'jotai';
 import { store } from '../store';
 import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
-import { citationDataMapAtom } from '../atoms/citations';
+import { citationDataMapAtom, citationKeyToMarkerAtom } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
-import { CitationData } from '../types/citations';
+import { CitationData, parseCitationAttributes, computeCitationKeyFromAttrs } from '../types/citations';
+import { CITATION_TAG_PATTERN } from '../utils/citationPreprocessing';
 import { ZoteroItemReference } from '../types/zotero';
 import { logger } from '../../src/utils/logger';
 import { ExternalReference } from '../types/externalReferences';
@@ -213,6 +214,27 @@ export function renderToHTML(
 ): string {
     let renderStore = store;
 
+    // Pre-calculate citation markers for static render to avoid React state updates during render.
+    // This must happen before the render since effects don't run during renderToStaticMarkup.
+    // Note: This only depends on content, not contextData, so we always calculate markers.
+    const markerMap: Record<string, string> = {};
+    let markerCount = 0;
+    
+    // Use the same regex as preprocessCitations to find citations in order
+    const pattern = new RegExp(CITATION_TAG_PATTERN);
+    
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+        const attributesStr = match[1];
+        const attrs = parseCitationAttributes(attributesStr);
+        const citationKey = computeCitationKeyFromAttrs(attrs);
+        
+        if (citationKey && !markerMap[citationKey]) {
+            markerCount++;
+            markerMap[citationKey] = markerCount.toString();
+        }
+    }
+
     // If context data is provided, we create a temporary store to ensure the data 
     // is available during the synchronous static render.
     if (contextData) {
@@ -229,6 +251,11 @@ export function renderToHTML(
         if (contextData.externalReferencesMap) {
             renderStore.set(externalReferenceMappingAtom, contextData.externalReferencesMap);
         }
+    }
+
+    // Set pre-calculated markers in the store (either ambient or isolated)
+    if (Object.keys(markerMap).length > 0) {
+        renderStore.set(citationKeyToMarkerAtom, markerMap);
     }
 
     // Create a React element using the existing MarkdownRenderer component
