@@ -104,10 +104,10 @@ export const allUserAttachmentsAtom = atom((get) => {
     return attachmentsMap;
 });
 
-/** Set of zotero_keys for all user attachments in the thread */
+/** Set of {library_id}-{zotero_key} for all user attachments in the thread */
 export const allUserAttachmentKeysAtom = atom((get) => {
     const attachmentsMap = get(allUserAttachmentsAtom);
-    return new Set(Array.from(attachmentsMap.values()).map(a => a.zotero_key));
+    return new Set(Array.from(attachmentsMap.values()).map(a => `${a.library_id}-${a.zotero_key}`));
 });
 
 
