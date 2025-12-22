@@ -18,6 +18,8 @@ interface UserRequestViewProps {
     runId: string;
     /** Max height in pixels before content fades out (default: 400) */
     maxContentHeight?: number;
+    /** Whether the user can edit the prompt (should match AgentRunFooter visibility) */
+    canEdit?: boolean;
 }
 
 /**
@@ -26,13 +28,14 @@ interface UserRequestViewProps {
  * 
  * Features:
  * - Limited height with fade-out effect when content exceeds maxContentHeight
- * - Hover effect showing the message is editable
- * - Click to open edit overlay for modifying the message
+ * - Hover effect showing the message is editable (when canEdit is true)
+ * - Click to open edit overlay for modifying the message (when canEdit is true)
  */
 export const UserRequestView: React.FC<UserRequestViewProps> = ({ 
     userPrompt, 
     runId,
-    maxContentHeight = 400 
+    maxContentHeight = 400,
+    canEdit = true
 }) => {
     const contentRef = useRef<HTMLDivElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -150,10 +153,10 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         (userPrompt.filters?.tags && userPrompt.filters.tags.length > 0);
 
     const handleClick = useCallback(() => {
-        if (!isEditing) {
+        if (!isEditing && canEdit) {
             setIsEditing(true);
         }
-    }, [isEditing]);
+    }, [isEditing, canEdit]);
 
     const handleSubmit = useCallback(async (e: React.FormEvent | React.MouseEvent) => {
         e.preventDefault();
@@ -187,10 +190,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             {/* Main display (always in DOM for layout) */}
             <div 
                 id={`user-request-${runId}`} 
-                className={`user-message-display user-request-view ${isHovered && !isEditing ? 'user-request-view-hover' : ''} ${isEditing ? 'user-request-view-editing' : ''}`}
-                onMouseEnter={() => setIsHovered(true)}
+                className={`user-message-display user-request-view ${isHovered && !isEditing && canEdit ? 'user-request-view-hover' : ''} ${isEditing ? 'user-request-view-editing' : ''}`}
+                onMouseEnter={() => canEdit && setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
                 onClick={handleClick}
+                style={{ cursor: canEdit ? 'pointer' : 'default' }}
             >
                 {/* Message attachments and filters */}
                 {hasFiltersOrAttachments && (
@@ -242,7 +246,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                 </div>
 
                 {/* Edit icon (visible on hover) */}
-                {isHovered && !isEditing && (
+                {isHovered && !isEditing && canEdit && (
                     <div className="user-request-edit-icon">
                         <LinkBackwardIcon width={14} height={14} />
                     </div>

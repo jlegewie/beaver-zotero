@@ -59,10 +59,13 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
         (wasResumed &&  run.model_messages.length > 0 && run.model_messages[run.model_messages.length - 1].parts.some(part => part.part_kind === 'text' && part.content.trim() !== '')) ||
         (run.status === 'error' && !isLastRun);
 
+    // Allow editing only when the footer (and thus regenerate button) would be shown
+    const canEdit = showAgentRunFooter && !wasResumed && !isStreaming;
+
     return (
         <div id={`run-${run.id}`} className="display-flex flex-col gap-4">
             {/* User's message */}
-            {showUserMessage && <UserRequestView userPrompt={run.user_prompt} runId={run.id} />}
+            {showUserMessage && <UserRequestView userPrompt={run.user_prompt} runId={run.id} canEdit={canEdit} />}
 
             {/* Warning display (dismissable, non-persistent) */}
             {runWarnings.length > 0 && (
