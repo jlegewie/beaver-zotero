@@ -431,8 +431,10 @@ export interface OCRDetectionOptions {
     maxNewlineRatio?: number;
     /** Min ratio of alphanumeric chars (default: 0.3) */
     minAlphanumericRatio?: number;
-    /** Max invalid/replacement characters (default: 6 or 3% of text) */
-    maxInvalidChars?: number;
+    /** Max ratio of invalid/replacement characters before flagging (default: 0.3 = 30%) */
+    maxInvalidCharRatio?: number;
+    /** Minimum valid characters to accept a page despite invalid chars (default: 1000) */
+    minValidCharsToAccept?: number;
 
     // Image coverage threshold
     /** Image area ratio to page that suggests a scan (default: 0.65) */
@@ -502,7 +504,8 @@ export const DEFAULT_OCR_DETECTION_OPTIONS: Required<OCRDetectionOptions> = {
     maxWhitespaceRatio: 0.7,
     maxNewlineRatio: 0.6,
     minAlphanumericRatio: 0.3,
-    maxInvalidChars: 6,
+    maxInvalidCharRatio: 0.3,      // 30% invalid chars threshold
+    minValidCharsToAccept: 1000,   // Accept page if it has >= 1000 valid chars despite issues
 
     imageCoverageThreshold: 0.65,
 

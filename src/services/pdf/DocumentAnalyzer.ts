@@ -86,6 +86,8 @@ function analyzeTextQuality(
     }
 
     // Check for replacement/invalid characters
+    // Only flag if: (1) invalid ratio is high AND (2) valid text is insufficient
+    // This allows pages with lots of valid text to pass even if they have some garbled sections
     const invalidChars = ["\uFFFD", "�", "\u0000"];
     let invalidCount = 0;
     for (const char of text) {
@@ -93,9 +95,17 @@ function analyzeTextQuality(
             invalidCount++;
         }
     }
-    const dynamicThreshold = Math.max(opts.maxInvalidChars, totalChars * 0.03);
-    if (invalidCount > dynamicThreshold) {
-        issues.push("invalid_characters");
+
+    if (invalidCount > 0 && contentChars > 0) {
+        const invalidRatio = invalidCount / contentChars;
+        const validChars = contentChars - invalidCount;
+
+        // Only flag if both conditions are met:
+        // 1. High ratio of invalid characters (above threshold, default 30%)
+        // 2. Not enough valid characters to be useful (below threshold, default 1000)
+        if (invalidRatio > opts.maxInvalidCharRatio && validChars < opts.minValidCharsToAccept) {
+            issues.push("invalid_characters");
+        }
     }
 
     return issues;
@@ -402,7 +412,7 @@ export class DocumentAnalyzer {
         if (issueRatio >= opts.expandThreshold && availablePages > initialSampleSize) {
             const expandedSampleSize = Math.min(availablePages, opts.expandedSampleSize);
 
-            for (let i = startPage + initialSampleSize; i < startPage + expandedSampleSize; i++) {
+                for (let i = startPage + initialSampleSize; i < startPage + expandedSampleSize; i++) {
                 const rawPage = this.mupdf.extractRawPage(i, { includeImages: true });
                 const analysis = analyzePage(rawPage, opts);
                 pageAnalyses.push(analysis);
@@ -505,10 +515,12 @@ export class DocumentAnalyzer {
                 maxWhitespaceRatio: options.maxWhitespaceRatio,
                 maxNewlineRatio: options.maxNewlineRatio,
                 minAlphanumericRatio: options.minAlphanumericRatio,
-                maxInvalidChars: options.maxInvalidChars,
+                maxInvalidCharRatio: options.maxInvalidCharRatio,
+                minValidCharsToAccept: options.minValidCharsToAccept,
                 imageCoverageThreshold: options.imageCoverageThreshold,
                 maxLineOverlapRatio: options.maxLineOverlapRatio,
                 boundaryMargin: options.boundaryMargin,
+                checkBoundingBoxes: options.checkBoundingBoxes,
             });
         }
 
