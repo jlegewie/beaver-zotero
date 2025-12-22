@@ -43,6 +43,7 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     // Reading tools
     read_pages: 'Reading',
     search_in_documents: 'Search in documents',
+    read_file: 'Retrieving data',
 
     // Annotations
     add_highlight_annotations: 'Highlight annotations',
@@ -53,6 +54,57 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     create_zotero_item: 'Add item',
     external_search: 'Web search',
 };
+
+/**
+ * Detect the type of file being read by the read_file tool.
+ * 
+ * Categorizes files according to:
+ * - Tool results: Files ending with .json.gz (compressed tool results from GCS)
+ * - Agent Skills: Files in /skills/{skill-name}/ directory
+ * - Skill resources: Bundled resources in /skills/{skill-name}/{scripts|references|assets}/
+ * - Documentation: Files in /docs/ directory
+ * 
+ * Agent Skills specification: https://agentskills.io/specification
+ */
+function detectReadFileType(path: string): 'tool_result' | 'skill' | 'skill_resource' | 'documentation' | 'unknown' {
+    const trimmedPath = path.trim();
+    const pathLower = trimmedPath.toLowerCase();
+    
+    // Tool results: files ending with .json.gz
+    if (pathLower.endsWith('.json.gz')) {
+        return 'tool_result';
+    }
+    
+    // Agent Skills: files in /skills/ directory
+    if (pathLower.includes('/skills/')) {
+        // Agent Skills main file: SKILL.md (case-insensitive per spec)
+        const fileName = trimmedPath.split('/').pop()?.toUpperCase();
+        if (fileName === 'SKILL.MD') {
+            return 'skill';
+        }
+        
+        // Agent Skills bundled resources (per agentskills.io specification)
+        const parts = pathLower.split('/skills/');
+        if (parts.length > 1) {
+            const skillPath = parts[1];
+            const pathSegments = skillPath.split('/');
+            // Check for standard skill resource directories (scripts/, references/, assets/)
+            if (pathSegments.length > 1 && ['scripts', 'references', 'assets'].includes(pathSegments[1])) {
+                return 'skill_resource';
+            }
+        }
+        
+        // Other files in skills directory default to skill
+        return 'skill';
+    }
+    
+    // Documentation: files in /docs/ directory
+    if (pathLower.includes('/docs/')) {
+        return 'documentation';
+    }
+    
+    return 'unknown';
+}
 
 /**
  * Truncate a string to a maximum length, adding ellipsis if needed.
@@ -106,6 +158,9 @@ function formatYearFilter(yearFilter: unknown): string | null {
  * - "Fulltext search: social capital"
  * - "Metadata search: Smith (2020)"
  * - "Reading: Smith 2020, p. 5-10"
+ * - "Retrieving previous results" (for read_file with .json.gz files)
+ * - "Reading skill: pdf-processing" (for any Agent Skills file)
+ * - "Reading documentation" (for any file in /docs/)
  * 
  * If the tool has a progress message, it takes precedence over the default label.
  */
@@ -173,8 +228,29 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
         }
         
-        case 'read_tool_result':
-            return 'Reading previous context';
+        case 'read_file': {
+            const path = args.path as string | undefined;
+            if (path) {
+                const fileType = detectReadFileType(path);
+                switch (fileType) {
+                    case 'tool_result':
+                        return 'Retrieving previous results';
+                    case 'skill':
+                    case 'skill_resource': {
+                        // Extract skill name from path: /skills/{skill-name}/...
+                        const skillMatch = path.match(/\/skills\/([^/]+)/i);
+                        const skillName = skillMatch?.[1] || 'skill';
+                        return `Reading skill: ${truncate(skillName, 30)}`;
+                    }
+                    case 'documentation':
+                        return 'Reading documentation';
+                    case 'unknown':
+                    default:
+                        return `${baseLabel}: ${truncate(path, 40)}`;
+                }
+            }
+            return baseLabel;
+        }
 
         case 'read_pages': {
             const attachmentId = args.attachment_id as string | undefined;
