@@ -1091,6 +1091,131 @@ export const regenerateFromRunAtom = atom(
 );
 
 /**
+ * Regenerate from a run with an edited user prompt.
+ * Similar to regenerateFromRunAtom but accepts a modified user prompt.
+ */
+export const regenerateWithEditedPromptAtom = atom(
+    null,
+    async (get, set, params: { runId: string; editedPrompt: BeaverAgentPrompt }) => {
+        const { runId, editedPrompt } = params;
+        logger(`regenerateWithEditedPromptAtom: Regenerating run ${runId} with edited prompt`, 1);
+
+        try {
+            // Get current model
+            const model = get(selectedModelAtom);
+            if (!model) {
+                logger('regenerateWithEditedPromptAtom: No model selected', 1);
+                return;
+            }
+
+            // Get user ID
+            const userId = get(userIdAtom);
+            if (!userId) {
+                logger('regenerateWithEditedPromptAtom: No user ID found', 1);
+                return;
+            }
+
+            // Find the run - check both threadRuns and activeRun
+            const threadRuns = get(threadRunsAtom);
+            const activeRun = get(activeRunAtom);
+            
+            let targetRun: AgentRun | null = null;
+            let runIndex = threadRuns.findIndex(r => r.id === runId);
+            
+            if (runIndex >= 0) {
+                targetRun = threadRuns[runIndex];
+            } else if (activeRun?.id === runId) {
+                // The run is currently active - cancel it and resubmit
+                targetRun = activeRun;
+                runIndex = threadRuns.length;
+                await agentService.cancel();
+                set(activeRunAtom, null);
+                set(isWSChatPendingAtom, false);
+            }
+            
+            if (!targetRun) {
+                logger(`regenerateWithEditedPromptAtom: Run ${runId} not found`, 1);
+                return;
+            }
+
+            // Get thread ID from the target run
+            const threadId = get(currentThreadIdAtom) || targetRun.thread_id;
+
+            // Collect run IDs that will be removed (target run and all subsequent)
+            const runIdsToRemove = threadRuns.slice(runIndex).map(r => r.id);
+
+            // Find applied annotation actions for runs being removed
+            const allAgentActions = get(threadAgentActionsAtom);
+            const actionsToDelete = allAgentActions
+                .filter(a => runIdsToRemove.includes(a.run_id))
+                .filter(isAnnotationAgentAction)
+                .filter(hasAppliedZoteroItem);
+
+            // Prompt user to confirm deletion of applied actions
+            if (actionsToDelete.length > 0) {
+                const shouldDelete = confirmDeleteAppliedActions(actionsToDelete);
+                if (shouldDelete) {
+                    await deleteAppliedZoteroItems(actionsToDelete);
+                }
+            }
+
+            // Truncate runs - keep only runs before the target
+            const truncatedRuns = threadRuns.slice(0, runIndex);
+            set(threadRunsAtom, truncatedRuns);
+
+            // Clear agent actions for removed runs
+            set(threadAgentActionsAtom, (prev) => 
+                prev.filter(a => !runIdsToRemove.includes(a.run_id))
+            );
+
+            // Clear citations for removed runs
+            set(citationMetadataAtom, (prev) => 
+                prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
+            );
+            set(updateCitationDataAtom);
+
+            // Reset WS state and set pending
+            set(resetWSStateAtom);
+            set(isWSChatPendingAtom, true);
+
+            // Build model selection options
+            const modelOptions = buildModelSelectionOptions(model);
+            const customInstructions = getPref('customInstructions') || undefined;
+
+            // Create new AgentRun shell with the EDITED user_prompt
+            const { run: newRun, request } = createAgentRunShell(
+                editedPrompt,
+                threadId,
+                userId,
+                model.name,
+                modelOptions,
+                model.provider,
+                customInstructions,
+                model.is_custom ? model.custom_model : undefined,
+                targetRun.id, // ask backend to rewrite thread from this run forward
+            );
+
+            // Set active run - UI now shows user message + spinner
+            set(activeRunAtom, newRun);
+
+            // Execute the WebSocket request
+            await executeWSRequest(newRun, request, set);
+        } catch (error) {
+            logger(`regenerateWithEditedPromptAtom: Unexpected error: ${error}`, 1);
+            console.error('[WS] Unexpected error in regenerateWithEditedPromptAtom:', error);
+            set(wsErrorAtom, {
+                event: 'error',
+                type: 'regeneration_error',
+                message: error instanceof Error ? error.message : 'Failed to regenerate with edited prompt',
+                is_retryable: true,
+            });
+            set(activeRunAtom, null);
+            set(isWSChatPendingAtom, false);
+        }
+    }
+);
+
+/**
  * Resume a failed run from its error point.
  * 
  * Flow:
