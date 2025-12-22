@@ -5,7 +5,8 @@ import PdfIcon from '../../icons/PdfIcon';
 import { 
     extractByLinesFromZoteroItem,
     ExtractionError, 
-    ExtractionErrorCode 
+    ExtractionErrorCode,
+    PDFExtractor,
 } from '../../../../src/services/pdf';
 import { 
     visualizeCurrentPageColumns, 
@@ -109,6 +110,10 @@ const PdfTestMenuButton: React.FC<PdfTestMenuButtonProps> = ({
                         break;
                     case ExtractionErrorCode.NO_TEXT_LAYER:
                         console.warn("[PDF Test] Document has no text layer (needs OCR):", error.message);
+                        // Log detailed OCR analysis if available
+                        if (error.details) {
+                            console.log("[PDF Test] OCR Analysis Details:", error.details);
+                        }
                         break;
                     case ExtractionErrorCode.INVALID_PDF:
                         console.error("[PDF Test] Invalid PDF:", error.message);
@@ -194,9 +199,10 @@ const PdfTestMenuButton: React.FC<PdfTestMenuButtonProps> = ({
                 return;
             }
             
-            // Extract with line detection for current page only
+            // Extract with line detection for current page only (skip OCR check for testing)
             const result = await extractByLinesFromZoteroItem(item, {
                 pages: [currentPageIndex],
+                checkTextLayer: false,
             });
             
             if (!result || result.pages.length === 0) {
@@ -246,8 +252,107 @@ const PdfTestMenuButton: React.FC<PdfTestMenuButtonProps> = ({
         }
     };
 
+    // Test OCR detection on selected item
+    const handleTestOCRDetection = async () => {
+        const selectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
+        
+        if (selectedItems.length === 0) {
+            console.log("[OCR Detection Test] No item selected");
+            return;
+        }
+
+        let pdfItem = selectedItems[0];
+
+        // If it's a parent item, try to get the first PDF attachment
+        if (!pdfItem.isPDFAttachment()) {
+            const attachmentIDs = pdfItem.getAttachments();
+            const pdfAttachment = attachmentIDs
+                .map(id => Zotero.Items.get(id))
+                .find(item => item.isPDFAttachment());
+            
+            if (!pdfAttachment) {
+                console.log("[OCR Detection Test] Selected item is not a PDF and has no PDF attachments");
+                return;
+            }
+            pdfItem = pdfAttachment;
+        }
+
+        const title = pdfItem.getField("title") || pdfItem.getDisplayTitle();
+        console.log(`[OCR Detection Test] Analyzing: ${title}`);
+
+        try {
+            // Get PDF file path and read data
+            const path = await pdfItem.getFilePathAsync();
+            if (!path) {
+                console.log("[OCR Detection Test] File not found");
+                return;
+            }
+
+            const pdfData = await IOUtils.read(path);
+            const extractor = new PDFExtractor();
+            
+            console.time("[OCR Detection Test] Analysis time");
+            const result = await extractor.analyzeOCRNeeds(pdfData);
+            console.timeEnd("[OCR Detection Test] Analysis time");
+
+            // Log summary
+            console.log("\n" + "=".repeat(60));
+            console.log("[OCR Detection Test] RESULT:", result.needsOCR ? "❌ NEEDS OCR" : "✅ TEXT LAYER OK");
+            console.log("=".repeat(60));
+            
+            console.group("[OCR Detection Test] Summary");
+            console.log(`Primary Reason: ${result.primaryReason}`);
+            console.log(`Issue Ratio: ${(result.issueRatio * 100).toFixed(1)}% of sampled pages have issues`);
+            console.log(`Pages Sampled: ${result.sampledPages} of ${result.totalPages} total`);
+            console.groupEnd();
+
+            // Log issue breakdown
+            const issuesWithCounts = Object.entries(result.issueBreakdown)
+                .filter(([, count]) => count > 0)
+                .sort((a, b) => b[1] - a[1]);
+            
+            if (issuesWithCounts.length > 0) {
+                console.group("[OCR Detection Test] Issue Breakdown");
+                for (const [issue, count] of issuesWithCounts) {
+                    console.log(`  ${issue}: ${count} pages`);
+                }
+                console.groupEnd();
+            } else {
+                console.log("[OCR Detection Test] No issues detected");
+            }
+
+            // Log per-page analysis
+            console.group("[OCR Detection Test] Per-Page Analysis");
+            for (const pageAnalysis of result.pageAnalyses) {
+                const status = pageAnalysis.hasIssues ? "⚠️" : "✓";
+                const issueList = pageAnalysis.issues.length > 0 
+                    ? ` [${pageAnalysis.issues.join(", ")}]` 
+                    : "";
+                console.log(
+                    `  Page ${pageAnalysis.pageIndex + 1}: ${status} ` +
+                    `text=${pageAnalysis.textLength} chars, ` +
+                    `images=${pageAnalysis.hasImages ? "yes" : "no"}` +
+                    issueList
+                );
+            }
+            console.groupEnd();
+
+            // Log full result object
+            console.log("[OCR Detection Test] Full result object:", result);
+            
+        } catch (error) {
+            console.error("[OCR Detection Test] Analysis failed:", error);
+        }
+    };
+
     // Create menu items for PDF testing functions
     const menuItems: MenuItem[] = [
+        {
+            label: "Test OCR Detection",
+            onClick: handleTestOCRDetection,
+            icon: PdfIcon,
+            disabled: false,
+        },
         {
             label: "Test PDF Extraction",
             onClick: handleTestPdfExtraction,

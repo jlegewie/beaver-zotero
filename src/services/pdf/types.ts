@@ -408,6 +408,110 @@ export interface LineExtractionResult {
 }
 
 // ============================================================================
+// OCR Detection Types
+// ============================================================================
+
+/** Options for OCR detection analysis */
+export interface OCRDetectionOptions {
+    /** Minimum text characters per page to consider valid (default: 100) */
+    minTextPerPage?: number;
+    /** Initial pages to sample for analysis (default: 6) */
+    sampleSize?: number;
+    /** Expanded sample size for confirmation (default: 20) */
+    expandedSampleSize?: number;
+    /** Percentage of problematic pages to trigger expanded sampling (default: 0.8) */
+    expandThreshold?: number;
+    /** Final threshold percentage to confirm OCR needed (default: 0.15) */
+    confirmationThreshold?: number;
+
+    // Text quality thresholds
+    /** Max ratio of whitespace to content (default: 0.7) */
+    maxWhitespaceRatio?: number;
+    /** Max ratio of newlines to content (default: 0.6) */
+    maxNewlineRatio?: number;
+    /** Min ratio of alphanumeric chars (default: 0.3) */
+    minAlphanumericRatio?: number;
+    /** Max invalid/replacement characters (default: 6 or 3% of text) */
+    maxInvalidChars?: number;
+
+    // Image coverage threshold
+    /** Image area ratio to page that suggests a scan (default: 0.65) */
+    imageCoverageThreshold?: number;
+
+    // Bounding box validation (primarily for word-level accuracy)
+    /** Max overlap ratio between lines (default: 0.1) */
+    maxLineOverlapRatio?: number;
+    /** Margin in points for boundary overflow check (default: 5) */
+    boundaryMargin?: number;
+    /** Whether to check bounding boxes - useful for word-level accuracy, less so for page-level (default: false) */
+    checkBoundingBoxes?: boolean;
+}
+
+/** Reasons why a page might need OCR */
+export type OCRIssueReason =
+    | "no_text_blocks"
+    | "insufficient_text"
+    | "high_whitespace_ratio"
+    | "high_newline_ratio"
+    | "low_alphanumeric_ratio"
+    | "invalid_characters"
+    | "large_image_coverage"
+    | "bbox_overflow"
+    | "excessive_line_overlap";
+
+/** Result of analyzing a single page for OCR issues */
+export interface PageOCRAnalysis {
+    /** Page index (0-based) */
+    pageIndex: number;
+    /** Whether this page has issues */
+    hasIssues: boolean;
+    /** Detected issues */
+    issues: OCRIssueReason[];
+    /** Text length found on page */
+    textLength: number;
+    /** Whether page has images */
+    hasImages: boolean;
+}
+
+/** Detailed result of document-level OCR detection */
+export interface OCRDetectionResult {
+    /** Whether the document likely needs OCR */
+    needsOCR: boolean;
+    /** Primary reason for the decision */
+    primaryReason: string;
+    /** Ratio of pages with issues (0-1) */
+    issueRatio: number;
+    /** Breakdown by issue type */
+    issueBreakdown: Record<OCRIssueReason, number>;
+    /** Per-page analysis (for sampled pages) */
+    pageAnalyses: PageOCRAnalysis[];
+    /** Total pages in document */
+    totalPages: number;
+    /** Pages actually sampled */
+    sampledPages: number;
+}
+
+/** Default OCR detection options */
+export const DEFAULT_OCR_DETECTION_OPTIONS: Required<OCRDetectionOptions> = {
+    minTextPerPage: 100,
+    sampleSize: 6,
+    expandedSampleSize: 20,
+    expandThreshold: 0.8,
+    confirmationThreshold: 0.15,
+
+    maxWhitespaceRatio: 0.7,
+    maxNewlineRatio: 0.6,
+    minAlphanumericRatio: 0.3,
+    maxInvalidChars: 6,
+
+    imageCoverageThreshold: 0.65,
+
+    maxLineOverlapRatio: 0.1,
+    boundaryMargin: 5,
+    checkBoundingBoxes: false, // Disabled by default - only needed for word-level accuracy
+};
+
+// ============================================================================
 // Error Types
 // ============================================================================
 

@@ -30,12 +30,15 @@ import {
     ExtractionErrorCode,
     DEFAULT_EXTRACTION_SETTINGS,
     ExtractedLine,
+    OCRDetectionOptions,
+    OCRDetectionResult,
 } from "./types";
 
 // Re-export types and classes for convenience
 export * from "./types";
 export { MuPDFService, disposeMuPDF } from "./MuPDFService";
 export { DocumentAnalyzer } from "./DocumentAnalyzer";
+export type { TextLayerCheckOptions } from "./DocumentAnalyzer";
 export { StyleAnalyzer } from "./StyleAnalyzer";
 export { MarginFilter } from "./MarginFilter";
 export { PageExtractor } from "./PageExtractor";
@@ -108,14 +111,15 @@ export class PDFExtractor {
 
             // 2. Check text layer if requested
             if (opts.checkTextLayer) {
-                const hasTextLayer = docAnalyzer.hasTextLayer({
+                const ocrAnalysis = docAnalyzer.getDetailedOCRAnalysis({
                     minTextPerPage: opts.minTextPerPage,
                 });
 
-                if (!hasTextLayer) {
+                if (ocrAnalysis.needsOCR) {
                     throw new ExtractionError(
                         ExtractionErrorCode.NO_TEXT_LAYER,
-                        "Document has no text layer and may require OCR"
+                        `Document may require OCR: ${ocrAnalysis.primaryReason} (${Math.round(ocrAnalysis.issueRatio * 100)}% of sampled pages have issues)`,
+                        ocrAnalysis
                     );
                 }
             }
@@ -256,14 +260,15 @@ export class PDFExtractor {
 
             // 2. Check text layer if requested
             if (opts.checkTextLayer) {
-                const hasTextLayer = docAnalyzer.hasTextLayer({
+                const ocrAnalysis = docAnalyzer.getDetailedOCRAnalysis({
                     minTextPerPage: opts.minTextPerPage,
                 });
 
-                if (!hasTextLayer) {
+                if (ocrAnalysis.needsOCR) {
                     throw new ExtractionError(
                         ExtractionErrorCode.NO_TEXT_LAYER,
-                        "Document has no text layer and may require OCR"
+                        `Document may require OCR: ${ocrAnalysis.primaryReason} (${Math.round(ocrAnalysis.issueRatio * 100)}% of sampled pages have issues)`,
+                        ocrAnalysis
                     );
                 }
             }
@@ -405,6 +410,35 @@ export class PDFExtractor {
             await this.mupdf.open(pdfData);
             const analyzer = new DocumentAnalyzer(this.mupdf);
             return analyzer.hasTextLayer();
+        } finally {
+            this.mupdf.close();
+        }
+    }
+
+    /**
+     * Perform detailed OCR detection analysis without full extraction.
+     * 
+     * This method analyzes the document to determine if it needs OCR,
+     * providing detailed information about why OCR might be needed.
+     * 
+     * Checks performed:
+     * - Text presence and sufficiency
+     * - Text quality (whitespace ratio, alphanumeric ratio, invalid chars)
+     * - Large image coverage (scanned page detection)
+     * - Bounding box validation (overflow, overlapping lines)
+     * 
+     * @param pdfData - PDF file data
+     * @param options - Detection options
+     * @returns Detailed OCR analysis result
+     */
+    async analyzeOCRNeeds(
+        pdfData: Uint8Array | ArrayBuffer,
+        options: OCRDetectionOptions = {}
+    ): Promise<OCRDetectionResult> {
+        try {
+            await this.mupdf.open(pdfData);
+            const analyzer = new DocumentAnalyzer(this.mupdf);
+            return analyzer.getDetailedOCRAnalysis(options);
         } finally {
             this.mupdf.close();
         }
