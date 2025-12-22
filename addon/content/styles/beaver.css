@@ -181,7 +181,7 @@
 }
 
 [id^="beaver-pane-"] .user-request-view-hover {
-    filter: brightness(1.08);
+    filter: brightness(1.02);
     border-color: var(--fill-quarternary);
 }
 
@@ -208,7 +208,7 @@
     right: 6px;
     padding: 4px;
     border-radius: 4px;
-    background-color: var(--fill-quinary);
+    /* background-color: var(--fill-quinary); */
     color: var(--fill-secondary);
     display: flex;
     align-items: center;
@@ -225,8 +225,8 @@
 [id^="beaver-pane-"] .user-request-edit-overlay {
     position: absolute;
     top: 4px;
-    left: 12px;
-    right: 12px;
+    left: 10px;
+    right: 10px;
     z-index: 10;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }

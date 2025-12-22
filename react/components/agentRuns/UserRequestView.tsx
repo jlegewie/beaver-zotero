@@ -245,7 +245,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
                 {/* Message content with max height and fade */}
                 <div 
-                    className={`-ml-1 user-select-text user-request-content ${needsFade ? 'user-request-content-fade' : ''}`}
+                    className={`-ml-1 user-select-text user-request-content border-transparent ${needsFade ? 'user-request-content-fade' : ''}`}
                     style={{ maxHeight: maxContentHeight, overflow: 'hidden' }}
                     ref={contentRef} 
                     onContextMenu={handleContextMenu}
