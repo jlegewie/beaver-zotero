@@ -7,7 +7,6 @@ const CUSTOM_MODEL_ID_PREFIX = 'custom';
 
 export type ProviderType = ModelProvider;
 export type ReasoningEffort = "low" | "medium" | "high" | "max";
-export type Verbosity = "low" | "medium" | "high";
 
 
 export interface ModelPricing {
@@ -22,26 +21,20 @@ export interface ModelPricing {
  * @property id - Unique identifier for the model
  * @property provider - The provider of the model (anthropic, google, openai)
  * @property snapshot - The provider's model identifier used in API calls
- * @property is_agent - Whether the model supports agent capabilities
  * @property context_window - The context window of the model (defaults to 128,000)
  * @property reasoning_model - Whether the model provides reasoning capabilities
  * @property reasoning_effort - The effort of the model for reasoning
- * @property verbosity - The verbosity of the model
  * @property pricing - The pricing of the model
- * @property kwargs - Additional provider-specific parameters
  */
 export interface ModelConfig {
     id: string;
     provider: ProviderType;
     name: string;
     snapshot: string;
-    is_agent: boolean;
     context_window?: number;
     reasoning_model?: boolean;
     reasoning_effort?: ReasoningEffort;
-    verbosity?: Verbosity;
     pricing: ModelPricing;
-    kwargs?: Record<string, any>;
 }
 
 export interface FullModelConfig extends ModelConfig {
@@ -74,13 +67,11 @@ const mapCustomModelsToConfigs = (): FullModelConfig[] => {
             name: model.name,
             snapshot: model.snapshot,
             context_window: model.context_window,
-            is_agent: false,
             reasoning_model: false,
             pricing: {
                 input: 0,
                 output: 0,
             },
-            kwargs: {},
             access_id: id,
             use_app_key: false,
             credit_cost: 0,
@@ -129,11 +120,6 @@ try {
     lastUsedModel = null
 }
 export const selectedModelAtom = atom<FullModelConfig | null>(lastUsedModel);
-
-/**
- * Derived atom that indicates if the selected model has agent capabilities
- */
-export const isAgentModelAtom = atom((get) => get(selectedModelAtom)?.is_agent || false);
 
 /**
  * Derived atom that indicates if the selected model uses the app's API key

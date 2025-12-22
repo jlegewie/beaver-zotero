@@ -8,7 +8,6 @@ import {
   availableModelsAtom,
   updateSelectedModelAtom,
   validateSelectedModelAtom,
-  isAgentModelAtom
 } from '../../../atoms/models';
 
 const MAX_MODEL_NAME_LENGTH = 25;
@@ -34,12 +33,6 @@ const ModelMenuItemContent: React.FC<{
                     <div className="text-xs">{model.credit_cost > 0.001 ? `${model.credit_cost}x credits` : 'Unlimited'}</div>
                 </div>
             }
-            {/* {model.is_agent &&
-                <div className="text-xs bg-quinary py-05 px-15 rounded-md font-color-secondary items-center gap-05">
-                    <Icon icon={AiMagicIcon} />
-                    <div className="text-xs">Agent</div>
-                </div>
-            } */}
         </div>
     );
 };
@@ -49,7 +42,6 @@ const ModelMenuItemContent: React.FC<{
  * Displays available models based on configured API keys.
  */
 const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaElement>}> = ({ inputRef }) => {
-    const isAgentModel = useAtomValue(isAgentModelAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
     const availableModels = useAtomValue(availableModelsAtom);
 
@@ -66,8 +58,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
 
         const custom_models = availableModels.filter((model) => model.is_custom);
         const included_models = availableModels.filter((model) => model.use_app_key && !model.is_custom) || [];
-        const byok_models = availableModels.filter((model) => !model.use_app_key && !model.is_agent && !model.is_custom);
-        const byok_models_agent = availableModels.filter((model) => !model.use_app_key && model.is_agent && !model.is_custom);
+        const byok_models = availableModels.filter((model) => !model.use_app_key && !model.is_custom);
 
         if (included_models.length > 0) {
             items.push({
@@ -141,30 +132,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             });
         }
 
-        if (byok_models_agent.length > 0) {
-            items.push({
-                label: 'Your API Keys',
-                isGroupHeader: true,
-                onClick: () => {},
-            });
-
-            byok_models_agent.sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
-                items.push({
-                    label: model.name,
-                    onClick: () => {
-                        updateSelectedModel(model);
-                    },
-                    icon: model.reasoning_model ? BrainIcon : undefined,
-                    customContent: (
-                        <ModelMenuItemContent 
-                            model={model} 
-                            isSelected={selectedModel !== null && selectedModel.access_id === model.access_id}
-                        />
-                    )
-                });
-            });
-        }
-
         return items;
     }, [availableModels, updateSelectedModel, selectedModel]);
 
@@ -185,10 +152,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         <div className="display-flex items-center gap-1">
             {(selectedModel?.reasoning_model || false) && <Icon icon={BrainIcon} />}
             {getButtonLabel()}
-            {/* <div className="text-xs bg-quinary py-05 px-15 rounded-md font-color-secondary items-center gap-05">
-                <Icon icon={AiMagicIcon} />
-                <span>Agent</span>
-            </div> */}
             <Icon icon={ArrowDownIcon} className="scale-11 -ml-1" />
         </div>
     );
@@ -204,7 +167,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         <MenuButton
             menuItems={menuItems}
             variant="ghost-secondary"
-            customContent={isAgentModel ? agentComponent : undefined}
+            customContent={agentComponent}
             buttonLabel={getButtonLabel()}
             icon={selectedModel && selectedModel.reasoning_model ? BrainIcon : undefined}
             rightIcon={ArrowDownIcon}
