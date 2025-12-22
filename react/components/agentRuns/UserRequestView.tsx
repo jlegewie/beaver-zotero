@@ -118,6 +118,29 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         return () => {
             doc.removeEventListener('mousedown', handleClickOutside, true);
         };
+    }, [isEditing, userPrompt.content]);
+
+    // Close edit mode when scrolled out of view
+    useEffect(() => {
+        if (!isEditing || !containerRef.current) return;
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                // Close if the element is not intersecting (out of view)
+                if (!entry.isIntersecting) {
+                    setIsEditing(false);
+                }
+            },
+            {
+                // Use the thread view as root to detect scrolling within the container
+                root: containerRef.current.closest('#beaver-thread-view'),
+                threshold: 0
+            }
+        );
+
+        observer.observe(containerRef.current);
+
+        return () => observer.disconnect();
     }, [isEditing]);
 
     const editMaxHeight = maxContentHeight + 50;
