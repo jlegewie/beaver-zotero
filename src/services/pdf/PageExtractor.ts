@@ -85,6 +85,7 @@ function rectToColumnBBox(rect: Rect): ColumnBBox {
 function cleanText(text: string): string {
     return text
         .replace(/\s+/g, " ")
+        // eslint-disable-next-line no-control-regex
         .replace(/[\u0000-\u001F]/g, "")
         .trim();
 }
