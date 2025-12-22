@@ -54,6 +54,8 @@ export interface ExtractionSettings {
     detectPageSequences?: boolean;
     /** Number of pages to sample for style analysis (0 = all pages) */
     styleSampleSize?: number;
+    /** Use line detection for high-quality extraction (default: false) */
+    useLineDetection?: boolean;
 }
 
 /** Default extraction settings */
@@ -66,6 +68,7 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     repeatThreshold: 3,
     detectPageSequences: true,
     styleSampleSize: 100,
+    useLineDetection: false,
 };
 
 // ============================================================================
@@ -290,6 +293,34 @@ export interface ColumnBBox {
     b: number;
 }
 
+/** Line bounding box (same format as ColumnBBox) */
+export interface LineBBox {
+    /** Left edge */
+    l: number;
+    /** Top edge */
+    t: number;
+    /** Right edge */
+    r: number;
+    /** Bottom edge */
+    b: number;
+    /** Width */
+    width: number;
+    /** Height */
+    height: number;
+}
+
+/** A single line of text with metadata */
+export interface ExtractedLine {
+    /** Text content */
+    text: string;
+    /** Bounding box */
+    bbox: LineBBox;
+    /** Font size (median of spans) */
+    fontSize?: number;
+    /** Column index (0-based) */
+    columnIndex: number;
+}
+
 /** A fully processed page */
 export interface ProcessedPage {
     /** 0-based page index */
@@ -305,6 +336,8 @@ export interface ProcessedPage {
     content: string;
     /** Detected columns (in reading order) */
     columns?: ColumnBBox[];
+    /** Detected lines (only present if useLineDetection=true) */
+    lines?: ExtractedLine[];
 }
 
 // ============================================================================
@@ -342,6 +375,25 @@ export interface DocumentAnalysis {
 /** The complete extraction result */
 export interface ExtractionResult {
     /** Processed pages */
+    pages: ProcessedPage[];
+    /** Document-level analysis */
+    analysis: DocumentAnalysis;
+    /** Combined plain text from all pages */
+    fullText: string;
+    /** Extraction metadata */
+    metadata: {
+        extractedAt: string;
+        version: string;
+        settings: ExtractionSettings;
+    };
+}
+
+/**
+ * Line-based extraction result for high-quality content
+ * Returns structured content by page with line-level granularity
+ */
+export interface LineExtractionResult {
+    /** Processed pages with line information */
     pages: ProcessedPage[];
     /** Document-level analysis */
     analysis: DocumentAnalysis;

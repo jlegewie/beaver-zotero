@@ -2,7 +2,11 @@ import React from 'react';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import PdfIcon from '../../icons/PdfIcon';
-import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../../../../src/services/pdf';
+import { 
+    extractByLinesFromZoteroItem,
+    ExtractionError, 
+    ExtractionErrorCode 
+} from '../../../../src/services/pdf';
 import { 
     visualizeCurrentPageColumns, 
     visualizeCurrentPageLines,
@@ -10,6 +14,7 @@ import {
     clearVisualizationAnnotations,
     extractCurrentPageContent
 } from '../../../utils/extractionVisualizer';
+import { getCurrentReaderAndWaitForView } from '../../../utils/readerUtils';
 
 interface PdfTestMenuButtonProps {
     className?: string;
@@ -49,24 +54,52 @@ const PdfTestMenuButton: React.FC<PdfTestMenuButtonProps> = ({
             pdfItem = pdfAttachment;
         }
 
-        console.log("[PDF Test] Starting extraction for:", pdfItem.getField("title") || pdfItem.getDisplayTitle());
+        console.log("[PDF Test] Starting line-based extraction for:", pdfItem.getField("title") || pdfItem.getDisplayTitle());
 
         try {
-            const filePath = await pdfItem.getFilePathAsync();
-            if (!filePath) {
-                console.log("[PDF Test] File path not found");
+            const result = await extractByLinesFromZoteroItem(pdfItem);
+            
+            if (!result) {
+                console.log("[PDF Test] File not found");
                 return;
             }
 
-            const pdfData = await IOUtils.read(filePath);
-            const extractor = new PDFExtractor();
-            const result = await extractor.extract(pdfData, { checkTextLayer: true });
-
-            console.log("[PDF Test] Extraction complete!");
-            console.log("[PDF Test] Page count:", result.analysis.pageCount);
-            console.log("[PDF Test] Has text layer:", result.analysis.hasTextLayer);
-            console.log("[PDF Test] Full text (first 2000 chars):", result.fullText.slice(0, 2000));
-            console.log("[PDF Test] Full result:", result);
+            console.log("[PDF Test] ✓ Extraction complete!");
+            console.log(`[PDF Test] Document: ${result.analysis.pageCount} pages, ${result.fullText.length} chars total`);
+            
+            // Log structured results for all pages
+            console.group("[PDF Test] Pages");
+            for (const page of result.pages) {
+                const lineCount = page.lines?.length || 0;
+                const columnCount = page.columns?.length || 0;
+                
+                console.group(`Page ${page.index + 1}${page.label ? ` (${page.label})` : ''}`);
+                console.log(`  Dimensions: ${page.width.toFixed(0)} × ${page.height.toFixed(0)} pt`);
+                console.log(`  Columns: ${columnCount}`);
+                console.log(`  Lines: ${lineCount}`);
+                console.log(`  Text length: ${page.content.length} chars`);
+                
+                if (page.lines && page.lines.length > 0) {
+                    console.group("Lines");
+                    for (let i = 0; i < Math.min(page.lines.length, 10); i++) {
+                        const line = page.lines[i];
+                        const preview = line.text.length > 80 
+                            ? line.text.slice(0, 80) + "..." 
+                            : line.text;
+                        console.log(`    [${i + 1}] Col ${line.columnIndex + 1}: "${preview}"`);
+                    }
+                    if (page.lines.length > 10) {
+                        console.log(`    ... ${page.lines.length - 10} more lines`);
+                    }
+                    console.groupEnd();
+                }
+                
+                console.groupEnd();
+            }
+            console.groupEnd();
+            
+            // Log full result object for inspection
+            console.log("[PDF Test] Full result object:", result);
         } catch (error) {
             // Handle specific extraction errors
             if (error instanceof ExtractionError) {
@@ -129,20 +162,87 @@ const PdfTestMenuButton: React.FC<PdfTestMenuButtonProps> = ({
         console.log("[PDF Visualizer] Annotations cleared");
     };
 
-    // Extract current page content
+    // Extract current page content with line detection
     const handleExtractCurrentPage = async () => {
         console.log("[PDF Extractor] Extracting current page content...");
-        const result = await extractCurrentPageContent();
         
-        if (result.success) {
-            console.log(`[PDF Extractor] ${result.message}`);
-            console.log(`[PDF Extractor] Page ${result.pageNumber}: ${result.columnCount} column(s)`);
-            console.log("[PDF Extractor] Columns:", result.columns);
-            console.log("[PDF Extractor] === CONTENT START ===");
-            console.log(result.content);
-            console.log("[PDF Extractor] === CONTENT END ===");
-        } else {
-            console.warn(`[PDF Extractor] ${result.message}`);
+        try {
+            // Get the current reader and page
+            const reader = await getCurrentReaderAndWaitForView(undefined, true);
+            if (!reader || !reader._internalReader) {
+                console.warn("[PDF Extractor] No active PDF reader found");
+                return;
+            }
+            
+            if (reader.type !== "pdf") {
+                console.warn("[PDF Extractor] Current reader is not a PDF");
+                return;
+            }
+            
+            // Get current page (0-based)
+            const pdfViewer = reader._internalReader._primaryView?._iframeWindow?.PDFViewerApplication?.pdfViewer;
+            if (!pdfViewer) {
+                console.warn("[PDF Extractor] Could not access PDF viewer");
+                return;
+            }
+            const currentPageIndex = pdfViewer.currentPageNumber - 1;
+            
+            // Get the PDF item
+            const item = Zotero.Items.get(reader.itemID);
+            if (!item) {
+                console.warn("[PDF Extractor] Could not find Zotero item");
+                return;
+            }
+            
+            // Extract with line detection for current page only
+            const result = await extractByLinesFromZoteroItem(item, {
+                pages: [currentPageIndex],
+            });
+            
+            if (!result || result.pages.length === 0) {
+                console.warn("[PDF Extractor] Extraction failed");
+                return;
+            }
+            
+            const page = result.pages[0];
+            const lineCount = page.lines?.length || 0;
+            const columnCount = page.columns?.length || 0;
+            
+            console.log(`[PDF Extractor] ✓ Page ${page.index + 1}${page.label ? ` (${page.label})` : ''} extracted`);
+            console.group(`Page ${page.index + 1} Details`);
+            console.log(`  Dimensions: ${page.width.toFixed(0)} × ${page.height.toFixed(0)} pt`);
+            console.log(`  Columns: ${columnCount}`);
+            console.log(`  Lines: ${lineCount}`);
+            console.log(`  Text length: ${page.content.length} chars`);
+            
+            if (page.columns && page.columns.length > 0) {
+                console.group("Columns");
+                page.columns.forEach((col, i) => {
+                    const width = col.r - col.l;
+                    const height = col.b - col.t;
+                    console.log(`  [${i + 1}] Position: (${col.l.toFixed(0)}, ${col.t.toFixed(0)}), Size: ${width.toFixed(0)} × ${height.toFixed(0)} pt`);
+                });
+                console.groupEnd();
+            }
+            
+            if (page.lines && page.lines.length > 0) {
+                console.group("Lines");
+                page.lines.forEach((line, i) => {
+                    const preview = line.text.length > 100 
+                        ? line.text.slice(0, 100) + "..." 
+                        : line.text;
+                    const fontSize = line.fontSize ? `${line.fontSize.toFixed(1)}pt` : "?";
+                    console.log(`  [${i + 1}] Col ${line.columnIndex + 1}, ${fontSize}: "${preview}"`);
+                });
+                console.groupEnd();
+            }
+            
+            console.groupEnd();
+            
+            // Log full page object
+            console.log("[PDF Extractor] Page object:", page);
+        } catch (error) {
+            console.error("[PDF Extractor] Extraction failed:", error);
         }
     };
 
