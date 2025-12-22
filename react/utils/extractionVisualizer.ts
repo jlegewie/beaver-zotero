@@ -10,10 +10,14 @@ import {
     MuPDFService, 
     detectColumns, 
     detectLinesOnPage,
+    detectParagraphs,
     lineBBoxToRect,
+    logParagraphDetection,
     Rect, 
     RawPageData,
     PageLineResult,
+    PageParagraphResult,
+    ContentItem,
 } from "../../src/services/pdf";
 import { getCurrentReaderAndWaitForView } from "./readerUtils";
 import { getPageViewportInfo } from "./pdfUtils";
@@ -23,6 +27,8 @@ import { ZoteroItemReference } from "../types/zotero";
 // Colors for visualization
 const COLUMN_COLOR = "#00bbff"; // Blue for columns
 const LINE_COLOR = "#ff9500";   // Orange for lines
+const PARAGRAPH_COLOR = "#34c759"; // Green for paragraphs
+const HEADER_COLOR = "#af52de";    // Purple for headers
 
 /**
  * Convert MuPDF Rect (top-left origin, x/y/w/h) to Zotero rect format (bottom-left origin, [x1, y1, x2, y2])
@@ -517,6 +523,269 @@ export async function visualizeCurrentPageLines(): Promise<{
         return {
             success: false,
             message: `Line visualization failed: ${errorMessage}`,
+        };
+    }
+}
+
+/**
+ * Create temporary highlight annotations for detected paragraphs/headers
+ */
+async function createParagraphAnnotations(
+    paragraphResult: PageParagraphResult,
+    pageHeight: number,
+    reader: ZoteroReader,
+    viewBoxLL: [number, number] = [0, 0]
+): Promise<ZoteroItemReference[]> {
+    const annotationReferences: ZoteroItemReference[] = [];
+    const tempAnnotations: any[] = [];
+    
+    for (let i = 0; i < paragraphResult.items.length; i++) {
+        const item = paragraphResult.items[i];
+        
+        // Convert LineBBox to Rect format, then to Zotero format
+        const itemRect: Rect = {
+            x: item.bbox.l,
+            y: item.bbox.t,
+            w: item.bbox.width,
+            h: item.bbox.height,
+        };
+        const rect = rectToZoteroFormat(itemRect, pageHeight, viewBoxLL);
+        
+        // Create unique IDs
+        const tempId = `${item.type}_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Choose color based on type
+        const color = item.type === "header" ? HEADER_COLOR : PARAGRAPH_COLOR;
+        const typeLabel = item.type === "header" ? "Header" : "Paragraph";
+        
+        // Truncate text for display
+        const textPreview = item.text.length > 50 
+            ? item.text.slice(0, 50) + "..." 
+            : item.text;
+        
+        // Create annotation object
+        const tempAnnotation = {
+            id: tempId,
+            key: tempId,
+            libraryID: (reader as any)._item.libraryID,
+            type: "highlight",
+            color: color,
+            sortIndex: `${paragraphResult.pageIndex.toString().padStart(5, "0")}|${String(Math.round(rect[1])).padStart(6, "0")}|${String(Math.round(rect[0])).padStart(5, "0")}`,
+            position: {
+                pageIndex: paragraphResult.pageIndex,
+                rects: [rect],
+            },
+            tags: [],
+            comment: `${typeLabel} ${item.idx + 1} (Col ${item.columnIndex + 1}): ${textPreview}`,
+            text: textPreview,
+            authorName: "Beaver Visualizer",
+            pageLabel: (paragraphResult.pageIndex + 1).toString(),
+            isExternal: false,
+            readOnly: false,
+            lastModifiedByUser: "",
+            dateModified: new Date().toISOString(),
+            annotationType: "highlight",
+            annotationAuthorName: "Beaver Visualizer",
+            annotationText: textPreview,
+            annotationComment: `${typeLabel} ${item.idx + 1}`,
+            annotationColor: color,
+            annotationPageLabel: (paragraphResult.pageIndex + 1).toString(),
+            annotationSortIndex: `${paragraphResult.pageIndex.toString().padStart(5, "0")}|${String(Math.round(rect[1])).padStart(6, "0")}|${String(Math.round(rect[0])).padStart(5, "0")}`,
+            annotationPosition: JSON.stringify({
+                pageIndex: paragraphResult.pageIndex,
+                rects: [rect],
+            }),
+            annotationIsExternal: false,
+            isTemporary: true,
+        };
+        
+        tempAnnotations.push(tempAnnotation);
+        annotationReferences.push({
+            zotero_key: tempId,
+            library_id: (reader as any)._item.libraryID,
+        });
+    }
+    
+    // Add annotations to reader
+    if (tempAnnotations.length > 0) {
+        (reader as any)._internalReader.setAnnotations(
+            Components.utils.cloneInto(tempAnnotations, (reader as any)._iframeWindow)
+        );
+    }
+    
+    return annotationReferences;
+}
+
+/**
+ * Visualize paragraph detection results for the current page in the reader
+ * 
+ * Creates temporary highlight annotations showing detected paragraphs (green)
+ * and headers (purple).
+ * 
+ * @returns Object with success status and details
+ */
+export async function visualizeCurrentPageParagraphs(): Promise<{
+    success: boolean;
+    message: string;
+    paragraphs?: number;
+    headers?: number;
+    pageIndex?: number;
+}> {
+    // Import MarginFilter and StyleAnalyzer here to avoid circular dependencies
+    const { MarginFilter, DEFAULT_MARGINS, StyleAnalyzer } = await import("../../src/services/pdf");
+    
+    try {
+        // 1. Get the current reader
+        const reader = await getCurrentReaderAndWaitForView(undefined, true);
+        if (!reader || !reader._internalReader) {
+            return {
+                success: false,
+                message: "No active PDF reader found",
+            };
+        }
+        
+        if (reader.type !== "pdf") {
+            return {
+                success: false,
+                message: "Current reader is not a PDF",
+            };
+        }
+        
+        // Get current page (0-based)
+        const pdfViewer = reader._internalReader._primaryView?._iframeWindow?.PDFViewerApplication?.pdfViewer;
+        if (!pdfViewer) {
+            return {
+                success: false,
+                message: "Could not access PDF viewer",
+            };
+        }
+        const currentPageIndex = pdfViewer.currentPageNumber - 1;
+        
+        // 2. Get the PDF item and file path
+        const item = Zotero.Items.get(reader.itemID);
+        if (!item) {
+            return {
+                success: false,
+                message: "Could not find Zotero item",
+            };
+        }
+        
+        const filePath = await item.getFilePathAsync();
+        if (!filePath) {
+            return {
+                success: false,
+                message: "Could not find PDF file",
+            };
+        }
+        
+        // 3. Clean up any existing temporary annotations
+        await BeaverTemporaryAnnotations.cleanupAll(reader as ZoteroReader);
+        
+        // 4. Load PDF and extract raw page data
+        logger(`[Visualizer] Loading PDF for paragraph detection on page ${currentPageIndex + 1}...`);
+        const pdfData = await IOUtils.read(filePath);
+        
+        const mupdf = new MuPDFService();
+        await mupdf.open(pdfData);
+        
+        let rawPage: RawPageData;
+        try {
+            rawPage = mupdf.extractRawPage(currentPageIndex);
+        } finally {
+            mupdf.close();
+        }
+        
+        // 5. Apply margin filtering
+        const filteredPage = MarginFilter.filterPageByMargins(rawPage, DEFAULT_MARGINS);
+        
+        // 6. Run column detection
+        logger(`[Visualizer] Detecting columns...`);
+        const columnResult = detectColumns(filteredPage);
+        
+        if (columnResult.columns.length === 0) {
+            return {
+                success: true,
+                message: `No columns detected on page ${currentPageIndex + 1}`,
+                paragraphs: 0,
+                headers: 0,
+                pageIndex: currentPageIndex,
+            };
+        }
+        
+        // 7. Run line detection
+        logger(`[Visualizer] Detecting lines...`);
+        const lineResult = detectLinesOnPage(filteredPage, columnResult.columns);
+        
+        if (lineResult.allLines.length === 0) {
+            return {
+                success: true,
+                message: `No lines detected on page ${currentPageIndex + 1}`,
+                paragraphs: 0,
+                headers: 0,
+                pageIndex: currentPageIndex,
+            };
+        }
+        
+        // 8. Quick style analysis on this page for body styles
+        // Note: For single page, we just use the page's dominant styles
+        const styleAnalyzer = new StyleAnalyzer();
+        const styleProfile = styleAnalyzer.analyze([filteredPage], 4, 0.15, 0);
+        const bodyStyles = styleProfile?.bodyStyles || null;
+        
+        // 9. Run paragraph detection
+        logger(`[Visualizer] Detecting paragraphs...`);
+        const paragraphResult = detectParagraphs(lineResult, bodyStyles);
+        
+        // Log results
+        logParagraphDetection(paragraphResult);
+        
+        if (paragraphResult.items.length === 0) {
+            return {
+                success: true,
+                message: `No paragraphs detected on page ${currentPageIndex + 1}`,
+                paragraphs: 0,
+                headers: 0,
+                pageIndex: currentPageIndex,
+            };
+        }
+        
+        // 10. Get viewport info for coordinate conversion
+        const { viewBox } = await getPageViewportInfo(reader as ZoteroReader, currentPageIndex);
+        const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
+        
+        // Use the page height from MuPDF for coordinate conversion
+        const pageHeight = rawPage.height;
+        
+        // 11. Create annotations
+        logger(`[Visualizer] Creating ${paragraphResult.items.length} paragraph/header annotations...`);
+        
+        const annotationRefs = await createParagraphAnnotations(
+            paragraphResult,
+            pageHeight,
+            reader as ZoteroReader,
+            viewBoxLL
+        );
+        
+        // Track annotations for cleanup
+        BeaverTemporaryAnnotations.addToTracking(annotationRefs);
+        
+        const message = `Page ${currentPageIndex + 1}: ${paragraphResult.paragraphCount} paragraphs, ${paragraphResult.headerCount} headers`;
+        
+        logger(`[Visualizer] ${message}`);
+        
+        return {
+            success: true,
+            message,
+            paragraphs: paragraphResult.paragraphCount,
+            headers: paragraphResult.headerCount,
+            pageIndex: currentPageIndex,
+        };
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger(`[Visualizer] Error: ${errorMessage}`);
+        return {
+            success: false,
+            message: `Paragraph visualization failed: ${errorMessage}`,
         };
     }
 }

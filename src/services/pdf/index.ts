@@ -51,6 +51,16 @@ export type {
     PageLineResult,
     LineDetectionOptions,
 } from "./LineDetector";
+export {
+    detectParagraphs,
+    logParagraphDetection,
+} from "./ParagraphDetector";
+export type {
+    ContentItem,
+    PageParagraphResult,
+    ParagraphDetectionSettings,
+    ItemCounters,
+} from "./ParagraphDetector";
 
 /**
  * PDFExtractor - High-level API for extracting text from PDFs.

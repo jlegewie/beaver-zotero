@@ -6,6 +6,7 @@ import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../../../../
 import { 
     visualizeCurrentPageColumns, 
     visualizeCurrentPageLines,
+    visualizeCurrentPageParagraphs,
     clearVisualizationAnnotations,
     extractCurrentPageContent
 } from '../../../utils/extractionVisualizer';
@@ -110,6 +111,17 @@ const PdfTestMenuButton: React.FC<PdfTestMenuButtonProps> = ({
         }
     };
 
+    // Visualize detected paragraphs on current page
+    const handleVisualizeParagraphs = async () => {
+        console.log("[PDF Visualizer] Visualizing paragraphs on current page...");
+        const result = await visualizeCurrentPageParagraphs();
+        if (result.success) {
+            console.log(`[PDF Visualizer] ${result.message}`);
+        } else {
+            console.warn(`[PDF Visualizer] ${result.message}`);
+        }
+    };
+
     // Clear visualization annotations
     const handleClearVisualization = async () => {
         console.log("[PDF Visualizer] Clearing visualization annotations...");
@@ -157,6 +169,12 @@ const PdfTestMenuButton: React.FC<PdfTestMenuButtonProps> = ({
         {
             label: "Visualize Lines",
             onClick: handleVisualizeLines,
+            icon: PdfIcon,
+            disabled: false,
+        },
+        {
+            label: "Visualize Paragraphs",
+            onClick: handleVisualizeParagraphs,
             icon: PdfIcon,
             disabled: false,
         },
