@@ -34,7 +34,7 @@ interface UserRequestViewProps {
 export const UserRequestView: React.FC<UserRequestViewProps> = ({ 
     userPrompt, 
     runId,
-    maxContentHeight = 400,
+    maxContentHeight = 200,
     canEdit = true
 }) => {
     const contentRef = useRef<HTMLDivElement | null>(null);
@@ -120,6 +120,8 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         };
     }, [isEditing]);
 
+    const editMaxHeight = maxContentHeight + 50;
+
     // Focus textarea and resize when entering edit mode
     useEffect(() => {
         if (isEditing) {
@@ -132,19 +134,19 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                     textareaRef.current.selectionEnd = textareaRef.current.value.length;
                     // Resize to fit content
                     textareaRef.current.style.height = 'auto';
-                    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 800)}px`;
+                    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, editMaxHeight)}px`;
                 }
             });
         }
-    }, [isEditing]);
+    }, [isEditing, editMaxHeight]);
 
-    // Auto-resize textarea on content change (max 800px, then scroll)
+    // Auto-resize textarea on content change (max editMaxHeight, then scroll)
     useEffect(() => {
         if (isEditing && textareaRef.current) {
             textareaRef.current.style.height = 'auto';
-            textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 800)}px`;
+            textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, editMaxHeight)}px`;
         }
-    }, [editedContent, isEditing]);
+    }, [editedContent, isEditing, editMaxHeight]);
 
     // Check if we have content to display in the filters/attachments section
     const hasFiltersOrAttachments = 
@@ -239,7 +241,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                 {/* Message content with max height and fade */}
                 <div 
                     className={`-ml-1 user-select-text user-request-content border-transparent ${needsFade ? 'user-request-content-fade' : ''}`}
-                    style={{ maxHeight: maxContentHeight, overflow: 'hidden' }}
+                    style={{ 
+                        maxHeight: `${maxContentHeight}px`, 
+                        overflow: 'hidden', 
+                        whiteSpace: 'pre-wrap',
+                        display: 'block' 
+                    }}
                     ref={contentRef} 
                     onContextMenu={handleContextMenu}
                 >
@@ -318,8 +325,9 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                 onChange={(e) => setEditedContent(e.target.value)}
                                 onInput={(e) => {
                                     e.currentTarget.style.height = 'auto';
-                                    e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, 800)}px`;
+                                    e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, editMaxHeight)}px`;
                                 }}
+                                style={{ maxHeight: `${editMaxHeight}px` }}
                                 placeholder="Edit your message..."
                                 className="chat-input user-request-edit-textarea"
                                 onKeyDown={handleKeyDown}

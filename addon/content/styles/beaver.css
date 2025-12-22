@@ -233,7 +233,7 @@
 
 /* Edit textarea - allows larger content with scrolling */
 [id^="beaver-pane-"] .user-request-edit-textarea {
-    max-height: 800px;
+    max-height: unset !important;
     overflow-y: auto;
 }
 
