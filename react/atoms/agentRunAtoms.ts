@@ -840,22 +840,22 @@ export const sendWSMessageAtom = atom(
         const readerAttachment = get(currentReaderAttachmentAtom);
         if (readerAttachment && readerState) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
-            console.log('reader att: allUserAttachmentKeys', allUserAttachmentKeys);
             const existingKeys = new Set([
                 ...attachments.map(att => `${att.library_id}-${att.zotero_key}`),
                 ...allUserAttachmentKeys
             ]);
-            console.log('reader att: existingKeys', existingKeys);
+            logger(`sendWSMessageAtom: Handeling reader attachment - existingKeys: ${JSON.stringify(existingKeys)}`, 1);
             const readerKey = `${readerAttachment.libraryID}-${readerAttachment.key}`;
-            console.log('reader att: readerKey', readerKey);
-            if (!existingKeys.has(readerAttachment.key)) {
-                console.log('reader att: adding readerKey', readerKey);
+            if (!existingKeys.has(readerKey)) {
+                logger(`sendWSMessageAtom: Handeling reader attachment - Adding reader attachment: ${readerKey}`, 1);
                 attachments.push({
                     library_id: readerAttachment.libraryID,
                     zotero_key: readerAttachment.key,
                     type: 'source',
                     include: 'fulltext'
                 } as SourceAttachment);
+            } else {
+                logger(`sendWSMessageAtom: Handeling reader attachment - Skipping reader attachment: ${readerKey}`, 1);
             }
         }
 
