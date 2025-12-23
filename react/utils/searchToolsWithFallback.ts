@@ -26,8 +26,6 @@ export interface SearchMetadataWithFallbackOptions {
     query_primary?: string[];
     /** 1-2 broader backup queries (1-3 words) if primary returns nothing */
     query_fallback?: string[];
-    /** Which field to search with the query terms: "title", "any" (all fields), "abstract" */
-    query_target?: 'title' | 'any' | 'abstract';
     /** Author name to filter results */
     author_query?: string;
     /** Journal/publication name */
@@ -72,7 +70,6 @@ export interface SearchMetadataWithFallbackOptions {
  *     "meta-analytic approach"
  *   ],
  *   query_fallback: ["systematic review", "meta-analysis"],
- *   query_target: "title",
  *   year_min: 2020
  * });
  * 
@@ -87,7 +84,6 @@ export const searchMetadataWithFallback = async (
     const {
         query_primary = [],
         query_fallback = [],
-        query_target = 'title',
         author_query,
         publication_query,
         year_min,
@@ -105,15 +101,8 @@ export const searchMetadataWithFallback = async (
         const search = new Zotero.Search();
         search.addCondition('libraryID', 'is', String(libraryID));
 
-        // Add query condition based on target field
-        if (query_target === 'title') {
-            search.addCondition('title', 'contains', queryTerm);
-        } else if (query_target === 'abstract') {
-            // Note: abstractNote is the field name in Zotero
-            search.addCondition('abstractNote', 'contains', queryTerm);
-        } else if (query_target === 'any') {
-            search.addCondition('anyField', 'contains', queryTerm);
-        }
+        // Search across all fields (most comprehensive)
+        search.addCondition('anyField', 'contains', queryTerm);
 
         // Add all other filters
         if (author_query) {
@@ -353,156 +342,6 @@ export const searchFulltextWithFallback = async (
     return {
         items: [],
         matched_tier: 'none'
-    };
-};
-
-/**
- * Options for combined metadata + fulltext search with comprehensive fallback
- */
-export interface SearchCombinedWithFallbackOptions {
-    /** Concept or topic to search for - will generate variations automatically */
-    concept: string;
-    /** 2-3 specific phrases to search in metadata/fulltext (manual variations) */
-    query_primary_metadata?: string[];
-    /** 1-2 broader terms for metadata fallback */
-    query_fallback_metadata?: string[];
-    /** 2-3 specific phrases for fulltext search */
-    query_primary_fulltext?: string[];
-    /** 1-2 broader terms for fulltext fallback */
-    query_fallback_fulltext?: string[];
-    /** Search metadata first (faster) before fulltext */
-    try_metadata_first?: boolean;
-    /** Author name filter */
-    author_filter?: string;
-    /** Minimum year */
-    year_min?: number;
-    /** Maximum year */
-    year_max?: number;
-    /** Collection key */
-    collection_key?: string;
-    /** Maximum results */
-    limit?: number;
-}
-
-/**
- * Combined metadata and fulltext search with comprehensive fallback strategy
- * 
- * This is the most comprehensive search tool, trying multiple strategies:
- * 1. Metadata search with primary queries
- * 2. Metadata search with fallback queries
- * 3. Fulltext search with primary queries
- * 4. Fulltext search with fallback queries
- * 
- * @param libraryID - The library to search in
- * @param options - Search parameters with multiple query tiers
- * @returns Results with indication of which strategy succeeded
- * 
- * @example
- * // Comprehensive search for a concept
- * const result = await searchCombinedWithFallback(userLibraryID, {
- *   query_primary_metadata: [
- *     "structural equation modeling",
- *     "structural equation modelling",
- *     "SEM analysis"
- *   ],
- *   query_fallback_metadata: ["SEM", "path analysis"],
- *   query_primary_fulltext: [
- *     '"structural equation model"',
- *     '"covariance structure analysis"'
- *   ],
- *   query_fallback_fulltext: ['"path model"', 'LISREL'],
- *   try_metadata_first: true,
- *   year_min: 2010
- * });
- */
-export const searchCombinedWithFallback = async (
-    libraryID: number,
-    options: SearchCombinedWithFallbackOptions
-): Promise<SearchResultWithTier<Zotero.Item> & { search_type: 'metadata' | 'fulltext' }> => {
-    const {
-        query_primary_metadata = [],
-        query_fallback_metadata = [],
-        query_primary_fulltext = [],
-        query_fallback_fulltext = [],
-        try_metadata_first = true,
-        author_filter,
-        year_min,
-        year_max,
-        collection_key,
-        limit = 30
-    } = options;
-
-    const commonFilters = {
-        author_filter,
-        year_min,
-        year_max,
-        collection_key,
-        limit
-    };
-
-    // Strategy 1: Try metadata search
-    if (try_metadata_first && (query_primary_metadata.length > 0 || query_fallback_metadata.length > 0)) {
-        const metadataResult = await searchMetadataWithFallback(libraryID, {
-            query_primary: query_primary_metadata,
-            query_fallback: query_fallback_metadata,
-            query_target: 'title',
-            author_query: author_filter,
-            year_min,
-            year_max,
-            collection_key,
-            limit
-        });
-
-        if (metadataResult.matched_tier !== 'none') {
-            return {
-                ...metadataResult,
-                search_type: 'metadata'
-            };
-        }
-    }
-
-    // Strategy 2: Try fulltext search
-    if (query_primary_fulltext.length > 0 || query_fallback_fulltext.length > 0) {
-        const fulltextResult = await searchFulltextWithFallback(libraryID, {
-            query_primary: query_primary_fulltext,
-            query_fallback: query_fallback_fulltext,
-            ...commonFilters
-        });
-
-        if (fulltextResult.matched_tier !== 'none') {
-            return {
-                ...fulltextResult,
-                search_type: 'fulltext'
-            };
-        }
-    }
-
-    // Strategy 3: If metadata wasn't tried first, try it now
-    if (!try_metadata_first && (query_primary_metadata.length > 0 || query_fallback_metadata.length > 0)) {
-        const metadataResult = await searchMetadataWithFallback(libraryID, {
-            query_primary: query_primary_metadata,
-            query_fallback: query_fallback_metadata,
-            query_target: 'title',
-            author_query: author_filter,
-            year_min,
-            year_max,
-            collection_key,
-            limit
-        });
-
-        if (metadataResult.matched_tier !== 'none') {
-            return {
-                ...metadataResult,
-                search_type: 'metadata'
-            };
-        }
-    }
-
-    // No results from any strategy
-    return {
-        items: [],
-        matched_tier: 'none',
-        search_type: 'metadata'
     };
 };
 
