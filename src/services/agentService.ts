@@ -265,8 +265,6 @@ export class AgentService {
         }
 
         try {
-            logger(`AgentService: Received event: ${event.event}`, 1);
-
             switch (event.event) {
                 case 'ready': {
                     // Convert snake_case backend response to camelCase frontend data
@@ -346,24 +344,28 @@ export class AgentService {
                     break;
 
                 case 'attachment_content_request':
+                    logger(`AgentService: Received attachment_content_request for ${event.attachment.library_id}-${event.attachment.zotero_key} (pages: ${event.page_numbers?.join(',') || 'all'})`, 1);
                     handleAttachmentContentRequest(event)
                         .then(res => this.send(res))
                         .catch(err => this.handleProviderError(err, 'attachment_content_request_failed'));
                     break;
 
                 case 'external_reference_check_request':
+                    logger(`AgentService: Received external_reference_check_request for ${event.items.length} items`, 1);
                     handleExternalReferenceCheckRequest(event)
                         .then(res => this.send(res))
                         .catch(err => this.handleProviderError(err, 'external_reference_check_request_failed'));
                     break;
 
                 case 'zotero_data_request':
+                    logger(`AgentService: Received zotero_data_request for ${event.items.length} items (parents: ${!!event.include_parents}, attachments: ${!!event.include_attachments})`, 1);
                     handleZoteroDataRequest(event)
                         .then(res => this.send(res))
                         .catch(err => this.handleProviderError(err, 'zotero_data_request_failed'));
                     break;
 
                 case 'zotero_item_search_request':
+                    logger(`AgentService: Received zotero_item_search_request: "${event.query_primary?.[0] || event.query_fallback?.[0] || 'no query'}"`, 1);
                     handleZoteroItemSearchRequest(event)
                         .then(res => this.send(res))
                         .catch(err => this.handleProviderError(err, 'zotero_item_search_request_failed'));
