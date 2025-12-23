@@ -370,11 +370,18 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
             if (typeof libraryFilter === 'number') {
                 libraryIds.push(libraryFilter);
             } else if (typeof libraryFilter === 'string') {
-                // It's a library name - find matching libraries
-                const allLibraries = Zotero.Libraries.getAll();
-                for (const lib of allLibraries) {
-                    if (lib.name.toLowerCase().includes(libraryFilter.toLowerCase())) {
-                        libraryIds.push(lib.libraryID);
+                // Could be a library ID as string or a library name
+                const libraryIdNum = parseInt(libraryFilter, 10);
+                if (!isNaN(libraryIdNum)) {
+                    // It's a number as string
+                    libraryIds.push(libraryIdNum);
+                } else {
+                    // It's a library name - find matching libraries
+                    const allLibraries = Zotero.Libraries.getAll();
+                    for (const lib of allLibraries) {
+                        if (lib.name.toLowerCase().includes(libraryFilter.toLowerCase())) {
+                            libraryIds.push(lib.libraryID);
+                        }
                     }
                 }
             }
