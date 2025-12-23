@@ -254,12 +254,14 @@ function createAgentRunShell(
         type: 'chat',
         run_id: runId,
         thread_id: threadId,
-        user_prompt: userPrompt,
+        user_prompt: {
+            ...userPrompt,
+            ...(customInstructions ? { custom_instructions: customInstructions } : {}),
+        },
         ...(modelSelectionOptions.model_id ? { model_id: modelSelectionOptions.model_id } : {}),
         ...(modelSelectionOptions.api_key ? { api_key: modelSelectionOptions.api_key } : {}),
         ...(customModel ? { custom_model: customModel } : {}),
         ...(rewriteFromRunId ? { retry_run_id: rewriteFromRunId } : {}),
-        ...(customInstructions ? { custom_instructions: customInstructions } : {}),
     };
 
     // Create the shell AgentRun for immediate UI rendering

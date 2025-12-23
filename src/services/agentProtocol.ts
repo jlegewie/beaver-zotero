@@ -304,8 +304,6 @@ export interface AgentRunRequest {
     custom_model?: CustomChatModel;
     /** If set, instructs the server to retry from this run ID, deleting it and all subsequent runs */
     retry_run_id?: string;
-    /** Custom system instructions for this request */
-    custom_instructions?: string;
     /** Pre-generated assistant message ID (optional) */
     assistant_message_id?: string;
 }
