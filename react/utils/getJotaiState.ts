@@ -2,7 +2,7 @@ import { citationMetadataAtom, citationDataListAtom, citationsByRunIdAtom } from
 import { userAtom, isAuthenticatedAtom, authLoadingAtom } from "../atoms/auth"
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
 import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom } from "../atoms/messageComposition"
-import { supportedModelsAtom, selectedModelAtom, isAgentModelAtom, availableModelsAtom } from "../atoms/models"
+import { supportedModelsAtom, selectedModelAtom, availableModelsAtom } from "../atoms/models"
 import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncLibraryIdsAtom, planFeaturesAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
 import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, overallSyncStatusAtom } from "../atoms/sync"
 import { recentThreadsAtom, currentThreadIdAtom } from "../atoms/threads"
@@ -66,7 +66,6 @@ export const atomRegistry = {
     // Models
     supportedModels: supportedModelsAtom,
     selectedModel: selectedModelAtom,
-    isAgentModel: isAgentModelAtom,
     availableModels: availableModelsAtom,
 
     // Profile

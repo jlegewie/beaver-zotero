@@ -6,8 +6,7 @@ import { logger } from '../../src/utils/logger';
 const CUSTOM_MODEL_ID_PREFIX = 'custom';
 
 export type ProviderType = ModelProvider;
-export type ReasoningEffort = "low" | "medium" | "high" | "max";
-export type Verbosity = "low" | "medium" | "high";
+export type ReasoningEffort = "low" | "medium" | "high";
 
 
 export interface ModelPricing {
@@ -19,38 +18,37 @@ export interface ModelPricing {
 
 /**
  * ModelConfig interface representing an AI model for chat completion
- * @property id - Unique identifier for the model
- * @property provider - The provider of the model (anthropic, google, openai)
- * @property snapshot - The provider's model identifier used in API calls
- * @property is_agent - Whether the model supports agent capabilities
- * @property context_window - The context window of the model (defaults to 128,000)
- * @property reasoning_model - Whether the model provides reasoning capabilities
- * @property reasoning_effort - The effort of the model for reasoning
- * @property verbosity - The verbosity of the model
- * @property pricing - The pricing of the model
- * @property kwargs - Additional provider-specific parameters
+ * Matches the backend ModelConfig model from model_configs table.
  */
 export interface ModelConfig {
+    /** UUID from backend model_configs table (or synthetic ID for custom models) */
     id: string;
     provider: ProviderType;
     name: string;
+    /** The provider's model identifier used in API calls */
     snapshot: string;
-    is_agent: boolean;
-    context_window?: number;
+    pricing?: ModelPricing;
+    is_enabled?: boolean;
+
+    // Access and billing configuration
+    is_default: boolean;
+    credit_cost: number;
+    /** Whether users can use their own API key with this model */
+    allow_byok: boolean;
+    /** Whether this model is available via the app's API key */
+    allow_app_key: boolean;
+    /** Whether this model supports usage-based billing */
+    allow_usage_billing?: boolean;
+    
+    // Model capabilities
     reasoning_model?: boolean;
     reasoning_effort?: ReasoningEffort;
-    verbosity?: Verbosity;
-    pricing: ModelPricing;
-    kwargs?: Record<string, any>;
-}
+    context_window?: number;
+    supports_vision?: boolean;
 
-export interface FullModelConfig extends ModelConfig {
-    access_id: string;
-    use_app_key: boolean;
-    credit_cost: number;
-    is_default: boolean;
-    is_custom?: boolean;             // frontend only
-    custom_model?: CustomChatModel;  // frontend only
+    // Frontend-only fields for custom models
+    is_custom?: boolean;
+    custom_model?: CustomChatModel;
 }
 
 const createCustomModelId = (model: CustomChatModel): string => {
@@ -62,7 +60,7 @@ const createCustomModelId = (model: CustomChatModel): string => {
     ].join(':');
 };
 
-const mapCustomModelsToConfigs = (): FullModelConfig[] => {
+const mapCustomModelsToConfigs = (): ModelConfig[] => {
     const customModels = getCustomChatModelsFromPreferences();
 
     return customModels.map((model) => {
@@ -74,17 +72,15 @@ const mapCustomModelsToConfigs = (): FullModelConfig[] => {
             name: model.name,
             snapshot: model.snapshot,
             context_window: model.context_window,
-            is_agent: false,
             reasoning_model: false,
             pricing: {
                 input: 0,
                 output: 0,
             },
-            kwargs: {},
-            access_id: id,
-            use_app_key: false,
             credit_cost: 0,
             is_default: false,
+            allow_byok: true,
+            allow_app_key: false,
             is_custom: true,
             custom_model: model,
         };
@@ -93,13 +89,12 @@ const mapCustomModelsToConfigs = (): FullModelConfig[] => {
 
 const initialCustomModels = mapCustomModelsToConfigs();
 
-const withCustomModels = (models: FullModelConfig[]): FullModelConfig[] => {
+const withCustomModels = (models: ModelConfig[]): ModelConfig[] => {
     const customModels = mapCustomModelsToConfigs();
-    const merged = new Map<string, FullModelConfig>();
+    const merged = new Map<string, ModelConfig>();
 
     [...models, ...customModels].forEach((model) => {
-        const key = `${model.id}:${model.access_id}`;
-        merged.set(key, model);
+        merged.set(model.id, model);
     });
 
     return Array.from(merged.values());
@@ -114,12 +109,12 @@ const googleApiKeyAtom = atom(getPref('googleGenerativeAiApiKey') ?? '');
 const openAiApiKeyAtom = atom(getPref('openAiApiKey') ?? '');
 const anthropicApiKeyAtom = atom(getPref('anthropicApiKey') ?? '');
 
-export const supportedModelsAtom = atom<FullModelConfig[]>(initialCustomModels);
+export const supportedModelsAtom = atom<ModelConfig[]>(initialCustomModels);
 
 // Stores the currently selected model
 let lastUsedModel = null;
 try {
-    const stored = JSON.parse(getPref('lastUsedModel')) as FullModelConfig;
+    const stored = JSON.parse(getPref('lastUsedModel')) as ModelConfig;
     if (stored?.is_custom) {
         lastUsedModel = initialCustomModels.find(model => model.id === stored.id) || stored;
     } else {
@@ -128,23 +123,19 @@ try {
 } catch (error) {
     lastUsedModel = null
 }
-export const selectedModelAtom = atom<FullModelConfig | null>(lastUsedModel);
-
-/**
- * Derived atom that indicates if the selected model has agent capabilities
- */
-export const isAgentModelAtom = atom((get) => get(selectedModelAtom)?.is_agent || false);
+export const selectedModelAtom = atom<ModelConfig | null>(lastUsedModel);
 
 /**
  * Derived atom that indicates if the selected model uses the app's API key
  */
-export const isAppKeyModelAtom = atom((get) => get(selectedModelAtom)?.use_app_key || false);
+export const isAppKeyModelAtom = atom((get) => get(selectedModelAtom)?.allow_app_key || false);
 
 /**
  * Derived atom that filters supported models based on available API keys
  * Models are available if they:
- * 1. Use the app's API key (app_key: true), or
- * 2. Have a matching user-provided API key for their provider
+ * 1. Are custom models (always available)
+ * 2. Use the app's API key (allow_app_key: true), or
+ * 3. Allow BYOK and have a matching user-provided API key for their provider
  */
 export const availableModelsAtom = atom(
     get => {
@@ -157,10 +148,11 @@ export const availableModelsAtom = atom(
         
         return supportedModels.filter(model => {
             if (model.is_custom) return true;
-            if (model.use_app_key) return true;
-            if (!model.use_app_key && model.provider === 'google' && apiKeys.google) return true;
-            if (!model.use_app_key && model.provider === 'openai' && apiKeys.openai) return true;
-            if (!model.use_app_key && model.provider === 'anthropic' && apiKeys.anthropic) return true;
+            if (model.allow_app_key) return true;
+            // BYOK models: available if user has an API key for the provider
+            if (model.allow_byok && model.provider === 'google' && apiKeys.google) return true;
+            if (model.allow_byok && model.provider === 'openai' && apiKeys.openai) return true;
+            if (model.allow_byok && model.provider === 'anthropic' && apiKeys.anthropic) return true;
             return false;
         });
     }
@@ -181,7 +173,7 @@ export const validateSelectedModelAtom = atom(
         if (!defaultModel && availableModels.length > 0) defaultModel = availableModels[0];
 
         // Check if the selected model is still valid with current API keys
-        const isModelAvailable = selectedModel && availableModels.some(m => m.id === selectedModel.id && m.access_id === selectedModel.access_id);
+        const isModelAvailable = selectedModel && availableModels.some(m => m.id === selectedModel.id);
 
         // If not valid, revert to default or first available model
         if (!isModelAvailable) {
@@ -199,7 +191,7 @@ export const validateSelectedModelAtom = atom(
  */
 export const setModelsAtom = atom(
     null,
-    (_get, set, models: FullModelConfig[]) => {
+    (_get, set, models: ModelConfig[]) => {
         // Update supported models
         set(supportedModelsAtom, withCustomModels(models));
 
@@ -212,7 +204,7 @@ export const setModelsAtom = atom(
 // Atom to update selected model
 export const updateSelectedModelAtom = atom(
     null,
-    (_, set, model: FullModelConfig) => {
+    (_, set, model: ModelConfig) => {
         set(selectedModelAtom, model);
         setPref('lastUsedModel', JSON.stringify(model));
     }
