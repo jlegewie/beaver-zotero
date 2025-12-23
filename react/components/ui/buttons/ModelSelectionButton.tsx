@@ -57,8 +57,8 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         const items: MenuItem[] = [];
 
         const custom_models = availableModels.filter((model) => model.is_custom);
-        const included_models = availableModels.filter((model) => model.allow_app_key && !model.is_custom) || [];
-        const byok_models = availableModels.filter((model) => !model.allow_app_key && !model.is_custom);
+        const included_models = availableModels.filter((model) => model.allow_app_key && model.is_enabled && !model.is_custom) || [];
+        const byok_models = availableModels.filter((model) => model.allow_byok && model.is_enabled && !model.is_custom);
 
         if (included_models.length > 0) {
             items.push({
