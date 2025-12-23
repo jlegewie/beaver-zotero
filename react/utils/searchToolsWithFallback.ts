@@ -124,10 +124,10 @@ export const searchMetadataWithFallback = async (
             search.addCondition('year', 'is', String(year_exact));
         } else {
             if (year_min !== undefined) {
-                search.addCondition('year', 'isGreaterThan', String(year_min - 1));
+                search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
             }
             if (year_max !== undefined) {
-                search.addCondition('year', 'isLessThan', String(year_max + 1));
+                search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
             }
         }
 
@@ -288,10 +288,10 @@ export const searchFulltextWithFallback = async (
         }
 
         if (year_min !== undefined) {
-            search.addCondition('year', 'isGreaterThan', String(year_min - 1));
+            search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
         }
         if (year_max !== undefined) {
-            search.addCondition('year', 'isLessThan', String(year_max + 1));
+            search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
         }
 
         for (const tag of tags) {

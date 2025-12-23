@@ -106,10 +106,10 @@ export const searchItemsByMetadata = async (
         search.addCondition('year', 'is', String(year_exact));
     } else {
         if (year_min !== undefined) {
-            search.addCondition('year', 'isGreaterThan', String(year_min - 1));
+            search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
         }
         if (year_max !== undefined) {
-            search.addCondition('year', 'isLessThan', String(year_max + 1));
+            search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
         }
     }
 
@@ -119,7 +119,7 @@ export const searchItemsByMetadata = async (
     }
 
     // Tag filters (OR logic)
-    if (tags.length > 0) {
+    if (tags && tags.length > 0) {
         // For tag OR logic, we need to use a subsearch approach or accept that
         // multiple tags with 'all' mode means item must have ALL tags
         // With 'any' mode, we can add multiple tag conditions
@@ -254,14 +254,14 @@ export const searchFulltextKeywords = async (
 
     // Year filters
     if (year_min !== undefined) {
-        search.addCondition('year', 'isGreaterThan', String(year_min - 1));
+        search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
     }
     if (year_max !== undefined) {
-        search.addCondition('year', 'isLessThan', String(year_max + 1));
+        search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
     }
 
     // Tag filters
-    if (tags.length > 0) {
+    if (tags && tags.length > 0) {
         for (const tag of tags) {
             search.addCondition('tag', 'is', tag);
         }
@@ -349,7 +349,7 @@ export const searchItemsByTagsAndCollections = async (
     search.addCondition('libraryID', 'is', String(libraryID));
 
     // If multiple tags, use OR logic (any tag matches)
-    if (tags.length > 0) {
+    if (tags && tags.length > 0) {
         if (tags.length > 1) {
             search.addCondition('joinMode', 'any');
         }
@@ -520,10 +520,10 @@ export const searchZoteroItemsWithQueries = async (
 
             // Apply year filters
             if (year_min !== undefined) {
-                search.addCondition('year', 'isGreaterThan', String(year_min - 1));
+                search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
             }
             if (year_max !== undefined) {
-                search.addCondition('year', 'isLessThan', String(year_max + 1));
+                search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
             }
 
             // Apply item type filter
@@ -537,7 +537,7 @@ export const searchZoteroItemsWithQueries = async (
             }
 
             // Apply tag filters
-            if (tags.length > 0) {
+            if (tags && tags.length > 0) {
                 for (const tag of tags) {
                     search.addCondition('tag', 'is', tag);
                 }
