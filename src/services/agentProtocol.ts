@@ -296,11 +296,11 @@ export interface AgentRunRequest {
     thread_id: string | null;
     /** The user's message */
     user_prompt: BeaverAgentPrompt;
-    /** UUID of plan_model_access entry (mutually exclusive with custom_model) */
-    access_id?: string;
-    /** User's API key for plan models that require BYOK */
+    /** UUID of model_configs entry (mutually exclusive with custom_model) */
+    model_id?: string;
+    /** User's API key for BYOK models */
     api_key?: string;
-    /** Custom model configuration (mutually exclusive with access_id) */
+    /** Custom model configuration (mutually exclusive with model_id) */
     custom_model?: CustomChatModel;
     /** If set, instructs the server to retry from this run ID, deleting it and all subsequent runs */
     retry_run_id?: string;

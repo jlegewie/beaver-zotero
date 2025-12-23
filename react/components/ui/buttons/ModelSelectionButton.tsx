@@ -28,7 +28,7 @@ const ModelMenuItemContent: React.FC<{
                 ? <Icon icon={BrainIcon} className={`-ml-015 ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`} />
                 : undefined
             }
-            {model.use_app_key &&
+            {model.allow_app_key &&
                 <div className="text-xs font-color-quarternary items-center">
                     <div className="text-xs">{model.credit_cost > 0.001 ? `${model.credit_cost}x credits` : 'Unlimited'}</div>
                 </div>
@@ -57,8 +57,8 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         const items: MenuItem[] = [];
 
         const custom_models = availableModels.filter((model) => model.is_custom);
-        const included_models = availableModels.filter((model) => model.use_app_key && !model.is_custom) || [];
-        const byok_models = availableModels.filter((model) => !model.use_app_key && !model.is_custom);
+        const included_models = availableModels.filter((model) => model.allow_app_key && !model.is_custom) || [];
+        const byok_models = availableModels.filter((model) => !model.allow_app_key && !model.is_custom);
 
         if (included_models.length > 0) {
             items.push({
@@ -78,7 +78,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                 customContent: (
                     <ModelMenuItemContent 
                         model={model} 
-                        isSelected={selectedModel !== null && selectedModel.access_id === model.access_id}
+                        isSelected={selectedModel !== null && selectedModel.id === model.id}
                     />
                 )
             });
@@ -101,7 +101,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                     customContent: (
                         <ModelMenuItemContent 
                             model={model} 
-                            isSelected={selectedModel !== null && selectedModel.access_id === model.access_id}
+                            isSelected={selectedModel !== null && selectedModel.id === model.id}
                         />
                     )
                 });
@@ -125,7 +125,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                     customContent: (
                         <ModelMenuItemContent 
                             model={model} 
-                            isSelected={selectedModel !== null && selectedModel.access_id === model.access_id}
+                            isSelected={selectedModel !== null && selectedModel.id === model.id}
                         />
                     )
                 });

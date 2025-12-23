@@ -87,11 +87,11 @@ export class AgentService {
      * 1. Client connects with clean URL (no sensitive data in params)
      * 2. Client sends WSAuthMessage with token only
      * 3. Server authenticates and sends "ready" event
-     * 4. Client sends agent run request (with model selection: access_id/api_key or custom_model)
+     * 4. Client sends agent run request (with model selection: model_id/api_key or custom_model)
      * 5. Server validates model and sends "request_ack" event
      * 6. Server streams delta events and sends complete event
      * 
-     * @param request The agent run request to send (should include access_id/api_key or custom_model)
+     * @param request The agent run request to send (should include model_id/api_key or custom_model)
      * @param callbacks Event callbacks
      * @returns Promise that resolves when connection is established and ready, rejects on error
      */
