@@ -201,6 +201,44 @@ export interface WSExternalReferenceCheckResponse {
     results: ExternalReferenceCheckResult[];
 }
 
+/** Zotero item search result with attachments */
+export interface ZoteroItemSearchResultItem {
+    item: import('../../react/types/zotero').ItemData;
+    attachments: import('../../react/types/zotero').AttachmentData[];
+}
+
+/** Request from backend to search Zotero library */
+export interface WSZoteroItemSearchRequest extends WSBaseEvent {
+    event: 'zotero_item_search_request';
+    request_id: string;
+
+    // Query parameters - two tiers
+    query_primary: string[];
+    query_fallback?: string[];
+
+    // Metadata filters
+    author?: string;
+    publication?: string;
+    year_min?: number;
+    year_max?: number;
+    item_type?: string;
+
+    // Collection and tag filters
+    collection_key?: string;
+    tags?: string[];
+
+    // Options
+    limit: number;
+}
+
+/** Response to zotero item search request */
+export interface WSZoteroItemSearchResponse {
+    type: 'zotero_item_search';
+    request_id: string;
+    items: ZoteroItemSearchResultItem[];
+    matched_tier: 'primary' | 'fallback' | 'none';
+}
+
 /** Request from backend to fetch Zotero item/attachment data */
 export interface WSZoteroDataRequest extends WSBaseEvent {
     event: 'zotero_data_request';
@@ -251,7 +289,8 @@ export type WSEvent =
     | WSMissingZoteroDataEvent
     | WSAttachmentContentRequest
     | WSExternalReferenceCheckRequest
-    | WSZoteroDataRequest;
+    | WSZoteroDataRequest
+    | WSZoteroItemSearchRequest;
 
 
 // =============================================================================

@@ -17,6 +17,7 @@ import {
     handleZoteroDataRequest, 
     handleExternalReferenceCheckRequest,
     handleAttachmentContentRequest,
+    handleZoteroItemSearchRequest,
 } from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
 import {
@@ -360,6 +361,12 @@ export class AgentService {
                     handleZoteroDataRequest(event)
                         .then(res => this.send(res))
                         .catch(err => this.handleProviderError(err, 'zotero_data_request_failed'));
+                    break;
+
+                case 'zotero_item_search_request':
+                    handleZoteroItemSearchRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => this.handleProviderError(err, 'zotero_item_search_request_failed'));
                     break;
 
                 default:

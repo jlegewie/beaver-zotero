@@ -29,7 +29,11 @@ import {
     WSAttachmentContentRequest,
     WSAttachmentContentResponse,
     WSPageContent,
+    WSZoteroItemSearchRequest,
+    WSZoteroItemSearchResponse,
+    ZoteroItemSearchResultItem,
 } from './agentProtocol';
+import { searchZoteroItemsWithQueries, ZoteroItemSearchFilters } from '../../react/utils/searchTools';
 
 /**
  * Handle zotero_data_request event.
@@ -312,6 +316,109 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
         type: 'external_reference_check',
         request_id: request.request_id,
         results
+    };
+
+    return response;
+}
+
+
+/**
+ * Handle zotero_item_search_request event.
+ * Searches the user's Zotero library and returns matching items with attachments.
+ */
+export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchRequest): Promise<WSZoteroItemSearchResponse> {
+    // Get synced library IDs
+    const syncLibraryIds = store.get(syncLibraryIdsAtom);
+    
+    if (syncLibraryIds.length === 0) {
+        logger('handleZoteroItemSearchRequest: No synced libraries configured', 1);
+        return {
+            type: 'zotero_item_search',
+            request_id: request.request_id,
+            items: [],
+            matched_tier: 'none',
+        };
+    }
+
+    // Build filters from request
+    const filters: ZoteroItemSearchFilters = {
+        author: request.author,
+        publication: request.publication,
+        year_min: request.year_min,
+        year_max: request.year_max,
+        item_type: request.item_type,
+        collection_key: request.collection_key,
+        tags: request.tags,
+        limit: request.limit,
+    };
+
+    // Step 1: Try primary queries
+    let items: Zotero.Item[] = [];
+    let matchedTier: 'primary' | 'fallback' | 'none' = 'none';
+
+    if (request.query_primary && request.query_primary.length > 0) {
+        items = await searchZoteroItemsWithQueries(syncLibraryIds, request.query_primary, filters);
+        if (items.length > 0) {
+            matchedTier = 'primary';
+        }
+    }
+
+    // Step 2: Try fallback queries if primary returned nothing
+    if (items.length === 0 && request.query_fallback && request.query_fallback.length > 0) {
+        items = await searchZoteroItemsWithQueries(syncLibraryIds, request.query_fallback, filters);
+        if (items.length > 0) {
+            matchedTier = 'fallback';
+        }
+    }
+
+    // Step 3: Apply limit
+    const limitedItems = request.limit > 0 ? items.slice(0, request.limit) : items;
+
+    // Step 4: Serialize items with attachments
+    const resultItems: ZoteroItemSearchResultItem[] = [];
+    
+    // Load all item data in bulk for efficiency
+    if (limitedItems.length > 0) {
+        await Zotero.Items.loadDataTypes(limitedItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]);
+    }
+
+    for (const item of limitedItems) {
+        try {
+            // Serialize the item
+            const itemData = await serializeItem(item, undefined);
+
+            // Get and serialize attachments
+            const attachmentIds = item.getAttachments();
+            const attachments: import('../../react/types/zotero').AttachmentData[] = [];
+
+            if (attachmentIds.length > 0) {
+                const attachmentItems = await Zotero.Items.getAsync(attachmentIds);
+                await Zotero.Items.loadDataTypes(attachmentItems, ["primaryData", "itemData"]);
+
+                for (const attachment of attachmentItems) {
+                    if (!attachment.deleted) {
+                        const attachmentData = await serializeAttachment(attachment, undefined, { skipSyncingFilter: true });
+                        if (attachmentData) {
+                            attachments.push(attachmentData);
+                        }
+                    }
+                }
+            }
+
+            resultItems.push({
+                item: itemData,
+                attachments,
+            });
+        } catch (error) {
+            logger(`handleZoteroItemSearchRequest: Failed to serialize item ${item.key}: ${error}`, 1);
+        }
+    }
+
+    const response: WSZoteroItemSearchResponse = {
+        type: 'zotero_item_search',
+        request_id: request.request_id,
+        items: resultItems,
+        matched_tier: matchedTier,
     };
 
     return response;

@@ -456,3 +456,151 @@ export const getSavedSearchKeyByName = async (
     return null;
 };
 
+
+/**
+ * Filters for Zotero item search (used by backend search requests)
+ */
+export interface ZoteroItemSearchFilters {
+    /** Author name substring match */
+    author?: string;
+    /** Journal/publication substring match */
+    publication?: string;
+    /** Minimum year (inclusive) */
+    year_min?: number;
+    /** Maximum year (inclusive) */
+    year_max?: number;
+    /** Filter by item type (e.g., "journalArticle", "book") */
+    item_type?: string;
+    /** Collection key to search within */
+    collection_key?: string;
+    /** Tags to filter by */
+    tags?: string[];
+    /** Maximum results to return */
+    limit?: number;
+}
+
+/**
+ * Search Zotero items across multiple libraries using query phrases.
+ * 
+ * This function executes a search for each query phrase, aggregates results,
+ * and deduplicates by item key. It searches the quicksearch-titleCreatorYear
+ * mode which matches title, creators, and year.
+ * 
+ * @param libraryIds - Array of library IDs to search across
+ * @param queries - Array of query phrases to search for
+ * @param filters - Additional filters to apply
+ * @returns Array of unique matching items (deduplicated by library_id + zotero_key)
+ * 
+ * @example
+ * const results = await searchZoteroItemsWithQueries(
+ *   [1, 2],
+ *   ["climate change", "global warming"],
+ *   { author: "Smith", year_min: 2020 }
+ * );
+ */
+export const searchZoteroItemsWithQueries = async (
+    libraryIds: number[],
+    queries: string[],
+    filters: ZoteroItemSearchFilters
+): Promise<Zotero.Item[]> => {
+    const {
+        author,
+        publication,
+        year_min,
+        year_max,
+        item_type,
+        collection_key,
+        tags = [],
+        limit = 50
+    } = filters;
+
+    // Track unique items by library_id + zotero_key
+    const uniqueItems = new Map<string, Zotero.Item>();
+    const makeKey = (libraryId: number, key: string) => `${libraryId}-${key}`;
+
+    // Search each library with each query
+    for (const libraryId of libraryIds) {
+        for (const query of queries) {
+            if (!query.trim()) continue;
+
+            const search = new Zotero.Search();
+            search.addCondition('libraryID', 'is', String(libraryId));
+
+            // Use quicksearch-titleCreatorYear mode for the query
+            // This searches title, creators, and year fields
+            search.addCondition('quicksearch-titleCreatorYear', 'contains', query);
+
+            // Apply author filter
+            if (author) {
+                search.addCondition('creator', 'contains', author);
+            }
+
+            // Apply publication filter
+            if (publication) {
+                search.addCondition('publicationTitle', 'contains', publication);
+            }
+
+            // Apply year filters
+            if (year_min !== undefined) {
+                search.addCondition('year', 'isGreaterThan', String(year_min - 1));
+            }
+            if (year_max !== undefined) {
+                search.addCondition('year', 'isLessThan', String(year_max + 1));
+            }
+
+            // Apply item type filter
+            if (item_type) {
+                search.addCondition('itemType', 'is', item_type);
+            }
+
+            // Apply collection filter (only if collection exists in this library)
+            if (collection_key) {
+                search.addCondition('collection', 'is', collection_key);
+            }
+
+            // Apply tag filters
+            if (tags.length > 0) {
+                for (const tag of tags) {
+                    search.addCondition('tag', 'is', tag);
+                }
+            }
+
+            // Execute search
+            try {
+                const itemIDs: number[] = await search.search();
+                
+                if (itemIDs.length > 0) {
+                    const items: Zotero.Item[] = await Zotero.Items.getAsync(itemIDs);
+                    
+                    // Filter to regular items only and deduplicate
+                    for (const item of items) {
+                        if (item.isRegularItem() && !item.deleted) {
+                            const key = makeKey(item.libraryID, item.key);
+                            if (!uniqueItems.has(key)) {
+                                uniqueItems.set(key, item);
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                // Log and continue with other queries/libraries
+                console.error(`searchZoteroItemsWithQueries: Error searching library ${libraryId} with query "${query}":`, error);
+            }
+
+            // Early exit if we have enough results
+            if (limit > 0 && uniqueItems.size >= limit) {
+                break;
+            }
+        }
+
+        // Early exit if we have enough results
+        if (limit > 0 && uniqueItems.size >= limit) {
+            break;
+        }
+    }
+
+    // Convert to array and apply limit
+    const results = Array.from(uniqueItems.values());
+    return limit > 0 ? results.slice(0, limit) : results;
+};
+
