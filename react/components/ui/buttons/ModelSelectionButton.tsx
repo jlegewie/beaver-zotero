@@ -18,7 +18,8 @@ const MAX_MODEL_NAME_LENGTH = 25;
 const ModelMenuItemContent: React.FC<{
     model: any;
     isSelected: boolean;
-}> = ({ model, isSelected }) => {
+    showCreditCosts?: boolean
+}> = ({ model, isSelected,  showCreditCosts= false}) => {
     return (
         <div className="display-flex flex-row items-center gap-2 min-w-0">
             <div className={`display-flex text-sm truncate ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
@@ -28,7 +29,7 @@ const ModelMenuItemContent: React.FC<{
                 ? <Icon icon={BrainIcon} className={`-ml-015 ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`} />
                 : undefined
             }
-            {model.allow_app_key &&
+            {showCreditCosts && model.credit_cost &&
                 <div className="text-xs font-color-quarternary items-center">
                     <div className="text-xs">{model.credit_cost > 0.001 ? `${model.credit_cost}x credits` : 'Unlimited'}</div>
                 </div>
@@ -79,6 +80,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                     <ModelMenuItemContent 
                         model={model} 
                         isSelected={selectedModel !== null && selectedModel.id === model.id}
+                        showCreditCosts={true}
                     />
                 )
             });
