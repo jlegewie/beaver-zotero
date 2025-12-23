@@ -159,8 +159,8 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                 <div className="flex-1" />
                                 {error.type === "usage_limit_exceeded" && (
                                     <Button
-                                        variant="outline"
-                                        className="border-error font-color-red"
+                                        variant="error"
+                                        iconClassName="font-color-red"
                                         rightIcon={SettingsIcon}
                                         onClick={() => togglePreferencePage(true)}
                                     >

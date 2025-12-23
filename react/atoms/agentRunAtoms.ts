@@ -24,7 +24,7 @@ import {
     WSMissingZoteroDataEvent,
 } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
-import { selectedModelAtom, FullModelConfig } from './models';
+import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { MessageAttachment, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
 import { toMessageAttachment } from '../types/attachments/converters';
@@ -132,55 +132,83 @@ export async function processImageAnnotations(attachments: MessageAttachment[]):
  * 
  * Returns a key in these cases:
  * - Custom models: Use the API key from the custom model config
- * - User-key models (not app-key): Use the user's configured API key for the provider
- * - App-key models: No user API key needed (returns undefined)
+ * - BYOK models (access_mode='byok'): Use the user's configured API key for the provider
+ * - App-key models (access_mode='app_key'): No user API key needed (returns undefined)
+ * - Legacy models without access_mode: Use app_key if available, otherwise BYOK if only BYOK is allowed
  */
-function getUserApiKey(model: FullModelConfig): string | undefined {
-    // App-key models don't need user API keys
-    if (model.use_app_key) return undefined;
-
+function getUserApiKey(model: ModelConfig): string | undefined {
     // Custom models use the API key from their config
     if (model.is_custom && model.custom_model?.api_key) {
         return model.custom_model.api_key;
     }
 
-    // Non-custom, non-app-key models use the user's configured provider key
-    if (model.provider === 'google') {
-        return getPref('googleGenerativeAiApiKey') || undefined;
-    } else if (model.provider === 'openai') {
-        return getPref('openAiApiKey') || undefined;
-    } else if (model.provider === 'anthropic') {
-        return getPref('anthropicApiKey') || undefined;
+    // Check access_mode to determine key usage
+    // If access_mode is explicitly 'app_key', don't provide user API key
+    if (model.access_mode === 'app_key') return undefined;
+
+    // If access_mode is 'byok', use user's key
+    if (model.access_mode === 'byok') {
+        if (model.provider === 'google') {
+            return getPref('googleGenerativeAiApiKey') || undefined;
+        } else if (model.provider === 'openai') {
+            return getPref('openAiApiKey') || undefined;
+        } else if (model.provider === 'anthropic') {
+            return getPref('anthropicApiKey') || undefined;
+        }
+        return undefined;
     }
+
+    // Legacy handling: no access_mode set (e.g., from old saved preferences)
+    // Default to app_key behavior if available, otherwise fall back to BYOK if only BYOK is allowed
+    if (!model.access_mode) {
+        if (model.allow_app_key) {
+            // Prefer app_key when both are available
+            return undefined;
+        } else if (model.allow_byok) {
+            // Only use BYOK if app_key is not available
+            if (model.provider === 'google') {
+                return getPref('googleGenerativeAiApiKey') || undefined;
+            } else if (model.provider === 'openai') {
+                return getPref('openAiApiKey') || undefined;
+            } else if (model.provider === 'anthropic') {
+                return getPref('anthropicApiKey') || undefined;
+            }
+        }
+    }
+
     return undefined;
 }
 
 /** Model selection options to be included in the AgentRunRequest */
 interface ModelSelectionOptions {
-    access_id?: string;
+    model_id?: string;
     api_key?: string;
 }
 
 /**
  * Build model selection options to include in the AgentRunRequest.
- * - Custom models: Use the custom_model field in the request (no access_id/api_key)
- * - Non-custom models: access_id from plan, api_key for BYOK models
+ * - Custom models: Use the custom_model field in the request (no model_id/api_key)
+ * - App-key models (access_mode='app_key' or default): model_id only, no api_key
+ * - BYOK models (access_mode='byok'): model_id + user's api_key
  */
-function buildModelSelectionOptions(model: FullModelConfig | null): ModelSelectionOptions {
+function buildModelSelectionOptions(model: ModelConfig | null): ModelSelectionOptions {
     if (!model) return {};
 
-    // Custom models use the custom_model field in the request, not access_id/api_key
+    // Custom models use the custom_model field in the request, not model_id/api_key
     if (model.is_custom) return {};
 
     const options: ModelSelectionOptions = {};
 
-    // Include access_id for non-custom models
-    options.access_id = model.access_id;
+    // Include model_id for non-custom models
+    options.model_id = model.id;
 
-    // Include api_key for user-key models (BYOK)
-    const apiKey = getUserApiKey(model);
-    if (apiKey) {
-        options.api_key = apiKey;
+    // Include api_key only for BYOK access mode
+    // Legacy models without access_mode default to app_key if available
+    if (model.access_mode === 'byok' || (!model.access_mode && !model.allow_app_key && model.allow_byok)) {
+        const apiKey = getUserApiKey(model);
+        if (apiKey) {
+            options.api_key = apiKey;
+        }
     }
 
     return options;
@@ -214,20 +242,20 @@ function createAgentRunShell(
     modelSelectionOptions: ModelSelectionOptions,
     providerName?: string,
     customInstructions?: string,
-    customModel?: FullModelConfig['custom_model'],
+    customModel?: ModelConfig['custom_model'],
     rewriteFromRunId?: string,
 ): { run: AgentRun; request: AgentRunRequest } {
     const runId = uuidv4();
 
     // Create the request that will be sent to the backend
     // thread_id is null for new threads - backend generates the ID
-    // Model selection is included in the request (access_id/api_key for plan models, custom_model for custom)
+    // Model selection is included in the request (model_id/api_key for backend models, custom_model for custom)
     const request: AgentRunRequest = {
         type: 'chat',
         run_id: runId,
         thread_id: threadId,
         user_prompt: userPrompt,
-        ...(modelSelectionOptions.access_id ? { access_id: modelSelectionOptions.access_id } : {}),
+        ...(modelSelectionOptions.model_id ? { model_id: modelSelectionOptions.model_id } : {}),
         ...(modelSelectionOptions.api_key ? { api_key: modelSelectionOptions.api_key } : {}),
         ...(customModel ? { custom_model: customModel } : {}),
         ...(rewriteFromRunId ? { retry_run_id: rewriteFromRunId } : {}),
@@ -800,14 +828,15 @@ export const sendWSMessageAtom = atom(
             // Log model and model selection info
             logger('Selected model:', model ? {
                 id: model.id,
-                access_id: model.access_id,
                 name: model.name,
                 provider: model.provider,
                 is_custom: model.is_custom,
-                use_app_key: model.use_app_key,
+                allow_app_key: model.allow_app_key,
+                allow_byok: model.allow_byok,
+                access_mode: model.access_mode,
             } : null);
             logger('Model selection options:', {
-                access_id: modelOptions.access_id || '(not set - using custom model or plan default)',
+                model_id: modelOptions.model_id || '(not set - using custom model or plan default)',
                 hasApiKey: !!modelOptions.api_key,
             });
 

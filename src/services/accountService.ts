@@ -3,7 +3,7 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 import { SafeProfileWithPlan, ProcessingTier } from '../../react/types/profile';
 import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
 import { ApiError, ZoteroInstanceMismatchError } from '../../react/types/apiErrors';
-import { FullModelConfig } from '../../react/atoms/models';
+import { ModelConfig } from '../../react/atoms/models';
 import { ZoteroLibrary } from '../../react/types/zotero';
 import { OverallSyncStatus } from '../../react/atoms/sync';
 
@@ -25,7 +25,7 @@ interface ProfileRequest {
 
 interface ProfileResponse {
     profile: SafeProfileWithPlan
-    model_configs: FullModelConfig[]
+    model_configs: ModelConfig[]
     device_requires_authorization: boolean;
     required_data_version: number;
 }
@@ -110,7 +110,7 @@ export class AccountService extends ApiService {
      * Fetches the list of models supported by the backend
      * @returns Promise resolving to an array of supported models
      */
-    async getModelList(plan_id: string): Promise<FullModelConfig[]> {
+    async getModelList(plan_id: string): Promise<ModelConfig[]> {
         try {
             const endpoint = `${this.baseUrl}/api/v1/account/model-configs?plan_id=${plan_id}`;
             const headers = await this.getAuthHeaders();
@@ -120,7 +120,7 @@ export class AccountService extends ApiService {
                 responseType: 'json'
             });
             
-            return response.response as FullModelConfig[];
+            return response.response as ModelConfig[];
         } catch (error) {
             Zotero.debug(`getModelList: getModelList error - ${error}`, 1);
             // Return empty array on error

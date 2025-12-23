@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ModelResponse } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
@@ -9,7 +9,7 @@ import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
-import { resumedRunIdsAtom } from '../../agents/atoms';
+import { getToolCallStatus, toolResultsMapAtom, resumedRunIdsAtom } from '../../agents/atoms';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -42,15 +42,32 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
     const allWarnings = useAtomValue(threadWarningsAtom);
     const runWarnings = allWarnings.filter((w) => w.run_id === run.id);
     const resumedRunIds = useAtomValue(resumedRunIdsAtom);
+    const resultsMap = useAtomValue(toolResultsMapAtom);
     
+    // Check if any tool calls are currently in progress
+    const hasInprogressToolcalls = useMemo(() => {
+        for (const message of run.model_messages) {
+            if (message.kind === 'response') {
+                for (const part of message.parts) {
+                    if (part.part_kind === 'tool-call') {
+                        if (getToolCallStatus(part.tool_call_id, resultsMap) === 'in_progress') {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }, [run.model_messages, resultsMap]);
+
     // Check if this error run was resumed (to hide error display)
     const wasResumed = hasError && resumedRunIds.has(run.id);
 
     // Don't show user message for resume runs (empty content)
     const showUserMessage = !run.user_prompt.is_resume || run.user_prompt.content.length > 0;
     
-    // Only show spinner when streaming AND no visible content yet (not for errors)
-    const showStatusIndicator = isLastRun && isStreaming && !hasVisibleContent(run);
+    // Only show spinner when streaming AND no visible content yet AND no tool calls in progress
+    const showStatusIndicator = isLastRun && isStreaming && !hasVisibleContent(run) && !hasInprogressToolcalls;
 
     // Show agent run footer
     const showAgentRunFooter = 
