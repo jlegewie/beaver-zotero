@@ -8,6 +8,13 @@ const CUSTOM_MODEL_ID_PREFIX = 'custom';
 export type ProviderType = ModelProvider;
 export type ReasoningEffort = "low" | "medium" | "high";
 
+/**
+ * Access mode determines how the model is accessed
+ * - app_key: Use the app's API key (included in plan, uses credits)
+ * - byok: Use the user's own API key (bring your own key)
+ * - custom: Custom model with user's own configuration
+ */
+export type AccessMode = "app_key" | "byok" | "custom";
 
 export interface ModelPricing {
     input: number;
@@ -49,6 +56,10 @@ export interface ModelConfig {
     // Frontend-only fields for custom models
     is_custom?: boolean;
     custom_model?: CustomChatModel;
+
+    // Frontend-only field to track selected access mode
+    // Only set when user explicitly selects a model from UI
+    access_mode?: AccessMode;
 }
 
 const createCustomModelId = (model: CustomChatModel): string => {
@@ -83,6 +94,7 @@ const mapCustomModelsToConfigs = (): ModelConfig[] => {
             allow_app_key: false,
             is_custom: true,
             custom_model: model,
+            access_mode: 'custom',
         };
     });
 };
@@ -171,6 +183,10 @@ export const validateSelectedModelAtom = atom(
         // Default model
         let defaultModel = availableModels.find(model => model.is_default) || null;
         if (!defaultModel && availableModels.length > 0) defaultModel = availableModels[0];
+        // Add access_mode to default model if it allows app_key
+        if (defaultModel && defaultModel.allow_app_key && !defaultModel.access_mode) {
+            defaultModel = { ...defaultModel, access_mode: 'app_key' as AccessMode };
+        }
 
         // Check if the selected model is still valid with current API keys
         const isModelAvailable = selectedModel && availableModels.some(m => m.id === selectedModel.id);

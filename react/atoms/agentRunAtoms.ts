@@ -132,8 +132,9 @@ export async function processImageAnnotations(attachments: MessageAttachment[]):
  * 
  * Returns a key in these cases:
  * - Custom models: Use the API key from the custom model config
- * - BYOK models (allow_byok without allow_app_key): Use the user's configured API key for the provider
- * - App-key models: No user API key needed (returns undefined)
+ * - BYOK models (access_mode='byok'): Use the user's configured API key for the provider
+ * - App-key models (access_mode='app_key'): No user API key needed (returns undefined)
+ * - Legacy models without access_mode: Use app_key if available, otherwise BYOK if only BYOK is allowed
  */
 function getUserApiKey(model: ModelConfig): string | undefined {
     // Custom models use the API key from their config
@@ -141,11 +142,12 @@ function getUserApiKey(model: ModelConfig): string | undefined {
         return model.custom_model.api_key;
     }
 
-    // App-key models don't need user API keys
-    if (model.allow_app_key) return undefined;
+    // Check access_mode to determine key usage
+    // If access_mode is explicitly 'app_key', don't provide user API key
+    if (model.access_mode === 'app_key') return undefined;
 
-    // BYOK models use the user's configured provider key
-    if (model.allow_byok) {
+    // If access_mode is 'byok', use user's key
+    if (model.access_mode === 'byok') {
         if (model.provider === 'google') {
             return getPref('googleGenerativeAiApiKey') || undefined;
         } else if (model.provider === 'openai') {
@@ -153,7 +155,27 @@ function getUserApiKey(model: ModelConfig): string | undefined {
         } else if (model.provider === 'anthropic') {
             return getPref('anthropicApiKey') || undefined;
         }
+        return undefined;
     }
+
+    // Legacy handling: no access_mode set (e.g., from old saved preferences)
+    // Default to app_key behavior if available, otherwise fall back to BYOK if only BYOK is allowed
+    if (!model.access_mode) {
+        if (model.allow_app_key) {
+            // Prefer app_key when both are available
+            return undefined;
+        } else if (model.allow_byok) {
+            // Only use BYOK if app_key is not available
+            if (model.provider === 'google') {
+                return getPref('googleGenerativeAiApiKey') || undefined;
+            } else if (model.provider === 'openai') {
+                return getPref('openAiApiKey') || undefined;
+            } else if (model.provider === 'anthropic') {
+                return getPref('anthropicApiKey') || undefined;
+            }
+        }
+    }
+
     return undefined;
 }
 
@@ -166,7 +188,8 @@ interface ModelSelectionOptions {
 /**
  * Build model selection options to include in the AgentRunRequest.
  * - Custom models: Use the custom_model field in the request (no model_id/api_key)
- * - Non-custom models: model_id from backend, api_key for BYOK models
+ * - App-key models (access_mode='app_key' or default): model_id only, no api_key
+ * - BYOK models (access_mode='byok'): model_id + user's api_key
  */
 function buildModelSelectionOptions(model: ModelConfig | null): ModelSelectionOptions {
     if (!model) return {};
@@ -179,10 +202,13 @@ function buildModelSelectionOptions(model: ModelConfig | null): ModelSelectionOp
     // Include model_id for non-custom models
     options.model_id = model.id;
 
-    // Include api_key for BYOK models
-    const apiKey = getUserApiKey(model);
-    if (apiKey) {
-        options.api_key = apiKey;
+    // Include api_key only for BYOK access mode
+    // Legacy models without access_mode default to app_key if available
+    if (model.access_mode === 'byok' || (!model.access_mode && !model.allow_app_key && model.allow_byok)) {
+        const apiKey = getUserApiKey(model);
+        if (apiKey) {
+            options.api_key = apiKey;
+        }
     }
 
     return options;
@@ -807,6 +833,7 @@ export const sendWSMessageAtom = atom(
                 is_custom: model.is_custom,
                 allow_app_key: model.allow_app_key,
                 allow_byok: model.allow_byok,
+                access_mode: model.access_mode,
             } : null);
             logger('Model selection options:', {
                 model_id: modelOptions.model_id || '(not set - using custom model or plan default)',

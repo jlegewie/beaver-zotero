@@ -63,6 +63,12 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         const included_models = availableModels.filter((model) => model.allow_app_key && model.is_enabled && !model.is_custom) || [];
         const byok_models = availableModels.filter((model) => model.allow_byok && model.is_enabled && !model.is_custom);
 
+        // Helper to create a composite key for selection comparison
+        const getModelKey = (model: any) => {
+            return `${model.id}:${model.access_mode || 'app_key'}`;
+        };
+        const selectedKey = selectedModel ? getModelKey(selectedModel) : null;
+
         if (included_models.length > 0) {
             items.push({
                 label: 'Included Models',
@@ -72,16 +78,20 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         }
 
         included_models.sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
+            // Create a model variant with access_mode set to 'app_key'
+            const modelWithAccessMode = { ...model, access_mode: 'app_key' as const };
+            const modelKey = getModelKey(modelWithAccessMode);
+            
             items.push({
                 label: model.name,
                 onClick: () => {
-                    updateSelectedModel(model);
+                    updateSelectedModel(modelWithAccessMode);
                 },
                 icon: model.reasoning_model ? BrainIcon : undefined,
                 customContent: (
                     <ModelMenuItemContent 
                         model={model} 
-                        isSelected={selectedModel !== null && selectedModel.id === model.id}
+                        isSelected={selectedKey === modelKey}
                         showCreditCosts={true}
                     />
                 )
@@ -96,6 +106,8 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             });
 
             custom_models.forEach((model) => {
+                const modelKey = getModelKey(model);
+                
                 items.push({
                     label: model.name,
                     onClick: () => {
@@ -105,7 +117,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                     customContent: (
                         <ModelMenuItemContent 
                             model={model} 
-                            isSelected={selectedModel !== null && selectedModel.id === model.id}
+                            isSelected={selectedKey === modelKey}
                         />
                     )
                 });
@@ -120,16 +132,20 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             });
 
             byok_models.sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
+                // Create a model variant with access_mode set to 'byok'
+                const modelWithAccessMode = { ...model, access_mode: 'byok' as const };
+                const modelKey = getModelKey(modelWithAccessMode);
+                
                 items.push({
                     label: model.name,
                     onClick: () => {
-                        updateSelectedModel(model);
+                        updateSelectedModel(modelWithAccessMode);
                     },
                     icon: model.reasoning_model ? BrainIcon : undefined,
                     customContent: (
                         <ModelMenuItemContent 
                             model={model} 
-                            isSelected={selectedModel !== null && selectedModel.id === model.id}
+                            isSelected={selectedKey === modelKey}
                         />
                     )
                 });
