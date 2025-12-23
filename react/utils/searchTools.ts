@@ -439,118 +439,133 @@ export const getCollectionKeyByName = async (
  * Filters for Zotero item search (used by backend search requests)
  */
 export interface ZoteroItemSearchFilters {
-    /** Author name substring match */
-    author?: string;
-    /** Journal/publication substring match */
-    publication?: string;
     /** Minimum year (inclusive) */
     year_min?: number;
     /** Maximum year (inclusive) */
     year_max?: number;
     /** Filter by item type (e.g., "journalArticle", "book") */
-    item_type?: string;
-    /** Collection key to search within */
-    collection_key?: string;
-    /** Tags to filter by */
-    tags?: string[];
+    item_type_filter?: string;
+    /** Filter by library IDs (OR logic) */
+    libraries_filter?: number[];
+    /** Filter by collection keys (OR logic) */
+    collections_filter?: string[];
+    /** Filter by tags (OR logic) */
+    tags_filter?: string[];
     /** Maximum results to return */
     limit?: number;
 }
 
 /**
- * Search Zotero items across multiple libraries using query phrases.
+ * Search parameters for topic-based search (title + abstract)
+ */
+export interface TopicSearchParams {
+    /** List of topic phrases to search in title and abstract (OR logic) */
+    topic_phrases: string[];
+    /** Author name substring match (AND logic with topic) */
+    author_query?: string;
+    /** Publication name substring match (AND logic with topic) */
+    publication_query?: string;
+}
+
+/**
+ * Search items by topic phrases in title and abstract fields.
  * 
- * This function executes a search for each query phrase, aggregates results,
- * and deduplicates by item key. It searches the quicksearch-titleCreatorYear
- * mode which matches title, creators, and year.
+ * This function searches for items where ANY of the topic phrases appear
+ * in either the title OR abstract field. Results are deduplicated.
+ * If author_query or publication_query are provided, results must match ALL queries (AND logic).
  * 
  * @param libraryIds - Array of library IDs to search across
- * @param queries - Array of query phrases to search for
- * @param filters - Additional filters to apply
- * @returns Array of unique matching items (deduplicated by library_id + zotero_key)
+ * @param params - Search parameters (topic_phrases required, author/publication optional)
+ * @param filters - Additional filters to narrow results
+ * @returns Array of unique matching items
  * 
  * @example
- * const results = await searchZoteroItemsWithQueries(
+ * const results = await searchItemsByTopic(
  *   [1, 2],
- *   ["climate change", "global warming"],
- *   { author: "Smith", year_min: 2020 }
+ *   { topic_phrases: ["machine learning", "ML"] },
+ *   { year_min: 2020, item_type_filter: "journalArticle" }
  * );
  */
-export const searchZoteroItemsWithQueries = async (
+export const searchItemsByTopic = async (
     libraryIds: number[],
-    queries: string[],
+    params: TopicSearchParams,
     filters: ZoteroItemSearchFilters
 ): Promise<Zotero.Item[]> => {
+    const { topic_phrases, author_query, publication_query } = params;
     const {
-        author,
-        publication,
         year_min,
         year_max,
-        item_type,
-        collection_key,
-        tags = [],
+        item_type_filter,
+        collections_filter = [],
+        tags_filter = [],
         limit = 50
     } = filters;
+
+    if (!topic_phrases || topic_phrases.length === 0) {
+        throw new Error('At least one topic phrase is required');
+    }
 
     // Track unique items by library_id + zotero_key
     const uniqueItems = new Map<string, Zotero.Item>();
     const makeKey = (libraryId: number, key: string) => `${libraryId}-${key}`;
 
-    // Search each library with each query
+    // For each library and each topic phrase, search title and abstract
     for (const libraryId of libraryIds) {
-        for (const query of queries) {
-            if (!query.trim()) continue;
+        for (const phrase of topic_phrases) {
+            if (!phrase.trim()) continue;
 
-            const search = new Zotero.Search();
-            search.addCondition('libraryID', 'is', String(libraryId));
+            // Search title field
+            const titleSearch = new Zotero.Search();
+            titleSearch.addCondition('libraryID', 'is', String(libraryId));
+            titleSearch.addCondition('title', 'contains', phrase);
 
-            // Use quicksearch-titleCreatorYear mode for the query
-            // This searches title, creators, and year fields
-            search.addCondition('quicksearch-titleCreatorYear', 'contains', query);
-
-            // Apply author filter
-            if (author) {
-                search.addCondition('creator', 'contains', author);
+            // Apply author query (AND logic)
+            if (author_query) {
+                titleSearch.addCondition('creator', 'contains', author_query);
             }
 
-            // Apply publication filter
-            if (publication) {
-                search.addCondition('publicationTitle', 'contains', publication);
+            // Apply publication query (AND logic)
+            if (publication_query) {
+                titleSearch.addCondition('publicationTitle', 'contains', publication_query);
             }
 
             // Apply year filters
             if (year_min !== undefined) {
-                search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
+                titleSearch.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
             }
             if (year_max !== undefined) {
-                search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
+                titleSearch.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
             }
 
             // Apply item type filter
-            if (item_type) {
-                search.addCondition('itemType', 'is', item_type);
+            if (item_type_filter) {
+                titleSearch.addCondition('itemType', 'is', item_type_filter);
             }
 
-            // Apply collection filter (only if collection exists in this library)
-            if (collection_key) {
-                search.addCondition('collection', 'is', collection_key);
-            }
-
-            // Apply tag filters
-            if (tags && tags.length > 0) {
-                for (const tag of tags) {
-                    search.addCondition('tag', 'is', tag);
+            // Apply collection filters (OR logic)
+            if (collections_filter.length > 0) {
+                if (collections_filter.length > 1) {
+                    titleSearch.addCondition('joinMode', 'any');
+                }
+                for (const collectionKey of collections_filter) {
+                    titleSearch.addCondition('collection', 'is', String(collectionKey));
                 }
             }
 
-            // Execute search
+            // Apply tag filters (OR logic)
+            if (tags_filter && tags_filter.length > 0) {
+                if (tags_filter.length > 1) {
+                    titleSearch.addCondition('joinMode', 'any');
+                }
+                for (const tag of tags_filter) {
+                    titleSearch.addCondition('tag', 'is', tag);
+                }
+            }
+
             try {
-                const itemIDs: number[] = await search.search();
-                
-                if (itemIDs.length > 0) {
-                    const items: Zotero.Item[] = await Zotero.Items.getAsync(itemIDs);
-                    
-                    // Filter to regular items only and deduplicate
+                const titleItemIDs: number[] = await titleSearch.search();
+                if (titleItemIDs.length > 0) {
+                    const items: Zotero.Item[] = await Zotero.Items.getAsync(titleItemIDs);
                     for (const item of items) {
                         if (item.isRegularItem() && !item.deleted) {
                             const key = makeKey(item.libraryID, item.key);
@@ -561,8 +576,62 @@ export const searchZoteroItemsWithQueries = async (
                     }
                 }
             } catch (error) {
-                // Log and continue with other queries/libraries
-                console.error(`searchZoteroItemsWithQueries: Error searching library ${libraryId} with query "${query}":`, error);
+                console.error(`searchItemsByTopic: Error searching title in library ${libraryId} with phrase "${phrase}":`, error);
+            }
+
+            // Search abstract field
+            const abstractSearch = new Zotero.Search();
+            abstractSearch.addCondition('libraryID', 'is', String(libraryId));
+            abstractSearch.addCondition('abstractNote', 'contains', phrase);
+
+            // Apply same filters to abstract search
+            if (author_query) {
+                abstractSearch.addCondition('creator', 'contains', author_query);
+            }
+            if (publication_query) {
+                abstractSearch.addCondition('publicationTitle', 'contains', publication_query);
+            }
+            if (year_min !== undefined) {
+                abstractSearch.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
+            }
+            if (year_max !== undefined) {
+                abstractSearch.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
+            }
+            if (item_type_filter) {
+                abstractSearch.addCondition('itemType', 'is', item_type_filter);
+            }
+            if (collections_filter.length > 0) {
+                if (collections_filter.length > 1) {
+                    abstractSearch.addCondition('joinMode', 'any');
+                }
+                for (const collectionKey of collections_filter) {
+                    abstractSearch.addCondition('collection', 'is', String(collectionKey));
+                }
+            }
+            if (tags_filter && tags_filter.length > 0) {
+                if (tags_filter.length > 1) {
+                    abstractSearch.addCondition('joinMode', 'any');
+                }
+                for (const tag of tags_filter) {
+                    abstractSearch.addCondition('tag', 'is', tag);
+                }
+            }
+
+            try {
+                const abstractItemIDs: number[] = await abstractSearch.search();
+                if (abstractItemIDs.length > 0) {
+                    const items: Zotero.Item[] = await Zotero.Items.getAsync(abstractItemIDs);
+                    for (const item of items) {
+                        if (item.isRegularItem() && !item.deleted) {
+                            const key = makeKey(item.libraryID, item.key);
+                            if (!uniqueItems.has(key)) {
+                                uniqueItems.set(key, item);
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error(`searchItemsByTopic: Error searching abstract in library ${libraryId} with phrase "${phrase}":`, error);
             }
 
             // Early exit if we have enough results
@@ -581,4 +650,184 @@ export const searchZoteroItemsWithQueries = async (
     const results = Array.from(uniqueItems.values());
     return limit > 0 ? results.slice(0, limit) : results;
 };
+
+/**
+ * Search items by author name.
+ * 
+ * @param libraryIds - Array of library IDs to search across
+ * @param author_query - Author name to search for (substring match)
+ * @param filters - Additional filters to narrow results
+ * @returns Array of unique matching items
+ */
+export const searchItemsByAuthor = async (
+    libraryIds: number[],
+    author_query: string,
+    filters: ZoteroItemSearchFilters
+): Promise<Zotero.Item[]> => {
+    const {
+        year_min,
+        year_max,
+        item_type_filter,
+        collections_filter = [],
+        tags_filter = [],
+        limit = 50
+    } = filters;
+
+    const uniqueItems = new Map<string, Zotero.Item>();
+    const makeKey = (libraryId: number, key: string) => `${libraryId}-${key}`;
+
+    for (const libraryId of libraryIds) {
+        const search = new Zotero.Search();
+        search.addCondition('libraryID', 'is', String(libraryId));
+        search.addCondition('creator', 'contains', author_query);
+
+        // Apply year filters
+        if (year_min !== undefined) {
+            search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
+        }
+        if (year_max !== undefined) {
+            search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
+        }
+
+        // Apply item type filter
+        if (item_type_filter) {
+            search.addCondition('itemType', 'is', item_type_filter);
+        }
+
+        // Apply collection filters (OR logic)
+        if (collections_filter.length > 0) {
+            if (collections_filter.length > 1) {
+                search.addCondition('joinMode', 'any');
+            }
+            for (const collectionKey of collections_filter) {
+                search.addCondition('collection', 'is', String(collectionKey));
+            }
+        }
+
+        // Apply tag filters (OR logic)
+        if (tags_filter && tags_filter.length > 0) {
+            if (tags_filter.length > 1) {
+                search.addCondition('joinMode', 'any');
+            }
+            for (const tag of tags_filter) {
+                search.addCondition('tag', 'is', tag);
+            }
+        }
+
+        try {
+            const itemIDs: number[] = await search.search();
+            if (itemIDs.length > 0) {
+                const items: Zotero.Item[] = await Zotero.Items.getAsync(itemIDs);
+                for (const item of items) {
+                    if (item.isRegularItem() && !item.deleted) {
+                        const key = makeKey(item.libraryID, item.key);
+                        if (!uniqueItems.has(key)) {
+                            uniqueItems.set(key, item);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error(`searchItemsByAuthor: Error searching library ${libraryId}:`, error);
+        }
+
+        if (limit > 0 && uniqueItems.size >= limit) {
+            break;
+        }
+    }
+
+    const results = Array.from(uniqueItems.values());
+    return limit > 0 ? results.slice(0, limit) : results;
+};
+
+/**
+ * Search items by publication name.
+ * 
+ * @param libraryIds - Array of library IDs to search across
+ * @param publication_query - Publication name to search for (substring match)
+ * @param filters - Additional filters to narrow results
+ * @returns Array of unique matching items
+ */
+export const searchItemsByPublication = async (
+    libraryIds: number[],
+    publication_query: string,
+    filters: ZoteroItemSearchFilters
+): Promise<Zotero.Item[]> => {
+    const {
+        year_min,
+        year_max,
+        item_type_filter,
+        collections_filter = [],
+        tags_filter = [],
+        limit = 50
+    } = filters;
+
+    const uniqueItems = new Map<string, Zotero.Item>();
+    const makeKey = (libraryId: number, key: string) => `${libraryId}-${key}`;
+
+    for (const libraryId of libraryIds) {
+        const search = new Zotero.Search();
+        search.addCondition('libraryID', 'is', String(libraryId));
+        search.addCondition('publicationTitle', 'contains', publication_query);
+
+        // Apply year filters
+        if (year_min !== undefined) {
+            search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
+        }
+        if (year_max !== undefined) {
+            search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
+        }
+
+        // Apply item type filter
+        if (item_type_filter) {
+            search.addCondition('itemType', 'is', item_type_filter);
+        }
+
+        // Apply collection filters (OR logic)
+        if (collections_filter.length > 0) {
+            if (collections_filter.length > 1) {
+                search.addCondition('joinMode', 'any');
+            }
+            for (const collectionKey of collections_filter) {
+                search.addCondition('collection', 'is', String(collectionKey));
+            }
+        }
+
+        // Apply tag filters (OR logic)
+        if (tags_filter && tags_filter.length > 0) {
+            if (tags_filter.length > 1) {
+                search.addCondition('joinMode', 'any');
+            }
+            for (const tag of tags_filter) {
+                search.addCondition('tag', 'is', tag);
+            }
+        }
+
+        try {
+            const itemIDs: number[] = await search.search();
+            if (itemIDs.length > 0) {
+                const items: Zotero.Item[] = await Zotero.Items.getAsync(itemIDs);
+                for (const item of items) {
+                    if (item.isRegularItem() && !item.deleted) {
+                        const key = makeKey(item.libraryID, item.key);
+                        if (!uniqueItems.has(key)) {
+                            uniqueItems.set(key, item);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error(`searchItemsByPublication: Error searching library ${libraryId}:`, error);
+        }
+
+        if (limit > 0 && uniqueItems.size >= limit) {
+            break;
+        }
+    }
+
+    const results = Array.from(uniqueItems.values());
+    return limit > 0 ? results.slice(0, limit) : results;
+};
+
+
 

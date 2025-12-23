@@ -212,20 +212,27 @@ export interface WSZoteroItemSearchRequest extends WSBaseEvent {
     event: 'zotero_item_search_request';
     request_id: string;
 
-    // Query parameters - two tiers
-    query_primary: string[];
-    query_fallback?: string[];
+    // Query parameters (at least one required, combined with AND)
+    /** List of phrases to search in title+abstract (OR'd within, AND'd with other queries) */
+    topic_query?: string[];
+    /** Author name to search (substring match) */
+    author_query?: string;
+    /** Publication/journal name to search (substring match) */
+    publication_query?: string;
 
-    // Metadata filters
-    author?: string;
-    publication?: string;
+    // Filters (optional, narrow results further)
+    /** Minimum publication year (inclusive) */
     year_min?: number;
+    /** Maximum publication year (inclusive) */
     year_max?: number;
-    item_type?: string;
-
-    // Collection and tag filters
-    collection_key?: string;
-    tags?: string[];
+    /** Filter by item type (e.g., "journalArticle") */
+    item_type_filter?: string;
+    /** Filter by library names or IDs (OR logic) */
+    libraries_filter?: (string | number)[];
+    /** Filter by tag names (OR logic) */
+    tags_filter?: string[];
+    /** Filter by collection names or keys (OR logic) */
+    collections_filter?: (string | number)[];
 
     // Options
     limit: number;
@@ -236,7 +243,7 @@ export interface WSZoteroItemSearchResponse {
     type: 'zotero_item_search';
     request_id: string;
     items: ZoteroItemSearchResultItem[];
-    matched_tier: 'primary' | 'fallback' | 'none';
+    matched_tier: 'primary';
 }
 
 /** Request from backend to fetch Zotero item/attachment data */

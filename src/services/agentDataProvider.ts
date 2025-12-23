@@ -33,7 +33,7 @@ import {
     WSZoteroItemSearchResponse,
     ZoteroItemSearchResultItem,
 } from './agentProtocol';
-import { searchZoteroItemsWithQueries, ZoteroItemSearchFilters } from '../../react/utils/searchTools';
+import { searchItemsByTopic, searchItemsByAuthor, searchItemsByPublication, TopicSearchParams, ZoteroItemSearchFilters } from '../../react/utils/searchTools';
 
 /**
  * Handle zotero_data_request event.
@@ -325,10 +325,34 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
 /**
  * Handle zotero_item_search_request event.
  * Searches the user's Zotero library and returns matching items with attachments.
+ * 
+ * Algorithm:
+ * 1. Validate: At least one query parameter must be provided
+ * 2. Apply query matching (AND logic between different query types):
+ *    - topic_query: search title+abstract for each phrase (OR within)
+ *    - author_query: search creator names
+ *    - publication_query: search publication/journal name
+ * 3. Apply filters to narrow results (year, type, libraries, tags, collections)
+ * 4. Return items with attachments
  */
 export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchRequest): Promise<WSZoteroItemSearchResponse> {
-    // Get synced library IDs
-    const syncLibraryIds = store.get(syncLibraryIdsAtom);
+    // Validate: at least one query parameter must be provided
+    const hasQuery = (request.topic_query && request.topic_query.length > 0) ||
+                     !!request.author_query ||
+                     !!request.publication_query;
+
+    if (!hasQuery) {
+        logger('handleZoteroItemSearchRequest: No query parameters provided', 1);
+        return {
+            type: 'zotero_item_search',
+            request_id: request.request_id,
+            items: [],
+            matched_tier: 'primary',
+        };
+    }
+
+    // Get synced library IDs and apply libraries_filter if provided
+    let syncLibraryIds = store.get(syncLibraryIdsAtom);
     
     if (syncLibraryIds.length === 0) {
         logger('handleZoteroItemSearchRequest: No synced libraries configured', 1);
@@ -336,45 +360,135 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
             type: 'zotero_item_search',
             request_id: request.request_id,
             items: [],
-            matched_tier: 'none',
+            matched_tier: 'primary',
         };
+    }
+
+    // Apply libraries_filter if provided
+    if (request.libraries_filter && request.libraries_filter.length > 0) {
+        // Convert library names/IDs to library IDs
+        const requestedLibraryIds = new Set<number>();
+        
+        for (const libraryFilter of request.libraries_filter) {
+            if (typeof libraryFilter === 'number') {
+                // It's a library ID
+                if (syncLibraryIds.includes(libraryFilter)) {
+                    requestedLibraryIds.add(libraryFilter);
+                }
+            } else if (typeof libraryFilter === 'string') {
+                // It's a library name - find matching libraries
+                const allLibraries = Zotero.Libraries.getAll();
+                for (const lib of allLibraries) {
+                    if (syncLibraryIds.includes(lib.libraryID) && 
+                        lib.name.toLowerCase().includes(libraryFilter.toLowerCase())) {
+                        requestedLibraryIds.add(lib.libraryID);
+                    }
+                }
+            }
+        }
+
+        if (requestedLibraryIds.size > 0) {
+            syncLibraryIds = Array.from(requestedLibraryIds);
+        } else {
+            // No matching libraries found
+            logger('handleZoteroItemSearchRequest: No matching libraries found in filter', 1);
+            return {
+                type: 'zotero_item_search',
+                request_id: request.request_id,
+                items: [],
+                matched_tier: 'primary',
+            };
+        }
+    }
+
+    // Convert collections_filter names to keys if needed
+    const collectionKeys: string[] = [];
+    if (request.collections_filter && request.collections_filter.length > 0) {
+        for (const collectionFilter of request.collections_filter) {
+            if (typeof collectionFilter === 'string') {
+                // Could be a key or a name
+                // Check if it looks like a Zotero key (8 alphanumeric characters)
+                if (/^[A-Z0-9]{8}$/i.test(collectionFilter)) {
+                    collectionKeys.push(collectionFilter);
+                } else {
+                    // Treat as name, search for matching collections across libraries
+                    for (const libraryId of syncLibraryIds) {
+                        const collections = Zotero.Collections.getByLibrary(libraryId);
+                        for (const collection of collections) {
+                            if (collection.name.toLowerCase().includes(collectionFilter.toLowerCase())) {
+                                collectionKeys.push(collection.key);
+                            }
+                        }
+                    }
+                }
+            } else if (typeof collectionFilter === 'number') {
+                // It's a collection ID - convert to key
+                const collection = Zotero.Collections.get(collectionFilter);
+                if (collection) {
+                    collectionKeys.push(collection.key);
+                }
+            }
+        }
     }
 
     // Build filters from request
     const filters: ZoteroItemSearchFilters = {
-        author: request.author,
-        publication: request.publication,
         year_min: request.year_min,
         year_max: request.year_max,
-        item_type: request.item_type,
-        collection_key: request.collection_key,
-        tags: request.tags,
+        item_type_filter: request.item_type_filter,
+        libraries_filter: syncLibraryIds,
+        collections_filter: collectionKeys.length > 0 ? collectionKeys : undefined,
+        tags_filter: request.tags_filter,
         limit: request.limit,
     };
 
-    // Step 1: Try primary queries
+    // Step 1: Execute queries based on what's provided
     let items: Zotero.Item[] = [];
-    let matchedTier: 'primary' | 'fallback' | 'none' = 'none';
 
-    if (request.query_primary && request.query_primary.length > 0) {
-        items = await searchZoteroItemsWithQueries(syncLibraryIds, request.query_primary, filters);
-        if (items.length > 0) {
-            matchedTier = 'primary';
-        }
+    // Topic query (searches title + abstract)
+    if (request.topic_query && request.topic_query.length > 0) {
+        const topicParams: TopicSearchParams = {
+            topic_phrases: request.topic_query,
+            author_query: request.author_query,
+            publication_query: request.publication_query,
+        };
+        items = await searchItemsByTopic(syncLibraryIds, topicParams, filters);
+    }
+    // Author-only query
+    else if (request.author_query && !request.publication_query) {
+        items = await searchItemsByAuthor(syncLibraryIds, request.author_query, filters);
+    }
+    // Publication-only query
+    else if (request.publication_query && !request.author_query) {
+        items = await searchItemsByPublication(syncLibraryIds, request.publication_query, filters);
+    }
+    // Both author and publication (need to intersect results)
+    else if (request.author_query && request.publication_query) {
+        // Search by author first
+        const authorItems = await searchItemsByAuthor(syncLibraryIds, request.author_query, {
+            ...filters,
+            limit: 0, // No limit for intermediate result
+        });
+        
+        // Filter by publication
+        const makeKey = (libraryId: number, key: string) => `${libraryId}-${key}`;
+        const authorItemKeys = new Set(authorItems.map(item => makeKey(item.libraryID, item.key)));
+        
+        const publicationItems = await searchItemsByPublication(syncLibraryIds, request.publication_query, {
+            ...filters,
+            limit: 0, // No limit for intermediate result
+        });
+        
+        // Keep only items that match both
+        items = publicationItems.filter(item => 
+            authorItemKeys.has(makeKey(item.libraryID, item.key))
+        );
     }
 
-    // Step 2: Try fallback queries if primary returned nothing
-    if (items.length === 0 && request.query_fallback && request.query_fallback.length > 0) {
-        items = await searchZoteroItemsWithQueries(syncLibraryIds, request.query_fallback, filters);
-        if (items.length > 0) {
-            matchedTier = 'fallback';
-        }
-    }
-
-    // Step 3: Apply limit
+    // Step 2: Apply limit
     const limitedItems = request.limit > 0 ? items.slice(0, request.limit) : items;
 
-    // Step 4: Serialize items with attachments
+    // Step 3: Serialize items with attachments
     const resultItems: ZoteroItemSearchResultItem[] = [];
     
     // Load all item data in bulk for efficiency
@@ -418,7 +532,7 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
         type: 'zotero_item_search',
         request_id: request.request_id,
         items: resultItems,
-        matched_tier: matchedTier,
+        matched_tier: 'primary',
     };
 
     return response;

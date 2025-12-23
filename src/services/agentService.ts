@@ -365,7 +365,7 @@ export class AgentService {
                     break;
 
                 case 'zotero_item_search_request':
-                    logger(`AgentService: Received zotero_item_search_request: "${event.query_primary?.[0] || event.query_fallback?.[0] || 'no query'}"`, 1);
+                    logger(`AgentService: Received zotero_item_search_request: topic=${event.topic_query?.length || 0} phrases, author="${event.author_query || ''}", pub="${event.publication_query || ''}"`, 1);
                     handleZoteroItemSearchRequest(event)
                         .then(res => this.send(res))
                         .catch(err => this.handleProviderError(err, 'zotero_item_search_request_failed'));
