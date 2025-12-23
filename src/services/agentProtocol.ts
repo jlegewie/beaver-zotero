@@ -243,7 +243,6 @@ export interface WSZoteroItemSearchResponse {
     type: 'zotero_item_search';
     request_id: string;
     items: ZoteroItemSearchResultItem[];
-    matched_tier: 'primary';
 }
 
 /** Request from backend to fetch Zotero item/attachment data */

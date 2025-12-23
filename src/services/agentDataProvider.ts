@@ -347,58 +347,40 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
             type: 'zotero_item_search',
             request_id: request.request_id,
             items: [],
-            matched_tier: 'primary',
         };
     }
 
     // Get synced library IDs and apply libraries_filter if provided
-    let syncLibraryIds = store.get(syncLibraryIdsAtom);
+    // let syncLibraryIds = store.get(syncLibraryIdsAtom);
     
-    if (syncLibraryIds.length === 0) {
-        logger('handleZoteroItemSearchRequest: No synced libraries configured', 1);
-        return {
-            type: 'zotero_item_search',
-            request_id: request.request_id,
-            items: [],
-            matched_tier: 'primary',
-        };
-    }
+    // if (syncLibraryIds.length === 0) {
+    //     logger('handleZoteroItemSearchRequest: No synced libraries configured', 1);
+    //     return {
+    //         type: 'zotero_item_search',
+    //         request_id: request.request_id,
+    //         items: [],
+    //     };
+    // }
 
     // Apply libraries_filter if provided
+    const libraryIds: number[] = [];
     if (request.libraries_filter && request.libraries_filter.length > 0) {
         // Convert library names/IDs to library IDs
-        const requestedLibraryIds = new Set<number>();
-        
         for (const libraryFilter of request.libraries_filter) {
             if (typeof libraryFilter === 'number') {
-                // It's a library ID
-                if (syncLibraryIds.includes(libraryFilter)) {
-                    requestedLibraryIds.add(libraryFilter);
-                }
+                libraryIds.push(libraryFilter);
             } else if (typeof libraryFilter === 'string') {
                 // It's a library name - find matching libraries
                 const allLibraries = Zotero.Libraries.getAll();
                 for (const lib of allLibraries) {
-                    if (syncLibraryIds.includes(lib.libraryID) && 
-                        lib.name.toLowerCase().includes(libraryFilter.toLowerCase())) {
-                        requestedLibraryIds.add(lib.libraryID);
+                    if (lib.name.toLowerCase().includes(libraryFilter.toLowerCase())) {
+                        libraryIds.push(lib.libraryID);
                     }
                 }
             }
         }
-
-        if (requestedLibraryIds.size > 0) {
-            syncLibraryIds = Array.from(requestedLibraryIds);
-        } else {
-            // No matching libraries found
-            logger('handleZoteroItemSearchRequest: No matching libraries found in filter', 1);
-            return {
-                type: 'zotero_item_search',
-                request_id: request.request_id,
-                items: [],
-                matched_tier: 'primary',
-            };
-        }
+    } else {
+        libraryIds.push(...Zotero.Libraries.getAll().map(lib => lib.libraryID));
     }
 
     // Convert collections_filter names to keys if needed
@@ -412,7 +394,7 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
                     collectionKeys.push(collectionFilter);
                 } else {
                     // Treat as name, search for matching collections across libraries
-                    for (const libraryId of syncLibraryIds) {
+                    for (const libraryId of Zotero.Libraries.getAll().map(lib => lib.libraryID)) {
                         const collections = Zotero.Collections.getByLibrary(libraryId);
                         for (const collection of collections) {
                             if (collection.name.toLowerCase().includes(collectionFilter.toLowerCase())) {
@@ -436,7 +418,7 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
         year_min: request.year_min,
         year_max: request.year_max,
         item_type_filter: request.item_type_filter,
-        libraries_filter: syncLibraryIds,
+        libraries_filter: libraryIds.length > 0 ? libraryIds : undefined,
         collections_filter: collectionKeys.length > 0 ? collectionKeys : undefined,
         tags_filter: request.tags_filter,
         limit: request.limit,
@@ -447,25 +429,42 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
 
     // Topic query (searches title + abstract)
     if (request.topic_query && request.topic_query.length > 0) {
+        logger('handleZoteroItemSearchRequest: Topic query', libraryIds, request.topic_query, filters, 1);
         const topicParams: TopicSearchParams = {
             topic_phrases: request.topic_query,
             author_query: request.author_query,
             publication_query: request.publication_query,
         };
-        items = await searchItemsByTopic(syncLibraryIds, topicParams, filters);
+        items = await searchItemsByTopic(libraryIds, topicParams, filters);
     }
     // Author-only query
     else if (request.author_query && !request.publication_query) {
-        items = await searchItemsByAuthor(syncLibraryIds, request.author_query, filters);
+        logger('handleZoteroItemSearchRequest: Author query', {
+            libraryIds,
+            author_query: request.author_query,
+            filters,
+        }, 1);
+        items = await searchItemsByAuthor(libraryIds, request.author_query, filters);
     }
     // Publication-only query
     else if (request.publication_query && !request.author_query) {
-        items = await searchItemsByPublication(syncLibraryIds, request.publication_query, filters);
+        logger('handleZoteroItemSearchRequest: Publication query', {
+            libraryIds,
+            publication_query: request.publication_query,
+            filters,
+        }, 1);
+        items = await searchItemsByPublication(libraryIds, request.publication_query, filters);
     }
     // Both author and publication (need to intersect results)
     else if (request.author_query && request.publication_query) {
+        logger('handleZoteroItemSearchRequest: Both author and publication query', {
+            libraryIds,
+            author_query: request.author_query,
+            publication_query: request.publication_query,
+            filters,
+        }, 1);
         // Search by author first
-        const authorItems = await searchItemsByAuthor(syncLibraryIds, request.author_query, {
+        const authorItems = await searchItemsByAuthor(libraryIds, request.author_query, {
             ...filters,
             limit: 0, // No limit for intermediate result
         });
@@ -474,7 +473,7 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
         const makeKey = (libraryId: number, key: string) => `${libraryId}-${key}`;
         const authorItemKeys = new Set(authorItems.map(item => makeKey(item.libraryID, item.key)));
         
-        const publicationItems = await searchItemsByPublication(syncLibraryIds, request.publication_query, {
+        const publicationItems = await searchItemsByPublication(libraryIds, request.publication_query, {
             ...filters,
             limit: 0, // No limit for intermediate result
         });
@@ -484,6 +483,10 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
             authorItemKeys.has(makeKey(item.libraryID, item.key))
         );
     }
+    logger('handleZoteroItemSearchRequest: Final items', {
+        libraryIds,
+        items: items.length,
+    }, 1);
 
     // Step 2: Apply limit
     const limitedItems = request.limit > 0 ? items.slice(0, request.limit) : items;
@@ -532,7 +535,6 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
         type: 'zotero_item_search',
         request_id: request.request_id,
         items: resultItems,
-        matched_tier: 'primary',
     };
 
     return response;

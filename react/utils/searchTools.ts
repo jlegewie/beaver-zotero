@@ -105,7 +105,7 @@ export const searchItemsByMetadata = async (
     if (year_exact !== undefined) {
         search.addCondition('year', 'is', String(year_exact));
     } else {
-        if (year_min !== undefined) {
+        if (year_min && year_min > 0) {
             search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
         }
         if (year_max !== undefined) {
@@ -253,7 +253,7 @@ export const searchFulltextKeywords = async (
     }
 
     // Year filters
-    if (year_min !== undefined) {
+    if (year_min && year_min > 0) {
         search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
     }
     if (year_max !== undefined) {
@@ -530,7 +530,7 @@ export const searchItemsByTopic = async (
             }
 
             // Apply year filters
-            if (year_min !== undefined) {
+            if (year_min && year_min > 0) {
                 titleSearch.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
             }
             if (year_max !== undefined) {
@@ -591,7 +591,7 @@ export const searchItemsByTopic = async (
             if (publication_query) {
                 abstractSearch.addCondition('publicationTitle', 'contains', publication_query);
             }
-            if (year_min !== undefined) {
+            if (year_min && year_min > 0) {
                 abstractSearch.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
             }
             if (year_max !== undefined) {
@@ -682,10 +682,10 @@ export const searchItemsByAuthor = async (
         search.addCondition('creator', 'contains', author_query);
 
         // Apply year filters
-        if (year_min !== undefined) {
+        if (year_min && year_min > 0) {
             search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
         }
-        if (year_max !== undefined) {
+        if (year_max && year_max > 0) {
             search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
         }
 
@@ -771,7 +771,7 @@ export const searchItemsByPublication = async (
         search.addCondition('publicationTitle', 'contains', publication_query);
 
         // Apply year filters
-        if (year_min !== undefined) {
+        if (year_min && year_min > 0) {
             search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
         }
         if (year_max !== undefined) {
