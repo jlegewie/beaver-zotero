@@ -434,28 +434,6 @@ export const getCollectionKeyByName = async (
     return null;
 };
 
-/**
- * Helper function to get saved search key from search name
- * 
- * @param libraryID - The library to search in
- * @param searchName - Name of the saved search
- * @returns Saved search key or null if not found
- */
-export const getSavedSearchKeyByName = async (
-    libraryID: number,
-    searchName: string
-): Promise<string | null> => {
-    const searches = Zotero.Searches.getAll(libraryID);
-    
-    for (const search of searches) {
-        if (search.name === searchName) {
-            return search.key;
-        }
-    }
-    
-    return null;
-};
-
 
 /**
  * Filters for Zotero item search (used by backend search requests)
