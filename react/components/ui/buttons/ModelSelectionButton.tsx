@@ -21,17 +21,19 @@ const ModelMenuItemContent: React.FC<{
     showCreditCosts?: boolean
 }> = ({ model, isSelected,  showCreditCosts= false}) => {
     return (
-        <div className="display-flex flex-row items-center gap-2 min-w-0">
-            <div className={`display-flex text-sm truncate ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
-                {model.name}
+        <div className="display-flex flex-col min-w-0">
+            <div className="display-flex flex-row items-center gap-2 min-w-0">
+                <div className={`display-flex text-sm truncate ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
+                    {model.name}
+                </div>
+                {model.reasoning_model
+                    ? <Icon icon={BrainIcon} className={`-ml-015 ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`} />
+                    : undefined
+                }
             </div>
-            {model.reasoning_model
-                ? <Icon icon={BrainIcon} className={`-ml-015 ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`} />
-                : undefined
-            }
             {showCreditCosts && model.credit_cost &&
-                <div className="text-xs font-color-quarternary items-center">
-                    <div className="text-xs">{model.credit_cost > 0.001 ? `${model.credit_cost}x credits` : 'Unlimited'}</div>
+                <div className="text-xs font-color-tertiary items-center">
+                    <div className="text-xs">{model.credit_cost > 0.001 ? `${model.credit_cost} credit${model.credit_cost !== 1 ? 's' : ''} per step` : 'Unlimited'}</div>
                 </div>
             }
         </div>
