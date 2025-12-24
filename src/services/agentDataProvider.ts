@@ -32,8 +32,132 @@ import {
     WSZoteroItemSearchRequest,
     WSZoteroItemSearchResponse,
     ZoteroItemSearchResultItem,
+    AttachmentFileStatus,
 } from './agentProtocol';
 import { searchItemsByTopic, searchItemsByAuthor, searchItemsByPublication, TopicSearchParams, ZoteroItemSearchFilters } from '../../react/utils/searchTools';
+import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
+
+/**
+ * Get file status information for an attachment.
+ * Determines page count and availability of fulltext/page images.
+ * 
+ * @param attachment - Zotero attachment item
+ * @returns File status information
+ */
+async function getAttachmentFileStatus(attachment: Zotero.Item): Promise<AttachmentFileStatus> {
+    // Get the attachment mime type
+    const contentType = attachment.attachmentContentType;
+
+    // Non-PDF attachments are not currently supported for content extraction
+    if (!attachment.isPDFAttachment()) {
+        return {
+            mime_type: contentType,
+            page_count: null,
+            fulltext_available: false,
+            page_images_available: false,
+            unavailable_reason: 'unsupported_format',
+            status_message: `File type "${contentType || 'unknown'}" is not supported for content extraction`,
+        };
+    }
+
+    // Check if the file exists locally
+    const filePath = await attachment.getFilePathAsync();
+    if (!filePath) {
+        const isFileAvailableOnServer = isAttachmentOnServer(attachment);
+        const status_message = isFileAvailableOnServer
+            ? 'File is not downloaded to the local computer and cannot be accessed'
+            : 'File is not available locally';
+        return {
+            mime_type: contentType,
+            page_count: null,
+            fulltext_available: false,
+            page_images_available: false,
+            unavailable_reason: 'file_missing',
+            status_message: status_message,
+        };
+    }
+    
+    const fileExists = await attachment.fileExists();
+    if (!fileExists) {
+        return {
+            mime_type: contentType,
+            page_count: null,
+            fulltext_available: false,
+            page_images_available: false,
+            unavailable_reason: 'file_missing',
+            status_message: 'File is not available locally',
+        };
+    }
+    
+    // Try to analyze the PDF
+    try {
+        const pdfData = await IOUtils.read(filePath);
+        const extractor = new PDFExtractor();
+        
+        // Get page count - this also validates the PDF and detects encryption
+        let pageCount: number;
+        try {
+            pageCount = await extractor.getPageCount(pdfData);
+        } catch (error) {
+            if (error instanceof ExtractionError) {
+                if (error.code === ExtractionErrorCode.ENCRYPTED) {
+                    return {
+                        mime_type: contentType,
+                        page_count: null,
+                        fulltext_available: false,
+                        page_images_available: false,
+                        unavailable_reason: 'file_encrypted',
+                        status_message: 'PDF is password-protected',
+                    };
+                } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
+                    return {
+                        mime_type: contentType,
+                        page_count: null,
+                        fulltext_available: false,
+                        page_images_available: false,
+                        unavailable_reason: 'file_invalid',
+                        status_message: 'PDF file is invalid or corrupted',
+                    };
+                }
+            }
+            throw error;
+        }
+        
+        // Check if the PDF has a text layer (needs OCR if not)
+        const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
+        
+        if (ocrAnalysis.needsOCR) {
+            return {
+                mime_type: contentType,
+                page_count: pageCount,
+                fulltext_available: false,
+                page_images_available: true, // Page images can still be rendered
+                unavailable_reason: 'file_needs_ocr',
+                status_message: `Text unavailable because the PDF requires OCR. Page images are available`,
+            };
+        }
+        
+        // All checks passed - file is fully accessible
+        return {
+            mime_type: contentType,
+            page_count: pageCount,
+            fulltext_available: true,
+            page_images_available: true,
+        };
+        
+    } catch (error) {
+        // Unexpected error during analysis
+        logger(`getAttachmentFileStatus: Error analyzing PDF: ${error}`, 1);
+        return {
+            mime_type: contentType,
+            page_count: null,
+            fulltext_available: false,
+            page_images_available: false,
+            unavailable_reason: 'file_invalid',
+            status_message: `Error analyzing PDF`,
+        };
+    }
+}
 
 /**
  * Handle zotero_data_request event.
@@ -514,6 +638,7 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
             // Get and serialize attachments
             const attachmentIds = item.getAttachments();
             const attachments: import('../../react/types/zotero').AttachmentData[] = [];
+            const attachmentFileStatus: AttachmentFileStatus[] = [];
 
             if (attachmentIds.length > 0) {
                 const attachmentItems = await Zotero.Items.getAsync(attachmentIds);
@@ -524,6 +649,9 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
                         const attachmentData = await serializeAttachment(attachment, undefined, { skipSyncingFilter: true });
                         if (attachmentData) {
                             attachments.push(attachmentData);
+                            // Get file status for this attachment
+                            const fileStatus = await getAttachmentFileStatus(attachment);
+                            attachmentFileStatus.push(fileStatus);
                         }
                     }
                 }
@@ -532,6 +660,7 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
             resultItems.push({
                 item: itemData,
                 attachments,
+                attachment_file_status: attachmentFileStatus,
             });
         } catch (error) {
             logger(`handleZoteroItemSearchRequest: Failed to serialize item ${item.key}: ${error}`, 1);
