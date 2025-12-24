@@ -259,7 +259,7 @@ export function isReadPagesResult(
     
     return (
         typeof summary.tool_name === 'string' &&
-        typeof summary.result_count === 'number' &&
+        // typeof summary.result_count === 'number' &&
         Array.isArray(summary.chunks) &&
         summary.chunks.every((chunk: unknown) => {
             if (!chunk || typeof chunk !== 'object') return false;
