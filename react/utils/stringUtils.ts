@@ -33,5 +33,5 @@ export function formatNumberRanges(numbers: number[]): string {
         }
     }
 
-    return parts.join(", ");
+    return parts.join(",");
 }
