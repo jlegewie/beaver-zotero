@@ -10,7 +10,7 @@
 import { logger } from '../utils/logger';
 import { ZoteroItemStatus, ItemDataWithStatus, AttachmentDataWithStatus } from '../../react/types/zotero';
 import { safeIsInTrash } from '../utils/zoteroUtils';
-import { syncingItemFilterAsync } from '../utils/sync';
+import { syncingItemFilter, syncingItemFilterAsync } from '../utils/sync';
 import { syncLibraryIdsAtom, syncWithZoteroAtom } from '../../react/atoms/profile';
 import { userIdAtom } from '../../react/atoms/auth';
 
@@ -33,7 +33,9 @@ import {
     WSZoteroItemSearchResponse,
     ZoteroItemSearchResultItem,
     AttachmentFileStatus,
+    AttachmentDataWithFileStatus,
 } from './agentProtocol';
+import { AttachmentData } from '../../react/types/zotero';
 import { searchItemsByTopic, searchItemsByAuthor, searchItemsByPublication, TopicSearchParams, ZoteroItemSearchFilters } from '../../react/utils/searchTools';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
 
@@ -44,19 +46,18 @@ import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
  * @param attachment - Zotero attachment item
  * @returns File status information
  */
-async function getAttachmentFileStatus(attachment: Zotero.Item): Promise<AttachmentFileStatus> {
+async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boolean): Promise<AttachmentFileStatus> {
     // Get the attachment mime type
     const contentType = attachment.attachmentContentType;
 
     // Non-PDF attachments are not currently supported for content extraction
     if (!attachment.isPDFAttachment()) {
         return {
+            is_primary: isPrimary,
             mime_type: contentType,
             page_count: null,
-            fulltext_available: false,
-            page_images_available: false,
-            unavailable_reason: 'unsupported_format',
-            status_message: `File type "${contentType || 'unknown'}" is not supported for content extraction`,
+            status: "unavailable",
+            status_reason: `File type "${contentType || 'unknown'}" is not supported`,
         };
     }
 
@@ -68,24 +69,22 @@ async function getAttachmentFileStatus(attachment: Zotero.Item): Promise<Attachm
             ? 'File is not downloaded to the local computer and cannot be accessed'
             : 'File is not available locally';
         return {
+            is_primary: isPrimary,
             mime_type: contentType,
             page_count: null,
-            fulltext_available: false,
-            page_images_available: false,
-            unavailable_reason: 'file_missing',
-            status_message: status_message,
+            status: "unavailable",
+            status_reason: status_message,
         };
     }
     
     const fileExists = await attachment.fileExists();
     if (!fileExists) {
         return {
+            is_primary: isPrimary,
             mime_type: contentType,
             page_count: null,
-            fulltext_available: false,
-            page_images_available: false,
-            unavailable_reason: 'file_missing',
-            status_message: 'File is not available locally',
+            status: "unavailable",
+            status_reason: 'File is not available',
         };
     }
     
@@ -102,21 +101,19 @@ async function getAttachmentFileStatus(attachment: Zotero.Item): Promise<Attachm
             if (error instanceof ExtractionError) {
                 if (error.code === ExtractionErrorCode.ENCRYPTED) {
                     return {
+                        is_primary: isPrimary,
                         mime_type: contentType,
                         page_count: null,
-                        fulltext_available: false,
-                        page_images_available: false,
-                        unavailable_reason: 'file_encrypted',
-                        status_message: 'PDF is password-protected',
+                        status: "unavailable",
+                        status_reason: 'PDF is password-protected',
                     };
                 } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
                     return {
+                        is_primary: isPrimary,
                         mime_type: contentType,
                         page_count: null,
-                        fulltext_available: false,
-                        page_images_available: false,
-                        unavailable_reason: 'file_invalid',
-                        status_message: 'PDF file is invalid or corrupted',
+                        status: "unavailable",
+                        status_reason: 'PDF file is invalid or corrupted',
                     };
                 }
             }
@@ -128,33 +125,31 @@ async function getAttachmentFileStatus(attachment: Zotero.Item): Promise<Attachm
         
         if (ocrAnalysis.needsOCR) {
             return {
+                is_primary: isPrimary,
                 mime_type: contentType,
                 page_count: pageCount,
-                fulltext_available: false,
-                page_images_available: true, // Page images can still be rendered
-                unavailable_reason: 'file_needs_ocr',
-                status_message: `Text unavailable because the PDF requires OCR. Page images are available`,
+                status: "unavailable",
+                status_reason: `Text unavailable because the PDF requires OCR. Page images are available`,
             };
         }
         
         // All checks passed - file is fully accessible
         return {
+            is_primary: isPrimary,
             mime_type: contentType,
             page_count: pageCount,
-            fulltext_available: true,
-            page_images_available: true,
+            status: "available",
         };
         
     } catch (error) {
         // Unexpected error during analysis
         logger(`getAttachmentFileStatus: Error analyzing PDF: ${error}`, 1);
         return {
+            is_primary: isPrimary,
             mime_type: contentType,
             page_count: null,
-            fulltext_available: false,
-            page_images_available: false,
-            unavailable_reason: 'file_invalid',
-            status_message: `Error analyzing PDF`,
+            status: "unavailable",
+            status_reason: `Error analyzing PDF`,
         };
     }
 }
@@ -632,26 +627,33 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
 
     for (const item of limitedItems) {
         try {
+            const isValidItem = syncingItemFilter(item);
+            if (!isValidItem) {
+                continue;
+            }
             // Serialize the item
             const itemData = await serializeItem(item, undefined);
 
             // Get and serialize attachments
             const attachmentIds = item.getAttachments();
-            const attachments: import('../../react/types/zotero').AttachmentData[] = [];
-            const attachmentFileStatus: AttachmentFileStatus[] = [];
+            const attachments: AttachmentDataWithFileStatus[] = [];
 
             if (attachmentIds.length > 0) {
                 const attachmentItems = await Zotero.Items.getAsync(attachmentIds);
+                const primaryAttachment = await item.getBestAttachment();
                 await Zotero.Items.loadDataTypes(attachmentItems, ["primaryData", "itemData"]);
 
                 for (const attachment of attachmentItems) {
-                    if (!attachment.deleted) {
+                    const isValidAttachment = syncingItemFilter(attachment);
+                    if (isValidAttachment) {
                         const attachmentData = await serializeAttachment(attachment, undefined, { skipSyncingFilter: true });
                         if (attachmentData) {
-                            attachments.push(attachmentData);
                             // Get file status for this attachment
-                            const fileStatus = await getAttachmentFileStatus(attachment);
-                            attachmentFileStatus.push(fileStatus);
+                            const fileStatus = await getAttachmentFileStatus(attachment, primaryAttachment && attachment.id === primaryAttachment.id);
+                            attachments.push({
+                                ...(attachmentData as AttachmentData),
+                                file_status: { ...fileStatus },
+                            });
                         }
                     }
                 }
@@ -660,7 +662,6 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
             resultItems.push({
                 item: itemData,
                 attachments,
-                attachment_file_status: attachmentFileStatus,
             });
         } catch (error) {
             logger(`handleZoteroItemSearchRequest: Failed to serialize item ${item.key}: ${error}`, 1);

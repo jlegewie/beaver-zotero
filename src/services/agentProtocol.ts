@@ -5,6 +5,7 @@ import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../react/types/
 import { ReaderState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
+import { AttachmentData, ItemData } from '../../react/types/zotero';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -217,26 +218,26 @@ export type FileUnavailableReason =
  * Describes what content is available to the LLM.
  */
 export interface AttachmentFileStatus {
+    /** Whether this is the primary attachment for the item */
+    is_primary: boolean;
     /** Attachment mime type */
     mime_type: string;
     /** Number of pages in the file (null if unavailable) */
     page_count: number | null;
     /** Whether fulltext extraction is available for this file */
-    fulltext_available: boolean;
-    /** Whether page images are available for this file */
-    page_images_available: boolean;
+    status: "available" | "processing" | "unavailable";
     /** Reason why content is unavailable (if applicable) */
-    unavailable_reason?: FileUnavailableReason;
-    /** Human-readable status message for LLM context */
-    status_message?: string;
+    status_reason?: string;
+}
+
+export interface AttachmentDataWithFileStatus extends AttachmentData {
+    file_status: AttachmentFileStatus;
 }
 
 /** Zotero item search result with attachments */
 export interface ZoteroItemSearchResultItem {
-    item: import('../../react/types/zotero').ItemData;
-    attachments: import('../../react/types/zotero').AttachmentData[];
-    /** File status for each attachment (same order as attachments array) */
-    attachment_file_status: AttachmentFileStatus[];
+    item: ItemData;
+    attachments: AttachmentDataWithFileStatus[];
 }
 
 /** Request from backend to search Zotero library */
