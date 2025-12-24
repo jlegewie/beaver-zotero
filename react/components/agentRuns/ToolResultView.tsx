@@ -58,7 +58,7 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
     if (isReadPagesResult(toolName, content, metadata)) {
         const data = extractReadPagesData(content, metadata);
         if (data) {
-            return <ReadPagesResultView attachment={data.attachment} />;
+            return <ReadPagesResultView chunks={data.chunks} />;
         }
     }
 

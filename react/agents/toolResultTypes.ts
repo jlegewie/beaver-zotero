@@ -430,35 +430,26 @@ export function extractFulltextSearchData(
 }
 
 /**
- * Normalized fulltext retrieval data - single chunk reference with lowest page.
+ * Normalized fulltext retrieval data - all chunks from read_pages.
  */
-export interface FulltextRetrievalViewData {
-    attachment: ChunkReference;
+export interface ReadPagesViewData {
+    chunks: ChunkReference[];
 }
 
 /**
- * Extract attachment reference with lowest page from metadata.summary.
- * @returns FulltextRetrievalViewData or null if summary is not available
+ * Extract all chunks from metadata.summary.
+ * @returns ReadPagesViewData or null if summary is not available
  */
 export function extractReadPagesData(
     _content: unknown,
     metadata?: Record<string, unknown>
-): FulltextRetrievalViewData | null {
+): ReadPagesViewData | null {
     if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
     const summary = metadata.summary as ReadPagesToolResultSummary;
     
-    if (!Array.isArray(summary.chunks) || summary.chunks.length === 0) return null;
+    if (!Array.isArray(summary.chunks)) return null;
 
-    // Find chunk with lowest page number
-    let attachmentChunk = summary.chunks[0];
-    
-    for (const chunk of summary.chunks) {
-        if (chunk.page != null && (attachmentChunk.page == null || chunk.page < attachmentChunk.page)) {
-            attachmentChunk = chunk;
-        }
-    }
-
-    return { attachment: attachmentChunk };
+    return { chunks: summary.chunks };
 }
 
 /**
@@ -596,7 +587,7 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
     // Fulltext retrieval results (single attachment)
     if (isReadPagesResult(tool_name, content, metadata)) {
         const data = extractReadPagesData(content, metadata);
-        return data?.attachment ? [data.attachment] : [];
+        return data?.chunks ?? [];
     }
 
     // View page images results
