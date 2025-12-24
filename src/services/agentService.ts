@@ -17,6 +17,7 @@ import {
     handleZoteroDataRequest, 
     handleExternalReferenceCheckRequest,
     handleZoteroAttachmentPagesRequest,
+    handleZoteroAttachmentPageImagesRequest,
     handleZoteroItemSearchRequest,
 } from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
@@ -345,6 +346,13 @@ export class AgentService {
                     handleZoteroAttachmentPagesRequest(event)
                         .then(res => this.send(res))
                         .catch(err => this.handleProviderError(err, 'zotero_attachment_pages_request_failed'));
+                    break;
+
+                case 'zotero_attachment_page_images_request':
+                    logger(`AgentService: Received zotero_attachment_page_images_request for ${event.attachment.library_id}-${event.attachment.zotero_key} (pages: ${event.pages?.join(',') ?? 'all'})`, 1);
+                    handleZoteroAttachmentPageImagesRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => this.handleProviderError(err, 'zotero_attachment_page_images_request_failed'));
                     break;
 
                 case 'external_reference_check_request':

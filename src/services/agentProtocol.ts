@@ -151,6 +151,19 @@ export interface WSPageContent {
     content: string;
 }
 
+export interface WSPageImage {
+    /** 1-indexed page number */
+    page_number: number;
+    /** Base64-encoded image data */
+    image_data: string;
+    /** Image format (png or jpeg) */
+    format: 'png' | 'jpeg';
+    /** Image width in pixels */
+    width: number;
+    /** Image height in pixels */
+    height: number;
+}
+
 /** Request from backend to fetch attachment page content */
 export interface WSZoteroAttachmentPagesRequest extends WSBaseEvent {
     event: 'zotero_attachment_pages_request';
@@ -160,6 +173,23 @@ export interface WSZoteroAttachmentPagesRequest extends WSBaseEvent {
     start_page?: number;
     /** 1-indexed end page (inclusive, defaults to total pages) */
     end_page?: number;
+}
+
+/** Request from backend to render attachment pages as images */
+export interface WSZoteroAttachmentPageImagesRequest extends WSBaseEvent {
+    event: 'zotero_attachment_page_images_request';
+    request_id: string;
+    attachment: ZoteroItemReference;
+    /** 1-indexed page numbers to render (defaults to all pages if not specified) */
+    pages?: number[];
+    /** Scale factor (1.0 = 72 DPI, 2.0 = 144 DPI, etc.). Default: 1.0 */
+    scale?: number;
+    /** Target DPI (alternative to scale, takes precedence if provided) */
+    dpi?: number;
+    /** Output format. Default: "png" */
+    format?: 'png' | 'jpeg';
+    /** JPEG quality (1-100), only used for format="jpeg". Default: 85 */
+    jpeg_quality?: number;
 }
 
 /**
@@ -334,6 +364,31 @@ export interface WSZoteroAttachmentPagesResponse {
     error_code?: AttachmentPagesErrorCode | null;
 }
 
+/** Error codes for attachment page image rendering failures */
+export type AttachmentPageImagesErrorCode =
+    | 'not_found'           // Attachment not found in Zotero
+    | 'not_pdf'             // Attachment is not a PDF
+    | 'file_missing'        // PDF file not available locally
+    | 'encrypted'           // PDF is password-protected
+    | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'page_out_of_range'   // Requested pages are out of range
+    | 'render_failed';      // General rendering failure
+
+/** Response to zotero attachment page images request */
+export interface WSZoteroAttachmentPageImagesResponse {
+    type: 'zotero_attachment_page_images';
+    request_id: string;
+    attachment: ZoteroItemReference;
+    /** Rendered page images (empty array if error) */
+    pages: WSPageImage[];
+    /** Total number of pages in the document */
+    total_pages: number | null;
+    /** Error message if rendering failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: AttachmentPageImagesErrorCode | null;
+}
+
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
@@ -350,6 +405,7 @@ export type WSEvent =
     | WSAgentActionsEvent
     | WSMissingZoteroDataEvent
     | WSZoteroAttachmentPagesRequest
+    | WSZoteroAttachmentPageImagesRequest
     | WSExternalReferenceCheckRequest
     | WSZoteroDataRequest
     | WSZoteroItemSearchRequest;
