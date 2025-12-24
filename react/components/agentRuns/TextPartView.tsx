@@ -14,7 +14,7 @@ interface TextPartViewProps {
  * we simply render the current content state.
  */
 export const TextPartView: React.FC<TextPartViewProps> = ({ part, runId }) => {
-    if (!part.content || part.content.trim() === '') {
+    if (!part.content || part.content.trim() === '' || part.content == '_') {
         return null;
     }
 
