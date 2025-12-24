@@ -93,7 +93,7 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                                 </div>
                             </div>
                         ) : (
-                            <div className={`display-flex flex-col gap-1 min-w-0 ${fontColor}`}>
+                            <div className={`display-flex flex-col flex-1 gap-1 min-w-0 ${fontColor}`}>
                                 <div className={`display-flex flex-row gap-1 min-w-0 ${fontColor}`}>
                                     <div className={`truncate text-sm ${fontColor}`}>
                                         {getDisplayNameFromItem(item)}
