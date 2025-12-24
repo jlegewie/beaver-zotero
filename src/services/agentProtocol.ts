@@ -145,15 +145,21 @@ export interface WSDataError {
 }
 
 export interface WSPageContent {
+    /** 1-indexed page number */
     page_number: number;
+    /** Text content of the page */
     content: string;
 }
 
-export interface WSAttachmentContentRequest extends WSBaseEvent {
-    event: 'attachment_content_request';
+/** Request from backend to fetch attachment page content */
+export interface WSZoteroAttachmentPagesRequest extends WSBaseEvent {
+    event: 'zotero_attachment_pages_request';
     request_id: string;
     attachment: ZoteroItemReference;
-    page_numbers?: number[] | null;
+    /** 1-indexed start page (inclusive, defaults to 1) */
+    start_page?: number;
+    /** 1-indexed end page (inclusive, defaults to total pages) */
+    end_page?: number;
 }
 
 /**
@@ -302,13 +308,30 @@ export interface WSZoteroDataResponse {
     errors?: WSDataError[];
 }
 
-export interface WSAttachmentContentResponse {
-    type: 'attachment_content';
+/** Error codes for attachment page extraction failures */
+export type AttachmentPagesErrorCode =
+    | 'not_found'           // Attachment not found in Zotero
+    | 'not_pdf'             // Attachment is not a PDF
+    | 'file_missing'        // PDF file not available locally
+    | 'encrypted'           // PDF is password-protected
+    | 'no_text_layer'       // PDF needs OCR
+    | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'page_out_of_range'   // Requested pages are out of range
+    | 'extraction_failed';  // General extraction failure
+
+/** Response to zotero attachment pages request */
+export interface WSZoteroAttachmentPagesResponse {
+    type: 'zotero_attachment_pages';
     request_id: string;
     attachment: ZoteroItemReference;
+    /** Extracted page content (empty array if error) */
     pages: WSPageContent[];
-    total_pages?: number | null;
+    /** Total number of pages in the document */
+    total_pages: number | null;
+    /** Error message if extraction failed */
     error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: AttachmentPagesErrorCode | null;
 }
 
 /** Union type for all WebSocket events */
@@ -326,7 +349,7 @@ export type WSEvent =
     | WSRetryEvent
     | WSAgentActionsEvent
     | WSMissingZoteroDataEvent
-    | WSAttachmentContentRequest
+    | WSZoteroAttachmentPagesRequest
     | WSExternalReferenceCheckRequest
     | WSZoteroDataRequest
     | WSZoteroItemSearchRequest;

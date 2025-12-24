@@ -26,8 +26,9 @@ import {
     WSExternalReferenceCheckRequest,
     WSExternalReferenceCheckResponse,
     ExternalReferenceCheckResult,
-    WSAttachmentContentRequest,
-    WSAttachmentContentResponse,
+    WSZoteroAttachmentPagesRequest,
+    WSZoteroAttachmentPagesResponse,
+    AttachmentPagesErrorCode,
     WSPageContent,
     WSZoteroItemSearchRequest,
     WSZoteroItemSearchResponse,
@@ -358,29 +359,177 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
 
 
 /**
- * Handle attachment_content_request event.
- * Currently returns placeholder content until full extraction is implemented.
+ * Handle zotero_attachment_pages_request event.
+ * Extracts text content from PDF attachment pages using the PDF extraction service.
  */
-export async function handleAttachmentContentRequest(request: WSAttachmentContentRequest): Promise<WSAttachmentContentResponse> {
-    const pageNumbers = request.page_numbers && request.page_numbers.length > 0
-        ? request.page_numbers
-        : [1];
+export async function handleZoteroAttachmentPagesRequest(
+    request: WSZoteroAttachmentPagesRequest
+): Promise<WSZoteroAttachmentPagesResponse> {
+    const { attachment, start_page, end_page, request_id } = request;
 
-    const pages: WSPageContent[] = pageNumbers.map((pageNumber) => ({
-        page_number: pageNumber,
-        content: 'Attachment content retrieval not implemented yet.'
-    }));
+    // Helper to create error response
+    const errorResponse = (
+        error: string, 
+        error_code: AttachmentPagesErrorCode,
+        total_pages: number | null = null
+    ): WSZoteroAttachmentPagesResponse => ({
+        type: 'zotero_attachment_pages',
+        request_id,
+        attachment,
+        pages: [],
+        total_pages,
+        error,
+        error_code,
+    });
 
-    const response: WSAttachmentContentResponse = {
-        type: 'attachment_content',
-        request_id: request.request_id,
-        attachment: request.attachment,
-        pages,
-        total_pages: null,
-        error: 'Attachment content retrieval not implemented'
-    };
+    try {
+        // 1. Get the attachment item from Zotero
+        const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
+            attachment.library_id, 
+            attachment.zotero_key
+        );
+        
+        if (!zoteroItem) {
+            return errorResponse(
+                `Attachment not found: ${attachment.library_id}-${attachment.zotero_key}`,
+                'not_found'
+            );
+        }
 
-    return response;
+        // 2. Verify it's a PDF attachment
+        if (!zoteroItem.isAttachment()) {
+            return errorResponse(
+                'Item is not an attachment',
+                'not_pdf'
+            );
+        }
+
+        if (!zoteroItem.isPDFAttachment()) {
+            const contentType = zoteroItem.attachmentContentType || 'unknown';
+            return errorResponse(
+                `Attachment is not a PDF (type: ${contentType})`,
+                'not_pdf'
+            );
+        }
+
+        // 3. Get the file path
+        const filePath = await zoteroItem.getFilePathAsync();
+        if (!filePath) {
+            return errorResponse(
+                'PDF file is not available locally',
+                'file_missing'
+            );
+        }
+
+        // 4. Verify file exists
+        const fileExists = await zoteroItem.fileExists();
+        if (!fileExists) {
+            return errorResponse(
+                'PDF file does not exist at expected location',
+                'file_missing'
+            );
+        }
+
+        // 5. Read the PDF data
+        const pdfData = await IOUtils.read(filePath);
+
+        // 6. Create extractor and get page count first
+        const extractor = new PDFExtractor();
+        let totalPages: number;
+        
+        try {
+            totalPages = await extractor.getPageCount(pdfData);
+        } catch (error) {
+            if (error instanceof ExtractionError) {
+                if (error.code === ExtractionErrorCode.ENCRYPTED) {
+                    return errorResponse(
+                        'PDF is password-protected',
+                        'encrypted'
+                    );
+                } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
+                    return errorResponse(
+                        'PDF file is invalid or corrupted',
+                        'invalid_pdf'
+                    );
+                }
+            }
+            throw error;
+        }
+
+        // 7. Validate page range (convert 1-indexed to 0-indexed)
+        const startPage = start_page ?? 1;
+        const endPage = end_page ?? totalPages;
+
+        if (startPage < 1 || startPage > totalPages) {
+            return errorResponse(
+                `Start page ${startPage} is out of range (document has ${totalPages} pages)`,
+                'page_out_of_range',
+                totalPages
+            );
+        }
+
+        if (endPage < startPage || endPage > totalPages) {
+            return errorResponse(
+                `End page ${endPage} is out of range (document has ${totalPages} pages)`,
+                'page_out_of_range',
+                totalPages
+            );
+        }
+
+        // 8. Build page indices (0-indexed for extraction)
+        const pageIndices: number[] = [];
+        for (let i = startPage - 1; i < endPage; i++) {
+            pageIndices.push(i);
+        }
+
+        // 9. Extract pages with OCR check enabled
+        const result = await extractor.extract(pdfData, {
+            pages: pageIndices,
+            checkTextLayer: true, // Fail if PDF needs OCR
+        });
+
+        // 10. Build response
+        const pages: WSPageContent[] = result.pages.map((page) => ({
+            page_number: page.index + 1, // Convert back to 1-indexed
+            content: page.content,
+        }));
+
+        return {
+            type: 'zotero_attachment_pages',
+            request_id,
+            attachment,
+            pages,
+            total_pages: totalPages,
+        };
+
+    } catch (error) {
+        logger(`handleZoteroAttachmentPagesRequest: Extraction failed: ${error}`, 1);
+
+        // Handle known extraction errors
+        if (error instanceof ExtractionError) {
+            switch (error.code) {
+                case ExtractionErrorCode.ENCRYPTED:
+                    return errorResponse('PDF is password-protected', 'encrypted');
+                case ExtractionErrorCode.NO_TEXT_LAYER:
+                    return errorResponse('PDF requires OCR (no text layer)', 'no_text_layer');
+                case ExtractionErrorCode.INVALID_PDF:
+                    return errorResponse('PDF file is invalid or corrupted', 'invalid_pdf');
+                case ExtractionErrorCode.PAGE_OUT_OF_RANGE:
+                    return errorResponse('Requested pages are out of range', 'page_out_of_range');
+                default:
+                    return errorResponse(
+                        `Extraction failed: ${error.message}`,
+                        'extraction_failed'
+                    );
+            }
+        }
+
+        // Unknown error
+        return errorResponse(
+            `Failed to extract PDF content: ${error instanceof Error ? error.message : String(error)}`,
+            'extraction_failed'
+        );
+    }
 }
 
 

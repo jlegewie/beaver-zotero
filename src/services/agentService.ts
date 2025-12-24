@@ -16,16 +16,13 @@ import { ApiService } from './apiService';
 import { 
     handleZoteroDataRequest, 
     handleExternalReferenceCheckRequest,
-    handleAttachmentContentRequest,
+    handleZoteroAttachmentPagesRequest,
     handleZoteroItemSearchRequest,
 } from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
 import {
     WSEvent,
     WSErrorEvent,
-    WSAttachmentContentRequest,
-    WSAttachmentContentResponse,
-    WSPageContent,
     WSCallbacks,
     WSAuthMessage,
     WSReadyData,
@@ -343,11 +340,11 @@ export class AgentService {
                     this.callbacks.onMissingZoteroData?.(event);
                     break;
 
-                case 'attachment_content_request':
-                    logger(`AgentService: Received attachment_content_request for ${event.attachment.library_id}-${event.attachment.zotero_key} (pages: ${event.page_numbers?.join(',') || 'all'})`, 1);
-                    handleAttachmentContentRequest(event)
+                case 'zotero_attachment_pages_request':
+                    logger(`AgentService: Received zotero_attachment_pages_request for ${event.attachment.library_id}-${event.attachment.zotero_key} (pages: ${event.start_page ?? 1}-${event.end_page ?? 'end'})`, 1);
+                    handleZoteroAttachmentPagesRequest(event)
                         .then(res => this.send(res))
-                        .catch(err => this.handleProviderError(err, 'attachment_content_request_failed'));
+                        .catch(err => this.handleProviderError(err, 'zotero_attachment_pages_request_failed'));
                     break;
 
                 case 'external_reference_check_request':
