@@ -102,13 +102,13 @@ export const searchItemsByMetadata = async (
     }
 
     // Year filters
-    if (year_exact !== undefined) {
+    if (year_exact && year_exact > 0) {
         search.addCondition('year', 'is', String(year_exact));
     } else {
         if (year_min && year_min > 0) {
             search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
         }
-        if (year_max !== undefined) {
+        if (year_max && year_max > 0) {
             search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
         }
     }
@@ -256,7 +256,7 @@ export const searchFulltextKeywords = async (
     if (year_min && year_min > 0) {
         search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
     }
-    if (year_max !== undefined) {
+    if (year_max && year_max > 0) {
         search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
     }
 
@@ -533,7 +533,7 @@ export const searchItemsByTopic = async (
             if (year_min && year_min > 0) {
                 titleSearch.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
             }
-            if (year_max !== undefined) {
+            if (year_max && year_max > 0) {
                 titleSearch.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
             }
 
@@ -594,7 +594,7 @@ export const searchItemsByTopic = async (
             if (year_min && year_min > 0) {
                 abstractSearch.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
             }
-            if (year_max !== undefined) {
+            if (year_max && year_max > 0) {
                 abstractSearch.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
             }
             if (item_type_filter) {
@@ -774,7 +774,7 @@ export const searchItemsByPublication = async (
         if (year_min && year_min > 0) {
             search.addCondition('date', 'isAfter', `${year_min - 1}-12-31`);
         }
-        if (year_max !== undefined) {
+        if (year_max && year_max > 0) {
             search.addCondition('date', 'isBefore', `${year_max + 1}-01-01`);
         }
 
