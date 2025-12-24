@@ -36,7 +36,7 @@ export const ViewPageImagesResultView: React.FC<ViewPageImagesResultViewProps> =
     const attachments: ZoteroItemReferenceWithLabel[] = Array.from(attachmentMap.values()).map(data => ({
         library_id: data.library_id,
         zotero_key: data.zotero_key,
-        label: `Page ${formatNumberRanges(data.pages)}`
+        label: `Page ${formatNumberRanges(data.pages, ",")}`
     }));
 
     return (
