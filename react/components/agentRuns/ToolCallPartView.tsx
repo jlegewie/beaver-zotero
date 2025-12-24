@@ -38,6 +38,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     search_in_documents: TextAlignLeftIcon,
     read_pages: TextAlignLeftIcon,
     view_page_images: ViewIcon,
+    view_pages: ViewIcon,
 
     // External search tools
     external_search: GlobalSearchIcon,

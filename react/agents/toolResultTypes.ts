@@ -26,6 +26,19 @@ export interface ChunkReference {
 }
 
 /**
+ * Page image reference with ZoteroItemReference fields and page metadata.
+ * Matches PageImageReference from backend.
+ */
+export interface PageImageReference {
+    library_id: number;
+    zotero_key: string;
+    page_number: number;
+    format: "png" | "jpeg";
+    width: number;
+    height: number;
+}
+
+/**
  * Item search result summary.
  * Matches ItemSearchResultSummary from backend.
  */
@@ -53,6 +66,16 @@ export interface ReadPagesToolResultSummary {
     tool_name: string;
     result_count: number;
     chunks: ChunkReference[];
+}
+
+/**
+ * View page images result summary.
+ * Matches ViewPageImagesFrontendResultSummary from backend.
+ */
+export interface ViewPageImagesResultSummary {
+    tool_name: string;
+    result_count: number;
+    pages: PageImageReference[];
 }
 
 /**
@@ -142,6 +165,11 @@ const READ_PAGES_TOOL_NAMES: readonly string[] = [
     'read_pages',
 ] as const;
 
+/** Valid tool names for chunk-based fulltext retrieval results */
+const VIEW_PAGE_IMAGES_TOOL_NAMES: readonly string[] = [
+    'view_page_images',
+] as const;
+
 /** Valid tool names for chunk-based passage retrieval results */
 const SEARCH_IN_DOCUMENTS_TOOL_NAMES: readonly string[] = [
     'search_in_documents',
@@ -208,7 +236,7 @@ export function isFulltextSearchResult(
 }
 
 /**
- * Type guard for fulltext retrieval results.
+ * Type guard for read pages results.
  * Checks if metadata.summary is ReadPagesToolResultSummary.
  */
 export function isReadPagesResult(
@@ -237,6 +265,43 @@ export function isReadPagesResult(
             if (!chunk || typeof chunk !== 'object') return false;
             const obj = chunk as Record<string, unknown>;
             return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
+        })
+    );
+}
+
+/**
+ * Type guard for view page images results.
+ * Checks if metadata.summary is ViewPageImagesResultSummary.
+ */
+export function isViewPageImagesResult(
+    toolName: string,
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): metadata is { summary: ViewPageImagesResultSummary } {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+
+    const toolNameIsViewPages = VIEW_PAGE_IMAGES_TOOL_NAMES.includes(toolName);
+    if (!toolNameIsViewPages) {
+        const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
+        if (!summaryToolName || !VIEW_PAGE_IMAGES_TOOL_NAMES.includes(summaryToolName)) return false;
+    }
+    
+    return (
+        typeof summary.tool_name === 'string' &&
+        typeof summary.result_count === 'number' &&
+        Array.isArray(summary.pages) &&
+        summary.pages.every((page: unknown) => {
+            if (!page || typeof page !== 'object') return false;
+            const obj = page as Record<string, unknown>;
+            return (
+                typeof obj.library_id === 'number' &&
+                typeof obj.zotero_key === 'string' &&
+                typeof obj.page_number === 'number' &&
+                typeof obj.format === 'string' &&
+                typeof obj.width === 'number' &&
+                typeof obj.height === 'number'
+            );
         })
     );
 }
@@ -397,6 +462,29 @@ export function extractReadPagesData(
 }
 
 /**
+ * Normalized page images data.
+ */
+export interface ViewPageImagesViewData {
+    pages: PageImageReference[];
+}
+
+/**
+ * Extract page image references from metadata.summary.
+ * @returns ViewPageImagesViewData or null if summary is not available
+ */
+export function extractViewPageImagesData(
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): ViewPageImagesViewData | null {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as ViewPageImagesResultSummary;
+    
+    if (!Array.isArray(summary.pages)) return null;
+
+    return { pages: summary.pages };
+}
+
+/**
  * Normalized passage retrieval data.
  */
 export interface PassageRetrievalViewData {
@@ -486,7 +574,7 @@ export function extractExternalSearchData(
 
 /**
  * Extract ZoteroItemReference list from a tool-return part.
- * Supports item search, fulltext search, fulltext retrieval, and passage retrieval results.
+ * Supports item search, fulltext search, fulltext retrieval, passage retrieval, and view page images results.
  * @param part Tool return part to extract references from
  * @returns Array of ZoteroItemReference, or empty array if not a supported tool result type
  */
@@ -509,6 +597,12 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
     if (isReadPagesResult(tool_name, content, metadata)) {
         const data = extractReadPagesData(content, metadata);
         return data?.attachment ? [data.attachment] : [];
+    }
+
+    // View page images results
+    if (isViewPageImagesResult(tool_name, content, metadata)) {
+        const data = extractViewPageImagesData(content, metadata);
+        return data?.pages ?? [];
     }
 
     // Passage retrieval results (chunks)

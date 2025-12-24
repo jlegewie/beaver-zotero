@@ -7,6 +7,8 @@ import {
     extractFulltextSearchData,
     isReadPagesResult,
     extractReadPagesData,
+    isViewPageImagesResult,
+    extractViewPageImagesData,
     isSearchInDocumentsResult,
     extractSearchInDocumentsData,
     isExternalSearchResult,
@@ -15,6 +17,7 @@ import {
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
 import { ReadPagesResultView } from './ReadPagesResultView';
+import { ViewPageImagesResultView } from './ViewPageImagesResultView';
 import { ExternalSearchResultView } from './ExternalSearchResultView';
 
 interface ToolResultViewProps {
@@ -51,7 +54,7 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         }
     }
 
-    // Fulltext retrieval results (read_pages)
+    // Read pages results (read_pages)
     if (isReadPagesResult(toolName, content, metadata)) {
         const data = extractReadPagesData(content, metadata);
         if (data) {
@@ -59,7 +62,15 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         }
     }
 
-    // Passage retrieval results (search_in_documents)
+    // View page images results (view_page_images)
+    if (isViewPageImagesResult(toolName, content, metadata)) {
+        const data = extractViewPageImagesData(content, metadata);
+        if (data) {
+            return <ViewPageImagesResultView pages={data.pages} />;
+        }
+    }
+
+    // Search in documents results (search_in_documents)
     if (isSearchInDocumentsResult(toolName, content, metadata)) {
         const data = extractSearchInDocumentsData(content, metadata);
         if (data) {

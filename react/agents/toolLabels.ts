@@ -45,6 +45,8 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     read_pages: 'Reading',
     search_in_documents: 'Search in documents',
     read_file: 'Retrieving data',
+    view_pages: 'Viewing pages',
+    view_page_images: 'Viewing pages',
 
     // Annotations
     add_highlight_annotations: 'Highlight annotations',
