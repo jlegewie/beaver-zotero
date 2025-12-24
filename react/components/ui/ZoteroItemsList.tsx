@@ -5,14 +5,24 @@ import { ItemMetadataAttachment, SourceAttachment } from '../../types/attachment
 import { ZoteroItemReference } from '../../types/zotero';
 import { selectItemById } from '../../../src/utils/selectItem';
 
+export interface ZoteroItemReferenceWithLabel extends ZoteroItemReference {
+    label: string;
+}
+
 interface ItemWithSelectionId {
     item: Zotero.Item;
     selectionItemId: number;
     muted?: boolean;
+    label?: string;
 }
 
 interface ZoteroItemsListProps {
-    messageAttachments: SourceAttachment[] | ItemMetadataAttachment[] | ZoteroItemReference[];
+    messageAttachments: (
+        SourceAttachment |
+        ItemMetadataAttachment |
+        ZoteroItemReference |
+        ZoteroItemReferenceWithLabel
+    )[];
     oneLine?: boolean;
     muted?: boolean;
 }
@@ -35,7 +45,11 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                         attachment.library_id, 
                         attachment.zotero_key
                     );
-                    if (item) items.push({ item: item.parentItem || item, selectionItemId: item.id });
+                    if (item) items.push({
+                        item: item.parentItem || item,
+                        selectionItemId: item.id,
+                        label: 'label' in attachment ? attachment.label : undefined
+                    });
                 }
                 setResolvedItems(items);
             }
@@ -54,7 +68,7 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
     return (
         <div className="min-w-0">
             {resolvedItems.map((itemWithSelectionId: ItemWithSelectionId) => {
-                const {item, selectionItemId} = itemWithSelectionId;
+                const {item, selectionItemId, label} = itemWithSelectionId;
                 const isHovered = hoveredItemId === selectionItemId;
                 
                 return (
@@ -80,12 +94,22 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                             </div>
                         ) : (
                             <div className={`display-flex flex-col gap-1 min-w-0 ${fontColor}`}>
-                                <span className={`truncate text-sm ${fontColor}`}>
-                                    {getDisplayNameFromItem(item)}
-                                </span>
-                                <span className={`truncate text-sm ${muted ? 'font-color-tertiary' : 'font-color-secondary'}`}>
+                                <div className={`display-flex flex-row gap-1 min-w-0 ${fontColor}`}>
+                                    <div className={`truncate text-sm ${fontColor}`}>
+                                        {getDisplayNameFromItem(item)}
+                                    </div>
+                                    {!oneLine && label &&
+                                         <>
+                                            <div className="flex-1" />
+                                            <div className="text-sm display-flex min-w-0 font-color-tertiary mr-1">
+                                                {label}
+                                            </div>
+                                        </>
+                                    }
+                                </div>
+                                <div className={`truncate text-sm ${muted ? 'font-color-tertiary' : 'font-color-secondary'}`}>
                                     {item.getDisplayTitle()}
-                                </span>
+                                </div>
                             </div>
                         )}
                     </div>
