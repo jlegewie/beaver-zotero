@@ -13,6 +13,7 @@ This service provides high-quality text extraction from PDFs using **MuPDF WASM*
 - OCR detection (identifies scanned PDFs that need OCR)
 - Encrypted PDF detection
 - Coordinate-accurate bounding boxes for highlighting
+- **Page-to-image rendering** with configurable DPI/scale and format (PNG/JPEG)
 
 ---
 
@@ -628,6 +629,65 @@ const hasText = await extractor.hasTextLayer(pdfData);
 const pageCount = await extractor.getPageCount(pdfData);
 const ocrNeeds = await extractor.analyzeOCRNeeds(pdfData);
 ```
+
+### Page Image Rendering
+
+Render PDF pages to PNG or JPEG images with configurable resolution.
+
+```typescript
+// From Zotero item (recommended)
+import {
+  renderPageToImageFromZoteroItem,
+  renderPagesToImagesFromZoteroItem,
+} from "src/services/pdf";
+
+// Render first page at 150 DPI as PNG
+const result = await renderPageToImageFromZoteroItem(item, 0, { dpi: 150 });
+// result.data is Uint8Array of PNG bytes
+// result.width, result.height - image dimensions in pixels
+
+// Render pages 0-2 as JPEG thumbnails
+const results = await renderPagesToImagesFromZoteroItem(item, [0, 1, 2], {
+  scale: 0.5, // 50% size (36 DPI)
+  format: "jpeg",
+  jpegQuality: 85,
+});
+
+// Manual with raw PDF data
+const extractor = new PDFExtractor();
+const image = await extractor.renderPageToImage(pdfData, 0, {
+  dpi: 300, // 300 DPI for high quality
+  alpha: false, // Opaque background
+  showExtras: true, // Include annotations
+  format: "png",
+});
+
+// Render all pages
+const allImages = await extractor.renderPagesToImages(pdfData);
+```
+
+#### PageImageOptions
+
+| Option        | Type            | Default | Description                              |
+| ------------- | --------------- | ------- | ---------------------------------------- |
+| `scale`       | number          | 1.0     | Scale factor (1.0 = 72 DPI)              |
+| `dpi`         | number          | 0       | Target DPI (takes precedence over scale) |
+| `alpha`       | boolean         | false   | Transparent background                   |
+| `showExtras`  | boolean         | true    | Render annotations and widgets           |
+| `format`      | "png" \| "jpeg" | "png"   | Output format                            |
+| `jpegQuality` | number          | 85      | JPEG quality (1-100)                     |
+
+#### PageImageResult
+
+| Property    | Type       | Description               |
+| ----------- | ---------- | ------------------------- |
+| `pageIndex` | number     | Page index (0-based)      |
+| `data`      | Uint8Array | Image bytes (PNG or JPEG) |
+| `format`    | string     | "png" or "jpeg"           |
+| `width`     | number     | Image width in pixels     |
+| `height`    | number     | Image height in pixels    |
+| `scale`     | number     | Scale factor used         |
+| `dpi`       | number     | Effective DPI             |
 
 ### Detection Functions
 

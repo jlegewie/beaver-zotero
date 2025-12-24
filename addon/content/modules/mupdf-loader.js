@@ -393,10 +393,164 @@ var MuPDFLoader = {
             }
         }
 
+        // Helper to write a Matrix to WASM memory
+        const _wasm_matrix = Malloc(4 * 6) >> 2;
+        const MATRIX = (m) => {
+            libmupdf.HEAPF32[_wasm_matrix + 0] = m[0];
+            libmupdf.HEAPF32[_wasm_matrix + 1] = m[1];
+            libmupdf.HEAPF32[_wasm_matrix + 2] = m[2];
+            libmupdf.HEAPF32[_wasm_matrix + 3] = m[3];
+            libmupdf.HEAPF32[_wasm_matrix + 4] = m[4];
+            libmupdf.HEAPF32[_wasm_matrix + 5] = m[5];
+            return _wasm_matrix << 2;
+        };
+
+        // Matrix utilities
+        const Matrix = {
+            identity: [1, 0, 0, 1, 0, 0],
+            scale(sx, sy) {
+                return [sx, 0, 0, sy, 0, 0];
+            },
+            translate(tx, ty) {
+                return [1, 0, 0, 1, tx, ty];
+            },
+            rotate(degrees) {
+                let d = degrees;
+                while (d < 0) d += 360;
+                while (d >= 360) d -= 360;
+                const s = Math.sin((d * Math.PI) / 180);
+                const c = Math.cos((d * Math.PI) / 180);
+                return [c, s, -s, c, 0, 0];
+            },
+            concat(one, two) {
+                return [
+                    one[0] * two[0] + one[1] * two[2],
+                    one[0] * two[1] + one[1] * two[3],
+                    one[2] * two[0] + one[3] * two[2],
+                    one[2] * two[1] + one[3] * two[3],
+                    one[4] * two[0] + one[5] * two[2] + two[4],
+                    one[4] * two[1] + one[5] * two[3] + two[5],
+                ];
+            },
+        };
+
+        // ColorSpace wrapper class
+        class ColorSpace {
+            constructor(pointer) {
+                this.pointer = pointer;
+            }
+        }
+
+        // Pre-create standard colorspaces
+        ColorSpace.DeviceGray = new ColorSpace(libmupdf._wasm_device_gray());
+        ColorSpace.DeviceRGB = new ColorSpace(libmupdf._wasm_device_rgb());
+        ColorSpace.DeviceBGR = new ColorSpace(libmupdf._wasm_device_bgr());
+        ColorSpace.DeviceCMYK = new ColorSpace(libmupdf._wasm_device_cmyk());
+
+        // Pixmap class wrapper
+        class Pixmap {
+            constructor(pointer) {
+                this.pointer = pointer;
+            }
+
+            getWidth() {
+                return libmupdf._wasm_pixmap_get_w(this.pointer);
+            }
+
+            getHeight() {
+                return libmupdf._wasm_pixmap_get_h(this.pointer);
+            }
+
+            getStride() {
+                return libmupdf._wasm_pixmap_get_stride(this.pointer);
+            }
+
+            getNumberOfComponents() {
+                return libmupdf._wasm_pixmap_get_n(this.pointer);
+            }
+
+            getAlpha() {
+                return libmupdf._wasm_pixmap_get_alpha(this.pointer);
+            }
+
+            /**
+             * Get the raw pixel data as a Uint8Array
+             */
+            getSamples() {
+                const stride = this.getStride();
+                const height = this.getHeight();
+                const ptr = libmupdf._wasm_pixmap_get_samples(this.pointer);
+                return new Uint8Array(libmupdf.HEAPU8.buffer, ptr, stride * height);
+            }
+
+            /**
+             * Convert pixmap to PNG format
+             * @returns {Uint8Array} PNG data
+             */
+            asPNG() {
+                const bufPtr = libmupdf._wasm_new_buffer_from_pixmap_as_png(this.pointer);
+                const data = libmupdf._wasm_buffer_get_data(bufPtr);
+                const len = libmupdf._wasm_buffer_get_len(bufPtr);
+                const result = new Uint8Array(libmupdf.HEAPU8.subarray(data, data + len));
+                libmupdf._wasm_drop_buffer(bufPtr);
+                return result;
+            }
+
+            /**
+             * Convert pixmap to JPEG format
+             * @param {number} quality - JPEG quality (1-100)
+             * @param {boolean} invertCmyk - Whether to invert CMYK colors
+             * @returns {Uint8Array} JPEG data
+             */
+            asJPEG(quality = 85, invertCmyk = false) {
+                const bufPtr = libmupdf._wasm_new_buffer_from_pixmap_as_jpeg(
+                    this.pointer,
+                    quality,
+                    invertCmyk ? 1 : 0
+                );
+                const data = libmupdf._wasm_buffer_get_data(bufPtr);
+                const len = libmupdf._wasm_buffer_get_len(bufPtr);
+                const result = new Uint8Array(libmupdf.HEAPU8.subarray(data, data + len));
+                libmupdf._wasm_drop_buffer(bufPtr);
+                return result;
+            }
+
+            destroy() {
+                if (this.pointer) {
+                    libmupdf._wasm_drop_pixmap(this.pointer);
+                    this.pointer = 0;
+                }
+            }
+        }
+
+        // Extend Page class with toPixmap method
+        Page.prototype.toPixmap = function (matrix, colorspace, alpha = false, showExtras = true) {
+            let result;
+            if (showExtras) {
+                result = libmupdf._wasm_new_pixmap_from_page(
+                    this.pointer,
+                    MATRIX(matrix),
+                    colorspace.pointer,
+                    alpha ? 1 : 0
+                );
+            } else {
+                result = libmupdf._wasm_new_pixmap_from_page_contents(
+                    this.pointer,
+                    MATRIX(matrix),
+                    colorspace.pointer,
+                    alpha ? 1 : 0
+                );
+            }
+            return new Pixmap(result);
+        };
+
         return {
             Document,
             Page,
             StructuredText,
+            Pixmap,
+            ColorSpace,
+            Matrix,
             // Expose low-level module for advanced usage
             _libmupdf: libmupdf,
         };
@@ -829,6 +983,159 @@ var MuPDFLoader = {
             } finally {
                 page.destroy();
             }
+        } finally {
+            doc.destroy();
+        }
+    },
+
+    /**
+     * Render a page to an image.
+     * @param {Uint8Array|ArrayBuffer} pdfData - The PDF file data
+     * @param {number} pageIndex - Zero-based page index
+     * @param {Object} [options] - Rendering options
+     * @param {number} [options.scale=1.0] - Scale factor (1.0 = 72 DPI)
+     * @param {number} [options.dpi] - Target DPI (alternative to scale, takes precedence)
+     * @param {boolean} [options.alpha=false] - Transparent background
+     * @param {boolean} [options.showExtras=true] - Render annotations and widgets
+     * @param {"png"|"jpeg"} [options.format="png"] - Output format
+     * @param {number} [options.jpegQuality=85] - JPEG quality (1-100)
+     * @param {string} [rootURI] - Root URI for the addon
+     * @returns {Promise<{data: Uint8Array, width: number, height: number, format: string, scale: number, dpi: number}>}
+     */
+    async renderPageToImage(pdfData, pageIndex = 0, options = {}, rootURI = "chrome://beaver/content/") {
+        const {
+            scale: scaleOpt = 1.0,
+            dpi,
+            alpha = false,
+            showExtras = true,
+            format = "png",
+            jpegQuality = 85,
+        } = options;
+
+        // Calculate scale from DPI if provided (72 DPI = scale 1.0)
+        const scale = dpi ? dpi / 72 : scaleOpt;
+        const effectiveDpi = dpi || scaleOpt * 72;
+
+        const mupdf = await this.init(rootURI);
+        const doc = mupdf.Document.openDocument(pdfData, "application/pdf");
+
+        try {
+            const pageCount = doc.countPages();
+            if (pageIndex < 0 || pageIndex >= pageCount) {
+                throw new Error(`Page index ${pageIndex} out of range (0-${pageCount - 1})`);
+            }
+
+            const page = doc.loadPage(pageIndex);
+            try {
+                // Create scale matrix
+                const matrix = mupdf.Matrix.scale(scale, scale);
+
+                // Render to pixmap
+                const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, alpha, showExtras);
+                try {
+                    const width = pixmap.getWidth();
+                    const height = pixmap.getHeight();
+
+                    // Convert to requested format
+                    let data;
+                    if (format === "jpeg") {
+                        data = pixmap.asJPEG(jpegQuality);
+                    } else {
+                        data = pixmap.asPNG();
+                    }
+
+                    return {
+                        pageIndex,
+                        data,
+                        width,
+                        height,
+                        format,
+                        scale,
+                        dpi: effectiveDpi,
+                    };
+                } finally {
+                    pixmap.destroy();
+                }
+            } finally {
+                page.destroy();
+            }
+        } finally {
+            doc.destroy();
+        }
+    },
+
+    /**
+     * Render multiple pages to images.
+     * @param {Uint8Array|ArrayBuffer} pdfData - The PDF file data
+     * @param {number[]} [pageIndices] - Array of page indices. If not provided, renders all pages.
+     * @param {Object} [options] - Rendering options (same as renderPageToImage)
+     * @param {string} [rootURI] - Root URI for the addon
+     * @returns {Promise<Array<{data: Uint8Array, width: number, height: number, format: string, scale: number, dpi: number}>>}
+     */
+    async renderPagesToImages(pdfData, pageIndices, options = {}, rootURI = "chrome://beaver/content/") {
+        const mupdf = await this.init(rootURI);
+        const doc = mupdf.Document.openDocument(pdfData, "application/pdf");
+
+        try {
+            const pageCount = doc.countPages();
+            const indicesToRender = pageIndices ?? Array.from({ length: pageCount }, (_, i) => i);
+
+            const {
+                scale: scaleOpt = 1.0,
+                dpi,
+                alpha = false,
+                showExtras = true,
+                format = "png",
+                jpegQuality = 85,
+            } = options;
+
+            const scale = dpi ? dpi / 72 : scaleOpt;
+            const effectiveDpi = dpi || scaleOpt * 72;
+            const matrix = mupdf.Matrix.scale(scale, scale);
+
+            const results = [];
+
+            for (const idx of indicesToRender) {
+                if (idx < 0 || idx >= pageCount) {
+                    results.push({
+                        pageIndex: idx,
+                        error: `Page index ${idx} out of range (0-${pageCount - 1})`,
+                    });
+                    continue;
+                }
+
+                const page = doc.loadPage(idx);
+                try {
+                    const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, alpha, showExtras);
+                    try {
+                        const width = pixmap.getWidth();
+                        const height = pixmap.getHeight();
+
+                        let data;
+                        if (format === "jpeg") {
+                            data = pixmap.asJPEG(jpegQuality);
+                        } else {
+                            data = pixmap.asPNG();
+                        }
+
+                        results.push({
+                            pageIndex: idx,
+                            data,
+                            width,
+                            height,
+                            format,
+                            scale,
+                            dpi: effectiveDpi,
+                        });
+                    } finally {
+                        pixmap.destroy();
+                    }
+                } finally {
+                    page.destroy();
+                }
+            }
+
+            return results;
         } finally {
             doc.destroy();
         }

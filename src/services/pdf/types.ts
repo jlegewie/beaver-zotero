@@ -541,3 +541,54 @@ export class ExtractionError extends Error {
         this.name = "ExtractionError";
     }
 }
+
+// ============================================================================
+// Page Image Rendering Types
+// ============================================================================
+
+/** Image output format for page rendering */
+export type ImageFormat = "png" | "jpeg";
+
+/** Options for rendering a page to an image */
+export interface PageImageOptions {
+    /** Scale factor (1.0 = 72 DPI, 2.0 = 144 DPI, etc.). Default: 1.0 */
+    scale?: number;
+    /** Target DPI (alternative to scale, takes precedence if provided) */
+    dpi?: number;
+    /** Whether to render with transparent background. Default: false */
+    alpha?: boolean;
+    /** Whether to render annotations and widgets. Default: true */
+    showExtras?: boolean;
+    /** Output format. Default: "png" */
+    format?: ImageFormat;
+    /** JPEG quality (1-100), only used for format="jpeg". Default: 85 */
+    jpegQuality?: number;
+}
+
+/** Default page image options */
+export const DEFAULT_PAGE_IMAGE_OPTIONS: Required<PageImageOptions> = {
+    scale: 1.0,
+    dpi: 0, // 0 means use scale instead
+    alpha: false,
+    showExtras: true,
+    format: "png",
+    jpegQuality: 85,
+};
+
+/** Result of rendering a page to an image */
+export interface PageImageResult {
+    /** Page index (0-based) */
+    pageIndex: number;
+    /** Image data as Uint8Array */
+    data: Uint8Array;
+    /** Image format */
+    format: ImageFormat;
+    /** Image width in pixels */
+    width: number;
+    /** Image height in pixels */
+    height: number;
+    /** Scale factor used */
+    scale: number;
+    /** Effective DPI */
+    dpi: number;
+}

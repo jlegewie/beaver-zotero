@@ -5,8 +5,8 @@
  * Handles initialization, caching, and provides typed access to raw PDF data.
  */
 
-import type { RawPageData, RawBlock, RawDocumentData } from "./types";
-import { ExtractionError, ExtractionErrorCode } from "./types";
+import type { RawPageData, RawBlock, RawDocumentData, PageImageOptions, PageImageResult, ImageFormat } from "./types";
+import { ExtractionError, ExtractionErrorCode, DEFAULT_PAGE_IMAGE_OPTIONS } from "./types";
 
 // ============================================================================
 // Structured Text Options
@@ -36,6 +36,8 @@ interface MuPDFAPI {
     Document: {
         openDocument: (data: Uint8Array | ArrayBuffer, magic?: string) => MuPDFDocument;
     };
+    ColorSpace: MuPDFColorSpaceStatic;
+    Matrix: MuPDFMatrix;
     _libmupdf: unknown;
 }
 
@@ -49,11 +51,44 @@ interface MuPDFDocument {
     destroy(): void;
 }
 
+interface MuPDFPixmap {
+    pointer: number;
+    getWidth(): number;
+    getHeight(): number;
+    getStride(): number;
+    getNumberOfComponents(): number;
+    getAlpha(): number;
+    getSamples(): Uint8Array;
+    asPNG(): Uint8Array;
+    asJPEG(quality?: number, invertCmyk?: boolean): Uint8Array;
+    destroy(): void;
+}
+
+interface MuPDFColorSpace {
+    pointer: number;
+}
+
+interface MuPDFColorSpaceStatic {
+    DeviceGray: MuPDFColorSpace;
+    DeviceRGB: MuPDFColorSpace;
+    DeviceBGR: MuPDFColorSpace;
+    DeviceCMYK: MuPDFColorSpace;
+}
+
+interface MuPDFMatrix {
+    identity: number[];
+    scale(sx: number, sy: number): number[];
+    translate(tx: number, ty: number): number[];
+    rotate(degrees: number): number[];
+    concat(one: number[], two: number[]): number[];
+}
+
 interface MuPDFPage {
     pointer: number;
     getBounds(box?: string): [number, number, number, number];
     getLabel(): string;
     toStructuredText(options?: string): MuPDFStructuredText;
+    toPixmap(matrix: number[], colorspace: MuPDFColorSpace, alpha?: boolean, showExtras?: boolean): MuPDFPixmap;
     destroy(): void;
 }
 
@@ -311,6 +346,82 @@ export class MuPDFService {
         } finally {
             page.destroy();
         }
+    }
+
+    /**
+     * Render a page to an image.
+     * @param pageIndex - Page index (0-based)
+     * @param options - Rendering options
+     * @returns PageImageResult with image data and metadata
+     */
+    renderPageToImage(pageIndex: number, options: PageImageOptions = {}): PageImageResult {
+        this.ensureOpen();
+        const opts = { ...DEFAULT_PAGE_IMAGE_OPTIONS, ...options };
+
+        // Calculate scale from DPI if provided (72 DPI = scale 1.0)
+        const scale = opts.dpi > 0 ? opts.dpi / 72 : opts.scale;
+        const effectiveDpi = opts.dpi > 0 ? opts.dpi : opts.scale * 72;
+
+        const page = this.doc!.loadPage(pageIndex);
+
+        try {
+            // Create scale matrix
+            const matrix = this.api!.Matrix.scale(scale, scale);
+
+            // Render to pixmap using DeviceRGB colorspace
+            const pixmap = page.toPixmap(
+                matrix,
+                this.api!.ColorSpace.DeviceRGB,
+                opts.alpha,
+                opts.showExtras
+            );
+
+            try {
+                const width = pixmap.getWidth();
+                const height = pixmap.getHeight();
+
+                // Convert to requested format
+                let data: Uint8Array;
+                let format: ImageFormat = opts.format;
+                if (opts.format === "jpeg") {
+                    data = pixmap.asJPEG(opts.jpegQuality);
+                } else {
+                    data = pixmap.asPNG();
+                    format = "png";
+                }
+
+                return {
+                    pageIndex,
+                    data,
+                    format,
+                    width,
+                    height,
+                    scale,
+                    dpi: effectiveDpi,
+                };
+            } finally {
+                pixmap.destroy();
+            }
+        } finally {
+            page.destroy();
+        }
+    }
+
+    /**
+     * Render multiple pages to images.
+     * @param pageIndices - Pages to render (0-based). If undefined, renders all.
+     * @param options - Rendering options
+     * @returns Array of PageImageResult
+     */
+    renderPagesToImages(pageIndices?: number[], options: PageImageOptions = {}): PageImageResult[] {
+        this.ensureOpen();
+        const pageCount = this.getPageCount();
+
+        const indices = pageIndices?.length
+            ? pageIndices.filter(i => i >= 0 && i < pageCount)
+            : Array.from({ length: pageCount }, (_, i) => i);
+
+        return indices.map(i => this.renderPageToImage(i, options));
     }
 
     /** Ensure the document is open */

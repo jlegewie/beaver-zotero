@@ -32,6 +32,9 @@ import {
     ExtractedLine,
     OCRDetectionOptions,
     OCRDetectionResult,
+    PageImageOptions,
+    PageImageResult,
+    DEFAULT_PAGE_IMAGE_OPTIONS,
 } from "./types";
 
 // Re-export types and classes for convenience
@@ -471,6 +474,67 @@ export class PDFExtractor {
             this.mupdf.close();
         }
     }
+
+    /**
+     * Render a single page to an image.
+     * 
+     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
+     * @param pageIndex - Page index (0-based)
+     * @param options - Rendering options (scale, dpi, format, etc.)
+     * @returns PageImageResult with image data and metadata
+     * 
+     * @example
+     * ```typescript
+     * const extractor = new PDFExtractor();
+     * // Render at 150 DPI as PNG
+     * const result = await extractor.renderPageToImage(pdfData, 0, { dpi: 150 });
+     * console.log(`Image: ${result.width}x${result.height} @ ${result.dpi} DPI`);
+     * ```
+     */
+    async renderPageToImage(
+        pdfData: Uint8Array | ArrayBuffer,
+        pageIndex: number,
+        options: PageImageOptions = {}
+    ): Promise<PageImageResult> {
+        try {
+            await this.mupdf.open(pdfData);
+            return this.mupdf.renderPageToImage(pageIndex, options);
+        } finally {
+            this.mupdf.close();
+        }
+    }
+
+    /**
+     * Render multiple pages to images.
+     * 
+     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
+     * @param pageIndices - Pages to render (0-based). If undefined, renders all.
+     * @param options - Rendering options (scale, dpi, format, etc.)
+     * @returns Array of PageImageResult
+     * 
+     * @example
+     * ```typescript
+     * const extractor = new PDFExtractor();
+     * // Render first 3 pages at 2x scale as JPEG
+     * const results = await extractor.renderPagesToImages(pdfData, [0, 1, 2], {
+     *   scale: 2.0,
+     *   format: "jpeg",
+     *   jpegQuality: 90
+     * });
+     * ```
+     */
+    async renderPagesToImages(
+        pdfData: Uint8Array | ArrayBuffer,
+        pageIndices?: number[],
+        options: PageImageOptions = {}
+    ): Promise<PageImageResult[]> {
+        try {
+            await this.mupdf.open(pdfData);
+            return this.mupdf.renderPagesToImages(pageIndices, options);
+        } finally {
+            this.mupdf.close();
+        }
+    }
 }
 
 // ============================================================================
@@ -534,4 +598,70 @@ export async function extractByLinesFromZoteroItem(
     const pdfData = await IOUtils.read(path);
     const extractor = new PDFExtractor();
     return extractor.extractByLines(pdfData, settings);
+}
+
+/**
+ * Render a page from a Zotero attachment item to an image.
+ *
+ * @param item - Zotero attachment item
+ * @param pageIndex - Page index (0-based). Default: 0
+ * @param options - Rendering options (scale, dpi, format, etc.)
+ * @returns PageImageResult or null if file not found
+ * 
+ * @example
+ * ```typescript
+ * // Render first page at 150 DPI
+ * const result = await renderPageToImageFromZoteroItem(item, 0, { dpi: 150 });
+ * if (result) {
+ *   // result.data is a Uint8Array of PNG/JPEG bytes
+ *   console.log(`Rendered: ${result.width}x${result.height}`);
+ * }
+ * ```
+ */
+export async function renderPageToImageFromZoteroItem(
+    item: Zotero.Item,
+    pageIndex: number = 0,
+    options: PageImageOptions = {}
+): Promise<PageImageResult | null> {
+    const path = await item.getFilePathAsync();
+    if (!path) {
+        return null;
+    }
+
+    const pdfData = await IOUtils.read(path);
+    const extractor = new PDFExtractor();
+    return extractor.renderPageToImage(pdfData, pageIndex, options);
+}
+
+/**
+ * Render multiple pages from a Zotero attachment item to images.
+ *
+ * @param item - Zotero attachment item
+ * @param pageIndices - Pages to render (0-based). If undefined, renders all.
+ * @param options - Rendering options (scale, dpi, format, etc.)
+ * @returns Array of PageImageResult or null if file not found
+ * 
+ * @example
+ * ```typescript
+ * // Render all pages as thumbnails (low resolution)
+ * const results = await renderPagesToImagesFromZoteroItem(item, undefined, {
+ *   scale: 0.25,
+ *   format: "jpeg",
+ *   jpegQuality: 75
+ * });
+ * ```
+ */
+export async function renderPagesToImagesFromZoteroItem(
+    item: Zotero.Item,
+    pageIndices?: number[],
+    options: PageImageOptions = {}
+): Promise<PageImageResult[] | null> {
+    const path = await item.getFilePathAsync();
+    if (!path) {
+        return null;
+    }
+
+    const pdfData = await IOUtils.read(path);
+    const extractor = new PDFExtractor();
+    return extractor.renderPagesToImages(pdfData, pageIndices, options);
 }
