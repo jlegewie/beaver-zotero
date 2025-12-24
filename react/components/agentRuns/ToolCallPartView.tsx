@@ -30,6 +30,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     item_search: SearchIcon,
     item_search_by_topic: SearchIcon,
     item_search_by_metadata: SearchIcon,
+    zotero_item_search: SearchIcon,
     fulltext_search: SearchIcon,
     fulltext_search_keywords: SearchIcon,
 
