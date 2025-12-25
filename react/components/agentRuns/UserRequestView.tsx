@@ -7,7 +7,7 @@ import { MessageItemButton } from '../input/MessageItemButton';
 import { LibraryButton } from '../library/LibraryButton';
 import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
-import { LinkBackwardIcon } from '../icons/icons';
+import { EditIcon } from '../icons/icons';
 import Button from '../ui/Button';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
@@ -284,7 +284,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                 {/* Edit icon (visible on hover) */}
                 {isHovered && !isEditing && canEditNow && (
                     <div className="user-request-edit-icon">
-                        <LinkBackwardIcon width={14} height={14} />
+                        <EditIcon width={12} height={12} />
                     </div>
                 )}
 
