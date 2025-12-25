@@ -9,8 +9,12 @@ import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 
 interface ModelResponseViewProps {
+    /** The model response */
     message: ModelResponse;
+    /** Whether the response is streaming */
     isStreaming: boolean;
+    /** Whether the previous message has a tool call */
+    previousMessageHasToolCall: boolean;
     /** Run ID for element identification */
     runId: string;
     /** Index of this response within the run (for unique DOM IDs) */
@@ -26,6 +30,7 @@ interface ModelResponseViewProps {
 export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
     message,
     isStreaming,
+    previousMessageHasToolCall,
     runId,
     responseIndex,
     runStatus,
@@ -59,7 +64,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
     return (
         <div
             id={`response-${responseId}`}
-            className="hover-trigger user-select-text"
+            className={`hover-trigger user-select-text ${previousMessageHasToolCall ? '-mt-1' : ''}`}
             ref={contentRef}
             onContextMenu={handleContextMenu}
         >
@@ -87,7 +92,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
 
             {/* Tool call parts */}
             {toolCallParts.length > 0 && (
-                <div className="display-flex flex-col py-1 gap-3">
+                <div className="display-flex flex-col py-2 gap-1">
                     {toolCallParts.map((part) => {
                         if (part.part_kind !== 'tool-call') return null;
                         

@@ -44,11 +44,20 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
                 // tool calls (tool returns)
                 if (message.kind === 'response') {
                     const isLastMessage = index === messages.length - 1;
+                    const previousMessageHasToolCall =
+                        index > 0 &&
+                        messages[index - 1].parts.some(
+                            part =>
+                                part.part_kind === 'tool-call' ||
+                                part.part_kind === 'tool-return' ||
+                                part.part_kind === 'retry-prompt'
+                        );
                     return (
                         <ModelResponseView
                             key={`${runId}-response-${index}`}
                             message={message}
                             isStreaming={isStreaming && isLastMessage}
+                            previousMessageHasToolCall={previousMessageHasToolCall}
                             runId={runId}
                             responseIndex={index}
                             runStatus={status}
