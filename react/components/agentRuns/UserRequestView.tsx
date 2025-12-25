@@ -13,6 +13,7 @@ import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '../../agents/atoms';
+import { useHelpMessageTarget } from '../../help/useHelpMessageTarget';
 
 interface UserRequestViewProps {
     userPrompt: BeaverAgentPrompt;
@@ -57,6 +58,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     
     // Editing is only allowed when canEdit is true AND no run is streaming
     const canEditNow = canEdit && !isStreaming;
+
+    // Register as help message target for the "edit your message" tip
+    const { targetRef: helpTargetRef } = useHelpMessageTarget('edit-user-request', {
+        enabled: canEditNow && !isEditing,
+    });
 
     const {
         isMenuOpen: isSelectionMenuOpen, 
@@ -220,6 +226,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         <div className="px-3 py-1 relative" ref={containerRef}>
             {/* Main display (always in DOM for layout) */}
             <div 
+                ref={helpTargetRef}
                 id={`user-request-${runId}`} 
                 className={`
                     user-message-display user-request-view

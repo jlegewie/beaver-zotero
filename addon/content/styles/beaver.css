@@ -1077,6 +1077,96 @@
 }
 
 
+/* ============================================================================
+   Help Message Bubble Styles
+   ============================================================================ */
+
+/* Help message bubble container */
+.help-message-bubble {
+    background: var(--fill-quarternary);
+    border: 1px solid var(--fill-quinary);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    max-width: 280px;
+    min-width: 180px;
+    pointer-events: auto;
+}
+
+/* Fade in animations */
+.help-message-bubble.help-message-bubble-bottom {
+    animation: helpMessageFadeInBottom 0.2s ease-out forwards;
+}
+
+.help-message-bubble.help-message-bubble-top {
+    animation: helpMessageFadeInTop 0.2s ease-out forwards;
+}
+
+/* Fade out animation */
+.help-message-bubble.help-message-bubble-fading-out {
+    animation: helpMessageFadeOut 0.15s ease-in forwards;
+}
+
+@keyframes helpMessageFadeInBottom {
+    from { 
+        opacity: 0; 
+        transform: translateY(-8px) translateX(-50%); 
+    }
+    to { 
+        opacity: 1; 
+        transform: translateY(0) translateX(-50%); 
+    }
+}
+
+@keyframes helpMessageFadeInTop {
+    from { 
+        opacity: 0; 
+        transform: translateY(8px) translateX(-50%); 
+    }
+    to { 
+        opacity: 1; 
+        transform: translateY(0) translateX(-50%); 
+    }
+}
+
+@keyframes helpMessageFadeOut {
+    from { 
+        opacity: 1; 
+        transform: translateY(0) translateX(-50%); 
+    }
+    to { 
+        opacity: 0; 
+        transform: translateY(0) translateX(-50%); 
+    }
+}
+
+/* Help message arrow */
+.help-message-arrow {
+    position: absolute;
+    width: 0;
+    height: 0;
+    transform: translateX(-50%);
+}
+
+.help-message-arrow.help-message-arrow-top {
+    bottom: -6px;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid var(--fill-quarternary);
+}
+
+.help-message-arrow.help-message-arrow-bottom {
+    top: -6px;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 6px solid var(--fill-quarternary);
+}
+
+/* Help message provider wrapper */
+.help-message-provider {
+    display: contents;
+}
+
+
 /* Common button styles - shared across all variants */
 [id^="beaver-pane-"] .button-base {
     cursor: pointer;

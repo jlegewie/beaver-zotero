@@ -21,6 +21,7 @@ import { store } from '../store';
 import { isLoadingThreadAtom } from '../atoms/threads';
 import { Spinner } from './icons/icons';
 import PreviewAndPopupContainer from './PreviewAndPopupContainer';
+import HelpMessageProvider from '../help/HelpMessageProvider';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -121,30 +122,32 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
 
     {/* Main page */}
     return (
-        <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
-            
-            {/* Header */}
-            <Header isWindow={isWindow} />
+        <HelpMessageProvider>
+            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                
+                {/* Header */}
+                <Header isWindow={isWindow} />
 
-            {/* Thread view with agent runs */}
-            {runs.length > 0 ? (
-                <ThreadView ref={messagesContainerRef} isWindow={isWindow} />
-            ) : (
-                <HomePage isWindow={isWindow} />
-            )}
+                {/* Thread view with agent runs */}
+                {runs.length > 0 ? (
+                    <ThreadView ref={messagesContainerRef} isWindow={isWindow} />
+                ) : (
+                    <HomePage isWindow={isWindow} />
+                )}
 
-            {/* Prompt area (footer) with floating elements */}
-            <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
-                <PreviewAndPopupContainer />
-                <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
-                <DragDropWrapper>
-                    <InputArea inputRef={inputRef} />
-                </DragDropWrapper>
+                {/* Prompt area (footer) with floating elements */}
+                <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
+                    <PreviewAndPopupContainer />
+                    <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
+                    <DragDropWrapper>
+                        <InputArea inputRef={inputRef} />
+                    </DragDropWrapper>
+                </div>
+
+                {/* Dialog Container */}
+                <DialogContainer />
             </div>
-
-            {/* Dialog Container */}
-            <DialogContainer />
-        </div>
+        </HelpMessageProvider>
     );
 };
 

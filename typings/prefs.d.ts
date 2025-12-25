@@ -38,6 +38,7 @@ declare namespace _ZoteroTypes {
       "runCollectionSync": boolean;
       "runWebDAVSync": boolean;
       "pendingVersionNotifications": string;
+      "helpMessageState": string;
     };
   }
 }

@@ -50,3 +50,6 @@ pref("runConsistencyCheck", false);
 pref("runCollectionSync", false);
 pref("runWebDAVSync", false);
 pref("pendingVersionNotifications", "[]");
+
+// Help message state (tracks dismissed messages and rate limiting)
+pref("helpMessageState", "{}");
