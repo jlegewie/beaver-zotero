@@ -71,6 +71,8 @@ export interface BeaverAgentPrompt {
     is_resume?: boolean;
     /** The run ID this request resumes (for resume requests) */
     resumes_run_id?: string;
+    /** Custom system instructions for this request */
+    custom_instructions?: string;
 }
 
 // ============================================================================
