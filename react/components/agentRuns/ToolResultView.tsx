@@ -13,6 +13,8 @@ import {
     extractSearchInDocumentsData,
     isExternalSearchResult,
     extractExternalSearchData,
+    isReadPagesFrontendResult,
+    extractReadPagesFrontendData,
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
@@ -55,10 +57,12 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
     }
 
     // Read pages results (read_pages)
-    if (isReadPagesResult(toolName, content, metadata)) {
-        const data = extractReadPagesData(content, metadata);
+    if (isReadPagesResult(toolName, content, metadata) || isReadPagesFrontendResult(toolName, content, metadata)) {
+        const data = isReadPagesResult(toolName, content, metadata)
+            ? extractReadPagesData(content, metadata)
+            : extractReadPagesFrontendData(content, metadata);
         if (data) {
-            return <ReadPagesResultView chunks={data.chunks} />;
+            return <ReadPagesResultView pages={data.pages} />;
         }
     }
 
@@ -108,13 +112,18 @@ const GenericResultView: React.FC<{ content: unknown }> = ({ content }) => {
         }
     };
 
-    const formattedContent = formatContent();
-
     return (
         <div className="tool-result-view p-3 text-sm overflow-x-auto">
-            <pre className="whitespace-pre-wrap font-mono text-xs opacity-80">
-                {formattedContent}
-            </pre>
+            {Zotero.Beaver.data.env === "development" ? (
+                <pre className="whitespace-pre-wrap font-mono text-xs opacity-80">
+                    {formatContent()}
+                </pre>
+            ) : (
+                <div className="font-color-secondary">
+                    No result to display
+                </div>
+            )}
+            
         </div>
     );
 };

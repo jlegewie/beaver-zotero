@@ -26,6 +26,16 @@ export interface ChunkReference {
 }
 
 /**
+ * Page reference with ZoteroItemReference fields and page number.
+ * Matches PageReference from backend.
+ */
+export interface PageReference {
+    library_id: number;
+    zotero_key: string;
+    page_number: number;
+}
+
+/**
  * Page image reference with ZoteroItemReference fields and page metadata.
  * Matches PageImageReference from backend.
  */
@@ -59,13 +69,23 @@ export interface FulltextSearchResultSummary {
 }
 
 /**
- * Fulltext retrieval result summary.
+ * Read pages result summary.
  * Matches ReadPagesToolResultSummary from backend.
  */
 export interface ReadPagesToolResultSummary {
     tool_name: string;
-    result_count: number;
+    // result_count: number;
     chunks: ChunkReference[];
+}
+
+/**
+ * Read pages frontend result summary.
+ * Matches ReadPagesFrontendResultSummary from backend.
+ */
+export interface ReadPagesFrontendResultSummary {
+    tool_name: string;
+    result_count: number;
+    pages: PageReference[];
 }
 
 /**
@@ -247,11 +267,11 @@ export function isReadPagesResult(
     if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
     const summary = metadata.summary as Record<string, unknown>;
 
-    const toolNameIsRetrieval = READ_PAGES_TOOL_NAMES.includes(toolName);
+    const toolNameIsReadPages = READ_PAGES_TOOL_NAMES.includes(toolName);
     const toolNameIsOtherKnownChunkTool =
         FULLTEXT_SEARCH_TOOL_NAMES.includes(toolName) ||
         SEARCH_IN_DOCUMENTS_TOOL_NAMES.includes(toolName);
-    if (!toolNameIsRetrieval) {
+    if (!toolNameIsReadPages) {
         if (toolNameIsOtherKnownChunkTool) return false;
         const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
         if (!summaryToolName || !READ_PAGES_TOOL_NAMES.includes(summaryToolName)) return false;
@@ -265,6 +285,40 @@ export function isReadPagesResult(
             if (!chunk || typeof chunk !== 'object') return false;
             const obj = chunk as Record<string, unknown>;
             return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
+        })
+    );
+}
+
+/**
+ * Type guard for read pages frontend results.
+ * Checks if metadata.summary is ReadPagesFrontendResultSummary.
+ */
+export function isReadPagesFrontendResult(
+    toolName: string,
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): metadata is { summary: ReadPagesFrontendResultSummary } {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+
+    const toolNameIsReadPages = READ_PAGES_TOOL_NAMES.includes(toolName);
+    if (!toolNameIsReadPages) {
+        const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
+        if (!summaryToolName || !READ_PAGES_TOOL_NAMES.includes(summaryToolName)) return false;
+    }
+    
+    return (
+        typeof summary.tool_name === 'string' &&
+        typeof summary.result_count === 'number' &&
+        Array.isArray(summary.pages) &&
+        summary.pages.every((page: unknown) => {
+            if (!page || typeof page !== 'object') return false;
+            const obj = page as Record<string, unknown>;
+            return (
+                typeof obj.library_id === 'number' &&
+                typeof obj.zotero_key === 'string' &&
+                typeof obj.page_number === 'number'
+            );
         })
     );
 }
@@ -433,7 +487,7 @@ export function extractFulltextSearchData(
  * Normalized fulltext retrieval data - all chunks from read_pages.
  */
 export interface ReadPagesViewData {
-    chunks: ChunkReference[];
+    pages: PageReference[];
 }
 
 /**
@@ -449,8 +503,47 @@ export function extractReadPagesData(
     
     if (!Array.isArray(summary.chunks)) return null;
 
-    return { chunks: summary.chunks };
+    const pages: PageReference[] = [];
+    for (const chunk of summary.chunks) {
+        if (chunk.page !== undefined) {
+            pages.push({
+                library_id: chunk.library_id,
+                zotero_key: chunk.zotero_key,
+                page_number: chunk.page,
+            });
+        }
+    }
+
+    return { pages };
 }
+
+/**
+ * Extract all chunks from metadata.summary.
+ * @returns ReadPagesViewData or null if summary is not available
+ */
+export function extractReadPagesFrontendData(
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): ReadPagesViewData | null {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as ReadPagesFrontendResultSummary;
+    
+    if (!Array.isArray(summary.pages)) return null;
+
+    const pages: PageReference[] = [];
+    for (const page of summary.pages) {
+        if (page.page_number !== undefined) {
+            pages.push({
+                library_id: page.library_id,
+                zotero_key: page.zotero_key,
+                page_number: page.page_number,
+            });
+        }
+    }
+
+    return { pages };
+}
+
 
 /**
  * Normalized page images data.
@@ -584,10 +677,16 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
         return data?.chunks ?? [];
     }
 
-    // Fulltext retrieval results (single attachment)
+    // Read pages results (pages)
     if (isReadPagesResult(tool_name, content, metadata)) {
         const data = extractReadPagesData(content, metadata);
-        return data?.chunks ?? [];
+        return data?.pages ?? [];
+    }
+
+    // Read pages frontend results (pages)
+    if (isReadPagesFrontendResult(tool_name, content, metadata)) {
+        const data = extractReadPagesFrontendData(content, metadata);
+        return data?.pages ?? [];
     }
 
     // View page images results

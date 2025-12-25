@@ -1,29 +1,29 @@
 import React from 'react';
-import { ChunkReference } from '../../agents/toolResultTypes';
+import { PageReference } from '../../agents/toolResultTypes';
 import ZoteroItemsList, { ZoteroItemReferenceWithLabel } from '../ui/ZoteroItemsList';
 import { formatNumberRanges } from '../../utils/stringUtils';
 
 interface ReadPagesResultViewProps {
-    chunks: ChunkReference[];
+    pages: PageReference[];
 }
 
 /**
  * Aggregate chunks to unique attachments with page numbers.
  */
-function aggregateToAttachmentsWithPages(chunks: ChunkReference[]): (ZoteroItemReferenceWithLabel | { library_id: number; zotero_key: string })[] {
+function aggregateToAttachmentsWithPages(pages: PageReference[]): (ZoteroItemReferenceWithLabel | { library_id: number; zotero_key: string })[] {
     const attachmentMap = new Map<string, { library_id: number; zotero_key: string; pages: number[] }>();
     
-    for (const chunk of chunks) {
-        const key = `${chunk.library_id}-${chunk.zotero_key}`;
+    for (const page of pages) {
+        const key = `${page.library_id}-${page.zotero_key}`;
         if (!attachmentMap.has(key)) {
             attachmentMap.set(key, {
-                library_id: chunk.library_id,
-                zotero_key: chunk.zotero_key,
+                library_id: page.library_id,
+                zotero_key: page.zotero_key,
                 pages: []
             });
         }
-        if (chunk.page !== undefined) {
-            attachmentMap.get(key)!.pages.push(chunk.page);
+        if (page.page_number !== undefined) {
+            attachmentMap.get(key)!.pages.push(page.page_number);
         }
     }
 
@@ -46,8 +46,8 @@ function aggregateToAttachmentsWithPages(chunks: ChunkReference[]): (ZoteroItemR
  * Renders the result of a fulltext retrieval tool (read_pages).
  * Shows the attachment that was retrieved with page info.
  */
-export const ReadPagesResultView: React.FC<ReadPagesResultViewProps> = ({ chunks }) => {
-    const attachments = aggregateToAttachmentsWithPages(chunks);
+export const ReadPagesResultView: React.FC<ReadPagesResultViewProps> = ({ pages }) => {
+    const attachments = aggregateToAttachmentsWithPages(pages);
 
     return (
         <div className="display-flex flex-col">
