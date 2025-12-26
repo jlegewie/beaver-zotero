@@ -124,14 +124,11 @@ export interface CitationKeyParams {
 }
 
 /**
- * Generate a unique key for a citation that can be used for marker assignment
- * and metadata lookup.
+ * Generate a base key for a citation (item-level, without location info).
  * 
- * This is the SINGLE SOURCE OF TRUTH for citation key generation.
- * Used by:
- * - MarkdownRenderer (preprocessing to inject citation_key prop)
- * - ZoteroCitation component (lookup in citationDataByCitationKeyAtom)
- * - updateCitationDataAtom (when metadata arrives)
+ * Used for:
+ * - Marker assignment (same item = same marker number)
+ * - Base identification of the cited item
  * 
  * Key format:
  * - Zotero citations: "zotero:{library_id}-{zotero_key}"
@@ -139,7 +136,7 @@ export interface CitationKeyParams {
  * - Unknown: "" (empty string)
  * 
  * @param params Citation key parameters
- * @returns Unique citation key string
+ * @returns Base citation key string
  */
 export function getCitationKey(params: CitationKeyParams): string {
     if (params.library_id && params.zotero_key) {
@@ -149,6 +146,40 @@ export function getCitationKey(params: CitationKeyParams): string {
         return `external:${params.external_source_id}`;
     }
     return '';
+}
+
+/**
+ * Parameters for generating a full citation key (includes location info).
+ */
+export interface FullCitationKeyParams extends CitationKeyParams {
+    sid?: string;   // Sentence ID (e.g., "s0-s8")
+    page?: string;  // Page number (e.g., "3")
+}
+
+/**
+ * Generate a full citation key including location info (sid, page).
+ * 
+ * Used for matching in-text citations to their specific metadata.
+ * Different locations within the same item get different full keys.
+ * 
+ * Key format:
+ * - Base key only: "zotero:1-ABC123"
+ * - With sid: "zotero:1-ABC123:sid=s0-s8"
+ * - With page: "zotero:1-ABC123:page=3"
+ * - With both: "zotero:1-ABC123:sid=s0-s8:page=3"
+ * 
+ * @param params Full citation key parameters
+ * @returns Full citation key string
+ */
+export function getFullCitationKey(params: FullCitationKeyParams): string {
+    const baseKey = getCitationKey(params);
+    if (!baseKey) return '';
+    
+    const parts: string[] = [baseKey];
+    if (params.sid) parts.push(`sid=${params.sid}`);
+    if (params.page) parts.push(`page=${params.page}`);
+    
+    return parts.join(':');
 }
 
 /**
@@ -180,7 +211,7 @@ export interface NormalizedCitationAttrs {
     item_id?: string;      // Format: "libraryID-itemKey"
     att_id?: string;       // Format: "libraryID-itemKey"
     external_id?: string;  // External source ID
-    sid?: string;          // Sentence ID
+    sid?: string;          // Sentence ID (e.g., "s0-s8")
     page?: string;         // Page number(s) - e.g., "10" or "10-12"
 }
 
@@ -189,7 +220,7 @@ export interface NormalizedCitationAttrs {
  * 
  * Normalizations:
  * - attachment_id → att_id
- * - Only keeps recognized attributes (item_id, att_id, external_id, sid)
+ * - Only keeps recognized attributes (item_id, att_id, external_id, sid, page)
  * 
  * @param attributesStr Raw attribute string from citation tag
  * @returns Normalized attributes object
@@ -220,14 +251,45 @@ export function parseCitationAttributes(attributesStr: string): NormalizedCitati
 }
 
 /**
- * Compute a citation key from normalized citation attributes.
+ * Compute a full citation key from normalized citation attributes.
+ * Includes sid and page for unique identification of citation instances.
  * Priority: att_id > item_id > external_id
  * 
  * @param attrs Normalized citation attributes
- * @returns Citation key or empty string if no valid identifier
+ * @returns Full citation key or empty string if no valid identifier
  */
 export function computeCitationKeyFromAttrs(attrs: NormalizedCitationAttrs): string {
     // att_id takes priority (attachment reference)
+    const zoteroRef = parseItemReference(attrs.att_id) || parseItemReference(attrs.item_id);
+    
+    if (zoteroRef) {
+        return getFullCitationKey({
+            library_id: zoteroRef.libraryID,
+            zotero_key: zoteroRef.itemKey,
+            sid: attrs.sid,
+            page: attrs.page
+        });
+    }
+    
+    if (attrs.external_id) {
+        return getFullCitationKey({ 
+            external_source_id: attrs.external_id,
+            sid: attrs.sid,
+            page: attrs.page
+        });
+    }
+    
+    return '';
+}
+
+/**
+ * Compute a base (item-only) citation key from normalized citation attributes.
+ * Does NOT include sid/page - used for marker assignment.
+ * 
+ * @param attrs Normalized citation attributes
+ * @returns Base citation key or empty string if no valid identifier
+ */
+export function computeBaseCitationKeyFromAttrs(attrs: NormalizedCitationAttrs): string {
     const zoteroRef = parseItemReference(attrs.att_id) || parseItemReference(attrs.item_id);
     
     if (zoteroRef) {

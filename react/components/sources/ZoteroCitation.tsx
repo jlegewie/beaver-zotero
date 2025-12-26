@@ -9,7 +9,8 @@ import {
     getCitationBoundingBoxes, 
     isExternalCitation, 
     isZoteroCitation, 
-    parseItemReference 
+    parseItemReference,
+    getCitationKey
 } from '../../types/citations';
 import { formatNumberRanges } from '../../utils/stringUtils';
 import { selectItemById } from '../../../src/utils/selectItem';
@@ -88,17 +89,20 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
 
     // =========================================================================
-    // IDENTITY RESOLUTION - Simplified using citation_key
+    // IDENTITY RESOLUTION - Using citation_key for lookup, base key for markers
     // =========================================================================
     // 
-    // citation_key is injected by preprocessCitations and serves as the
-    // single source of truth for both metadata lookup and marker assignment.
+    // citation_key (full key) is injected by preprocessCitations for metadata lookup.
+    // It includes sid/page for unique identification of citation instances.
+    // 
+    // For marker assignment, we use a base key (item-only) so that all citations
+    // to the same item get the same marker number.
     //
     const identity = useMemo(() => {
-        // citation_key is the canonical identifier (e.g., "zotero:1-ABC123" or "external:xyz")
+        // citation_key is the full identifier (e.g., "zotero:1-ABC123:sid=s0-s8")
         const citationKey = citationKeyProp || '';
         
-        // Look up citation metadata via citation_key
+        // Look up citation metadata via full citation_key
         let metadata = citationKey 
             ? citationDataByCitationKey[citationKey] 
             : undefined;
@@ -113,16 +117,21 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             }
         }
         
-        // Debug logging for citation matching (level 5 = verbose/trace)
-        // if (citationKey && !metadata) {
-        //     logger(`ZoteroCitation: No metadata for key "${citationKey}" (available: ${Object.keys(citationDataByCitationKey).length} keys)`, 5);
-        // } else if (!citationKey) {
-        //     logger(`ZoteroCitation: No citation_key (att_id=${att_id}, item_id=${item_id}, external_id=${external_id})`, 5);
-        // }
-        
         // Parse Zotero reference from props (att_id takes priority)
         // Used for click handling and display even before metadata arrives
         const zoteroRef = parseItemReference(att_id) || parseItemReference(item_id);
+        
+        // Compute base key for marker assignment (same item = same marker)
+        // This strips sid/page from the key
+        let markerKey = '';
+        if (zoteroRef) {
+            markerKey = getCitationKey({
+                library_id: zoteroRef.libraryID,
+                zotero_key: zoteroRef.itemKey
+            });
+        } else if (external_id) {
+            markerKey = getCitationKey({ external_source_id: external_id });
+        }
         
         // Determine citation type
         const isExternal = metadata 
@@ -146,7 +155,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             metadata,
             zoteroRef,
             isExternal,
-            citationKey,
+            citationKey,     // Full key for metadata lookup
+            markerKey,       // Base key for marker assignment
             displayState,
             // Convenience accessors
             libraryID: zoteroRef?.libraryID ?? metadata?.library_id ?? 0,
@@ -160,6 +170,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         metadata: citationMetadata, 
         isExternal, 
         citationKey,
+        markerKey,
         displayState,
         libraryID,
         itemKey
@@ -181,8 +192,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const isStreaming = displayState === 'streaming';
     const isInvalid = displayState === 'invalid';
 
-    // Get or assign numeric marker using the thread-scoped atom (resets when thread changes)
-    const numericMarker = useCitationMarker(citationKey, exportRendering);
+    // Get or assign numeric marker using base key (same item = same marker)
+    // Uses markerKey (without sid/page) so all citations to the same item share a marker
+    const numericMarker = useCitationMarker(markerKey, exportRendering);
 
     // Cleanup effect for when component unmounts or citation changes
     useEffect(() => {
@@ -396,7 +408,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     } else {
         // Numeric markers should be stable and independent of citationMetadata.
         // If key is missing (invalid/malformed citation) or invalid, show placeholder.
-        displayText = (citationKey && !isInvalid) ? numericMarker : '?';
+        displayText = (markerKey && !isInvalid) ? numericMarker : '?';
     }
 
     // Rendering for export to Zotero note (using CSL JSON for citations)

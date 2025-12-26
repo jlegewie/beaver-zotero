@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, Icon } from '../icons/icons';
+import { LinkIcon, ArrowRightIcon, Spinner, TickIcon, AlertIcon, Icon, InformationCircleIcon } from '../icons/icons';
 import IconButton from "../ui/IconButton";
 import Button from "../ui/Button";
 import { useSetAtom, useAtomValue } from 'jotai';
@@ -190,6 +190,12 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                         {buttonText}
                     </Button>
                 </div>
+                {provider.toLowerCase() === 'google' && (
+                    <div className="text-sm font-color-secondary display-flex flex-row items-start gap-1">
+                        <Icon icon={InformationCircleIcon} className="scale-90 mt-015 font-color-secondary" />
+                        Free Gemini API keys will fail due to severe rate limits. Use a paid key for reliable performance.
+                    </div>
+                )}
                 {verificationStatus === 'error' && verificationMessage && (
                     <div className="text-sm font-color-error" role="alert">
                         {verificationMessage}
