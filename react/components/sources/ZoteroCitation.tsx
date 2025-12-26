@@ -193,17 +193,6 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     // Uses markerKey (without sid/page) so all citations to the same item share a marker
     const numericMarker = useCitationMarker(markerKey, exportRendering);
 
-    // Cleanup effect for when component unmounts or citation changes
-    useEffect(() => {
-        return () => {
-            // Cleanup temporary annotations when component unmounts
-            if (BeaverTemporaryAnnotations.getCount() > 0) {
-                logger('ZoteroCitation: cleanupTemporaryAnnotations');
-                BeaverTemporaryAnnotations.cleanupAll().catch(logger);
-            }
-        };
-    }, [citationKey]);
-
     // Derive citation display data from metadata
     // When metadata is not available (streaming), values are empty and component shows inactive "?"
     const { formatted_citation, citation, url, previewText, pages } = useMemo(() => {
