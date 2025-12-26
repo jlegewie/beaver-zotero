@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, forwardRef, useLayoutEffect } from "react";
+import React, { useEffect, useRef, forwardRef, useLayoutEffect, useCallback } from "react";
 import { useAtomValue } from "jotai";
 import { allRunsAtom } from "../../agents/atoms";
 import { AgentRunView } from "./AgentRunView";
@@ -37,11 +37,16 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             isWindow
         });
 
-        // Restore scroll position from atom (only for thread switching, not during streaming)
-        // Note: userScrolledAtom is managed by useAutoScroll.handleScroll, not here
-        useLayoutEffect(() => {
+        // Helper function to restore scroll position
+        const restoreScrollPosition = useCallback(() => {
             const container = scrollContainerRef.current;
             if (!container) {
+                restoredFromAtomRef.current = false;
+                return;
+            }
+            
+            // Skip if hidden
+            if (container.clientHeight === 0) {
                 restoredFromAtomRef.current = false;
                 return;
             }
@@ -75,6 +80,28 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 }
             }
         }, [storedScrollTop, scrolledAtom]);
+
+        // Restore scroll position from atom (only for thread switching, not during streaming)
+        // Note: userScrolledAtom is managed by useAutoScroll.handleScroll, not here
+        useLayoutEffect(() => {
+            restoreScrollPosition();
+        }, [restoreScrollPosition]);
+
+        // Watch for visibility/size changes to restore scroll position when becoming visible
+        useEffect(() => {
+            const container = scrollContainerRef.current;
+            if (!container) return;
+
+            const observer = new ResizeObserver(() => {
+                // If we became visible, try restoring
+                if (container.clientHeight > 0) {
+                    restoreScrollPosition();
+                }
+            });
+            
+            observer.observe(container);
+            return () => observer.disconnect();
+        }, [restoreScrollPosition]);
 
         // Scroll to bottom when runs change
         useEffect(() => {
