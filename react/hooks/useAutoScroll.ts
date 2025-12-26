@@ -110,6 +110,12 @@ export function useAutoScroll(
         };
 
         const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+
+        // Ignore scroll events when the container is hidden or has no height
+        if (clientHeight === 0) {
+            return;
+        }
+
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
         
         // Detect scroll direction

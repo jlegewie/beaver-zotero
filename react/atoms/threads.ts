@@ -15,6 +15,7 @@ import { threadRunsAtom, activeRunAtom } from "../agents/atoms";
 import { threadAgentActionsAtom, isCreateItemAgentAction, AgentAction, validateAppliedAgentAction, undoAgentActionAtom } from "../agents/agentActions";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
+import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
 
 // Thread types
 export interface ThreadData {
@@ -105,6 +106,11 @@ export const recentThreadsAtom = atom<ThreadData[]>([]);
 export const newThreadAtom = atom(
     null,
     async (get, set) => {
+        // Clean up any temporary annotations from previous thread
+        await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
+            logger(`newThreadAtom: Error cleaning up temporary annotations: ${error}`);
+        });
+        
         const isLibraryTab = get(isLibraryTabAtom);
         set(currentThreadIdAtom, null);
         
@@ -152,6 +158,11 @@ export const loadThreadAtom = atom(
     async (get, set, { user_id, threadId }: { user_id: string; threadId: string }) => {
         set(isLoadingThreadAtom, true);
         try {
+            // Clean up any temporary annotations from previous thread
+            await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
+                logger(`loadThreadAtom: Error cleaning up temporary annotations: ${error}`);
+            });
+            
             // Reset scroll state for both sidebar and window
             set(userScrolledAtom, false);
             set(windowUserScrolledAtom, false);
