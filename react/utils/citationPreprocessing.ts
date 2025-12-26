@@ -88,6 +88,7 @@ export function preprocessCitationMatch(
     if (normalizedAttrs.att_id) attrParts.push(`att_id="${normalizedAttrs.att_id}"`);
     if (normalizedAttrs.external_id) attrParts.push(`external_id="${normalizedAttrs.external_id}"`);
     if (normalizedAttrs.sid) attrParts.push(`sid="${normalizedAttrs.sid}"`);
+    if (normalizedAttrs.page) attrParts.push(`page="${normalizedAttrs.page}"`);
     const normalizedAttrStr = attrParts.join(' ');
     
     // Compute citation_key for metadata lookup (single source of truth)

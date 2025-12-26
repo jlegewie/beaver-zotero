@@ -6,7 +6,7 @@ import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
 import { citationDataMapAtom, citationKeyToMarkerAtom } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
-import { CitationData, parseCitationAttributes, computeCitationKeyFromAttrs } from '../types/citations';
+import { CitationData, parseCitationAttributes, computeBaseCitationKeyFromAttrs } from '../types/citations';
 import { CITATION_TAG_PATTERN } from '../utils/citationPreprocessing';
 import { ZoteroItemReference } from '../types/zotero';
 import { logger } from '../../src/utils/logger';
@@ -166,8 +166,8 @@ export function renderToMarkdown(
         let citation = '';
         if (itemToCite.isRegularItem()) {
             const citationObject: Citation = {id: itemToCite.id};
-            if (attrs.pages) {
-                citationObject.locator = attrs.pages;
+            if (attrs.page || attrs.pages) {
+                citationObject.locator = attrs.page || attrs.pages;
                 citationObject.label = 'p.';
             }
             citation = Zotero.Beaver.citationService.formatCitation([citationObject]);
@@ -227,7 +227,8 @@ export function renderToHTML(
     while ((match = pattern.exec(content)) !== null) {
         const attributesStr = match[1];
         const attrs = parseCitationAttributes(attributesStr);
-        const citationKey = computeCitationKeyFromAttrs(attrs);
+        // Use base key (without sid/page) so all citations to the same item share a marker
+        const citationKey = computeBaseCitationKeyFromAttrs(attrs);
         
         if (citationKey && !markerMap[citationKey]) {
             markerCount++;

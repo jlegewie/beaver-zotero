@@ -2,7 +2,14 @@ import { atom } from 'jotai';
 import { getDisplayNameFromItem, getReferenceFromItem } from '../utils/sourceUtils';
 import { createZoteroURI } from "../utils/zoteroURI";
 import { logger } from '../../src/utils/logger';
-import { CitationMetadata, CitationData, isExternalCitation, getCitationKey } from '../types/citations';
+import { 
+    CitationMetadata, 
+    CitationData, 
+    isExternalCitation, 
+    getCitationKey, 
+    getFullCitationKey,
+    parseCitationAttributes
+} from '../types/citations';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { externalReferenceMappingAtom, formatExternalCitation } from './externalReferences';
 
@@ -116,16 +123,45 @@ function getInvalidCitationFallbackKey(rawTag: string): string | null {
 }
 
 /**
- * Citation data mapped by citation key for lookup.
+ * Compute full citation key from CitationMetadata.
+ * 
+ * Parses raw_tag to extract sid/page for unique identification,
+ * since these location details aren't stored as direct fields on CitationMetadata.
+ * 
+ * @param citation Citation metadata
+ * @returns Full citation key including sid/page if present
+ */
+function getFullCitationKeyFromMetadata(citation: CitationMetadata): string {
+    // Parse raw_tag to get sid and page
+    let sid: string | undefined;
+    let page: string | undefined;
+    
+    if (citation.raw_tag) {
+        const attrs = parseCitationAttributes(citation.raw_tag);
+        sid = attrs.sid;
+        page = attrs.page;
+    }
+    
+    return getFullCitationKey({
+        library_id: citation.library_id,
+        zotero_key: citation.zotero_key,
+        external_source_id: citation.external_source_id,
+        sid,
+        page
+    });
+}
+
+/**
+ * Citation data mapped by full citation key for lookup.
  * 
  * This is the primary lookup mechanism for ZoteroCitation components:
  * - MarkdownRenderer injects citation_key prop during preprocessing
  * - ZoteroCitation looks up metadata using this key
- * - Key is computed via getCitationKey() from library_id/zotero_key or external_source_id
+ * - Key includes sid/page for unique identification of citation instances
  * 
  * Key format:
- * - Zotero citations: "zotero:{library_id}-{zotero_key}"
- * - External citations: "external:{external_source_id}"
+ * - Zotero citations: "zotero:{library_id}-{zotero_key}" or with location: "zotero:1-ABC:sid=s0-s8"
+ * - External citations: "external:{external_source_id}" or with location
  * - Invalid citations (fallback): "invalid:{raw_id_value}"
  */
 export const citationDataByCitationKeyAtom = atom<Record<string, CitationData>>((get) => {
@@ -133,11 +169,8 @@ export const citationDataByCitationKeyAtom = atom<Record<string, CitationData>>(
     const byKey: Record<string, CitationData> = {};
     
     for (const citation of Object.values(dataMap)) {
-        const key = getCitationKey({
-            library_id: citation.library_id,
-            zotero_key: citation.zotero_key,
-            external_source_id: citation.external_source_id
-        });
+        // Use full citation key (includes sid/page from raw_tag)
+        const key = getFullCitationKeyFromMetadata(citation);
         if (key) {
             byKey[key] = citation;
         }
