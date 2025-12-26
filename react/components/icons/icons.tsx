@@ -54,6 +54,7 @@ export { default as ViewIcon } from './ViewIcon';
 export { default as OneIcon } from './OneIcon';
 export { default as TwoIcon } from './TwoIcon';
 export { default as ThreeIcon } from './ThreeIcon';
+export { default as EditIcon } from './EditIcon';
 export { default as FourIcon } from './FourIcon';
 export { default as AlertCircleIcon } from './AlertCircleIcon';
 export { default as CircleIcon } from './CircleIcon';

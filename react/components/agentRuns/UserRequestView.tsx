@@ -7,7 +7,7 @@ import { MessageItemButton } from '../input/MessageItemButton';
 import { LibraryButton } from '../library/LibraryButton';
 import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
-import { LinkBackwardIcon } from '../icons/icons';
+import { EditIcon, Spinner } from '../icons/icons';
 import Button from '../ui/Button';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
@@ -221,11 +221,15 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             {/* Main display (always in DOM for layout) */}
             <div 
                 id={`user-request-${runId}`} 
-                className={`user-message-display user-request-view ${isHovered && !isEditing && canEditNow ? 'user-request-view-hover' : ''} ${isEditing ? 'user-request-view-editing' : ''}`}
-                onMouseEnter={() => canEditNow && setIsHovered(true)}
+                className={`
+                    user-message-display user-request-view
+                    ${isHovered && !isEditing ? 'user-request-view-hover' : ''}
+                    ${isEditing ? 'user-request-view-editing' : ''}
+                `}
+                onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
                 onClick={handleClick}
-                style={{ cursor: canEditNow ? 'pointer' : 'default' }}
+                style={{ cursor: canEditNow ? 'pointer' : 'not-allowed' }}
             >
                 {/* Message attachments and filters */}
                 {hasFiltersOrAttachments && (
@@ -283,8 +287,13 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
                 {/* Edit icon (visible on hover) */}
                 {isHovered && !isEditing && canEditNow && (
-                    <div className="user-request-edit-icon">
-                        <LinkBackwardIcon width={14} height={14} />
+                    <div className="user-request-edit-icon mb-075">
+                        <EditIcon width={12} height={12} />
+                    </div>
+                )}
+                {isHovered && !isEditing && !canEditNow && (
+                    <div className="user-request-edit-icon mb-075">
+                        <Spinner size={12} />
                     </div>
                 )}
 

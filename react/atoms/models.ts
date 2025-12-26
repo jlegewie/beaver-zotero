@@ -183,16 +183,83 @@ export const validateSelectedModelAtom = atom(
         // Default model
         let defaultModel = availableModels.find(model => model.is_default) || null;
         if (!defaultModel && availableModels.length > 0) defaultModel = availableModels[0];
-        // Add access_mode to default model if it allows app_key
-        if (defaultModel && defaultModel.allow_app_key && !defaultModel.access_mode) {
-            defaultModel = { ...defaultModel, access_mode: 'app_key' as AccessMode };
+        // Add access_mode to default model if not already set
+        if (defaultModel && !defaultModel.access_mode) {
+            if (defaultModel.is_custom) {
+                defaultModel = { ...defaultModel, access_mode: 'custom' as AccessMode };
+            } else if (defaultModel.allow_app_key) {
+                defaultModel = { ...defaultModel, access_mode: 'app_key' as AccessMode };
+            } else if (defaultModel.allow_byok) {
+                defaultModel = { ...defaultModel, access_mode: 'byok' as AccessMode };
+            }
         }
 
-        // Check if the selected model is still valid with current API keys
-        const isModelAvailable = selectedModel && availableModels.some(m => m.id === selectedModel.id);
+        // 1. Check existence in available models
+        // We find the "fresh" definition from the available list to ensure we have latest flags/config
+        // This is crucial for migration: if lastUsedModel is stale/legacy, we hydrate it from availableModels
+        const freshModel = selectedModel ? availableModels.find(m => m.id === selectedModel.id) : null;
+        
+        if (!freshModel) {
+            // Model no longer exists or none selected
+            set(selectedModelAtom, defaultModel);
+            if(defaultModel) setPref('lastUsedModel', JSON.stringify(defaultModel));
+            return;
+        }
 
-        // If not valid, revert to default or first available model
-        if (!isModelAvailable) {
+        // 2. Hydrate/Migrate the model
+        // Use fresh properties, but preserve the selected access_mode if it exists
+        // If access_mode is missing (legacy persistence), infer it
+        let accessMode = selectedModel?.access_mode;
+        
+        // Validate persisted access_mode is still supported by fresh model
+        // If not, clear it so we can re-infer the best available mode
+        if (accessMode === 'byok' && !freshModel.allow_byok) accessMode = undefined;
+        if (accessMode === 'app_key' && !freshModel.allow_app_key) accessMode = undefined;
+        if (accessMode === 'custom' && !freshModel.is_custom) accessMode = undefined;
+        
+        if (!accessMode) {
+            // Legacy migration or access mode no longer valid: infer from fresh model
+            if (freshModel.is_custom) accessMode = 'custom';
+            else if (freshModel.allow_app_key) accessMode = 'app_key';
+            else if (freshModel.allow_byok) accessMode = 'byok';
+        }
+
+        // 3. Validate Access Mode & API Keys
+        // Now check if the resolved access mode is actually valid given current keys
+        let isValid = true;
+        
+        // If accessMode is still undefined, model has no valid access method
+        if (!accessMode) {
+            isValid = false;
+        }
+        
+        if (accessMode === 'byok') {
+            const apiKeys = {
+                google: !!get(googleApiKeyAtom),
+                openai: !!get(openAiApiKeyAtom),
+                anthropic: !!get(anthropicApiKeyAtom)
+            };
+            const hasKey = (freshModel.provider === 'google' && apiKeys.google) ||
+                           (freshModel.provider === 'openai' && apiKeys.openai) ||
+                           (freshModel.provider === 'anthropic' && apiKeys.anthropic);
+            
+            if (!hasKey) {
+                // Key missing. Can we fall back to app_key?
+                if (freshModel.allow_app_key) {
+                    accessMode = 'app_key';
+                } else {
+                    isValid = false;
+                }
+            }
+        }
+
+        if (isValid) {
+            // Update selected model with fresh data + validated access mode
+            const newSelectedModel = { ...freshModel, access_mode: accessMode };
+            set(selectedModelAtom, newSelectedModel);
+            setPref('lastUsedModel', JSON.stringify(newSelectedModel));
+        } else {
+            // Invalid configuration (e.g. BYOK required but no key), revert to default
             set(selectedModelAtom, defaultModel);
             if(defaultModel) setPref('lastUsedModel', JSON.stringify(defaultModel));
         }
