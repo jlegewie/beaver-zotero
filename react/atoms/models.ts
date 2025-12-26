@@ -189,7 +189,32 @@ export const validateSelectedModelAtom = atom(
         }
 
         // Check if the selected model is still valid with current API keys
-        const isModelAvailable = selectedModel && availableModels.some(m => m.id === selectedModel.id);
+        let isModelAvailable = selectedModel && availableModels.some(m => m.id === selectedModel.id);
+
+        // If in BYOK mode, ensure we actually have the key. 
+        // If not, try to switch to app_key mode if allowed.
+        if (isModelAvailable && selectedModel?.access_mode === 'byok') {
+            const apiKeys = {
+                google: !!get(googleApiKeyAtom),
+                openai: !!get(openAiApiKeyAtom),
+                anthropic: !!get(anthropicApiKeyAtom)
+            };
+            const hasKey = (selectedModel.provider === 'google' && apiKeys.google) ||
+                           (selectedModel.provider === 'openai' && apiKeys.openai) ||
+                           (selectedModel.provider === 'anthropic' && apiKeys.anthropic);
+            
+            if (!hasKey) {
+                if (selectedModel.allow_app_key) {
+                    // Switch to app_key mode
+                    set(selectedModelAtom, { ...selectedModel, access_mode: 'app_key' });
+                    setPref('lastUsedModel', JSON.stringify({ ...selectedModel, access_mode: 'app_key' }));
+                    return; // Done, valid model set
+                } else {
+                    // No key and no app_key fallback -> invalid
+                    isModelAvailable = false;
+                }
+            }
+        }
 
         // If not valid, revert to default or first available model
         if (!isModelAvailable) {
