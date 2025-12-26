@@ -127,9 +127,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 zotero_key: zoteroRef.itemKey
             });
         } else if (external_id) {
-            // Clean external_id from user-content- prefix
-            const cleanExternalId = external_id.replace('user-content-', '');
-            markerKey = getCitationKey({ external_source_id: cleanExternalId });
+            markerKey = getCitationKey({ external_source_id: external_id });
         }
         
         // Determine citation type
