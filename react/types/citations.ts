@@ -89,6 +89,8 @@ export interface CitationMetadata {
     preview?: string;
     /** A list of the specific parts/chunks cited. */
     parts: CitationPart[];
+    /** Page numbers cited directly (e.g., [10] or [10, 11, 12] for ranges). */
+    pages?: number[];
     
     /** The agent run ID of the citation. */
     run_id: string;
@@ -179,6 +181,7 @@ export interface NormalizedCitationAttrs {
     att_id?: string;       // Format: "libraryID-itemKey"
     external_id?: string;  // External source ID
     sid?: string;          // Sentence ID
+    page?: string;         // Page number(s) - e.g., "10" or "10-12"
 }
 
 /**
@@ -210,6 +213,7 @@ export function parseCitationAttributes(attributesStr: string): NormalizedCitati
         else if (name === 'att_id') attrs.att_id = value;
         else if (name === 'external_id') attrs.external_id = value;
         else if (name === 'sid') attrs.sid = value;
+        else if (name === 'page') attrs.page = value;
     }
     
     return attrs;
@@ -261,11 +265,19 @@ export interface CitationData extends CitationMetadata {
 
 export const getCitationPages = (citation: CitationData | CitationMetadata | null | undefined): number[] => {
     if (!citation) return [];
-    if (!citation.parts) return [];
-    return citation.parts
+    
+    // Collect pages from parts (sentence-level citations with locations)
+    const pagesFromParts = (citation.parts || [])
         .flatMap(p => p.locations || [])  
         .map(l => l.page_idx + 1)
         .filter((page): page is number => page !== undefined);
+    
+    // Collect pages from direct pages field (page-level citations)
+    const directPages = citation.pages || [];
+    
+    // Combine both sources, removing duplicates
+    const allPages = [...new Set([...pagesFromParts, ...directPages])];
+    return allPages.sort((a, b) => a - b);
 }
 
 export interface CitationBoundingBoxData {

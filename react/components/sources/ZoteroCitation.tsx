@@ -43,6 +43,7 @@ type CitationDisplayState = 'streaming' | 'ready' | 'invalid' | 'error';
  *   <citation item_id="libraryID-itemKey"/>      - parent item reference
  *   <citation att_id="libraryID-itemKey"/>       - attachment reference
  *   <citation att_id="..." sid="..."/>           - attachment with sentence ID
+ *   <citation att_id="..." page="..."/>          - attachment with page reference
  *   <citation external_id="..."/>                - external reference
  * 
  * Note: Props are passed from HTML attributes after sanitization,
@@ -56,6 +57,7 @@ interface ZoteroCitationProps {
     
     // Optional modifiers
     sid?: string;          // Sentence ID for location within attachment
+    page?: string;         // Page number(s) for location within attachment
     
     // Citation key for metadata lookup (injected by preprocessCitations)
     // Format: "zotero:{library_id}-{zotero_key}" or "external:{external_source_id}"
@@ -74,6 +76,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     item_id,
     att_id,
     external_id,
+    page,
     citation_key: citationKeyProp,
     consecutive = false,
     adjacent = false,

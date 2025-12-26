@@ -18,6 +18,7 @@ import {
 //   <citation item_id="..."/>           - parent item reference
 //   <citation att_id="..."/>            - attachment reference  
 //   <citation att_id="..." sid="..."/>  - attachment with sentence ID
+//   <citation att_id="..." page="..."/> - attachment with page reference
 //   <citation external_id="..."/>       - external reference
 const customSchema = deepmerge(defaultSchema, {
     tagNames: [...(defaultSchema.tagNames || []), 'citation'],
@@ -26,7 +27,7 @@ const customSchema = deepmerge(defaultSchema, {
         // Note: We allow extra attributes that get passed through but ignored
         // attachment_id is normalized to att_id during preprocessing
         // citation_key is used for metadata lookup (replaces raw_tag)
-        citation: ['item_id', 'att_id', 'attachment_id', 'sid', 'external_id', 'consecutive', 'adjacent', 'citation_key']
+        citation: ['item_id', 'att_id', 'attachment_id', 'sid', 'page', 'external_id', 'consecutive', 'adjacent', 'citation_key']
     }
 });
 
