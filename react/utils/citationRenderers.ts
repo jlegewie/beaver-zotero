@@ -166,8 +166,8 @@ export function renderToMarkdown(
         let citation = '';
         if (itemToCite.isRegularItem()) {
             const citationObject: Citation = {id: itemToCite.id};
-            if (attrs.pages) {
-                citationObject.locator = attrs.pages;
+            if (attrs.page || attrs.pages) {
+                citationObject.locator = attrs.page || attrs.pages;
                 citationObject.label = 'p.';
             }
             citation = Zotero.Beaver.citationService.formatCitation([citationObject]);
