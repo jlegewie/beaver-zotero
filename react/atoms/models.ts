@@ -183,9 +183,15 @@ export const validateSelectedModelAtom = atom(
         // Default model
         let defaultModel = availableModels.find(model => model.is_default) || null;
         if (!defaultModel && availableModels.length > 0) defaultModel = availableModels[0];
-        // Add access_mode to default model if it allows app_key
-        if (defaultModel && defaultModel.allow_app_key && !defaultModel.access_mode) {
-            defaultModel = { ...defaultModel, access_mode: 'app_key' as AccessMode };
+        // Add access_mode to default model if not already set
+        if (defaultModel && !defaultModel.access_mode) {
+            if (defaultModel.is_custom) {
+                defaultModel = { ...defaultModel, access_mode: 'custom' as AccessMode };
+            } else if (defaultModel.allow_app_key) {
+                defaultModel = { ...defaultModel, access_mode: 'app_key' as AccessMode };
+            } else if (defaultModel.allow_byok) {
+                defaultModel = { ...defaultModel, access_mode: 'byok' as AccessMode };
+            }
         }
 
         // 1. Check existence in available models
@@ -209,12 +215,13 @@ export const validateSelectedModelAtom = atom(
         // If not, clear it so we can re-infer the best available mode
         if (accessMode === 'byok' && !freshModel.allow_byok) accessMode = undefined;
         if (accessMode === 'app_key' && !freshModel.allow_app_key) accessMode = undefined;
+        if (accessMode === 'custom' && !freshModel.is_custom) accessMode = undefined;
         
         if (!accessMode) {
             // Legacy migration or access mode no longer valid: infer from fresh model
-            if (freshModel.allow_app_key) accessMode = 'app_key';
+            if (freshModel.is_custom) accessMode = 'custom';
+            else if (freshModel.allow_app_key) accessMode = 'app_key';
             else if (freshModel.allow_byok) accessMode = 'byok';
-            else if (freshModel.is_custom) accessMode = 'custom';
         }
 
         // 3. Validate Access Mode & API Keys
