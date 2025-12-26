@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { citationDataByCitationKeyAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { createZoteroURI } from '../../utils/zoteroURI';
@@ -22,6 +22,10 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { ZoteroItemReference } from '../../types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
+import { 
+    isExternalReferenceDetailsDialogVisibleAtom, 
+    selectedExternalReferenceAtom 
+} from '../../atoms/ui';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -84,6 +88,10 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const citationDataByCitationKey = useAtomValue(citationDataByCitationKeyAtom);
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
+    
+    // For opening external reference details dialog
+    const setIsDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
+    const setSelectedReference = useSetAtom(selectedExternalReferenceAtom);
 
     // =========================================================================
     // IDENTITY RESOLUTION - Using citation_key for lookup, base key for markers
@@ -258,9 +266,16 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             return;
         }
         
-        // External citations without Zotero mapping are not clickable
+        // External citations without Zotero mapping - open details dialog
         if (isExternal && !mappedZoteroItem) {
-            logger('ZoteroCitation: External citation without Zotero mapping - no action');
+            logger('ZoteroCitation: External citation - opening details dialog');
+            if (citationMetadata?.external_source_id) {
+                const externalReference = externalReferenceMap[citationMetadata.external_source_id];
+                if (externalReference) {
+                    setSelectedReference(externalReference);
+                    setIsDetailsVisible(true);
+                }
+            }
             return;
         }
         
