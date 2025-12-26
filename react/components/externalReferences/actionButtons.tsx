@@ -343,7 +343,12 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                     Cited by {item.citation_count.toLocaleString()}
                 </div>
             )}
-            <div className="flex-1"/>
+            {((
+                (itemExists && zoteroItemRef) && revealButtonMode !== 'none') ||
+                (!itemExists && importButtonMode !== 'none')
+            ) &&
+                <div className="flex-1"/>
+            }
 
             {/* Reveal button - shown when item exists in library */}
             {itemExists && zoteroItemRef && renderButton(
