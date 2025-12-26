@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Icon, AlertIcon, RepeatIcon, SettingsIcon, ArrowDownIcon, ArrowRightIcon, LinkForwardIcon } from '../icons/icons';
 import Button from '../ui/Button';
+import ContextMenu from '../ui/menu/ContextMenu';
+import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { regenerateFromRunAtom, resumeFromRunAtom } from '../../atoms/agentRunAtoms';
 import { isPreferencePageVisibleAtom } from '../../atoms/ui';
@@ -87,6 +89,16 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
     const toggleVisibility = useSetAtom(toggleRunErrorVisibilityAtom);
     const isExpanded = runErrorVisibility[runId] ?? isLastRun;
 
+    const contentRef = useRef<HTMLDivElement | null>(null);
+
+    const { 
+        isMenuOpen: isSelectionMenuOpen, 
+        menuPosition: selectionMenuPosition,
+        closeMenu: closeSelectionMenu,
+        handleContextMenu,
+        menuItems: selectionMenuItems
+    } = useSelectionContextMenu(contentRef);
+
     const [isHovered, setIsHovered] = useState(false);
 
     const handleRetry = async () => {
@@ -110,7 +122,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
     const headerTitle = typeMap[error.type] || "An error occurred";
 
     return (
-        <div className="px-4">
+        <div className="px-4 user-select-text" ref={contentRef} onContextMenu={handleContextMenu}>
              <div
                 id={`run-error-${runId}`}
                 className={`
@@ -191,6 +203,15 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                         </div>
                     </div>
                 )}
+
+                {/* Text selection context menu */}
+                <ContextMenu
+                    menuItems={selectionMenuItems}
+                    isOpen={isSelectionMenuOpen}
+                    onClose={closeSelectionMenu}
+                    position={selectionMenuPosition}
+                    useFixedPosition={true}
+                />
             </div>
         </div>
     );
