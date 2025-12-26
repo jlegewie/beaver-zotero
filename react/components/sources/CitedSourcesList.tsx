@@ -29,10 +29,13 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
     
     // Check for best attachments on item citations
     useEffect(() => {
+        let cancelled = false;
+        
         const checkBestAttachments = async () => {
             const newSet = new Set<string>();
             
             for (const citation of citations) {
+                if (cancelled) return;
                 if (citation.type === "item" && citation.library_id && citation.zotero_key) {
                     const item = Zotero.Items.getByLibraryAndKey(citation.library_id, citation.zotero_key);
                     if (item && item.isRegularItem()) {
@@ -44,10 +47,16 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                 }
             }
             
-            setItemsWithBestAttachment(newSet);
+            if (!cancelled) {
+                setItemsWithBestAttachment(newSet);
+            }
         };
         
         checkBestAttachments();
+        
+        return () => {
+            cancelled = true;
+        };
     }, [citations]);
     
     // Helper to get external reference from mapping
