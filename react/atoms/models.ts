@@ -205,8 +205,13 @@ export const validateSelectedModelAtom = atom(
         // If access_mode is missing (legacy persistence), infer it
         let accessMode = selectedModel?.access_mode;
         
+        // Validate persisted access_mode is still supported by fresh model
+        // If not, clear it so we can re-infer the best available mode
+        if (accessMode === 'byok' && !freshModel.allow_byok) accessMode = undefined;
+        if (accessMode === 'app_key' && !freshModel.allow_app_key) accessMode = undefined;
+        
         if (!accessMode) {
-            // Legacy migration: default to app_key if allowed, else BYOK
+            // Legacy migration or access mode no longer valid: infer from fresh model
             if (freshModel.allow_app_key) accessMode = 'app_key';
             else if (freshModel.allow_byok) accessMode = 'byok';
             else if (freshModel.is_custom) accessMode = 'custom';
