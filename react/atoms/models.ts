@@ -188,36 +188,66 @@ export const validateSelectedModelAtom = atom(
             defaultModel = { ...defaultModel, access_mode: 'app_key' as AccessMode };
         }
 
-        // Check if the selected model is still valid with current API keys
-        let isModelAvailable = selectedModel && availableModels.some(m => m.id === selectedModel.id);
+        // 1. Check existence in available models
+        // We find the "fresh" definition from the available list to ensure we have latest flags/config
+        // This is crucial for migration: if lastUsedModel is stale/legacy, we hydrate it from availableModels
+        const freshModel = selectedModel ? availableModels.find(m => m.id === selectedModel.id) : null;
+        
+        if (!freshModel) {
+            // Model no longer exists or none selected
+            set(selectedModelAtom, defaultModel);
+            if(defaultModel) setPref('lastUsedModel', JSON.stringify(defaultModel));
+            return;
+        }
 
-        // If in BYOK mode, ensure we actually have the key. 
-        // If not, try to switch to app_key mode if allowed.
-        if (isModelAvailable && selectedModel?.access_mode === 'byok') {
+        // 2. Hydrate/Migrate the model
+        // Use fresh properties, but preserve the selected access_mode if it exists
+        // If access_mode is missing (legacy persistence), infer it
+        let accessMode = selectedModel?.access_mode;
+        
+        if (!accessMode) {
+            // Legacy migration: default to app_key if allowed, else BYOK
+            if (freshModel.allow_app_key) accessMode = 'app_key';
+            else if (freshModel.allow_byok) accessMode = 'byok';
+            else if (freshModel.is_custom) accessMode = 'custom';
+        }
+
+        // 3. Validate Access Mode & API Keys
+        // Now check if the resolved access mode is actually valid given current keys
+        let isValid = true;
+        
+        // If accessMode is still undefined, model has no valid access method
+        if (!accessMode) {
+            isValid = false;
+        }
+        
+        if (accessMode === 'byok') {
             const apiKeys = {
                 google: !!get(googleApiKeyAtom),
                 openai: !!get(openAiApiKeyAtom),
                 anthropic: !!get(anthropicApiKeyAtom)
             };
-            const hasKey = (selectedModel.provider === 'google' && apiKeys.google) ||
-                           (selectedModel.provider === 'openai' && apiKeys.openai) ||
-                           (selectedModel.provider === 'anthropic' && apiKeys.anthropic);
+            const hasKey = (freshModel.provider === 'google' && apiKeys.google) ||
+                           (freshModel.provider === 'openai' && apiKeys.openai) ||
+                           (freshModel.provider === 'anthropic' && apiKeys.anthropic);
             
             if (!hasKey) {
-                if (selectedModel.allow_app_key) {
-                    // Switch to app_key mode
-                    set(selectedModelAtom, { ...selectedModel, access_mode: 'app_key' });
-                    setPref('lastUsedModel', JSON.stringify({ ...selectedModel, access_mode: 'app_key' }));
-                    return; // Done, valid model set
+                // Key missing. Can we fall back to app_key?
+                if (freshModel.allow_app_key) {
+                    accessMode = 'app_key';
                 } else {
-                    // No key and no app_key fallback -> invalid
-                    isModelAvailable = false;
+                    isValid = false;
                 }
             }
         }
 
-        // If not valid, revert to default or first available model
-        if (!isModelAvailable) {
+        if (isValid) {
+            // Update selected model with fresh data + validated access mode
+            const newSelectedModel = { ...freshModel, access_mode: accessMode };
+            set(selectedModelAtom, newSelectedModel);
+            setPref('lastUsedModel', JSON.stringify(newSelectedModel));
+        } else {
+            // Invalid configuration (e.g. BYOK required but no key), revert to default
             set(selectedModelAtom, defaultModel);
             if(defaultModel) setPref('lastUsedModel', JSON.stringify(defaultModel));
         }
