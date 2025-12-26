@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAtomValue } from 'jotai';
 import { openSource, revealSource } from '../../utils/sourceUtils';
 import { CSSItemTypeIcon, PdfIcon } from '../icons/icons';
@@ -24,6 +24,32 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
     const externalReferenceMapping = useAtomValue(externalReferenceMappingAtom);
     const externalItemMapping = useAtomValue(externalReferenceItemMappingAtom);
     
+    // Track which item citations have best attachments available
+    const [itemsWithBestAttachment, setItemsWithBestAttachment] = useState<Set<string>>(new Set());
+    
+    // Check for best attachments on item citations
+    useEffect(() => {
+        const checkBestAttachments = async () => {
+            const newSet = new Set<string>();
+            
+            for (const citation of citations) {
+                if (citation.type === "item" && citation.library_id && citation.zotero_key) {
+                    const item = Zotero.Items.getByLibraryAndKey(citation.library_id, citation.zotero_key);
+                    if (item && item.isRegularItem()) {
+                        const bestAttachment = await item.getBestAttachment();
+                        if (bestAttachment) {
+                            newSet.add(getCitationKey(citation));
+                        }
+                    }
+                }
+            }
+            
+            setItemsWithBestAttachment(newSet);
+        };
+        
+        checkBestAttachments();
+    }, [citations]);
+    
     // Helper to get external reference from mapping
     const getExternalReference = (citation: CitationData): ExternalReference | undefined => {
         if (!isExternalCitation(citation) || !citation.external_source_id) return undefined;
@@ -35,6 +61,14 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
         if (!isExternalCitation(citation) || !citation.external_source_id) return undefined;
         const mapping = externalItemMapping[citation.external_source_id];
         return mapping ?? undefined; // Convert null to undefined
+    };
+    
+    // Check if PDF button should be enabled for a citation
+    const isPdfButtonEnabled = (citation: CitationData, mappedZoteroItem: ZoteroItemReference | undefined): boolean => {
+        if (mappedZoteroItem) return true;
+        if (citation.type === "attachment") return true;
+        if (citation.type === "item" && itemsWithBestAttachment.has(getCitationKey(citation))) return true;
+        return false;
     };
     
     // Filter out invalid citations
@@ -140,6 +174,18 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                                 } else if (item && item.isAttachment()) {
                                                                     Zotero.getActiveZoteroPane().viewAttachment(item.id);
                                                                 }
+                                                            } else if (citation.type === "item" && citation.library_id && citation.zotero_key) {
+                                                                // Handle item citation - get best attachment
+                                                                const item = Zotero.Items.getByLibraryAndKey(
+                                                                    citation.library_id,
+                                                                    citation.zotero_key
+                                                                );
+                                                                if (item && item.isRegularItem()) {
+                                                                    const bestAttachment = await item.getBestAttachment();
+                                                                    if (bestAttachment) {
+                                                                        Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                                                                    }
+                                                                }
                                                             } else {
                                                                 openSource(citation);
                                                             }
@@ -147,7 +193,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                         ariaLabel="Open PDF"
                                                         title="Open PDF"
                                                         className="display-flex scale-12"
-                                                        disabled={!mappedZoteroItem && citation.type !== "attachment"}
+                                                        disabled={!isPdfButtonEnabled(citation, mappedZoteroItem)}
                                                     />
                                                 </Tooltip>
                                             </>
