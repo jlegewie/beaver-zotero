@@ -4,6 +4,7 @@ import { userScrolledAtom, windowUserScrolledAtom } from '../atoms/ui';
 import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
 
 const BOTTOM_THRESHOLD = 120; // pixels
+const SCROLL_POSITION_UPDATE_THRESHOLD = 10; // pixels - minimum change to update scroll position atom
 
 interface UseAutoScrollOptions {
     /**
@@ -46,6 +47,7 @@ interface UseAutoScrollReturn {
  * - Detects deliberate upward scrolls immediately
  * - Tolerates layout shifts from streaming content via debouncing
  * - Maintains scroll position across thread changes
+ * - Throttles scroll position atom updates to reduce jitter
  * 
  * @param forwardedRef Optional ref to forward (for forwardRef components)
  * @param options Configuration options
@@ -70,9 +72,11 @@ export function useAutoScroll(
 
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const lastScrollTopRef = useRef(0);
+    const lastStoredScrollTopRef = useRef(0); // Track what we last stored in atom
     const scrollDebounceTimer = useRef<number | null>(null);
     const lastScrollDirectionRef = useRef<'up' | 'down' | null>(null);
     const consecutiveUpScrollsRef = useRef(0);
+    const lastScrolledStateRef = useRef(false); // Track last scrolled state to avoid redundant updates
 
     const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
         scrollContainerRef.current = node;
@@ -118,7 +122,7 @@ export function useAutoScroll(
 
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
         
-        // Detect scroll direction
+        // Detect scroll direction and magnitude
         const scrollDelta = scrollTop - lastScrollTopRef.current;
         const scrollDirection = scrollTop > lastScrollTopRef.current ? 'down' : 
                                scrollTop < lastScrollTopRef.current ? 'up' : null;
@@ -133,7 +137,10 @@ export function useAutoScroll(
             // This filters out layout-induced scroll jumps during streaming
             if (consecutiveUpScrollsRef.current >= upScrollConsecutiveRequired) {
                 clearDebounceTimer();
-                store.set(scrolledAtom, true);
+                if (!lastScrolledStateRef.current) {
+                    store.set(scrolledAtom, true);
+                    lastScrolledStateRef.current = true;
+                }
                 lastScrollDirectionRef.current = 'up';
             }
         } else if (distanceFromBottom > threshold) {
@@ -148,8 +155,9 @@ export function useAutoScroll(
                 if (scrollContainerRef.current) {
                     const { scrollTop: currentScrollTop, scrollHeight: currentScrollHeight, clientHeight: currentClientHeight } = scrollContainerRef.current;
                     const currentDistanceFromBottom = currentScrollHeight - currentScrollTop - currentClientHeight;
-                    if (currentDistanceFromBottom > threshold) {
+                    if (currentDistanceFromBottom > threshold && !lastScrolledStateRef.current) {
                         store.set(scrolledAtom, true);
+                        lastScrolledStateRef.current = true;
                     }
                 }
             }, debounceDelay);
@@ -157,11 +165,23 @@ export function useAutoScroll(
             // Near the bottom - user hasn't scrolled
             // Reset consecutive counter when near bottom
             consecutiveUpScrollsRef.current = 0;
-            store.set(scrolledAtom, false);
+            clearDebounceTimer();
+            // Only update if state actually changed to avoid unnecessary re-renders
+            if (lastScrolledStateRef.current) {
+                store.set(scrolledAtom, false);
+                lastScrolledStateRef.current = false;
+            }
             lastScrollDirectionRef.current = 'down';
         }
 
-        store.set(scrollPositionAtom, scrollTop);
+        // Only update scroll position atom if there's a meaningful change
+        // This reduces jitter from micro-updates during animation
+        const scrollPositionDelta = Math.abs(scrollTop - lastStoredScrollTopRef.current);
+        if (scrollPositionDelta > SCROLL_POSITION_UPDATE_THRESHOLD) {
+            store.set(scrollPositionAtom, scrollTop);
+            lastStoredScrollTopRef.current = scrollTop;
+        }
+        
         lastScrollTopRef.current = scrollTop;
     }, [threshold, debounceDelay, upScrollThreshold, upScrollConsecutiveRequired, win, scrolledAtom, scrollPositionAtom]);
 

@@ -2,13 +2,18 @@ import { store } from "../store";
 import { userScrolledAtom } from "../atoms/ui";
 import type { WritableAtom } from "jotai";
 
-// Function to scroll to the bottom of the chat container
-// const scrollToBottom = () => {
-//   if (containerRef.current && !userScrolled) {
-//     containerRef.current.scrollTop = containerRef.current.scrollHeight;
-//   }
-// };
+// Threshold for detecting user scroll interruption during animation
+const INTERRUPTION_THRESHOLD = 50; // pixels
+// Minimum progress before checking for interruption (allow animation to stabilize)
+const MIN_PROGRESS_FOR_INTERRUPTION_CHECK = 50; // ms
 
+/**
+ * Smoothly scroll a container to the bottom with animation.
+ * Respects user scroll state and can be interrupted by user scrolling.
+ * @param containerRef Ref to the scroll container
+ * @param userScrolledOverride Optional override for user scrolled state
+ * @param customScrolledAtom Optional custom atom to read scrolled state from
+ */
 export const scrollToBottom = (
     containerRef: React.RefObject<HTMLElement>,
     userScrolledOverride?: boolean,
@@ -23,66 +28,70 @@ export const scrollToBottom = (
     
     const container = containerRef.current;
     const targetScrollTop = Math.max(container.scrollHeight - container.clientHeight, 0);
-    const startScrollTop = container.scrollTop;
-    const distance = targetScrollTop - startScrollTop;
+    const initialScrollTop = container.scrollTop;
+    const initialDistance = targetScrollTop - initialScrollTop;
     
     // If already at bottom or nearly at bottom, just jump there
     // Allow for small negative distance if already overscrolled by a tiny bit
-    if (distance < 50 && distance > -5) { 
+    if (initialDistance < 50 && initialDistance > -5) { 
         container.scrollTop = targetScrollTop;
         return;
     }
     
     // Otherwise animate scroll
     // Animation duration based on distance (faster for shorter distances)
-    const duration = Math.min(300, 100 + Math.sqrt(Math.abs(distance)) * 5); 
+    const duration = Math.min(300, 100 + Math.sqrt(Math.abs(initialDistance)) * 5);
+    const win = Zotero.getMainWindow();
 
     let start: number | null = null;
-    // expectedScrollTop tracks where the animation intends the scrollTop to be.
-    // Initialize with the current scrollTop in case it's already moving.
-    let expectedScrollTop = container.scrollTop; 
+    // Track animation state for interruption detection
+    let animationStartScrollTop = initialScrollTop;
+    let animationDistance = initialDistance;
+    let expectedScrollTop = initialScrollTop;
 
     const step = (timestamp: number) => {
         if (!start) {
             start = timestamp;
-            // Re-initialize expectedScrollTop and startScrollTop at the true beginning of the animation
-            // to correctly calculate the path, especially if container.scrollTop changed before animation started.
-            expectedScrollTop = container.scrollTop; 
-            const currentStartScrollTop = container.scrollTop;
-            const currentDistance = targetScrollTop - currentStartScrollTop;
+            // Re-initialize at the true beginning of the animation
+            // This handles cases where scrollTop changed between call and first frame
+            animationStartScrollTop = container.scrollTop;
+            animationDistance = targetScrollTop - animationStartScrollTop;
+            expectedScrollTop = animationStartScrollTop;
             
-            // If, after re-checking, we are already at the bottom or no scroll is needed.
-            if (currentDistance < 5 && currentDistance > -5) {
+            // If, after re-checking, we are already at the bottom or no scroll is needed
+            if (animationDistance < 5 && animationDistance > -5) {
                 container.scrollTop = targetScrollTop;
                 return;
             }
         }
-        const progress = timestamp - start!; // start is guaranteed to be non-null here
+        
+        const progress = timestamp - start;
         const percentage = Math.min(progress / duration, 1);
         
-        // Check for interruption before setting scrollTop
-        if (progress > 20) {
-            // A threshold of 20-30 pixels for interruption detection.
-            if (Math.abs(container.scrollTop - expectedScrollTop) > 30) { 
-                // User scrolled, abort animation
+        // Check for user interruption after animation has had time to stabilize
+        // Use a higher threshold to avoid false positives from layout shifts
+        if (progress > MIN_PROGRESS_FOR_INTERRUPTION_CHECK) {
+            const deviation = Math.abs(container.scrollTop - expectedScrollTop);
+            if (deviation > INTERRUPTION_THRESHOLD) {
+                // User scrolled significantly away from expected position, abort animation
                 return;
             }
         }
 
-        const eased = 1 - (1 - percentage) * (1 - percentage); 
-        // Calculate the next position based on the original start and distance
-        const nextAnimatedScrollTop = startScrollTop + distance * eased;
+        // Ease-out quadratic for smooth deceleration
+        const eased = 1 - (1 - percentage) * (1 - percentage);
+        const nextAnimatedScrollTop = animationStartScrollTop + animationDistance * eased;
         
         container.scrollTop = nextAnimatedScrollTop;
-        expectedScrollTop = nextAnimatedScrollTop; // Update for the next frame's check
+        expectedScrollTop = nextAnimatedScrollTop;
 
         if (progress < duration) {
-            Zotero.getMainWindow().requestAnimationFrame(step);
+            win.requestAnimationFrame(step);
         } else {
             // Ensure it ends exactly at the target if animation completes
             container.scrollTop = targetScrollTop;
         }
     };
 
-    Zotero.getMainWindow().requestAnimationFrame(step);
+    win.requestAnimationFrame(step);
 };
