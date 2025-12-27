@@ -8,6 +8,8 @@ interface RunStatusIndicatorProps {
     status: AgentRunStatus;
     /** The run ID to match retry state against */
     runId?: string;
+    /** Whether the previous message has a tool call */
+    lastMessageHasToolCall?: boolean;
 }
 
 /**
@@ -15,7 +17,7 @@ interface RunStatusIndicatorProps {
  * Shows a spinner for in-progress runs, retry info when backend is retrying.
  * Note: Errors are displayed separately by RunErrorDisplay.
  */
-export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId }) => {
+export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId, lastMessageHasToolCall }) => {
     const retryState = useAtomValue(wsRetryAtom);
     
     // Check if retry state applies to this run
@@ -39,7 +41,10 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, 
             <div className="display-flex flex-row py-15">
                 <button
                     type="button"
-                    className="variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left disabled-but-styled"
+                    className={`
+                        variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left disabled-but-styled
+                        ${lastMessageHasToolCall ? '-mt-1' : ''}
+                    `}
                     style={{ background: 'transparent', border: 0, padding: 0, cursor: 'default' }}
                     disabled={true}
                     aria-busy="true"

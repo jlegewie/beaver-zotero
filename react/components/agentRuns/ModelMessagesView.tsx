@@ -31,6 +31,13 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
         return null;
     }
 
+    const lastMessageHasToolCall = messages[messages.length - 1]?.parts.some(
+        part =>
+            part.part_kind === 'tool-call' ||
+                part.part_kind === 'tool-return' ||
+                part.part_kind === 'retry-prompt'
+        );
+
     return (
         <div className="display-flex flex-col px-4">
             {messages.map((message, index) => {
@@ -68,7 +75,7 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
             })}
             {/* Status indicator rendered inside the same container for smooth transitions */}
             {showStatusIndicator && status && (
-                <RunStatusIndicator status={status} runId={runId} />
+                <RunStatusIndicator status={status} runId={runId} lastMessageHasToolCall={lastMessageHasToolCall} />
             )}
         </div>
     );
