@@ -148,7 +148,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                         style={{ padding: '2px 6px', maxHeight: 'none' }}
                     >
                         <div className="display-flex flex-row px-3 gap-2">
-                            <div className="flex-1 display-flex mt-010 font-color-red">
+                            <div className="display-flex mt-010 font-color-red">
                                 <Icon icon={isHovered ? (isExpanded ? ArrowDownIcon : ArrowRightIcon) : AlertIcon} />
                             </div>
                             
