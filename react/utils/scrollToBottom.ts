@@ -3,9 +3,9 @@ import { userScrolledAtom } from "../atoms/ui";
 import type { WritableAtom } from "jotai";
 
 // Threshold for detecting user scroll interruption during animation
-const INTERRUPTION_THRESHOLD = 50; // pixels
+const INTERRUPTION_THRESHOLD = 10; // pixels - sensitive to any user movement
 // Minimum progress before checking for interruption (allow animation to stabilize)
-const MIN_PROGRESS_FOR_INTERRUPTION_CHECK = 50; // ms
+const MIN_PROGRESS_FOR_INTERRUPTION_CHECK = 20; // ms
 
 /**
  * Smoothly scroll a container to the bottom with animation.

@@ -21,14 +21,15 @@ interface UseAutoScrollOptions {
      * Minimum scroll distance (in pixels) to detect upward user scroll
      * @default 50
      */
-    upScrollThreshold?: number;
+    upScrollThreshold?: number; // kept for compatibility but unused
     /**
      * Number of consecutive upward scroll events required to confirm user scroll
      * @default 3
      */
-    upScrollConsecutiveRequired?: number;
+    upScrollConsecutiveRequired?: number; // kept for compatibility but unused
     /**
      * Whether this is being used in the separate window (uses independent scroll state)
+
      * @default false
      */
     isWindow?: boolean;
@@ -61,8 +62,6 @@ export function useAutoScroll(
     const {
         threshold = BOTTOM_THRESHOLD,
         debounceDelay = 150,
-        upScrollThreshold = 50,
-        upScrollConsecutiveRequired = 3,
         isWindow = false
     } = options;
 
@@ -75,7 +74,8 @@ export function useAutoScroll(
     const lastStoredScrollTopRef = useRef(0); // Track what we last stored in atom
     const scrollDebounceTimer = useRef<number | null>(null);
     const lastScrollDirectionRef = useRef<'up' | 'down' | null>(null);
-    const consecutiveUpScrollsRef = useRef(0);
+    const cumulativeUpScrollRef = useRef(0); // Track cumulative upward scroll distance
+    const cumulativeResetTimer = useRef<number | null>(null);
     const lastScrolledStateRef = useRef(false); // Track last scrolled state to avoid redundant updates
 
     const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
@@ -96,7 +96,7 @@ export function useAutoScroll(
      * Handle scroll events with intelligent user scroll detection
      * 
      * Logic:
-     * 1. Upward scrolls > threshold → immediately mark as user scroll
+     * 1. Upward scrolls accumulate; when cumulative distance exceeds threshold → mark as user scroll
      * 2. Near bottom (< threshold) → continue autoscroll
      * 3. Far from bottom (> threshold) → debounce before marking as user scroll
      */
@@ -113,6 +113,13 @@ export function useAutoScroll(
             scrollDebounceTimer.current = null;
         };
 
+        const clearCumulativeResetTimer = () => {
+            if (cumulativeResetTimer.current !== null) {
+                win.clearTimeout(cumulativeResetTimer.current);
+                cumulativeResetTimer.current = null;
+            }
+        };
+
         const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
 
         // Ignore scroll events when the container is hidden or has no height
@@ -127,15 +134,21 @@ export function useAutoScroll(
         const scrollDirection = scrollTop > lastScrollTopRef.current ? 'down' : 
                                scrollTop < lastScrollTopRef.current ? 'up' : null;
         
-        // Only consider it a "user scroll" if they scroll UP significantly AND consistently
-        // or if they scroll down but stop far from the bottom
-        // This prevents layout shifts from streaming content from being detected as user scrolls
-        if (scrollDirection === 'up' && Math.abs(scrollDelta) > upScrollThreshold) {
-            consecutiveUpScrollsRef.current++;
+        // Handle upward scrolling (interruption)
+        if (scrollDirection === 'up') {
+            // Accumulate upward scroll distance
+            cumulativeUpScrollRef.current += Math.abs(scrollDelta);
             
-            // Only mark as user scrolled after multiple consecutive upward scrolls
-            // This filters out layout-induced scroll jumps during streaming
-            if (consecutiveUpScrollsRef.current >= upScrollConsecutiveRequired) {
+            // Schedule reset of cumulative counter if user stops scrolling
+            clearCumulativeResetTimer();
+            cumulativeResetTimer.current = win.setTimeout(() => {
+                cumulativeUpScrollRef.current = 0;
+                cumulativeResetTimer.current = null;
+            }, 200);
+
+            // If cumulative upward scroll exceeds threshold, mark as user scrolled
+            // This filters out single small layout shifts but catches deliberate scrolling
+            if (cumulativeUpScrollRef.current > 15) { // 15px threshold for high responsiveness
                 clearDebounceTimer();
                 if (!lastScrolledStateRef.current) {
                     store.set(scrolledAtom, true);
@@ -144,8 +157,11 @@ export function useAutoScroll(
                 lastScrollDirectionRef.current = 'up';
             }
         } else if (distanceFromBottom > threshold) {
-            // Reset consecutive counter on non-upward scroll
-            consecutiveUpScrollsRef.current = 0;
+            // Scrolling down or stationary but far from bottom
+            // Reset cumulative upward counter
+            cumulativeUpScrollRef.current = 0;
+            clearCumulativeResetTimer();
+
             // Only set userScrolled after a debounce delay to avoid false positives
             // from rapid layout shifts during streaming
             clearDebounceTimer();
@@ -163,9 +179,11 @@ export function useAutoScroll(
             }, debounceDelay);
         } else {
             // Near the bottom - user hasn't scrolled
-            // Reset consecutive counter when near bottom
-            consecutiveUpScrollsRef.current = 0;
+            // Reset counters when near bottom
+            cumulativeUpScrollRef.current = 0;
+            clearCumulativeResetTimer();
             clearDebounceTimer();
+            
             // Only update if state actually changed to avoid unnecessary re-renders
             if (lastScrolledStateRef.current) {
                 store.set(scrolledAtom, false);
@@ -183,16 +201,19 @@ export function useAutoScroll(
         }
         
         lastScrollTopRef.current = scrollTop;
-    }, [threshold, debounceDelay, upScrollThreshold, upScrollConsecutiveRequired, win, scrolledAtom, scrollPositionAtom]);
+    }, [threshold, debounceDelay, win, scrolledAtom, scrollPositionAtom]);
 
-    // Cleanup debounce timer on unmount
+    // Cleanup timers on unmount
     useEffect(() => {
         return () => {
-            if (scrollDebounceTimer.current === null) {
-                return;
+            if (scrollDebounceTimer.current !== null) {
+                win.clearTimeout(scrollDebounceTimer.current);
+                scrollDebounceTimer.current = null;
             }
-            win.clearTimeout(scrollDebounceTimer.current);
-            scrollDebounceTimer.current = null;
+            if (cumulativeResetTimer.current !== null) {
+                win.clearTimeout(cumulativeResetTimer.current);
+                cumulativeResetTimer.current = null;
+            }
         };
     }, [win]);
 
