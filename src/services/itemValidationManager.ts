@@ -579,7 +579,7 @@ class ItemValidationManager {
                 logger(`ItemValidationManager: Attachment ${attachmentKey} has no file hash`, 4);
                 const missingHashResult: AttachmentValidationResult = {
                     isValid: false,
-                    reason: 'No file hash available',
+                    reason: 'File is missing',
                     backendChecked: false
                 };
                 this.setCacheEntry(attachment, ItemValidationType.LOCAL_ONLY, missingHashResult);
