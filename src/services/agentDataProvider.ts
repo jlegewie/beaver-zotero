@@ -478,8 +478,12 @@ export async function handleZoteroAttachmentPagesRequest(
         // 3. Get the file path
         const filePath = await zoteroItem.getFilePathAsync();
         if (!filePath) {
+            const isFileAvailableOnServer = isAttachmentOnServer(zoteroItem);
+            const errorMessage = isFileAvailableOnServer
+                ? 'PDF file is not available locally. It may be in remote storage, which cannot be accessed by Beaver.'
+                : 'PDF file is not available locally';
             return errorResponse(
-                'PDF file is not available locally',
+                errorMessage,
                 'file_missing'
             );
         }
@@ -493,10 +497,25 @@ export async function handleZoteroAttachmentPagesRequest(
             );
         }
 
-        // 5. Read the PDF data
+        // 5. Check file size before reading
+        const maxFileSizeMB = getPref('maxFileSizeMB');
+        const fileSize = await Zotero.Attachments.getTotalFileSize(zoteroItem);
+        
+        if (fileSize) {
+            const fileSizeInMB = fileSize / 1024 / 1024;
+            
+            if (fileSizeInMB > maxFileSizeMB) {
+                return errorResponse(
+                    `PDF file size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
+                    'file_too_large'
+                );
+            }
+        }
+
+        // 6. Read the PDF data
         const pdfData = await IOUtils.read(filePath);
 
-        // 6. Create extractor and get page count first
+        // 7. Create extractor and get page count first
         const extractor = new PDFExtractor();
         let totalPages: number;
         
@@ -519,7 +538,17 @@ export async function handleZoteroAttachmentPagesRequest(
             throw error;
         }
 
-        // 7. Validate page range (convert 1-indexed to 0-indexed)
+        // 8. Check page count limit
+        const maxPageCount = getPref('maxPageCount');
+        
+        if (totalPages > maxPageCount) {
+            return errorResponse(
+                `PDF has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
+                'too_many_pages'
+            );
+        }
+
+        // 9. Validate page range (convert 1-indexed to 0-indexed)
         const startPage = start_page ?? 1;
         const endPage = end_page ?? totalPages;
 
@@ -539,19 +568,19 @@ export async function handleZoteroAttachmentPagesRequest(
             );
         }
 
-        // 8. Build page indices (0-indexed for extraction)
+        // 10. Build page indices (0-indexed for extraction)
         const pageIndices: number[] = [];
         for (let i = startPage - 1; i < endPage; i++) {
             pageIndices.push(i);
         }
 
-        // 9. Extract pages with OCR check enabled
+        // 11. Extract pages with OCR check enabled
         const result = await extractor.extract(pdfData, {
             pages: pageIndices,
             checkTextLayer: true, // Fail if PDF needs OCR
         });
 
-        // 10. Build response
+        // 12. Build response
         const pages: WSPageContent[] = result.pages.map((page) => ({
             page_number: page.index + 1, // Convert back to 1-indexed
             content: page.content,
@@ -653,8 +682,12 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // 3. Get the file path
         const filePath = await zoteroItem.getFilePathAsync();
         if (!filePath) {
+            const isFileAvailableOnServer = isAttachmentOnServer(zoteroItem);
+            const errorMessage = isFileAvailableOnServer
+                ? 'PDF file is not available locally. It may be in remote storage, which cannot be accessed by Beaver.'
+                : 'PDF file is not available locally';
             return errorResponse(
-                'PDF file is not available locally',
+                errorMessage,
                 'file_missing'
             );
         }
@@ -668,10 +701,25 @@ export async function handleZoteroAttachmentPageImagesRequest(
             );
         }
 
-        // 5. Read the PDF data
+        // 5. Check file size before reading
+        const maxFileSizeMB = getPref('maxFileSizeMB');
+        const fileSize = await Zotero.Attachments.getTotalFileSize(zoteroItem);
+        
+        if (fileSize) {
+            const fileSizeInMB = fileSize / 1024 / 1024;
+            
+            if (fileSizeInMB > maxFileSizeMB) {
+                return errorResponse(
+                    `PDF file size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
+                    'file_too_large'
+                );
+            }
+        }
+
+        // 6. Read the PDF data
         const pdfData = await IOUtils.read(filePath);
 
-        // 6. Create extractor and get page count first
+        // 7. Create extractor and get page count first
         const extractor = new PDFExtractor();
         let totalPages: number;
         
@@ -694,7 +742,17 @@ export async function handleZoteroAttachmentPageImagesRequest(
             throw error;
         }
 
-        // 7. Determine which pages to render
+        // 8. Check page count limit
+        const maxPageCount = getPref('maxPageCount');
+        
+        if (totalPages > maxPageCount) {
+            return errorResponse(
+                `PDF has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
+                'too_many_pages'
+            );
+        }
+
+        // 9. Determine which pages to render
         let pageIndices: number[];
         if (pages && pages.length > 0) {
             // Convert 1-indexed page numbers to 0-indexed
@@ -715,7 +773,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
             pageIndices = Array.from({ length: totalPages }, (_, i) => i);
         }
 
-        // 8. Build render options
+        // 10. Build render options
         const renderOptions = {
             scale: scale ?? 1.0,
             dpi: dpi ?? 0,
@@ -723,10 +781,10 @@ export async function handleZoteroAttachmentPageImagesRequest(
             jpegQuality: jpeg_quality ?? 85,
         };
 
-        // 9. Render pages
+        // 11. Render pages
         const renderResults = await extractor.renderPagesToImages(pdfData, pageIndices, renderOptions);
 
-        // 10. Convert to base64 and build response
+        // 12. Convert to base64 and build response
         const pageImages: WSPageImage[] = renderResults.map((result) => {
             // Convert Uint8Array to base64
             const binaryStr = Array.from(result.data)

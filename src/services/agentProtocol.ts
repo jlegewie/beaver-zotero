@@ -311,9 +311,11 @@ export type AttachmentPagesErrorCode =
     | 'not_found'           // Attachment not found in Zotero
     | 'not_pdf'             // Attachment is not a PDF
     | 'file_missing'        // PDF file not available locally
+    | 'file_too_large'      // PDF file exceeds size limit
     | 'encrypted'           // PDF is password-protected
     | 'no_text_layer'       // PDF needs OCR
     | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
     | 'extraction_failed';  // General extraction failure
 
@@ -337,8 +339,10 @@ export type AttachmentPageImagesErrorCode =
     | 'not_found'           // Attachment not found in Zotero
     | 'not_pdf'             // Attachment is not a PDF
     | 'file_missing'        // PDF file not available locally
+    | 'file_too_large'      // PDF file exceeds size limit
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
     | 'render_failed';      // General rendering failure
 
