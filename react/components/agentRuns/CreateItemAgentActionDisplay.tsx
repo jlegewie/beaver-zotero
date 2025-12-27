@@ -468,7 +468,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             >
                 <button
                     type="button"
-                    className={`display-flex flex-row py-15 gap-2 text-left ${canToggleResults ? 'cursor-pointer' : ''}`}
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left ${canToggleResults ? 'cursor-pointer' : ''}`}
                     style={{ background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={resultsVisible}
                     aria-controls={`agent-actions-content-${groupId}`}

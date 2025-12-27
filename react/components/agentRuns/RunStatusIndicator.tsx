@@ -39,7 +39,7 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, 
             <div className="display-flex flex-row py-15">
                 <button
                     type="button"
-                    className="display-flex flex-row py-15 gap-2 w-full text-left disabled-but-styled"
+                    className="variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left disabled-but-styled"
                     style={{ background: 'transparent', border: 0, padding: 0, cursor: 'default' }}
                     disabled={true}
                     aria-busy="true"

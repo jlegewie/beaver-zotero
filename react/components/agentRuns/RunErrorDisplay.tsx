@@ -141,7 +141,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                 >
                     <button
                         type="button"
-                        className="display-flex flex-row py-15 cursor-pointer gap-2 w-full text-left"
+                        className="variant-ghost-secondary display-flex flex-row py-15 cursor-pointer gap-2 w-full text-left"
                         style={{ background: 'transparent', border: 0, padding: 0 }}
                         aria-expanded={isExpanded}
                         aria-controls={`run-error-content-${runId}`}

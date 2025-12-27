@@ -627,7 +627,7 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
             >
                 <button
                     type="button"
-                    className={`display-flex flex-row py-15 gap-2 text-left ${canToggleResults ? 'cursor-pointer' : ''} ${isError ? 'font-color-warning' : ''}`}
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left ${canToggleResults ? 'cursor-pointer' : ''} ${isError ? 'font-color-warning' : ''}`}
                     style={{ background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={resultsVisible}
                     aria-controls={`annotation-list-${toolCallId}`}
