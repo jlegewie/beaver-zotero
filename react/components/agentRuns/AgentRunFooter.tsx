@@ -265,7 +265,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
 
     const handleRegenerate = async () => {
-        await regenerateFromRun(run.id);
+        const runId = run.user_prompt.is_resume && run.user_prompt.resumes_run_id
+            ? run.user_prompt.resumes_run_id
+            : run.id;
+        await regenerateFromRun(runId);
     };
 
     // Hide during streaming
