@@ -16,6 +16,10 @@ pref("addSelectedItemsOnNewThread", true);
 pref("annotationToolEnabled", true);
 pref("maxAddAttachmentToMessage", 3);
 
+// Beaver Free file limits
+pref("maxFileSizeMB", 100);
+pref("maxPageCount", 500);
+
 // Agent actions
 pref("autoApplyAnnotations", true);
 pref("autoImportItems", false);

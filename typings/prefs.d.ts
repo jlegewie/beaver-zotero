@@ -19,6 +19,8 @@ declare namespace _ZoteroTypes {
       "addSelectedItemsOnNewThread": boolean;
       "annotationToolEnabled": boolean;
       "maxAddAttachmentToMessage": number;
+      "maxFileSizeMB": number;
+      "maxPageCount": number;
       "autoApplyAnnotations": boolean;
       "autoImportItems": boolean;
       "customInstructions": string;
