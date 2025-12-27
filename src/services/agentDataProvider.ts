@@ -69,7 +69,7 @@ async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boole
     if (!filePath) {
         const isFileAvailableOnServer = isAttachmentOnServer(attachment);
         const status_message = isFileAvailableOnServer
-            ? 'File is not downloaded to the local computer and cannot be accessed'
+            ? 'File not available locally. It may be in remote storage, which cannot be accessed by Beaver.'
             : 'File is not available locally';
         return {
             is_primary: isPrimary,
