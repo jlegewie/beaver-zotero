@@ -434,6 +434,16 @@ class ItemValidationManager {
                 };
             }
 
+            // Check if file hash is missing (file doesn't exist)
+            if (!fileHash) {
+                logger(`ItemValidationManager: Attachment ${item.libraryID}-${item.key} has no file hash (file is missing)`, 4);
+                return {
+                    isValid: false,
+                    reason: 'File is missing',
+                    backendChecked: false
+                };
+            }
+
             // Perform backend validation
             logger(`ItemValidationManager: Starting backend validation for ${item.libraryID}-${item.key}`, 4);
             const { isValid, reason } = await this.performBackendValidation(item, fileHash);
