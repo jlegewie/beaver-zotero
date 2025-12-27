@@ -15,6 +15,7 @@ import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { planFeaturesAtom, hasCompletedOnboardingAtom } from '../atoms/profile';
 import Button from './ui/Button';
 import { getWindowFromElement } from '../utils/windowContext';
+import { getPref } from '../../src/utils/prefs';
 
 interface HeaderProps {
     onClose?: () => void;
@@ -47,8 +48,10 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
     }, [isWindow]);
 
     // Get platform-specific shortcut text
+    const keyboardShortcut = getPref("keyboardShortcut").toUpperCase() || "L";
     const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
-    const closeChatShortcut = Zotero.isMac ? '⌘L' : 'Ctrl+L';
+    const closeChatShortcut = Zotero.isMac ? `⌘${keyboardShortcut}` : `Ctrl+${keyboardShortcut}`;
+    const openWindowShortcut = Zotero.isMac ? `⌘⇧${keyboardShortcut}` : `Ctrl+Shift+${keyboardShortcut}`;
 
     return (
         <div id="beaver-header" className="display-flex flex-row px-3 py-2">
@@ -89,7 +92,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
 
                 {/* Only show "Open in Separate Window" button when not already in a separate window and user is authenticated and has completed onboarding */}
                 {!isWindow && isAuthenticated && hasCompletedOnboarding && (
-                    <Tooltip content="Open in Separate Window" showArrow singleLine>
+                    <Tooltip content="Open in Separate Window" secondaryContent={openWindowShortcut} showArrow singleLine>
                         <IconButton
                             icon={Share05Icon}
                             onClick={openBeaverWindow}
