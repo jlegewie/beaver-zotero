@@ -231,6 +231,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
 
         try {
             // Create the item in Zotero with full post-processing
+            // applyCreateItemData handles library/collection resolution internally
             const result: CreateItemResultData = await applyCreateItemData(action.proposed_data);
 
             logger(`handleApplyItem: created item ${action.id}: ${JSON.stringify(result)}`, 1);
@@ -251,6 +252,15 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                 action_id: action.id,
                 result_data: result
             }]);
+
+            // Select the newly created item in Zotero (single item import)
+            const newItem = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
+            if (newItem) {
+                const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
+                if (ZoteroPane) {
+                    ZoteroPane.selectItem(newItem.id);
+                }
+            }
 
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to create item';
@@ -297,6 +307,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                     batch.map(async (action) => {
                         try {
                             // Create the item in Zotero with full post-processing
+                            // applyCreateItemData handles library/collection resolution internally
                             const result: CreateItemResultData = await applyCreateItemData(action.proposed_data);
                             
                             // Update external reference cache
@@ -347,6 +358,18 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                     ensureItemsSynced(libraryId, keys).catch(err => {
                         logger(`handleApplyAll: Failed to sync items in library ${libraryId}: ${err.message}`, 2);
                     });
+                }
+                
+                // If only one item was imported, select it in Zotero
+                if (successfulResults.length === 1) {
+                    const data = successfulResults[0].result_data as CreateItemResultData;
+                    const newItem = await Zotero.Items.getByLibraryAndKeyAsync(data.library_id, data.zotero_key);
+                    if (newItem) {
+                        const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
+                        if (ZoteroPane) {
+                            ZoteroPane.selectItem(newItem.id);
+                        }
+                    }
                 }
             }
 
