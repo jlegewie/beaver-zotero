@@ -238,42 +238,10 @@ export interface WSExternalReferenceCheckResponse {
     results: ExternalReferenceCheckResult[];
 }
 
-/**
- * Reason why file content (fulltext or page images) is unavailable.
- * Used to communicate to LLM why certain file operations will fail.
- */
-export type FileUnavailableReason = 
-    | 'file_missing'           // File not found locally
-    | 'file_encrypted'         // PDF is password-protected
-    | 'file_needs_ocr'         // Scanned PDF without text layer
-    | 'file_invalid'           // Invalid/corrupted PDF
-    | 'unsupported_format';    // Not a supported file type (e.g., not PDF)
-
-/**
- * File status information for an attachment.
- * Describes what content is available to the LLM.
- */
-export interface AttachmentFileStatus {
-    /** Whether this is the primary attachment for the item */
-    is_primary: boolean;
-    /** Attachment mime type */
-    mime_type: string;
-    /** Number of pages in the file (null if unavailable) */
-    page_count: number | null;
-    /** Whether fulltext extraction is available for this file */
-    status: "available" | "processing" | "unavailable";
-    /** Reason why content is unavailable (if applicable) */
-    status_reason?: string;
-}
-
-export interface AttachmentDataWithFileStatus extends AttachmentData {
-    file_status: AttachmentFileStatus;
-}
-
-/** Zotero item search result with attachments */
+/** Zotero item search result with attachments (unified format) */
 export interface ZoteroItemSearchResultItem {
     item: ItemData;
-    attachments: AttachmentDataWithFileStatus[];
+    attachments: AttachmentDataWithStatus[];
 }
 
 /** Request from backend to search Zotero library */

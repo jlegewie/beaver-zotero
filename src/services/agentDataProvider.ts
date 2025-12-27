@@ -8,7 +8,7 @@
  */
 
 import { logger } from '../utils/logger';
-import { ZoteroItemStatus, ItemDataWithStatus, AttachmentDataWithStatus } from '../../react/types/zotero';
+import { ZoteroItemStatus, ItemDataWithStatus, FrontendFileStatus, AttachmentDataWithStatus } from '../../react/types/zotero';
 import { safeIsInTrash } from '../utils/zoteroUtils';
 import { syncingItemFilter, syncingItemFilterAsync } from '../utils/sync';
 import { syncLibraryIdsAtom, syncWithZoteroAtom } from '../../react/atoms/profile';
@@ -37,10 +37,7 @@ import {
     WSZoteroItemSearchRequest,
     WSZoteroItemSearchResponse,
     ZoteroItemSearchResultItem,
-    AttachmentFileStatus,
-    AttachmentDataWithFileStatus,
 } from './agentProtocol';
-import { AttachmentData } from '../../react/types/zotero';
 import { searchItemsByTopic, searchItemsByAuthor, searchItemsByPublication, TopicSearchParams, ZoteroItemSearchFilters } from '../../react/utils/searchTools';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
 
@@ -49,9 +46,10 @@ import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
  * Determines page count and availability of fulltext/page images.
  * 
  * @param attachment - Zotero attachment item
+ * @param isPrimary - Whether this is the primary attachment for the parent item
  * @returns File status information
  */
-async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boolean): Promise<AttachmentFileStatus> {
+async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boolean): Promise<FrontendFileStatus> {
     // Get the attachment mime type
     const contentType = attachment.attachmentContentType;
 
@@ -157,6 +155,49 @@ async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boole
             status_reason: `Error analyzing PDF`,
         };
     }
+}
+
+/**
+ * Compute sync status information for a Zotero item.
+ * Determines why an item might not be available in the backend.
+ * 
+ * @param item - Zotero item to compute status for
+ * @param syncLibraryIds - List of library IDs configured for sync
+ * @param syncWithZotero - Sync settings from profile
+ * @param userId - Current user ID (for pending sync detection)
+ * @returns Status information for the item
+ */
+async function computeItemStatus(
+    item: Zotero.Item,
+    syncLibraryIds: number[],
+    syncWithZotero: any,
+    userId: string | null
+): Promise<ZoteroItemStatus> {
+    const isSyncedLibrary = syncLibraryIds.includes(item.libraryID);
+    const trashState = safeIsInTrash(item);
+    const isInTrash = trashState === true;
+    const availableLocallyOrOnServer = !item.isAttachment() || (await item.fileExists()) || isAttachmentOnServer(item);
+    const passesSyncFilters = availableLocallyOrOnServer && (await syncingItemFilterAsync(item));
+    
+    // Compute is_pending_sync only if we have a userId
+    let isPendingSync: boolean | null = null;
+    if (userId) {
+        try {
+            const wasAddedBeforeSync = await wasItemAddedBeforeLastSync(item, syncWithZotero, userId);
+            isPendingSync = !wasAddedBeforeSync;
+        } catch (e) {
+            // Unable to determine pending status
+            isPendingSync = null;
+        }
+    }
+
+    return {
+        is_synced_library: isSyncedLibrary,
+        is_in_trash: isInTrash,
+        available_locally_or_on_server: availableLocallyOrOnServer,
+        passes_sync_filters: passesSyncFilters,
+        is_pending_sync: isPendingSync
+    };
 }
 
 /**
@@ -295,40 +336,11 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
         }
     }
 
-    // Helper function to compute status for an item
-    const computeStatus = async (item: Zotero.Item): Promise<ZoteroItemStatus> => {
-        const isSyncedLibrary = syncLibraryIds.includes(item.libraryID);
-        const trashState = safeIsInTrash(item);
-        const isInTrash = trashState === true;
-        const availableLocallyOrOnServer = !item.isAttachment() || (await item.fileExists()) || isAttachmentOnServer(item);
-        const passesSyncFilters = availableLocallyOrOnServer && (await syncingItemFilterAsync(item));
-        
-        // Compute is_pending_sync only if we have a userId
-        let isPendingSync: boolean | null = null;
-        if (userId) {
-            try {
-                const wasAddedBeforeSync = await wasItemAddedBeforeLastSync(item, syncWithZotero, userId);
-                isPendingSync = !wasAddedBeforeSync;
-            } catch (e) {
-                // Unable to determine pending status
-                isPendingSync = null;
-            }
-        }
-
-        return {
-            is_synced_library: isSyncedLibrary,
-            is_in_trash: isInTrash,
-            available_locally_or_on_server: availableLocallyOrOnServer,
-            passes_sync_filters: passesSyncFilters,
-            is_pending_sync: isPendingSync
-        };
-    };
-
-    // Phase 3: Serialize all items and attachments with status
+    // Phase 5: Serialize all items and attachments with status
     const [itemResults, attachmentResults] = await Promise.all([
         Promise.all(itemsToSerialize.map(async (item): Promise<ItemDataWithStatus | null> => {
             const serialized = await serializeItem(item, undefined);
-            const status = await computeStatus(item);
+            const status = await computeItemStatus(item, syncLibraryIds, syncWithZotero, userId);
             return { item: serialized, status };
         })),
         Promise.all(attachmentsToSerialize.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
@@ -341,8 +353,22 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
                 });
                 return null;
             }
-            const status = await computeStatus(attachment);
-            return { attachment: serialized, status };
+            const status = await computeItemStatus(attachment, syncLibraryIds, syncWithZotero, userId);
+            
+            // Determine if this is the primary attachment for its parent
+            let isPrimary = false;
+            if (attachment.parentID) {
+                const parentItem = await Zotero.Items.getAsync(attachment.parentID);
+                if (parentItem) {
+                    const primaryAttachment = await parentItem.getBestAttachment();
+                    isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
+                }
+            }
+            
+            // Get file status (optional but recommended)
+            const fileStatus = await getAttachmentFileStatus(attachment, isPrimary);
+            
+            return { attachment: serialized, status, file_status: fileStatus };
         }))
     ]);
 
@@ -954,7 +980,12 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
     // Step 2: Apply limit
     const limitedItems = request.limit > 0 ? items.slice(0, request.limit) : items;
 
-    // Step 3: Serialize items with attachments
+    // Get sync configuration from store for status computation
+    const syncLibraryIds = store.get(syncLibraryIdsAtom);
+    const syncWithZotero = store.get(syncWithZoteroAtom);
+    const userId = store.get(userIdAtom);
+
+    // Step 3: Serialize items with attachments (using unified format)
     const resultItems: ZoteroItemSearchResultItem[] = [];
     
     // Load all item data in bulk for efficiency
@@ -971,9 +1002,9 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
             // Serialize the item
             const itemData = await serializeItem(item, undefined);
 
-            // Get and serialize attachments
+            // Get and serialize attachments using unified format
             const attachmentIds = item.getAttachments();
-            const attachments: AttachmentDataWithFileStatus[] = [];
+            const attachments: AttachmentDataWithStatus[] = [];
 
             if (attachmentIds.length > 0) {
                 const attachmentItems = await Zotero.Items.getAsync(attachmentIds);
@@ -985,11 +1016,18 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
                     if (isValidAttachment) {
                         const attachmentData = await serializeAttachment(attachment, undefined, { skipSyncingFilter: true });
                         if (attachmentData) {
+                            // Compute sync status
+                            const status = await computeItemStatus(attachment, syncLibraryIds, syncWithZotero, userId);
+                            
                             // Get file status for this attachment
-                            const fileStatus = await getAttachmentFileStatus(attachment, primaryAttachment && attachment.id === primaryAttachment.id);
+                            const isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
+                            const fileStatus = await getAttachmentFileStatus(attachment, isPrimary);
+                            
+                            // Build unified attachment structure
                             attachments.push({
-                                ...(attachmentData as AttachmentData),
-                                file_status: { ...fileStatus },
+                                attachment: attachmentData,
+                                status,
+                                file_status: fileStatus,
                             });
                         }
                     }
