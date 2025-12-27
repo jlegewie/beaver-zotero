@@ -428,7 +428,7 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
 export async function handleZoteroAttachmentPagesRequest(
     request: WSZoteroAttachmentPagesRequest
 ): Promise<WSZoteroAttachmentPagesResponse> {
-    const { attachment, start_page, end_page, request_id } = request;
+    const { attachment, start_page, end_page, skip_local_limits, request_id } = request;
 
     // Helper to create error response
     const errorResponse = (
@@ -497,18 +497,20 @@ export async function handleZoteroAttachmentPagesRequest(
             );
         }
 
-        // 5. Check file size before reading
-        const maxFileSizeMB = getPref('maxFileSizeMB');
-        const fileSize = await Zotero.Attachments.getTotalFileSize(zoteroItem);
-        
-        if (fileSize) {
-            const fileSizeInMB = fileSize / 1024 / 1024;
+        // 5. Check file size before reading (skip if skip_local_limits is true)
+        if (!skip_local_limits) {
+            const maxFileSizeMB = getPref('maxFileSizeMB');
+            const fileSize = await Zotero.Attachments.getTotalFileSize(zoteroItem);
             
-            if (fileSizeInMB > maxFileSizeMB) {
-                return errorResponse(
-                    `PDF file size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
-                    'file_too_large'
-                );
+            if (fileSize) {
+                const fileSizeInMB = fileSize / 1024 / 1024;
+                
+                if (fileSizeInMB > maxFileSizeMB) {
+                    return errorResponse(
+                        `PDF file size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
+                        'file_too_large'
+                    );
+                }
             }
         }
 
@@ -538,14 +540,16 @@ export async function handleZoteroAttachmentPagesRequest(
             throw error;
         }
 
-        // 8. Check page count limit
-        const maxPageCount = getPref('maxPageCount');
-        
-        if (totalPages > maxPageCount) {
-            return errorResponse(
-                `PDF has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
-                'too_many_pages'
-            );
+        // 8. Check page count limit (skip if skip_local_limits is true)
+        if (!skip_local_limits) {
+            const maxPageCount = getPref('maxPageCount');
+            
+            if (totalPages > maxPageCount) {
+                return errorResponse(
+                    `PDF has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
+                    'too_many_pages'
+                );
+            }
         }
 
         // 9. Validate page range (convert 1-indexed to 0-indexed)
@@ -632,7 +636,7 @@ export async function handleZoteroAttachmentPagesRequest(
 export async function handleZoteroAttachmentPageImagesRequest(
     request: WSZoteroAttachmentPageImagesRequest
 ): Promise<WSZoteroAttachmentPageImagesResponse> {
-    const { attachment, pages, scale, dpi, format, jpeg_quality, request_id } = request;
+    const { attachment, pages, scale, dpi, format, jpeg_quality, skip_local_limits, request_id } = request;
 
     // Helper to create error response
     const errorResponse = (
@@ -701,18 +705,20 @@ export async function handleZoteroAttachmentPageImagesRequest(
             );
         }
 
-        // 5. Check file size before reading
-        const maxFileSizeMB = getPref('maxFileSizeMB');
-        const fileSize = await Zotero.Attachments.getTotalFileSize(zoteroItem);
-        
-        if (fileSize) {
-            const fileSizeInMB = fileSize / 1024 / 1024;
+        // 5. Check file size before reading (skip if skip_local_limits is true)
+        if (!skip_local_limits) {
+            const maxFileSizeMB = getPref('maxFileSizeMB');
+            const fileSize = await Zotero.Attachments.getTotalFileSize(zoteroItem);
             
-            if (fileSizeInMB > maxFileSizeMB) {
-                return errorResponse(
-                    `PDF file size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
-                    'file_too_large'
-                );
+            if (fileSize) {
+                const fileSizeInMB = fileSize / 1024 / 1024;
+                
+                if (fileSizeInMB > maxFileSizeMB) {
+                    return errorResponse(
+                        `PDF file size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
+                        'file_too_large'
+                    );
+                }
             }
         }
 
@@ -742,14 +748,16 @@ export async function handleZoteroAttachmentPageImagesRequest(
             throw error;
         }
 
-        // 8. Check page count limit
-        const maxPageCount = getPref('maxPageCount');
-        
-        if (totalPages > maxPageCount) {
-            return errorResponse(
-                `PDF has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
-                'too_many_pages'
-            );
+        // 8. Check page count limit (skip if skip_local_limits is true)
+        if (!skip_local_limits) {
+            const maxPageCount = getPref('maxPageCount');
+            
+            if (totalPages > maxPageCount) {
+                return errorResponse(
+                    `PDF has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
+                    'too_many_pages'
+                );
+            }
         }
 
         // 9. Determine which pages to render

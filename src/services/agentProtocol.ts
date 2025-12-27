@@ -173,6 +173,8 @@ export interface WSZoteroAttachmentPagesRequest extends WSBaseEvent {
     start_page?: number;
     /** 1-indexed end page (inclusive, defaults to total pages) */
     end_page?: number;
+    /** Skip local file size and page count limits. Default: false */
+    skip_local_limits?: boolean;
 }
 
 /** Request from backend to render attachment pages as images */
@@ -190,6 +192,8 @@ export interface WSZoteroAttachmentPageImagesRequest extends WSBaseEvent {
     format?: 'png' | 'jpeg';
     /** JPEG quality (1-100), only used for format="jpeg". Default: 85 */
     jpeg_quality?: number;
+    /** Skip local file size and page count limits. Default: false */
+    skip_local_limits?: boolean;
 }
 
 /**
