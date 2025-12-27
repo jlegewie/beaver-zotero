@@ -188,7 +188,7 @@ class ItemValidationManager {
     /**
      * Perform local validation checks
      */
-    private async performLocalValidation(item: Zotero.Item): Promise<{ isValid: boolean; reason?: string }> {
+    private async performLocalValidation(item: Zotero.Item): Promise<{ isValid: boolean; reason?: string; isServerOnly?: boolean }> {
         // 1. Use existing frontend validation
         const localValidation = await isValidZoteroItem(item);
         if (!localValidation.valid) {
@@ -200,7 +200,7 @@ class ItemValidationManager {
             return { isValid: true }; // Non-attachments pass local validation
         }
 
-        // 3. Check file size limits (same logic as FileUploader)
+        // 3. Check file availability (same logic as syncingItemFilterAsync)
         const isLocalFile = await item.fileExists();
         const isServerFile = isAttachmentOnServer(item);
         
@@ -210,7 +210,10 @@ class ItemValidationManager {
         }
 
         // Skip file size check if file is on server only
-        if (!isLocalFile && isServerFile) return { isValid: true };
+        // Server-only files will be downloaded during upload process
+        if (!isLocalFile && isServerFile) {
+            return { isValid: true, isServerOnly: true };
+        }
 
         try {
             const fileSize = await Zotero.Attachments.getTotalFileSize(item);
@@ -421,10 +424,14 @@ class ItemValidationManager {
             }
 
             // Get file hash for backend validation
+            // For server-only files, use the synced hash instead of local hash
             let fileHash: string;
             try {
-                // Note: file hash can be undefined for missing files
-                fileHash = await item.attachmentHash || '';
+                const localHash = await item.attachmentHash;
+                const serverHash = item.attachmentSyncedHash;
+                
+                // Prefer local hash, fall back to server hash for server-only files
+                fileHash = localHash || serverHash || '';
             } catch (error: any) {
                 logger(`ItemValidationManager: Unable to get file hash for ${item.libraryID}-${item.key}: ${error.message}`, 1);
                 return {
@@ -434,7 +441,7 @@ class ItemValidationManager {
                 };
             }
 
-            // Check if file hash is missing (file doesn't exist)
+            // Check if file hash is missing (file doesn't exist locally or on server)
             if (!fileHash) {
                 logger(`ItemValidationManager: Attachment ${item.libraryID}-${item.key} has no file hash (file is missing)`, 4);
                 return {
@@ -569,9 +576,14 @@ class ItemValidationManager {
             }
 
             // Retrieve file hash for backend validation
+            // For server-only files, use the synced hash instead of local hash
             let fileHash: string | undefined;
             try {
-                fileHash = await attachment.attachmentHash || '';
+                const localHash = await attachment.attachmentHash;
+                const serverHash = attachment.attachmentSyncedHash;
+                
+                // Prefer local hash, fall back to server hash for server-only files
+                fileHash = localHash || serverHash || '';
             } catch (error: any) {
                 logger(`ItemValidationManager: Unable to get file hash for ${attachmentKey}: ${error.message}`, 2);
                 const errorResult: AttachmentValidationResult = {
@@ -586,7 +598,7 @@ class ItemValidationManager {
             }
 
             if (!fileHash) {
-                logger(`ItemValidationManager: Attachment ${attachmentKey} has no file hash`, 4);
+                logger(`ItemValidationManager: Attachment ${attachmentKey} has no file hash (file is missing)`, 4);
                 const missingHashResult: AttachmentValidationResult = {
                     isValid: false,
                     reason: 'File is missing',
