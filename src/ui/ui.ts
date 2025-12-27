@@ -147,7 +147,7 @@ export class BeaverUIFactory {
         const shortcut = Zotero.isMac ? `⌘${key}` : `Ctrl+${key}`;
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
         chatToggleBtn.setAttribute("id", "zotero-beaver-tb-chat-toggle");
-        chatToggleBtn.setAttribute("tooltiptext", `Toggle AI Chat (${shortcut})`);
+        chatToggleBtn.setAttribute("tooltiptext", `Toggle Beaver (${shortcut})`);
         chatToggleBtn.addEventListener("command", () => triggerToggleChat(win));
 
         const syncButton = toolbar.querySelector("#zotero-tb-sync");
