@@ -159,6 +159,19 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             }
 
             if (scrollContainerRef.current && runs.length > 0) {
+                const container = scrollContainerRef.current;
+
+                // Check if we're effectively at the bottom now (e.g. content shrunk due to retry/edit)
+                // If we are within the threshold, we should reset userScrolled to allow auto-scroll.
+                // This handles cases where the user was scrolled up, but the content size reduced 
+                // such that they are now looking at the bottom.
+                const { scrollHeight, clientHeight, scrollTop } = container;
+                const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+                
+                if (distanceFromBottom <= BOTTOM_THRESHOLD) {
+                    store.set(scrolledAtom, false);
+                }
+
                 // Set animation flag to prevent restoreScrollPosition from interfering
                 isAnimatingRef.current = true;
                 
