@@ -13,6 +13,7 @@ import { safeIsInTrash } from '../utils/zoteroUtils';
 import { syncingItemFilter, syncingItemFilterAsync } from '../utils/sync';
 import { syncLibraryIdsAtom, syncWithZoteroAtom } from '../../react/atoms/profile';
 import { userIdAtom } from '../../react/atoms/auth';
+import { getPref } from '../utils/prefs';
 
 import { store } from '../../react/store';
 import { isAttachmentOnServer } from '../utils/webAPI';
@@ -91,6 +92,24 @@ async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boole
         };
     }
     
+    // Early size check before expensive reads/parsing
+    const maxFileSizeMB = getPref('maxFileSizeMB');
+    const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
+    
+    if (fileSize) {
+        const fileSizeInMB = fileSize / 1024 / 1024;
+        
+        if (fileSizeInMB > maxFileSizeMB) {
+            return {
+                is_primary: isPrimary,
+                mime_type: contentType,
+                page_count: null,
+                status: "unavailable",
+                status_reason: `File size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
+            };
+        }
+    }
+    
     // Try to analyze the PDF
     try {
         const pdfData = await IOUtils.read(filePath);
@@ -121,6 +140,20 @@ async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boole
                 }
             }
             throw error;
+        }
+        
+        // Check page count limit
+        const maxPageCount = getPref('maxPageCount');
+        console.log('maxPageCount', pageCount, maxPageCount);
+        
+        if (pageCount > maxPageCount) {
+            return {
+                is_primary: isPrimary,
+                mime_type: contentType,
+                page_count: pageCount,
+                status: "unavailable",
+                status_reason: `PDF has ${pageCount} pages, which exceeds the ${maxPageCount}-page limit`,
+            };
         }
         
         // Check if the PDF has a text layer (needs OCR if not)
