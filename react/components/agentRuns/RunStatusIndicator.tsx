@@ -45,7 +45,7 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, 
                         variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left disabled-but-styled
                         ${lastMessageHasToolCall ? '-mt-1' : ''}
                     `}
-                    style={{ background: 'transparent', border: 0, padding: 0, cursor: 'default' }}
+                    style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0, cursor: 'default' }}
                     disabled={true}
                     aria-busy="true"
                     aria-live="polite"
