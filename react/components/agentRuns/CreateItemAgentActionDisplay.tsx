@@ -8,8 +8,8 @@ import {
     TickIcon,
     CancelIcon,
     DocumentValidationIcon,
+    Icon,
 } from '../icons/icons';
-import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import { applyCreateItemData } from '../../utils/addItemActions';
@@ -459,24 +459,32 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         >
             {/* Header with button and action icons */}
             <div
-                className={`display-flex flex-row py-15 px-2 ${resultsVisible && hasItemsToShow ? 'border-bottom-quinary' : ''}`}
+                className={`
+                    display-flex flex-row py-15 px-25
+                    ${resultsVisible && hasItemsToShow ? 'border-bottom-quinary' : ''}
+                `}
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
             >
-                <div className="display-flex flex-row flex-1" onClick={toggleResults}>
-                    <Button
-                        variant="ghost-secondary"
-                        icon={getIcon()}
-                        className={`
-                            text-base scale-105
-                            ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
-                        `}
-                        disabled={isButtonDisabled && !canToggleResults}
-                    >
-                        <span className={`mr-1`}>{getButtonText()}</span>
-                    </Button>
-                    <div className="flex-1" />
-                </div>
+                <button
+                    type="button"
+                    className={`display-flex flex-row py-15 gap-2 text-left ${canToggleResults ? 'cursor-pointer' : ''}`}
+                    style={{ background: 'transparent', border: 0, padding: 0 }}
+                    aria-expanded={resultsVisible}
+                    aria-controls={`agent-actions-content-${groupId}`}
+                    onClick={toggleResults}
+                    disabled={isButtonDisabled && !canToggleResults}
+                >
+                    <div className="display-flex flex-row gap-2">
+                        <div className="flex-1 display-flex mt-010">
+                            <Icon icon={getIcon()} />
+                        </div>
+                        <div className="display-flex">
+                            {getButtonText()}
+                        </div>
+                    </div>
+                </button>
+                <div className="flex-1" />
 
                 {/* Apply/Reject all buttons */}
                 {showApplyButton && !allErrors && (
@@ -503,7 +511,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
 
             {/* Expandable list of individual items */}
             {resultsVisible && hasItemsToShow && (
-                <div className="display-flex flex-col">
+                <div className="display-flex flex-col" id={`agent-actions-content-${groupId}`}>
                     {actions.map((action, index) => (
                         <CreateItemListItem
                             key={action.id}

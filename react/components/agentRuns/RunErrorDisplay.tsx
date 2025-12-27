@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Icon, AlertIcon, RepeatIcon, SettingsIcon, ArrowDownIcon, ArrowRightIcon, LinkForwardIcon } from '../icons/icons';
 import Button from '../ui/Button';
@@ -7,7 +7,7 @@ import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { regenerateFromRunAtom, resumeFromRunAtom } from '../../atoms/agentRunAtoms';
 import { isPreferencePageVisibleAtom } from '../../atoms/ui';
-import { runErrorVisibilityAtom, toggleRunErrorVisibilityAtom, setRunErrorVisibilityAtom } from '../../atoms/messageUIState';
+import { runErrorVisibilityAtom, setRunErrorVisibilityAtom } from '../../atoms/messageUIState';
 
 interface RunError {
     type: string;
@@ -86,16 +86,8 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
     
     // Visibility state
     const runErrorVisibility = useAtomValue(runErrorVisibilityAtom);
-    const toggleVisibility = useSetAtom(toggleRunErrorVisibilityAtom);
     const setVisibility = useSetAtom(setRunErrorVisibilityAtom);
     const isExpanded = runErrorVisibility[runId] ?? isLastRun;
-
-    // Initialize visibility state in atom on first render if not already set
-    useEffect(() => {
-        if (runErrorVisibility[runId] === undefined) {
-            setVisibility({ runId, visible: isLastRun });
-        }
-    }, [runId, isLastRun, runErrorVisibility, setVisibility]);
 
     const contentRef = useRef<HTMLDivElement | null>(null);
 
@@ -118,7 +110,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
     };
 
     const handleToggle = () => {
-        toggleVisibility(runId);
+        setVisibility({ runId, visible: !isExpanded });
     };
 
     // Strip error type prefix if it exists in the message (e.g. "internal_error: message" -> "message")
@@ -149,13 +141,11 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                 >
                     <button
                         type="button"
-                        className="display-flex flex-row py-15 cursor-pointer gap-2 w-full text-left focus-visible:outline"
+                        className="display-flex flex-row py-15 cursor-pointer gap-2 w-full text-left"
                         style={{ background: 'transparent', border: 0, padding: 0 }}
                         aria-expanded={isExpanded}
                         aria-controls={`run-error-content-${runId}`}
                         onClick={handleToggle}
-                        onMouseEnter={() => setIsHovered(true)}
-                        onMouseLeave={() => setIsHovered(false)}
                     >
                         <div className="display-flex flex-row px-3 gap-2">
                             <div className="display-flex mt-010 font-color-red">
@@ -171,7 +161,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
 
                 {/* Expanded Content */}
                 {isExpanded && (
-                    <div className="p-3">
+                    <div className="p-3" id={`run-error-content-${runId}`}>
                         <div className="display-flex flex-col gap-3">
                             <div className="text-base font-color-red">
                                 {parseTextWithLinksAndNewlines(displayMessage)}
