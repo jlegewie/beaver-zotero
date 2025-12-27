@@ -21,6 +21,7 @@ import TokenUsageDisplay from './TokenUsageDisplay';
 import { regenerateFromRunAtom } from '../../atoms/agentRunAtoms';
 import { currentThreadIdAtom } from '../../atoms/threads';
 import { store } from '../../store';
+import Tooltip from '../ui/Tooltip';
 
 interface AgentRunFooterProps {
     run: AgentRun;
@@ -304,26 +305,43 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                     {Zotero.Beaver.data.env === "development" && run.status === 'completed' && run.total_usage && run.total_cost && (
                         <TokenUsageDisplay usage={run.total_usage} cost={run.total_cost} />
                     )}
-                    <MenuButton
-                        icon={ShareIcon}
-                        menuItems={getShareMenuItems()}
-                        className="scale-11"
-                        ariaLabel="Share"
-                        variant="ghost"
-                        positionAdjustment={{ x: 0, y: 0 }}
-                        toggleCallback={handleMenuToggle}
-                    />
-                    <IconButton
-                        icon={RepeatIcon}
-                        onClick={handleRegenerate}
-                        className="scale-11"
-                        ariaLabel="Regenerate response"
-                    />
-                    <CopyButton
-                        content={combinedContent}
-                        formatContent={renderToMarkdown}
-                        className="scale-11"
-                    />
+                    {/* Share button */}
+                    <Tooltip
+                        content="More options"
+                        showArrow
+                        singleLine
+                    >
+                        <MenuButton
+                            icon={ShareIcon}
+                            menuItems={getShareMenuItems()}
+                            className="scale-11"
+                            ariaLabel="Share"
+                            variant="ghost"
+                            positionAdjustment={{ x: 0, y: 0 }}
+                            toggleCallback={handleMenuToggle}
+                        />
+                    </Tooltip>
+                    <Tooltip
+                        content="Retry"
+                        showArrow
+                    >
+                        <IconButton
+                            icon={RepeatIcon}
+                            onClick={handleRegenerate}
+                            className="scale-11"
+                            ariaLabel="Retry"
+                        />
+                    </Tooltip>
+                    <Tooltip
+                        content="Copy"
+                        showArrow
+                    >
+                        <CopyButton
+                            content={combinedContent}
+                            formatContent={renderToMarkdown}
+                            className="scale-11"
+                        />
+                    </Tooltip>
                 </div>
             </div>
 
