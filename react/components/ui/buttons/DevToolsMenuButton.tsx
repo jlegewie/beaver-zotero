@@ -2,6 +2,8 @@ import React from 'react';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import PdfIcon from '../../icons/PdfIcon';
+import SearchIcon from '../../icons/SearchIcon';
+import MoreHorizontalIcon from '../../icons/MoreHorizontalIcon';
 import { 
     extractByLinesFromZoteroItem,
     ExtractionError, 
@@ -16,20 +18,80 @@ import {
     extractCurrentPageContent
 } from '../../../utils/extractionVisualizer';
 import { getCurrentReaderAndWaitForView } from '../../../utils/readerUtils';
+import { semanticSearchService } from '../../../../src/services/semanticSearchService';
+import { BeaverDB } from '../../../../src/services/database';
 
-interface PdfTestMenuButtonProps {
+interface DevToolsMenuButtonProps {
     className?: string;
     ariaLabel?: string;
+    currentMessageContent?: string;
 }
 
 /**
- * TEMPORARY: Button component for PDF testing functions - REMOVE BEFORE RELEASE
- * Shows PDF extraction testing options in a dropdown menu
+ * TEMPORARY: Button component for dev testing functions - REMOVE BEFORE RELEASE
+ * Shows PDF extraction testing and semantic search options in a dropdown menu
  */
-const PdfTestMenuButton: React.FC<PdfTestMenuButtonProps> = ({ 
+const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({ 
     className = '',
-    ariaLabel = 'PDF Test Menu',
+    ariaLabel = 'Dev Tools Menu',
+    currentMessageContent = '',
 }) => {
+    // Test semantic search
+    const handleTestSemanticSearch = async () => {
+        try {
+            const query = currentMessageContent;
+            if (!query || query.trim().length === 0) {
+                console.log('[Semantic Search Test] No query text provided');
+                return;
+            }
+
+            console.log('[Semantic Search Test] Testing with query:', query);
+            
+            // Get database instance from global addon
+            const db = Zotero.Beaver?.db as BeaverDB | null;
+            if (!db) {
+                console.error('[Semantic Search Test] Database not available');
+                return;
+            }
+
+            // Create search service instance
+            const searchService = new semanticSearchService(db, 512);
+            
+            // Run search
+            const results = await searchService.search(query, {
+                topK: 20,
+                minSimilarity: 0.3
+            });
+
+            console.log('[Semantic Search Test] Results:', results);
+            console.log(`[Semantic Search Test] Found ${results.length} results`);
+            
+            // Log top results with item details
+            const topResults = results.slice(0, 20);
+            const itemIds = topResults.map(r => r.itemId);
+            const items = await Zotero.Items.getAsync(itemIds);
+            const validItems = items.filter((item): item is Zotero.Item => item !== null);
+            
+            // Load itemData for title access
+            if (validItems.length > 0) {
+                await Zotero.Items.loadDataTypes(validItems, ["itemData"]);
+            }
+            
+            // Create a map for quick lookup
+            const itemMap = new Map(validItems.map(item => [item.id, item]));
+            
+            console.group('[Semantic Search Test] Top Results');
+            for (let i = 0; i < topResults.length; i++) {
+                const result = topResults[i];
+                const item = itemMap.get(result.itemId);
+                console.log(`${i + 1}. [${result.similarity.toFixed(3)}] ${item?.getField('title') || 'Unknown'}`);
+            }
+            console.groupEnd();
+        } catch (error) {
+            console.error('[Semantic Search Test] Failed:', error);
+        }
+    };
+
     // Test PDF extraction on selected item
     const handleTestPdfExtraction = async () => {
         const selectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
@@ -345,8 +407,14 @@ const PdfTestMenuButton: React.FC<PdfTestMenuButtonProps> = ({
         }
     };
 
-    // Create menu items for PDF testing functions
+    // Create menu items for dev testing functions
     const menuItems: MenuItem[] = [
+        {
+            label: "Test Semantic Search",
+            onClick: handleTestSemanticSearch,
+            icon: SearchIcon,
+            disabled: false,
+        },
         {
             label: "Test OCR Detection",
             onClick: handleTestOCRDetection,
@@ -395,14 +463,14 @@ const PdfTestMenuButton: React.FC<PdfTestMenuButtonProps> = ({
         <MenuButton
             menuItems={menuItems}
             variant="ghost"
-            icon={PdfIcon}
+            icon={MoreHorizontalIcon}
             className={className}
             ariaLabel={ariaLabel}
-            tooltipContent="[DEV] PDF Testing Tools"
+            tooltipContent="Development Tools"
             showArrow={true}
         />
     );
 };
 
-export default PdfTestMenuButton;
+export default DevToolsMenuButton;
 
