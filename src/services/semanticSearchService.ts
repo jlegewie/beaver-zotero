@@ -54,10 +54,7 @@ export class semanticSearchService {
         }
 
         // 1. Generate query embedding from backend API
-        const queryEmbeddingResponse = await embeddingsService.generateQueryEmbedding(
-            query,
-            this.dimensions
-        );
+        const queryEmbeddingResponse = await embeddingsService.generateQueryEmbedding(query);
         const queryEmbedding = new Int8Array(queryEmbeddingResponse.embedding);
 
         // 2. Load embeddings from database

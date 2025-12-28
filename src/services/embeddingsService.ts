@@ -7,7 +7,6 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 interface GenerateEmbeddingsRequest {
     texts: string[];
     item_ids: number[];
-    dimensions?: number;
 }
 
 /**
@@ -25,8 +24,6 @@ interface EmbeddingResult {
 interface GenerateEmbeddingsResponse {
     embeddings: EmbeddingResult[];
     model: string;
-    total_tokens: number;
-    total_cost: number;
 }
 
 /**
@@ -34,7 +31,6 @@ interface GenerateEmbeddingsResponse {
  */
 interface GenerateQueryRequest {
     query: string;
-    dimensions?: number;
 }
 
 /**
@@ -68,15 +64,13 @@ export class EmbeddingsService extends ApiService {
 
     /**
      * Generate int8 quantized embeddings for multiple paper texts
-     * @param texts Array of paper texts to embed
+     * @param texts Array of paper texts to embed (max 500 items)
      * @param itemIds Corresponding Zotero item IDs
-     * @param dimensions Embedding dimensions: 256 or 512 (default: 512)
      * @returns Promise with embeddings and metadata
      */
     async generateEmbeddings(
         texts: string[],
-        itemIds: number[],
-        dimensions: number = 512
+        itemIds: number[]
     ): Promise<GenerateEmbeddingsResponse> {
         if (texts.length !== itemIds.length) {
             throw new Error('texts and item_ids must have the same length');
@@ -86,38 +80,30 @@ export class EmbeddingsService extends ApiService {
             throw new Error('texts must not be empty');
         }
         
-        if (dimensions !== 256 && dimensions !== 512) {
-            throw new Error('dimensions must be 256 or 512');
+        if (texts.length > 500) {
+            throw new Error('Batch size cannot exceed 500 items');
         }
 
         return this.post<GenerateEmbeddingsResponse>('/api/v1/embeddings/generate', {
             texts,
-            item_ids: itemIds,
-            dimensions
+            item_ids: itemIds
         } as GenerateEmbeddingsRequest);
     }
 
     /**
      * Generate int8 quantized embedding for a single search query
      * @param query Search query text
-     * @param dimensions Embedding dimensions: 256 or 512 (default: 512)
-     * @returns Promise with query embedding
+     * @returns Promise with query embedding (always 512 dimensions)
      */
     async generateQueryEmbedding(
-        query: string,
-        dimensions: number = 512
+        query: string
     ): Promise<QueryEmbeddingResponse> {
         if (!query || query.trim().length === 0) {
             throw new Error('Query cannot be empty');
         }
-        
-        if (dimensions !== 256 && dimensions !== 512) {
-            throw new Error('dimensions must be 256 or 512');
-        }
 
         return this.post<QueryEmbeddingResponse>('/api/v1/embeddings/generate-query', {
-            query,
-            dimensions
+            query
         } as GenerateQueryRequest);
     }
 
@@ -125,23 +111,19 @@ export class EmbeddingsService extends ApiService {
      * Batch process texts in chunks to respect API limits
      * @param texts Array of paper texts to embed
      * @param itemIds Corresponding Zotero item IDs
-     * @param dimensions Embedding dimensions
-     * @param batchSize Maximum texts per batch (default: 100)
+     * @param batchSize Maximum texts per batch (default: 500)
      * @returns Promise with all embeddings and combined metadata
      */
     async generateEmbeddingsBatch(
         texts: string[],
         itemIds: number[],
-        dimensions: number = 512,
-        batchSize: number = 100
+        batchSize: number = 500
     ): Promise<GenerateEmbeddingsResponse> {
         if (texts.length !== itemIds.length) {
             throw new Error('texts and item_ids must have the same length');
         }
 
         const allEmbeddings: EmbeddingResult[] = [];
-        let totalTokens = 0;
-        let totalCost = 0;
         let model = '';
 
         // Process in batches
@@ -151,21 +133,16 @@ export class EmbeddingsService extends ApiService {
 
             const response = await this.generateEmbeddings(
                 batchTexts,
-                batchItemIds,
-                dimensions
+                batchItemIds
             );
 
             allEmbeddings.push(...response.embeddings);
-            totalTokens += response.total_tokens;
-            totalCost += response.total_cost;
             model = response.model;
         }
 
         return {
             embeddings: allEmbeddings,
-            model,
-            total_tokens: totalTokens,
-            total_cost: totalCost
+            model
         };
     }
 }

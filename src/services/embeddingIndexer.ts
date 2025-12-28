@@ -11,9 +11,9 @@ import { logger } from '../utils/logger';
 export const MIN_CONTENT_LENGTH = 50;
 
 /**
- * Default batch size for embedding API requests
+ * Default batch size for embedding API requests (max 500)
  */
-export const INDEX_BATCH_SIZE = 100;
+export const INDEX_BATCH_SIZE = 500;
 
 /**
  * How often to force a full diff scan as a safety net (in milliseconds).
@@ -60,7 +60,6 @@ export interface IndexingResult {
     indexed: number;        // Number of items successfully indexed
     skipped: number;        // Number of items skipped (no content or unchanged)
     failed: number;         // Number of items that failed
-    totalTokens: number;    // Total tokens used for embedding generation
 }
 
 /**
@@ -313,8 +312,7 @@ export class EmbeddingIndexer {
         const result: IndexingResult = {
             indexed: 0,
             skipped: 0,
-            failed: 0,
-            totalTokens: 0,
+            failed: 0
         };
 
         if (itemIds.length === 0) {
@@ -377,9 +375,7 @@ export class EmbeddingIndexer {
                 const ids = itemsData.map(item => item.itemId);
 
                 // Generate embeddings via API
-                const response = await embeddingsService.generateEmbeddings(texts, ids, this.dimensions);
-
-                result.totalTokens += response.total_tokens;
+                const response = await embeddingsService.generateEmbeddings(texts, ids);
 
                 // Prepare embedding records
                 const embeddingRecords: Array<Omit<EmbeddingRecord, 'indexed_at'>> = [];
@@ -608,8 +604,7 @@ export class EmbeddingIndexer {
             // Generate embedding via API
             const response = await embeddingsService.generateEmbeddings(
                 [text],
-                [itemData.itemId],
-                this.dimensions
+                [itemData.itemId]
             );
 
             if (response.embeddings.length === 0) {
@@ -652,18 +647,17 @@ export class EmbeddingIndexer {
     async indexItemsBatch(
         items: Zotero.Item[],
         options: {
-            batchSize?: number;         // Items per API batch (default: 100)
+            batchSize?: number;         // Items per API batch (default: 500)
             skipUnchanged?: boolean;    // Skip items with unchanged content (default: true)
             onProgress?: (indexed: number, total: number) => void;
         } = {}
     ): Promise<IndexingResult> {
-        const { batchSize = 100, skipUnchanged = true, onProgress } = options;
+        const { batchSize = 500, skipUnchanged = true, onProgress } = options;
 
         const result: IndexingResult = {
             indexed: 0,
             skipped: 0,
-            failed: 0,
-            totalTokens: 0,
+            failed: 0
         };
 
         // Extract data from all items
@@ -715,11 +709,8 @@ export class EmbeddingIndexer {
                 // Generate embeddings via API
                 const response = await embeddingsService.generateEmbeddings(
                     texts,
-                    itemIds,
-                    this.dimensions
+                    itemIds
                 );
-
-                result.totalTokens += response.total_tokens;
 
                 // Prepare embedding records
                 const embeddingRecords: Array<Omit<EmbeddingRecord, 'indexed_at'>> = [];
