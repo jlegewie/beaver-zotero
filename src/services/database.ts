@@ -23,6 +23,20 @@ export interface EmbeddingRecord {
     indexed_at: string;                 // When the embedding was created
 }
 
+/**
+ * Interface for the 'embedding_index_state' table row
+ * 
+ * Tracks the state of the embedding index for each library.
+ * Used to optimize startup by skipping full diff when nothing changed.
+ */
+export interface EmbeddingIndexStateRecord {
+    library_id: number;                  // Zotero library ID
+    last_scan_timestamp: string;         // When we last ran a full scan (ISO string)
+    max_client_date_modified: string;    // MAX(clientDateModified) from Zotero at last scan
+    item_count: number;                  // Count of regular items in Zotero at last scan
+    embedding_count: number;             // Count of embeddings at last scan
+}
+
 
 /* 
  * Interface for the 'threads' table row
@@ -155,6 +169,18 @@ export class BeaverDB {
                 model_id                 TEXT NOT NULL,
                 indexed_at               TEXT NOT NULL DEFAULT (datetime('now')),
                 PRIMARY KEY (item_id)
+            );
+        `);
+
+        // Table for tracking embedding index state per library
+        // Used to optimize startup by skipping full diff when nothing changed
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS embedding_index_state (
+                library_id               INTEGER PRIMARY KEY,
+                last_scan_timestamp      TEXT NOT NULL,
+                max_client_date_modified TEXT NOT NULL,
+                item_count               INTEGER NOT NULL,
+                embedding_count          INTEGER NOT NULL
             );
         `);
 
@@ -905,6 +931,78 @@ export class BeaverDB {
         }
 
         return result;
+    }
+
+    // =============================================
+    // Embedding Index State Methods
+    // =============================================
+
+    /**
+     * Get the embedding index state for a library.
+     * @param libraryId The Zotero library ID
+     * @returns The state record or null if not found
+     */
+    public async getEmbeddingIndexState(libraryId: number): Promise<EmbeddingIndexStateRecord | null> {
+        const sql = 'SELECT * FROM embedding_index_state WHERE library_id = ?';
+        const rows = await this.conn.queryAsync(sql, [libraryId]);
+        
+        if (rows.length === 0) return null;
+        
+        const row = rows[0];
+        return {
+            library_id: row.library_id,
+            last_scan_timestamp: row.last_scan_timestamp,
+            max_client_date_modified: row.max_client_date_modified,
+            item_count: row.item_count,
+            embedding_count: row.embedding_count,
+        };
+    }
+
+    /**
+     * Update the embedding index state for a library.
+     * @param state The state to save
+     */
+    public async upsertEmbeddingIndexState(state: EmbeddingIndexStateRecord): Promise<void> {
+        const sql = `
+            INSERT INTO embedding_index_state 
+                (library_id, last_scan_timestamp, max_client_date_modified, item_count, embedding_count)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(library_id) DO UPDATE SET
+                last_scan_timestamp = excluded.last_scan_timestamp,
+                max_client_date_modified = excluded.max_client_date_modified,
+                item_count = excluded.item_count,
+                embedding_count = excluded.embedding_count
+        `;
+        
+        await this.conn.queryAsync(sql, [
+            state.library_id,
+            state.last_scan_timestamp,
+            state.max_client_date_modified,
+            state.item_count,
+            state.embedding_count,
+        ]);
+    }
+
+    /**
+     * Delete the embedding index state for a library.
+     * @param libraryId The Zotero library ID
+     */
+    public async deleteEmbeddingIndexState(libraryId: number): Promise<void> {
+        await this.conn.queryAsync(
+            'DELETE FROM embedding_index_state WHERE library_id = ?',
+            [libraryId]
+        );
+    }
+
+    /**
+     * Get MAX(client_date_modified) from embeddings for a library.
+     * @param libraryId The Zotero library ID
+     * @returns The max date or null if no embeddings exist
+     */
+    public async getEmbeddingsMaxClientDateModified(libraryId: number): Promise<string | null> {
+        const sql = 'SELECT MAX(client_date_modified) as max_date FROM embeddings WHERE library_id = ?';
+        const rows = await this.conn.queryAsync(sql, [libraryId]);
+        return rows[0]?.max_date || null;
     }
 
 }

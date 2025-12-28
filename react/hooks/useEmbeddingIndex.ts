@@ -80,56 +80,73 @@ export function useEmbeddingIndex() {
 
     /**
      * Perform initial indexing of all libraries.
-     * Uses lightweight SQL queries for metadata and per-batch item loading
-     * to avoid memory issues with large libraries.
+     * Uses optimized diff check to skip full scans when nothing changed.
+     * Falls back to full diff when changes are detected or on periodic safety check.
      */
     const performInitialIndexing = async () => {
         const indexer = getIndexer();
         if (!indexer) return;
 
-        logger("useEmbeddingIndex: Starting initial indexing", 3);
+        logger("useEmbeddingIndex: Starting initial indexing check", 3);
         setIndexStatus({ status: 'indexing', phase: 'initial' });
 
         try {
             // Get libraries sorted (user library first)
             const libraryIds = indexer.getLibrariesSorted();
-            logger(`useEmbeddingIndex: Found ${libraryIds.length} libraries to index`, 3);
+            logger(`useEmbeddingIndex: Found ${libraryIds.length} libraries to check`, 3);
 
-            // First pass: compute diff for each library to get total counts
-            // Uses lightweight SQL queries, not loading full items
-            let totalToIndex = 0;
-            let totalToDelete = 0;
-            let totalIndexable = 0;
-            const libraryDiffs: Map<number, { toIndex: number[], toDelete: number[], totalIndexable: number }> = new Map();
+            // First pass: check which libraries need a full diff
+            // This is fast - just SQL queries for MAX(date) and COUNT
+            const librariesToProcess: number[] = [];
+            const libraryStates: Map<number, { maxClientDateModified: string | null, itemCount: number }> = new Map();
 
             for (const libraryId of libraryIds) {
+                const diffCheck = await indexer.shouldRunFullDiff(libraryId);
+                
+                if (diffCheck.needsDiff) {
+                    logger(`useEmbeddingIndex: Library ${libraryId} needs diff: ${diffCheck.reason}`, 3);
+                    librariesToProcess.push(libraryId);
+                    // Get and store the current state for later
+                    const state = await indexer.getZoteroLibraryState(libraryId);
+                    libraryStates.set(libraryId, state);
+                } else {
+                    logger(`useEmbeddingIndex: Library ${libraryId} skipped: ${diffCheck.reason}`, 4);
+                }
+            }
+
+            // If no libraries need processing, we're done
+            if (librariesToProcess.length === 0) {
+                logger("useEmbeddingIndex: All libraries up to date, skipping full diff", 3);
+                setIndexStatus({ status: 'idle', phase: 'incremental' });
+                return;
+            }
+
+            // Second pass: compute diff only for libraries that need it
+            let totalToIndex = 0;
+            let totalToDelete = 0;
+            const libraryDiffs: Map<number, { toIndex: number[], toDelete: number[], totalIndexable: number }> = new Map();
+
+            for (const libraryId of librariesToProcess) {
                 logger(`useEmbeddingIndex: Computing diff for library ${libraryId}`, 4);
                 const diff = await indexer.computeIndexingDiff(libraryId, MIN_CONTENT_LENGTH);
                 libraryDiffs.set(libraryId, diff);
                 totalToIndex += diff.toIndex.length;
                 totalToDelete += diff.toDelete.length;
-                totalIndexable += diff.totalIndexable;
             }
 
-            logger(`useEmbeddingIndex: Total: ${totalToIndex} to index, ${totalToDelete} to delete, ${totalIndexable} indexable items`, 3);
+            logger(`useEmbeddingIndex: Total: ${totalToIndex} to index, ${totalToDelete} to delete across ${librariesToProcess.length} libraries`, 3);
             store.set(embeddingIndexStateAtom, (prev: EmbeddingIndexState) => ({
                 ...prev,
                 totalItems: totalToIndex,
             }));
 
-            // If nothing to do, we're done
-            if (totalToIndex === 0 && totalToDelete === 0) {
-                logger("useEmbeddingIndex: Index is up to date", 3);
-                setIndexStatus({ status: 'idle', phase: 'incremental' });
-                return;
-            }
-
-            // Second pass: process each library
+            // Third pass: process each library and save state
             let processedItems = 0;
             const db = getDB();
 
-            for (const libraryId of libraryIds) {
+            for (const libraryId of librariesToProcess) {
                 const diff = libraryDiffs.get(libraryId);
+                const zoteroState = libraryStates.get(libraryId);
                 if (!diff) continue;
 
                 // Delete orphaned embeddings
@@ -154,6 +171,12 @@ export function useEmbeddingIndex() {
 
                     processedItems += result.indexed + result.skipped + result.failed;
                     logger(`useEmbeddingIndex: Library ${libraryId} complete: ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed`, 3);
+                }
+
+                // Save the index state for this library (for future quick checks)
+                if (zoteroState) {
+                    await indexer.saveIndexState(libraryId, zoteroState);
+                    logger(`useEmbeddingIndex: Saved index state for library ${libraryId}`, 4);
                 }
             }
 

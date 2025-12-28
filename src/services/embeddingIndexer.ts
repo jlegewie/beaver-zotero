@@ -16,6 +16,12 @@ export const MIN_CONTENT_LENGTH = 50;
 export const INDEX_BATCH_SIZE = 100;
 
 /**
+ * How often to force a full diff scan as a safety net (in milliseconds).
+ * Default: 7 days. This catches any edge cases missed by the quick check.
+ */
+export const FULL_DIFF_SAFETY_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
  * Lightweight metadata for sorting and batching items without loading full item data.
  * This allows efficient processing of large libraries.
  */
@@ -55,6 +61,22 @@ export interface IndexingResult {
     skipped: number;        // Number of items skipped (no content or unchanged)
     failed: number;         // Number of items that failed
     totalTokens: number;    // Total tokens used for embedding generation
+}
+
+/**
+ * Current state of Zotero library for diff comparison
+ */
+export interface ZoteroLibraryState {
+    maxClientDateModified: string | null;  // MAX(clientDateModified) from items table
+    itemCount: number;                      // COUNT of regular items
+}
+
+/**
+ * Result of checking whether full diff is needed
+ */
+export interface DiffCheckResult {
+    needsDiff: boolean;     // Whether full diff should run
+    reason: string;         // Human-readable reason for the decision
 }
 
 /**
@@ -424,6 +446,130 @@ export class EmbeddingIndexer {
                 if (b === userLibraryId) return 1;
                 return a - b;
             });
+    }
+
+    /**
+     * Query Zotero database for current library state.
+     * Uses SQL to get MAX(clientDateModified) and COUNT of regular items.
+     * @param libraryId The library to query
+     * @returns ZoteroLibraryState with max date and item count
+     */
+    async getZoteroLibraryState(libraryId: number): Promise<ZoteroLibraryState> {
+        const noteItemTypeID = Zotero.ItemTypes.getID('note');
+        const annotationItemTypeID = Zotero.ItemTypes.getID('annotation');
+        const attachmentItemTypeID = Zotero.ItemTypes.getID('attachment');
+
+        const sql = `
+            SELECT 
+                MAX(clientDateModified) as max_date,
+                COUNT(*) as item_count
+            FROM items 
+            WHERE libraryID = ? 
+              AND itemTypeID NOT IN (?, ?, ?)
+              AND itemID NOT IN (SELECT itemID FROM deletedItems)
+        `;
+        const params = [libraryId, noteItemTypeID, annotationItemTypeID, attachmentItemTypeID];
+
+        const rows = await Zotero.DB.queryAsync(sql, params);
+        
+        if (!rows || rows.length === 0) {
+            return { maxClientDateModified: null, itemCount: 0 };
+        }
+        
+        const row = rows[0];
+
+        let maxClientDateModified: string | null = null;
+        if (row?.max_date) {
+            try {
+                maxClientDateModified = Zotero.Date.sqlToISO8601(row.max_date);
+            } catch (e) {
+                maxClientDateModified = row.max_date;
+            }
+        }
+
+        return {
+            maxClientDateModified,
+            itemCount: row?.item_count || 0,
+        };
+    }
+
+    /**
+     * Check if a full diff scan is needed for a library.
+     * Uses quick comparisons to avoid expensive full scans when nothing changed.
+     * 
+     * A full diff is needed if:
+     * 1. No embeddings exist for this library (first run)
+     * 2. Zotero's MAX(clientDateModified) > stored MAX (items modified)
+     * 3. Zotero's item count ≠ stored count (items added or deleted)
+     * 4. Last scan was more than FULL_DIFF_SAFETY_INTERVAL_MS ago (weekly safety net)
+     * 
+     * @param libraryId The library to check
+     * @returns DiffCheckResult with needsDiff flag and reason
+     */
+    async shouldRunFullDiff(libraryId: number): Promise<DiffCheckResult> {
+        // Get stored state from last successful scan
+        const storedState = await this.db.getEmbeddingIndexState(libraryId);
+        
+        // Check 1: First run - no stored state
+        if (!storedState) {
+            const embeddingCount = await this.db.getEmbeddingCount(libraryId);
+            if (embeddingCount === 0) {
+                return { needsDiff: true, reason: 'First run - no embeddings exist' };
+            }
+            // Has embeddings but no state - run diff to establish baseline
+            return { needsDiff: true, reason: 'No stored state - establishing baseline' };
+        }
+
+        // Check 2: Safety net - periodic full scan
+        const lastScanTime = new Date(storedState.last_scan_timestamp).getTime();
+        const timeSinceLastScan = Date.now() - lastScanTime;
+        if (timeSinceLastScan > FULL_DIFF_SAFETY_INTERVAL_MS) {
+            return { needsDiff: true, reason: `Safety net - last scan was ${Math.round(timeSinceLastScan / (24 * 60 * 60 * 1000))} days ago` };
+        }
+
+        // Get current Zotero state
+        const zoteroState = await this.getZoteroLibraryState(libraryId);
+
+        // Check 3: Item count changed (additions or deletions)
+        if (zoteroState.itemCount !== storedState.item_count) {
+            return { 
+                needsDiff: true, 
+                reason: `Item count changed: ${storedState.item_count} → ${zoteroState.itemCount}` 
+            };
+        }
+
+        // Check 4: Items modified (MAX date increased)
+        if (zoteroState.maxClientDateModified && storedState.max_client_date_modified) {
+            const zoteroDate = new Date(zoteroState.maxClientDateModified).getTime();
+            const storedDate = new Date(storedState.max_client_date_modified).getTime();
+            
+            if (zoteroDate > storedDate) {
+                return { 
+                    needsDiff: true, 
+                    reason: `Items modified since last scan` 
+                };
+            }
+        }
+
+        // No changes detected
+        return { needsDiff: false, reason: 'No changes detected' };
+    }
+
+    /**
+     * Save the index state after a successful diff scan.
+     * @param libraryId The library that was scanned
+     * @param zoteroState The Zotero state at scan time
+     */
+    async saveIndexState(libraryId: number, zoteroState: ZoteroLibraryState): Promise<void> {
+        const embeddingCount = await this.db.getEmbeddingCount(libraryId);
+        
+        await this.db.upsertEmbeddingIndexState({
+            library_id: libraryId,
+            last_scan_timestamp: new Date().toISOString(),
+            max_client_date_modified: zoteroState.maxClientDateModified || new Date().toISOString(),
+            item_count: zoteroState.itemCount,
+            embedding_count: embeddingCount,
+        });
     }
 
     /**
