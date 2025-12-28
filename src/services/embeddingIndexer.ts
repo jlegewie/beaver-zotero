@@ -1,6 +1,6 @@
 import { BeaverDB, EmbeddingRecord } from './database';
 import { embeddingsService } from './embeddingsService';
-import { getClientDateModifiedAsISOString, getClientDateModifiedBatch } from '../utils/zoteroUtils';
+import { getClientDateModifiedAsISOString } from '../utils/zoteroUtils';
 import { logger } from '../utils/logger';
 
 
@@ -14,6 +14,16 @@ export const MIN_CONTENT_LENGTH = 50;
  * Default batch size for embedding API requests
  */
 export const INDEX_BATCH_SIZE = 100;
+
+/**
+ * Lightweight metadata for sorting and batching items without loading full item data.
+ * This allows efficient processing of large libraries.
+ */
+export interface ItemIndexMetadata {
+    itemId: number;
+    libraryId: number;
+    clientDateModified: string;
+}
 
 /**
  * Data required to index a Zotero item for semantic search
@@ -32,8 +42,9 @@ export interface ItemIndexData {
  * Result of determining which items need indexing
  */
 export interface IndexingDiff {
-    toIndex: ItemIndexData[];       // Items that need (re-)indexing
+    toIndex: number[];              // Item IDs that need (re-)indexing
     toDelete: number[];             // Item IDs whose embeddings should be deleted
+    totalIndexable: number;         // Total number of indexable items in library
 }
 
 /**
@@ -149,49 +160,104 @@ export class EmbeddingIndexer {
     }
 
     /**
+     * Get lightweight item metadata for a library using direct SQL query.
+     * Only returns regular items (excludes notes, annotations, attachments).
+     * Sorted by clientDateModified DESC (most recent first).
+     * @param libraryId The library to query
+     * @returns Array of ItemIndexMetadata
+     */
+    async getItemMetadataForLibrary(libraryId: number): Promise<ItemIndexMetadata[]> {
+        const noteItemTypeID = Zotero.ItemTypes.getID('note');
+        const annotationItemTypeID = Zotero.ItemTypes.getID('annotation');
+        const attachmentItemTypeID = Zotero.ItemTypes.getID('attachment');
+
+        const sql = `
+            SELECT itemID, libraryID, clientDateModified 
+            FROM items 
+            WHERE libraryID = ? 
+              AND itemTypeID NOT IN (?, ?, ?)
+              AND itemID NOT IN (SELECT itemID FROM deletedItems)
+            ORDER BY clientDateModified DESC
+        `;
+        const params = [libraryId, noteItemTypeID, annotationItemTypeID, attachmentItemTypeID];
+
+        const results: ItemIndexMetadata[] = [];
+        await Zotero.DB.queryAsync(sql, params, {
+            onRow: (row: any) => {
+                const itemId = row.getResultByIndex(0);
+                const libId = row.getResultByIndex(1);
+                const rawDate = row.getResultByIndex(2);
+                let clientDateModified: string;
+                try {
+                    clientDateModified = Zotero.Date.sqlToISO8601(rawDate);
+                } catch (e) {
+                    clientDateModified = new Date().toISOString();
+                }
+                results.push({ itemId, libraryId: libId, clientDateModified });
+            }
+        });
+
+        return results;
+    }
+
+    /**
      * Compute the full diff of what needs to be indexed and deleted for a library.
-     * Compares current Zotero items against existing embeddings.
+     * Uses lightweight SQL queries and per-batch item loading to avoid memory issues.
      * @param libraryId The library to analyze
      * @param minContentLength Minimum content length for indexing
-     * @returns IndexingDiff with items to index and delete
+     * @param batchSize Size of batches for loading items (default: 500)
+     * @returns IndexingDiff with item IDs to index and delete
      */
-    async computeIndexingDiff(libraryId: number, minContentLength: number = MIN_CONTENT_LENGTH): Promise<IndexingDiff> {
+    async computeIndexingDiff(
+        libraryId: number, 
+        minContentLength: number = MIN_CONTENT_LENGTH,
+        batchSize: number = 500
+    ): Promise<IndexingDiff> {
         // Get all existing embeddings for this library
         const existingHashes = await this.db.getEmbeddingContentHashMap(libraryId);
         const existingItemIds = new Set(existingHashes.keys());
 
-        // Get all regular items from Zotero for this library
-        const allItems = await Zotero.Items.getAll(libraryId, false, false, false) as Zotero.Item[];
+        // Get lightweight metadata for all regular items via SQL
+        const itemMetadata = await this.getItemMetadataForLibrary(libraryId);
         
-        const toIndex: ItemIndexData[] = [];
+        const toIndex: number[] = [];
         const currentItemIds = new Set<number>();
+        let totalIndexable = 0;
 
-        for (const item of allItems) {
-            if (!item.isRegularItem()) continue;
+        // Process in batches to check content hashes
+        for (let i = 0; i < itemMetadata.length; i += batchSize) {
+            const batchMeta = itemMetadata.slice(i, i + batchSize);
+            const batchItemIds = batchMeta.map(m => m.itemId);
             
-            const title = item.getField('title') as string || '';
-            const abstract = item.getField('abstractNote') as string || '';
-            const combinedLength = (title.trim() + abstract.trim()).length;
+            // Load items for this batch
+            const items = await Zotero.Items.getAsync(batchItemIds);
+            
+            // Load required data types
+            if (items.length > 0) {
+                await Zotero.Items.loadDataTypes(items, ["primaryData", "itemData"]);
+            }
 
-            if (combinedLength < minContentLength) continue;
+            for (const item of items) {
+                if (!item || !item.isRegularItem()) continue;
+                
+                const title = item.getField('title') as string || '';
+                const abstract = item.getField('abstractNote') as string || '';
+                const combinedLength = (title.trim() + abstract.trim()).length;
 
-            currentItemIds.add(item.id);
+                if (combinedLength < minContentLength) continue;
 
-            // Compute content hash
-            const text = this.buildEmbeddingText(title, abstract);
-            const newHash = BeaverDB.computeContentHash(text);
-            const existingHash = existingHashes.get(item.id);
+                currentItemIds.add(item.id);
+                totalIndexable++;
 
-            // Add to index list if new or changed
-            if (existingHash === undefined || existingHash !== newHash) {
-                toIndex.push({
-                    itemId: item.id,
-                    libraryId: item.libraryID,
-                    zoteroKey: item.key,
-                    version: item.version,
-                    title,
-                    abstract,
-                });
+                // Compute content hash
+                const text = this.buildEmbeddingText(title, abstract);
+                const newHash = BeaverDB.computeContentHash(text);
+                const existingHash = existingHashes.get(item.id);
+
+                // Add to index list if new or changed
+                if (existingHash === undefined || existingHash !== newHash) {
+                    toIndex.push(item.id);
+                }
             }
         }
 
@@ -203,36 +269,143 @@ export class EmbeddingIndexer {
             }
         }
 
-        return { toIndex, toDelete };
+        return { toIndex, toDelete, totalIndexable };
     }
 
     /**
-     * Get all indexable items for a library, sorted by clientDateModified DESC.
-     * @param libraryId The library to get items from
-     * @param minContentLength Minimum content length for indexing
-     * @returns Array of Zotero items sorted by most recently modified first
+     * Index items by their IDs, loading and processing in batches.
+     * This is memory-efficient as it only loads items per-batch.
+     * @param itemIds Array of item IDs to index
+     * @param options Options for batch indexing
+     * @returns IndexingResult with counts
      */
-    async getIndexableItemsForLibrary(
-        libraryId: number, 
-        minContentLength: number = MIN_CONTENT_LENGTH
-    ): Promise<Zotero.Item[]> {
-        // Get all items from the library
-        const allItems = await Zotero.Items.getAll(libraryId, false, false, false) as Zotero.Item[];
-        
-        // Filter to indexable items
-        const indexableItems = allItems.filter(item => this.isItemIndexable(item, minContentLength));
+    async indexItemIdsBatch(
+        itemIds: number[],
+        options: {
+            batchSize?: number;         // Items per API batch (default: INDEX_BATCH_SIZE)
+            onProgress?: (indexed: number, total: number) => void;
+        } = {}
+    ): Promise<IndexingResult> {
+        const { batchSize = INDEX_BATCH_SIZE, onProgress } = options;
 
-        // Get clientDateModified for sorting
-        const clientDates = await getClientDateModifiedBatch(indexableItems);
+        const result: IndexingResult = {
+            indexed: 0,
+            skipped: 0,
+            failed: 0,
+            totalTokens: 0,
+        };
 
-        // Sort by clientDateModified DESC (most recent first)
-        indexableItems.sort((a, b) => {
-            const dateA = clientDates.get(a.id) || '';
-            const dateB = clientDates.get(b.id) || '';
-            return dateB.localeCompare(dateA);
-        });
+        if (itemIds.length === 0) {
+            return result;
+        }
 
-        return indexableItems;
+        // Process in batches
+        for (let i = 0; i < itemIds.length; i += batchSize) {
+            const batchIds = itemIds.slice(i, i + batchSize);
+            
+            try {
+                // Load items for this batch
+                const items = await Zotero.Items.getAsync(batchIds);
+                
+                // Load required data types
+                if (items.length > 0) {
+                    await Zotero.Items.loadDataTypes(items, ["primaryData", "itemData", "creators"]);
+                }
+
+                // Filter to valid items and extract data
+                const itemsData: ItemIndexData[] = [];
+                const clientDatesMap = new Map<number, string>();
+
+                for (const item of items) {
+                    if (!item || !item.isRegularItem()) {
+                        result.skipped++;
+                        continue;
+                    }
+
+                    const title = item.getField('title') as string || '';
+                    const abstract = item.getField('abstractNote') as string || '';
+                    const combinedLength = (title.trim() + abstract.trim()).length;
+
+                    if (combinedLength < MIN_CONTENT_LENGTH) {
+                        result.skipped++;
+                        continue;
+                    }
+
+                    // Get clientDateModified
+                    const clientDateModified = await getClientDateModifiedAsISOString(item);
+                    clientDatesMap.set(item.id, clientDateModified);
+
+                    itemsData.push({
+                        itemId: item.id,
+                        libraryId: item.libraryID,
+                        zoteroKey: item.key,
+                        version: item.version,
+                        title,
+                        abstract,
+                        clientDateModified,
+                    });
+                }
+
+                if (itemsData.length === 0) {
+                    continue;
+                }
+
+                // Build texts for embedding
+                const texts = itemsData.map(item => this.buildEmbeddingText(item.title, item.abstract));
+                const ids = itemsData.map(item => item.itemId);
+
+                // Generate embeddings via API
+                const response = await embeddingsService.generateEmbeddings(texts, ids, this.dimensions);
+
+                result.totalTokens += response.total_tokens;
+
+                // Prepare embedding records
+                const embeddingRecords: Array<Omit<EmbeddingRecord, 'indexed_at'>> = [];
+
+                for (let j = 0; j < itemsData.length; j++) {
+                    const itemData = itemsData[j];
+                    const embeddingData = response.embeddings.find(e => e.item_id === itemData.itemId);
+
+                    if (!embeddingData) {
+                        result.failed++;
+                        continue;
+                    }
+
+                    const text = texts[j];
+                    const contentHash = BeaverDB.computeContentHash(text);
+                    const clientDateModified = clientDatesMap.get(itemData.itemId) || new Date().toISOString();
+
+                    embeddingRecords.push({
+                        item_id: itemData.itemId,
+                        library_id: itemData.libraryId,
+                        zotero_key: itemData.zoteroKey,
+                        version: itemData.version,
+                        client_date_modified: clientDateModified,
+                        content_hash: contentHash,
+                        embedding: BeaverDB.embeddingToBlob(new Int8Array(embeddingData.embedding)),
+                        dimensions: this.dimensions,
+                        model_id: this.modelId,
+                    });
+                }
+
+                // Store embeddings in batch
+                if (embeddingRecords.length > 0) {
+                    await this.db.upsertEmbeddingsBatch(embeddingRecords);
+                    result.indexed += embeddingRecords.length;
+                }
+
+            } catch (error) {
+                logger(`indexItemIdsBatch: Batch failed at offset ${i}: ${(error as Error).message}`, 1);
+                result.failed += batchIds.length;
+            }
+
+            // Report progress
+            if (onProgress) {
+                onProgress(result.indexed + result.skipped + result.failed, itemIds.length);
+            }
+        }
+
+        return result;
     }
 
     /**

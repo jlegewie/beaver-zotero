@@ -79,7 +79,9 @@ export function useEmbeddingIndex() {
     };
 
     /**
-     * Perform initial indexing of all libraries
+     * Perform initial indexing of all libraries.
+     * Uses lightweight SQL queries for metadata and per-batch item loading
+     * to avoid memory issues with large libraries.
      */
     const performInitialIndexing = async () => {
         const indexer = getIndexer();
@@ -93,50 +95,65 @@ export function useEmbeddingIndex() {
             const libraryIds = indexer.getLibrariesSorted();
             logger(`useEmbeddingIndex: Found ${libraryIds.length} libraries to index`, 3);
 
-            // Count total items across all libraries for progress tracking
-            let totalItems = 0;
-            let processedItems = 0;
-            const libraryItems: Map<number, Zotero.Item[]> = new Map();
+            // First pass: compute diff for each library to get total counts
+            // Uses lightweight SQL queries, not loading full items
+            let totalToIndex = 0;
+            let totalToDelete = 0;
+            let totalIndexable = 0;
+            const libraryDiffs: Map<number, { toIndex: number[], toDelete: number[], totalIndexable: number }> = new Map();
 
             for (const libraryId of libraryIds) {
-                const items = await indexer.getIndexableItemsForLibrary(libraryId, MIN_CONTENT_LENGTH);
-                libraryItems.set(libraryId, items);
-                totalItems += items.length;
+                logger(`useEmbeddingIndex: Computing diff for library ${libraryId}`, 4);
+                const diff = await indexer.computeIndexingDiff(libraryId, MIN_CONTENT_LENGTH);
+                libraryDiffs.set(libraryId, diff);
+                totalToIndex += diff.toIndex.length;
+                totalToDelete += diff.toDelete.length;
+                totalIndexable += diff.totalIndexable;
             }
 
-            logger(`useEmbeddingIndex: Total indexable items: ${totalItems}`, 3);
+            logger(`useEmbeddingIndex: Total: ${totalToIndex} to index, ${totalToDelete} to delete, ${totalIndexable} indexable items`, 3);
             store.set(embeddingIndexStateAtom, (prev: EmbeddingIndexState) => ({
                 ...prev,
-                totalItems,
+                totalItems: totalToIndex,
             }));
 
-            // Process each library
+            // If nothing to do, we're done
+            if (totalToIndex === 0 && totalToDelete === 0) {
+                logger("useEmbeddingIndex: Index is up to date", 3);
+                setIndexStatus({ status: 'idle', phase: 'incremental' });
+                return;
+            }
+
+            // Second pass: process each library
+            let processedItems = 0;
+            const db = getDB();
+
             for (const libraryId of libraryIds) {
-                const items = libraryItems.get(libraryId) || [];
-                if (items.length === 0) continue;
+                const diff = libraryDiffs.get(libraryId);
+                if (!diff) continue;
 
-                logger(`useEmbeddingIndex: Processing library ${libraryId} with ${items.length} items`, 3);
+                // Delete orphaned embeddings
+                if (diff.toDelete.length > 0 && db) {
+                    await db.deleteEmbeddingsBatch(diff.toDelete);
+                    logger(`useEmbeddingIndex: Deleted ${diff.toDelete.length} orphaned embeddings from library ${libraryId}`, 3);
+                }
 
-                // Index items with progress callback
-                const result = await indexer.indexItemsBatch(items, {
-                    batchSize: INDEX_BATCH_SIZE,
-                    skipUnchanged: true,
-                    onProgress: (indexed, total) => {
-                        const currentProcessed = processedItems + indexed;
-                        updateProgress({
-                            indexedItems: currentProcessed,
-                            totalItems: totalItems,
-                        });
-                    },
-                });
+                // Index items that need (re-)indexing
+                if (diff.toIndex.length > 0) {
+                    logger(`useEmbeddingIndex: Indexing ${diff.toIndex.length} items in library ${libraryId}`, 3);
 
-                processedItems += result.indexed + result.skipped + result.failed;
-                logger(`useEmbeddingIndex: Library ${libraryId} complete: ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed`, 3);
+                    const result = await indexer.indexItemIdsBatch(diff.toIndex, {
+                        batchSize: INDEX_BATCH_SIZE,
+                        onProgress: (processed, total) => {
+                            updateProgress({
+                                indexedItems: processedItems + processed,
+                                totalItems: totalToIndex,
+                            });
+                        },
+                    });
 
-                // Clean up orphaned embeddings for this library
-                const orphanedCount = await indexer.cleanupOrphanedEmbeddings(libraryId);
-                if (orphanedCount > 0) {
-                    logger(`useEmbeddingIndex: Removed ${orphanedCount} orphaned embeddings from library ${libraryId}`, 3);
+                    processedItems += result.indexed + result.skipped + result.failed;
+                    logger(`useEmbeddingIndex: Library ${libraryId} complete: ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed`, 3);
                 }
             }
 
@@ -155,7 +172,8 @@ export function useEmbeddingIndex() {
     };
 
     /**
-     * Process collected events for incremental updates
+     * Process collected events for incremental updates.
+     * Uses indexItemIdsBatch which loads items per-batch for memory efficiency.
      */
     const processEvents = async () => {
         const indexer = getIndexer();
@@ -175,40 +193,46 @@ export function useEmbeddingIndex() {
         setIndexStatus({ status: 'updating', phase: 'incremental' });
 
         try {
+            const db = getDB();
+
             // Handle deletions first
-            if (deletedIds.length > 0) {
-                const db = getDB();
-                if (db) {
-                    await db.deleteEmbeddingsBatch(deletedIds);
-                    logger(`useEmbeddingIndex: Deleted ${deletedIds.length} embeddings`, 3);
-                }
+            if (deletedIds.length > 0 && db) {
+                await db.deleteEmbeddingsBatch(deletedIds);
+                logger(`useEmbeddingIndex: Deleted ${deletedIds.length} embeddings`, 3);
             }
 
-            // Handle modifications
+            // Handle modifications - indexItemIdsBatch handles per-batch loading
+            // and skips items that don't meet criteria or haven't changed
             if (modifiedIds.length > 0) {
-                const items = await Zotero.Items.getAsync(modifiedIds);
-                const validItems = items.filter(item => 
-                    item && 
-                    item.isRegularItem() && 
-                    indexer.isItemIndexable(item, MIN_CONTENT_LENGTH)
-                );
+                const result = await indexer.indexItemIdsBatch(modifiedIds, {
+                    batchSize: INDEX_BATCH_SIZE,
+                });
+                logger(`useEmbeddingIndex: Updated ${result.indexed} embeddings (${result.skipped} skipped, ${result.failed} failed)`, 3);
 
-                if (validItems.length > 0) {
-                    const result = await indexer.indexItemsBatch(validItems, {
-                        batchSize: INDEX_BATCH_SIZE,
-                        skipUnchanged: true,
-                    });
-                    logger(`useEmbeddingIndex: Updated ${result.indexed} embeddings (${result.skipped} skipped)`, 3);
-                }
-
-                // Handle items that no longer meet criteria (remove their embeddings)
-                const validItemIds = new Set(validItems.map(item => item.id));
-                const noLongerIndexableIds = modifiedIds.filter(id => !validItemIds.has(id));
-                if (noLongerIndexableIds.length > 0) {
-                    const db = getDB();
-                    if (db) {
-                        await db.deleteEmbeddingsBatch(noLongerIndexableIds);
-                        logger(`useEmbeddingIndex: Removed ${noLongerIndexableIds.length} embeddings for items no longer meeting criteria`, 3);
+                // Items that were skipped might need their embeddings removed
+                // (e.g., if title/abstract were cleared below min length)
+                // Only delete embeddings for items that exist but don't meet criteria anymore
+                if (result.skipped > 0 && db) {
+                    // Get existing embeddings for these items
+                    const existingEmbeddings = await db.getContentHashes(modifiedIds);
+                    const idsWithEmbeddings = modifiedIds.filter(id => existingEmbeddings.has(id));
+                    
+                    // Check which of these no longer meet criteria
+                    if (idsWithEmbeddings.length > 0) {
+                        const items = await Zotero.Items.getAsync(idsWithEmbeddings);
+                        const stillValidIds = new Set<number>();
+                        
+                        for (const item of items) {
+                            if (item && item.isRegularItem() && indexer.isItemIndexable(item, MIN_CONTENT_LENGTH)) {
+                                stillValidIds.add(item.id);
+                            }
+                        }
+                        
+                        const toRemove = idsWithEmbeddings.filter(id => !stillValidIds.has(id));
+                        if (toRemove.length > 0) {
+                            await db.deleteEmbeddingsBatch(toRemove);
+                            logger(`useEmbeddingIndex: Removed ${toRemove.length} embeddings for items no longer meeting criteria`, 3);
+                        }
                     }
                 }
             }
