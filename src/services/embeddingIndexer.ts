@@ -499,9 +499,11 @@ export class EmbeddingIndexer {
      * 
      * A full diff is needed if:
      * 1. No embeddings exist for this library (first run)
-     * 2. Zotero's MAX(clientDateModified) > stored MAX (items modified)
-     * 3. Zotero's item count ≠ stored count (items added or deleted)
-     * 4. Last scan was more than FULL_DIFF_SAFETY_INTERVAL_MS ago (weekly safety net)
+     * 2. No stored state exists (establishing baseline)
+     * 3. Last scan was more than FULL_DIFF_SAFETY_INTERVAL_MS ago (weekly safety net)
+     * 4. Zotero's item count ≠ stored count (items added or deleted)
+     * 5. Zotero's MAX(clientDateModified) > stored MAX (items modified)
+     * 6. Current embedding count ≠ stored count (data loss/corruption)
      * 
      * @param libraryId The library to check
      * @returns DiffCheckResult with needsDiff flag and reason
@@ -549,6 +551,15 @@ export class EmbeddingIndexer {
                     reason: `Items modified since last scan` 
                 };
             }
+        }
+
+        // Check 5: Embedding count mismatch (possible data loss/corruption)
+        const currentEmbeddingCount = await this.db.getEmbeddingCount(libraryId);
+        if (currentEmbeddingCount !== storedState.embedding_count) {
+            return { 
+                needsDiff: true, 
+                reason: `Embedding count changed: ${storedState.embedding_count} → ${currentEmbeddingCount}` 
+            };
         }
 
         // No changes detected
