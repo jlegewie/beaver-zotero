@@ -1,5 +1,6 @@
 import React, { useRef, useCallback } from 'react';
 import { CancelIcon, PlusSignIcon, SettingsIcon, Share05Icon } from './icons/icons';
+import SearchIcon from './icons/SearchIcon';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
@@ -16,6 +17,9 @@ import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { planFeaturesAtom, hasCompletedOnboardingAtom } from '../atoms/profile';
 import Button from './ui/Button';
 import { getWindowFromElement } from '../utils/windowContext';
+import { currentMessageContentAtom } from '../atoms/messageComposition';
+import { semanticSearchService } from '../../src/services/semanticSearchService';
+import { BeaverDB } from 'src/services/database';
 
 interface HeaderProps {
     onClose?: () => void;
@@ -31,11 +35,53 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
     const planFeatures = useAtomValue(planFeaturesAtom);
     const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
+    const currentMessageContent = useAtomValue(currentMessageContentAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
     const handleNewThread = async () => {
         await newThread();
     }
+
+    // TEMPORARY: Test semantic search
+    const handleTestSearch = async () => {
+        try {
+            const query = currentMessageContent;
+            if (!query || query.trim().length === 0) {
+                console.log('No query text in currentMessageContentAtom');
+                return;
+            }
+
+            console.log('Testing semantic search with query:', query);
+            
+            // Get database instance from global addon
+            const db = Zotero.Beaver?.db as BeaverDB | null;
+            if (!db) {
+                console.error('Database not available');
+                return;
+            }
+
+            // Create search service instance
+            const searchService = new semanticSearchService(db, 512);
+            
+            // Run search
+            const results = await searchService.search(query, {
+                topK: 20,
+                minSimilarity: 0.3
+            });
+
+            console.log('Semantic search results:', results);
+            console.log(`Found ${results.length} results`);
+            
+            // Log top 5 results with item details
+            for (let i = 0; i < Math.min(5, results.length); i++) {
+                const result = results[i];
+                const item = await Zotero.Items.getAsync(result.itemId);
+                console.log(`${i + 1}. [${result.similarity.toFixed(3)}] ${item?.getField('title') || 'Unknown'}`);
+            }
+        } catch (error) {
+            console.error('Semantic search test failed:', error);
+        }
+    };
 
     const handleClose = useCallback(() => {
         if (isWindow) {
@@ -105,6 +151,16 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                     className="scale-14"
                     ariaLabel="PDF testing tools"
                 />
+
+                {/* TEMPORARY: Semantic search testing - REMOVE BEFORE RELEASE */}
+                <Tooltip content="Test Semantic Search" showArrow singleLine>
+                    <IconButton
+                        icon={SearchIcon}
+                        onClick={handleTestSearch}
+                        className="scale-14"
+                        ariaLabel="Test semantic search"
+                    />
+                </Tooltip>
             </div>
 
             {/* Database status and user account menu */}
