@@ -122,47 +122,6 @@ export class EmbeddingsService extends ApiService {
     }
 
     /**
-     * Convert int8 array to Int8Array for storage
-     * @param embedding Array of int8 values [-128 to 127]
-     * @returns Int8Array suitable for SQLite BLOB storage
-     */
-    static toInt8Array(embedding: number[]): Int8Array {
-        return new Int8Array(embedding);
-    }
-
-    /**
-     * Convert Int8Array back to regular array
-     * @param int8Array Int8Array from SQLite BLOB
-     * @returns Array of int8 values
-     */
-    static fromInt8Array(int8Array: Int8Array): number[] {
-        return Array.from(int8Array);
-    }
-
-    /**
-     * Compute int8 dot product similarity between two embeddings
-     * @param a First embedding as Int8Array
-     * @param b Second embedding as Int8Array
-     * @returns Similarity score normalized to [0, 1] range
-     */
-    static computeSimilarity(a: Int8Array, b: Int8Array): number {
-        if (a.length !== b.length) {
-            throw new Error('Embeddings must have the same dimensions');
-        }
-
-        let dotProduct = 0;
-        for (let i = 0; i < a.length; i++) {
-            dotProduct += a[i] * b[i];
-        }
-
-        // Normalize to [0, 1] range
-        const dimensions = a.length;
-        const maxDotProduct = 127 * 127 * dimensions;
-        const minDotProduct = -128 * 127 * dimensions;
-        return (dotProduct - minDotProduct) / (maxDotProduct - minDotProduct);
-    }
-
-    /**
      * Batch process texts in chunks to respect API limits
      * @param texts Array of paper texts to embed
      * @param itemIds Corresponding Zotero item IDs
