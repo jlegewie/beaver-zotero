@@ -959,6 +959,18 @@ export class BeaverDB {
     }
 
     /**
+     * Get distinct library IDs that have embeddings.
+     * Used to find libraries that may need cleanup when sync settings change.
+     * @returns Array of library IDs
+     */
+    public async getEmbeddedLibraryIds(): Promise<number[]> {
+        const rows = await this.conn.queryAsync(
+            'SELECT DISTINCT library_id FROM embeddings'
+        );
+        return rows.map((row: any) => row.library_id);
+    }
+
+    /**
      * Get all content hashes for embeddings, optionally filtered by library.
      * More efficient than getContentHashes for full-database scans.
      * @param libraryId Optional library ID to filter by
