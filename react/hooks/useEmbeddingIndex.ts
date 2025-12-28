@@ -289,6 +289,7 @@ export function useEmbeddingIndex() {
         }
     };
 
+    
     /**
      * Process collected events for incremental updates.
      * Uses indexItemIdsBatch which loads items per-batch for memory efficiency.
