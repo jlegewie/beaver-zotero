@@ -40,7 +40,6 @@ import {
     ZoteroItemSearchResultItem,
     WSZoteroItemTopicSearchRequest,
     WSZoteroItemTopicSearchResponse,
-    ZoteroItemTopicSearchResultItem,
 } from './agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions, ZoteroItemSearchFilters } from '../../react/utils/searchTools';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
@@ -1242,7 +1241,7 @@ export async function handleZoteroItemTopicSearchRequest(
     const userId = store.get(userIdAtom);
 
     // Serialize items with attachments and similarity
-    const resultItems: ZoteroItemTopicSearchResultItem[] = [];
+    const resultItems: ZoteroItemSearchResultItem[] = [];
 
     for (const searchResult of searchResults) {
         const item = itemById.get(searchResult.itemId);

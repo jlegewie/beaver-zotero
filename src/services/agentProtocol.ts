@@ -246,13 +246,8 @@ export interface WSExternalReferenceCheckResponse {
 export interface ZoteroItemSearchResultItem {
     item: ItemData;
     attachments: AttachmentDataWithStatus[];
-}
-
-/** Zotero item topic search result with similarity score */
-export interface ZoteroItemTopicSearchResultItem {
-    item: ItemData;
-    attachments: AttachmentDataWithStatus[];
-    similarity: number;
+    /** Semantic similarity score (0-1) for topic searches, undefined for metadata searches */
+    similarity?: number;
 }
 
 /** Request from backend to search Zotero library by metadata */
@@ -324,7 +319,7 @@ export interface WSZoteroItemTopicSearchRequest extends WSBaseEvent {
 export interface WSZoteroItemTopicSearchResponse {
     type: 'zotero_item_topic_search';
     request_id: string;
-    items: ZoteroItemTopicSearchResultItem[];
+    items: ZoteroItemSearchResultItem[];
 }
 
 /** Request from backend to fetch Zotero item/attachment data */
