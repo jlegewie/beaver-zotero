@@ -82,6 +82,7 @@ export function useEmbeddingIndex() {
      * Perform initial indexing of all libraries.
      * Uses optimized diff check to skip full scans when nothing changed.
      * Falls back to full diff when changes are detected or on periodic safety check.
+     * Also retries previously failed items that are ready for retry.
      */
     const performInitialIndexing = async () => {
         const indexer = getIndexer();
@@ -114,9 +115,15 @@ export function useEmbeddingIndex() {
                 }
             }
 
-            // If no libraries need processing, we're done
-            if (librariesToProcess.length === 0) {
-                logger("useEmbeddingIndex: All libraries up to date, skipping full diff", 3);
+            // Collect items ready for retry across all libraries
+            const itemsReadyForRetry = await indexer.getItemsReadyForRetry();
+            if (itemsReadyForRetry.length > 0) {
+                logger(`useEmbeddingIndex: Found ${itemsReadyForRetry.length} items ready for retry`, 3);
+            }
+
+            // If no libraries need processing and no retries, we're done
+            if (librariesToProcess.length === 0 && itemsReadyForRetry.length === 0) {
+                logger("useEmbeddingIndex: All libraries up to date, no retries needed", 3);
                 setIndexStatus({ status: 'idle', phase: 'incremental' });
                 return;
             }
@@ -129,12 +136,34 @@ export function useEmbeddingIndex() {
             for (const libraryId of librariesToProcess) {
                 logger(`useEmbeddingIndex: Computing diff for library ${libraryId}`, 4);
                 const diff = await indexer.computeIndexingDiff(libraryId, MIN_CONTENT_LENGTH);
-                libraryDiffs.set(libraryId, diff);
-                totalToIndex += diff.toIndex.length;
+                
+                // Filter out items that are still in backoff period
+                const filteredToIndex = await indexer.filterItemsNotInBackoff(diff.toIndex);
+                const skippedDueToBackoff = diff.toIndex.length - filteredToIndex.length;
+                if (skippedDueToBackoff > 0) {
+                    logger(`useEmbeddingIndex: Library ${libraryId}: ${skippedDueToBackoff} items still in backoff`, 4);
+                }
+                
+                libraryDiffs.set(libraryId, { 
+                    toIndex: filteredToIndex, 
+                    toDelete: diff.toDelete, 
+                    totalIndexable: diff.totalIndexable 
+                });
+                totalToIndex += filteredToIndex.length;
                 totalToDelete += diff.toDelete.length;
             }
 
-            logger(`useEmbeddingIndex: Total: ${totalToIndex} to index, ${totalToDelete} to delete across ${librariesToProcess.length} libraries`, 3);
+            // Add retry items to total (they may overlap with diff items, but that's fine)
+            const uniqueRetryItems = itemsReadyForRetry.filter(id => {
+                // Check if this item is already in any library diff
+                for (const diff of libraryDiffs.values()) {
+                    if (diff.toIndex.includes(id)) return false;
+                }
+                return true;
+            });
+            totalToIndex += uniqueRetryItems.length;
+
+            logger(`useEmbeddingIndex: Total: ${totalToIndex} to index (including ${uniqueRetryItems.length} retries), ${totalToDelete} to delete across ${librariesToProcess.length} libraries`, 3);
             store.set(embeddingIndexStateAtom, (prev: EmbeddingIndexState) => ({
                 ...prev,
                 totalItems: totalToIndex,
@@ -148,6 +177,12 @@ export function useEmbeddingIndex() {
                 const diff = libraryDiffs.get(libraryId);
                 const zoteroState = libraryStates.get(libraryId);
                 if (!diff) continue;
+
+                // Clean up failed embeddings for deleted items
+                const cleanedUp = await indexer.cleanupDeletedFailedEmbeddings(libraryId);
+                if (cleanedUp > 0) {
+                    logger(`useEmbeddingIndex: Cleaned up ${cleanedUp} failed records for deleted items in library ${libraryId}`, 3);
+                }
 
                 // Delete orphaned embeddings
                 if (diff.toDelete.length > 0 && db) {
@@ -178,6 +213,30 @@ export function useEmbeddingIndex() {
                     await indexer.saveIndexState(libraryId, zoteroState);
                     logger(`useEmbeddingIndex: Saved index state for library ${libraryId}`, 4);
                 }
+            }
+
+            // Fourth pass: process retry items that weren't covered by library diffs
+            if (uniqueRetryItems.length > 0) {
+                logger(`useEmbeddingIndex: Processing ${uniqueRetryItems.length} retry items`, 3);
+                
+                const result = await indexer.indexItemIdsBatch(uniqueRetryItems, {
+                    batchSize: INDEX_BATCH_SIZE,
+                    onProgress: (processed, total) => {
+                        updateProgress({
+                            indexedItems: processedItems + processed,
+                            totalItems: totalToIndex,
+                        });
+                    },
+                });
+
+                processedItems += result.indexed + result.skipped + result.failed;
+                logger(`useEmbeddingIndex: Retry items complete: ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed`, 3);
+            }
+
+            // Log final failed stats
+            const failedStats = await indexer.getFailedStats();
+            if (failedStats.totalFailed > 0) {
+                logger(`useEmbeddingIndex: Failed items summary: ${failedStats.totalFailed} total, ${failedStats.readyForRetry} ready for retry, ${failedStats.permanentlyFailed} permanently failed`, 3);
             }
 
             logger("useEmbeddingIndex: Initial indexing complete", 3);

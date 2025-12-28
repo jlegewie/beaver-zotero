@@ -37,6 +37,34 @@ export interface EmbeddingIndexStateRecord {
     embedding_count: number;             // Count of embeddings at last scan
 }
 
+/**
+ * Interface for the 'failed_embeddings' table row
+ * 
+ * Tracks items that failed to embed, with retry backoff logic.
+ * Items are retried with exponential backoff based on failure_count.
+ */
+export interface FailedEmbeddingRecord {
+    item_id: number;                     // Zotero item ID
+    library_id: number;                  // Zotero library ID
+    failure_count: number;               // Number of consecutive failures
+    last_error: string;                  // Last error message
+    last_attempt: string;                // When the last attempt was made (ISO string)
+    next_retry_after: string;            // Don't retry before this time (ISO string)
+}
+
+/**
+ * Maximum number of failures before an item is considered permanently failed.
+ * After this many failures, the item won't be retried automatically.
+ */
+export const MAX_EMBEDDING_FAILURES = 5;
+
+/**
+ * Base delay for retry backoff in milliseconds.
+ * Actual delay = BASE_DELAY * 2^(failure_count - 1)
+ * So delays are: 1h, 2h, 4h, 8h, 16h
+ */
+export const EMBEDDING_RETRY_BASE_DELAY_MS = 60 * 60 * 1000; // 1 hour
+
 
 /* 
  * Interface for the 'threads' table row
@@ -184,6 +212,18 @@ export class BeaverDB {
             );
         `);
 
+        // Table for tracking failed embedding attempts
+        // Items are retried with exponential backoff
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS failed_embeddings (
+                item_id                  INTEGER PRIMARY KEY,
+                library_id               INTEGER NOT NULL,
+                failure_count            INTEGER NOT NULL DEFAULT 1,
+                last_error               TEXT NOT NULL,
+                last_attempt             TEXT NOT NULL DEFAULT (datetime('now')),
+                next_retry_after         TEXT NOT NULL
+            );
+        `);
 
         // DB indexes
         await this.conn.queryAsync(`
@@ -234,6 +274,16 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_embeddings_zotero_key
             ON embeddings(zotero_key);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_failed_embeddings_library
+            ON failed_embeddings(library_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_failed_embeddings_retry
+            ON failed_embeddings(next_retry_after);
         `);
     }
 
@@ -1003,6 +1053,257 @@ export class BeaverDB {
         const sql = 'SELECT MAX(client_date_modified) as max_date FROM embeddings WHERE library_id = ?';
         const rows = await this.conn.queryAsync(sql, [libraryId]);
         return rows[0]?.max_date || null;
+    }
+
+    // =============================================
+    // Failed Embeddings Methods
+    // =============================================
+
+    /**
+     * Helper method to construct FailedEmbeddingRecord from a database row
+     */
+    private static rowToFailedEmbeddingRecord(row: any): FailedEmbeddingRecord {
+        return {
+            item_id: row.item_id,
+            library_id: row.library_id,
+            failure_count: row.failure_count,
+            last_error: row.last_error,
+            last_attempt: row.last_attempt,
+            next_retry_after: row.next_retry_after,
+        };
+    }
+
+    /**
+     * Calculate the next retry time based on failure count.
+     * Uses exponential backoff: 1h, 2h, 4h, 8h, 16h
+     * @param failureCount Number of consecutive failures
+     * @returns ISO string of next retry time
+     */
+    private static calculateNextRetryTime(failureCount: number): string {
+        const delayMs = EMBEDDING_RETRY_BASE_DELAY_MS * Math.pow(2, failureCount - 1);
+        const nextRetry = new Date(Date.now() + delayMs);
+        return nextRetry.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+    }
+
+    /**
+     * Record a failed embedding attempt for an item.
+     * If the item already has failures, increments the counter.
+     * @param itemId The Zotero item ID
+     * @param libraryId The Zotero library ID
+     * @param error The error message
+     */
+    public async recordFailedEmbedding(itemId: number, libraryId: number, error: string): Promise<void> {
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        
+        // Check if already exists
+        const existing = await this.getFailedEmbedding(itemId);
+        
+        if (existing) {
+            // Increment failure count
+            const newFailureCount = existing.failure_count + 1;
+            const nextRetry = BeaverDB.calculateNextRetryTime(newFailureCount);
+            
+            await this.conn.queryAsync(
+                `UPDATE failed_embeddings 
+                 SET failure_count = ?, last_error = ?, last_attempt = ?, next_retry_after = ?
+                 WHERE item_id = ?`,
+                [newFailureCount, error, now, nextRetry, itemId]
+            );
+        } else {
+            // Insert new record
+            const nextRetry = BeaverDB.calculateNextRetryTime(1);
+            
+            await this.conn.queryAsync(
+                `INSERT INTO failed_embeddings 
+                 (item_id, library_id, failure_count, last_error, last_attempt, next_retry_after)
+                 VALUES (?, ?, 1, ?, ?, ?)`,
+                [itemId, libraryId, error, now, nextRetry]
+            );
+        }
+    }
+
+    /**
+     * Record multiple failed embedding attempts in a batch.
+     * @param items Array of {itemId, libraryId} pairs
+     * @param error The error message (same for all items in batch)
+     */
+    public async recordFailedEmbeddingsBatch(
+        items: Array<{ itemId: number; libraryId: number }>,
+        error: string
+    ): Promise<void> {
+        if (items.length === 0) return;
+
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        const itemIds = items.map(i => i.itemId);
+        
+        // Get existing failed records
+        const existing = await this.getFailedEmbeddingsBatch(itemIds);
+        const existingMap = new Map(existing.map(r => [r.item_id, r]));
+
+        await this.conn.executeTransaction(async () => {
+            for (const item of items) {
+                const existingRecord = existingMap.get(item.itemId);
+                
+                if (existingRecord) {
+                    const newFailureCount = existingRecord.failure_count + 1;
+                    const nextRetry = BeaverDB.calculateNextRetryTime(newFailureCount);
+                    
+                    await this.conn.queryAsync(
+                        `UPDATE failed_embeddings 
+                         SET failure_count = ?, last_error = ?, last_attempt = ?, next_retry_after = ?
+                         WHERE item_id = ?`,
+                        [newFailureCount, error, now, nextRetry, item.itemId]
+                    );
+                } else {
+                    const nextRetry = BeaverDB.calculateNextRetryTime(1);
+                    
+                    await this.conn.queryAsync(
+                        `INSERT INTO failed_embeddings 
+                         (item_id, library_id, failure_count, last_error, last_attempt, next_retry_after)
+                         VALUES (?, ?, 1, ?, ?, ?)`,
+                        [item.itemId, item.libraryId, error, now, nextRetry]
+                    );
+                }
+            }
+        });
+    }
+
+    /**
+     * Get a failed embedding record by item ID.
+     * @param itemId The Zotero item ID
+     * @returns The failed embedding record or null
+     */
+    public async getFailedEmbedding(itemId: number): Promise<FailedEmbeddingRecord | null> {
+        const rows = await this.conn.queryAsync(
+            'SELECT * FROM failed_embeddings WHERE item_id = ?',
+            [itemId]
+        );
+        
+        if (rows.length === 0) return null;
+        return BeaverDB.rowToFailedEmbeddingRecord(rows[0]);
+    }
+
+    /**
+     * Get failed embedding records for multiple item IDs.
+     * @param itemIds Array of Zotero item IDs
+     * @returns Array of failed embedding records
+     */
+    public async getFailedEmbeddingsBatch(itemIds: number[]): Promise<FailedEmbeddingRecord[]> {
+        if (itemIds.length === 0) return [];
+
+        const results: FailedEmbeddingRecord[] = [];
+        const chunkSize = 500;
+
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+            
+            const rows = await this.conn.queryAsync(
+                `SELECT * FROM failed_embeddings WHERE item_id IN (${placeholders})`,
+                chunk
+            );
+            
+            for (const row of rows) {
+                results.push(BeaverDB.rowToFailedEmbeddingRecord(row));
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * Get all items that are ready for retry.
+     * Returns items where next_retry_after < now AND failure_count < MAX_EMBEDDING_FAILURES.
+     * @param libraryId Optional library ID to filter by
+     * @returns Array of item IDs ready for retry
+     */
+    public async getItemsReadyForRetry(libraryId?: number): Promise<number[]> {
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        
+        let sql = `SELECT item_id FROM failed_embeddings 
+                   WHERE next_retry_after <= ? AND failure_count < ?`;
+        const params: any[] = [now, MAX_EMBEDDING_FAILURES];
+        
+        if (libraryId !== undefined) {
+            sql += ' AND library_id = ?';
+            params.push(libraryId);
+        }
+        
+        const rows = await this.conn.queryAsync(sql, params);
+        return rows.map((row: any) => row.item_id);
+    }
+
+    /**
+     * Get all permanently failed items (failure_count >= MAX_EMBEDDING_FAILURES).
+     * @param libraryId Optional library ID to filter by
+     * @returns Array of failed embedding records
+     */
+    public async getPermanentlyFailedItems(libraryId?: number): Promise<FailedEmbeddingRecord[]> {
+        let sql = `SELECT * FROM failed_embeddings WHERE failure_count >= ?`;
+        const params: any[] = [MAX_EMBEDDING_FAILURES];
+        
+        if (libraryId !== undefined) {
+            sql += ' AND library_id = ?';
+            params.push(libraryId);
+        }
+        
+        const rows = await this.conn.queryAsync(sql, params);
+        return rows.map((row: any) => BeaverDB.rowToFailedEmbeddingRecord(row));
+    }
+
+    /**
+     * Remove a failed embedding record (call after successful indexing).
+     * @param itemId The Zotero item ID
+     */
+    public async removeFailedEmbedding(itemId: number): Promise<void> {
+        await this.conn.queryAsync(
+            'DELETE FROM failed_embeddings WHERE item_id = ?',
+            [itemId]
+        );
+    }
+
+    /**
+     * Remove multiple failed embedding records in a batch.
+     * @param itemIds Array of Zotero item IDs
+     */
+    public async removeFailedEmbeddingsBatch(itemIds: number[]): Promise<void> {
+        if (itemIds.length === 0) return;
+
+        const chunkSize = 500;
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+            await this.conn.queryAsync(
+                `DELETE FROM failed_embeddings WHERE item_id IN (${placeholders})`,
+                chunk
+            );
+        }
+    }
+
+    /**
+     * Remove failed embedding records for items that no longer exist.
+     * @param itemIds Array of item IDs that should be removed
+     */
+    public async cleanupDeletedFailedEmbeddings(itemIds: number[]): Promise<void> {
+        await this.removeFailedEmbeddingsBatch(itemIds);
+    }
+
+    /**
+     * Get count of failed embeddings.
+     * @param libraryId Optional library ID to filter by
+     * @returns Number of failed embedding records
+     */
+    public async getFailedEmbeddingCount(libraryId?: number): Promise<number> {
+        let sql = 'SELECT COUNT(*) as count FROM failed_embeddings';
+        const params: any[] = [];
+
+        if (libraryId !== undefined) {
+            sql += ' WHERE library_id = ?';
+            params.push(libraryId);
+        }
+
+        const rows = await this.conn.queryAsync(sql, params);
+        return rows[0]?.count || 0;
     }
 
 }

@@ -1,4 +1,4 @@
-import { BeaverDB, EmbeddingRecord } from './database';
+import { BeaverDB, EmbeddingRecord, MAX_EMBEDDING_FAILURES } from './database';
 import { embeddingsService } from './embeddingsService';
 import { getClientDateModifiedAsISOString } from '../utils/zoteroUtils';
 import { logger } from '../utils/logger';
@@ -296,6 +296,8 @@ export class EmbeddingIndexer {
     /**
      * Index items by their IDs, loading and processing in batches.
      * This is memory-efficient as it only loads items per-batch.
+     * Uses retry with exponential backoff for transient failures.
+     * Failed batches are tracked for later retry.
      * @param itemIds Array of item IDs to index
      * @param options Options for batch indexing
      * @returns IndexingResult with counts
@@ -374,11 +376,12 @@ export class EmbeddingIndexer {
                 const texts = itemsData.map(item => this.buildEmbeddingText(item.title, item.abstract));
                 const ids = itemsData.map(item => item.itemId);
 
-                // Generate embeddings via API
-                const response = await embeddingsService.generateEmbeddings(texts, ids);
+                // Generate embeddings via API with retry
+                const response = await embeddingsService.generateEmbeddingsWithRetry(texts, ids);
 
                 // Prepare embedding records
                 const embeddingRecords: Array<Omit<EmbeddingRecord, 'indexed_at'>> = [];
+                const successfulItemIds: number[] = [];
 
                 for (let j = 0; j < itemsData.length; j++) {
                     const itemData = itemsData[j];
@@ -404,17 +407,39 @@ export class EmbeddingIndexer {
                         dimensions: this.dimensions,
                         model_id: this.modelId,
                     });
+                    
+                    successfulItemIds.push(itemData.itemId);
                 }
 
                 // Store embeddings in batch
                 if (embeddingRecords.length > 0) {
                     await this.db.upsertEmbeddingsBatch(embeddingRecords);
                     result.indexed += embeddingRecords.length;
+                    
+                    // Remove successful items from failed tracking
+                    await this.db.removeFailedEmbeddingsBatch(successfulItemIds);
                 }
 
             } catch (error) {
-                logger(`indexItemIdsBatch: Batch failed at offset ${i}: ${(error as Error).message}`, 1);
+                const errorMessage = (error as Error).message;
+                logger(`indexItemIdsBatch: Batch failed at offset ${i}: ${errorMessage}`, 1);
                 result.failed += batchIds.length;
+                
+                // Track all items in the failed batch
+                // We need to get library IDs for the failed items
+                try {
+                    const items = await Zotero.Items.getAsync(batchIds);
+                    const failedItems = items
+                        .filter(item => item && item.isRegularItem())
+                        .map(item => ({ itemId: item.id, libraryId: item.libraryID }));
+                    
+                    if (failedItems.length > 0) {
+                        await this.db.recordFailedEmbeddingsBatch(failedItems, errorMessage);
+                        logger(`indexItemIdsBatch: Recorded ${failedItems.length} items as failed`, 3);
+                    }
+                } catch (trackError) {
+                    logger(`indexItemIdsBatch: Failed to track failed items: ${(trackError as Error).message}`, 1);
+                }
             }
 
             // Report progress
@@ -581,6 +606,7 @@ export class EmbeddingIndexer {
 
     /**
      * Index a single Zotero item.
+     * Uses retry with exponential backoff for transient failures.
      * @param item Zotero item to index
      * @returns true if indexed successfully, false if skipped or failed
      */
@@ -601,14 +627,15 @@ export class EmbeddingIndexer {
         }
 
         try {
-            // Generate embedding via API
-            const response = await embeddingsService.generateEmbeddings(
+            // Generate embedding via API with retry
+            const response = await embeddingsService.generateEmbeddingsWithRetry(
                 [text],
                 [itemData.itemId]
             );
 
             if (response.embeddings.length === 0) {
                 logger(`indexItem: No embedding returned for item ${itemData.itemId}`, 2);
+                await this.db.recordFailedEmbedding(itemData.itemId, itemData.libraryId, 'No embedding returned');
                 return false;
             }
 
@@ -630,9 +657,14 @@ export class EmbeddingIndexer {
                 model_id: this.modelId,
             });
 
+            // Remove from failed tracking on success
+            await this.db.removeFailedEmbedding(itemData.itemId);
+
             return true;
         } catch (error) {
-            logger(`indexItem: Failed to index item ${itemData.itemId}: ${(error as Error).message}`, 1);
+            const errorMessage = (error as Error).message;
+            logger(`indexItem: Failed to index item ${itemData.itemId}: ${errorMessage}`, 1);
+            await this.db.recordFailedEmbedding(itemData.itemId, itemData.libraryId, errorMessage);
             return false;
         }
     }
@@ -640,6 +672,7 @@ export class EmbeddingIndexer {
     /**
      * Index multiple Zotero items in batch.
      * Optimized for bulk indexing with batched API calls and database writes.
+     * Uses retry with exponential backoff for transient failures.
      * @param items Array of Zotero items to index
      * @param options Options for batch indexing
      * @returns IndexingResult with counts of indexed/skipped/failed items
@@ -706,14 +739,15 @@ export class EmbeddingIndexer {
             const itemIds = batch.map(item => item.itemId);
 
             try {
-                // Generate embeddings via API
-                const response = await embeddingsService.generateEmbeddings(
+                // Generate embeddings via API with retry
+                const response = await embeddingsService.generateEmbeddingsWithRetry(
                     texts,
                     itemIds
                 );
 
                 // Prepare embedding records
                 const embeddingRecords: Array<Omit<EmbeddingRecord, 'indexed_at'>> = [];
+                const successfulItemIds: number[] = [];
 
                 for (let j = 0; j < batch.length; j++) {
                     const itemData = batch[j];
@@ -739,17 +773,30 @@ export class EmbeddingIndexer {
                         dimensions: this.dimensions,
                         model_id: this.modelId,
                     });
+                    
+                    successfulItemIds.push(itemData.itemId);
                 }
 
                 // Store embeddings in batch
                 if (embeddingRecords.length > 0) {
                     await this.db.upsertEmbeddingsBatch(embeddingRecords);
                     result.indexed += embeddingRecords.length;
+                    
+                    // Remove successful items from failed tracking
+                    await this.db.removeFailedEmbeddingsBatch(successfulItemIds);
                 }
 
             } catch (error) {
-                logger(`indexItemsBatch: Batch failed at offset ${i}: ${(error as Error).message}`, 1);
+                const errorMessage = (error as Error).message;
+                logger(`indexItemsBatch: Batch failed at offset ${i}: ${errorMessage}`, 1);
                 result.failed += batch.length;
+                
+                // Track all items in the failed batch
+                const failedItems = batch.map(item => ({ 
+                    itemId: item.itemId, 
+                    libraryId: item.libraryId 
+                }));
+                await this.db.recordFailedEmbeddingsBatch(failedItems, errorMessage);
             }
 
             // Report progress
@@ -823,6 +870,106 @@ export class EmbeddingIndexer {
             dimensions: this.dimensions,
             modelId: this.modelId,
         };
+    }
+
+    /**
+     * Get item IDs that are ready for retry (failed previously but retry time has passed).
+     * @param libraryId Optional library ID to filter by
+     * @returns Array of item IDs ready for retry
+     */
+    async getItemsReadyForRetry(libraryId?: number): Promise<number[]> {
+        return this.db.getItemsReadyForRetry(libraryId);
+    }
+
+    /**
+     * Get count of failed embeddings.
+     * @param libraryId Optional library ID to filter by
+     * @returns Object with total failed, ready for retry, and permanently failed counts
+     */
+    async getFailedStats(libraryId?: number): Promise<{
+        totalFailed: number;
+        readyForRetry: number;
+        permanentlyFailed: number;
+    }> {
+        const totalFailed = await this.db.getFailedEmbeddingCount(libraryId);
+        const readyForRetry = (await this.db.getItemsReadyForRetry(libraryId)).length;
+        const permanentlyFailed = (await this.db.getPermanentlyFailedItems(libraryId)).length;
+        
+        return {
+            totalFailed,
+            readyForRetry,
+            permanentlyFailed,
+        };
+    }
+
+    /**
+     * Filter out items that are not ready for retry from the to-index list.
+     * Items that have failed and are still in backoff period will be excluded.
+     * @param itemIds Array of item IDs to potentially index
+     * @returns Filtered array excluding items not ready for retry
+     */
+    async filterItemsNotInBackoff(itemIds: number[]): Promise<number[]> {
+        if (itemIds.length === 0) return [];
+
+        // Get failed items for these IDs
+        const failedRecords = await this.db.getFailedEmbeddingsBatch(itemIds);
+        const failedMap = new Map(failedRecords.map(r => [r.item_id, r]));
+        
+        // Use the same string format as stored timestamps for consistent comparison
+        // Timestamps are stored as UTC strings like "2024-05-24 12:00:00"
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        
+        return itemIds.filter(id => {
+            const failed = failedMap.get(id);
+            if (!failed) {
+                // Never failed, include it
+                return true;
+            }
+            
+            // Check if permanently failed
+            if (failed.failure_count >= MAX_EMBEDDING_FAILURES) {
+                // Skip permanently failed items
+                return false;
+            }
+            
+            // Check if backoff period has passed
+            // Compare as strings since both are in the same UTC format
+            return now >= failed.next_retry_after;
+        });
+    }
+
+    /**
+     * Clean up failed embedding records for items that have been deleted from Zotero.
+     * @param libraryId The library to clean up
+     * @returns Number of records cleaned up
+     */
+    async cleanupDeletedFailedEmbeddings(libraryId: number): Promise<number> {
+        // Get all failed item IDs for this library
+        const failedRecords = await this.db.getPermanentlyFailedItems(libraryId);
+        const allFailedIds = failedRecords.map(r => r.item_id);
+        
+        // Also get items ready for retry
+        const retryIds = await this.db.getItemsReadyForRetry(libraryId);
+        const allIds = [...new Set([...allFailedIds, ...retryIds])];
+        
+        if (allIds.length === 0) return 0;
+        
+        // Check which items still exist in Zotero
+        const existingItems = await Zotero.Items.getAsync(allIds);
+        const existingIds = new Set(
+            existingItems
+                .filter(item => item && !item.deleted)
+                .map(item => item.id)
+        );
+        
+        // Find items that no longer exist
+        const toDelete = allIds.filter(id => !existingIds.has(id));
+        
+        if (toDelete.length > 0) {
+            await this.db.removeFailedEmbeddingsBatch(toDelete);
+        }
+        
+        return toDelete.length;
     }
 }
 

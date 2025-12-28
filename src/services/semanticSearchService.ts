@@ -44,6 +44,7 @@ export class semanticSearchService {
 
     /**
      * Search for papers similar to a query string.
+     * Uses retry with exponential backoff for transient failures.
      * @param query The search query text
      * @param options Search options (topK, minSimilarity, libraryIds)
      * @returns Array of search results sorted by similarity (highest first)
@@ -55,8 +56,8 @@ export class semanticSearchService {
             return [];
         }
 
-        // 1. Generate query embedding from backend API
-        const queryEmbeddingResponse = await embeddingsService.generateQueryEmbedding(query);
+        // 1. Generate query embedding from backend API (with retry)
+        const queryEmbeddingResponse = await embeddingsService.generateQueryEmbeddingWithRetry(query);
         const queryEmbedding = new Int8Array(queryEmbeddingResponse.embedding);
 
         // 2. Load embeddings from database
