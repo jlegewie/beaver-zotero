@@ -38,9 +38,14 @@ import {
     WSZoteroItemSearchRequest,
     WSZoteroItemSearchResponse,
     ZoteroItemSearchResultItem,
+    WSZoteroItemTopicSearchRequest,
+    WSZoteroItemTopicSearchResponse,
+    ZoteroItemTopicSearchResultItem,
 } from './agentProtocol';
-import { searchItemsByTopic, searchItemsByAuthor, searchItemsByPublication, TopicSearchParams, ZoteroItemSearchFilters } from '../../react/utils/searchTools';
+import { searchItemsByMetadata, SearchItemsByMetadataOptions, ZoteroItemSearchFilters } from '../../react/utils/searchTools';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
+import { semanticSearchService, SearchResult } from './semanticSearchService';
+import { BeaverDB } from './database';
 
 /**
  * Get file status information for an attachment.
@@ -904,12 +909,12 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
 
 /**
  * Handle zotero_item_search_request event.
- * Searches the user's Zotero library and returns matching items with attachments.
+ * Searches the user's Zotero library by metadata and returns matching items with attachments.
  * 
  * Algorithm:
  * 1. Validate: At least one query parameter must be provided
  * 2. Apply query matching (AND logic between different query types):
- *    - topic_query: search title+abstract for each phrase (OR within)
+ *    - title_query: search title field (substring match)
  *    - author_query: search creator names
  *    - publication_query: search publication/journal name
  * 3. Apply filters to narrow results (year, type, libraries, tags, collections)
@@ -917,7 +922,7 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
  */
 export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchRequest): Promise<WSZoteroItemSearchResponse> {
     // Validate: at least one query parameter must be provided
-    const hasQuery = (request.topic_query && request.topic_query.length > 0) ||
+    const hasQuery = !!request.title_query ||
                      !!request.author_query ||
                      !!request.publication_query;
 
@@ -929,18 +934,6 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
             items: [],
         };
     }
-
-    // Get synced library IDs and apply libraries_filter if provided
-    // let syncLibraryIds = store.get(syncLibraryIdsAtom);
-    
-    // if (syncLibraryIds.length === 0) {
-    //     logger('handleZoteroItemSearchRequest: No synced libraries configured', 1);
-    //     return {
-    //         type: 'zotero_item_search',
-    //         request_id: request.request_id,
-    //         items: [],
-    //     };
-    // }
 
     // Apply libraries_filter if provided
     const libraryIds: number[] = [];
@@ -1000,76 +993,58 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
         }
     }
 
-    // Build filters from request
-    const filters: ZoteroItemSearchFilters = {
-        year_min: request.year_min,
-        year_max: request.year_max,
-        item_type_filter: request.item_type_filter,
-        libraries_filter: libraryIds.length > 0 ? libraryIds : undefined,
-        collections_filter: collectionKeys.length > 0 ? collectionKeys : undefined,
-        tags_filter: request.tags_filter,
-        limit: request.limit,
-    };
+    logger('handleZoteroItemSearchRequest: Metadata search', {
+        libraryIds,
+        title_query: request.title_query,
+        author_query: request.author_query,
+        publication_query: request.publication_query,
+    }, 1);
 
-    // Step 1: Execute queries based on what's provided
-    let items: Zotero.Item[] = [];
+    // Collect unique items across all libraries
+    const uniqueItems = new Map<string, Zotero.Item>();
+    const makeKey = (libraryId: number, key: string) => `${libraryId}-${key}`;
 
-    // Topic query (searches title + abstract)
-    if (request.topic_query && request.topic_query.length > 0) {
-        logger('handleZoteroItemSearchRequest: Topic query', libraryIds, request.topic_query, filters, 1);
-        const topicParams: TopicSearchParams = {
-            topic_phrases: request.topic_query,
+    // Search each library using searchItemsByMetadata
+    for (const libraryId of libraryIds) {
+        const options: SearchItemsByMetadataOptions = {
+            title_query: request.title_query,
             author_query: request.author_query,
             publication_query: request.publication_query,
+            year_min: request.year_min,
+            year_max: request.year_max,
+            item_type: request.item_type_filter,
+            tags: request.tags_filter,
+            collection_key: collectionKeys.length > 0 ? collectionKeys[0] : undefined,
+            limit: request.limit,
+            join_mode: 'all', // AND logic between query params
         };
-        items = await searchItemsByTopic(libraryIds, topicParams, filters);
+
+        try {
+            const results = await searchItemsByMetadata(libraryId, options);
+            for (const item of results) {
+                if (item.isRegularItem() && !item.deleted) {
+                    const key = makeKey(item.libraryID, item.key);
+                    if (!uniqueItems.has(key)) {
+                        uniqueItems.set(key, item);
+                    }
+                }
+            }
+        } catch (error) {
+            logger(`handleZoteroItemSearchRequest: Error searching library ${libraryId}: ${error}`, 1);
+        }
+
+        // Early exit if we have enough results
+        if (request.limit > 0 && uniqueItems.size >= request.limit) {
+            break;
+        }
     }
-    // Author-only query
-    else if (request.author_query && !request.publication_query) {
-        logger('handleZoteroItemSearchRequest: Author query', {
-            libraryIds,
-            author_query: request.author_query,
-            filters,
-        }, 1);
-        items = await searchItemsByAuthor(libraryIds, request.author_query, filters);
+
+    // Convert to array and apply limit
+    let items = Array.from(uniqueItems.values());
+    if (request.limit > 0) {
+        items = items.slice(0, request.limit);
     }
-    // Publication-only query
-    else if (request.publication_query && !request.author_query) {
-        logger('handleZoteroItemSearchRequest: Publication query', {
-            libraryIds,
-            publication_query: request.publication_query,
-            filters,
-        }, 1);
-        items = await searchItemsByPublication(libraryIds, request.publication_query, filters);
-    }
-    // Both author and publication (need to intersect results)
-    else if (request.author_query && request.publication_query) {
-        logger('handleZoteroItemSearchRequest: Both author and publication query', {
-            libraryIds,
-            author_query: request.author_query,
-            publication_query: request.publication_query,
-            filters,
-        }, 1);
-        // Search by author first
-        const authorItems = await searchItemsByAuthor(libraryIds, request.author_query, {
-            ...filters,
-            limit: 0, // No limit for intermediate result
-        });
-        
-        // Filter by publication
-        const makeKey = (libraryId: number, key: string) => `${libraryId}-${key}`;
-        const authorItemKeys = new Set(authorItems.map(item => makeKey(item.libraryID, item.key)));
-        
-        const publicationItems = await searchItemsByPublication(libraryIds, request.publication_query, {
-            ...filters,
-            limit: 0, // No limit for intermediate result
-        });
-        
-        // Keep only items that match both
-        items = publicationItems.filter(item => 
-            authorItemKeys.has(makeKey(item.libraryID, item.key))
-        );
-    }
+
     logger('handleZoteroItemSearchRequest: Final items', {
         libraryIds,
         items: items.length,
@@ -1143,6 +1118,222 @@ export async function handleZoteroItemSearchRequest(request: WSZoteroItemSearchR
 
     const response: WSZoteroItemSearchResponse = {
         type: 'zotero_item_search',
+        request_id: request.request_id,
+        items: resultItems,
+    };
+
+    return response;
+}
+
+
+/**
+ * Handle zotero_item_topic_search_request event.
+ * Searches the user's Zotero library by topic using semantic search and returns matching items.
+ * 
+ * Algorithm:
+ * 1. Use semantic search service to find items by topic similarity
+ * 2. Apply filters (year, libraries, etc.)
+ * 3. Serialize items with attachments and similarity scores
+ * 4. Return items sorted by similarity
+ */
+export async function handleZoteroItemTopicSearchRequest(
+    request: WSZoteroItemTopicSearchRequest
+): Promise<WSZoteroItemTopicSearchResponse> {
+    // Get database instance from global addon
+    const db = Zotero.Beaver?.db as BeaverDB | null;
+    if (!db) {
+        logger('handleZoteroItemTopicSearchRequest: Database not available', 1);
+        return {
+            type: 'zotero_item_topic_search',
+            request_id: request.request_id,
+            items: [],
+        };
+    }
+
+    // Resolve library IDs from filter
+    const libraryIds: number[] = [];
+    if (request.libraries_filter && request.libraries_filter.length > 0) {
+        for (const libraryFilter of request.libraries_filter) {
+            if (typeof libraryFilter === 'number') {
+                libraryIds.push(libraryFilter);
+            } else if (typeof libraryFilter === 'string') {
+                const libraryIdNum = parseInt(libraryFilter, 10);
+                if (!isNaN(libraryIdNum)) {
+                    libraryIds.push(libraryIdNum);
+                } else {
+                    // Library name lookup
+                    const allLibraries = Zotero.Libraries.getAll();
+                    for (const lib of allLibraries) {
+                        if (lib.name.toLowerCase().includes(libraryFilter.toLowerCase())) {
+                            libraryIds.push(lib.libraryID);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    logger('handleZoteroItemTopicSearchRequest: Searching by topic', {
+        topic_query: request.topic_query,
+        libraryIds: libraryIds.length > 0 ? libraryIds : 'all',
+        limit: request.limit,
+    }, 1);
+
+    // Create search service and run semantic search
+    const searchService = new semanticSearchService(db, 512);
+    
+    let searchResults: SearchResult[];
+    try {
+        searchResults = await searchService.search(request.topic_query, {
+            topK: request.limit * 2, // Fetch extra to account for filtering
+            minSimilarity: 0.3,
+            libraryIds: libraryIds.length > 0 ? libraryIds : undefined,
+        });
+    } catch (error) {
+        logger(`handleZoteroItemTopicSearchRequest: Semantic search failed: ${error}`, 1);
+        return {
+            type: 'zotero_item_topic_search',
+            request_id: request.request_id,
+            items: [],
+        };
+    }
+
+    logger(`handleZoteroItemTopicSearchRequest: Semantic search returned ${searchResults.length} results`, 1);
+
+    if (searchResults.length === 0) {
+        return {
+            type: 'zotero_item_topic_search',
+            request_id: request.request_id,
+            items: [],
+        };
+    }
+
+    // Load items from search results
+    const itemIds = searchResults.map(r => r.itemId);
+    const items = await Zotero.Items.getAsync(itemIds);
+    const validItems = items.filter((item): item is Zotero.Item => item !== null);
+
+    if (validItems.length === 0) {
+        return {
+            type: 'zotero_item_topic_search',
+            request_id: request.request_id,
+            items: [],
+        };
+    }
+
+    // Load item data
+    await Zotero.Items.loadDataTypes(validItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]);
+
+    // Create a map for item lookup by ID
+    const itemById = new Map<number, Zotero.Item>();
+    for (const item of validItems) {
+        itemById.set(item.id, item);
+    }
+
+    // Create similarity map
+    const similarityByItemId = new Map<number, number>();
+    for (const result of searchResults) {
+        similarityByItemId.set(result.itemId, result.similarity);
+    }
+
+    // Get sync configuration from store for status computation
+    const syncLibraryIds = store.get(syncLibraryIdsAtom);
+    const syncWithZotero = store.get(syncWithZoteroAtom);
+    const userId = store.get(userIdAtom);
+
+    // Serialize items with attachments and similarity
+    const resultItems: ZoteroItemTopicSearchResultItem[] = [];
+
+    for (const searchResult of searchResults) {
+        const item = itemById.get(searchResult.itemId);
+        if (!item) continue;
+
+        // Apply filters
+        // Year filter
+        if (request.year_min || request.year_max) {
+            const yearStr = item.getField('date');
+            const yearMatch = yearStr ? String(yearStr).match(/\d{4}/) : null;
+            const year = yearMatch ? parseInt(yearMatch[0], 10) : null;
+            
+            if (year) {
+                if (request.year_min && year < request.year_min) continue;
+                if (request.year_max && year > request.year_max) continue;
+            }
+        }
+
+        // Author filter
+        if (request.author_filter && request.author_filter.length > 0) {
+            const creators = item.getCreators();
+            const creatorLastNames = creators.map(c => (c.lastName || '').toLowerCase());
+            const matchesAuthor = request.author_filter.some(authorName => 
+                creatorLastNames.some(lastName => lastName.includes(authorName.toLowerCase()))
+            );
+            if (!matchesAuthor) continue;
+        }
+
+        // Tags filter
+        if (request.tags_filter && request.tags_filter.length > 0) {
+            const itemTags = item.getTags().map(t => t.tag.toLowerCase());
+            const matchesTag = request.tags_filter.some(tag => 
+                itemTags.includes(tag.toLowerCase())
+            );
+            if (!matchesTag) continue;
+        }
+
+        // Validate item is regular item and not in trash
+        const isValidItem = syncingItemFilter(item);
+        if (!isValidItem) continue;
+
+        try {
+            const itemData = await serializeItem(item, undefined);
+
+            // Get and serialize attachments
+            const attachmentIds = item.getAttachments();
+            const attachments: AttachmentDataWithStatus[] = [];
+
+            if (attachmentIds.length > 0) {
+                const attachmentItems = await Zotero.Items.getAsync(attachmentIds);
+                const primaryAttachment = await item.getBestAttachment();
+                await Zotero.Items.loadDataTypes(attachmentItems, ["primaryData", "itemData"]);
+
+                for (const attachment of attachmentItems) {
+                    const isValidAttachment = syncingItemFilter(attachment);
+                    if (isValidAttachment) {
+                        const attachmentData = await serializeAttachment(attachment, undefined, { skipSyncingFilter: true });
+                        if (attachmentData) {
+                            const status = await computeItemStatus(attachment, syncLibraryIds, syncWithZotero, userId);
+                            const isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
+                            const fileStatus = await getAttachmentFileStatus(attachment, isPrimary);
+                            
+                            attachments.push({
+                                attachment: attachmentData,
+                                status,
+                                file_status: fileStatus,
+                            });
+                        }
+                    }
+                }
+            }
+
+            resultItems.push({
+                item: itemData,
+                attachments,
+                similarity: searchResult.similarity,
+            });
+
+            // Check limit
+            if (request.limit > 0 && resultItems.length >= request.limit) {
+                break;
+            }
+        } catch (error) {
+            logger(`handleZoteroItemTopicSearchRequest: Failed to serialize item ${item.key}: ${error}`, 1);
+        }
+    }
+
+    logger(`handleZoteroItemTopicSearchRequest: Returning ${resultItems.length} items`, 1);
+
+    const response: WSZoteroItemTopicSearchResponse = {
+        type: 'zotero_item_topic_search',
         request_id: request.request_id,
         items: resultItems,
     };

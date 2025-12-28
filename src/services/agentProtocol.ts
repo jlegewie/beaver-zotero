@@ -248,14 +248,21 @@ export interface ZoteroItemSearchResultItem {
     attachments: AttachmentDataWithStatus[];
 }
 
-/** Request from backend to search Zotero library */
+/** Zotero item topic search result with similarity score */
+export interface ZoteroItemTopicSearchResultItem {
+    item: ItemData;
+    attachments: AttachmentDataWithStatus[];
+    similarity: number;
+}
+
+/** Request from backend to search Zotero library by metadata */
 export interface WSZoteroItemSearchRequest extends WSBaseEvent {
     event: 'zotero_item_search_request';
     request_id: string;
 
     // Query parameters (at least one required, combined with AND)
-    /** List of phrases to search in title+abstract (OR'd within, AND'd with other queries) */
-    topic_query?: string[];
+    /** Keyword or phrase from the title (substring match) */
+    title_query?: string;
     /** Author name to search (substring match) */
     author_query?: string;
     /** Publication/journal name to search (substring match) */
@@ -279,11 +286,45 @@ export interface WSZoteroItemSearchRequest extends WSBaseEvent {
     limit: number;
 }
 
-/** Response to zotero item search request */
+/** Response to zotero item metadata search request */
 export interface WSZoteroItemSearchResponse {
     type: 'zotero_item_search';
     request_id: string;
     items: ZoteroItemSearchResultItem[];
+}
+
+/** Request from backend to search Zotero library by topic using semantic search */
+export interface WSZoteroItemTopicSearchRequest extends WSBaseEvent {
+    event: 'zotero_item_topic_search_request';
+    request_id: string;
+
+    // Query parameter (required)
+    /** A concise topic phrase (2-8 words) for semantic search */
+    topic_query: string;
+
+    // Filters (optional, narrow results further)
+    /** List of author last names to filter results (OR'd) */
+    author_filter?: string[];
+    /** Minimum publication year (inclusive) */
+    year_min?: number;
+    /** Maximum publication year (inclusive) */
+    year_max?: number;
+    /** Filter by library names or IDs (OR logic) */
+    libraries_filter?: (string | number)[];
+    /** Filter by tag names (OR logic) */
+    tags_filter?: string[];
+    /** Filter by collection names or keys (OR logic) */
+    collections_filter?: (string | number)[];
+
+    // Options
+    limit: number;
+}
+
+/** Response to zotero item topic search request */
+export interface WSZoteroItemTopicSearchResponse {
+    type: 'zotero_item_topic_search';
+    request_id: string;
+    items: ZoteroItemTopicSearchResultItem[];
 }
 
 /** Request from backend to fetch Zotero item/attachment data */
@@ -384,7 +425,8 @@ export type WSEvent =
     | WSZoteroAttachmentPageImagesRequest
     | WSExternalReferenceCheckRequest
     | WSZoteroDataRequest
-    | WSZoteroItemSearchRequest;
+    | WSZoteroItemSearchRequest
+    | WSZoteroItemTopicSearchRequest;
 
 
 // =============================================================================

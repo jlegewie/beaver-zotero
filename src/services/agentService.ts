@@ -19,6 +19,7 @@ import {
     handleZoteroAttachmentPagesRequest,
     handleZoteroAttachmentPageImagesRequest,
     handleZoteroItemSearchRequest,
+    handleZoteroItemTopicSearchRequest,
 } from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
 import {
@@ -370,10 +371,17 @@ export class AgentService {
                     break;
 
                 case 'zotero_item_search_request':
-                    logger(`AgentService: Received zotero_item_search_request: topic=${event.topic_query?.length || 0} phrases, author="${event.author_query || ''}", pub="${event.publication_query || ''}"`, 1);
+                    logger(`AgentService: Received zotero_item_search_request: title="${event.title_query || ''}", author="${event.author_query || ''}", pub="${event.publication_query || ''}"`, 1);
                     handleZoteroItemSearchRequest(event)
                         .then(res => this.send(res))
                         .catch(err => this.handleProviderError(err, 'zotero_item_search_request_failed'));
+                    break;
+
+                case 'zotero_item_topic_search_request':
+                    logger(`AgentService: Received zotero_item_topic_search_request: topic="${event.topic_query}", limit=${event.limit}`, 1);
+                    handleZoteroItemTopicSearchRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => this.handleProviderError(err, 'zotero_item_topic_search_request_failed'));
                     break;
 
                 default:
