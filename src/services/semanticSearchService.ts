@@ -142,7 +142,7 @@ export class semanticSearchService {
                 continue;
             }
 
-            const similarity = this.int8DotProductSimilarity(queryEmbedding, docEmbedding);
+            const similarity = this.int8CosineSimilarity(queryEmbedding, docEmbedding);
 
             if (similarity >= minSimilarity) {
                 results.push({
