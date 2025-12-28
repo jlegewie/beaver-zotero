@@ -10,7 +10,7 @@ export interface SearchResult {
     itemId: number;
     libraryId: number;
     zoteroKey: string;
-    similarity: number;         // 0-1 normalized similarity score
+    similarity: number;         // Raw cosine similarity [-1, 1]
 }
 
 /**
@@ -18,7 +18,9 @@ export interface SearchResult {
  */
 export interface SearchOptions {
     topK?: number;              // Maximum number of results to return (default: 20)
-    minSimilarity?: number;     // Minimum similarity threshold 0-1 (default: 0.3)
+    minSimilarity?: number;     // Minimum cosine similarity threshold (default: 0.4)
+                                // Interpretation: 0.7+ very similar, 0.5-0.7 related, 
+                                // 0.3-0.5 weak, <0.3 noise
     libraryIds?: number[];      // Optional: filter to specific libraries
 }
 
@@ -47,7 +49,7 @@ export class semanticSearchService {
      * @returns Array of search results sorted by similarity (highest first)
      */
     async search(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
-        const { topK = 20, minSimilarity = 0.3, libraryIds } = options;
+        const { topK = 20, minSimilarity = 0.4, libraryIds } = options;
 
         if (!query || query.trim().length === 0) {
             return [];
@@ -84,7 +86,7 @@ export class semanticSearchService {
      * @returns Array of search results sorted by similarity (highest first)
      */
     async findSimilar(itemId: number, options: SearchOptions = {}): Promise<SearchResult[]> {
-        const { topK = 20, minSimilarity = 0.3, libraryIds } = options;
+        const { topK = 20, minSimilarity = 0.4, libraryIds } = options;
 
         // 1. Get the embedding for the source item
         const sourceEmbedding = await this.db.getEmbedding(itemId);
@@ -187,11 +189,19 @@ export class semanticSearchService {
     }
 
     /**
-     * Alternative: Compute cosine similarity for int8 vectors.
-     * More accurate for comparing normalized embeddings, slightly slower.
+     * Compute cosine similarity for int8 vectors.
+     * Returns raw cosine similarity in [-1, 1] range.
+     * Interpretation:
+     *   1.0 = identical direction
+     *   0.7+ = very similar
+     *   0.5-0.7 = related
+     *   0.3-0.5 = weakly related
+     *   <0.3 = likely noise
+     *   0 = orthogonal (unrelated)
+     *   -1 = opposite
      * @param a First embedding
      * @param b Second embedding
-     * @returns Cosine similarity normalized to [0, 1] range
+     * @returns Raw cosine similarity [-1, 1]
      */
     private int8CosineSimilarity(a: Int8Array, b: Int8Array): number {
         if (a.length !== b.length) {
@@ -215,9 +225,7 @@ export class semanticSearchService {
             return 0;
         }
 
-        // Cosine similarity returns [-1, 1], normalize to [0, 1]
-        const cosineSim = dotProduct / (normA * normB);
-        return (cosineSim + 1) / 2;
+        return dotProduct / (normA * normB);
     }
 
     /**
