@@ -1293,6 +1293,17 @@ export class BeaverDB {
     }
 
     /**
+     * Delete all failed embedding records for a library.
+     * @param libraryId The Zotero library ID
+     */
+    public async deleteFailedEmbeddingsByLibrary(libraryId: number): Promise<void> {
+        await this.conn.queryAsync(
+            'DELETE FROM failed_embeddings WHERE library_id = ?',
+            [libraryId]
+        );
+    }
+
+    /**
      * Remove failed embedding records for items that no longer exist.
      * @param itemIds Array of item IDs that should be removed
      */

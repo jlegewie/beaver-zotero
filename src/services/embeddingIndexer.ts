@@ -856,7 +856,7 @@ export class EmbeddingIndexer {
     }
 
     /**
-     * Clean up embeddings and failed records for libraries that are no longer synced.
+     * Clean up embeddings, failed records, and index state for libraries that are no longer synced.
      * This should be called during initial indexing to handle library sync changes.
      * @param syncedLibraryIds Array of library IDs that should be synced
      * @returns Object with number of libraries and embeddings cleaned up
@@ -885,11 +885,14 @@ export class EmbeddingIndexer {
             // Delete embeddings for this library
             await this.db.deleteEmbeddingsByLibrary(libraryId);
             
+            // Delete failed embedding records for this library
+            await this.db.deleteFailedEmbeddingsByLibrary(libraryId);
+            
             // Also clean up the index state for this library
             await this.db.deleteEmbeddingIndexState(libraryId);
             
             totalEmbeddingsRemoved += count;
-            logger(`cleanupUnsyncedLibraries: Removed ${count} embeddings and index state for unsynced library ${libraryId}`, 3);
+            logger(`cleanupUnsyncedLibraries: Removed ${count} embeddings, failed records, and index state for unsynced library ${libraryId}`, 3);
         }
         
         return { 
