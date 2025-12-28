@@ -29,6 +29,8 @@ import { getPref } from '../../src/utils/prefs';
 import { MessageAttachment, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
+import { SubscriptionStatus, ProcessingMode } from '../types/profile';
+import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import {
     currentMessageItemsAtom,
     currentReaderAttachmentAtom,
@@ -559,6 +561,18 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             logger('WS onReady:', data, 1);
             set(isWSReadyAtom, true);
             set(wsReadyDataAtom, data);
+            
+            // Show popup if subscription is active but using frontend processing
+            if (data.subscriptionStatus === SubscriptionStatus.ACTIVE && 
+                data.processingMode === ProcessingMode.FRONTEND) {
+                set(addPopupMessageAtom, {
+                    type: 'info',
+                    title: 'Indexing in progress',
+                    text: `Library indexing is not yet complete. Some features are limited until indexing finishes. Learn more <a href="${process.env.WEBAPP_BASE_URL}/docs/indexing" className="text-link" target="_blank">here</a>.`,
+                    expire: false,
+                    duration: 6000
+                });
+            }
         },
 
         onRequestAck: (data: WSRequestAckData) => {

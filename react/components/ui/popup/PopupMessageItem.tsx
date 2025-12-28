@@ -11,6 +11,7 @@ import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../..
 import Button from "../Button";
 import PopupMessageHeader from './PopupMessageHeader';
 import { getWindowFromElement } from '../../../utils/windowContext';
+import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinksAndNewlines';
 
 interface PopupMessageItemProps {
     message: PopupMessage;
@@ -145,7 +146,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                         </div>
                     ) : (
                         <div className='text-base font-color-tertiary'>
-                            {message.text}
+                            {message.text && parseTextWithLinksAndNewlines(message.text)}
                         </div>
                     )
                 )}
