@@ -882,4 +882,29 @@ export class BeaverDB {
         return rows.map((row: any) => row.item_id);
     }
 
+    /**
+     * Get all content hashes for embeddings, optionally filtered by library.
+     * More efficient than getContentHashes for full-database scans.
+     * @param libraryId Optional library ID to filter by
+     * @returns Map of item ID to content hash
+     */
+    public async getEmbeddingContentHashMap(libraryId?: number): Promise<Map<number, string>> {
+        let sql = 'SELECT item_id, content_hash FROM embeddings';
+        const params: any[] = [];
+
+        if (libraryId !== undefined) {
+            sql += ' WHERE library_id = ?';
+            params.push(libraryId);
+        }
+
+        const rows = await this.conn.queryAsync(sql, params);
+        const result = new Map<number, string>();
+        
+        for (const row of rows) {
+            result.set(row.item_id, row.content_hash);
+        }
+
+        return result;
+    }
+
 }
