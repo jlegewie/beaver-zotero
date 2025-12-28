@@ -229,6 +229,56 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         console.log("[PDF Visualizer] Annotations cleared");
     };
 
+    // Reset embedding index (clear all embedding tables)
+    const handleResetEmbeddingIndex = async () => {
+        console.log("[Embedding Reset] Starting embedding index reset...");
+        
+        try {
+            // Get database instance
+            const db = Zotero.Beaver?.db as BeaverDB | null;
+            if (!db) {
+                console.error("[Embedding Reset] Database not available");
+                return;
+            }
+
+            // Get all library IDs that have embeddings
+            const libraryIds = await db.getEmbeddedLibraryIds();
+            console.log(`[Embedding Reset] Found ${libraryIds.length} libraries with embeddings`);
+
+            let totalEmbeddings = 0;
+            let totalFailed = 0;
+            let totalStates = 0;
+
+            // Clear embeddings, failed records, and index state for each library
+            for (const libraryId of libraryIds) {
+                // Get counts before deletion
+                const embeddingCount = await db.getEmbeddingCount(libraryId);
+                const failedCount = await db.getFailedEmbeddingCount(libraryId);
+
+                // Delete embeddings
+                await db.deleteEmbeddingsByLibrary(libraryId);
+                totalEmbeddings += embeddingCount;
+
+                // Delete failed embedding records
+                await db.deleteFailedEmbeddingsByLibrary(libraryId);
+                totalFailed += failedCount;
+
+                // Delete index state
+                await db.deleteEmbeddingIndexState(libraryId);
+                totalStates++;
+
+                console.log(`[Embedding Reset] Cleared library ${libraryId}: ${embeddingCount} embeddings, ${failedCount} failed records`);
+            }
+
+            console.log("[Embedding Reset] ✓ Reset complete!");
+            console.log(`[Embedding Reset] Total cleared: ${totalEmbeddings} embeddings, ${totalFailed} failed records, ${totalStates} index states`);
+            console.log("[Embedding Reset] Plugin is now in fresh user state - restart required for re-indexing");
+            
+        } catch (error) {
+            console.error("[Embedding Reset] Reset failed:", error);
+        }
+    };
+
     // Extract current page content with line detection
     const handleExtractCurrentPage = async () => {
         console.log("[PDF Extractor] Extracting current page content...");
@@ -455,6 +505,12 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             label: "Clear Visualization",
             onClick: handleClearVisualization,
             icon: PdfIcon,
+            disabled: false,
+        },
+        {
+            label: "Reset Embedding Index",
+            onClick: handleResetEmbeddingIndex,
+            icon: SearchIcon,
             disabled: false,
         }
     ];
