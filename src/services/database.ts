@@ -5,6 +5,26 @@ import { SyncMethod, SyncType } from '../../react/atoms/sync';
 
 
 /* 
+ * Interface for the 'embeddings' table row
+ * 
+ * Table stores paper embeddings for semantic search.
+ * Embeddings are generated from title + abstract text.
+ */
+export interface EmbeddingRecord {
+    item_id: number;                    // Zotero item ID
+    library_id: number;                 // Zotero library ID
+    zotero_key: string;                 // Zotero item key
+    version: number;                    // Zotero item version at embedding time
+    client_date_modified: string;       // Item's clientDateModified at embedding time
+    content_hash: string;               // Hash of title+abstract for change detection
+    embedding: Uint8Array;              // Int8 embedding stored as BLOB
+    dimensions: number;                 // Embedding dimensions (256 or 512)
+    model_id: string;                   // Model identifier (e.g., "voyage-3-int8-512")
+    indexed_at: string;                 // When the embedding was created
+}
+
+
+/* 
  * Interface for the 'threads' table row
  * 
  * Table stores chat threads, mirroring the backend postgres structure.
@@ -122,6 +142,22 @@ export class BeaverDB {
             );
         `);
 
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS embeddings (
+                item_id                  INTEGER NOT NULL,
+                library_id               INTEGER NOT NULL,
+                zotero_key               TEXT NOT NULL,
+                version                  INTEGER NOT NULL,
+                client_date_modified     TEXT NOT NULL,
+                content_hash             TEXT NOT NULL,
+                embedding                BLOB NOT NULL,
+                dimensions               INTEGER NOT NULL,
+                model_id                 TEXT NOT NULL,
+                indexed_at               TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (item_id)
+            );
+        `);
+
 
         // DB indexes
         await this.conn.queryAsync(`
@@ -157,6 +193,21 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_sync_logs_session
             ON sync_logs(session_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_embeddings_library
+            ON embeddings(library_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_embeddings_content_hash
+            ON embeddings(content_hash);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_embeddings_zotero_key
+            ON embeddings(zotero_key);
         `);
     }
 
@@ -523,6 +574,312 @@ export class BeaverDB {
             `DELETE FROM sync_logs WHERE user_id = ? AND library_id IN (${placeholders})`,
             [user_id, ...library_ids]
         );
+    }
+
+    // --- Embedding Methods ---
+
+    /**
+     * Helper method to construct EmbeddingRecord from a database row
+     */
+    private static rowToEmbeddingRecord(row: any): EmbeddingRecord {
+        return {
+            item_id: row.item_id,
+            library_id: row.library_id,
+            zotero_key: row.zotero_key,
+            version: row.version,
+            client_date_modified: row.client_date_modified,
+            content_hash: row.content_hash,
+            embedding: new Uint8Array(row.embedding),
+            dimensions: row.dimensions,
+            model_id: row.model_id,
+            indexed_at: row.indexed_at,
+        };
+    }
+
+    /**
+     * Convert Int8Array embedding to Uint8Array for BLOB storage.
+     * SQLite stores BLOBs as raw bytes; Int8Array and Uint8Array share the same buffer layout.
+     */
+    public static embeddingToBlob(embedding: Int8Array): Uint8Array {
+        return new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
+    }
+
+    /**
+     * Convert BLOB (Uint8Array) back to Int8Array for similarity computation.
+     */
+    public static blobToEmbedding(blob: Uint8Array): Int8Array {
+        return new Int8Array(blob.buffer, blob.byteOffset, blob.byteLength);
+    }
+
+    /**
+     * Compute a hash for content change detection.
+     * Uses a simple but fast DJB2-style hash suitable for detecting text changes.
+     * @param text The text content to hash (title + abstract)
+     * @returns Hash string
+     */
+    public static computeContentHash(text: string): string {
+        let hash = 5381;
+        for (let i = 0; i < text.length; i++) {
+            const char = text.charCodeAt(i);
+            hash = ((hash << 5) + hash) ^ char;
+        }
+        // Convert to unsigned 32-bit and then to base36 for compact representation
+        return (hash >>> 0).toString(36);
+    }
+
+    /**
+     * Insert or update an embedding record.
+     * @param embedding The embedding data to store
+     */
+    public async upsertEmbedding(embedding: Omit<EmbeddingRecord, 'indexed_at'> & { indexed_at?: string }): Promise<void> {
+        const now = embedding.indexed_at || new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        
+        await this.conn.queryAsync(
+            `INSERT OR REPLACE INTO embeddings 
+             (item_id, library_id, zotero_key, version, client_date_modified, 
+              content_hash, embedding, dimensions, model_id, indexed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                embedding.item_id,
+                embedding.library_id,
+                embedding.zotero_key,
+                embedding.version,
+                embedding.client_date_modified,
+                embedding.content_hash,
+                embedding.embedding,
+                embedding.dimensions,
+                embedding.model_id,
+                now
+            ]
+        );
+    }
+
+    /**
+     * Insert or update multiple embedding records in a batch.
+     * @param embeddings Array of embedding data to store
+     */
+    public async upsertEmbeddingsBatch(embeddings: Array<Omit<EmbeddingRecord, 'indexed_at'> & { indexed_at?: string }>): Promise<void> {
+        if (embeddings.length === 0) return;
+
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+
+        // Use a transaction for batch insert
+        await this.conn.executeTransaction(async () => {
+            for (const embedding of embeddings) {
+                const indexedAt = embedding.indexed_at || now;
+                await this.conn.queryAsync(
+                    `INSERT OR REPLACE INTO embeddings 
+                     (item_id, library_id, zotero_key, version, client_date_modified, 
+                      content_hash, embedding, dimensions, model_id, indexed_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        embedding.item_id,
+                        embedding.library_id,
+                        embedding.zotero_key,
+                        embedding.version,
+                        embedding.client_date_modified,
+                        embedding.content_hash,
+                        embedding.embedding,
+                        embedding.dimensions,
+                        embedding.model_id,
+                        indexedAt
+                    ]
+                );
+            }
+        });
+    }
+
+    /**
+     * Get an embedding record by item ID.
+     * @param itemId The Zotero item ID
+     * @returns The embedding record or null if not found
+     */
+    public async getEmbedding(itemId: number): Promise<EmbeddingRecord | null> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM embeddings WHERE item_id = ?`,
+            [itemId]
+        );
+        
+        if (rows.length === 0) {
+            return null;
+        }
+        
+        return BeaverDB.rowToEmbeddingRecord(rows[0]);
+    }
+
+    /**
+     * Get embedding records for multiple item IDs.
+     * @param itemIds Array of Zotero item IDs
+     * @returns Map of item ID to embedding record
+     */
+    public async getEmbeddingsBatch(itemIds: number[]): Promise<Map<number, EmbeddingRecord>> {
+        if (itemIds.length === 0) return new Map();
+
+        const result = new Map<number, EmbeddingRecord>();
+        const chunkSize = 500;
+
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+            
+            const rows = await this.conn.queryAsync(
+                `SELECT * FROM embeddings WHERE item_id IN (${placeholders})`,
+                chunk
+            );
+            
+            for (const row of rows) {
+                result.set(row.item_id, BeaverDB.rowToEmbeddingRecord(row));
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Get all embeddings for a library.
+     * @param libraryId The Zotero library ID
+     * @returns Array of embedding records
+     */
+    public async getEmbeddingsByLibrary(libraryId: number): Promise<EmbeddingRecord[]> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM embeddings WHERE library_id = ?`,
+            [libraryId]
+        );
+        
+        return rows.map((row: any) => BeaverDB.rowToEmbeddingRecord(row));
+    }
+
+    /**
+     * Get all embeddings across all libraries.
+     * @returns Array of embedding records
+     */
+    public async getAllEmbeddings(): Promise<EmbeddingRecord[]> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM embeddings ORDER BY library_id, item_id`
+        );
+        
+        return rows.map((row: any) => BeaverDB.rowToEmbeddingRecord(row));
+    }
+
+    /**
+     * Get embeddings for multiple libraries.
+     * @param libraryIds Array of library IDs
+     * @returns Array of embedding records
+     */
+    public async getEmbeddingsByLibraries(libraryIds: number[]): Promise<EmbeddingRecord[]> {
+        if (libraryIds.length === 0) return [];
+
+        const placeholders = libraryIds.map(() => '?').join(',');
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM embeddings WHERE library_id IN (${placeholders})`,
+            libraryIds
+        );
+        
+        return rows.map((row: any) => BeaverDB.rowToEmbeddingRecord(row));
+    }
+
+    /**
+     * Get content hashes for items to check what needs re-indexing.
+     * @param itemIds Array of Zotero item IDs
+     * @returns Map of item ID to content hash
+     */
+    public async getContentHashes(itemIds: number[]): Promise<Map<number, string>> {
+        if (itemIds.length === 0) return new Map();
+
+        const result = new Map<number, string>();
+        const chunkSize = 500;
+
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+            
+            const rows = await this.conn.queryAsync(
+                `SELECT item_id, content_hash FROM embeddings WHERE item_id IN (${placeholders})`,
+                chunk
+            );
+            
+            for (const row of rows) {
+                result.set(row.item_id, row.content_hash);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Delete an embedding by item ID.
+     * @param itemId The Zotero item ID
+     */
+    public async deleteEmbedding(itemId: number): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM embeddings WHERE item_id = ?`,
+            [itemId]
+        );
+    }
+
+    /**
+     * Delete embeddings for multiple item IDs.
+     * @param itemIds Array of Zotero item IDs
+     */
+    public async deleteEmbeddingsBatch(itemIds: number[]): Promise<void> {
+        if (itemIds.length === 0) return;
+
+        const chunkSize = 500;
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+            await this.conn.queryAsync(
+                `DELETE FROM embeddings WHERE item_id IN (${placeholders})`,
+                chunk
+            );
+        }
+    }
+
+    /**
+     * Delete all embeddings for a library.
+     * @param libraryId The Zotero library ID
+     */
+    public async deleteEmbeddingsByLibrary(libraryId: number): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM embeddings WHERE library_id = ?`,
+            [libraryId]
+        );
+    }
+
+    /**
+     * Get the count of embeddings for a library.
+     * @param libraryId The Zotero library ID
+     * @returns Number of embeddings
+     */
+    public async getEmbeddingCount(libraryId?: number): Promise<number> {
+        let sql = 'SELECT COUNT(*) as count FROM embeddings';
+        const params: any[] = [];
+
+        if (libraryId !== undefined) {
+            sql += ' WHERE library_id = ?';
+            params.push(libraryId);
+        }
+
+        const rows = await this.conn.queryAsync(sql, params);
+        return rows[0]?.count || 0;
+    }
+
+    /**
+     * Get item IDs that have embeddings in a library.
+     * @param libraryId The Zotero library ID
+     * @returns Array of item IDs
+     */
+    public async getEmbeddedItemIds(libraryId?: number): Promise<number[]> {
+        let sql = 'SELECT item_id FROM embeddings';
+        const params: any[] = [];
+
+        if (libraryId !== undefined) {
+            sql += ' WHERE library_id = ?';
+            params.push(libraryId);
+        }
+
+        const rows = await this.conn.queryAsync(sql, params);
+        return rows.map((row: any) => row.item_id);
     }
 
 }
