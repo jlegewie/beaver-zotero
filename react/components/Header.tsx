@@ -73,7 +73,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
             console.log(`Found ${results.length} results`);
             
             // Log top 5 results with item details
-            for (let i = 0; i < Math.min(5, results.length); i++) {
+            for (let i = 0; i < Math.min(20, results.length); i++) {
                 const result = results[i];
                 const item = await Zotero.Items.getAsync(result.itemId);
                 console.log(`${i + 1}. [${result.similarity.toFixed(3)}] ${item?.getField('title') || 'Unknown'}`);
