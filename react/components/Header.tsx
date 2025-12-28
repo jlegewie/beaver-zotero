@@ -72,10 +72,23 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
             console.log('Semantic search results:', results);
             console.log(`Found ${results.length} results`);
             
-            // Log top 5 results with item details
-            for (let i = 0; i < Math.min(20, results.length); i++) {
-                const result = results[i];
-                const item = await Zotero.Items.getAsync(result.itemId);
+            // Log top results with item details
+            const topResults = results.slice(0, 20);
+            const itemIds = topResults.map(r => r.itemId);
+            const items = await Zotero.Items.getAsync(itemIds);
+            const validItems = items.filter((item): item is Zotero.Item => item !== null);
+            
+            // Load itemData for title access
+            if (validItems.length > 0) {
+                await Zotero.Items.loadDataTypes(validItems, ["itemData"]);
+            }
+            
+            // Create a map for quick lookup
+            const itemMap = new Map(validItems.map(item => [item.id, item]));
+            
+            for (let i = 0; i < topResults.length; i++) {
+                const result = topResults[i];
+                const item = itemMap.get(result.itemId);
                 console.log(`${i + 1}. [${result.similarity.toFixed(3)}] ${item?.getField('title') || 'Unknown'}`);
             }
         } catch (error) {
