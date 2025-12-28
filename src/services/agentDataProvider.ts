@@ -144,7 +144,6 @@ async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boole
         
         // Check page count limit
         const maxPageCount = getPref('maxPageCount');
-        console.log('maxPageCount', pageCount, maxPageCount);
         
         if (pageCount > maxPageCount) {
             return {
