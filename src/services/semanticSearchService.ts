@@ -1,6 +1,7 @@
 import { BeaverDB, EmbeddingRecord } from './database';
 import { embeddingsService } from './embeddingsService';
 import { logger } from '../utils/logger';
+import { safeIsInTrash } from '../utils/zoteroUtils';
 
 
 /**
@@ -45,6 +46,7 @@ export class semanticSearchService {
     /**
      * Search for papers similar to a query string.
      * Uses retry with exponential backoff for transient failures.
+     * Filters out items that are in the trash.
      * @param query The search query text
      * @param options Search options (topK, minSimilarity, libraryIds)
      * @returns Array of search results sorted by similarity (highest first)
@@ -75,13 +77,19 @@ export class semanticSearchService {
         // 3. Compute similarities
         const results = this.computeSimilarities(queryEmbedding, embeddings, minSimilarity);
 
-        // 4. Sort by similarity (descending) and return top K
+        // 4. Sort by similarity (descending)
         results.sort((a, b) => b.similarity - a.similarity);
-        return results.slice(0, topK);
+
+        // 5. Filter out trashed items and return top K
+        // Fetch extra candidates to account for filtering, then slice to topK
+        const candidates = results.slice(0, topK * 2);
+        const filtered = await this.filterOutTrashedItems(candidates);
+        return filtered.slice(0, topK);
     }
 
     /**
      * Find papers similar to a given paper by its item ID.
+     * Filters out items that are in the trash.
      * @param itemId The Zotero item ID to find similar papers for
      * @param options Search options (topK, minSimilarity, libraryIds)
      * @returns Array of search results sorted by similarity (highest first)
@@ -117,9 +125,77 @@ export class semanticSearchService {
             minSimilarity
         );
 
-        // 4. Sort by similarity (descending) and return top K
+        // 4. Sort by similarity (descending)
         results.sort((a, b) => b.similarity - a.similarity);
-        return results.slice(0, topK);
+
+        // 5. Filter out trashed items and return top K
+        // Fetch extra candidates to account for filtering, then slice to topK
+        const candidates = results.slice(0, topK * 2);
+        const filtered = await this.filterOutTrashedItems(candidates);
+        return filtered.slice(0, topK);
+    }
+
+    /**
+     * Filter out items that are in the trash from search results.
+     * This ensures trashed items don't appear in search results even if their
+     * embeddings haven't been cleaned up yet.
+     * 
+     * Note: isInTrash() requires primaryData to be loaded, and for child items
+     * (attachments, notes, annotations), it also checks the parent's trash status,
+     * so parent data must be loaded too.
+     * 
+     * @param results Array of search results to filter
+     * @returns Filtered array with trashed items removed
+     */
+    private async filterOutTrashedItems(results: SearchResult[]): Promise<SearchResult[]> {
+        if (results.length === 0) {
+            return [];
+        }
+
+        const itemIds = results.map(r => r.itemId);
+        const items = await Zotero.Items.getAsync(itemIds);
+
+        // Filter out null items
+        const validItems = items.filter((item): item is Zotero.Item => item !== null);
+        if (validItems.length === 0) {
+            return [];
+        }
+
+        // Load primaryData for all items
+        await Zotero.Items.loadDataTypes(validItems, ["primaryData"]);
+
+        // Load parent items for child items (needed for isInTrash() to check parent trash status)
+        const parentIds = [...new Set(
+            validItems
+                .filter(item => item.parentID)
+                .map(item => item.parentID as number)
+        )];
+        if (parentIds.length > 0) {
+            const parentItems = await Zotero.Items.getAsync(parentIds);
+            const validParents = parentItems.filter((item): item is Zotero.Item => item !== null);
+            if (validParents.length > 0) {
+                await Zotero.Items.loadDataTypes(validParents, ["primaryData"]);
+            }
+        }
+
+        // Build a set of valid (non-trashed) item IDs using safeIsInTrash
+        const validIds = new Set<number>();
+        for (const item of validItems) {
+            const trashState = safeIsInTrash(item);
+            // Only include if we're certain it's NOT in trash
+            // If trashState is null (unable to determine), exclude to be safe
+            if (trashState === false) {
+                validIds.add(item.id);
+            }
+        }
+
+        const filtered = results.filter(r => validIds.has(r.itemId));
+        
+        if (filtered.length < results.length) {
+            logger(`filterOutTrashedItems: Filtered out ${results.length - filtered.length} trashed items from search results`, 4);
+        }
+
+        return filtered;
     }
 
     /**
