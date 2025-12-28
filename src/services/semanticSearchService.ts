@@ -26,12 +26,12 @@ export interface SearchOptions {
  * Semantic search service for finding similar papers.
  * Reads embeddings directly from SQLite database and computes similarity.
  */
-export class SearchService {
+export class semanticSearchService {
     private db: BeaverDB;
     private dimensions: number;
 
     /**
-     * Creates a new SearchService instance
+     * Creates a new semanticSearchService instance
      * @param db The BeaverDB instance for accessing embeddings
      * @param dimensions Embedding dimensions (256 or 512, default: 512)
      */
