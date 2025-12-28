@@ -17,6 +17,12 @@ import { store } from "../store";
 const EVENT_DEBOUNCE_MS = 4000; // Same as useZoteroSync
 
 /**
+ * Module-level variable to track the Zotero notifier observer ID.
+ * This persists across hot-reloads to ensure proper cleanup.
+ */
+let moduleNotifierId: string | null = null;
+
+/**
  * Interface for collected embedding index events
  */
 interface CollectedEvents {
@@ -44,8 +50,6 @@ export function useEmbeddingIndex() {
     const setIndexStatus = useSetAtom(setEmbeddingIndexStatusAtom);
     const updateProgress = useSetAtom(updateEmbeddingIndexProgressAtom);
 
-    // Ref to prevent multiple registrations
-    const zoteroNotifierIdRef = useRef<string | null>(null);
 
     // Ref for collected events
     const eventsRef = useRef<CollectedEvents>({
@@ -390,6 +394,11 @@ export function useEmbeddingIndex() {
 
         logger("useEmbeddingIndex: Setting up embedding index", 3);
 
+        let isMounted = true;
+
+        // Track the observer ID for this specific hook instance to prevent race conditions during cleanup
+        let myObserverId: string | null = null;
+
         // Create a set for efficient library lookup in event handling
         const syncedLibrarySet = new Set(syncLibraryIds);
 
@@ -397,6 +406,19 @@ export function useEmbeddingIndex() {
         const setupObserver = () => {
             // Don't set up observer if no libraries are synced
             if (syncLibraryIds.length === 0) return;
+
+            // Unregister any existing observer before registering a new one
+            // This handles hot-reload scenarios where cleanup may not have run
+            if (moduleNotifierId) {
+                try {
+                    Zotero.Notifier.unregisterObserver(moduleNotifierId);
+                    logger("useEmbeddingIndex: Unregistered stale observer before re-registering", 4);
+                } catch (e) {
+                    // Ignore errors if observer was already unregistered
+                }
+                moduleNotifierId = null;
+            }
+
             const observer = {
                 notify: async function(event: string, type: string, ids: number[], extraData: any) {
                     // Only handle item events
@@ -441,7 +463,8 @@ export function useEmbeddingIndex() {
             // @ts-ignore Zotero.Notifier.Notify is defined
             } as Zotero.Notifier.Notify;
 
-            zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item'], 'beaver-embedding-index');
+            moduleNotifierId = Zotero.Notifier.registerObserver(observer, ['item'], 'beaver-embedding-index');
+            myObserverId = moduleNotifierId;
         };
 
         // Initialize indexing
@@ -454,12 +477,12 @@ export function useEmbeddingIndex() {
                 await performInitialIndexing(syncLibraryIds);
 
                 // Setup observer after initial indexing
-                setupObserver();
+                if (isMounted) setupObserver();
 
             } catch (error) {
                 logger(`useEmbeddingIndex: Initialization failed: ${(error as Error).message}`, 1);
                 Zotero.logError(error as Error);
-                setupObserver(); // Still set up observer even if initial indexing fails
+                if (isMounted) setupObserver(); // Still set up observer even if initial indexing fails
             }
         };
 
@@ -467,12 +490,13 @@ export function useEmbeddingIndex() {
 
         // Cleanup
         return () => {
+            isMounted = false;
             logger("useEmbeddingIndex: Cleaning up embedding index", 3);
 
             // Unregister observer
-            if (zoteroNotifierIdRef.current) {
-                Zotero.Notifier.unregisterObserver(zoteroNotifierIdRef.current);
-                zoteroNotifierIdRef.current = null;
+            if (moduleNotifierId && moduleNotifierId === myObserverId) {
+                Zotero.Notifier.unregisterObserver(myObserverId);
+                moduleNotifierId = null;
             }
 
             // Clear pending timer

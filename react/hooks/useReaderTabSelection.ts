@@ -14,6 +14,12 @@ import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction, AgentAct
 import { getItemValidationAtom } from '../atoms/itemValidation';
 
 /**
+ * Module-level variable to track the Zotero notifier observer ID.
+ * This persists across hot-reloads to ensure proper cleanup.
+ */
+let moduleReaderTabNotifierId: string | null = null;
+
+/**
  * Manages text selection listening for the currently active Zotero reader tab.
  * This hook should only be mounted when the reader sidebar is visible.
  * It initializes selection state, listens for changes, and handles switching
@@ -32,7 +38,6 @@ export function useReaderTabSelection() {
 
     // Refs to store cleanup functions, the current reader instance, and mounted state
     const selectionCleanupRef = useRef<(() => void) | null>(null);
-    const zoteroNotifierIdRef = useRef<string | null>(null);
     const currentReaderIdRef = useRef<number | null>(null);
     const currentReaderRef = useRef<ZoteroReader | null>(null);
 
@@ -160,15 +165,17 @@ export function useReaderTabSelection() {
         if (!isAuthenticated || !hasAuthorized || !isDeviceAuthorized) return;
         logger("useReaderTabSelection: Hook mounted");
 
+        let isMounted = true;
+
         // Initial setup: Get the current reader and set it up
         const initializeReader = async () => {
             const initialReader = getCurrentReader(mainWindow);
             if (initialReader) {
                 logger(`useReaderTabSelection: Initial reader detected (itemID: ${initialReader.itemID})`);
-                await setupReader(initialReader);
+                if (isMounted) await setupReader(initialReader);
             } else {
                 logger("useReaderTabSelection: No active reader on mount.");
-                setReaderTextSelection(null); // Ensure selection is null if no reader
+                if (isMounted) setReaderTextSelection(null); // Ensure selection is null if no reader
             }
         };
         initializeReader().catch(error => {
@@ -178,6 +185,8 @@ export function useReaderTabSelection() {
         // Set up tab change listener
         const readerObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
             notify: async function(event: _ZoteroTypes.Notifier.Event, type: _ZoteroTypes.Notifier.Type, ids: string[] | number[], extraData: any) {
+                if (!isMounted) return;
+
                 // Tab change event
                 if (type === 'tab' && event === 'select') {
                     const selectedTab = mainWindow.Zotero_Tabs._tabs.find(tab => tab.id === ids[0]);
@@ -252,12 +261,26 @@ export function useReaderTabSelection() {
             }
         };
 
+        // Unregister any existing observer before registering a new one
+        // This handles hot-reload scenarios where cleanup may not have run
+        if (moduleReaderTabNotifierId) {
+            try {
+                Zotero.Notifier.unregisterObserver(moduleReaderTabNotifierId);
+                logger("useReaderTabSelection: Unregistered stale observer before re-registering", 4);
+            } catch (e) {
+                // Ignore errors if observer was already unregistered
+            }
+            moduleReaderTabNotifierId = null;
+        }
+
         logger("useReaderTabSelection: Registering tab selection observer");
         
-        zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(readerObserver, ['tab', 'item'], 'beaver-readerSidebarTabObserver');
+        const myObserverId = Zotero.Notifier.registerObserver(readerObserver, ['tab', 'item'], 'beaver-readerSidebarTabObserver');
+        moduleReaderTabNotifierId = myObserverId;
 
         // Cleanup function on unmount
         return () => {
+            isMounted = false;
             logger("useReaderTabSelection: Hook unmounting. Cleaning up listeners and observer.");
             // Clear reader item key
             setReaderAttachment(null);
@@ -267,14 +290,14 @@ export function useReaderTabSelection() {
                 selectionCleanupRef.current();
                 selectionCleanupRef.current = null;
             }
-            if (zoteroNotifierIdRef.current) {
+            if (moduleReaderTabNotifierId && moduleReaderTabNotifierId === myObserverId) {
                 logger("useReaderTabSelection: Unregistering tab observer.");
                 try {
-                    Zotero.Notifier.unregisterObserver(zoteroNotifierIdRef.current);
+                    Zotero.Notifier.unregisterObserver(myObserverId);
                 } catch (e) {
                     logger(`useReaderTabSelection: Error during unregisterObserver: ${e}`);
                 }
-                zoteroNotifierIdRef.current = null;
+                moduleReaderTabNotifierId = null;
             }
             
             // Stash reader instance before clearing refs
