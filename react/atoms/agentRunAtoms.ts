@@ -569,8 +569,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     type: 'info',
                     title: 'Indexing in progress',
                     text: `Library indexing is not yet complete. Some features are limited until indexing finishes. Learn more <a href="${process.env.WEBAPP_BASE_URL}/docs/indexing" className="text-link" target="_blank">here</a>.`,
-                    expire: false,
-                    duration: 6000
+                    expire: true,
+                    duration: 10000
                 });
             }
         },
