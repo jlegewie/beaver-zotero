@@ -82,6 +82,16 @@ export function useEmbeddingIndex() {
     };
 
     /**
+     * Format duration in milliseconds to a human-readable string
+     */
+    const formatDuration = (ms: number): string => {
+        if (ms < 1000) {
+            return `${Math.round(ms)}ms`;
+        }
+        return `${(ms / 1000).toFixed(2)}s`;
+    };
+
+    /**
      * Perform initial indexing of synced libraries only.
      * First cleans up embeddings from libraries no longer in sync.
      * Uses optimized diff check to skip full scans when nothing changed.
@@ -90,6 +100,7 @@ export function useEmbeddingIndex() {
      * @param libraryIds Array of library IDs to index (from syncLibraryIds)
      */
     const performInitialIndexing = async (libraryIds: number[]) => {
+        const startTime = Date.now();
         const indexer = getIndexer();
         if (!indexer) return;
 
@@ -106,7 +117,8 @@ export function useEmbeddingIndex() {
 
             // If no libraries to sync, we're done after cleanup
             if (libraryIds.length === 0) {
-                logger("useEmbeddingIndex: No libraries to index (syncLibraryIds is empty)", 3);
+                const duration = Date.now() - startTime;
+                logger(`useEmbeddingIndex: No libraries to index (syncLibraryIds is empty) - completed in ${formatDuration(duration)}`, 3);
                 setIndexStatus({ status: 'idle', phase: 'initial' });
                 return;
             }
@@ -144,7 +156,8 @@ export function useEmbeddingIndex() {
 
             // If no libraries need processing and no retries, we're done
             if (librariesToProcess.length === 0 && itemsReadyForRetry.length === 0) {
-                logger("useEmbeddingIndex: All libraries up to date, no retries needed", 3);
+                const duration = Date.now() - startTime;
+                logger(`useEmbeddingIndex: All libraries up to date, no retries needed - completed in ${formatDuration(duration)}`, 3);
                 setIndexStatus({ status: 'idle', phase: 'incremental' });
                 return;
             }
@@ -260,11 +273,13 @@ export function useEmbeddingIndex() {
                 logger(`useEmbeddingIndex: Failed items summary: ${failedStats.totalFailed} total, ${failedStats.readyForRetry} ready for retry, ${failedStats.permanentlyFailed} permanently failed`, 3);
             }
 
-            logger("useEmbeddingIndex: Initial indexing complete", 3);
+            const duration = Date.now() - startTime;
+            logger(`useEmbeddingIndex: Initial indexing complete - took ${formatDuration(duration)}`, 3);
             setIndexStatus({ status: 'idle', phase: 'incremental' });
 
         } catch (error) {
-            logger(`useEmbeddingIndex: Initial indexing failed: ${(error as Error).message}`, 1);
+            const duration = Date.now() - startTime;
+            logger(`useEmbeddingIndex: Initial indexing failed after ${formatDuration(duration)}: ${(error as Error).message}`, 1);
             Zotero.logError(error as Error);
             setIndexStatus({ 
                 status: 'error', 
