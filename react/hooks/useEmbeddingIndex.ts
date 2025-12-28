@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom } from "../atoms/auth";
-import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from "../atoms/profile";
+import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom, syncLibraryIdsAtom } from "../atoms/profile";
 import { 
     embeddingIndexStateAtom, 
     setEmbeddingIndexStatusAtom, 
@@ -28,14 +28,17 @@ interface CollectedEvents {
 
 /**
  * Hook that manages embedding index for semantic search:
- * - Performs initial indexing on mount (all libraries, sorted by recent modifications)
- * - Sets up listeners for item changes with debouncing
+ * - Only indexes libraries in syncLibraryIds
+ * - Cleans up embeddings from libraries removed from sync
+ * - Performs initial indexing on mount for synced libraries
+ * - Sets up listeners for item changes with debouncing (filtered to synced libraries)
  * - Updates embeddings incrementally based on content hash changes
  */
 export function useEmbeddingIndex() {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isAuthorized = useAtomValue(hasAuthorizedAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
+    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
 
     // Atoms for state management
     const setIndexStatus = useSetAtom(setEmbeddingIndexStatusAtom);
@@ -79,12 +82,14 @@ export function useEmbeddingIndex() {
     };
 
     /**
-     * Perform initial indexing of all libraries.
+     * Perform initial indexing of synced libraries only.
+     * First cleans up embeddings from libraries no longer in sync.
      * Uses optimized diff check to skip full scans when nothing changed.
      * Falls back to full diff when changes are detected or on periodic safety check.
      * Also retries previously failed items that are ready for retry.
+     * @param libraryIds Array of library IDs to index (from syncLibraryIds)
      */
-    const performInitialIndexing = async () => {
+    const performInitialIndexing = async (libraryIds: number[]) => {
         const indexer = getIndexer();
         if (!indexer) return;
 
@@ -92,9 +97,21 @@ export function useEmbeddingIndex() {
         setIndexStatus({ status: 'indexing', phase: 'initial' });
 
         try {
-            // Get libraries sorted (user library first)
-            const libraryIds = indexer.getLibrariesSorted();
-            logger(`useEmbeddingIndex: Found ${libraryIds.length} libraries to check`, 3);
+            // First, clean up embeddings from libraries no longer in sync
+            // This runs even when libraryIds is empty to remove all stale embeddings
+            const cleanup = await indexer.cleanupUnsyncedLibraries(libraryIds);
+            if (cleanup.librariesRemoved > 0) {
+                logger(`useEmbeddingIndex: Cleaned up ${cleanup.embeddingsRemoved} embeddings from ${cleanup.librariesRemoved} unsynced libraries`, 3);
+            }
+
+            // If no libraries to sync, we're done after cleanup
+            if (libraryIds.length === 0) {
+                logger("useEmbeddingIndex: No libraries to index (syncLibraryIds is empty)", 3);
+                setIndexStatus({ status: 'idle', phase: 'initial' });
+                return;
+            }
+
+            logger(`useEmbeddingIndex: Found ${libraryIds.length} synced libraries to check`, 3);
 
             // First pass: check which libraries need a full diff
             // This is fast - just SQL queries for MAX(date) and COUNT
@@ -115,10 +132,14 @@ export function useEmbeddingIndex() {
                 }
             }
 
-            // Collect items ready for retry across all libraries
-            const itemsReadyForRetry = await indexer.getItemsReadyForRetry();
+            // Collect items ready for retry across synced libraries only
+            const itemsReadyForRetry: number[] = [];
+            for (const libraryId of libraryIds) {
+                const retryItems = await indexer.getItemsReadyForRetry(libraryId);
+                itemsReadyForRetry.push(...retryItems);
+            }
             if (itemsReadyForRetry.length > 0) {
-                logger(`useEmbeddingIndex: Found ${itemsReadyForRetry.length} items ready for retry`, 3);
+                logger(`useEmbeddingIndex: Found ${itemsReadyForRetry.length} items ready for retry across synced libraries`, 3);
             }
 
             // If no libraries need processing and no retries, we're done
@@ -346,15 +367,20 @@ export function useEmbeddingIndex() {
     };
 
     useEffect(() => {
-        // Guards
+        // Guards - auth/authorization required
         if (!isAuthenticated) return;
         if (!isAuthorized) return;
         if (!isDeviceAuthorized) return;
 
         logger("useEmbeddingIndex: Setting up embedding index", 3);
 
-        // Setup observer
+        // Create a set for efficient library lookup in event handling
+        const syncedLibrarySet = new Set(syncLibraryIds);
+
+        // Setup observer (only if we have libraries to sync)
         const setupObserver = () => {
+            // Don't set up observer if no libraries are synced
+            if (syncLibraryIds.length === 0) return;
             const observer = {
                 notify: async function(event: string, type: string, ids: number[], extraData: any) {
                     // Only handle item events
@@ -362,24 +388,34 @@ export function useEmbeddingIndex() {
 
                     let shouldSchedule = false;
 
-                    // Handle add/modify events
+                    // Handle add/modify events - filter to synced libraries
                     if (event === 'add' || event === 'modify') {
-                        for (const id of ids) {
-                            // Remove from delete set if it was there (item was restored)
-                            eventsRef.current.deletedItemIds.delete(id);
-                            eventsRef.current.modifiedItemIds.add(id);
+                        // Load items to check their library
+                        const items = await Zotero.Items.getAsync(ids);
+                        for (const item of items) {
+                            if (item && syncedLibrarySet.has(item.libraryID)) {
+                                // Remove from delete set if it was there (item was restored)
+                                eventsRef.current.deletedItemIds.delete(item.id);
+                                eventsRef.current.modifiedItemIds.add(item.id);
+                                shouldSchedule = true;
+                            }
                         }
-                        shouldSchedule = true;
                     }
 
-                    // Handle delete events
+                    // Handle delete events - use extraData to get libraryID
                     if (event === 'delete') {
                         for (const id of ids) {
-                            // Remove from modified set
-                            eventsRef.current.modifiedItemIds.delete(id);
-                            eventsRef.current.deletedItemIds.add(id);
+                            // For delete events, item no longer exists - check extraData for libraryID
+                            if (extraData && extraData[id]) {
+                                const { libraryID } = extraData[id];
+                                if (libraryID && syncedLibrarySet.has(libraryID)) {
+                                    // Remove from modified set
+                                    eventsRef.current.modifiedItemIds.delete(id);
+                                    eventsRef.current.deletedItemIds.add(id);
+                                    shouldSchedule = true;
+                                }
+                            }
                         }
-                        shouldSchedule = true;
                     }
 
                     if (shouldSchedule) {
@@ -398,8 +434,8 @@ export function useEmbeddingIndex() {
                 // Wait a moment for DB to be ready
                 await new Promise(resolve => setTimeout(resolve, 500));
 
-                // Perform initial indexing
-                await performInitialIndexing();
+                // Perform initial indexing for synced libraries only
+                await performInitialIndexing(syncLibraryIds);
 
                 // Setup observer after initial indexing
                 setupObserver();
@@ -447,6 +483,6 @@ export function useEmbeddingIndex() {
             // Clear indexer reference
             indexerRef.current = null;
         };
-    }, [isAuthenticated, isAuthorized, isDeviceAuthorized]);
+    }, [isAuthenticated, isAuthorized, isDeviceAuthorized, syncLibraryIds]);
 }
 

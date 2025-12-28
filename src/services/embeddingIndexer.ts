@@ -856,6 +856,49 @@ export class EmbeddingIndexer {
     }
 
     /**
+     * Clean up embeddings and failed records for libraries that are no longer synced.
+     * This should be called during initial indexing to handle library sync changes.
+     * @param syncedLibraryIds Array of library IDs that should be synced
+     * @returns Object with number of libraries and embeddings cleaned up
+     */
+    async cleanupUnsyncedLibraries(syncedLibraryIds: number[]): Promise<{ 
+        librariesRemoved: number; 
+        embeddingsRemoved: number;
+    }> {
+        // Get all library IDs that have embeddings
+        const embeddedLibraryIds = await this.db.getEmbeddedLibraryIds();
+        
+        // Find libraries that have embeddings but are not in sync list
+        const syncedSet = new Set(syncedLibraryIds);
+        const librariesToRemove = embeddedLibraryIds.filter(id => !syncedSet.has(id));
+        
+        if (librariesToRemove.length === 0) {
+            return { librariesRemoved: 0, embeddingsRemoved: 0 };
+        }
+        
+        let totalEmbeddingsRemoved = 0;
+        
+        for (const libraryId of librariesToRemove) {
+            // Get count before deletion for logging
+            const count = await this.db.getEmbeddingCount(libraryId);
+            
+            // Delete embeddings for this library
+            await this.db.deleteEmbeddingsByLibrary(libraryId);
+            
+            // Also clean up the index state for this library
+            await this.db.deleteEmbeddingIndexState(libraryId);
+            
+            totalEmbeddingsRemoved += count;
+            logger(`cleanupUnsyncedLibraries: Removed ${count} embeddings and index state for unsynced library ${libraryId}`, 3);
+        }
+        
+        return { 
+            librariesRemoved: librariesToRemove.length, 
+            embeddingsRemoved: totalEmbeddingsRemoved 
+        };
+    }
+
+    /**
      * Get indexing statistics for a library.
      * @param libraryId Optional library ID (all libraries if not specified)
      */
