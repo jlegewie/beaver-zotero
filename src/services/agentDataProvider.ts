@@ -1173,11 +1173,46 @@ export async function handleItemSearchByTopicRequest(
                 }
             }
         }
+    } else {
+        // Default to synced libraries if no filter provided
+        const syncLibraryIds = store.get(syncLibraryIdsAtom);
+        libraryIds.push(...syncLibraryIds);
+    }
+
+    // Convert collections_filter names to keys if needed
+    const collectionKeys: string[] = [];
+    if (request.collections_filter && request.collections_filter.length > 0) {
+        for (const collectionFilter of request.collections_filter) {
+            if (typeof collectionFilter === 'string') {
+                // Could be a key or a name
+                // Check if it looks like a Zotero key (8 alphanumeric characters)
+                if (/^[A-Z0-9]{8}$/i.test(collectionFilter)) {
+                    collectionKeys.push(collectionFilter);
+                } else {
+                    // Treat as name, search for matching collections across libraries
+                    for (const libraryId of libraryIds) {
+                        const collections = Zotero.Collections.getByLibrary(libraryId);
+                        for (const collection of collections) {
+                            if (collection.name.toLowerCase().includes(collectionFilter.toLowerCase())) {
+                                collectionKeys.push(collection.key);
+                            }
+                        }
+                    }
+                }
+            } else if (typeof collectionFilter === 'number') {
+                // It's a collection ID - convert to key
+                const collection = Zotero.Collections.get(collectionFilter);
+                if (collection) {
+                    collectionKeys.push(collection.key);
+                }
+            }
+        }
     }
 
     logger('handleItemSearchByTopicRequest: Searching by topic', {
         topic_query: request.topic_query,
         libraryIds: libraryIds.length > 0 ? libraryIds : 'all',
+        collectionKeys: collectionKeys.length > 0 ? collectionKeys : 'all',
         limit: request.limit,
     }, 1);
 
@@ -1187,7 +1222,7 @@ export async function handleItemSearchByTopicRequest(
     let searchResults: SearchResult[];
     try {
         searchResults = await searchService.search(request.topic_query, {
-            topK: request.limit * 2, // Fetch extra to account for filtering
+            topK: request.limit * 4, // Fetch extra to account for filtering
             minSimilarity: 0.3,
             libraryIds: libraryIds.length > 0 ? libraryIds : undefined,
         });
@@ -1280,6 +1315,20 @@ export async function handleItemSearchByTopicRequest(
                 itemTags.includes(tag.toLowerCase())
             );
             if (!matchesTag) continue;
+        }
+
+        // Collections filter
+        if (collectionKeys.length > 0) {
+            const itemCollections = item.getCollections();
+            const itemCollectionKeys = itemCollections.map(collectionId => {
+                const collection = Zotero.Collections.get(collectionId);
+                return collection ? collection.key : null;
+            }).filter((key): key is string => key !== null);
+            
+            const matchesCollection = collectionKeys.some(key => 
+                itemCollectionKeys.includes(key)
+            );
+            if (!matchesCollection) continue;
         }
 
         // Validate item is regular item and not in trash
