@@ -8,7 +8,7 @@ import { logger } from "../../../src/utils/logger";
 import { setPref } from "../../../src/utils/prefs";
 import { getZoteroUserIdentifier } from "../../../src/utils/zoteroUtils";
 import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
-import { OnboardingHeader, OnboardingFooter, EmbeddingIndexProgress } from "./onboarding";
+import { OnboardingHeader, OnboardingFooter, EmbeddingIndexProgress, ExamplePrompts } from "./onboarding";
 import ConsentToggle from "../preferences/ConsentToggle";
 import { ZapIcon } from "../icons/icons";
 
@@ -143,12 +143,12 @@ const FreeOnboardingPage: React.FC = () => {
                 <div className="display-flex flex-col gap-4 flex-1">
 
                     {/* Speed note - shown before starting */}
-                    {!hasStarted && (
+                    {/* {!hasStarted && (
                         <div className="display-flex flex-row gap-2 items-center p-3 rounded-md bg-quinary">
                             <ZapIcon size={16} className="font-color-secondary" />
                             <span className="font-color-secondary">Indexing takes less than a minute</span>
                         </div>
-                    )}
+                    )} */}
 
                     {/* Indexing progress - shown after starting */}
                     {hasStarted && (
@@ -158,8 +158,10 @@ const FreeOnboardingPage: React.FC = () => {
                     {/* Upgrade card */}
                     {/* <UpgradeCard /> */}
 
-                    {/* Spacer */}
-                    <div className="flex-1" />
+                    {/* Spacer with example prompts */}
+                    <div className="flex-1 display-flex flex-col mt-2">
+                        <ExamplePrompts />
+                    </div>
 
                     {/* Consent toggle */}
                     <div className="display-flex flex-col gap-4">
