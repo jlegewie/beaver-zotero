@@ -242,8 +242,8 @@ export interface WSExternalReferenceCheckResponse {
     results: ExternalReferenceCheckResult[];
 }
 
-/** Zotero item search result with attachments (unified format) */
-export interface ZoteroItemSearchResultItem {
+/** Item search result with attachments (unified format) */
+export interface ItemSearchFrontendResultItem {
     item: ItemData;
     attachments: AttachmentDataWithStatus[];
     /** Semantic similarity score (0-1) for topic searches, undefined for metadata searches */
@@ -251,8 +251,8 @@ export interface ZoteroItemSearchResultItem {
 }
 
 /** Request from backend to search Zotero library by metadata */
-export interface WSZoteroItemSearchRequest extends WSBaseEvent {
-    event: 'zotero_item_search_request';
+export interface WSItemSearchByMetadataRequest extends WSBaseEvent {
+    event: 'item_search_by_metadata_request';
     request_id: string;
 
     // Query parameters (at least one required, combined with AND)
@@ -281,16 +281,16 @@ export interface WSZoteroItemSearchRequest extends WSBaseEvent {
     limit: number;
 }
 
-/** Response to zotero item metadata search request */
-export interface WSZoteroItemSearchResponse {
-    type: 'zotero_item_search';
+/** Response to item metadata search request */
+export interface WSItemSearchByMetadataResponse {
+    type: 'item_search_by_metadata';
     request_id: string;
-    items: ZoteroItemSearchResultItem[];
+    items: ItemSearchFrontendResultItem[];
 }
 
 /** Request from backend to search Zotero library by topic using semantic search */
-export interface WSZoteroItemTopicSearchRequest extends WSBaseEvent {
-    event: 'zotero_item_topic_search_request';
+export interface WSItemSearchByTopicRequest extends WSBaseEvent {
+    event: 'item_search_by_topic_request';
     request_id: string;
 
     // Query parameter (required)
@@ -315,11 +315,11 @@ export interface WSZoteroItemTopicSearchRequest extends WSBaseEvent {
     limit: number;
 }
 
-/** Response to zotero item topic search request */
-export interface WSZoteroItemTopicSearchResponse {
-    type: 'zotero_item_topic_search';
+/** Response to item topic search request */
+export interface WSItemSearchByTopicResponse {
+    type: 'item_search_by_topic';
     request_id: string;
-    items: ZoteroItemSearchResultItem[];
+    items: ItemSearchFrontendResultItem[];
 }
 
 /** Request from backend to fetch Zotero item/attachment data */
@@ -420,8 +420,8 @@ export type WSEvent =
     | WSZoteroAttachmentPageImagesRequest
     | WSExternalReferenceCheckRequest
     | WSZoteroDataRequest
-    | WSZoteroItemSearchRequest
-    | WSZoteroItemTopicSearchRequest;
+    | WSItemSearchByMetadataRequest
+    | WSItemSearchByTopicRequest;
 
 
 // =============================================================================
