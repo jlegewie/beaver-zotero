@@ -114,4 +114,3 @@ const EmbeddingIndexProgress: React.FC<EmbeddingIndexProgressProps> = ({ compact
 };
 
 export default EmbeddingIndexProgress;
-
