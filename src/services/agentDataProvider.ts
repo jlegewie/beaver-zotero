@@ -961,7 +961,8 @@ export async function handleItemSearchByMetadataRequest(
             }
         }
     } else {
-        libraryIds.push(...Zotero.Libraries.getAll().map(lib => lib.libraryID));
+        const syncLibraryIds = store.get(syncLibraryIdsAtom);
+        libraryIds.push(...syncLibraryIds);
     }
 
     // Convert collections_filter names to keys if needed
