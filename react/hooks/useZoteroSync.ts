@@ -178,6 +178,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         if (!isAuthorized) return;
         if (!isDeviceAuthorized) return;
         if (syncLibraryIds.length === 0) return;
+        if (!store.get(planFeaturesAtom).databaseSync) return;
 
         let isMounted = true;
 
