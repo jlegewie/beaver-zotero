@@ -60,7 +60,7 @@ const ExamplePrompts: React.FC = () => {
                         transform: translateY(10px);
                     }
                     to {
-                        opacity: 0.6;
+                        opacity: 0.85;
                         transform: translateY(0);
                     }
                 }
