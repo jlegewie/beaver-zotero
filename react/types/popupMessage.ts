@@ -29,4 +29,5 @@ export interface PopupMessage {
     featureList?: PopupMessageFeature[];
     learnMoreUrl?: string;
     learnMoreLabel?: string;
+    footer?: string;
 }
