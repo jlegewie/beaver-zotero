@@ -11,7 +11,8 @@ import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
 import { OnboardingHeader, OnboardingFooter, EmbeddingIndexProgress, ExamplePrompts } from "./onboarding";
 import ConsentToggle from "../preferences/ConsentToggle";
 import PreferenceToggle from "../preferences/PreferenceToggle";
-import { ZapIcon } from "../icons/icons";
+import { LockIcon, Icon } from "../icons/icons";
+import EmailToggle from "../preferences/EmailToggle";
 
 /**
  * Free onboarding flow - single screen experience
@@ -128,7 +129,18 @@ const FreeOnboardingPage: React.FC = () => {
     };
 
     const getHeaderMessage = () => {
-        return "Your AI research assistant that lives in Zotero. Chat with your entire library, discover new research and much more.";
+        return <div className="display-flex flex-col gap-3 py-2 mt-2">
+            <div>AI research assistant that lives in Zotero. Chat with your entire library, discover new research and much more.</div>
+            <div className="display-flex flex-row gap-2 items-start">
+                <Icon icon={LockIcon} className="mt-1" />
+                {/* <span className="font-color-secondary">Privacy Notice:</span> */}
+                {/* Your Zotero library stays local. Chats stored securely and deletable anytime. */}
+                {/* Privacy-first: Your library data remains local and is never stored on our servers. Metadata is processed temporarily for indexing only.
+                Chat history is saved securely to your account and is fully deletable at any time. */}
+                Privacy-first: We never store your library data. Metadata is processed temporarily server-side for local indexing only.
+                Chat history is saved to your account and is fully deletable.
+            </div>
+        </div>;
     };
 
     // Determine button state

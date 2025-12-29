@@ -2,7 +2,7 @@ import React from "react";
 
 interface OnboardingHeaderProps {
     title?: string;
-    message: string;
+    message: string | React.ReactNode;
 }
 
 /**
@@ -23,9 +23,13 @@ const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({
                 />
                 <div className="text-2xl font-semibold mb-2">{title}</div>
             </div>
-            <p className="text-base font-color-secondary" style={{ whiteSpace: 'pre-line' }}>
-                {message}
-            </p>
+            {typeof message === 'string' ? (
+                <p className="text-base font-color-secondary" style={{ whiteSpace: 'pre-line' }}>
+                    {message}
+                </p>
+            ) : (
+                message
+            )}
         </div>
     );
 };
