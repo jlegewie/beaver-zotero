@@ -8,6 +8,7 @@ interface PreferenceToggleProps {
     disabled?: boolean;
     error?: boolean;
     title: string;
+    subtitle?: string;
     className?: string;
     description: string;
     tooltip?: string;
@@ -24,6 +25,7 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
     disabled = false,
     error = false,
     title,
+    subtitle,
     className = '',
     description,
     tooltip,
@@ -74,6 +76,11 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
                             <div className={`font-color-primary text-base ${className || ''}`}>
                                 {title}
                             </div>
+                            {subtitle && (
+                                <div className="font-color-tertiary">
+                                    {subtitle}
+                                </div>
+                            )}
                             {!disabled && !error && showRecommended && (
                                 <div className="font-color-secondary scale-90 px-15 py-05 mt-015 text-sm rounded-md bg-quinary border-quinary">
                                     {recommendedText}
