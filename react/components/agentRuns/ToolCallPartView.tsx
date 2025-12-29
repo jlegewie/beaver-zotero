@@ -4,7 +4,6 @@ import { AgentRunStatus, ToolCallPart } from '../../agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
 import { getToolCallLabel } from '../../agents/toolLabels';
 import { ToolResultView } from './ToolResultView';
-import Button from '../ui/Button';
 import {
     Spinner,
     AlertIcon,
@@ -121,7 +120,6 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         return getToolIcon(part.tool_name);
     };
 
-    const isButtonDisabled = isInProgress || (hasError && !hasResult);
     const hasExpandedResult = effectiveExpanded && canExpand;
     const isShimmering = isInProgress && !hasResult && runStatus === 'in_progress';
 
@@ -142,14 +140,13 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
             >
-                <Button
-                    variant="ghost-secondary"
+                <button
+                    type="button"
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left ${canExpand ? 'cursor-pointer' : ''}`}
+                    style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
+                    aria-expanded={effectiveExpanded}
+                    aria-controls={`tool-result-${part.tool_call_id}`}
                     onClick={toggleExpanded}
-                    className={`
-                        text-base scale-105 w-full min-w-0 align-start text-left
-                        ${isButtonDisabled && !hasResult ? 'disabled-but-styled' : ''}
-                    `}
-                    style={{ padding: '2px 6px', maxHeight: 'none' }}
                     disabled={!canExpand}
                 >
                     <div className="display-flex flex-row px-3 gap-2">
@@ -161,12 +158,15 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                             {label}
                         </div>
                     </div>
-                </Button>
+                </button>
+                <div className="flex-1"/>
             </div>
 
             {/* Expanded result view */}
             {hasExpandedResult && (
-                <ToolResultView toolcall={part} result={result} />
+                <div id={`tool-result-${part.tool_call_id}`}>
+                    <ToolResultView toolcall={part} result={result} />
+                </div>
             )}
         </div>
     );

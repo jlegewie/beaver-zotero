@@ -4,11 +4,14 @@ import { allRunsAtom } from "../../agents/atoms";
 import { AgentRunView } from "./AgentRunView";
 import { scrollToBottom } from "../../utils/scrollToBottom";
 import { userScrolledAtom, windowUserScrolledAtom } from "../../atoms/ui";
-import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from "../../atoms/threads";
+import { currentThreadScrollPositionAtom, windowScrollPositionAtom, currentThreadIdAtom } from "../../atoms/threads";
 import { store } from "../../store";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
 
 const BOTTOM_THRESHOLD = 120; // pixels
+const RESTORE_THRESHOLD = 100; // pixels - threshold for restoring scroll position
+const RESTORE_DEBOUNCE_MS = 50; // ms - debounce delay for scroll restoration
+const ANIMATION_LOCKOUT_MS = 400; // ms - time to wait after animation before allowing restore
 
 type ThreadViewProps = {
     /** Optional className for styling */
@@ -23,8 +26,18 @@ type ThreadViewProps = {
  */
 export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
     function ThreadView({ className, isWindow = false }: ThreadViewProps, ref: React.ForwardedRef<HTMLDivElement>) {
+        const win = Zotero.getMainWindow();
         const runs = useAtomValue(allRunsAtom);
         const restoredFromAtomRef = useRef(false);
+        const currentThreadId = useAtomValue(currentThreadIdAtom);
+        const prevThreadIdRef = useRef<string | null>(null);
+        
+        // Track visibility state for ResizeObserver
+        const wasHiddenRef = useRef(true);
+        // Track if we're currently animating scroll
+        const isAnimatingRef = useRef(false);
+        // Debounce timer for restore
+        const restoreDebounceRef = useRef<number | null>(null);
         
         // Select the correct atoms based on whether we're in the separate window
         const scrollPositionAtom = isWindow ? windowScrollPositionAtom : currentThreadScrollPositionAtom;
@@ -37,8 +50,11 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             isWindow
         });
 
-        // Helper function to restore scroll position
-        const restoreScrollPosition = useCallback(() => {
+        /**
+         * Helper function to restore scroll position.
+         * Only restores if there's a significant difference and we're not animating.
+         */
+        const restoreScrollPosition = useCallback((force = false) => {
             const container = scrollContainerRef.current;
             if (!container) {
                 restoredFromAtomRef.current = false;
@@ -50,13 +66,21 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 restoredFromAtomRef.current = false;
                 return;
             }
+            
+            // Skip if currently animating (unless forced)
+            if (isAnimatingRef.current && !force) {
+                return;
+            }
 
             const targetScrollTop = storedScrollTop ?? container.scrollHeight;
             const delta = Math.abs(container.scrollTop - targetScrollTop);
             
+            // Check if this is a thread switch
+            const isThreadSwitch = currentThreadId !== prevThreadIdRef.current;
+
             // Only restore if there's a significant difference (e.g., thread switch)
-            // Small deltas are just normal scroll position updates during streaming
-            if (delta > 50) {
+            // Use a larger threshold to avoid oscillation near boundaries
+            if (delta > RESTORE_THRESHOLD) {
                 restoredFromAtomRef.current = true;
                 container.scrollTop = targetScrollTop;
                 
@@ -70,38 +94,62 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 
                 // For small deltas (thread switch with similar position or streaming updates),
                 // ensure scroll state is false if we're near the bottom.
-                // This prevents stale userScrolled=true from a previous thread from blocking auto-scroll.
-                // We only set to false (never true) to avoid the original regression where
-                // content growth during streaming would incorrectly disable auto-scroll.
-                const { scrollHeight, clientHeight } = container;
-                const distanceFromBottom = scrollHeight - container.scrollTop - clientHeight;
-                if (distanceFromBottom <= BOTTOM_THRESHOLD) {
-                    store.set(scrolledAtom, false);
+                // IMPORTANT: Only do this on thread switch!
+                // If we're just scrolling (user interaction), useAutoScroll handles the atom state.
+                // Overwriting it here would hide the ScrollDownButton when the user scrolls up.
+                if (isThreadSwitch) {
+                    const { scrollHeight, clientHeight } = container;
+                    const distanceFromBottom = scrollHeight - container.scrollTop - clientHeight;
+                    if (distanceFromBottom <= BOTTOM_THRESHOLD) {
+                        store.set(scrolledAtom, false);
+                    }
                 }
             }
-        }, [storedScrollTop, scrolledAtom]);
+        }, [storedScrollTop, scrolledAtom, scrollContainerRef, currentThreadId]);
 
         // Restore scroll position from atom (only for thread switching, not during streaming)
         // Note: userScrolledAtom is managed by useAutoScroll.handleScroll, not here
         useLayoutEffect(() => {
             restoreScrollPosition();
-        }, [restoreScrollPosition]);
+            prevThreadIdRef.current = currentThreadId;
+        }, [restoreScrollPosition, currentThreadId]);
 
-        // Watch for visibility/size changes to restore scroll position when becoming visible
+        // Watch for visibility transitions only (not all resize events)
         useEffect(() => {
             const container = scrollContainerRef.current;
             if (!container) return;
 
-            const observer = new ResizeObserver(() => {
-                // If we became visible, try restoring
-                if (container.clientHeight > 0) {
-                    restoreScrollPosition();
+            const observer = new ResizeObserver((entries) => {
+                const entry = entries[0];
+                if (!entry) return;
+                
+                const isVisible = entry.contentRect.height > 0;
+                const wasHidden = wasHiddenRef.current;
+                
+                // Only restore scroll position when transitioning from hidden to visible
+                // This prevents interference during normal content growth or layout shifts
+                if (wasHidden && isVisible) {
+                    // Debounce to avoid rapid-fire restores during visibility transitions
+                    if (restoreDebounceRef.current !== null) {
+                        win.clearTimeout(restoreDebounceRef.current);
+                    }
+                    restoreDebounceRef.current = win.setTimeout(() => {
+                        restoreDebounceRef.current = null;
+                        restoreScrollPosition();
+                    }, RESTORE_DEBOUNCE_MS);
                 }
+                
+                wasHiddenRef.current = !isVisible;
             });
             
             observer.observe(container);
-            return () => observer.disconnect();
-        }, [restoreScrollPosition]);
+            return () => {
+                observer.disconnect();
+                if (restoreDebounceRef.current !== null) {
+                    win.clearTimeout(restoreDebounceRef.current);
+                }
+            };
+        }, [restoreScrollPosition, win]);
 
         // Scroll to bottom when runs change
         useEffect(() => {
@@ -111,10 +159,31 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             }
 
             if (scrollContainerRef.current && runs.length > 0) {
+                const container = scrollContainerRef.current;
+
+                // Check if we're effectively at the bottom now (e.g. content shrunk due to retry/edit)
+                // If we are within the threshold, we should reset userScrolled to allow auto-scroll.
+                // This handles cases where the user was scrolled up, but the content size reduced 
+                // such that they are now looking at the bottom.
+                const { scrollHeight, clientHeight, scrollTop } = container;
+                const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+                
+                if (distanceFromBottom <= BOTTOM_THRESHOLD) {
+                    store.set(scrolledAtom, false);
+                }
+
+                // Set animation flag to prevent restoreScrollPosition from interfering
+                isAnimatingRef.current = true;
+                
                 // Pass the correct scroll atom for this context
                 scrollToBottom(scrollContainerRef as React.RefObject<HTMLElement>, undefined, scrolledAtom);
+                
+                // Clear animation flag after animation completes (with buffer)
+                win.setTimeout(() => {
+                    isAnimatingRef.current = false;
+                }, ANIMATION_LOCKOUT_MS);
             }
-        }, [runs, scrolledAtom]);
+        }, [runs, scrolledAtom, win]);
 
         if (runs.length === 0) {
             return (
