@@ -1,5 +1,6 @@
 import React from "react";
 import { Icon, InformationCircleIcon } from "../icons/icons";
+import { parseTextWithLinksAndNewlines } from "../../utils/parseTextWithLinksAndNewlines";
 
 interface PreferenceToggleProps {
     checked: boolean;
@@ -7,6 +8,7 @@ interface PreferenceToggleProps {
     disabled?: boolean;
     error?: boolean;
     title: string;
+    className?: string;
     description: string;
     tooltip?: string;
     disabledTooltip?: string;
@@ -22,6 +24,7 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
     disabled = false,
     error = false,
     title,
+    className = '',
     description,
     tooltip,
     disabledTooltip,
@@ -44,7 +47,14 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
     return (
         <div
             className={`display-flex flex-col rounded-md ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
-            onClick={disabled ? undefined : handleToggle}
+            onClick={(e) => {
+                if (disabled) return;
+                // Don't toggle if clicking a link in the description
+                if ((e.target as HTMLElement).tagName.toLowerCase() === 'a' || (e.target as HTMLElement).closest('a')) {
+                    return;
+                }
+                handleToggle();
+            }}
             title={getTooltip()}
         >
             <div className="display-flex flex-row gap-2 items-start">
@@ -58,10 +68,10 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
                     disabled={disabled}
                 />
 
-                <div className="display-flex flex-col gap-05">
-                    <div className="display-flex flex-col items-start">
+                <div className="display-flex flex-col">
+                    <div className="display-flex flex-col items-start gap-05">
                         <div className="display-flex flex-row gap-2 items-center">
-                            <div className="font-color-primary text-base">
+                            <div className={`font-color-primary text-base ${className || ''}`}>
                                 {title}
                             </div>
                             {!disabled && !error && showRecommended && (
@@ -80,7 +90,7 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
                             )}
                         </div>
                         <div className="font-color-secondary text-sm display-flex flex-row items-start gap-05">
-                            {description}
+                            {parseTextWithLinksAndNewlines(description)}
                             {tooltip && <Icon icon={InformationCircleIcon} className="font-color-primary mt-020" />}
                         </div>
                     </div>

@@ -10,6 +10,7 @@ import { getZoteroUserIdentifier } from "../../../src/utils/zoteroUtils";
 import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
 import { OnboardingHeader, OnboardingFooter, EmbeddingIndexProgress, ExamplePrompts } from "./onboarding";
 import ConsentToggle from "../preferences/ConsentToggle";
+import PreferenceToggle from "../preferences/PreferenceToggle";
 import { ZapIcon } from "../icons/icons";
 
 /**
@@ -32,6 +33,7 @@ const FreeOnboardingPage: React.FC = () => {
     const isIndexing = useAtomValue(isEmbeddingIndexingAtom);
 
     // Local state
+    const [agreedToTerms, setAgreedToTerms] = useState<boolean>(false);
     const [consentToShare, setConsentToShare] = useState<boolean>(false);
     const [isAuthorizing, setIsAuthorizing] = useState(false);
     const [hasStarted, setHasStarted] = useState(false);
@@ -48,6 +50,10 @@ const FreeOnboardingPage: React.FC = () => {
 
     const handleConsentChange = (checked: boolean) => {
         setConsentToShare(checked);
+    };
+
+    const handleTermsChange = (checked: boolean) => {
+        setAgreedToTerms(checked);
     };
 
     /**
@@ -128,6 +134,7 @@ const FreeOnboardingPage: React.FC = () => {
     // Determine button state
     const isLoading = isAuthorizing || (hasStarted && isIndexing);
     const buttonLabel = hasStarted ? "Indexing..." : "Get Started";
+    const isButtonDisabled = hasStarted || !agreedToTerms;
 
     return (
         <div 
@@ -166,6 +173,17 @@ const FreeOnboardingPage: React.FC = () => {
                     {/* Consent toggle */}
                     <div className="display-flex flex-col gap-4">
                         <div className="h-1 border-top-quinary" />
+                        
+                        {/* Terms and Privacy Policy Agreement */}
+                        <PreferenceToggle
+                            checked={agreedToTerms}
+                            onChange={handleTermsChange}
+                            disabled={hasStarted}
+                            title="Terms and Privacy Policy"
+                            className="font-medium"
+                            description="I agree to the <a href='https://www.beaverapp.ai/terms' target='_blank' rel='noopener noreferrer'>Terms of Service</a> and <a href='https://www.beaverapp.ai/privacy-policy' target='_blank' rel='noopener noreferrer'>Privacy Policy</a>"
+                        />
+                        
                         <ConsentToggle
                             checked={consentToShare}
                             onChange={handleConsentChange}
@@ -178,9 +196,9 @@ const FreeOnboardingPage: React.FC = () => {
             <OnboardingFooter
                 buttonLabel={buttonLabel}
                 isLoading={isLoading}
-                disabled={hasStarted}
+                disabled={isButtonDisabled}
                 onButtonClick={handleGetStarted}
-                showTerms={true}
+                showTerms={false}
             />
         </div>
     );
