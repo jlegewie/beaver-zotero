@@ -97,7 +97,8 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     const [bestAttachment, setBestAttachment] = useState<Zotero.Item | null>(null);
 
     /**
-     * Handle importing the external reference to Zotero
+     * Handle importing the external reference to Zotero.
+     * Uses the current library/collection context for import.
      */
     const handleImport = useCallback(async () => {
         if (isImporting || isLoading) return;
@@ -106,9 +107,11 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         try {
             logger(`ActionButtons: Importing item "${item.title}"`, 1);
             
+            // createZoteroItem handles library/collection resolution internally
             const newItem = await createZoteroItem(item);
             
-            const libraryId = Zotero.Libraries.userLibraryID;
+            // Use the item's actual library ID (may differ from user library if in group)
+            const libraryId = newItem.libraryID;
             const newZoteroRef = {
                 library_id: libraryId,
                 zotero_key: newItem.key

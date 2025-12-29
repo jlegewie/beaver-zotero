@@ -8,8 +8,8 @@ import {
     TickIcon,
     CancelIcon,
     DocumentValidationIcon,
+    Icon,
 } from '../icons/icons';
-import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import { applyCreateItemData } from '../../utils/addItemActions';
@@ -231,6 +231,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
 
         try {
             // Create the item in Zotero with full post-processing
+            // applyCreateItemData handles library/collection resolution internally
             const result: CreateItemResultData = await applyCreateItemData(action.proposed_data);
 
             logger(`handleApplyItem: created item ${action.id}: ${JSON.stringify(result)}`, 1);
@@ -251,6 +252,15 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                 action_id: action.id,
                 result_data: result
             }]);
+
+            // Select the newly created item in Zotero (single item import)
+            const newItem = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
+            if (newItem) {
+                const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
+                if (ZoteroPane) {
+                    ZoteroPane.selectItem(newItem.id);
+                }
+            }
 
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to create item';
@@ -297,6 +307,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                     batch.map(async (action) => {
                         try {
                             // Create the item in Zotero with full post-processing
+                            // applyCreateItemData handles library/collection resolution internally
                             const result: CreateItemResultData = await applyCreateItemData(action.proposed_data);
                             
                             // Update external reference cache
@@ -347,6 +358,18 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                     ensureItemsSynced(libraryId, keys).catch(err => {
                         logger(`handleApplyAll: Failed to sync items in library ${libraryId}: ${err.message}`, 2);
                     });
+                }
+                
+                // If only one item was imported, select it in Zotero
+                if (successfulResults.length === 1) {
+                    const data = successfulResults[0].result_data as CreateItemResultData;
+                    const newItem = await Zotero.Items.getByLibraryAndKeyAsync(data.library_id, data.zotero_key);
+                    if (newItem) {
+                        const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
+                        if (ZoteroPane) {
+                            ZoteroPane.selectItem(newItem.id);
+                        }
+                    }
                 }
             }
 
@@ -436,24 +459,32 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         >
             {/* Header with button and action icons */}
             <div
-                className={`display-flex flex-row py-15 px-2 ${resultsVisible && hasItemsToShow ? 'border-bottom-quinary' : ''}`}
+                className={`
+                    display-flex flex-row py-15 px-25
+                    ${resultsVisible && hasItemsToShow ? 'border-bottom-quinary' : ''}
+                `}
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
             >
-                <div className="display-flex flex-row flex-1" onClick={toggleResults}>
-                    <Button
-                        variant="ghost-secondary"
-                        icon={getIcon()}
-                        className={`
-                            text-base scale-105
-                            ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
-                        `}
-                        disabled={isButtonDisabled && !canToggleResults}
-                    >
-                        <span className={`mr-1`}>{getButtonText()}</span>
-                    </Button>
-                    <div className="flex-1" />
-                </div>
+                <button
+                    type="button"
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left ${canToggleResults ? 'cursor-pointer' : ''}`}
+                    style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
+                    aria-expanded={resultsVisible}
+                    aria-controls={`agent-actions-content-${groupId}`}
+                    onClick={toggleResults}
+                    disabled={isButtonDisabled && !canToggleResults}
+                >
+                    <div className="display-flex flex-row gap-2">
+                        <div className="flex-1 display-flex mt-010">
+                            <Icon icon={getIcon()} />
+                        </div>
+                        <div className="display-flex">
+                            {getButtonText()}
+                        </div>
+                    </div>
+                </button>
+                <div className="flex-1" />
 
                 {/* Apply/Reject all buttons */}
                 {showApplyButton && !allErrors && (
@@ -480,7 +511,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
 
             {/* Expandable list of individual items */}
             {resultsVisible && hasItemsToShow && (
-                <div className="display-flex flex-col">
+                <div className="display-flex flex-col" id={`agent-actions-content-${groupId}`}>
                     {actions.map((action, index) => (
                         <CreateItemListItem
                             key={action.id}

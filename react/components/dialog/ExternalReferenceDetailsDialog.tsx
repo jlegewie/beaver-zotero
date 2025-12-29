@@ -40,6 +40,7 @@ const ExternalReferenceDetailsDialog: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
         >
             <div className="display-flex flex-row pt-2 px-2">
+                {/* <div className="font-color-secondary px-4">External Reference</div> */}
                 <div className="flex-1" />
                 <IconButton
                     icon={CancelIcon}

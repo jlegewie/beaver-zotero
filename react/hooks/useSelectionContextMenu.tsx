@@ -73,6 +73,42 @@ export default function useSelectionContextMenu(
         };
     }, [isMenuOpen, elementRef]);
     
+    // Handle keyboard copy (Cmd+C on Mac, Ctrl+C on Windows/Linux)
+    useEffect(() => {
+        const element = elementRef.current;
+        if (!element) return;
+        
+        const win = getWindowFromElement(element);
+        const doc = getDocumentFromElement(element);
+        
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Check for Cmd+C (Mac) or Ctrl+C (Windows/Linux)
+            const isCopyShortcut = (e.metaKey || e.ctrlKey) && e.key === 'c';
+            if (!isCopyShortcut) return;
+            
+            // Check if there's selected text within our element
+            const selection = win.getSelection();
+            const text = selection?.toString() || '';
+            
+            if (text.trim().length > 0) {
+                // Check if selection is within our element
+                const anchorNode = selection?.anchorNode;
+                if (anchorNode && element.contains(anchorNode)) {
+                    // Copy to clipboard
+                    navigator.clipboard.writeText(text);
+                    if (options.onCopy) {
+                        options.onCopy(text);
+                    }
+                }
+            }
+        };
+        
+        doc.addEventListener('keydown', handleKeyDown);
+        return () => {
+            doc.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [elementRef, options]);
+    
     // Default copy handler
     const defaultCopyHandler = () => {
         if (selectedText) {
