@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { Spinner, ArrowRightIcon } from "../icons/icons";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useFileStatus } from '../../hooks/useFileStatus';
 import { fileStatusSummaryAtom } from "../../atoms/files";
 import { overallSyncStatusAtom, syncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
-import Button from "../ui/Button";
 import { hasAuthorizedAccessAtom, syncLibrariesAtom } from '../../atoms/profile';
 import AuthorizeLibraryAccess from "../auth/AuthorizeLibraryAccess";
 import { setPref } from "../../../src/utils/prefs";
@@ -21,7 +19,7 @@ import { isLibraryValidForSync } from "../../../src/utils/sync";
 import { store } from "../../store";
 import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
 import { ZoteroLibrary } from "../../types/zotero";
-import { OnboardingHeader } from "./onboarding";
+import { OnboardingHeader, OnboardingFooter } from "./onboarding";
 
 /**
  * Pro/Beta onboarding flow with two steps:
@@ -294,63 +292,24 @@ const ProOnboardingPage: React.FC = () => {
                 )}
             </div>
 
-            {/* Fixed button area */}
-            <div className="p-4 border-top-quinary">
-                {/* Library selection button */}
-                {!hasAuthorizedAccess && (
-                    <div className="display-flex flex-row items-center gap-1">
-                        <div className="font-color-secondary text-sm">
-                            {`By continuing, you agree to our `}
-                            <a 
-                                className="text-link cursor-pointer" 
-                                onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/terms')}
-                            >
-                                Terms of Service
-                            </a>
-                            {` and `}
-                            <a 
-                                className="text-link cursor-pointer" 
-                                onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/privacy-policy')}
-                            >
-                                Privacy Policy
-                            </a>.
-                        </div>
-                        <div className="flex-1" />
-                        <Button
-                            variant="solid"
-                            className="fit-content"
-                            rightIcon={isAuthorizing ? Spinner : ArrowRightIcon}
-                            onClick={handleAuthorize}
-                            disabled={!isLibrarySelectionValid || isAuthorizing}
-                        >
-                            Continue
-                        </Button>
-                    </div>
-                )}
-
-                {/* Syncing process button */}
-                {hasAuthorizedAccess && (
-                    <div className="display-flex flex-row items-center gap-4">
-
-                        {/* Footer message */}
-                        <div className="font-color-secondary text-sm">
-                            {getFooterMessage()}
-                        </div>
-
-                        <div className="flex-1" />
-
-                        {/* Complete onboarding button */}
-                        <Button
-                            variant="solid"
-                            rightIcon={isCompletingOnboarding ? Spinner : ArrowRightIcon}
-                            disabled={(!isUploadProcessed && !fileStatusSummary.pageBalanceExhausted) || (overallSyncStatus === 'in_progress' || overallSyncStatus === 'failed') || isCompletingOnboarding}
-                            onClick={handleCompleteOnboarding}
-                        >
-                            Complete
-                        </Button>
-                    </div>
-                )}
-            </div>
+            {/* Fixed footer area */}
+            {!hasAuthorizedAccess ? (
+                <OnboardingFooter
+                    buttonLabel="Continue"
+                    isLoading={isAuthorizing}
+                    disabled={!isLibrarySelectionValid}
+                    onButtonClick={handleAuthorize}
+                    showTerms={true}
+                />
+            ) : (
+                <OnboardingFooter
+                    message={getFooterMessage()}
+                    buttonLabel="Complete"
+                    isLoading={isCompletingOnboarding}
+                    disabled={(!isUploadProcessed && !fileStatusSummary.pageBalanceExhausted) || (overallSyncStatus === 'in_progress' || overallSyncStatus === 'failed')}
+                    onButtonClick={handleCompleteOnboarding}
+                />
+            )}
         </div>
     );
 };
