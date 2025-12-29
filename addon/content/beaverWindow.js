@@ -14,6 +14,18 @@ async function onLoad() {
     // This applies the user's preferred font size and UI density settings
     Zotero.UIProperties.registerRoot(document.documentElement);
 
+    // Register keyboard shortcut for closing the window (Cmd+W on Mac, Ctrl+W on Windows)
+    window.addEventListener("keydown", (event) => {
+        // Check for Cmd+W (Mac) or Ctrl+W (Windows)
+        const isMacClose = Zotero.isMac && event.key === 'w' && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+        const isWindowsClose = !Zotero.isMac && event.key === 'w' && event.ctrlKey && !event.altKey && !event.shiftKey;
+        
+        if (isMacClose || isWindowsClose) {
+            event.preventDefault();
+            window.close();
+        }
+    });
+
     // Use the main window's BeaverReact instance to ensure shared state (Jotai store)
     // This allows the separate window to share the same Atom instances and Store as the main window
     const mainWindow = Zotero.getMainWindow();

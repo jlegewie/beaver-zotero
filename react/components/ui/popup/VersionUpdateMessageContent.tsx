@@ -10,7 +10,7 @@ interface VersionUpdateMessageContentProps {
 }
 
 const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = ({ message }) => {
-    const { text, featureList, learnMoreUrl, learnMoreLabel } = message;
+    const { text, featureList, learnMoreUrl, learnMoreLabel, footer } = message;
 
     const handleLearnMore = () => {
         if (learnMoreUrl) {
@@ -26,7 +26,7 @@ const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = 
         <div className="display-flex flex-col gap-5 w-full">
             {text && (
                 <div className="font-color-secondary text-base" style={{ whiteSpace: 'pre-line' }}>
-                    {text}
+                    {parseTextWithLinksAndNewlines(text)}
                 </div>
             )}
 
@@ -57,6 +57,12 @@ const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = 
                     <Button onClick={handleLearnMore} variant="outline">
                         {learnMoreLabel || 'Learn more'}
                     </Button>
+                </div>
+            )}
+
+            {footer && (
+                <div className="font-color-secondary text-base" style={{ whiteSpace: 'pre-line' }}>
+                    {parseTextWithLinksAndNewlines(footer)}
                 </div>
             )}
         </div>

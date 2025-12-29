@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Icon, AlertIcon, RepeatIcon, SettingsIcon, ArrowDownIcon, ArrowRightIcon, LinkForwardIcon } from '../icons/icons';
 import Button from '../ui/Button';
+import ContextMenu from '../ui/menu/ContextMenu';
+import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { regenerateFromRunAtom, resumeFromRunAtom } from '../../atoms/agentRunAtoms';
 import { isPreferencePageVisibleAtom } from '../../atoms/ui';
-import { runErrorVisibilityAtom, toggleRunErrorVisibilityAtom } from '../../atoms/messageUIState';
+import { runErrorVisibilityAtom, setRunErrorVisibilityAtom } from '../../atoms/messageUIState';
 
 interface RunError {
     type: string;
@@ -84,8 +86,18 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
     
     // Visibility state
     const runErrorVisibility = useAtomValue(runErrorVisibilityAtom);
-    const toggleVisibility = useSetAtom(toggleRunErrorVisibilityAtom);
+    const setVisibility = useSetAtom(setRunErrorVisibilityAtom);
     const isExpanded = runErrorVisibility[runId] ?? isLastRun;
+
+    const contentRef = useRef<HTMLDivElement | null>(null);
+
+    const { 
+        isMenuOpen: isSelectionMenuOpen, 
+        menuPosition: selectionMenuPosition,
+        closeMenu: closeSelectionMenu,
+        handleContextMenu,
+        menuItems: selectionMenuItems
+    } = useSelectionContextMenu(contentRef);
 
     const [isHovered, setIsHovered] = useState(false);
 
@@ -98,7 +110,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
     };
 
     const handleToggle = () => {
-        toggleVisibility(runId);
+        setVisibility({ runId, visible: !isExpanded });
     };
 
     // Strip error type prefix if it exists in the message (e.g. "internal_error: message" -> "message")
@@ -110,7 +122,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
     const headerTitle = typeMap[error.type] || "An error occurred";
 
     return (
-        <div className="px-4">
+        <div className="px-4 user-select-text" ref={contentRef} onContextMenu={handleContextMenu}>
              <div
                 id={`run-error-${runId}`}
                 className={`
@@ -127,16 +139,16 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                     onMouseEnter={() => setIsHovered(true)}
                     onMouseLeave={() => setIsHovered(false)}
                 >
-                    <Button
-                        variant="ghost-secondary"
+                    <button
+                        type="button"
+                        className="variant-ghost-secondary display-flex flex-row py-15 cursor-pointer gap-2 w-full text-left"
+                        style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
+                        aria-expanded={isExpanded}
+                        aria-controls={`run-error-content-${runId}`}
                         onClick={handleToggle}
-                        className={`
-                            text-base scale-105 w-full min-w-0 align-start text-left
-                        `}
-                        style={{ padding: '2px 6px', maxHeight: 'none' }}
                     >
                         <div className="display-flex flex-row px-3 gap-2">
-                            <div className="flex-1 display-flex mt-010 font-color-red">
+                            <div className="display-flex mt-010 font-color-red">
                                 <Icon icon={isHovered ? (isExpanded ? ArrowDownIcon : ArrowRightIcon) : AlertIcon} />
                             </div>
                             
@@ -144,12 +156,12 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                 {headerTitle}
                             </div>
                         </div>
-                    </Button>
+                    </button>
                 </div>
 
                 {/* Expanded Content */}
                 {isExpanded && (
-                    <div className="p-3">
+                    <div className="p-3" id={`run-error-content-${runId}`}>
                         <div className="display-flex flex-col gap-3">
                             <div className="text-base font-color-red">
                                 {parseTextWithLinksAndNewlines(displayMessage)}
@@ -191,6 +203,15 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                         </div>
                     </div>
                 )}
+
+                {/* Text selection context menu */}
+                <ContextMenu
+                    menuItems={selectionMenuItems}
+                    isOpen={isSelectionMenuOpen}
+                    onClose={closeSelectionMenu}
+                    position={selectionMenuPosition}
+                    useFixedPosition={true}
+                />
             </div>
         </div>
     );

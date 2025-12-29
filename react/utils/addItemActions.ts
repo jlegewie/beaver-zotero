@@ -1,6 +1,50 @@
 import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
 import { ExternalReference, NormalizedPublicationType } from '../types/externalReferences';
 import { logger } from '../../src/utils/logger';
+import { getZoteroTargetContext } from '../../src/utils/zoteroUtils';
+
+/** Options for importing items */
+export interface ImportItemOptions {
+    /** Target library ID. If not provided, uses current context */
+    libraryId?: number;
+    /** Collection to add the item to */
+    collectionId?: number;
+    /** Whether to select the item after import */
+    selectAfterImport?: boolean;
+}
+
+/**
+ * Resolves import options to get the target library and collection.
+ * If library is not editable, falls back to user library.
+ */
+async function resolveImportTarget(options?: ImportItemOptions): Promise<{
+    libraryId: number;
+    collectionId: number | null;
+}> {
+    let libraryId = options?.libraryId;
+    let collectionId = options?.collectionId ?? null;
+    
+    // If no library specified, get from current context
+    if (libraryId === undefined) {
+        const context = await getZoteroTargetContext();
+        libraryId = context.targetLibraryId ?? Zotero.Libraries.userLibraryID;
+        
+        // Get collection from context if not specified
+        if (collectionId === null && context.collectionToAddTo) {
+            collectionId = context.collectionToAddTo.id;
+        }
+    }
+    
+    // Check if library is editable
+    const library = Zotero.Libraries.get(libraryId);
+    if (!library || !library.editable) {
+        logger(`resolveImportTarget: Library ${libraryId} is not editable, falling back to user library`, 2);
+        libraryId = Zotero.Libraries.userLibraryID;
+        collectionId = null; // Can't use collection from different library
+    }
+    
+    return { libraryId, collectionId };
+}
 
 // Helper to map publication types
 function mapPublicationType(types: NormalizedPublicationType[] | undefined): string {
@@ -30,7 +74,7 @@ function mapPublicationType(types: NormalizedPublicationType[] | undefined): str
  * ATTEMPT 1: Use Zotero's Translation Architecture
  * This is preferred because it handles metadata fetching and PDF downloading automatically.
  */
-async function tryImportFromIdentifiers(identifiers: any): Promise<Zotero.Item | null> {
+async function tryImportFromIdentifiers(identifiers: any, libraryId: number): Promise<Zotero.Item | null> {
     const translate = new (Zotero as any).Translate.Search();
     
     // Determine which identifier to use (DOI is usually best)
@@ -52,7 +96,7 @@ async function tryImportFromIdentifiers(identifiers: any): Promise<Zotero.Item |
     // Execute translation
     // Returns an array of Zotero.Item objects
     const newItems = await translate.translate({
-        libraryID: Zotero.Libraries.userLibraryID,
+        libraryID: libraryId,
         saveAttachments: true // Automatically download PDFs if available
     });
 
@@ -62,9 +106,10 @@ async function tryImportFromIdentifiers(identifiers: any): Promise<Zotero.Item |
 /**
  * Import an item from a URL using Zotero's RemoteTranslate and HiddenBrowser.
  * @param url - The URL to import the item from.
+ * @param libraryId - Target library ID.
  * @returns A Promise that resolves to the imported Zotero.Item or null if the import fails.
  */
-async function importFromUrl(url: string): Promise<Zotero.Item | null> {
+async function importFromUrl(url: string, libraryId: number): Promise<Zotero.Item | null> {
     if (!url) return null;
 
     // Dynamic import for Zotero modules
@@ -85,7 +130,7 @@ async function importFromUrl(url: string): Promise<Zotero.Item | null> {
         if (!translators || translators.length === 0) return null;
 
         const newItems = await translate.translate({
-            libraryID: Zotero.Libraries.userLibraryID,
+            libraryID: libraryId,
             saveAttachments: true
         });
 
@@ -102,10 +147,10 @@ async function importFromUrl(url: string): Promise<Zotero.Item | null> {
 /**
  * Helper to attach a PDF from a URL to an existing item
  */
-async function attachPdfFromUrl(parentItem: Zotero.Item, url: string) {
+async function attachPdfFromUrl(parentItem: Zotero.Item, url: string, libraryId: number) {
     try {
         await Zotero.Attachments.importFromURL({
-            libraryID: Zotero.Libraries.userLibraryID,
+            libraryID: libraryId,
             url: url,
             parentItemID: parentItem.id,
             title: "Full Text PDF",
@@ -123,9 +168,7 @@ async function attachPdfFromUrl(parentItem: Zotero.Item, url: string) {
  * ATTEMPT 2: Manual Creation
  * Manually maps ExternalReference fields to a new Zotero Item.
  */
-async function createItemManually(itemData: ExternalReference): Promise<Zotero.Item> {
-    const libraryId = Zotero.Libraries.userLibraryID;
-
+async function createItemManually(itemData: ExternalReference, libraryId: number): Promise<Zotero.Item> {
     // 1. Determine Item Type
     let itemType = mapPublicationType(itemData.publication_types);
     
@@ -206,7 +249,7 @@ async function createItemManually(itemData: ExternalReference): Promise<Zotero.I
     // 6. Manual Attachment Handling
     // If we created the item manually, we need to attach the PDF manually if provided
     if (itemData.open_access_url) {
-        await attachPdfFromUrl(item, itemData.open_access_url);
+        await attachPdfFromUrl(item, itemData.open_access_url, libraryId);
     }
 
     return item;
@@ -234,8 +277,14 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation:
  * Note: We don't use timeouts on import methods because Zotero's translation
  * system cannot be canceled. A timed-out import could still complete and create
  * a duplicate item after we've fallen back to manual creation.
+ * 
+ * @param reference - External reference data to import
+ * @param options - Import options including target library and collection
  */
-export async function createZoteroItem(reference: ExternalReference): Promise<Zotero.Item> {
+export async function createZoteroItem(reference: ExternalReference, options?: ImportItemOptions): Promise<Zotero.Item> {
+    // Resolve target library and collection
+    const { libraryId, collectionId } = await resolveImportTarget(options);
+    
     let item: Zotero.Item | null = null;
 
     // 1. Try to import using identifiers (DOI, arXiv, ISBN, etc.)
@@ -243,7 +292,7 @@ export async function createZoteroItem(reference: ExternalReference): Promise<Zo
     // to avoid duplicate items if the translation completes after timeout
     if (reference.identifiers) {
         try {
-            item = await tryImportFromIdentifiers(reference.identifiers);
+            item = await tryImportFromIdentifiers(reference.identifiers, libraryId);
             if (item) {
                 logger("createZoteroItem: Successfully imported item via identifiers", 2);
             }
@@ -256,7 +305,7 @@ export async function createZoteroItem(reference: ExternalReference): Promise<Zo
     // No timeout here for the same reason as above
     if (!item && reference.url) {
         try {
-            item = await importFromUrl(reference.url);
+            item = await importFromUrl(reference.url, libraryId);
             if (item) {
                 logger("createZoteroItem: Successfully imported item via URL", 2);
             }
@@ -268,10 +317,21 @@ export async function createZoteroItem(reference: ExternalReference): Promise<Zo
     // 3. Fallback: Create item manually from available metadata
     if (!item) {
         logger("createZoteroItem: Falling back to manual item creation", 2);
-        item = await createItemManually(reference);
+        item = await createItemManually(reference, libraryId);
+    }
+    
+    // 4. Add to collection if specified
+    if (collectionId) {
+        const collection = Zotero.Collections.get(collectionId);
+        if (collection) {
+            await Zotero.DB.executeTransaction(async () => {
+                await collection.addItem(item!.id);
+            });
+            logger(`createZoteroItem: Added item to collection ${collection.name}`, 2);
+        }
     }
 
-    // 4. Try to find PDF using Zotero's "Find Full Text" logic
+    // 5. Try to find PDF using Zotero's "Find Full Text" logic
     // This uses all methods: doi (visits publisher page), url, oa (Unpaywall), custom resolvers
     // Timeout is safe here because PDF finding doesn't create items, just attachments
     const attachmentIds = await item.getAttachments();
@@ -304,13 +364,19 @@ export async function createZoteroItem(reference: ExternalReference): Promise<Zo
 /**
  * Creates a Zotero item from CreateItemProposedData with full post-processing.
  * Handles extra fields, collections, tags, and attachments.
+ * 
+ * @param proposedData - The proposed item data from the agent
+ * @param options - Import options including target library and collection
  */
-export async function applyCreateItemData(proposedData: CreateItemProposedData): Promise<CreateItemResultData> {
+export async function applyCreateItemData(
+    proposedData: CreateItemProposedData, 
+    options?: ImportItemOptions
+): Promise<CreateItemResultData> {
     const itemData = proposedData.item;
-    const libraryId = Zotero.Libraries.userLibraryID;
 
-    // Create or Import the item
-    const item = await createZoteroItem(itemData);
+    // Create or Import the item (handles library/collection resolution internally)
+    const item = await createZoteroItem(itemData, options);
+    const libraryId = item.libraryID;
     
     // Post-processing (Things that apply regardless of how item was created)
     
@@ -340,14 +406,14 @@ export async function applyCreateItemData(proposedData: CreateItemProposedData):
         await item.saveTx();
     }
 
-    // Collections
+    // Collections (from proposed data, in addition to context collection)
     if (proposedData.collection_keys && proposedData.collection_keys.length > 0) {
         const collectionIds: number[] = [];
         for (const key of proposedData.collection_keys) {
              const collection = Zotero.Collections.getByLibraryAndKey(libraryId, key);
              if (collection) collectionIds.push(collection.id);
         }
-        // Append to existing collections if any (from translation)
+        // Append to existing collections if any (from translation or context)
         const currentCollections = item.getCollections();
         const newCollections = [...new Set([...currentCollections, ...collectionIds])];
         item.setCollections(newCollections);
@@ -371,7 +437,7 @@ export async function applyCreateItemData(proposedData: CreateItemProposedData):
          const url = itemData.open_access_url || proposedData.downloaded_url || itemData.url;
          if (url) {
              logger(`applyCreateItemData: Attaching file from ${url} (post-creation)`, 2);
-             await attachPdfFromUrl(item, url);
+             await attachPdfFromUrl(item, url, libraryId);
          }
     }
     

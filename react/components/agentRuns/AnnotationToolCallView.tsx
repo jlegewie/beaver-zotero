@@ -31,7 +31,6 @@ import {
     CancelIcon,
     HighlighterIcon,
 } from '../icons/icons';
-import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import {
@@ -620,26 +619,28 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
             {/* Header */}
             <div
                 className={`
-                    display-flex flex-row bg-senary py-15 px-2
+                    display-flex flex-row bg-senary py-15 px-25
                     ${resultsVisible && hasAnnotationsToShow ? 'border-bottom-quinary' : ''}
                 `}
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
             >
-                <div className="display-flex flex-row flex-1" onClick={toggleResults}>
-                    <Button
-                        variant="ghost-secondary"
-                        icon={getIcon()}
-                        className={`
-                            text-base scale-105
-                            ${isButtonDisabled && !canToggleResults ? 'disabled-but-styled' : ''}
-                            ${isError ? 'font-color-warning' : ''}
-                        `}
-                        style={{ padding: '2px 6px', maxHeight: 'none' }}
-                        disabled={isButtonDisabled && !canToggleResults}
-                    >
-                        <span className={`mr-1 ${isInProgress ? 'shimmer-text' : ''}`}>{getButtonText()}</span>
-
+                <button
+                    type="button"
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left ${canToggleResults ? 'cursor-pointer' : ''} ${isError ? 'font-color-warning' : ''}`}
+                    style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
+                    aria-expanded={resultsVisible}
+                    aria-controls={`annotation-list-${toolCallId}`}
+                    onClick={toggleResults}
+                    disabled={isButtonDisabled && !canToggleResults}
+                >
+                    <div className="display-flex flex-row gap-2">
+                        <div className="flex-1 display-flex mt-010">
+                            <Icon icon={getIcon()} />
+                        </div>
+                        <div className={`display-flex ${isInProgress ? 'shimmer-text' : ''}`}>
+                            {getButtonText()}
+                        </div>
                         {/* Annotation metrics */}
                         {isCompleted && hasAnnotationsToShow && (
                             <div className="display-flex flex-row items-center gap-1">
@@ -651,9 +652,9 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
                                 )}
                             </div>
                         )}
-                    </Button>
-                    <div className="flex-1" />
-                </div>
+                    </div>
+                </button>
+                <div className="flex-1" />
 
                 {readOnlyLibrary && (
                     <div className="text-sm font-color-tertiary mt-015">
@@ -696,7 +697,7 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
 
             {/* Annotation list */}
             {resultsVisible && hasAnnotationsToShow && isCompleted && (
-                <div className="display-flex flex-col gap-1">
+                <div className="display-flex flex-col gap-1" id={`annotation-list-${toolCallId}`}>
                     {annotations.map((annotation, index) => (
                         <AnnotationListItem
                             key={annotation.id}

@@ -127,7 +127,11 @@ export const supportedModelsAtom = atom<ModelConfig[]>(initialCustomModels);
 let lastUsedModel = null;
 try {
     const stored = JSON.parse(getPref('lastUsedModel')) as ModelConfig;
-    if (stored?.is_custom) {
+    // Validate that stored model has a valid id before using it
+    if (!stored?.id) {
+        logger('models: Stored lastUsedModel has no id, ignoring', 1);
+        lastUsedModel = null;
+    } else if (stored?.is_custom) {
         lastUsedModel = initialCustomModels.find(model => model.id === stored.id) || stored;
     } else {
         lastUsedModel = stored;

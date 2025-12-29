@@ -174,6 +174,7 @@ export const useUpgradeHandler = () => {
                 featureList: config.featureList,
                 learnMoreUrl: config.learnMoreUrl,
                 learnMoreLabel: config.learnMoreLabel,
+                footer: config.footer,
                 expire: false,
             });
 

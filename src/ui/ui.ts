@@ -147,7 +147,7 @@ export class BeaverUIFactory {
         const shortcut = Zotero.isMac ? `⌘${key}` : `Ctrl+${key}`;
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
         chatToggleBtn.setAttribute("id", "zotero-beaver-tb-chat-toggle");
-        chatToggleBtn.setAttribute("tooltiptext", `Toggle AI Chat (${shortcut})`);
+        chatToggleBtn.setAttribute("tooltiptext", `Toggle Beaver (${shortcut})`);
         chatToggleBtn.addEventListener("command", () => triggerToggleChat(win));
 
         const syncButton = toolbar.querySelector("#zotero-tb-sync");
@@ -236,15 +236,17 @@ export class BeaverUIFactory {
         
         ztoolkit.log("Registering keyboard shortcuts...");
 
-        // Register keyboard shortcut for chat panel
         const keyboardShortcut = getPref("keyboardShortcut").toLowerCase() || "l";
+
+        // Register keyboard shortcut for toggling chat panel (accel+key only, no other modifiers)
         keyboardManager.register(
             (ev, keyOptions) => {
                 
-                // Check for accel+l shortcut
-                const isAccelL = (ev.key.toLowerCase() === keyboardShortcut && (ev.ctrlKey || ev.metaKey));
+                // Check for accel+key shortcut (Cmd+L on Mac, Ctrl+L on Windows) with NO other modifiers
+                const isMacToggle = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey;
+                const isWindowsToggle = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && !ev.altKey && !ev.shiftKey;
                 
-                if (isAccelL || keyOptions.keyboard?.equals(`accel,${keyboardShortcut}`)) {
+                if (isMacToggle || isWindowsToggle) {
                     // Prevent default behavior
                     ev.preventDefault();
                     
@@ -267,6 +269,24 @@ export class BeaverUIFactory {
                     
                     // Toggle the chat panel
                     triggerToggleChat(win);
+                }
+            }
+        );
+
+        // Register keyboard shortcut for opening separate window (Cmd+Shift+key on Mac, Ctrl+Shift+key on Windows)
+        keyboardManager.register(
+            (ev, keyOptions) => {
+                
+                // Check for Cmd+Shift+key (Mac) or Ctrl+Shift+key (Windows)
+                const isMacShortcut = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && ev.shiftKey && !ev.ctrlKey;
+                const isWindowsShortcut = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && ev.shiftKey && !ev.metaKey;
+                
+                if (isMacShortcut || isWindowsShortcut) {
+                    // Prevent default behavior
+                    ev.preventDefault();
+                    
+                    // Open Beaver in a separate window
+                    this.openBeaverWindow();
                 }
             }
         );

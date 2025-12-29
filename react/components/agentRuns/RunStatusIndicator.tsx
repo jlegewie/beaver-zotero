@@ -1,6 +1,5 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
-import Button from '../ui/Button';
 import { Icon, Spinner, RepeatIcon } from '../icons/icons';
 import { AgentRunStatus } from '../../agents/types';
 import { wsRetryAtom } from '../../atoms/agentRunAtoms';
@@ -9,6 +8,8 @@ interface RunStatusIndicatorProps {
     status: AgentRunStatus;
     /** The run ID to match retry state against */
     runId?: string;
+    /** Whether the previous message has a tool call */
+    lastMessageHasToolCall?: boolean;
 }
 
 /**
@@ -16,7 +17,7 @@ interface RunStatusIndicatorProps {
  * Shows a spinner for in-progress runs, retry info when backend is retrying.
  * Note: Errors are displayed separately by RunErrorDisplay.
  */
-export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId }) => {
+export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId, lastMessageHasToolCall }) => {
     const retryState = useAtomValue(wsRetryAtom);
     
     // Check if retry state applies to this run
@@ -38,24 +39,27 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, 
     return (
         <div className="rounded-md flex flex-col min-w-0 border-transparent">
             <div className="display-flex flex-row py-15">
-                <div className="display-flex flex-row flex-1">
-                    <Button
-                        variant="ghost-secondary"
-                        className="text-base scale-105 w-full min-w-0 align-start text-left disabled-but-styled"
-                        style={{ padding: '2px 6px', maxHeight: 'none' }}
-                        disabled={true}
-                    >
-                        <div className="display-flex flex-row px-3 gap-2">
-                            <div className="flex-1 display-flex mt-010">
-                                <Icon icon={Spinner} />
-                            </div>
-                            <div className="display-flex shimmer-text">
-                                {text}
-                            </div>
+                <button
+                    type="button"
+                    className={`
+                        variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left disabled-but-styled
+                        ${lastMessageHasToolCall ? '-mt-1' : ''}
+                    `}
+                    style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0, cursor: 'default' }}
+                    disabled={true}
+                    aria-busy="true"
+                    aria-live="polite"
+                >
+                    <div className="display-flex flex-row px-3 gap-2">
+                        <div className="flex-1 display-flex mt-010">
+                            <Icon icon={Spinner} />
                         </div>
-                    </Button>
-                    <div className="flex-1"/>
-                </div>
+                        <div className="display-flex shimmer-text">
+                            {text}
+                        </div>
+                    </div>
+                </button>
+                <div className="flex-1"/>
             </div>
         </div>
     );

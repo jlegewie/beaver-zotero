@@ -7,6 +7,7 @@ export interface VersionUpdateMessageConfig {
     featureList: PopupMessageFeature[];
     learnMoreUrl?: string;
     learnMoreLabel?: string;
+    footer?: string;
 }
 
 const compareVersions = (v1: string, v2: string): number => {
@@ -139,6 +140,22 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 description: "Edit and resubmit previous messages, resume interrupted conversations, and other handy improvements."
             }
         ]
+    },
+    {
+        version: "0.9.4",
+        title: "Beaver Version 0.9.4",
+        featureList: [
+            {
+                title: "Copy text with keyboard shortcut (cmd/ctrl+c)",
+            },
+            {
+                title: "Use keyboard shortcut to open Beaver in separate window (cmd/ctrl+shift+l)",
+            },
+            {
+                title: "Various bug fixes and improvements",
+            }
+        ],
+        footer: "Full changelog <a href='https://github.com/jlegewie/beaver-zotero/releases/tag/v0.9.4' target='_blank'>here</a>."
     },
 ];
 
