@@ -17,7 +17,7 @@ const Highlight: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     </span>
 );
 
-const ExampleBubble: React.FC<ExampleBubbleProps> = ({ children, side = 'left' }) => {
+const ExampleBubble: React.FC<ExampleBubbleProps & { delay?: number }> = ({ children, side = 'left', delay = 0 }) => {
     const isRight = side === 'right';
     
     // Chat bubble style with one corner less rounded (like a speech bubble tail)
@@ -27,6 +27,8 @@ const ExampleBubble: React.FC<ExampleBubbleProps> = ({ children, side = 'left' }
             ? '12px 12px 4px 12px'  // top-left, top-right, bottom-right (small), bottom-left
             : '12px 12px 12px 4px', // top-left, top-right, bottom-right, bottom-left (small)
         boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+        animation: `fadeInUp 0.6s ease-out ${delay}s forwards`,
+        opacity: 0,
     };
     
     return (
@@ -50,30 +52,43 @@ const ExampleBubble: React.FC<ExampleBubbleProps> = ({ children, side = 'left' }
  */
 const ExamplePrompts: React.FC = () => {
     return (
-        <div 
-            className="display-flex flex-col gap-4 select-none pointer-events-none"
-            style={{ opacity: 0.6 }}
-        >
-            <ExampleBubble side="left">
-                Summarize the <Highlight>experimental protocols</Highlight> across my papers on <Highlight>neural plasticity</Highlight>
-            </ExampleBubble>
-            
-            <ExampleBubble side="right">
-                Compare and contrast all definitions of <Highlight>social capital</Highlight> in my library
-            </ExampleBubble>
-            
-            <ExampleBubble side="left">
-                <Highlight>Create a note</Highlight> that compares this article's key findings to related studies
-            </ExampleBubble>
+        <>
+            <style>{`
+                @keyframes fadeInUp {
+                    from {
+                        opacity: 0;
+                        transform: translateY(10px);
+                    }
+                    to {
+                        opacity: 0.6;
+                        transform: translateY(0);
+                    }
+                }
+            `}</style>
+            <div 
+                className="display-flex flex-col gap-4 select-none pointer-events-none"
+            >
+                <ExampleBubble side="left" delay={0}>
+                    Summarize the <Highlight>experimental protocols</Highlight> across my papers on <Highlight>neural plasticity</Highlight>
+                </ExampleBubble>
+                
+                <ExampleBubble side="left" delay={0.6}>
+                    Compare and contrast all definitions of <Highlight>social capital</Highlight> in my library
+                </ExampleBubble>
+                
+                <ExampleBubble side="left" delay={1.2}>
+                    <Highlight>Create a note</Highlight> that compares this article's key findings to related studies
+                </ExampleBubble>
 
-            <ExampleBubble side="right">
-                Please <Highlight>review my paragraph</Highlight> on the negative effects of microplastic toxicity. Research every citation to ensure accuracy.
-            </ExampleBubble>
-            
-            <ExampleBubble side="left">
-                Did the <Highlight>American Economic Review</Highlight> publish recent papers on <Highlight>AI and the labor market</Highlight>?
-            </ExampleBubble>
-        </div>
+                <ExampleBubble side="left" delay={1.8}>
+                    Please <Highlight>review my paragraph</Highlight> on the negative effects of microplastic toxicity. Research every citation to ensure accuracy.
+                </ExampleBubble>
+                
+                <ExampleBubble side="left" delay={2.4}>
+                    Did the <Highlight>American Economic Review</Highlight> publish recent papers on <Highlight>AI and the labor market</Highlight>?
+                </ExampleBubble>
+            </div>
+        </>
     );
 };
 
