@@ -1,4 +1,5 @@
 import React from "react";
+import { Icon, InformationCircleIcon } from "../icons/icons";
 
 interface PreferenceToggleProps {
     checked: boolean;
@@ -78,8 +79,9 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
                                 </div>
                             )}
                         </div>
-                        <div className="font-color-secondary text-sm">
+                        <div className="font-color-secondary text-sm display-flex flex-row items-start gap-05">
                             {description}
+                            {tooltip && <Icon icon={InformationCircleIcon} className="font-color-primary mt-020" />}
                         </div>
                     </div>
                 </div>
