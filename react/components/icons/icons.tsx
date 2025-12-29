@@ -49,6 +49,7 @@ export { default as BrainIcon } from './BrainIcon';
 export { default as TextAlignLeftIcon } from './TextAlignLeftIcon';
 export { default as SearchIcon } from './SearchIcon';
 export { default as ArrowUpRightIcon } from './ArrowUpRightIcon';
+export { default as ZapIcon } from './ZapIcon';
 export { default as AiMagicIcon } from './AiMagicIcon';
 export { default as ViewIcon } from './ViewIcon';
 export { default as OneIcon } from './OneIcon';

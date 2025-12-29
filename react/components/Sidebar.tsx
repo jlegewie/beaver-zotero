@@ -10,7 +10,7 @@ import { scrollToBottom } from '../utils/scrollToBottom';
 import { isPreferencePageVisibleAtom, userScrolledAtom, windowUserScrolledAtom, isSkippedFilesDialogVisibleAtom } from '../atoms/ui';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
-import OnboardingPage from './pages/OnboardingPage';
+import OnboardingRouter from './pages/OnboardingRouter';
 import PreferencePage from './pages/PreferencePage';
 import DeviceAuthorizationPage from './pages/DeviceAuthorizationPage';
 import { isAuthenticatedAtom } from '../atoms/auth';
@@ -91,7 +91,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         return (
             <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
                 <Header isWindow={isWindow} />
-                <OnboardingPage />
+                <OnboardingRouter />
                 <DialogContainer />
             </div>
         );

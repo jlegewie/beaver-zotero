@@ -21,9 +21,14 @@ import { isLibraryValidForSync } from "../../../src/utils/sync";
 import { store } from "../../store";
 import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
 import { ZoteroLibrary } from "../../types/zotero";
+import { OnboardingHeader } from "./onboarding";
 
-
-const OnboardingPage: React.FC = () => {
+/**
+ * Pro/Beta onboarding flow with two steps:
+ * 1. Library selection and authorization (with file upload consent)
+ * 2. Syncing process (database sync + file processing)
+ */
+const ProOnboardingPage: React.FC = () => {
     // Auth state
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
     const user = useAtomValue(userAtom);
@@ -121,7 +126,7 @@ const OnboardingPage: React.FC = () => {
                     return serializeZoteroLibrary(library);
                 })
                 .filter(library => library !== null);
-            logger(`OnboardingPage: Authorizing access with libraries: ${libraries.map(library => library.library_id).join(', ')}`, 2);
+            logger(`ProOnboardingPage: Authorizing access with libraries: ${libraries.map(library => library.library_id).join(', ')}`, 2);
             await accountService.authorizeAccess(requireOnboarding, libraries, useZoteroSync, consentToShare);
 
             // Update local state
@@ -143,7 +148,7 @@ const OnboardingPage: React.FC = () => {
             setPref("userEmail", user?.email ?? "");
             
         } catch (error) {
-            logger(`OnboardingPage: Error authorizing access: ${error}`);
+            logger(`ProOnboardingPage: Error authorizing access: ${error}`);
             // Revert optimistic update on error by fetching fresh profile
             // Note: We could store currentProfile outside try block, but a fresh fetch is safer
         } finally {
@@ -207,7 +212,7 @@ const OnboardingPage: React.FC = () => {
             }
             
         } catch (error) {
-            logger(`OnboardingPage: Error completing onboarding: ${error}`);
+            logger(`ProOnboardingPage: Error completing onboarding: ${error}`);
             // Revert optimistic update on error
             if (profileWithPlan) {
                 setProfileWithPlan({
@@ -255,15 +260,7 @@ const OnboardingPage: React.FC = () => {
             {/* Scrollable content area */}
             <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1 display-flex flex-col">
                 {/* Header section - always shown */}
-                <div className="display-flex flex-col items-start mb-3">
-                    <div className="display-flex flex-row gap-2 items-end">
-                        <img src="chrome://beaver/content/icons/beaver.png" style={{ width: '4rem', height: '4rem' }} />
-                        <div className="text-2xl font-semibold mb-2">Welcome to Beaver</div>
-                    </div>
-                    <p className="text-base font-color-secondary" style={{ whiteSpace: 'pre-line' }}>
-                        {getHeaderMessage()}
-                    </p>
-                </div>
+                <OnboardingHeader message={getHeaderMessage()} />
 
                 {/* ------------- Step 1: Library Selection & Authorization ------------- */}
                 {!hasAuthorizedAccess && (
@@ -358,4 +355,4 @@ const OnboardingPage: React.FC = () => {
     );
 };
 
-export default OnboardingPage;
+export default ProOnboardingPage;
