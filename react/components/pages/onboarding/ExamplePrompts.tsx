@@ -39,7 +39,7 @@ const ExampleBubble: React.FC<ExampleBubbleProps & { delay?: number }> = ({ chil
                 className="user-message-display px-3 py-2"
                 style={bubbleStyle}
             >
-                <span className="text-base">{children}</span>
+                <span className="text-base font-color-primary">{children}</span>
             </div>
         </div>
     );
