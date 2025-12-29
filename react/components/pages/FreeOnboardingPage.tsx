@@ -8,7 +8,7 @@ import { logger } from "../../../src/utils/logger";
 import { setPref } from "../../../src/utils/prefs";
 import { getZoteroUserIdentifier } from "../../../src/utils/zoteroUtils";
 import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
-import { OnboardingHeader, OnboardingFooter, UpgradeCard, EmbeddingIndexProgress } from "./onboarding";
+import { OnboardingHeader, OnboardingFooter, EmbeddingIndexProgress } from "./onboarding";
 import ConsentToggle from "../preferences/ConsentToggle";
 import { ZapIcon } from "../icons/icons";
 
@@ -122,7 +122,7 @@ const FreeOnboardingPage: React.FC = () => {
     };
 
     const getHeaderMessage = () => {
-        return "Your AI research assistant that lives in Zotero. Search across your library by metadata, find related papers, and ask questions as you read.";
+        return "Your AI research assistant that lives in Zotero. Chat with your entire library, discover new research and much more.";
     };
 
     // Determine button state
@@ -156,7 +156,7 @@ const FreeOnboardingPage: React.FC = () => {
                     )}
 
                     {/* Upgrade card */}
-                    <UpgradeCard />
+                    {/* <UpgradeCard /> */}
 
                     {/* Spacer */}
                     <div className="flex-1" />
