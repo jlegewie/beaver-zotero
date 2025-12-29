@@ -61,7 +61,7 @@ const OnboardingFooter: React.FC<OnboardingFooterProps> = ({
                 {/* Action button */}
                 <Button
                     variant="solid"
-                    className="fit-content"
+                    className="fit-content whitespace-nowrap"
                     rightIcon={isLoading ? Spinner : ArrowRightIcon}
                     onClick={onButtonClick}
                     disabled={disabled || isLoading}
