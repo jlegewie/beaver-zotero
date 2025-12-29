@@ -68,23 +68,23 @@ const ExamplePrompts: React.FC = () => {
             <div 
                 className="display-flex flex-col gap-4 select-none pointer-events-none"
             >
-                <ExampleBubble side="left" delay={0}>
+                <ExampleBubble side="left" delay={0.5}>
                     Summarize the <Highlight>experimental protocols</Highlight> across my papers on <Highlight>neural plasticity</Highlight>
                 </ExampleBubble>
                 
-                <ExampleBubble side="left" delay={0.6}>
+                {/* <ExampleBubble side="left" delay={1.5}>
                     Compare and contrast all definitions of <Highlight>social capital</Highlight> in my library
-                </ExampleBubble>
+                </ExampleBubble> */}
                 
-                <ExampleBubble side="left" delay={1.2}>
+                <ExampleBubble side="left" delay={1.5}>
                     <Highlight>Create a note</Highlight> that compares this article's key findings to related studies
                 </ExampleBubble>
 
-                <ExampleBubble side="left" delay={1.8}>
+                <ExampleBubble side="left" delay={2.5}>
                     Please <Highlight>review my paragraph</Highlight> on the negative effects of microplastic toxicity. Research every citation to ensure accuracy.
                 </ExampleBubble>
                 
-                <ExampleBubble side="left" delay={2.4}>
+                <ExampleBubble side="left" delay={3.5}>
                     Did the <Highlight>American Economic Review</Highlight> publish recent papers on <Highlight>AI and the labor market</Highlight>?
                 </ExampleBubble>
             </div>
