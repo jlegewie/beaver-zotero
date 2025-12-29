@@ -11,11 +11,12 @@ import Tooltip from './ui/Tooltip';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import ThreadsMenu from './ui/menus/ThreadsMenu';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
-import PdfTestMenuButton from './ui/buttons/PdfTestMenuButton';
+import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { planFeaturesAtom, hasCompletedOnboardingAtom } from '../atoms/profile';
 import Button from './ui/Button';
 import { getWindowFromElement } from '../utils/windowContext';
+import { currentMessageContentAtom } from '../atoms/messageComposition';
 
 interface HeaderProps {
     onClose?: () => void;
@@ -31,6 +32,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
     const planFeatures = useAtomValue(planFeaturesAtom);
     const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
+    const currentMessageContent = useAtomValue(currentMessageContentAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
     const handleNewThread = async () => {
@@ -100,11 +102,14 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                     </Tooltip>
                 )}
 
-                {/* TEMPORARY: PDF testing tools - REMOVE BEFORE RELEASE */}
-                <PdfTestMenuButton
-                    className="scale-14"
-                    ariaLabel="PDF testing tools"
-                />
+                {/* Development tools */}
+                {process.env.NODE_ENV === 'development' && (
+                    <DevToolsMenuButton
+                        className="scale-14"
+                        ariaLabel="Development tools"
+                        currentMessageContent={currentMessageContent}
+                    />
+                )}
             </div>
 
             {/* Database status and user account menu */}

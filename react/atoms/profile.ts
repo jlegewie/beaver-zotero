@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { selectAtom } from 'jotai/utils';
-import { SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode, SubscriptionStatus } from "../types/profile";
+import { SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode } from "../types/profile";
 import { getZoteroUserIdentifier } from "../../src/utils/zoteroUtils";
 import { ZoteroLibrary } from "../types/zotero";
 
@@ -52,11 +52,7 @@ export const planDisplayNameAtom = atom<string>((get) => {
 
 export const processingModeAtom = atom<ProcessingMode>((get) => {
     const profile = get(profileWithPlanAtom);
-    if (
-        (profile?.subscription_status === SubscriptionStatus.ACTIVE ||
-         profile?.subscription_status === SubscriptionStatus.PAST_DUE) &&
-         profile?.indexing_complete === true
-    ) {
+    if (get(planFeaturesAtom).databaseSync && profile?.indexing_complete === true) {
         return ProcessingMode.BACKEND;
     } else {
         return ProcessingMode.FRONTEND;

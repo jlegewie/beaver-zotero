@@ -5,6 +5,68 @@ import { SyncMethod, SyncType } from '../../react/atoms/sync';
 
 
 /* 
+ * Interface for the 'embeddings' table row
+ * 
+ * Table stores paper embeddings for semantic search.
+ * Embeddings are generated from title + abstract text.
+ */
+export interface EmbeddingRecord {
+    item_id: number;                    // Zotero item ID
+    library_id: number;                 // Zotero library ID
+    zotero_key: string;                 // Zotero item key
+    version: number;                    // Zotero item version at embedding time
+    client_date_modified: string;       // Item's clientDateModified at embedding time
+    content_hash: string;               // Hash of title+abstract for change detection
+    embedding: Uint8Array;              // Int8 embedding stored as BLOB
+    dimensions: number;                 // Embedding dimensions (256 or 512)
+    model_id: string;                   // Model identifier (e.g., "voyage-3-int8-512")
+    indexed_at: string;                 // When the embedding was created
+}
+
+/**
+ * Interface for the 'embedding_index_state' table row
+ * 
+ * Tracks the state of the embedding index for each library.
+ * Used to optimize startup by skipping full diff when nothing changed.
+ */
+export interface EmbeddingIndexStateRecord {
+    library_id: number;                  // Zotero library ID
+    last_scan_timestamp: string;         // When we last ran a full scan (ISO string)
+    max_client_date_modified: string;    // MAX(clientDateModified) from Zotero at last scan
+    item_count: number;                  // Count of regular items in Zotero at last scan
+    embedding_count: number;             // Count of embeddings at last scan
+}
+
+/**
+ * Interface for the 'failed_embeddings' table row
+ * 
+ * Tracks items that failed to embed, with retry backoff logic.
+ * Items are retried with exponential backoff based on failure_count.
+ */
+export interface FailedEmbeddingRecord {
+    item_id: number;                     // Zotero item ID
+    library_id: number;                  // Zotero library ID
+    failure_count: number;               // Number of consecutive failures
+    last_error: string;                  // Last error message
+    last_attempt: string;                // When the last attempt was made (ISO string)
+    next_retry_after: string;            // Don't retry before this time (ISO string)
+}
+
+/**
+ * Maximum number of failures before an item is considered permanently failed.
+ * After this many failures, the item won't be retried automatically.
+ */
+export const MAX_EMBEDDING_FAILURES = 5;
+
+/**
+ * Base delay for retry backoff in milliseconds.
+ * Actual delay = BASE_DELAY * 2^(failure_count - 1)
+ * So delays are: 1h, 2h, 4h, 8h, 16h
+ */
+export const EMBEDDING_RETRY_BASE_DELAY_MS = 60 * 60 * 1000; // 1 hour
+
+
+/* 
  * Interface for the 'threads' table row
  * 
  * Table stores chat threads, mirroring the backend postgres structure.
@@ -122,6 +184,46 @@ export class BeaverDB {
             );
         `);
 
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS embeddings (
+                item_id                  INTEGER NOT NULL,
+                library_id               INTEGER NOT NULL,
+                zotero_key               TEXT NOT NULL,
+                version                  INTEGER NOT NULL,
+                client_date_modified     TEXT NOT NULL,
+                content_hash             TEXT NOT NULL,
+                embedding                BLOB NOT NULL,
+                dimensions               INTEGER NOT NULL,
+                model_id                 TEXT NOT NULL,
+                indexed_at               TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (item_id)
+            );
+        `);
+
+        // Table for tracking embedding index state per library
+        // Used to optimize startup by skipping full diff when nothing changed
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS embedding_index_state (
+                library_id               INTEGER PRIMARY KEY,
+                last_scan_timestamp      TEXT NOT NULL,
+                max_client_date_modified TEXT NOT NULL,
+                item_count               INTEGER NOT NULL,
+                embedding_count          INTEGER NOT NULL
+            );
+        `);
+
+        // Table for tracking failed embedding attempts
+        // Items are retried with exponential backoff
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS failed_embeddings (
+                item_id                  INTEGER PRIMARY KEY,
+                library_id               INTEGER NOT NULL,
+                failure_count            INTEGER NOT NULL DEFAULT 1,
+                last_error               TEXT NOT NULL,
+                last_attempt             TEXT NOT NULL DEFAULT (datetime('now')),
+                next_retry_after         TEXT NOT NULL
+            );
+        `);
 
         // DB indexes
         await this.conn.queryAsync(`
@@ -157,6 +259,31 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_sync_logs_session
             ON sync_logs(session_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_embeddings_library
+            ON embeddings(library_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_embeddings_content_hash
+            ON embeddings(content_hash);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_embeddings_zotero_key
+            ON embeddings(zotero_key);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_failed_embeddings_library
+            ON failed_embeddings(library_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_failed_embeddings_retry
+            ON failed_embeddings(next_retry_after);
         `);
     }
 
@@ -523,6 +650,683 @@ export class BeaverDB {
             `DELETE FROM sync_logs WHERE user_id = ? AND library_id IN (${placeholders})`,
             [user_id, ...library_ids]
         );
+    }
+
+    // --- Embedding Methods ---
+
+    /**
+     * Helper method to construct EmbeddingRecord from a database row
+     */
+    private static rowToEmbeddingRecord(row: any): EmbeddingRecord {
+        return {
+            item_id: row.item_id,
+            library_id: row.library_id,
+            zotero_key: row.zotero_key,
+            version: row.version,
+            client_date_modified: row.client_date_modified,
+            content_hash: row.content_hash,
+            embedding: new Uint8Array(row.embedding),
+            dimensions: row.dimensions,
+            model_id: row.model_id,
+            indexed_at: row.indexed_at,
+        };
+    }
+
+    /**
+     * Convert Int8Array embedding to Uint8Array for BLOB storage.
+     * SQLite stores BLOBs as raw bytes; Int8Array and Uint8Array share the same buffer layout.
+     */
+    public static embeddingToBlob(embedding: Int8Array): Uint8Array {
+        return new Uint8Array(embedding.buffer, embedding.byteOffset, embedding.byteLength);
+    }
+
+    /**
+     * Convert BLOB (Uint8Array) back to Int8Array for similarity computation.
+     */
+    public static blobToEmbedding(blob: Uint8Array): Int8Array {
+        return new Int8Array(blob.buffer, blob.byteOffset, blob.byteLength);
+    }
+
+    /**
+     * Compute a hash for content change detection.
+     * Uses a simple but fast DJB2-style hash suitable for detecting text changes.
+     * @param text The text content to hash (title + abstract)
+     * @returns Hash string
+     */
+    public static computeContentHash(text: string): string {
+        let hash = 5381;
+        for (let i = 0; i < text.length; i++) {
+            const char = text.charCodeAt(i);
+            hash = ((hash << 5) + hash) ^ char;
+        }
+        // Convert to unsigned 32-bit and then to base36 for compact representation
+        return (hash >>> 0).toString(36);
+    }
+
+    /**
+     * Insert or update an embedding record.
+     * @param embedding The embedding data to store
+     */
+    public async upsertEmbedding(embedding: Omit<EmbeddingRecord, 'indexed_at'> & { indexed_at?: string }): Promise<void> {
+        const now = embedding.indexed_at || new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        
+        await this.conn.queryAsync(
+            `INSERT OR REPLACE INTO embeddings 
+             (item_id, library_id, zotero_key, version, client_date_modified, 
+              content_hash, embedding, dimensions, model_id, indexed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                embedding.item_id,
+                embedding.library_id,
+                embedding.zotero_key,
+                embedding.version,
+                embedding.client_date_modified,
+                embedding.content_hash,
+                embedding.embedding,
+                embedding.dimensions,
+                embedding.model_id,
+                now
+            ]
+        );
+    }
+
+    /**
+     * Insert or update multiple embedding records in a batch.
+     * @param embeddings Array of embedding data to store
+     */
+    public async upsertEmbeddingsBatch(embeddings: Array<Omit<EmbeddingRecord, 'indexed_at'> & { indexed_at?: string }>): Promise<void> {
+        if (embeddings.length === 0) return;
+
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+
+        // Use a transaction for batch insert
+        await this.conn.executeTransaction(async () => {
+            for (const embedding of embeddings) {
+                const indexedAt = embedding.indexed_at || now;
+                await this.conn.queryAsync(
+                    `INSERT OR REPLACE INTO embeddings 
+                     (item_id, library_id, zotero_key, version, client_date_modified, 
+                      content_hash, embedding, dimensions, model_id, indexed_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        embedding.item_id,
+                        embedding.library_id,
+                        embedding.zotero_key,
+                        embedding.version,
+                        embedding.client_date_modified,
+                        embedding.content_hash,
+                        embedding.embedding,
+                        embedding.dimensions,
+                        embedding.model_id,
+                        indexedAt
+                    ]
+                );
+            }
+        });
+    }
+
+    /**
+     * Get an embedding record by item ID.
+     * @param itemId The Zotero item ID
+     * @returns The embedding record or null if not found
+     */
+    public async getEmbedding(itemId: number): Promise<EmbeddingRecord | null> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM embeddings WHERE item_id = ?`,
+            [itemId]
+        );
+        
+        if (rows.length === 0) {
+            return null;
+        }
+        
+        return BeaverDB.rowToEmbeddingRecord(rows[0]);
+    }
+
+    /**
+     * Get embedding records for multiple item IDs.
+     * @param itemIds Array of Zotero item IDs
+     * @returns Map of item ID to embedding record
+     */
+    public async getEmbeddingsBatch(itemIds: number[]): Promise<Map<number, EmbeddingRecord>> {
+        if (itemIds.length === 0) return new Map();
+
+        const result = new Map<number, EmbeddingRecord>();
+        const chunkSize = 500;
+
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+            
+            const rows = await this.conn.queryAsync(
+                `SELECT * FROM embeddings WHERE item_id IN (${placeholders})`,
+                chunk
+            );
+            
+            for (const row of rows) {
+                result.set(row.item_id, BeaverDB.rowToEmbeddingRecord(row));
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Get all embeddings for a library.
+     * @param libraryId The Zotero library ID
+     * @returns Array of embedding records
+     */
+    public async getEmbeddingsByLibrary(libraryId: number): Promise<EmbeddingRecord[]> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM embeddings WHERE library_id = ?`,
+            [libraryId]
+        );
+        
+        return rows.map((row: any) => BeaverDB.rowToEmbeddingRecord(row));
+    }
+
+    /**
+     * Get all embeddings across all libraries.
+     * @returns Array of embedding records
+     */
+    public async getAllEmbeddings(): Promise<EmbeddingRecord[]> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM embeddings ORDER BY library_id, item_id`
+        );
+        
+        return rows.map((row: any) => BeaverDB.rowToEmbeddingRecord(row));
+    }
+
+    /**
+     * Get embeddings for multiple libraries.
+     * @param libraryIds Array of library IDs
+     * @returns Array of embedding records
+     */
+    public async getEmbeddingsByLibraries(libraryIds: number[]): Promise<EmbeddingRecord[]> {
+        if (libraryIds.length === 0) return [];
+
+        const placeholders = libraryIds.map(() => '?').join(',');
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM embeddings WHERE library_id IN (${placeholders})`,
+            libraryIds
+        );
+        
+        return rows.map((row: any) => BeaverDB.rowToEmbeddingRecord(row));
+    }
+
+    /**
+     * Get content hashes for items to check what needs re-indexing.
+     * @param itemIds Array of Zotero item IDs
+     * @returns Map of item ID to content hash
+     */
+    public async getContentHashes(itemIds: number[]): Promise<Map<number, string>> {
+        if (itemIds.length === 0) return new Map();
+
+        const result = new Map<number, string>();
+        const chunkSize = 500;
+
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+            
+            const rows = await this.conn.queryAsync(
+                `SELECT item_id, content_hash FROM embeddings WHERE item_id IN (${placeholders})`,
+                chunk
+            );
+            
+            for (const row of rows) {
+                result.set(row.item_id, row.content_hash);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Delete an embedding by item ID.
+     * @param itemId The Zotero item ID
+     */
+    public async deleteEmbedding(itemId: number): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM embeddings WHERE item_id = ?`,
+            [itemId]
+        );
+    }
+
+    /**
+     * Delete embeddings for multiple item IDs.
+     * @param itemIds Array of Zotero item IDs
+     */
+    public async deleteEmbeddingsBatch(itemIds: number[]): Promise<void> {
+        if (itemIds.length === 0) return;
+
+        const chunkSize = 500;
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+            await this.conn.queryAsync(
+                `DELETE FROM embeddings WHERE item_id IN (${placeholders})`,
+                chunk
+            );
+        }
+    }
+
+    /**
+     * Delete all embeddings for a library.
+     * @param libraryId The Zotero library ID
+     */
+    public async deleteEmbeddingsByLibrary(libraryId: number): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM embeddings WHERE library_id = ?`,
+            [libraryId]
+        );
+    }
+
+    /**
+     * Get the count of embeddings for a library.
+     * @param libraryId The Zotero library ID
+     * @returns Number of embeddings
+     */
+    public async getEmbeddingCount(libraryId?: number): Promise<number> {
+        let sql = 'SELECT COUNT(*) as count FROM embeddings';
+        const params: any[] = [];
+
+        if (libraryId !== undefined) {
+            sql += ' WHERE library_id = ?';
+            params.push(libraryId);
+        }
+
+        const rows = await this.conn.queryAsync(sql, params);
+        return rows[0]?.count || 0;
+    }
+
+    /**
+     * Get item IDs that have embeddings in a library.
+     * @param libraryId The Zotero library ID
+     * @returns Array of item IDs
+     */
+    public async getEmbeddedItemIds(libraryId?: number): Promise<number[]> {
+        let sql = 'SELECT item_id FROM embeddings';
+        const params: any[] = [];
+
+        if (libraryId !== undefined) {
+            sql += ' WHERE library_id = ?';
+            params.push(libraryId);
+        }
+
+        const rows = await this.conn.queryAsync(sql, params);
+        return rows.map((row: any) => row.item_id);
+    }
+
+    /**
+     * Get distinct library IDs that have embeddings.
+     * Used to find libraries that may need cleanup when sync settings change.
+     * @returns Array of library IDs
+     */
+    public async getEmbeddedLibraryIds(): Promise<number[]> {
+        const rows = await this.conn.queryAsync(
+            'SELECT DISTINCT library_id FROM embeddings'
+        );
+        return rows.map((row: any) => row.library_id);
+    }
+
+    /**
+     * Get all content hashes for embeddings, optionally filtered by library.
+     * More efficient than getContentHashes for full-database scans.
+     * @param libraryId Optional library ID to filter by
+     * @returns Map of item ID to content hash
+     */
+    public async getEmbeddingContentHashMap(libraryId?: number): Promise<Map<number, string>> {
+        let sql = 'SELECT item_id, content_hash FROM embeddings';
+        const params: any[] = [];
+
+        if (libraryId !== undefined) {
+            sql += ' WHERE library_id = ?';
+            params.push(libraryId);
+        }
+
+        const rows = await this.conn.queryAsync(sql, params);
+        const result = new Map<number, string>();
+        
+        for (const row of rows) {
+            result.set(row.item_id, row.content_hash);
+        }
+
+        return result;
+    }
+
+    // =============================================
+    // Embedding Index State Methods
+    // =============================================
+
+    /**
+     * Get the embedding index state for a library.
+     * @param libraryId The Zotero library ID
+     * @returns The state record or null if not found
+     */
+    public async getEmbeddingIndexState(libraryId: number): Promise<EmbeddingIndexStateRecord | null> {
+        const sql = 'SELECT * FROM embedding_index_state WHERE library_id = ?';
+        const rows = await this.conn.queryAsync(sql, [libraryId]);
+        
+        if (rows.length === 0) return null;
+        
+        const row = rows[0];
+        return {
+            library_id: row.library_id,
+            last_scan_timestamp: row.last_scan_timestamp,
+            max_client_date_modified: row.max_client_date_modified,
+            item_count: row.item_count,
+            embedding_count: row.embedding_count,
+        };
+    }
+
+    /**
+     * Update the embedding index state for a library.
+     * @param state The state to save
+     */
+    public async upsertEmbeddingIndexState(state: EmbeddingIndexStateRecord): Promise<void> {
+        const sql = `
+            INSERT INTO embedding_index_state 
+                (library_id, last_scan_timestamp, max_client_date_modified, item_count, embedding_count)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(library_id) DO UPDATE SET
+                last_scan_timestamp = excluded.last_scan_timestamp,
+                max_client_date_modified = excluded.max_client_date_modified,
+                item_count = excluded.item_count,
+                embedding_count = excluded.embedding_count
+        `;
+        
+        await this.conn.queryAsync(sql, [
+            state.library_id,
+            state.last_scan_timestamp,
+            state.max_client_date_modified,
+            state.item_count,
+            state.embedding_count,
+        ]);
+    }
+
+    /**
+     * Delete the embedding index state for a library.
+     * @param libraryId The Zotero library ID
+     */
+    public async deleteEmbeddingIndexState(libraryId: number): Promise<void> {
+        await this.conn.queryAsync(
+            'DELETE FROM embedding_index_state WHERE library_id = ?',
+            [libraryId]
+        );
+    }
+
+    /**
+     * Get MAX(client_date_modified) from embeddings for a library.
+     * @param libraryId The Zotero library ID
+     * @returns The max date or null if no embeddings exist
+     */
+    public async getEmbeddingsMaxClientDateModified(libraryId: number): Promise<string | null> {
+        const sql = 'SELECT MAX(client_date_modified) as max_date FROM embeddings WHERE library_id = ?';
+        const rows = await this.conn.queryAsync(sql, [libraryId]);
+        return rows[0]?.max_date || null;
+    }
+
+    // =============================================
+    // Failed Embeddings Methods
+    // =============================================
+
+    /**
+     * Helper method to construct FailedEmbeddingRecord from a database row
+     */
+    private static rowToFailedEmbeddingRecord(row: any): FailedEmbeddingRecord {
+        return {
+            item_id: row.item_id,
+            library_id: row.library_id,
+            failure_count: row.failure_count,
+            last_error: row.last_error,
+            last_attempt: row.last_attempt,
+            next_retry_after: row.next_retry_after,
+        };
+    }
+
+    /**
+     * Calculate the next retry time based on failure count.
+     * Uses exponential backoff: 1h, 2h, 4h, 8h, 16h
+     * @param failureCount Number of consecutive failures
+     * @returns ISO string of next retry time
+     */
+    private static calculateNextRetryTime(failureCount: number): string {
+        const delayMs = EMBEDDING_RETRY_BASE_DELAY_MS * Math.pow(2, failureCount - 1);
+        const nextRetry = new Date(Date.now() + delayMs);
+        return nextRetry.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+    }
+
+    /**
+     * Record a failed embedding attempt for an item.
+     * If the item already has failures, increments the counter.
+     * @param itemId The Zotero item ID
+     * @param libraryId The Zotero library ID
+     * @param error The error message
+     */
+    public async recordFailedEmbedding(itemId: number, libraryId: number, error: string): Promise<void> {
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        
+        // Check if already exists
+        const existing = await this.getFailedEmbedding(itemId);
+        
+        if (existing) {
+            // Increment failure count
+            const newFailureCount = existing.failure_count + 1;
+            const nextRetry = BeaverDB.calculateNextRetryTime(newFailureCount);
+            
+            await this.conn.queryAsync(
+                `UPDATE failed_embeddings 
+                 SET failure_count = ?, last_error = ?, last_attempt = ?, next_retry_after = ?
+                 WHERE item_id = ?`,
+                [newFailureCount, error, now, nextRetry, itemId]
+            );
+        } else {
+            // Insert new record
+            const nextRetry = BeaverDB.calculateNextRetryTime(1);
+            
+            await this.conn.queryAsync(
+                `INSERT INTO failed_embeddings 
+                 (item_id, library_id, failure_count, last_error, last_attempt, next_retry_after)
+                 VALUES (?, ?, 1, ?, ?, ?)`,
+                [itemId, libraryId, error, now, nextRetry]
+            );
+        }
+    }
+
+    /**
+     * Record multiple failed embedding attempts in a batch.
+     * @param items Array of {itemId, libraryId} pairs
+     * @param error The error message (same for all items in batch)
+     */
+    public async recordFailedEmbeddingsBatch(
+        items: Array<{ itemId: number; libraryId: number }>,
+        error: string
+    ): Promise<void> {
+        if (items.length === 0) return;
+
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        const itemIds = items.map(i => i.itemId);
+        
+        // Get existing failed records
+        const existing = await this.getFailedEmbeddingsBatch(itemIds);
+        const existingMap = new Map(existing.map(r => [r.item_id, r]));
+
+        await this.conn.executeTransaction(async () => {
+            for (const item of items) {
+                const existingRecord = existingMap.get(item.itemId);
+                
+                if (existingRecord) {
+                    const newFailureCount = existingRecord.failure_count + 1;
+                    const nextRetry = BeaverDB.calculateNextRetryTime(newFailureCount);
+                    
+                    await this.conn.queryAsync(
+                        `UPDATE failed_embeddings 
+                         SET failure_count = ?, last_error = ?, last_attempt = ?, next_retry_after = ?
+                         WHERE item_id = ?`,
+                        [newFailureCount, error, now, nextRetry, item.itemId]
+                    );
+                } else {
+                    const nextRetry = BeaverDB.calculateNextRetryTime(1);
+                    
+                    await this.conn.queryAsync(
+                        `INSERT INTO failed_embeddings 
+                         (item_id, library_id, failure_count, last_error, last_attempt, next_retry_after)
+                         VALUES (?, ?, 1, ?, ?, ?)`,
+                        [item.itemId, item.libraryId, error, now, nextRetry]
+                    );
+                }
+            }
+        });
+    }
+
+    /**
+     * Get a failed embedding record by item ID.
+     * @param itemId The Zotero item ID
+     * @returns The failed embedding record or null
+     */
+    public async getFailedEmbedding(itemId: number): Promise<FailedEmbeddingRecord | null> {
+        const rows = await this.conn.queryAsync(
+            'SELECT * FROM failed_embeddings WHERE item_id = ?',
+            [itemId]
+        );
+        
+        if (rows.length === 0) return null;
+        return BeaverDB.rowToFailedEmbeddingRecord(rows[0]);
+    }
+
+    /**
+     * Get failed embedding records for multiple item IDs.
+     * @param itemIds Array of Zotero item IDs
+     * @returns Array of failed embedding records
+     */
+    public async getFailedEmbeddingsBatch(itemIds: number[]): Promise<FailedEmbeddingRecord[]> {
+        if (itemIds.length === 0) return [];
+
+        const results: FailedEmbeddingRecord[] = [];
+        const chunkSize = 500;
+
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+            
+            const rows = await this.conn.queryAsync(
+                `SELECT * FROM failed_embeddings WHERE item_id IN (${placeholders})`,
+                chunk
+            );
+            
+            for (const row of rows) {
+                results.push(BeaverDB.rowToFailedEmbeddingRecord(row));
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * Get all items that are ready for retry.
+     * Returns items where next_retry_after < now AND failure_count < MAX_EMBEDDING_FAILURES.
+     * @param libraryId Optional library ID to filter by
+     * @returns Array of item IDs ready for retry
+     */
+    public async getItemsReadyForRetry(libraryId?: number): Promise<number[]> {
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        
+        let sql = `SELECT item_id FROM failed_embeddings 
+                   WHERE next_retry_after <= ? AND failure_count < ?`;
+        const params: any[] = [now, MAX_EMBEDDING_FAILURES];
+        
+        if (libraryId !== undefined) {
+            sql += ' AND library_id = ?';
+            params.push(libraryId);
+        }
+        
+        const rows = await this.conn.queryAsync(sql, params);
+        return rows.map((row: any) => row.item_id);
+    }
+
+    /**
+     * Get all permanently failed items (failure_count >= MAX_EMBEDDING_FAILURES).
+     * @param libraryId Optional library ID to filter by
+     * @returns Array of failed embedding records
+     */
+    public async getPermanentlyFailedItems(libraryId?: number): Promise<FailedEmbeddingRecord[]> {
+        let sql = `SELECT * FROM failed_embeddings WHERE failure_count >= ?`;
+        const params: any[] = [MAX_EMBEDDING_FAILURES];
+        
+        if (libraryId !== undefined) {
+            sql += ' AND library_id = ?';
+            params.push(libraryId);
+        }
+        
+        const rows = await this.conn.queryAsync(sql, params);
+        return rows.map((row: any) => BeaverDB.rowToFailedEmbeddingRecord(row));
+    }
+
+    /**
+     * Remove a failed embedding record (call after successful indexing).
+     * @param itemId The Zotero item ID
+     */
+    public async removeFailedEmbedding(itemId: number): Promise<void> {
+        await this.conn.queryAsync(
+            'DELETE FROM failed_embeddings WHERE item_id = ?',
+            [itemId]
+        );
+    }
+
+    /**
+     * Remove multiple failed embedding records in a batch.
+     * @param itemIds Array of Zotero item IDs
+     */
+    public async removeFailedEmbeddingsBatch(itemIds: number[]): Promise<void> {
+        if (itemIds.length === 0) return;
+
+        const chunkSize = 500;
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+            await this.conn.queryAsync(
+                `DELETE FROM failed_embeddings WHERE item_id IN (${placeholders})`,
+                chunk
+            );
+        }
+    }
+
+    /**
+     * Delete all failed embedding records for a library.
+     * @param libraryId The Zotero library ID
+     */
+    public async deleteFailedEmbeddingsByLibrary(libraryId: number): Promise<void> {
+        await this.conn.queryAsync(
+            'DELETE FROM failed_embeddings WHERE library_id = ?',
+            [libraryId]
+        );
+    }
+
+    /**
+     * Remove failed embedding records for items that no longer exist.
+     * @param itemIds Array of item IDs that should be removed
+     */
+    public async cleanupDeletedFailedEmbeddings(itemIds: number[]): Promise<void> {
+        await this.removeFailedEmbeddingsBatch(itemIds);
+    }
+
+    /**
+     * Get count of failed embeddings.
+     * @param libraryId Optional library ID to filter by
+     * @returns Number of failed embedding records
+     */
+    public async getFailedEmbeddingCount(libraryId?: number): Promise<number> {
+        let sql = 'SELECT COUNT(*) as count FROM failed_embeddings';
+        const params: any[] = [];
+
+        if (libraryId !== undefined) {
+            sql += ' WHERE library_id = ?';
+            params.push(libraryId);
+        }
+
+        const rows = await this.conn.queryAsync(sql, params);
+        return rows[0]?.count || 0;
     }
 
 }

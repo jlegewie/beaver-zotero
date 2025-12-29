@@ -11,6 +11,7 @@ import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atom
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import FileStatusDisplay from "../status/FileStatusDisplay";
+import { planFeaturesAtom } from "../../atoms/profile";
 
 interface HomePageProps {
     isWindow?: boolean;
@@ -24,6 +25,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
+    const planFeatures = useAtomValue(planFeaturesAtom);
 
     // Realtime listening for file status updates
     const { connectionStatus } = useFileStatus();
@@ -82,7 +84,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
             )}
             
             {/* File Processing Status */}
-            {!isWindow && (
+            {planFeatures.databaseSync && !isWindow && (
                 <div className="display-flex flex-row justify-between items-center mt-4">
                     <Button
                         variant="ghost-secondary"

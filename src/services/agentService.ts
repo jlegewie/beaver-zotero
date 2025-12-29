@@ -18,7 +18,8 @@ import {
     handleExternalReferenceCheckRequest,
     handleZoteroAttachmentPagesRequest,
     handleZoteroAttachmentPageImagesRequest,
-    handleZoteroItemSearchRequest,
+    handleItemSearchByMetadataRequest,
+    handleItemSearchByTopicRequest,
 } from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
 import {
@@ -369,11 +370,18 @@ export class AgentService {
                         .catch(err => this.handleProviderError(err, 'zotero_data_request_failed'));
                     break;
 
-                case 'zotero_item_search_request':
-                    logger(`AgentService: Received zotero_item_search_request: topic=${event.topic_query?.length || 0} phrases, author="${event.author_query || ''}", pub="${event.publication_query || ''}"`, 1);
-                    handleZoteroItemSearchRequest(event)
+                case 'item_search_by_metadata_request':
+                    logger(`AgentService: Received item_search_by_metadata_request: title="${event.title_query || ''}", author="${event.author_query || ''}", pub="${event.publication_query || ''}"`, 1);
+                    handleItemSearchByMetadataRequest(event)
                         .then(res => this.send(res))
-                        .catch(err => this.handleProviderError(err, 'zotero_item_search_request_failed'));
+                        .catch(err => this.handleProviderError(err, 'item_search_by_metadata_request_failed'));
+                    break;
+
+                case 'item_search_by_topic_request':
+                    logger(`AgentService: Received item_search_by_topic_request: topic="${event.topic_query}", limit=${event.limit}`, 1);
+                    handleItemSearchByTopicRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => this.handleProviderError(err, 'item_search_by_topic_request_failed'));
                     break;
 
                 default:

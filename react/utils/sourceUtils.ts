@@ -111,7 +111,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
     // User ID
     const userID = store.get(userIdAtom);
-    if (!userID) return {valid: false, error: "User ID not found"};
+    if (!userID) return {valid: false, error: "User ID not found. Make sure you are logged in."};
 
     // Item library
     const library = Zotero.Libraries.get(item.libraryID);

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Provider } from 'jotai';
 import LibrarySidebar from './components/LibrarySidebar';
 import { useZoteroSync } from './hooks/useZoteroSync';
+import { useEmbeddingIndex } from './hooks/useEmbeddingIndex';
 import { useAuth } from './hooks/useAuth';
 import ReaderSidebar from './components/ReaderSidebar';
 import WindowSidebar from './components/WindowSidebar';
@@ -21,6 +22,9 @@ import { useUpgradeHandler } from './hooks/useUpgradeHandler';
 const GlobalContextInitializer = () => {
     // Handle Supabase authentication
     useAuth();
+
+    // Handle embedding index
+    useEmbeddingIndex();
 
     // Handle plugin upgrade tasks
     useUpgradeHandler();

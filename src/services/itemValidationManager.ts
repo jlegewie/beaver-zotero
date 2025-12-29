@@ -3,7 +3,7 @@ import { itemsService } from './itemsService';
 import { isValidZoteroItem } from '../../react/utils/sourceUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
-import { planFeaturesAtom } from '../../react/atoms/profile';
+import { planFeaturesAtom, syncLibraryIdsAtom } from '../../react/atoms/profile';
 import { isAttachmentOnServer } from '../utils/webAPI';
 import { getPref } from '../utils/prefs';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
@@ -371,14 +371,43 @@ class ItemValidationManager {
     }
 
     /**
+     * Check if item's library is synced with Beaver
+     * Simple check for frontend validation
+     */
+    private checkLibrarySynced(item: Zotero.Item): { isValid: boolean; reason?: string } {
+        // Check if library exists
+        const library = Zotero.Libraries.get(item.libraryID);
+        if (!library) {
+            return { isValid: false, reason: 'Library not found' };
+        }
+
+        // Check if library is in synced libraries
+        const syncedLibraries = store.get(syncLibraryIdsAtom);
+        if (!syncedLibraries.includes(item.libraryID)) {
+            return { 
+                isValid: false, 
+                reason: `Library "${library.name}" is excluded from Beaver. You can update this setting in Beaver Preferences.` 
+            };
+        }
+
+        return { isValid: true };
+    }
+
+    /**
      * Perform frontend mode validation
-     * For regular items: just checks existence and trash status
-     * For attachments: comprehensive file validation
+     * For regular items: checks library sync status, existence and trash status
+     * For attachments: checks library sync status + comprehensive file validation
      * For annotations: checks type and parent
      */
     private async performFrontendValidation(
         item: Zotero.Item
     ): Promise<{ isValid: boolean; reason?: string }> {
+        // Check if library is synced/excluded from Beaver (applies to all item types)
+        const libraryCheck = this.checkLibrarySynced(item);
+        if (!libraryCheck.isValid) {
+            return libraryCheck;
+        }
+
         // Regular items: simple existence and trash check
         if (item.isRegularItem()) {
             if (item.isInTrash()) {

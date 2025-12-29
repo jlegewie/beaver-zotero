@@ -164,6 +164,93 @@ declare namespace Zotero {
              */
             deleteSyncLogsForLibraryIds(user_id: string, library_ids: number[]): Promise<void>;
 
+            // --- Embedding Methods ---
+
+            /**
+             * Insert or update an embedding record.
+             * @param embedding The embedding data to store
+             */
+            upsertEmbedding(embedding: Omit<import("../src/services/database").EmbeddingRecord, 'indexed_at'> & { indexed_at?: string }): Promise<void>;
+
+            /**
+             * Insert or update multiple embedding records in a batch.
+             * @param embeddings Array of embedding data to store
+             */
+            upsertEmbeddingsBatch(embeddings: Array<Omit<import("../src/services/database").EmbeddingRecord, 'indexed_at'> & { indexed_at?: string }>): Promise<void>;
+
+            /**
+             * Get an embedding record by item ID.
+             * @param itemId The Zotero item ID
+             * @returns The embedding record or null if not found
+             */
+            getEmbedding(itemId: number): Promise<import("../src/services/database").EmbeddingRecord | null>;
+
+            /**
+             * Get embedding records for multiple item IDs.
+             * @param itemIds Array of Zotero item IDs
+             * @returns Map of item ID to embedding record
+             */
+            getEmbeddingsBatch(itemIds: number[]): Promise<Map<number, import("../src/services/database").EmbeddingRecord>>;
+
+            /**
+             * Get all embeddings for a library.
+             * @param libraryId The Zotero library ID
+             * @returns Array of embedding records
+             */
+            getEmbeddingsByLibrary(libraryId: number): Promise<import("../src/services/database").EmbeddingRecord[]>;
+
+            /**
+             * Get all embeddings across all libraries.
+             * @returns Array of embedding records
+             */
+            getAllEmbeddings(): Promise<import("../src/services/database").EmbeddingRecord[]>;
+
+            /**
+             * Get embeddings for multiple libraries.
+             * @param libraryIds Array of library IDs
+             * @returns Array of embedding records
+             */
+            getEmbeddingsByLibraries(libraryIds: number[]): Promise<import("../src/services/database").EmbeddingRecord[]>;
+
+            /**
+             * Get content hashes for items to check what needs re-indexing.
+             * @param itemIds Array of Zotero item IDs
+             * @returns Map of item ID to content hash
+             */
+            getContentHashes(itemIds: number[]): Promise<Map<number, string>>;
+
+            /**
+             * Delete an embedding by item ID.
+             * @param itemId The Zotero item ID
+             */
+            deleteEmbedding(itemId: number): Promise<void>;
+
+            /**
+             * Delete embeddings for multiple item IDs.
+             * @param itemIds Array of Zotero item IDs
+             */
+            deleteEmbeddingsBatch(itemIds: number[]): Promise<void>;
+
+            /**
+             * Delete all embeddings for a library.
+             * @param libraryId The Zotero library ID
+             */
+            deleteEmbeddingsByLibrary(libraryId: number): Promise<void>;
+
+            /**
+             * Get the count of embeddings for a library.
+             * @param libraryId The Zotero library ID (optional - if not provided, returns total count)
+             * @returns Number of embeddings
+             */
+            getEmbeddingCount(libraryId?: number): Promise<number>;
+
+            /**
+             * Get item IDs that have embeddings in a library.
+             * @param libraryId The Zotero library ID (optional - if not provided, returns all embedded item IDs)
+             * @returns Array of item IDs
+             */
+            getEmbeddedItemIds(libraryId?: number): Promise<number[]>;
+
         }
 
         /**

@@ -1,6 +1,6 @@
 import { ApiService } from './apiService';
 import API_BASE_URL from '../utils/getAPIBaseURL';
-import { SafeProfileWithPlan, ProcessingTier } from '../../react/types/profile';
+import { SafeProfileWithPlan } from '../../react/types/profile';
 import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
 import { ApiError, ZoteroInstanceMismatchError } from '../../react/types/apiErrors';
 import { ModelConfig } from '../../react/atoms/models';
@@ -12,7 +12,6 @@ interface AuthorizationRequest {
     zotero_user_id: string | undefined;
     libraries: ZoteroLibrary[];
     require_onboarding: boolean;
-    processing_tier: ProcessingTier;
     use_zotero_sync: boolean;
     consent_to_share: boolean;
 }
@@ -31,7 +30,8 @@ interface ProfileResponse {
 }
 
 interface OnboardingRequest {
-    processing_tier: ProcessingTier;
+    sync_status?: OverallSyncStatus;
+    libraries?: ZoteroLibrary[];
 }
 
 
@@ -136,7 +136,6 @@ export class AccountService extends ApiService {
     async authorizeAccess(
         requireOnboarding: boolean = true,
         libraries: ZoteroLibrary[],
-        processingTier: ProcessingTier,
         syncWithZotero: boolean = false,
         consentToShare: boolean = false
     ): Promise<{ message: string }> {
@@ -146,7 +145,6 @@ export class AccountService extends ApiService {
             zotero_user_id: userID,
             require_onboarding: requireOnboarding,
             libraries: libraries,
-            processing_tier: processingTier,
             use_zotero_sync: syncWithZotero,
             consent_to_share: consentToShare
         } as AuthorizationRequest);
@@ -170,12 +168,10 @@ export class AccountService extends ApiService {
      * @returns Promise with the response message
      */
     async completeOnboarding(
-        processingTier: ProcessingTier,
         overallSyncStatus: OverallSyncStatus,
         libraries?: ZoteroLibrary[]
     ): Promise<{ message: string }> {
         return this.post<{ message: string }>('/api/v1/account/complete-onboarding', {
-            processing_tier: processingTier,
             sync_status: overallSyncStatus,
             libraries: libraries
         } as OnboardingRequest);

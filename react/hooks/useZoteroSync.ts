@@ -15,6 +15,12 @@ const LIBRARY_SYNC_DELAY_MS = 4000; // Delay before calling syncZoteroDatabase f
 const SYNC_BATCH_SIZE_INITIAL = 85;
 
 /**
+ * Module-level variable to track the Zotero notifier observer ID.
+ * This persists across hot-reloads to ensure proper cleanup.
+ */
+let moduleSyncNotifierId: string | null = null;
+
+/**
  * Interface for collected sync events
  */
 interface CollectedEvents {
@@ -40,9 +46,6 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
 
-    // ref to prevent multiple registrations if dependencies change
-    const zoteroNotifierIdRef = useRef<string | null>(null);
-    
     // ref for collected events - using ref to persist between renders
     const eventsRef = useRef<CollectedEvents>({
         changedLibraries: new Set(),
@@ -175,12 +178,30 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         if (!isAuthorized) return;
         if (!isDeviceAuthorized) return;
         if (syncLibraryIds.length === 0) return;
+        if (!store.get(planFeaturesAtom).databaseSync) return;
+
+        let isMounted = true;
+
+        // Track the observer ID for this specific hook instance
+        let myObserverId: string | null = null;
 
         // Set initial status to in_progress
         logger("useZoteroSync: Setting up Zotero sync", 3);
         
         // Function to create the observer
         const setupObserver = () => {
+            // Unregister any existing observer before registering a new one
+            // This handles hot-reload scenarios where cleanup may not have run
+            if (moduleSyncNotifierId) {
+                try {
+                    Zotero.Notifier.unregisterObserver(moduleSyncNotifierId);
+                    logger("useZoteroSync: Unregistered stale observer before re-registering", 4);
+                } catch (e) {
+                    // Ignore errors if observer was already unregistered
+                }
+                moduleSyncNotifierId = null;
+            }
+
             // Create the notification observer with debouncing
             const observer = {
                 notify: async function(event: string, type: string, ids: number[], extraData: any) {
@@ -360,7 +381,8 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             } as Zotero.Notifier.Notify;
             
             // Register the observer
-            zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(observer, ['item', 'sync', 'collection', 'item-tag'], 'beaver-sync');
+            moduleSyncNotifierId = Zotero.Notifier.registerObserver(observer, ['item', 'sync', 'collection', 'item-tag'], 'beaver-sync');
+            myObserverId = moduleSyncNotifierId;
         };
         
         // Initialize sync operations
@@ -376,7 +398,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 updateLibraryVersionCache();
                 
                 // Then set up the observer after sync completes
-                setupObserver();
+                if (isMounted) setupObserver();
                 
                 // Start file uploader after sync completes
                 if (store.get(planFeaturesAtom)?.uploadFiles) {
@@ -386,7 +408,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 logger(`useZoteroSync: Error during initial sync: ${error.message}`, 1);
                 Zotero.logError(error);
                 // Still set up the observer even if initial sync fails
-                setupObserver();
+                if (isMounted) setupObserver();
             }
         };
         
@@ -395,12 +417,13 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         
         // Cleanup function
         return () => {
+            isMounted = false;
             logger("useZoteroSync: Cleaning up Zotero sync", 3);
             
             // Unregister observer
-            if (zoteroNotifierIdRef.current) {
-                Zotero.Notifier.unregisterObserver(zoteroNotifierIdRef.current);
-                zoteroNotifierIdRef.current = null;
+            if (moduleSyncNotifierId && moduleSyncNotifierId === myObserverId) {
+                Zotero.Notifier.unregisterObserver(myObserverId);
+                moduleSyncNotifierId = null;
             }
             
             // Clear any pending timers

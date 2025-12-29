@@ -37,7 +37,6 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     item_search: 'Item search',
     item_search_by_topic: 'Item search',
     item_search_by_metadata: 'Item search',
-    zotero_item_search: 'Item search',
     fulltext_search: 'Fulltext search',
     fulltext_search_keywords: 'Keyword search',
 
