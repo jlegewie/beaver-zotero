@@ -17,6 +17,14 @@ interface AuthorizationRequest {
     email_notifications: boolean;
 }
 
+interface FreeAuthorizationRequest {
+    zotero_local_id: string;
+    zotero_user_id: string | undefined;
+    libraries: ZoteroLibrary[];
+    consent_to_share: boolean;
+    email_notifications: boolean;
+}
+
 interface ProfileRequest {
     zotero_local_id: string;
     zotero_user_id: string | undefined;
@@ -138,6 +146,16 @@ export class AccountService extends ApiService {
      * @param emailNotifications Whether user wants email notifications
      * @returns Promise with the response message
      */
+    /**
+     * Sets the user's authorization status to authorized and records consent timestamp.
+     * Used for Pro/Beta plan users who go through the full onboarding flow.
+     * @param requireOnboarding Whether the user needs to complete onboarding
+     * @param libraries List of Zotero libraries to sync
+     * @param syncWithZotero Whether to sync with Zotero
+     * @param consentToShare Whether user consents to share data
+     * @param emailNotifications Whether user wants email notifications
+     * @returns Promise with the response message
+     */
     async authorizeAccess(
         requireOnboarding: boolean = true,
         libraries: ZoteroLibrary[],
@@ -155,6 +173,34 @@ export class AccountService extends ApiService {
             consent_to_share: consentToShare,
             email_notifications: emailNotifications
         } as AuthorizationRequest);
+    }
+
+    /**
+     * Sets the free plan user's authorization status and records consent timestamp.
+     * Used for Free plan users who go through the simplified onboarding flow.
+     * 
+     * Key differences from Pro/Beta authorization:
+     * - Sets has_authorized_free_access instead of has_authorized_access
+     * - Does NOT set has_completed_onboarding (free users don't need full onboarding)
+     * 
+     * @param libraries List of Zotero libraries
+     * @param consentToShare Whether user consents to share data
+     * @param emailNotifications Whether user wants email notifications
+     * @returns Promise with the response message
+     */
+    async authorizeFreeAccess(
+        libraries: ZoteroLibrary[],
+        consentToShare: boolean = false,
+        emailNotifications: boolean = false
+    ): Promise<{ message: string }> {
+        const { userID, localUserKey } = getZoteroUserIdentifier();
+        return this.post<{ message: string }>('/api/v1/account/authorize-free', {
+            zotero_local_id: localUserKey,
+            zotero_user_id: userID,
+            libraries: libraries,
+            consent_to_share: consentToShare,
+            email_notifications: emailNotifications
+        } as FreeAuthorizationRequest);
     }
 
     /**

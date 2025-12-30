@@ -44,11 +44,12 @@ const FreeOnboardingPage: React.FC = () => {
     const isIndexingComplete = embeddingState.status === 'idle' && embeddingState.phase === 'incremental';
 
     // Auto-complete onboarding when indexing finishes
+    // Note: For free users, we check has_authorized_free_access instead of has_authorized_access
     useEffect(() => {
-        if (hasStarted && isIndexingComplete && profileWithPlan?.has_authorized_access) {
+        if (hasStarted && isIndexingComplete && profileWithPlan?.has_authorized_free_access) {
             handleCompleteOnboarding();
         }
-    }, [hasStarted, isIndexingComplete, profileWithPlan?.has_authorized_access]);
+    }, [hasStarted, isIndexingComplete, profileWithPlan?.has_authorized_free_access]);
 
     const handleConsentChange = (checked: boolean) => {
         setConsentToShare(checked);
@@ -64,7 +65,7 @@ const FreeOnboardingPage: React.FC = () => {
 
     /**
      * Handle the "Get Started" button click
-     * Authorizes access and the embedding indexing will be triggered by the useEmbeddingIndex hook
+     * Authorizes free access and the embedding indexing will be triggered by the useEmbeddingIndex hook
      */
     const handleGetStarted = async () => {
         if (isAuthorizing || !profileWithPlan) return;
@@ -79,29 +80,29 @@ const FreeOnboardingPage: React.FC = () => {
                 .map(library => serializeZoteroLibrary(library))
                 .filter(library => library !== null);
 
-            logger(`FreeOnboardingPage: Authorizing access with ${libraries.length} libraries`, 2);
+            logger(`FreeOnboardingPage: Authorizing free access with ${libraries.length} libraries`, 2);
 
-            // Authorize access
-            await accountService.authorizeAccess(
-                false, // requireOnboarding = false (fast indexing, will auto-complete)
+            // Authorize free access (uses new /authorize-free endpoint)
+            await accountService.authorizeFreeAccess(
                 libraries,
-                isLibrarySynced(1), // useZoteroSync - Unused for free plan, set to default for pro upgrade
                 consentToShare,
                 emailNotifications
             );
 
             // Update local profile state
+            // Note: Free users set has_authorized_free_access, NOT has_authorized_access
+            // Also, free users do NOT set has_completed_onboarding (they skip full onboarding)
             const { userID, localUserKey } = getZoteroUserIdentifier();
             setProfileWithPlan({
                 ...profileWithPlan,
                 libraries: libraries,
-                has_authorized_access: true,
-                consented_at: new Date(),
+                has_authorized_free_access: true,
+                free_consented_at: new Date(),
                 consent_to_share: consentToShare,
                 email_notifications: emailNotifications,
                 zotero_user_id: userID || profileWithPlan.zotero_user_id,
                 zotero_local_ids: [localUserKey],
-                has_completed_onboarding: true
+                // Note: has_completed_onboarding is NOT set for free users
             });
 
             // Update user ID and email in prefs
@@ -109,7 +110,7 @@ const FreeOnboardingPage: React.FC = () => {
             setPref("userEmail", user?.email ?? "");
 
         } catch (error) {
-            logger(`FreeOnboardingPage: Error during authorization: ${error}`);
+            logger(`FreeOnboardingPage: Error during free authorization: ${error}`);
             setHasStarted(false);
         } finally {
             setIsAuthorizing(false);
@@ -118,22 +119,19 @@ const FreeOnboardingPage: React.FC = () => {
 
     /**
      * Complete onboarding after indexing finishes
+     * Note: For free users, we don't call the backend to set has_completed_onboarding
+     * because free users don't need full onboarding. The guard clauses in the frontend
+     * check has_authorized_free_access instead.
      */
     const handleCompleteOnboarding = async () => {
         if (!profileWithPlan) return;
 
         try {
-            logger("FreeOnboardingPage: Completing onboarding", 2);
-            await accountService.completeOnboarding('completed');
-
-            // Update local profile state
-            setProfileWithPlan({
-                ...profileWithPlan,
-                has_completed_onboarding: true
-            });
-
+            logger("FreeOnboardingPage: Free user indexing complete - no backend call needed", 2);
+            // Free users don't need to call completeOnboarding on the backend
+            // The frontend guard clauses check has_authorized_free_access for free users
         } catch (error) {
-            logger(`FreeOnboardingPage: Error completing onboarding: ${error}`);
+            logger(`FreeOnboardingPage: Error completing free onboarding: ${error}`);
         }
     };
 

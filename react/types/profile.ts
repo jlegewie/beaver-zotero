@@ -81,16 +81,22 @@ export interface SafeProfileModel {
     current_period_start?: Date;
     current_period_end?: Date;
     
-    // Authorization and onboarding status
+    // Zotero integration and settings
     zotero_user_id: string | null;
     zotero_local_ids: string[] | null;
-    has_authorized_access: boolean;
-    consented_at: Date;
-    has_completed_onboarding: boolean;
     use_zotero_sync: boolean;
     consent_to_share: boolean;
     email_notifications: boolean;
     libraries?: ZoteroLibrary[];
+
+    // Consent and authorization status: Pro plan
+    has_authorized_access: boolean;
+    consented_at: Date;
+    has_completed_onboarding: boolean;
+
+    // Consent and authorization status: Free plan
+    has_authorized_free_access: boolean;
+    free_consented_at: Date | null;
     
     // Balances
     standard_page_balance: number;

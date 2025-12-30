@@ -14,11 +14,13 @@ export const isMigratingDataAtom = atom<boolean>(false);
 export const requiredDataVersionAtom = atom<number>(0);
 
 // Device authorization state
+// A device is authorized if the user has completed authorization (pro or free) AND the device is in the list
 const { localUserKey } = getZoteroUserIdentifier();
 export const isDeviceAuthorizedAtom = selectAtom(
     profileWithPlanAtom,
     (profile: SafeProfileWithPlan | null) => {
-        return profile?.has_authorized_access && profile?.zotero_local_ids?.includes(localUserKey) || false;
+        const hasAnyAuthorization = profile?.has_authorized_access || profile?.has_authorized_free_access;
+        return hasAnyAuthorization && profile?.zotero_local_ids?.includes(localUserKey) || false;
     }
 );
 
@@ -86,11 +88,24 @@ export const profileBalanceAtom = atom<ProfileBalance>((get) => {
     } as ProfileBalance;
 });
 
-// Onboarding state
-export const hasAuthorizedAccessAtom = selectAtom(
+// Onboarding state - separate atoms for pro and free authorization
+export const hasAuthorizedProAccessAtom = selectAtom(
     profileWithPlanAtom,
     (profile: SafeProfileWithPlan | null) => profile?.has_authorized_access || false
 );
+
+export const hasAuthorizedFreeAccessAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => profile?.has_authorized_free_access || false
+);
+
+// Combined authorization check - returns true if user has completed EITHER authorization flow
+// This preserves backward compatibility with existing code that uses hasAuthorizedAccessAtom
+export const hasAuthorizedAccessAtom = atom<boolean>((get) => {
+    const profile = get(profileWithPlanAtom);
+    if (!profile) return false;
+    return profile.has_authorized_access || profile.has_authorized_free_access;
+});
 
 export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
     const profile = get(profileWithPlanAtom);
