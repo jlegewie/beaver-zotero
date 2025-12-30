@@ -895,15 +895,11 @@ export class FileUploader {
         logger(`File Uploader: Failed upload. Updating status to ${status} for ${item.zotero_key} with error code ${errorCode}: ${reason}`, 1);
         
         try {
-            // Get processing tier from plan features
-            const processingTier = store.get(planFeaturesAtom).processingTier;
-            
             // Report failure to backend with appropriate status
             await attachmentsService.reportFileUploadFailed(
                 item.file_hash,
                 status,
                 errorCode,
-                processingTier,
                 reason
             );
             

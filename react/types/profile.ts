@@ -16,7 +16,6 @@ interface SafePlanModel {
     // Features
     sync_database: boolean;
     upload_files: boolean;
-    processing_tier: ProcessingTier;
     mcp_server: boolean;
     supported_file_types: string[];
 
@@ -30,7 +29,6 @@ interface SafePlanModel {
 export interface PlanFeatures {
     databaseSync: boolean;
     uploadFiles: boolean;
-    processingTier: ProcessingTier;
     maxUserAttachments: number;
     uploadFileSizeLimit: number;
     maxPageCount: number;
@@ -48,13 +46,6 @@ export enum SubscriptionStatus {
     FREE = "free",
     ACTIVE = "active",
     PAST_DUE = "past_due"
-}
-
-export enum ProcessingTier {
-    NONE = "none",
-    BASIC = "basic",
-    STANDARD = "standard",
-    ADVANCED = "advanced"
 }
 
 /**
@@ -82,9 +73,6 @@ export enum ProcessingMode {
  */
 export interface SafeProfileModel {
     user_id: string;             // UUID
-
-    // Library status
-    library_status: ProcessingTier;
     
     // Subscription
     current_plan_id: string;     // UUID
@@ -104,12 +92,8 @@ export interface SafeProfileModel {
     libraries?: ZoteroLibrary[];
     
     // Balances
-    basic_page_balance: number;
     standard_page_balance: number;
-    advanced_page_balance: number;
-    purchased_basic_page_balance: number;
     purchased_standard_page_balance: number;
-    purchased_advanced_page_balance: number;
 
     // Chat credits
     chat_credits_used: number;

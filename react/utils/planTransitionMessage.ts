@@ -20,7 +20,7 @@ export const planTransitionMessage = async (profile: SafeProfileWithPlan) => {
     if (!fileStatusSummary.fileStatusAvailable) {
         logger(`planTransitionMessage: File status summary not available, fetching...`);
         const fileStatus = await fetchFileStatus(profile.user_id);
-        fileStatusSummary = calculateFileStatusSummary(fileStatus, profile.plan.processing_tier);
+        fileStatusSummary = calculateFileStatusSummary(fileStatus);
     }
     const {totalFiles, progress} = fileStatusSummary;
 
