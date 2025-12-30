@@ -6,7 +6,9 @@ import {
     embeddingIndexStateAtom, 
     setEmbeddingIndexStatusAtom, 
     EmbeddingIndexState,
-    updateEmbeddingIndexProgressAtom 
+    updateEmbeddingIndexProgressAtom,
+    forceReindexCounterAtom,
+    updateFailedItemsCountAtom
 } from "../atoms/embeddingIndex";
 import { EmbeddingIndexer, MIN_CONTENT_LENGTH, INDEX_BATCH_SIZE } from "../../src/services/embeddingIndexer";
 import { BeaverDB } from "../../src/services/database";
@@ -45,10 +47,12 @@ export function useEmbeddingIndex() {
     const isAuthorized = useAtomValue(hasAuthorizedAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const forceReindexCounter = useAtomValue(forceReindexCounterAtom);
 
     // Atoms for state management
     const setIndexStatus = useSetAtom(setEmbeddingIndexStatusAtom);
     const updateProgress = useSetAtom(updateEmbeddingIndexProgressAtom);
+    const updateFailedCount = useSetAtom(updateFailedItemsCountAtom);
 
 
     // Ref for collected events
@@ -61,6 +65,9 @@ export function useEmbeddingIndex() {
 
     // Ref for the indexer instance
     const indexerRef = useRef<EmbeddingIndexer | null>(null);
+    
+    // Ref to track previous forceReindexCounter for detecting manual reindex requests
+    const prevForceReindexCounterRef = useRef<number>(forceReindexCounter);
 
     /**
      * Get the BeaverDB instance from addon
@@ -102,8 +109,9 @@ export function useEmbeddingIndex() {
      * Falls back to full diff when changes are detected or on periodic safety check.
      * Also retries previously failed items that are ready for retry.
      * @param libraryIds Array of library IDs to index (from syncLibraryIds)
+     * @param forceFullDiff If true, bypass shouldRunFullDiff and process all libraries
      */
-    const performInitialIndexing = async (libraryIds: number[]) => {
+    const performInitialIndexing = async (libraryIds: number[], forceFullDiff: boolean = false) => {
         const startTime = Date.now();
         const indexer = getIndexer();
         if (!indexer) return;
@@ -123,18 +131,34 @@ export function useEmbeddingIndex() {
             if (libraryIds.length === 0) {
                 const duration = Date.now() - startTime;
                 logger(`useEmbeddingIndex: No libraries to index (syncLibraryIds is empty) - completed in ${formatDuration(duration)}`, 3);
+                // Still update failed count to reflect any existing failures in DB
+                const failedStats = await indexer.getFailedStats();
+                updateFailedCount(failedStats.permanentlyFailed);
                 setIndexStatus({ status: 'idle', phase: 'initial' });
                 return;
             }
 
-            logger(`useEmbeddingIndex: Found ${libraryIds.length} synced libraries to check`, 3);
+            if (forceFullDiff) {
+                logger(`useEmbeddingIndex: Force full diff requested - processing all ${libraryIds.length} libraries`, 3);
+            } else {
+                logger(`useEmbeddingIndex: Found ${libraryIds.length} synced libraries to check`, 3);
+            }
 
             // First pass: check which libraries need a full diff
             // This is fast - just SQL queries for MAX(date) and COUNT
+            // Skip this check if forceFullDiff is true
             const librariesToProcess: number[] = [];
             const libraryStates: Map<number, { maxClientDateModified: string | null, itemCount: number }> = new Map();
 
             for (const libraryId of libraryIds) {
+                // If forceFullDiff, process all libraries without checking
+                if (forceFullDiff) {
+                    librariesToProcess.push(libraryId);
+                    const state = await indexer.getZoteroLibraryState(libraryId);
+                    libraryStates.set(libraryId, state);
+                    continue;
+                }
+
                 const diffCheck = await indexer.shouldRunFullDiff(libraryId);
                 
                 if (diffCheck.needsDiff) {
@@ -162,6 +186,9 @@ export function useEmbeddingIndex() {
             if (librariesToProcess.length === 0 && itemsReadyForRetry.length === 0) {
                 const duration = Date.now() - startTime;
                 logger(`useEmbeddingIndex: All libraries up to date, no retries needed - completed in ${formatDuration(duration)}`, 3);
+                // Still update failed count to reflect any existing failures in DB
+                const failedStats = await indexer.getFailedStats();
+                updateFailedCount(failedStats.permanentlyFailed);
                 setIndexStatus({ status: 'idle', phase: 'incremental' });
                 return;
             }
@@ -271,11 +298,12 @@ export function useEmbeddingIndex() {
                 logger(`useEmbeddingIndex: Retry items complete: ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed`, 3);
             }
 
-            // Log final failed stats
+            // Log final failed stats and update UI
             const failedStats = await indexer.getFailedStats();
             if (failedStats.totalFailed > 0) {
                 logger(`useEmbeddingIndex: Failed items summary: ${failedStats.totalFailed} total, ${failedStats.readyForRetry} ready for retry, ${failedStats.permanentlyFailed} permanently failed`, 3);
             }
+            updateFailedCount(failedStats.permanentlyFailed);
 
             const duration = Date.now() - startTime;
             logger(`useEmbeddingIndex: Initial indexing complete - took ${formatDuration(duration)}`, 3);
@@ -359,6 +387,10 @@ export function useEmbeddingIndex() {
                     }
                 }
             }
+
+            // Update failed items count after incremental processing
+            const failedStats = await indexer.getFailedStats();
+            updateFailedCount(failedStats.permanentlyFailed);
 
             setIndexStatus({ status: 'idle', phase: 'incremental' });
 
@@ -467,14 +499,21 @@ export function useEmbeddingIndex() {
             myObserverId = moduleNotifierId;
         };
 
+        // Check if this is a manual reindex request (counter changed)
+        const isForceReindex = forceReindexCounter !== prevForceReindexCounterRef.current;
+        prevForceReindexCounterRef.current = forceReindexCounter;
+
         // Initialize indexing
         const initialize = async () => {
             try {
-                // Wait a moment for DB to be ready
-                await new Promise(resolve => setTimeout(resolve, 500));
+                // Wait a moment for DB to be ready (skip delay for force reindex)
+                if (!isForceReindex) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
 
                 // Perform initial indexing for synced libraries only
-                await performInitialIndexing(syncLibraryIds);
+                // Pass forceFullDiff=true if user clicked "Rebuild Search Index"
+                await performInitialIndexing(syncLibraryIds, isForceReindex);
 
                 // Setup observer after initial indexing
                 if (isMounted) setupObserver();
@@ -523,6 +562,6 @@ export function useEmbeddingIndex() {
             // Clear indexer reference
             indexerRef.current = null;
         };
-    }, [isAuthenticated, isAuthorized, isDeviceAuthorized, syncLibraryIds]);
+    }, [isAuthenticated, isAuthorized, isDeviceAuthorized, syncLibraryIds, forceReindexCounter]);
 }
 

@@ -1,6 +1,7 @@
 import React, { useRef, useCallback } from 'react';
 import { CancelIcon, PlusSignIcon, SettingsIcon, Share05Icon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
+import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
 import { newThreadAtom } from '../atoms/threads';
@@ -116,18 +117,25 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                 )}
             </div>
 
-            {/* Database status and user account menu */}
+            {/* Database status, embedding index status, and user account menu */}
             {isAuthenticated && !settingsPage && (
                 <div className="display-flex gap-4">
-                    {planFeatures.databaseSync && hasCompletedOnboarding &&
+                    {/* Show embedding index status for users without databaseSync */}
+                    {!planFeatures.databaseSync && hasCompletedOnboarding && (
+                        <EmbeddingIndexStatusButton />
+                    )}
+                    {/* Show database status for users with databaseSync */}
+                    {planFeatures.databaseSync && hasCompletedOnboarding && (
                         <DatabaseStatusButton />
-                    }
+                    )}
+                    {/* Show chat history menu */}
                     {isAuthenticated && hasCompletedOnboarding && (
                         <ThreadsMenu
                             className="scale-14"
                             ariaLabel="Show chat history"
                         />
                     )}
+                    {/* Show user account menu */}
                     <UserAccountMenuButton
                         className="scale-14"
                         ariaLabel="User settings"

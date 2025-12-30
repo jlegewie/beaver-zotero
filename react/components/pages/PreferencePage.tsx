@@ -2,13 +2,18 @@ import React, { useState, useCallback } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, SearchIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, planFeaturesAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
+import { 
+    embeddingIndexStateAtom, 
+    forceReindexAtom, 
+    isEmbeddingIndexingAtom 
+} from "../../atoms/embeddingIndex";
 import ApiKeyInput from "../preferences/ApiKeyInput";
 import CustomPromptSettings from "../preferences/CustomPromptSettings";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
@@ -49,6 +54,7 @@ const PreferencePage: React.FC = () => {
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
     const profileBalance = useAtomValue(profileBalanceAtom);
+    const planFeatures = useAtomValue(planFeaturesAtom);
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -61,6 +67,11 @@ const PreferencePage: React.FC = () => {
     const [syncStatus, setSyncStatus] = useState<'idle' | 'running' | 'completed'>('idle');
     const [verifyStatus, setVerifyStatus] = useState<'idle' | 'running' | 'completed'>('idle');
     const [lastSyncedText, setLastSyncedText] = useState<string>('Never');
+    
+    // --- Embedding Index ---
+    const embeddingIndexState = useAtomValue(embeddingIndexStateAtom);
+    const isEmbeddingIndexing = useAtomValue(isEmbeddingIndexingAtom);
+    const forceReindex = useSetAtom(forceReindexAtom);
  
      // --- Load last synced timestamp from local DB ---
      const loadLastSynced = useCallback(async () => {
@@ -266,6 +277,40 @@ const PreferencePage: React.FC = () => {
         }
     }, [setProfileWithPlan]);
 
+    // --- Rebuild Search Index Handler ---
+    const handleRebuildSearchIndex = useCallback(() => {
+        if (isEmbeddingIndexing) return;
+        logger('handleRebuildSearchIndex: User-initiated search index rebuild');
+        forceReindex();
+    }, [isEmbeddingIndexing, forceReindex]);
+
+    // Helper function to get rebuild index button props
+    const getRebuildIndexButtonProps = () => {
+        if (isEmbeddingIndexing) {
+            const progress = embeddingIndexState.progress > 0 ? ` (${embeddingIndexState.progress}%)` : '';
+            return {
+                icon: Spinner,
+                iconClassName: 'animate-spin',
+                disabled: true,
+                text: `Indexing${progress}`
+            };
+        }
+        if (embeddingIndexState.failedItems > 0) {
+            return {
+                icon: SearchIcon,
+                iconClassName: '',
+                disabled: false,
+                text: `Rebuild Index (${embeddingIndexState.failedItems} failed)`
+            };
+        }
+        return {
+            icon: SearchIcon,
+            iconClassName: '',
+            disabled: false,
+            text: 'Rebuild Search Index'
+        };
+    };
+
     // Helper function to get sync button props
     const getSyncButtonProps = () => {
         switch (syncStatus) {
@@ -322,6 +367,7 @@ const PreferencePage: React.FC = () => {
 
     const syncButtonProps = getSyncButtonProps();
     const verifyButtonProps = getVerifyButtonProps();
+    const rebuildIndexButtonProps = getRebuildIndexButtonProps();
 
     return (
         <div
@@ -388,41 +434,77 @@ const PreferencePage: React.FC = () => {
             )}
 
             {/* --- Library Syncing Section --- */}
-            <SectionHeader>Beaver Syncing</SectionHeader>
+            {planFeatures.databaseSync && (
+                <>
+                    <SectionHeader>Beaver Syncing</SectionHeader>
 
-            {/* <div className="text-sm font-color-secondary mb-3">
-                Beaver syncs your library, uploads your PDFs, and indexes your files for search.
-            </div> */}
 
-            <div className="display-flex flex-col gap-3">
-                {/* Synced Libraries */}
-                <SyncedLibraries />
+                    <div className="display-flex flex-col gap-3">
+                        {/* Synced Libraries */}
+                        <SyncedLibraries />
 
-                {/* Verify Data Button */}
-                <div className="display-flex flex-row items-center gap-4 justify-end" style={{ marginRight: '1px' }}>
-                    <Button 
-                        variant="outline" 
-                        rightIcon={verifyButtonProps.icon}
-                        iconClassName={verifyButtonProps.iconClassName}
-                        onClick={handleVerifySync}
-                        disabled={verifyButtonProps.disabled}
-                    >
-                        {verifyButtonProps.text}
-                    </Button>
-                </div>
+                        {/* Verify Data Button */}
+                        <div className="display-flex flex-row items-center gap-4 justify-end" style={{ marginRight: '1px' }}>
+                            <Button 
+                                variant="outline" 
+                                rightIcon={verifyButtonProps.icon}
+                                iconClassName={verifyButtonProps.iconClassName}
+                                onClick={handleVerifySync}
+                                disabled={verifyButtonProps.disabled}
+                            >
+                                {verifyButtonProps.text}
+                            </Button>
+                        </div>
 
-                {/* Sync with Zotero Toggle */}
-                <div className="mt-2">
-                    <ZoteroSyncToggle 
-                        checked={localSyncToggle}
-                        onChange={handleSyncToggleChange}
-                        disabled={!isLibrarySynced(1) && !syncWithZotero}
-                        error={!isLibrarySynced(1) && syncWithZotero}
-                    />
-                </div>
-            </div>
+                        {/* Sync with Zotero Toggle */}
+                        <div className="mt-2">
+                            <ZoteroSyncToggle 
+                                checked={localSyncToggle}
+                                onChange={handleSyncToggleChange}
+                                disabled={!isLibrarySynced(1) && !syncWithZotero}
+                                error={!isLibrarySynced(1) && syncWithZotero}
+                            />
+                        </div>
+                    </div>
+                </>
+            )}
             
             {/* <LibrarySelection /> */}
+
+            {/* --- Search Index Section (only for users without databaseSync) --- */}
+            {!planFeatures.databaseSync && (
+                <>
+                    <SectionHeader>Search Index</SectionHeader>
+                    <div className="font-color-secondary mb-3">
+                        Beaver indexes your library locally for semantic search. If you experience search issues, you can rebuild the index.
+                    </div>
+                    <div className="display-flex flex-col gap-3">
+                        <div className="display-flex flex-row items-center gap-4 justify-between">
+                            <div className="display-flex flex-col gap-1">
+                                {embeddingIndexState.failedItems > 0 && (
+                                    <div className="text-sm font-color-yellow">
+                                        {embeddingIndexState.failedItems} items failed to index
+                                    </div>
+                                )}
+                                {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
+                                    <div className="text-sm font-color-red">
+                                        Error: {embeddingIndexState.error}
+                                    </div>
+                                )}
+                            </div>
+                            <Button 
+                                variant="outline" 
+                                rightIcon={rebuildIndexButtonProps.icon}
+                                iconClassName={rebuildIndexButtonProps.iconClassName}
+                                onClick={handleRebuildSearchIndex}
+                                disabled={rebuildIndexButtonProps.disabled}
+                            >
+                                {rebuildIndexButtonProps.text}
+                            </Button>
+                        </div>
+                    </div>
+                </>
+            )}
 
             {/* --- General Settings Section --- */}
             <SectionHeader>General Settings</SectionHeader>

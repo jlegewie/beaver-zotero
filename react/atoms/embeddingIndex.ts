@@ -21,6 +21,7 @@ export interface EmbeddingIndexState {
     progress: number;           // 0-100 percentage
     totalItems: number;
     indexedItems: number;
+    failedItems: number;        // Count of permanently failed items
     error?: string;
 }
 
@@ -33,12 +34,19 @@ const defaultEmbeddingIndexState: EmbeddingIndexState = {
     progress: 0,
     totalItems: 0,
     indexedItems: 0,
+    failedItems: 0,
 };
 
 /**
  * Atom to track the current state of embedding indexing
  */
 export const embeddingIndexStateAtom = atom<EmbeddingIndexState>(defaultEmbeddingIndexState);
+
+/**
+ * Counter that increments when a force reindex is requested.
+ * useEmbeddingIndex hook watches this and triggers a full diff when it changes.
+ */
+export const forceReindexCounterAtom = atom<number>(0);
 
 /**
  * Derived atom that indicates if indexing is currently in progress
@@ -103,6 +111,46 @@ export const resetEmbeddingIndexStateAtom = atom(
     null,
     (_get, set) => {
         set(embeddingIndexStateAtom, defaultEmbeddingIndexState);
+    }
+);
+
+/**
+ * Derived atom that indicates if there's an embedding index error
+ */
+export const hasEmbeddingIndexErrorAtom = selectAtom(
+    embeddingIndexStateAtom,
+    (state: EmbeddingIndexState) => state.status === 'error'
+);
+
+/**
+ * Derived atom that indicates if there are permanently failed items
+ */
+export const hasFailedEmbeddingsAtom = selectAtom(
+    embeddingIndexStateAtom,
+    (state: EmbeddingIndexState) => state.failedItems > 0
+);
+
+/**
+ * Action atom to trigger a force reindex (full diff run)
+ */
+export const forceReindexAtom = atom(
+    null,
+    (_get, set) => {
+        set(forceReindexCounterAtom, (prev) => prev + 1);
+    }
+);
+
+/**
+ * Action atom to update failed items count
+ */
+export const updateFailedItemsCountAtom = atom(
+    null,
+    (get, set, failedItems: number) => {
+        const current = get(embeddingIndexStateAtom);
+        set(embeddingIndexStateAtom, {
+            ...current,
+            failedItems,
+        });
     }
 );
 
