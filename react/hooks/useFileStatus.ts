@@ -100,8 +100,10 @@ export const fetchFileStatus = async (userId: string, processingTier?: Processin
  * - Handles authentication state changes properly
  * - Implements proper cleanup to prevent memory leaks
  * - Detects reconnections and re-establishes subscriptions
+ * 
+ * @param enabled Whether to enable the realtime connection (default: true)
  */
-export const useFileStatus = (): FileStatusConnection => {
+export const useFileStatus = (enabled: boolean = true): FileStatusConnection => {
     const setFileStatus = useSetAtom(fileStatusAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
@@ -326,6 +328,7 @@ export const useFileStatus = (): FileStatusConnection => {
     // Main effect for managing connection lifecycle
     useEffect(() => {
         const isEligible = (
+            enabled &&
             isAuthenticated &&
             user &&
             hasAuthorizedAccess &&
@@ -357,7 +360,7 @@ export const useFileStatus = (): FileStatusConnection => {
         return () => {
             cleanupConnection();
         };
-    }, [isAuthenticated, user, hasAuthorizedAccess, isDeviceAuthorized, setupConnection, cleanupConnection]);
+    }, [enabled, isAuthenticated, user, hasAuthorizedAccess, isDeviceAuthorized, setupConnection, cleanupConnection]);
 
     // Handle auth state changes for token refresh
     useEffect(() => {
