@@ -4,6 +4,7 @@ import { Provider } from 'jotai';
 import LibrarySidebar from './components/LibrarySidebar';
 import { useZoteroSync } from './hooks/useZoteroSync';
 import { useEmbeddingIndex } from './hooks/useEmbeddingIndex';
+import { useEmbeddingIndexProgress } from './hooks/useEmbeddingIndexProgress';
 import { useAuth } from './hooks/useAuth';
 import ReaderSidebar from './components/ReaderSidebar';
 import WindowSidebar from './components/WindowSidebar';
@@ -25,6 +26,9 @@ const GlobalContextInitializer = () => {
 
     // Handle embedding index
     useEmbeddingIndex();
+
+    // Show embedding index progress popup
+    useEmbeddingIndexProgress();
 
     // Handle plugin upgrade tasks
     useUpgradeHandler();
