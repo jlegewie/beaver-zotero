@@ -63,38 +63,28 @@ export const useErrorCodeStats = () => {
         const hasValidCache = lastFetchedCounts &&
             debouncedFailedCount === lastFetchedCounts.failed &&
             debouncedSkippedCount === lastFetchedCounts.skipped &&
-            lastFetchedCounts.processingTier === planFeatures.processingTier &&
             errorCodeStats !== null;
 
         // Don't fetch if we have valid cached data
         if (hasValidCache) {
-            logger(`useErrorCodeStats: Using cached data for failed=${debouncedFailedCount}, skipped=${debouncedSkippedCount}, tier=${planFeatures.processingTier}`);
+            logger(`useErrorCodeStats: Using cached data for failed=${debouncedFailedCount}, skipped=${debouncedSkippedCount}`);
             return;
         }
 
-        logger(`useErrorCodeStats: Fetching error code stats for failed=${debouncedFailedCount}, skipped=${debouncedSkippedCount}, tier=${planFeatures.processingTier}`);
+        logger(`useErrorCodeStats: Fetching error code stats for failed=${debouncedFailedCount}, skipped=${debouncedSkippedCount}`);
         
         setIsLoading(true);
         setError(null);
 
         try {
-            // Set the type of processing to fetch stats for
-            let type = 'text';
-            if (planFeatures.processingTier === 'standard') {
-                type = 'md';
-            } else if (planFeatures.processingTier === 'advanced') {
-                type = 'docling';
-            }
-
             // Fetch the error code stats
-            const stats = await attachmentsService.getErrorCodeStats(type as 'text' | 'md' | 'docling');
+            const stats = await attachmentsService.getErrorCodeStats('md');
             
-            logger(`useErrorCodeStats: Fetched error code stats for ${type}: ${JSON.stringify(stats)}`);
+            logger(`useErrorCodeStats: Fetched error code stats for md: ${JSON.stringify(stats)}`);
             setErrorCodeStats(stats);
             setLastFetchedCounts({ 
                 failed: debouncedFailedCount, 
                 skipped: debouncedSkippedCount,
-                processingTier: planFeatures.processingTier
             });
         } catch (err) {
             console.error("Failed to fetch error code stats:", err);
@@ -111,7 +101,6 @@ export const useErrorCodeStats = () => {
         setLastFetchedCounts,
         setIsLoading,
         setError,
-        planFeatures.processingTier
     ]);
 
     return { fetchStats };

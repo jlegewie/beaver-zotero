@@ -7,7 +7,6 @@ import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
 import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from '../atoms/profile';
-import { ProcessingTier } from '../types/profile';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'polling' | 'error';
 
@@ -18,38 +17,25 @@ export interface FileStatusConnection {
 }
 
 const formatStatus = (statusData: any): FileStatus => ({
-    ...statusData,
+    user_id: statusData.user_id,
     total_files: Number(statusData.total_files || 0),
     // Upload status
+    upload_not_uploaded: Number(statusData.upload_not_uploaded || 0),
     upload_pending: Number(statusData.upload_pending || 0),
     upload_completed: Number(statusData.upload_completed || 0),
     upload_failed: Number(statusData.upload_failed || 0),
-    upload_failed_user: Number(statusData.upload_failed_user || 0),
-    upload_plan_limit: Number(statusData.upload_plan_limit || 0),
-    // Text status
-    text_queued: Number(statusData.text_queued || 0),
-    text_processing: Number(statusData.text_processing || 0),
-    text_completed: Number(statusData.text_completed || 0),
-    text_failed_system: Number(statusData.text_failed_system || 0),
-    text_failed_user: Number(statusData.text_failed_user || 0),
-    text_plan_limit: Number(statusData.text_plan_limit || 0),
-    text_unsupported_file: Number(statusData.text_unsupported_file || 0),
     // Markdown status
     md_queued: Number(statusData.md_queued || 0),
     md_processing: Number(statusData.md_processing || 0),
     md_completed: Number(statusData.md_completed || 0),
+    md_failed_upload: Number(statusData.md_failed_upload || 0),
     md_failed_system: Number(statusData.md_failed_system || 0),
     md_failed_user: Number(statusData.md_failed_user || 0),
     md_plan_limit: Number(statusData.md_plan_limit || 0),
     md_unsupported_file: Number(statusData.md_unsupported_file || 0),
-    // Docling status
-    docling_queued: Number(statusData.docling_queued || 0),
-    docling_processing: Number(statusData.docling_processing || 0),
-    docling_completed: Number(statusData.docling_completed || 0),
-    docling_failed_system: Number(statusData.docling_failed_system || 0),
-    docling_failed_user: Number(statusData.docling_failed_user || 0),
-    docling_plan_limit: Number(statusData.docling_plan_limit || 0),
-    docling_unsupported_file: Number(statusData.docling_unsupported_file || 0),
+    page_balance_exhausted: Boolean(statusData.page_balance_exhausted || false),
+    // Timestamp
+    last_updated_at: statusData.last_updated_at || new Date().toISOString(),
 });
 
 /**
@@ -57,20 +43,10 @@ const formatStatus = (statusData: any): FileStatus => ({
  * @param userId The ID of the user
  * @returns The formatted file status, or null if not found or an error occurs
  */
-export const fetchFileStatus = async (userId: string, processingTier?: ProcessingTier): Promise<FileStatus | null> => {
+export const fetchFileStatus = async (userId: string): Promise<FileStatus | null> => {
     try {
-        // Set select string based on processing tier
-        let selectString = '*';
-        if (processingTier) {
-            selectString = 'upload_not_uploaded,upload_pending,upload_completed,upload_failed,upload_failed_user,upload_plan_limit';
-            if (processingTier === 'basic') {
-                selectString += ',text_queued,text_processing,text_completed,text_failed_system,text_failed_user,text_plan_limit,text_unsupported_file';
-            } else if (processingTier === 'standard') {
-                selectString += ',md_queued,md_processing,md_completed,md_failed_system,md_failed_user,md_plan_limit,md_unsupported_file';
-            } else if (processingTier === 'advanced') {
-                selectString += ',docling_queued,docling_processing,docling_completed,docling_failed_system,docling_failed_user,docling_plan_limit,docling_unsupported_file';
-            }
-        }
+        // Set select string
+        const selectString = 'user_id,total_files,upload_not_uploaded,upload_pending,upload_completed,upload_failed,md_queued,md_processing,md_completed,md_failed_upload,md_failed_system,md_failed_user,md_plan_limit,md_unsupported_file,page_balance_exhausted,last_updated_at';
 
         // Get the file status for the user
         const { data, error } = await supabase

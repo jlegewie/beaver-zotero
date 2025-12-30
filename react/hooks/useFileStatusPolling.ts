@@ -124,8 +124,7 @@ export const useFileStatusPolling = (): FileStatusPollingConnection => {
         }));
 
         try {
-            const processingTier = store.get(planFeaturesAtom)?.processingTier;
-            const currentStatus = await fetchFileStatus(userIdRef.current, processingTier);
+            const currentStatus = await fetchFileStatus(userIdRef.current);
             
             // Check if we got a null response, which could indicate an error
             // or legitimately no data. We need to distinguish between these cases.
@@ -220,8 +219,7 @@ export const useFileStatusPolling = (): FileStatusPollingConnection => {
         
         // Fetch initial data immediately
         try {
-            const processingTier = store.get(planFeaturesAtom)?.processingTier;
-            const initialStatus = await fetchFileStatus(userId, processingTier);
+            const initialStatus = await fetchFileStatus(userId);
             setFileStatus(initialStatus);
             lastFileStatusRef.current = initialStatus;
             

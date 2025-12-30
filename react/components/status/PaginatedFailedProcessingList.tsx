@@ -55,27 +55,17 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
     const userId = useAtomValue(userIdAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
 
-    const processingTier = useMemo(() => planFeatures.processingTier, [planFeatures.processingTier]);
 
     const fetchItems = useCallback(async (page: number) => {
         if (!userId || isLoading) return;
 
         setIsLoading(true);
         try {
-            // If the user has no processing tier, don't show the list
-            if (processingTier === 'none') {
-                setAttachments([]);
-                setHasMore(false);
-                setCurrentPage(0);
-                setShowList(false);
-                return;
-            }
 
             // Fetch items based on processing status
             const result: AttachmentStatusPagedResponse =
                 await attachmentsService.getAttachmentsByStatus(
                     statuses,
-                    processingTier,
                     page + 1, // API is 1-based
                     ITEMS_PER_PAGE
                 );
@@ -89,12 +79,7 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
                     fileHash = await zoteroItem.attachmentHash;
                     if (fileHash !== item.file_hash) enableRetry = true;
                 }
-                let errorCode = item.text_error_code;
-                if(planFeatures.processingTier === 'standard') {
-                    errorCode = item.md_error_code;
-                } else if(planFeatures.processingTier === 'advanced') {
-                    errorCode = item.docling_error_code;
-                }
+                const errorCode = item.md_error_code;
 
                 return {
                     file_hash: item.file_hash || '',
@@ -123,7 +108,7 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
         } finally {
             setIsLoading(false);
         }
-    }, [userId, processingTier, statuses, errorCode]);
+    }, [userId, statuses, errorCode]);
 
     useEffect(() => {
         setShowList(collapseable ? show : true);
@@ -161,10 +146,6 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
             fetchItems(currentPage + 1);
         }
     };
-
-    if (processingTier === 'none' || count === 0) {
-        return null;
-    }
 
     return (
         <div className="display-flex flex-col gap-4 min-w-0">

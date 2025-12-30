@@ -1,8 +1,6 @@
 import { atom } from 'jotai';
 import { FileStatus, FileStatusSummary } from '../types/fileStatus';
-import { planFeaturesAtom } from './profile';
 import { ErrorCodeStats } from 'src/services/attachmentsService';
-import { ProcessingTier } from '../types/profile';
 import { errorMapping } from './errors';
 
 // File upload status
@@ -15,7 +13,7 @@ export const fileStatusAtom = atom<FileStatus | null>(null);
 export const errorCodeStatsAtom = atom<ErrorCodeStats[] | null>(null);
 export const errorCodeStatsIsLoadingAtom = atom<boolean>(false);
 export const errorCodeStatsErrorAtom = atom<string | null>(null);
-export const lastFetchedErrorCountsAtom = atom<{ failed: number; skipped: number; processingTier: ProcessingTier } | null>(null);
+export const lastFetchedErrorCountsAtom = atom<{ failed: number; skipped: number; } | null>(null);
 
 // Type for aggregated error messages
 export type AggregatedErrorMessage = {
@@ -57,9 +55,7 @@ export const aggregatedErrorMessagesForSkippedFilesAtom = atom<Record<string, Ag
 });
 
 
-export const calculateFileStatusSummary = (fileStatus: FileStatus | null, processingTier: ProcessingTier) => {
-    // if(processingTier === 'none') return;
-
+export const calculateFileStatusSummary = (fileStatus: FileStatus | null) => {
     // Total files
     const totalFiles = fileStatus?.total_files || 0;
 
@@ -68,10 +64,8 @@ export const calculateFileStatusSummary = (fileStatus: FileStatus | null, proces
     const uploadNotUploadedCount = fileStatus?.upload_not_uploaded || 0;
     const uploadCompletedCount = fileStatus?.upload_completed || 0;
     const uploadFailedCount = fileStatus?.upload_failed || 0;           // Temporary upload failure (retryable)
-    const uploadFailedUserCount = fileStatus?.upload_failed_user || 0;  // DEPRECATED
-    const uploadPlanLimitCount = fileStatus?.upload_plan_limit || 0;    // DEPRECATED
     const uploadProgress = fileStatus && totalFiles > 0 
-        ? Math.round(((uploadNotUploadedCount + uploadCompletedCount + uploadFailedCount + uploadFailedUserCount + uploadPlanLimitCount) / totalFiles) * 1000) / 10
+        ? Math.round(((uploadNotUploadedCount + uploadCompletedCount + uploadFailedCount) / totalFiles) * 1000) / 10
         : 0;
 
     // Processing status
@@ -117,8 +111,11 @@ export const calculateFileStatusSummary = (fileStatus: FileStatus | null, proces
         failedSystemCount,      // Category 3: System processing error
         planLimitCount,         // Category 4: Plan limit (Client-side or server-side)
         
-        // Transient counts
+        // Upload status counts
+        uploadNotUploadedCount,
         uploadPendingCount,
+        uploadCompletedCount,
+        uploadFailedCount,
         
         // Processing status
         queuedProcessingCount,
@@ -137,10 +134,8 @@ export const calculateFileStatusSummary = (fileStatus: FileStatus | null, proces
 
 export const fileStatusSummaryAtom = atom<FileStatusSummary>(
     (get) => {
-        const planFeatures = get(planFeaturesAtom);
         const fileStatus = get(fileStatusAtom);
-        
-        return calculateFileStatusSummary(fileStatus, planFeatures.processingTier);
+        return calculateFileStatusSummary(fileStatus);
     }
 );
 

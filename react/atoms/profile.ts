@@ -65,7 +65,6 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
     return {
         databaseSync: profile?.plan.sync_database || false,
         uploadFiles: profile?.plan.upload_files || false,
-        processingTier: profile?.plan.processing_tier || 'basic',
         maxUserAttachments: profile?.plan.max_user_attachments || 2,
         uploadFileSizeLimit: profile?.plan.max_file_size_mb || 10,
         maxPageCount: profile?.plan.max_page_count || 100,
@@ -75,15 +74,8 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
 export const profileBalanceAtom = atom<ProfileBalance>((get) => {
     const profile = get(profileWithPlanAtom);
 
-    // Page balance based on processing tier
-    let pagesRemaining = 0;
-    if (profile && profile.plan.processing_tier === 'basic') {
-        pagesRemaining = profile.basic_page_balance + profile.purchased_basic_page_balance;
-    } else if (profile && profile.plan.processing_tier === 'standard') {
-        pagesRemaining = profile.standard_page_balance + profile.purchased_standard_page_balance;
-    } else if (profile && profile.plan.processing_tier === 'advanced') {
-        pagesRemaining = profile.advanced_page_balance + profile.purchased_advanced_page_balance;
-    }
+    // Page balance
+    const pagesRemaining = profile ? profile.standard_page_balance + profile.purchased_standard_page_balance : 0;
 
     // Chat credits remaining
     const chatMessagesRemaining = profile ? (profile.plan.monthly_chat_credits - profile.chat_credits_used) : 0;
