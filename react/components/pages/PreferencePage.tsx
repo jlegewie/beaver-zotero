@@ -498,6 +498,7 @@ const PreferencePage: React.FC = () => {
                                 iconClassName={rebuildIndexButtonProps.iconClassName}
                                 onClick={handleRebuildSearchIndex}
                                 disabled={rebuildIndexButtonProps.disabled}
+                                loading={isEmbeddingIndexing}
                             >
                                 {rebuildIndexButtonProps.text}
                             </Button>
