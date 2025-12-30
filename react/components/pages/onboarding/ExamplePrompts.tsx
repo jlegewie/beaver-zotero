@@ -76,15 +76,15 @@ const ExamplePrompts: React.FC = () => {
                     Compare and contrast all definitions of <Highlight>social capital</Highlight> in my library
                 </ExampleBubble> */}
                 
-                <ExampleBubble side="left" delay={1.2}>
+                <ExampleBubble side="left" delay={0.8}>
                     <Highlight>Create a note</Highlight> that compares this article's key findings to related studies
                 </ExampleBubble>
 
-                <ExampleBubble side="left" delay={2.2}>
+                <ExampleBubble side="left" delay={1.4}>
                     Please <Highlight>review my paragraph</Highlight> on the negative effects of microplastic toxicity. Research every citation to ensure accuracy.
                 </ExampleBubble>
                 
-                <ExampleBubble side="left" delay={3.2}>
+                <ExampleBubble side="left" delay={2.2}>
                     Did the <Highlight>American Economic Review</Highlight> publish recent papers on <Highlight>AI and the labor market</Highlight>?
                 </ExampleBubble>
             </div>

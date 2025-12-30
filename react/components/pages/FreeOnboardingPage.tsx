@@ -141,7 +141,7 @@ const FreeOnboardingPage: React.FC = () => {
             <div className="display-flex flex-col gap-4 py-2 mt-2">
                 <div>AI research assistant that lives in Zotero. Chat with your entire library, discover new research and much more.</div>
                 <div className="display-flex flex-row gap-2 items-start">
-                    <Icon icon={LockIcon} className="mt-1" />
+                    <Icon icon={LockIcon} className="mt-020 scale-11" />
                     {/* <span className="font-color-secondary">Privacy Notice:</span> */}
                     {/* Your Zotero library stays local. Chats stored securely and deletable anytime. */}
                     {/* Privacy-first: Your library data remains local and is never stored on our servers. Metadata is processed temporarily for indexing only.
