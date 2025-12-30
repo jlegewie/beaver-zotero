@@ -122,7 +122,7 @@ const OnboardingPage: React.FC = () => {
                 })
                 .filter(library => library !== null);
             logger(`OnboardingPage: Authorizing access with libraries: ${libraries.map(library => library.library_id).join(', ')}`, 2);
-            await accountService.authorizeAccess(requireOnboarding, libraries, profileWithPlan.plan.processing_tier, useZoteroSync, consentToShare);
+            await accountService.authorizeAccess(requireOnboarding, libraries, useZoteroSync, consentToShare);
 
             // Update local state
             if (profileWithPlan) {
@@ -185,7 +185,7 @@ const OnboardingPage: React.FC = () => {
             }
             
             // Call the service to complete onboarding
-            await accountService.completeOnboarding(profileWithPlan.plan.processing_tier, overallSyncStatus, updatedLibraries);
+            await accountService.completeOnboarding(overallSyncStatus, updatedLibraries);
 
             // Update local state with updated libraries if they were updated
             if (updatedLibraries) {

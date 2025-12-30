@@ -4,7 +4,6 @@ import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero
 import { FileStatus } from '../../react/types/fileStatus';
 import { logger } from '../utils/logger';
 import { fileUploader } from './FileUploader';
-import { ProcessingTier } from '../../react/types/profile';
 
 // processing_status from backend
 export type FailureStatus =
@@ -89,14 +88,10 @@ export interface AttachmentStatusResponse {
 
     // Processing status
     upload_status?: UploadStatus;
-    text_status?: ProcessingStatus;
     md_status?: ProcessingStatus;
-    docling_status?: ProcessingStatus;
 
     // error codes
-    text_error_code?: string
     md_error_code?: string
-    docling_error_code?: string
     upload_error_code?: string
 }
 
@@ -188,7 +183,6 @@ export interface FileUploadFailedRequest {
     status: FailureStatus;
     error_code: ErrorCode;
     details?: string;
-    processing_tier: ProcessingTier;
 }
 
 /**
@@ -318,14 +312,12 @@ export class AttachmentsService extends ApiService {
     /**
      * Fetches attachments by processing status.
      * @param status The processing status to filter by
-     * @param pipeline The pipeline type ("basic", "standard" or "advanced", default: "basic")
      * @param page Page number (1-based, default: 1)
      * @param pageSize Number of items per page (default: 50, max: 100)
      * @returns Promise with paginated list of attachments with the specified status
      */
     async getAttachmentsByStatus(
         status: ProcessingStatus[],
-        pipeline: "basic" | "standard" | "advanced" = "basic",
         page: number = 1,
         pageSize: number = 50
     ): Promise<AttachmentStatusPagedResponse> {
@@ -333,7 +325,6 @@ export class AttachmentsService extends ApiService {
         
         // Add all parameters
         status.forEach(s => params.append('status', s));
-        params.append('pipeline', pipeline);
         params.append('page', page.toString());
         params.append('page_size', pageSize.toString());
         
@@ -427,7 +418,6 @@ export class AttachmentsService extends ApiService {
      * @param fileHash Single file hash or array of file hashes
      * @param status Failure status to set for the processing tier
      * @param errorCode Error code indicating the reason for failure
-     * @param processingTier Processing tier (basic/standard/advanced) to update
      * @param details Optional additional details about the failure
      * @returns Promise with the operation response
      */
@@ -435,15 +425,13 @@ export class AttachmentsService extends ApiService {
         fileHash: string | string[],
         status: FailureStatus,
         errorCode: ErrorCode,
-        processingTier: ProcessingTier,
         details?: string
     ): Promise<FileUploadFailedResponse> {
         const request: FileUploadFailedRequest = {
             file_hash: fileHash,
             status: status,
             error_code: errorCode,
-            details: details,
-            processing_tier: processingTier
+            details: details
         };
         return this.post<FileUploadFailedResponse>('/api/v1/attachments/file-upload-failed', request);
     }

@@ -1,4 +1,3 @@
-import { ProcessingTier } from "./profile";
 
 /**
  * Represents the processing status summary for a user's files.
@@ -6,7 +5,6 @@ import { ProcessingTier } from "./profile";
  */
 export interface FileStatus {
     user_id: string;
-    processing_tier: ProcessingTier;
     total_files: number;
 
     // Upload status
@@ -14,19 +12,8 @@ export interface FileStatus {
     upload_pending: number;
     upload_completed: number;
     upload_failed: number;
-    upload_failed_user: number; // DEPRECATED
-    upload_plan_limit: number;  // DEPRECATED
 
-    // Basic processing status (text)
-    text_queued: number;
-    text_processing: number;
-    text_completed: number;
-    text_failed_system: number;
-    text_failed_user: number;
-    text_plan_limit: number;
-    text_unsupported_file: number;
-
-    // Standard processing status (markdown)
+    // File processing status
     md_queued: number;
     md_processing: number;
     md_completed: number;
@@ -36,15 +23,6 @@ export interface FileStatus {
     md_plan_limit: number;
     md_unsupported_file: number;
     page_balance_exhausted: boolean;
-
-    // Advanced processing status (docling)
-    docling_queued: number;
-    docling_processing: number;
-    docling_completed: number;
-    docling_failed_system: number;
-    docling_failed_user: number;
-    docling_plan_limit: number;
-    docling_unsupported_file: number;
 
     // Timestamp for the last update
     last_updated_at: string; // ISO 8601 timestamp string
@@ -71,8 +49,6 @@ export interface FileStatusSummary {
     uploadPendingCount: number,
     uploadCompletedCount: number,
     uploadFailedCount: number,
-    uploadFailedUserCount: number,
-    uploadPlanLimitCount: number,
 
     // Processing status
     queuedProcessingCount: number,
