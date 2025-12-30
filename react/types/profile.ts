@@ -101,6 +101,7 @@ export interface SafeProfileModel {
     has_completed_onboarding: boolean;
     use_zotero_sync: boolean;
     consent_to_share: boolean;
+    email_notifications: boolean;
     libraries?: ZoteroLibrary[];
     
     // Balances

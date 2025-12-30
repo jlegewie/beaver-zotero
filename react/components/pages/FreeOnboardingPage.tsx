@@ -36,6 +36,7 @@ const FreeOnboardingPage: React.FC = () => {
     // Local state
     const [agreedToTerms, setAgreedToTerms] = useState<boolean>(false);
     const [consentToShare, setConsentToShare] = useState<boolean>(false);
+    const [emailNotifications, setEmailNotifications] = useState<boolean>(false);
     const [isAuthorizing, setIsAuthorizing] = useState(false);
     const [hasStarted, setHasStarted] = useState(false);
 
@@ -51,6 +52,10 @@ const FreeOnboardingPage: React.FC = () => {
 
     const handleConsentChange = (checked: boolean) => {
         setConsentToShare(checked);
+    };
+
+    const handleEmailNotificationsChange = (checked: boolean) => {
+        setEmailNotifications(checked);
     };
 
     const handleTermsChange = (checked: boolean) => {
@@ -81,7 +86,8 @@ const FreeOnboardingPage: React.FC = () => {
                 false, // requireOnboarding = false (fast indexing, will auto-complete)
                 libraries,
                 false, // useZoteroSync = false (no database sync for free)
-                consentToShare
+                consentToShare,
+                emailNotifications
             );
 
             // Update local profile state
@@ -91,6 +97,8 @@ const FreeOnboardingPage: React.FC = () => {
                 libraries: libraries,
                 has_authorized_access: true,
                 consented_at: new Date(),
+                consent_to_share: consentToShare,
+                email_notifications: emailNotifications,
                 zotero_user_id: userID || profileWithPlan.zotero_user_id,
                 zotero_local_ids: [localUserKey],
             });
@@ -203,6 +211,11 @@ const FreeOnboardingPage: React.FC = () => {
                             checked={consentToShare}
                             onChange={handleConsentChange}
                         />
+
+                        <EmailToggle
+                            checked={emailNotifications}
+                            onChange={handleEmailNotificationsChange}
+                        />
                     </div>
                 </div>
             </div>
@@ -210,6 +223,7 @@ const FreeOnboardingPage: React.FC = () => {
             {/* Footer */}
             <OnboardingFooter
                 buttonLabel={buttonLabel}
+                // message="Agree to Terms and Privacy Policy to continue."
                 isLoading={isLoading}
                 disabled={isButtonDisabled}
                 onButtonClick={handleGetStarted}

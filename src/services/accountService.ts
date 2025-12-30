@@ -14,6 +14,7 @@ interface AuthorizationRequest {
     require_onboarding: boolean;
     use_zotero_sync: boolean;
     consent_to_share: boolean;
+    email_notifications: boolean;
 }
 
 interface ProfileRequest {
@@ -41,7 +42,7 @@ interface SyncLibrariesRequest {
 
 
 interface PreferenceRequest {
-    preference: "consent_to_share" | "use_zotero_sync";
+    preference: "consent_to_share" | "use_zotero_sync" | "email_notifications";
     value: boolean;
 }
 
@@ -131,13 +132,18 @@ export class AccountService extends ApiService {
     /**
      * Sets the user's authorization status to authorized and records consent timestamp
      * @param requireOnboarding Whether the user needs to complete onboarding
+     * @param libraries List of Zotero libraries to sync
+     * @param syncWithZotero Whether to sync with Zotero
+     * @param consentToShare Whether user consents to share data
+     * @param emailNotifications Whether user wants email notifications
      * @returns Promise with the response message
      */
     async authorizeAccess(
         requireOnboarding: boolean = true,
         libraries: ZoteroLibrary[],
         syncWithZotero: boolean = false,
-        consentToShare: boolean = false
+        consentToShare: boolean = false,
+        emailNotifications: boolean = false
     ): Promise<{ message: string }> {
         const { userID, localUserKey } = getZoteroUserIdentifier();
         return this.post<{ message: string }>('/api/v1/account/authorize', {
@@ -146,7 +152,8 @@ export class AccountService extends ApiService {
             require_onboarding: requireOnboarding,
             libraries: libraries,
             use_zotero_sync: syncWithZotero,
-            consent_to_share: consentToShare
+            consent_to_share: consentToShare,
+            email_notifications: emailNotifications
         } as AuthorizationRequest);
     }
 

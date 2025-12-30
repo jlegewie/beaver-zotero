@@ -43,6 +43,7 @@ const ProOnboardingPage: React.FC = () => {
     // Sync toggle state
     const [useZoteroSync, setUseZoteroSync] = useState<boolean>(false);
     const [consentToShare, setConsentToShare] = useState<boolean>(false);
+    const [emailNotifications, setEmailNotifications] = useState<boolean>(false);
 
     // Realtime listening for file status updates
     const { connectionStatus } = useFileStatus();
@@ -85,6 +86,10 @@ const ProOnboardingPage: React.FC = () => {
         setConsentToShare(checked);
     };
 
+    const handleEmailNotificationsChange = (checked: boolean) => {
+        setEmailNotifications(checked);
+    };
+
     // Handle authorization
     const handleAuthorize = async () => {
         if (validLibraryIds.length === 0 || isAuthorizing) return;
@@ -125,7 +130,7 @@ const ProOnboardingPage: React.FC = () => {
                 })
                 .filter(library => library !== null);
             logger(`ProOnboardingPage: Authorizing access with libraries: ${libraries.map(library => library.library_id).join(', ')}`, 2);
-            await accountService.authorizeAccess(requireOnboarding, libraries, useZoteroSync, consentToShare);
+            await accountService.authorizeAccess(requireOnboarding, libraries, useZoteroSync, consentToShare, emailNotifications);
 
             // Update local state
             if (profileWithPlan) {
@@ -135,6 +140,8 @@ const ProOnboardingPage: React.FC = () => {
                     libraries: libraries,
                     has_authorized_access: true,
                     consented_at: new Date(),
+                    consent_to_share: consentToShare,
+                    email_notifications: emailNotifications,
                     zotero_user_id: userID || profileWithPlan.zotero_user_id,
                     zotero_local_ids: [localUserKey],
                     has_completed_onboarding: !requireOnboarding || profileWithPlan.has_completed_onboarding
@@ -272,6 +279,8 @@ const ProOnboardingPage: React.FC = () => {
                         handleSyncToggleChange={handleSyncToggleChange}
                         consentToShare={consentToShare}
                         handleConsentChange={handleConsentChange}
+                        emailNotifications={emailNotifications}
+                        handleEmailNotificationsChange={handleEmailNotificationsChange}
                     />
                 )}
 

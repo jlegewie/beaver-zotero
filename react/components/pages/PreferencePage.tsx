@@ -15,6 +15,7 @@ import ZoteroSyncToggle from "../preferences/SyncToggle";
 import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { accountService } from "../../../src/services/accountService";
 import ConsentToggle from "../preferences/ConsentToggle";
+import EmailToggle from "../preferences/EmailToggle";
 import CitationFormatToggle from "../preferences/CitationFormatToggle";
 import AddSelectedItemsOnNewThreadToggle from "../preferences/AddSelectedItemsOnNewThreadToggle";
 import AddSelectedItemsOnOpenToggle from "../preferences/AddSelectedItemsOnOpenToggle";
@@ -44,6 +45,7 @@ const PreferencePage: React.FC = () => {
     const [addSelectedOnNewThread, setAddSelectedOnNewThread] = useState(() => getPref('addSelectedItemsOnNewThread'));
     const [addSelectedOnOpen, setAddSelectedOnOpen] = useState(() => getPref('addSelectedItemsOnOpen'));
     const [consentToShare, setConsentToShare] = useState(() => profileWithPlan?.consent_to_share || false);
+    const [emailNotifications, setEmailNotifications] = useState(() => profileWithPlan?.email_notifications || false);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
     const profileBalance = useAtomValue(profileBalanceAtom);
@@ -52,7 +54,8 @@ const PreferencePage: React.FC = () => {
     React.useEffect(() => {
         setLocalSyncToggle(syncWithZotero);
         setConsentToShare(profileWithPlan?.consent_to_share || false);
-    }, [syncWithZotero, profileWithPlan?.consent_to_share]);
+        setEmailNotifications(profileWithPlan?.email_notifications || false);
+    }, [syncWithZotero, profileWithPlan?.consent_to_share, profileWithPlan?.email_notifications]);
 
     // --- Sync and Verify Status States ---
     const [syncStatus, setSyncStatus] = useState<'idle' | 'running' | 'completed'>('idle');
@@ -203,6 +206,27 @@ const PreferencePage: React.FC = () => {
             Zotero.logError(error as Error);
             // Revert the toggle on error
             setConsentToShare(!checked);
+        }
+    }, [setProfileWithPlan]);
+
+    // --- Email Notifications Toggle Change Handler ---
+    const handleEmailNotificationsChange = useCallback(async (checked: boolean) => {
+        const action = checked ? 'enable' : 'disable';
+        try {
+            logger(`User confirmed to ${action} email notifications. New value: ${checked}`);
+            await accountService.updatePreference('email_notifications', checked);
+
+            setProfileWithPlan((prev) => {
+                if (!prev) return null;
+                return { ...prev, email_notifications: checked };
+            });
+            setEmailNotifications(checked);
+            logger('Successfully updated email notifications preference.');
+        } catch (error) {
+            logger(`Failed to update email notifications preference: ${error}`, 1);
+            Zotero.logError(error as Error);
+            // Revert the toggle on error
+            setEmailNotifications(!checked);
         }
     }, [setProfileWithPlan]);
 
@@ -418,6 +442,10 @@ const PreferencePage: React.FC = () => {
                 <ConsentToggle
                     checked={consentToShare}
                     onChange={handleConsentChange}
+                />
+                <EmailToggle
+                    checked={emailNotifications}
+                    onChange={handleEmailNotificationsChange}
                 />
             </div>
 

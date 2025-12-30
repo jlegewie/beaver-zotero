@@ -3,6 +3,7 @@ import { AlertIcon, Icon } from "../icons/icons";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
 import ConsentToggle from "../preferences/ConsentToggle";
+import EmailToggle from "../preferences/EmailToggle";
 import SelectLibraries from "../SelectLibraries";
 import { planNameAtom } from "../../atoms/profile";
 import { useAtomValue } from "jotai";
@@ -18,6 +19,8 @@ interface AuthorizeLibraryAccessProps {
     disableSyncToggle: boolean;
     consentToShare: boolean;
     handleConsentChange: (checked: boolean) => void;
+    emailNotifications: boolean;
+    handleEmailNotificationsChange: (checked: boolean) => void;
 }
 
 const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
@@ -29,7 +32,9 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
     handleSyncToggleChange,
     disableSyncToggle,
     consentToShare,
-    handleConsentChange
+    handleConsentChange,
+    emailNotifications,
+    handleEmailNotificationsChange
 }) => {
     const planName = useAtomValue(planNameAtom);
 
@@ -87,6 +92,10 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                 <ConsentToggle
                     checked={consentToShare}
                     onChange={handleConsentChange}
+                />
+                <EmailToggle
+                    checked={emailNotifications}
+                    onChange={handleEmailNotificationsChange}
                 />
             </div>
             
