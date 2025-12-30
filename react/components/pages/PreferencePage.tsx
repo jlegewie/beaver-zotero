@@ -300,7 +300,7 @@ const PreferencePage: React.FC = () => {
                 icon: SearchIcon,
                 iconClassName: '',
                 disabled: false,
-                text: `Rebuild Index (${embeddingIndexState.failedItems} failed)`
+                text: `Rebuild & Retry Failed (${embeddingIndexState.failedItems})`
             };
         }
         return {
@@ -476,7 +476,7 @@ const PreferencePage: React.FC = () => {
                 <>
                     <SectionHeader>Search Index</SectionHeader>
                     <div className="font-color-secondary mb-3">
-                        Beaver indexes your library locally for semantic search. If you experience search issues, you can rebuild the index.
+                        Beaver indexes your library locally for semantic search. Rebuilding the index will retry any failed items and reindex all libraries.
                     </div>
                     <div className="display-flex flex-col gap-3">
                         <div className="display-flex flex-row items-center gap-4 justify-between">

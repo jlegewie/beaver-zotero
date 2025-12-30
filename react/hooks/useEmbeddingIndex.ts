@@ -127,6 +127,14 @@ export function useEmbeddingIndex() {
                 logger(`useEmbeddingIndex: Cleaned up ${cleanup.embeddingsRemoved} embeddings from ${cleanup.librariesRemoved} unsynced libraries`, 3);
             }
 
+            // If force reindex requested, clear all failed embeddings to retry them
+            if (forceFullDiff && libraryIds.length > 0) {
+                const clearedCount = await indexer.clearFailedEmbeddings(libraryIds);
+                if (clearedCount > 0) {
+                    logger(`useEmbeddingIndex: Cleared ${clearedCount} failed embeddings for force reindex`, 3);
+                }
+            }
+
             // If no libraries to sync, we're done after cleanup
             if (libraryIds.length === 0) {
                 const duration = Date.now() - startTime;
