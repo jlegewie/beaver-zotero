@@ -6,7 +6,7 @@ import { FileStatus } from '../types/fileStatus';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
-import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
+import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from '../atoms/profile';
 import { ProcessingTier } from '../types/profile';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'polling' | 'error';
@@ -107,6 +107,7 @@ export const useFileStatus = (): FileStatusConnection => {
     const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const user = useAtomValue(userAtom);
+    const planFeatures = useAtomValue(planFeaturesAtom);
 
     const [connection, setConnection] = useState<FileStatusConnection>({
         connectionStatus: 'idle',
@@ -324,7 +325,13 @@ export const useFileStatus = (): FileStatusConnection => {
 
     // Main effect for managing connection lifecycle
     useEffect(() => {
-        const isEligible = isAuthenticated && user && hasAuthorizedAccess && isDeviceAuthorized;
+        const isEligible = (
+            isAuthenticated &&
+            user &&
+            hasAuthorizedAccess &&
+            isDeviceAuthorized &&
+            planFeatures.databaseSync
+        );
         const currentUserId = user?.id;
         const shouldConnect = isEligible && currentUserId;
         const userChanged = currentUserId !== userIdRef.current;
