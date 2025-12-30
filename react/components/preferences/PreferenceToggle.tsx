@@ -96,9 +96,9 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
                                 </div>
                             )}
                         </div>
-                        <div className="font-color-secondary text-sm display-flex flex-row items-start gap-05">
+                        <div className="font-color-secondary text-sm">
                             {parseTextWithLinksAndNewlines(description)}
-                            {tooltip && <Icon icon={InformationCircleIcon} className="font-color-primary mt-020" />}
+                            {tooltip && <Icon icon={InformationCircleIcon} className="font-color-primary ml-05 mt-1 inline-flex" />}
                         </div>
                     </div>
                 </div>
