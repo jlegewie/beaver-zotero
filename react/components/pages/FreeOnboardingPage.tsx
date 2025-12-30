@@ -6,7 +6,7 @@ import { embeddingIndexStateAtom, isEmbeddingIndexingAtom } from "../../atoms/em
 import { accountService } from "../../../src/services/accountService";
 import { logger } from "../../../src/utils/logger";
 import { setPref } from "../../../src/utils/prefs";
-import { getZoteroUserIdentifier } from "../../../src/utils/zoteroUtils";
+import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
 import { OnboardingHeader, OnboardingFooter, EmbeddingIndexProgress, ExamplePrompts } from "./onboarding";
 import ConsentToggle from "../preferences/ConsentToggle";
@@ -81,11 +81,11 @@ const FreeOnboardingPage: React.FC = () => {
 
             logger(`FreeOnboardingPage: Authorizing access with ${libraries.length} libraries`, 2);
 
-            // Authorize access - no file sync for free plan
+            // Authorize access
             await accountService.authorizeAccess(
                 false, // requireOnboarding = false (fast indexing, will auto-complete)
                 libraries,
-                false, // useZoteroSync = false (no database sync for free)
+                isLibrarySynced(1), // useZoteroSync - Unused for free plan, set to default for pro upgrade
                 consentToShare,
                 emailNotifications
             );
@@ -101,6 +101,7 @@ const FreeOnboardingPage: React.FC = () => {
                 email_notifications: emailNotifications,
                 zotero_user_id: userID || profileWithPlan.zotero_user_id,
                 zotero_local_ids: [localUserKey],
+                has_completed_onboarding: true
             });
 
             // Update user ID and email in prefs
