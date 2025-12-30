@@ -24,7 +24,6 @@ const InputArea: React.FC<InputAreaProps> = ({
 }) => {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
-    const [isCommandPressed, setIsCommandPressed] = useState(false);
     const selectedModel = useAtomValue(selectedModelAtom);
     const newThread = useSetAtom(newThreadAtom);
     const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);
@@ -75,11 +74,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         closeWSConnection();
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {        
-        if (e.key === 'Meta') {
-            setIsCommandPressed(true);
-        }
-
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Handle ⌘N (Mac) or Ctrl+N (Windows/Linux) for new thread
         if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
             e.preventDefault();
@@ -105,11 +100,6 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
     }
 
-    const handleKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (e.key === 'Meta') {
-            setIsCommandPressed(false);
-        }
-    };
 
     const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
         // Check if the click target is a button or within a button
@@ -169,7 +159,6 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 handleSubmit(e as any);
                             }
                         }}
-                        onKeyUp={handleKeyUp}
                         rows={1}
                     />
                 </div>
@@ -190,8 +179,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                         </Tooltip>
                         <Button
                             rightIcon={isPending ? StopIcon : undefined}
-                            type={isPending ? "button" : (!isCommandPressed && messageContent.length > 0 ? "button" : undefined)}
-                            variant={!isCommandPressed || isPending ? 'solid' : 'outline'}
+                            type="button"
+                            variant="solid"
                             style={{ padding: '2px 5px' }}
                             onClick={isPending ? (e) => handleStop(e as any) : handleSubmit}
                             disabled={(messageContent.length === 0 && !isPending) || !selectedModel}
