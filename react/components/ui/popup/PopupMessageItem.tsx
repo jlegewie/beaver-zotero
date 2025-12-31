@@ -140,6 +140,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                     buttonOnClick={message.buttonOnClick}
                     fontColor={fontColor}
                     handleDismiss={handleDismiss}
+                    cancelable={message.cancelable}
                 />
 
                 {/* Content for info, warning, error */}

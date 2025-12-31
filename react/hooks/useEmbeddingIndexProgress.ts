@@ -45,9 +45,11 @@ export function useEmbeddingIndexProgress() {
                 id: EMBEDDING_INDEXING_POPUP_ID,
                 type: 'embedding_indexing',
                 title: 'Building Search Index',
-                text: `Indexing ${totalItems.toLocaleString()} items...`,
+                // text: `Indexing ${totalItems.toLocaleString()} items...`,
+                text: `Search limited until indexing completes`,
                 progress: progress,
                 expire: false, // Don't auto-expire while indexing
+                cancelable: false,
             });
         }
         // Update progress while indexing
@@ -56,7 +58,8 @@ export function useEmbeddingIndexProgress() {
                 messageId: EMBEDDING_INDEXING_POPUP_ID,
                 updates: {
                     progress: progress,
-                    text: `Indexing ${indexedItems.toLocaleString()} of ${totalItems.toLocaleString()} items...`,
+                    // text: `Indexing ${indexedItems.toLocaleString()} of ${totalItems.toLocaleString()} items...`,
+                    cancelable: false,
                 },
             });
         }
@@ -66,10 +69,11 @@ export function useEmbeddingIndexProgress() {
                 messageId: EMBEDDING_INDEXING_POPUP_ID,
                 updates: {
                     title: 'Search Index Ready',
-                    text: `Indexed ${indexedItems.toLocaleString()} items`,
+                    text: `Completed indexing ${indexedItems.toLocaleString()} items`,
                     progress: 100,
                     expire: true,
                     duration: 3500, // Dismiss after 3.5 seconds
+                    cancelable: true,
                 },
             });
             hasShownPopupRef.current = false;
@@ -83,6 +87,7 @@ export function useEmbeddingIndexProgress() {
                     text: indexState.error || 'Failed to build search index',
                     expire: true,
                     duration: 4000,
+                    cancelable: true,
                 },
             });
             hasShownPopupRef.current = false;

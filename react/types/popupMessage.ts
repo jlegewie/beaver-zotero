@@ -11,6 +11,7 @@ export interface PopupMessageFeature {
 
 export interface PopupMessage {
     id: string;
+    cancelable?: boolean; // Defaults to true
     type: PopupMessageType;
     title?: string;
     text?: string;
