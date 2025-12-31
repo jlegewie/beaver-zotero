@@ -394,11 +394,14 @@ const ProOnboardingPage: React.FC = () => {
                         {/* Library synced complete */}
                         {!(overallSyncStatus === 'in_progress' || overallSyncStatus === 'failed') && (
                             <div className="font-color-secondary display-flex flex-row gap-3 items-start mt-2">
-                                <Icon icon={InformationCircleIcon} className="scale-11 mt-020" />
+                                {/* <Icon icon={InformationCircleIcon} className="scale-11 mt-020" /> */}
+                                <span className="text-xl">🎉</span>
                                 <div className="items-start display-flex flex-col gap-2">
-                                    <div>Completed Syncing Zotero Library</div>
+                                    <div className="mt-020 font-semibold">Syncing complete</div>
                                     <div className="text-base">
-                                        You can now start using Beaver. Features will be limited until file uploads and processing complete in the background.
+                                        Background processing is underway and may take an hour or more depending your library.
+                                        You can start using Beaver now. Some features like full-text search will unlock as processing completes.
+                                        {` `}<a href="https://beaverapp.ai/docs/syncing" target="_blank" className="text-link">Learn more</a>
                                     </div>
 
                                     {/* File Processing Status */}
