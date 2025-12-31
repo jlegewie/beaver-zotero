@@ -16,7 +16,7 @@ import DeviceAuthorizationPage from './pages/DeviceAuthorizationPage';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
-import { hasAuthorizedFreeAccessAtom, hasAuthorizedProAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom, isMigratingDataAtom, planFeaturesAtom } from '../atoms/profile';
+import { hasAuthorizedFreeAccessAtom, hasAuthorizedProAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom, isMigratingDataAtom, planFeaturesAtom, syncLibrariesAtom } from '../atoms/profile';
 import { store } from '../store';
 import { isLoadingThreadAtom } from '../atoms/threads';
 import { Spinner } from './icons/icons';
@@ -39,6 +39,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const hasAuthorizedFreeAccess = useAtomValue(hasAuthorizedFreeAccessAtom);
     const hasAuthorizedProAccess = useAtomValue(hasAuthorizedProAccessAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
+    const syncLibraries = useAtomValue(syncLibrariesAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const isLoadingThread = useAtomValue(isLoadingThreadAtom);
@@ -90,11 +91,11 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
 
     {/* Onboarding page */}
     {/* Free users: need has_authorized_free_access only (no full onboarding required) */}
-    {/* Pro users: need has_authorized_access AND has_completed_onboarding */}
+    {/* Pro users: need has_authorized_access AND has_completed_onboarding AND at least one library */}
     const isFreeUser = !planFeatures.databaseSync;
     const needsOnboarding = isFreeUser 
         ? !hasAuthorizedFreeAccess 
-        : (!hasAuthorizedProAccess || !hasCompletedOnboarding);
+        : (!hasAuthorizedProAccess || !hasCompletedOnboarding || syncLibraries.length === 0);
     
     if (needsOnboarding) {
         return (
