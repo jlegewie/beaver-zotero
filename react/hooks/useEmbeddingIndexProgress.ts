@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { embeddingIndexStateAtom, EmbeddingIndexState } from '../atoms/embeddingIndex';
 import { addPopupMessageAtom, updatePopupMessageAtom, removePopupMessageAtom } from '../utils/popupMessageUtils';
+import { planFeaturesAtom } from '../atoms/profile';
 
 const EMBEDDING_INDEXING_POPUP_ID = 'embedding-indexing-progress';
 
@@ -16,12 +17,16 @@ export function useEmbeddingIndexProgress() {
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const updatePopupMessage = useSetAtom(updatePopupMessageAtom);
     const removePopupMessage = useSetAtom(removePopupMessageAtom);
+    const planFeatures = useAtomValue(planFeaturesAtom);
     
     // Track if we've shown the popup for this indexing session
     const hasShownPopupRef = useRef(false);
     const previousStatusRef = useRef<EmbeddingIndexState['status']>('idle');
 
     useEffect(() => {
+        if (planFeatures.databaseSync) {
+            return;
+        }
         const { status, phase, progress, totalItems, indexedItems } = indexState;
         const prevStatus = previousStatusRef.current;
 
@@ -85,7 +90,7 @@ export function useEmbeddingIndexProgress() {
 
         // Update previous status for next comparison
         previousStatusRef.current = status;
-    }, [indexState, addPopupMessage, updatePopupMessage, removePopupMessage]);
+    }, [indexState, planFeatures, addPopupMessage, updatePopupMessage, removePopupMessage]);
 
     // Cleanup on unmount
     useEffect(() => {
