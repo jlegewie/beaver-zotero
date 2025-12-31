@@ -7,7 +7,7 @@ import PreferenceToggle from '../../preferences/PreferenceToggle';
 interface ConsentTogglesProps {
     agreedToTerms: boolean;
     handleTermsChange: (checked: boolean) => void;
-    hasStarted: boolean;
+    disabled: boolean;
     consentToShare: boolean;
     handleConsentChange: (checked: boolean) => void;
     emailNotifications: boolean;
@@ -21,7 +21,7 @@ interface ConsentTogglesProps {
 const ConsentToggles: React.FC<ConsentTogglesProps> = ({
     agreedToTerms,
     handleTermsChange,
-    hasStarted,
+    disabled,
     consentToShare,
     handleConsentChange,
     emailNotifications,
@@ -35,7 +35,7 @@ const ConsentToggles: React.FC<ConsentTogglesProps> = ({
             <PreferenceToggle
                 checked={agreedToTerms}
                 onChange={handleTermsChange}
-                disabled={hasStarted}
+                disabled={disabled}
                 title="Terms and Privacy Policy"
                 subtitle="(required)"
                 className="font-medium"
@@ -45,11 +45,13 @@ const ConsentToggles: React.FC<ConsentTogglesProps> = ({
             <HelpImproveBeaverToggle
                 checked={consentToShare}
                 onChange={handleConsentChange}
+                disabled={disabled}
             />
 
             <EmailToggle
                 checked={emailNotifications}
                 onChange={handleEmailNotificationsChange}
+                disabled={disabled}
             />
         </div>
     );

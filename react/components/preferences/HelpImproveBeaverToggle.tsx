@@ -4,13 +4,15 @@ import PreferenceToggle from "./PreferenceToggle";
 interface HelpImproveBeaverToggleProps {
     checked: boolean;
     onChange: (checked: boolean) => void;
+    disabled?: boolean;
 }
 
-const HelpImproveBeaverToggle: React.FC<HelpImproveBeaverToggleProps> = ({ checked, onChange }) => {
+const HelpImproveBeaverToggle: React.FC<HelpImproveBeaverToggleProps> = ({ checked, onChange, disabled }) => {
     return (
         <PreferenceToggle
             checked={checked}
             onChange={onChange}
+            disabled={disabled}
             title="Help Improve Beaver"
             subtitle="(optional)"
             description="Share anonymized prompts to help improve Beaver"

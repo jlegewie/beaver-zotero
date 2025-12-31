@@ -1,48 +1,35 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import { profileWithPlanAtom } from "../../atoms/profile";
 import { userAtom } from "../../atoms/auth";
-import { embeddingIndexStateAtom, isEmbeddingIndexingAtom } from "../../atoms/embeddingIndex";
 import { accountService } from "../../../src/services/accountService";
 import { logger } from "../../../src/utils/logger";
 import { setPref } from "../../../src/utils/prefs";
 import { getZoteroUserIdentifier } from "../../../src/utils/zoteroUtils";
 import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
-import { OnboardingHeader, OnboardingFooter, EmbeddingIndexProgress, ExamplePrompts } from "./onboarding";
-import HelpImproveBeaverToggle from "../preferences/HelpImproveBeaverToggle";
-import PreferenceToggle from "../preferences/PreferenceToggle";
+import { OnboardingHeader, OnboardingFooter, ExamplePrompts } from "./onboarding";
 import { LockIcon, Icon } from "../icons/icons";
-import EmailToggle from "../preferences/EmailToggle";
 import ConsentToggles from "./onboarding/ConsentToggles";
 
 /**
  * Free onboarding flow - single screen experience
  * 
  * Features:
- * - Welcome message and description
- * - Speed note (indexing takes less than a minute)
- * - Upgrade card with Pro benefits
- * - Telemetry consent toggle
- * - Local embedding indexing (no file upload)
+ * - Welcome message and privacy notice
+ * - Example prompts to show what users can do
+ * - Terms agreement and consent toggles
+ * - Authorizes free access (embedding indexing happens automatically after)
  */
 const FreeOnboardingPage: React.FC = () => {
     // Profile state
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
     const user = useAtomValue(userAtom);
 
-    // Embedding index state
-    const embeddingState = useAtomValue(embeddingIndexStateAtom);
-    const isIndexing = useAtomValue(isEmbeddingIndexingAtom);
-
     // Local state
     const [agreedToTerms, setAgreedToTerms] = useState<boolean>(false);
     const [consentToShare, setConsentToShare] = useState<boolean>(false);
     const [emailNotifications, setEmailNotifications] = useState<boolean>(false);
     const [isAuthorizing, setIsAuthorizing] = useState(false);
-    const [hasStarted, setHasStarted] = useState(false);
-
-    // Check if indexing is complete
-    const isIndexingComplete = embeddingState.status === 'idle' && embeddingState.phase === 'incremental';
 
     const handleConsentChange = (checked: boolean) => {
         setConsentToShare(checked);
@@ -58,13 +45,13 @@ const FreeOnboardingPage: React.FC = () => {
 
     /**
      * Handle the "Get Started" button click
-     * Authorizes free access and the embedding indexing will be triggered by the useEmbeddingIndex hook
+     * Authorizes free access and completes onboarding.
+     * Note: Embedding indexing will be triggered automatically by the useEmbeddingIndex hook.
      */
     const handleGetStarted = async () => {
         if (isAuthorizing || !profileWithPlan) return;
 
         setIsAuthorizing(true);
-        setHasStarted(true);
 
         try {
             // Get all libraries (free users sync all libraries metadata-only)
@@ -104,7 +91,6 @@ const FreeOnboardingPage: React.FC = () => {
 
         } catch (error) {
             logger(`FreeOnboardingPage: Error during free authorization: ${error}`);
-            setHasStarted(false);
         } finally {
             setIsAuthorizing(false);
         }
@@ -128,9 +114,8 @@ const FreeOnboardingPage: React.FC = () => {
     };
 
     // Determine button state
-    const isLoading = isAuthorizing || (hasStarted && isIndexing);
-    const buttonLabel = hasStarted ? "Indexing..." : "Get Started";
-    const isButtonDisabled = hasStarted || !agreedToTerms;
+    const buttonLabel = isAuthorizing ? "Setting up..." : "Get Started";
+    const isButtonDisabled = isAuthorizing || !agreedToTerms;
 
     return (
         <div 
@@ -145,22 +130,6 @@ const FreeOnboardingPage: React.FC = () => {
                 {/* Main content */}
                 <div className="display-flex flex-col gap-4 flex-1">
 
-                    {/* Speed note - shown before starting */}
-                    {/* {!hasStarted && (
-                        <div className="display-flex flex-row gap-2 items-center p-3 rounded-md bg-quinary">
-                            <ZapIcon size={16} className="font-color-secondary" />
-                            <span className="font-color-secondary">Indexing takes less than a minute</span>
-                        </div>
-                    )} */}
-
-                    {/* Indexing progress - shown after starting */}
-                    {hasStarted && (
-                        <EmbeddingIndexProgress />
-                    )}
-
-                    {/* Upgrade card */}
-                    {/* <UpgradeCard /> */}
-
                     {/* Spacer with example prompts */}
                     <div className="flex-1 display-flex flex-col mt-2">
                         <ExamplePrompts />
@@ -170,7 +139,7 @@ const FreeOnboardingPage: React.FC = () => {
                     <ConsentToggles
                         agreedToTerms={agreedToTerms}
                         handleTermsChange={handleTermsChange}
-                        hasStarted={hasStarted}
+                        disabled={isAuthorizing}
                         consentToShare={consentToShare}
                         handleConsentChange={handleConsentChange}
                         emailNotifications={emailNotifications}
@@ -182,8 +151,7 @@ const FreeOnboardingPage: React.FC = () => {
             {/* Footer */}
             <OnboardingFooter
                 buttonLabel={buttonLabel}
-                // message="Agree to Terms and Privacy Policy to continue."
-                isLoading={isLoading}
+                isLoading={isAuthorizing}
                 disabled={isButtonDisabled}
                 onButtonClick={handleGetStarted}
                 showTerms={false}
