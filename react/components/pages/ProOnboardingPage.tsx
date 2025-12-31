@@ -192,13 +192,7 @@ const ProOnboardingPage: React.FC = () => {
             logger(`ProOnboardingPage: Starting sync with libraries: ${libraries.map(lib => lib.library_id).join(', ')}`, 2);
 
             // Update backend with selected libraries
-            await accountService.authorizeAccess(
-                true, // requireOnboarding
-                libraries,
-                useZoteroSync,
-                consentToShare,
-                emailNotifications
-            );
+            await accountService.updateSyncLibraries(libraries);
 
             // Update local profile
             setProfileWithPlan({
