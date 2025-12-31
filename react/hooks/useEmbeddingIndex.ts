@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom } from "../atoms/auth";
-import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom, syncLibraryIdsAtom } from "../atoms/profile";
+import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom, syncLibraryIdsAtom, processingModeAtom } from "../atoms/profile";
+import { ProcessingMode } from "../types/profile";
 import { 
     embeddingIndexStateAtom, 
     setEmbeddingIndexStatusAtom, 
@@ -48,6 +49,7 @@ export function useEmbeddingIndex() {
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     const forceReindexCounter = useAtomValue(forceReindexCounterAtom);
+    const processingMode = useAtomValue(processingModeAtom);
 
     // Atoms for state management
     const setIndexStatus = useSetAtom(setEmbeddingIndexStatusAtom);
@@ -431,6 +433,7 @@ export function useEmbeddingIndex() {
         if (!isAuthenticated) return;
         if (!isAuthorized) return;
         if (!isDeviceAuthorized) return;
+        if (processingMode === ProcessingMode.BACKEND) return;
 
         logger("useEmbeddingIndex: Setting up embedding index", 3);
 
