@@ -44,14 +44,6 @@ const FreeOnboardingPage: React.FC = () => {
     // Check if indexing is complete
     const isIndexingComplete = embeddingState.status === 'idle' && embeddingState.phase === 'incremental';
 
-    // Auto-complete onboarding when indexing finishes
-    // Note: For free users, we check has_authorized_free_access instead of has_authorized_access
-    useEffect(() => {
-        if (hasStarted && isIndexingComplete && profileWithPlan?.has_authorized_free_access) {
-            handleCompleteOnboarding();
-        }
-    }, [hasStarted, isIndexingComplete, profileWithPlan?.has_authorized_free_access]);
-
     const handleConsentChange = (checked: boolean) => {
         setConsentToShare(checked);
     };
@@ -115,24 +107,6 @@ const FreeOnboardingPage: React.FC = () => {
             setHasStarted(false);
         } finally {
             setIsAuthorizing(false);
-        }
-    };
-
-    /**
-     * Complete onboarding after indexing finishes
-     * Note: For free users, we don't call the backend to set has_completed_onboarding
-     * because free users don't need full onboarding. The guard clauses in the frontend
-     * check has_authorized_free_access instead.
-     */
-    const handleCompleteOnboarding = async () => {
-        if (!profileWithPlan) return;
-
-        try {
-            logger("FreeOnboardingPage: Free user indexing complete - no backend call needed", 2);
-            // Free users don't need to call completeOnboarding on the backend
-            // The frontend guard clauses check has_authorized_free_access for free users
-        } catch (error) {
-            logger(`FreeOnboardingPage: Error completing free onboarding: ${error}`);
         }
     };
 
