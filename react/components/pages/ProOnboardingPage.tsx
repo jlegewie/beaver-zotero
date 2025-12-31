@@ -362,7 +362,7 @@ const ProOnboardingPage: React.FC = () => {
         >
             <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1 display-flex flex-col">
                 {/* Header section */}
-                <OnboardingHeader message={getStep2HeaderMessage()} />
+                <OnboardingHeader message={getStep2HeaderMessage()} tag="Beta"/>
 
                 {/* Library Selection */}
                 {!hasSyncStarted ? (

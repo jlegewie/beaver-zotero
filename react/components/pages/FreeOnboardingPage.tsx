@@ -125,7 +125,7 @@ const FreeOnboardingPage: React.FC = () => {
             {/* Scrollable content area */}
             <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1 display-flex flex-col">
                 {/* Header */}
-                <OnboardingHeader message={getHeaderMessage()} />
+                <OnboardingHeader message={getHeaderMessage()} tag="Free"/>
 
                 {/* Main content */}
                 <div className="display-flex flex-col gap-4 flex-1">
