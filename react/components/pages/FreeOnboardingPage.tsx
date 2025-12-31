@@ -13,6 +13,7 @@ import HelpImproveBeaverToggle from "../preferences/HelpImproveBeaverToggle";
 import PreferenceToggle from "../preferences/PreferenceToggle";
 import { LockIcon, Icon } from "../icons/icons";
 import EmailToggle from "../preferences/EmailToggle";
+import ConsentToggles from "./onboarding/ConsentToggles";
 
 /**
  * Free onboarding flow - single screen experience
@@ -192,30 +193,15 @@ const FreeOnboardingPage: React.FC = () => {
                     </div>
 
                     {/* Consent toggle */}
-                    <div className="display-flex flex-col gap-4">
-                        <div className="h-1 border-top-quinary" />
-                        
-                        {/* Terms and Privacy Policy Agreement */}
-                        <PreferenceToggle
-                            checked={agreedToTerms}
-                            onChange={handleTermsChange}
-                            disabled={hasStarted}
-                            title="Terms and Privacy Policy"
-                            subtitle="(required)"
-                            className="font-medium"
-                            description="I agree to the <a href='https://www.beaverapp.ai/terms' target='_blank' rel='noopener noreferrer'>Terms of Service</a> and <a href='https://www.beaverapp.ai/privacy-policy' target='_blank' rel='noopener noreferrer'>Privacy Policy</a>"
-                        />
-                        
-                        <HelpImproveBeaverToggle
-                            checked={consentToShare}
-                            onChange={handleConsentChange}
-                        />
-
-                        <EmailToggle
-                            checked={emailNotifications}
-                            onChange={handleEmailNotificationsChange}
-                        />
-                    </div>
+                    <ConsentToggles
+                        agreedToTerms={agreedToTerms}
+                        handleTermsChange={handleTermsChange}
+                        hasStarted={hasStarted}
+                        consentToShare={consentToShare}
+                        handleConsentChange={handleConsentChange}
+                        emailNotifications={emailNotifications}
+                        handleEmailNotificationsChange={handleEmailNotificationsChange}
+                    />
                 </div>
             </div>
 
