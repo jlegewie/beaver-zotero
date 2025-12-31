@@ -17,13 +17,8 @@ import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
 import { ZoteroLibrary } from "../../types/zotero";
 import { OnboardingHeader, OnboardingFooter, ExamplePrompts } from "./onboarding";
 import ConsentToggles from "./onboarding/ConsentToggles";
-import FileStatusDisplay from "../status/FileStatusDisplay";
-import { LockIcon, Icon, AlertIcon, InformationCircleIcon, ArrowRightIcon, ArrowDownIcon } from "../icons/icons";
+import { LockIcon, Icon, AlertIcon, InformationCircleIcon } from "../icons/icons";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
-import { useFileStatus } from "../../hooks/useFileStatus";
-import FileStatusButton from "../ui/buttons/FileStatusButton";
-import Button from "../ui/Button";
-import FileStatusIcons from "../ui/FileStatusIcons";
 
 /**
  * Pro/Beta onboarding flow with two steps:
@@ -50,13 +45,9 @@ const ProOnboardingPage: React.FC = () => {
     const [libraryStatistics, setLibraryStatistics] = useState<LibraryStatistics[]>([]);
     const [useZoteroSync, setUseZoteroSync] = useState<boolean>(false);
     const [isStartingSync, setIsStartingSync] = useState(false);
-    const [showFileStatusDetails, setShowFileStatusDetails] = useState(false);
 
     // Has sync started
     const hasSyncStarted = useMemo(() => (profileWithPlan?.libraries && profileWithPlan?.libraries?.length > 0) || false, [profileWithPlan]);
-
-    // Connection status
-    const { connectionStatus } = useFileStatus();
 
     // Library sync state
     const setSyncStatus = useSetAtom(syncStatusAtom);
@@ -110,12 +101,6 @@ const ProOnboardingPage: React.FC = () => {
         setIsSubmittingConsent(true);
 
         try {
-            // Get all libraries initially (we'll refine selection in step 2)
-            // const allLibraries = Zotero.Libraries.getAll();
-            // const libraries = allLibraries
-            //     .map(library => serializeZoteroLibrary(library))
-            //     .filter(library => library !== null);
-
             logger(`ProOnboardingPage: Authorizing access (consent step)`, 2);
 
             // Call the service to authorize access (without starting sync yet)
