@@ -1,5 +1,5 @@
 import React from "react";
-import { Spinner, ArrowRightIcon } from "../../icons/icons";
+import { Spinner, ArrowRightIcon, ArrowLeftIcon } from "../../icons/icons";
 import Button from "../../ui/Button";
 
 interface OnboardingFooterProps {
@@ -15,6 +15,12 @@ interface OnboardingFooterProps {
     onButtonClick: () => void;
     /** Whether to show terms and privacy policy links */
     showTerms?: boolean;
+    /** Whether to show a back button */
+    showBackButton?: boolean;
+    /** Click handler for the back button */
+    onBackClick?: () => void;
+    /** Label for the back button */
+    backButtonLabel?: string;
 }
 
 /**
@@ -27,11 +33,26 @@ const OnboardingFooter: React.FC<OnboardingFooterProps> = ({
     isLoading = false,
     disabled = false,
     onButtonClick,
-    showTerms = false
+    showTerms = false,
+    showBackButton = false,
+    onBackClick,
+    backButtonLabel = "Back"
 }) => {
     return (
         <div className="p-4 border-top-quinary">
             <div className="display-flex flex-row items-center gap-4">
+                {/* Back button */}
+                {showBackButton && onBackClick && (
+                    <Button
+                        variant="ghost"
+                        className="fit-content whitespace-nowrap"
+                        icon={ArrowLeftIcon}
+                        onClick={onBackClick}
+                    >
+                        {backButtonLabel}
+                    </Button>
+                )}
+
                 {/* Terms and message area */}
                 <div className="font-color-secondary text-sm">
                     {showTerms ? (
