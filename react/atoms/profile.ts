@@ -53,9 +53,26 @@ export const planDisplayNameAtom = atom<string>((get) => {
     return profile?.plan.display_name || 'Unknown';
 });
 
-export const processingModeAtom = atom<ProcessingMode>((get) => {
+export const isBackendIndexingCompleteAtom = atom<boolean>((get) => {
     const profile = get(profileWithPlanAtom);
-    if (get(planFeaturesAtom).databaseSync && profile?.indexing_complete === true) {
+    const fileStatus = get(fileStatusAtom);
+    
+    // Only prioritize realtime data if it's actually available
+    // If fileStatus is null, it means either:
+    // 1. Realtime subscription hasn't connected yet (use profile as fallback)
+    // 2. User doesn't have pro access or databaseSync (use profile as source of truth)
+    // 3. Connection failed/disconnected (use profile as fallback)
+    if (fileStatus !== null) {
+        return fileStatus.indexing_complete;
+    }
+    
+    // Fallback to profile data (refreshed every 15 min via useProfileSync)
+    return profile?.indexing_complete || false;
+});
+
+export const processingModeAtom = atom<ProcessingMode>((get) => {
+    const isBackendIndexingComplete = get(isBackendIndexingCompleteAtom);
+    if (get(planFeaturesAtom).databaseSync && isBackendIndexingComplete) {
         return ProcessingMode.BACKEND;
     } else {
         return ProcessingMode.FRONTEND;
