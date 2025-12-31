@@ -24,7 +24,9 @@ export function useEmbeddingIndexProgress() {
     const previousStatusRef = useRef<EmbeddingIndexState['status']>('idle');
 
     useEffect(() => {
+        // Remove popup if user upgrades to databaseSync plan
         if (planFeatures.databaseSync) {
+            removePopupMessage(EMBEDDING_INDEXING_POPUP_ID);
             return;
         }
         const { status, phase, progress, totalItems, indexedItems } = indexState;
@@ -45,8 +47,7 @@ export function useEmbeddingIndexProgress() {
                 id: EMBEDDING_INDEXING_POPUP_ID,
                 type: 'embedding_indexing',
                 title: 'Building Search Index',
-                // text: `Indexing ${totalItems.toLocaleString()} items...`,
-                text: `Search limited until indexing completes`,
+                text: `Indexing ${indexedItems.toLocaleString()}/${totalItems.toLocaleString()} items. Search limited until complete.`,
                 progress: progress,
                 expire: false, // Don't auto-expire while indexing
                 cancelable: false,
@@ -58,7 +59,7 @@ export function useEmbeddingIndexProgress() {
                 messageId: EMBEDDING_INDEXING_POPUP_ID,
                 updates: {
                     progress: progress,
-                    // text: `Indexing ${indexedItems.toLocaleString()} of ${totalItems.toLocaleString()} items...`,
+                    text: `Indexing ${indexedItems.toLocaleString()}/${totalItems.toLocaleString()} items. Search limited until complete.`,
                     cancelable: false,
                 },
             });
@@ -69,7 +70,7 @@ export function useEmbeddingIndexProgress() {
                 messageId: EMBEDDING_INDEXING_POPUP_ID,
                 updates: {
                     title: 'Search Index Ready',
-                    text: `Completed indexing ${indexedItems.toLocaleString()} items`,
+                    text: `${indexedItems.toLocaleString()} items indexed`,
                     progress: 100,
                     expire: true,
                     duration: 3500, // Dismiss after 3.5 seconds
