@@ -14,8 +14,7 @@ interface PreferenceToggleProps {
     tooltip?: string;
     disabledTooltip?: string;
     errorTooltip?: string;
-    showRecommended?: boolean;
-    recommendedText?: string;
+    tag?: string;
     errorText?: string;
 }
 
@@ -31,8 +30,7 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
     tooltip,
     disabledTooltip,
     errorTooltip,
-    showRecommended = false,
-    recommendedText = "Recommended",
+    tag,
     errorText = "Error"
 }) => {
     const handleToggle = () => {
@@ -62,7 +60,7 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
             <div className="display-flex flex-row gap-2 items-start">
                 <input
                     type="checkbox" 
-                    className={`mr-1 scale-90 ${showRecommended ? 'mt-15' : 'mt-020'}`}
+                    className={`mr-1 scale-90 ${tag ? 'mt-15' : 'mt-020'}`}
                     style={{minWidth: 'auto'}}
                     checked={checked}
                     onChange={handleToggle}
@@ -81,9 +79,9 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
                                     {subtitle}
                                 </div>
                             )}
-                            {!disabled && !error && showRecommended && (
+                            {!disabled && !error && tag && (
                                 <div className="font-color-secondary scale-90 px-15 py-05 mt-015 text-sm rounded-md bg-quinary border-quinary">
-                                    {recommendedText}
+                                    {tag}
                                 </div>
                             )}
                             {error && (
