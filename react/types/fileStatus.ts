@@ -62,6 +62,8 @@ export interface FileStatusSummary {
     // Processing summary
     totalProcessingCount: number,
     uploadProgress: number,
-    progress: number,
+    progress: number, // frontend progress calculation
+    indexingProgress: number, // backend progress calculation
+    indexingComplete: boolean,
     pageBalanceExhausted: boolean,
 }
