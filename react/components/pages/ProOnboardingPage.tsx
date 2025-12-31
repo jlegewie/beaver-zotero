@@ -13,6 +13,7 @@ import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zot
 import { userAtom } from "../../atoms/auth";
 import { isLibraryValidForSync } from "../../../src/utils/sync";
 import { store } from "../../store";
+import SelectLibraries from "./onboarding/SelectLibraries";
 import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
 import { ZoteroLibrary } from "../../types/zotero";
 import { OnboardingHeader, OnboardingFooter } from "./onboarding";

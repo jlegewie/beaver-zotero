@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef, Dispatch, SetStateAction } from 'react';
-import { getLibraryItemCounts, LibraryStatistics } from '../../src/utils/libraries';
-import { Icon, DeleteIcon, CSSIcon, PlusSignIcon, AlertIcon } from './icons/icons';
-import IconButton from './ui/IconButton';
-import SearchMenu, { MenuPosition, SearchMenuItem } from './ui/menus/SearchMenu';
-import { isLibrarySynced } from '../../src/utils/zoteroUtils';
-import { logger } from '../../src/utils/logger';
-import { isLibraryValidForSync, isLibraryValidForSyncWithServerCheck } from '../../src/utils/sync';
+import { getLibraryItemCounts, LibraryStatistics } from '../../../../src/utils/libraries';
+import { Icon, DeleteIcon, CSSIcon, PlusSignIcon, AlertIcon } from '../../icons/icons';
+import IconButton from '../../ui/IconButton';
+import SearchMenu, { MenuPosition, SearchMenuItem } from '../../ui/menus/SearchMenu';
+import { isLibrarySynced } from '../../../../src/utils/zoteroUtils';
+import { logger } from '../../../../src/utils/logger';
+import { isLibraryValidForSync, isLibraryValidForSyncWithServerCheck } from '../../../../src/utils/sync';
 
 interface SelectLibrariesProps {
     selectedLibraryIds: number[];
