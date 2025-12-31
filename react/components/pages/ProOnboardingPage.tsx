@@ -23,6 +23,7 @@ import ZoteroSyncToggle from "../preferences/SyncToggle";
 import { useFileStatus } from "../../hooks/useFileStatus";
 import FileStatusButton from "../ui/buttons/FileStatusButton";
 import Button from "../ui/Button";
+import FileStatusIcons from "../ui/FileStatusIcons";
 
 /**
  * Pro/Beta onboarding flow with two steps:
@@ -411,9 +412,9 @@ const ProOnboardingPage: React.FC = () => {
                         {/* Syncing your library */}
                         <DatabaseSyncStatus />
 
-                        {/* File processing limit reached */}
+                        {/* Library synced complete */}
                         {!(overallSyncStatus === 'in_progress' || overallSyncStatus === 'failed') && (
-                            <div className="font-color-secondary display-flex flex-row gap-3 items-start">
+                            <div className="font-color-secondary display-flex flex-row gap-3 items-start mt-2">
                                 <Icon icon={InformationCircleIcon} className="scale-11 mt-020" />
                                 <div className="items-start display-flex flex-col gap-2">
                                     <div>Completed Syncing Zotero Library</div>
@@ -422,13 +423,13 @@ const ProOnboardingPage: React.FC = () => {
                                     </div>
 
                                     {/* File Processing Status */}
-                                    <div className="display-flex flex-row flex-1 items-center">
-                                        <div className="font-semibold">
+                                    {/* <div className="display-flex flex-row gap-1 mt-1">
+                                        <div>
                                             File Status
                                         </div>
                                         <div className="flex-1" />
-                                        <FileStatusButton showFileStatus={showFileStatusDetails} setShowFileStatus={setShowFileStatusDetails}/>
-                                    </div>
+                                        <FileStatusIcons textClassName="text-base" iconScale="scale-100" />
+                                    </div> */}
                                 </div>
                             </div>
                         )}

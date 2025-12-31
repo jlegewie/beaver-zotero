@@ -38,7 +38,8 @@ export const StatusItem: React.FC<StatusItemProps> = ({ icon, count, className =
 const FileStatusIcons: React.FC<{
     className?: string,
     textClassName?: string
-}> = ({ className = '', textClassName = 'text-lg' }) => {
+    iconScale?: string;
+}> = ({ className = '', textClassName = 'text-lg', iconScale = 'scale-115' }) => {
 
     const [fileStatusSummary] = useAtom(fileStatusSummaryAtom);
     const [isAnimating, setIsAnimating] = useState(false);
@@ -71,10 +72,10 @@ const FileStatusIcons: React.FC<{
 
     return (
         <div className={`display-flex flex-row gap-4 ${animationClass} ${className}`}>
-            <StatusItem icon={ClockIcon} count={fileStatusSummary.queuedProcessingCount} textClassName={textClassName} iconClassName="scale-115" />
-            <StatusItem icon={SyncIcon} count={fileStatusSummary.processingProcessingCount} textClassName={textClassName} iconClassName={syncIconClassName} />
-            <StatusItem icon={CheckmarkCircleIcon} count={fileStatusSummary.completedFiles} textClassName={textClassName} iconClassName="scale-115 text-green-500" />
-            <StatusItem icon={CancelCircleIcon} count={fileStatusSummary.failedCount} textClassName={textClassName} iconClassName="scale-115 text-red-500" />
+            <StatusItem icon={ClockIcon} count={fileStatusSummary.queuedProcessingCount} textClassName={textClassName} iconClassName={iconScale} />
+            <StatusItem icon={SyncIcon} count={fileStatusSummary.processingProcessingCount} textClassName={textClassName} iconClassName={`${iconScale} ${syncIconClassName}`} />
+            <StatusItem icon={CheckmarkCircleIcon} count={fileStatusSummary.completedFiles} textClassName={textClassName} iconClassName={`${iconScale} text-green-500`} />
+            <StatusItem icon={CancelCircleIcon} count={fileStatusSummary.failedCount} textClassName={textClassName} iconClassName={`${iconScale} text-red-500`} />
         </div>
     );
 };
