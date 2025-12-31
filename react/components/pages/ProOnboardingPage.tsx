@@ -305,7 +305,7 @@ const ProOnboardingPage: React.FC = () => {
                 {/* Scrollable content area */}
                 <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1 display-flex flex-col">
                     {/* Header */}
-                    <OnboardingHeader message={getStep1HeaderMessage()} />
+                    <OnboardingHeader message={getStep1HeaderMessage()} tag="Beta" />
 
                     {/* Main content */}
                     <div className="display-flex flex-col gap-4 flex-1">
