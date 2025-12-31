@@ -36,8 +36,9 @@ export const StatusItem: React.FC<StatusItemProps> = ({ icon, count, className =
  * Button component displaying aggregated file processing status.
  */
 const FileStatusIcons: React.FC<{
-    className?: string
-}> = ({ className = '' }) => {
+    className?: string,
+    textClassName?: string
+}> = ({ className = '', textClassName = 'text-lg' }) => {
 
     const [fileStatusSummary] = useAtom(fileStatusSummaryAtom);
     const [isAnimating, setIsAnimating] = useState(false);
@@ -69,11 +70,11 @@ const FileStatusIcons: React.FC<{
     const syncIconClassName = `scale-125 text-purple-500 ${fileStatusSummary.activeCount > 0 ? 'animate-spin' : ''}`;
 
     return (
-        <div className="display-flex flex-row gap-4">
-            <StatusItem icon={ClockIcon} count={fileStatusSummary.queuedProcessingCount} textClassName="text-lg" iconClassName="scale-115" />
-            <StatusItem icon={SyncIcon} count={fileStatusSummary.processingProcessingCount} textClassName="text-lg" iconClassName={syncIconClassName} />
-            <StatusItem icon={CheckmarkCircleIcon} count={fileStatusSummary.completedFiles} textClassName="text-lg" iconClassName="scale-115 text-green-500" />
-            <StatusItem icon={CancelCircleIcon} count={fileStatusSummary.failedCount} textClassName="text-lg" iconClassName="scale-115 text-red-500" />
+        <div className={`display-flex flex-row gap-4 ${animationClass} ${className}`}>
+            <StatusItem icon={ClockIcon} count={fileStatusSummary.queuedProcessingCount} textClassName={textClassName} iconClassName="scale-115" />
+            <StatusItem icon={SyncIcon} count={fileStatusSummary.processingProcessingCount} textClassName={textClassName} iconClassName={syncIconClassName} />
+            <StatusItem icon={CheckmarkCircleIcon} count={fileStatusSummary.completedFiles} textClassName={textClassName} iconClassName="scale-115 text-green-500" />
+            <StatusItem icon={CancelCircleIcon} count={fileStatusSummary.failedCount} textClassName={textClassName} iconClassName="scale-115 text-red-500" />
         </div>
     );
 };
