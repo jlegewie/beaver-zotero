@@ -573,6 +573,6 @@ export function useEmbeddingIndex() {
             // Clear indexer reference
             indexerRef.current = null;
         };
-    }, [isAuthenticated, isAuthorized, isDeviceAuthorized, syncLibraryIds, forceReindexCounter]);
+    }, [isAuthenticated, isAuthorized, isDeviceAuthorized, processingMode, syncLibraryIds, forceReindexCounter]);
 }
 
