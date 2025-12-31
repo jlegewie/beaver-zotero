@@ -24,6 +24,10 @@ export interface FileStatus {
     md_unsupported_file: number;
     page_balance_exhausted: boolean;
 
+    // Indexing status
+    indexing_complete: boolean;
+    indexing_progress: number;  // 0-100
+
     // Timestamp for the last update
     last_updated_at: string; // ISO 8601 timestamp string
 }

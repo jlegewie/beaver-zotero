@@ -109,7 +109,13 @@ export const hasAuthorizedAccessAtom = atom<boolean>((get) => {
 
 export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
     const profile = get(profileWithPlanAtom);
-    return profile?.has_completed_onboarding || false;
+    const planFeatures = get(planFeaturesAtom);
+    return (
+        profile?.has_completed_onboarding ||
+        // Free accounts don't need to complete onboarding
+        (planFeatures && !planFeatures.databaseSync) ||
+        false
+    );
 });
 
 export const syncWithZoteroAtom = atom<boolean>((get) => {

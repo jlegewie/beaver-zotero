@@ -6,7 +6,7 @@ import { FileStatus } from '../types/fileStatus';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
-import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from '../atoms/profile';
+import { hasAuthorizedProAccessAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from '../atoms/profile';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'polling' | 'error';
 
@@ -34,6 +34,9 @@ const formatStatus = (statusData: any): FileStatus => ({
     md_plan_limit: Number(statusData.md_plan_limit || 0),
     md_unsupported_file: Number(statusData.md_unsupported_file || 0),
     page_balance_exhausted: Boolean(statusData.page_balance_exhausted || false),
+    // Indexing status
+    indexing_complete: Boolean(statusData.indexing_complete || false),
+    indexing_progress: Number(statusData.indexing_progress || 0),
     // Timestamp
     last_updated_at: statusData.last_updated_at || new Date().toISOString(),
 });
@@ -46,7 +49,7 @@ const formatStatus = (statusData: any): FileStatus => ({
 export const fetchFileStatus = async (userId: string): Promise<FileStatus | null> => {
     try {
         // Set select string
-        const selectString = 'user_id,total_files,upload_not_uploaded,upload_pending,upload_completed,upload_failed,md_queued,md_processing,md_completed,md_failed_upload,md_failed_system,md_failed_user,md_plan_limit,md_unsupported_file,page_balance_exhausted,last_updated_at';
+        const selectString = 'user_id,total_files,upload_not_uploaded,upload_pending,upload_completed,upload_failed,md_queued,md_processing,md_completed,md_failed_upload,md_failed_system,md_failed_user,md_plan_limit,md_unsupported_file,page_balance_exhausted,indexing_complete,indexing_progress,last_updated_at';
 
         // Get the file status for the user
         const { data, error } = await supabase
@@ -82,7 +85,7 @@ export const fetchFileStatus = async (userId: string): Promise<FileStatus | null
 export const useFileStatus = (enabled: boolean = true): FileStatusConnection => {
     const setFileStatus = useSetAtom(fileStatusAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
-    const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
+    const hasAuthorizedProAccess = useAtomValue(hasAuthorizedProAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const user = useAtomValue(userAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);
@@ -307,7 +310,7 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
             enabled &&
             isAuthenticated &&
             user &&
-            hasAuthorizedAccess &&
+            hasAuthorizedProAccess &&
             isDeviceAuthorized &&
             planFeatures.databaseSync
         );
@@ -336,7 +339,7 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
         return () => {
             cleanupConnection();
         };
-    }, [enabled, isAuthenticated, user, hasAuthorizedAccess, isDeviceAuthorized, setupConnection, cleanupConnection]);
+    }, [enabled, isAuthenticated, user, hasAuthorizedProAccess, isDeviceAuthorized, setupConnection, cleanupConnection]);
 
     // Handle auth state changes for token refresh
     useEffect(() => {

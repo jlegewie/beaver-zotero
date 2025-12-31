@@ -16,7 +16,7 @@ import DeviceAuthorizationPage from './pages/DeviceAuthorizationPage';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
-import { hasAuthorizedAccessAtom, hasAuthorizedFreeAccessAtom, hasAuthorizedProAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom, isMigratingDataAtom, planFeaturesAtom } from '../atoms/profile';
+import { hasAuthorizedFreeAccessAtom, hasAuthorizedProAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom, isMigratingDataAtom, planFeaturesAtom } from '../atoms/profile';
 import { store } from '../store';
 import { isLoadingThreadAtom } from '../atoms/threads';
 import { Spinner } from './icons/icons';
@@ -36,7 +36,6 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const setIsSkippedFilesDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
-    const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
     const hasAuthorizedFreeAccess = useAtomValue(hasAuthorizedFreeAccessAtom);
     const hasAuthorizedProAccess = useAtomValue(hasAuthorizedProAccessAtom);
     const planFeatures = useAtomValue(planFeaturesAtom);

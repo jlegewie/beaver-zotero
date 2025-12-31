@@ -3,7 +3,7 @@ import { syncZoteroDatabase, syncingItemFilter, ItemFilterFunction } from "../..
 import { useAtomValue } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
 import { fileUploader } from "../../src/services/FileUploader";
-import { hasAuthorizedAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom, syncWithZoteroAtom } from "../atoms/profile";
+import { hasAuthorizedProAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom, syncWithZoteroAtom } from "../atoms/profile";
 import { store } from "../store";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
@@ -41,7 +41,7 @@ interface CollectedEvents {
  */
 export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFilter, debounceMs: number = DEBOUNCE_MS) {
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
-    const isAuthorized = useAtomValue(hasAuthorizedAccessAtom);
+    const hasAuthorizedProAccess = useAtomValue(hasAuthorizedProAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
@@ -175,7 +175,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     useEffect(() => {
         // Conditions for sync
         if (!isAuthenticated) return;
-        if (!isAuthorized) return;
+        if (!hasAuthorizedProAccess) return;
         if (!isDeviceAuthorized) return;
         if (syncLibraryIds.length === 0) return;
         if (!store.get(planFeaturesAtom).databaseSync) return;
@@ -452,5 +452,5 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             eventsRef.current.changedLibraries.clear();
             eventsRef.current.delete.clear();
         };
-    }, [isAuthenticated, filterFunction, debounceMs, isAuthorized, isDeviceAuthorized, syncLibraryIds, syncWithZotero]);
+    }, [isAuthenticated, filterFunction, debounceMs, hasAuthorizedProAccess, isDeviceAuthorized, syncLibraryIds, syncWithZotero]);
 }
