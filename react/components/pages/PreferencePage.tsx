@@ -19,7 +19,7 @@ import CustomPromptSettings from "../preferences/CustomPromptSettings";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
 import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { accountService } from "../../../src/services/accountService";
-import ConsentToggle from "../preferences/ConsentToggle";
+import HelpImproveBeaverToggle from "../preferences/HelpImproveBeaverToggle";
 import EmailToggle from "../preferences/EmailToggle";
 import CitationFormatToggle from "../preferences/CitationFormatToggle";
 import AddSelectedItemsOnNewThreadToggle from "../preferences/AddSelectedItemsOnNewThreadToggle";
@@ -522,7 +522,7 @@ const PreferencePage: React.FC = () => {
                     checked={addSelectedOnOpen} 
                     onChange={setAddSelectedOnOpen} 
                 />
-                <ConsentToggle
+                <HelpImproveBeaverToggle
                     checked={consentToShare}
                     onChange={handleConsentChange}
                 />

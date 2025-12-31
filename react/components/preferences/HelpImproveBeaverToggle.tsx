@@ -1,12 +1,12 @@
 import React from "react";
 import PreferenceToggle from "./PreferenceToggle";
 
-interface ConsentToggleProps {
+interface HelpImproveBeaverToggleProps {
     checked: boolean;
     onChange: (checked: boolean) => void;
 }
 
-const ConsentToggle: React.FC<ConsentToggleProps> = ({ checked, onChange }) => {
+const HelpImproveBeaverToggle: React.FC<HelpImproveBeaverToggleProps> = ({ checked, onChange }) => {
     return (
         <PreferenceToggle
             checked={checked}
@@ -19,4 +19,4 @@ const ConsentToggle: React.FC<ConsentToggleProps> = ({ checked, onChange }) => {
     );
 };
 
-export default ConsentToggle;
+export default HelpImproveBeaverToggle;

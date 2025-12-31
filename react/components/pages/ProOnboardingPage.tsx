@@ -1,20 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { useFileStatus } from '../../hooks/useFileStatus';
-import { fileStatusSummaryAtom } from "../../atoms/files";
 import { overallSyncStatusAtom, syncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
-import { hasAuthorizedAccessAtom, syncLibrariesAtom } from '../../atoms/profile';
+import { hasAuthorizedProAccessAtom, syncLibrariesAtom } from '../../atoms/profile';
 import AuthorizeLibraryAccess from "../auth/AuthorizeLibraryAccess";
 import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import { logger } from "../../../src/utils/logger";
 import { accountService } from "../../../src/services/accountService";
-import { isUploadProcessedAtom } from "../../atoms/files";
 import { DatabaseSyncStatus } from "../status/DatabaseSyncStatus";
 import { profileWithPlanAtom } from "../../atoms/profile";
 import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { userAtom } from "../../atoms/auth";
-import FileStatusDisplay from "../status/FileStatusDisplay";
 import { isLibraryValidForSync } from "../../../src/utils/sync";
 import { store } from "../../store";
 import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
@@ -32,8 +28,7 @@ const ProOnboardingPage: React.FC = () => {
     const user = useAtomValue(userAtom);
     
     // Onboarding state
-    const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
-    const isUploadProcessed = useAtomValue(isUploadProcessedAtom);
+    const hasAuthorizedProAccess = useAtomValue(hasAuthorizedProAccessAtom);
 
     // Track selected libraries
     const [selectedLibraryIds, setSelectedLibraryIds] = useState<number[]>([1]);
@@ -45,18 +40,12 @@ const ProOnboardingPage: React.FC = () => {
     const [consentToShare, setConsentToShare] = useState<boolean>(false);
     const [emailNotifications, setEmailNotifications] = useState<boolean>(false);
 
-    // Realtime listening for file status updates
-    const { connectionStatus } = useFileStatus();
-
     // Library sync state
     const setSyncStatus = useSetAtom(syncStatusAtom);
     const overallSyncStatus = useAtomValue(overallSyncStatusAtom);
     
     // State for full library statistics (loaded asynchronously)
     const [libraryStatistics, setLibraryStatistics] = useState<LibraryStatistics[]>([]);
-
-    // Processing state
-    const fileStatusSummary = useAtomValue(fileStatusSummaryAtom);
 
     // Loading states for service calls
     const [isAuthorizing, setIsAuthorizing] = useState(false);
@@ -205,8 +194,8 @@ const ProOnboardingPage: React.FC = () => {
                 });
             }
 
-            // Show indexing complete message if indexing is not complete
-            if (fileStatusSummary.progress < 100) setPref("showIndexingCompleteMessage", true);
+            // Show indexing complete message - users will see this while indexing continues in background
+            setPref("showIndexingCompleteMessage", true);
 
             // Update profile atom for immediate UI feedback
             if (profileWithPlan) {
@@ -232,28 +221,22 @@ const ProOnboardingPage: React.FC = () => {
 
     const getFooterMessage = () => {
         if (overallSyncStatus === 'in_progress') {
-            return "Initial syncing in progress.";
+            return "Database sync in progress. You can complete onboarding once the sync finishes.";
         } else if (overallSyncStatus === 'failed') {
-            return `Initial syncing failed. Please retry or contact support.`;
-        } else if (fileStatusSummary.pageBalanceExhausted) {
-            return "Free file processing limit reached. Continue to use Beaver with processed files.";
-        } else if (!isUploadProcessed) {
-            return `Waiting for file uploads to complete (${fileStatusSummary.uploadPendingCount.toLocaleString()} remaining).`;
-        } else if (isUploadProcessed && fileStatusSummary?.uploadFailedCount > 0) {
-            return "Failed to upload some files. Please retry to use them with Beaver."
-        } else if (isUploadProcessed && fileStatusSummary?.uploadFailedCount === 0 && fileStatusSummary.progress < 100) {
-            return "File processing incomplete. Expect slower response times & limited search."
+            return "Database sync failed. Please retry or contact support.";
+        } else if (overallSyncStatus === 'completed' || overallSyncStatus === 'partially_completed') {
+            return "Database sync complete! File uploads and processing will continue in the background.";
         }
         return "";
     };
 
     const getHeaderMessage = () => {
-        if (!hasAuthorizedAccess) {
+        if (!hasAuthorizedProAccess) {
             // Step 1: Library Selection & Authorization
             return "Beaver syncs your Zotero data, uploads attachments, and indexes them for search and AI features. By continuing, you confirm you're authorized to upload these files and link your Zotero and Beaver account.";
         } else {
             // Step 2: Syncing Process
-            return "We're now syncing your Zotero library and processing your files. This usually takes 20-60 minutes, depending on your library size and server load.\n\nYou can safely close Beaver and return later. Just make sure Zotero stays open so syncing can continue in the background.";
+            return "We're syncing your Zotero library. Once the database sync completes, you can start using Beaver while file uploads and processing continue in the background.";
         }
     };
     
@@ -268,7 +251,7 @@ const ProOnboardingPage: React.FC = () => {
                 <OnboardingHeader message={getHeaderMessage()} />
 
                 {/* ------------- Step 1: Library Selection & Authorization ------------- */}
-                {!hasAuthorizedAccess && (
+                {!hasAuthorizedProAccess && (
                     <AuthorizeLibraryAccess
                         selectedLibraryIds={selectedLibraryIds}
                         setSelectedLibraryIds={setSelectedLibraryIds}
@@ -285,16 +268,13 @@ const ProOnboardingPage: React.FC = () => {
                 )}
 
                 {/* ------------- Step 2: Syncing Process ------------- */}
-                {hasAuthorizedAccess && (
+                {hasAuthorizedProAccess && (
                     <div className="display-flex flex-col gap-4">
-                        <div className="text-lg font-semibold mb-3">Step 2: Syncing Process</div>
+                        <div className="text-lg font-semibold mb-3">Step 2: Database Sync</div>
 
                         <div className="display-flex flex-col gap-4">
                             {/* Syncing your library */}
                             <DatabaseSyncStatus />
-
-                            {/* File status display */}
-                            <FileStatusDisplay connectionStatus={connectionStatus}/>
                         </div>
 
                     </div>
@@ -302,7 +282,7 @@ const ProOnboardingPage: React.FC = () => {
             </div>
 
             {/* Fixed footer area */}
-            {!hasAuthorizedAccess ? (
+            {!hasAuthorizedProAccess ? (
                 <OnboardingFooter
                     buttonLabel="Continue"
                     isLoading={isAuthorizing}
@@ -315,7 +295,7 @@ const ProOnboardingPage: React.FC = () => {
                     message={getFooterMessage()}
                     buttonLabel="Complete"
                     isLoading={isCompletingOnboarding}
-                    disabled={(!isUploadProcessed && !fileStatusSummary.pageBalanceExhausted) || (overallSyncStatus === 'in_progress' || overallSyncStatus === 'failed')}
+                    disabled={overallSyncStatus === 'in_progress' || overallSyncStatus === 'failed'}
                     onButtonClick={handleCompleteOnboarding}
                 />
             )}

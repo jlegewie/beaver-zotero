@@ -6,10 +6,10 @@ import { embeddingIndexStateAtom, isEmbeddingIndexingAtom } from "../../atoms/em
 import { accountService } from "../../../src/services/accountService";
 import { logger } from "../../../src/utils/logger";
 import { setPref } from "../../../src/utils/prefs";
-import { getZoteroUserIdentifier, isLibrarySynced } from "../../../src/utils/zoteroUtils";
+import { getZoteroUserIdentifier } from "../../../src/utils/zoteroUtils";
 import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
 import { OnboardingHeader, OnboardingFooter, EmbeddingIndexProgress, ExamplePrompts } from "./onboarding";
-import ConsentToggle from "../preferences/ConsentToggle";
+import HelpImproveBeaverToggle from "../preferences/HelpImproveBeaverToggle";
 import PreferenceToggle from "../preferences/PreferenceToggle";
 import { LockIcon, Icon } from "../icons/icons";
 import EmailToggle from "../preferences/EmailToggle";
@@ -206,7 +206,7 @@ const FreeOnboardingPage: React.FC = () => {
                             description="I agree to the <a href='https://www.beaverapp.ai/terms' target='_blank' rel='noopener noreferrer'>Terms of Service</a> and <a href='https://www.beaverapp.ai/privacy-policy' target='_blank' rel='noopener noreferrer'>Privacy Policy</a>"
                         />
                         
-                        <ConsentToggle
+                        <HelpImproveBeaverToggle
                             checked={consentToShare}
                             onChange={handleConsentChange}
                         />

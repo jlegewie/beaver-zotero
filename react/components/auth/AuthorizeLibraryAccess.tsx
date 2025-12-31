@@ -2,7 +2,7 @@ import React, { Dispatch, SetStateAction } from "react";
 import { AlertIcon, Icon } from "../icons/icons";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
-import ConsentToggle from "../preferences/ConsentToggle";
+import HelpImproveBeaverToggle from "../preferences/HelpImproveBeaverToggle";
 import EmailToggle from "../preferences/EmailToggle";
 import SelectLibraries from "../SelectLibraries";
 import { planNameAtom } from "../../atoms/profile";
@@ -89,7 +89,7 @@ const AuthorizeLibraryAccess: React.FC<AuthorizeLibraryAccessProps> = ({
                     onChange={handleSyncToggleChange}
                     disabled={disableSyncToggle}
                 />
-                <ConsentToggle
+                <HelpImproveBeaverToggle
                     checked={consentToShare}
                     onChange={handleConsentChange}
                 />
