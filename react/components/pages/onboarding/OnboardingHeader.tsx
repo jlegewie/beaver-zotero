@@ -3,6 +3,7 @@ import React from "react";
 interface OnboardingHeaderProps {
     title?: string;
     message: string | React.ReactNode;
+    tag?: string
 }
 
 /**
@@ -11,7 +12,8 @@ interface OnboardingHeaderProps {
  */
 const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({
     title = "Welcome to Beaver",
-    message
+    message,
+    tag
 }) => {
     return (
         <div className="display-flex flex-col items-start mb-3">
@@ -21,7 +23,14 @@ const OnboardingHeader: React.FC<OnboardingHeaderProps> = ({
                     style={{ width: '4rem', height: '4rem' }} 
                     alt="Beaver logo"
                 />
+                <div className="display-flex flex-row gap-1 items-center">
                 <div className="text-2xl font-semibold mb-2">{title}</div>
+                    {tag && (
+                        <div className="font-color-secondary scale-90 px-15 py-05 mb-3 text-sm rounded-md bg-quinary border-quinary">
+                            {tag}
+                        </div>
+                    )}
+                </div>
             </div>
             {typeof message === 'string' ? (
                 <p className="text-base font-color-secondary" style={{ whiteSpace: 'pre-line' }}>
