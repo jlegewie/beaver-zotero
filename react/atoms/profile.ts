@@ -3,6 +3,7 @@ import { selectAtom } from 'jotai/utils';
 import { SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode } from "../types/profile";
 import { getZoteroUserIdentifier } from "../../src/utils/zoteroUtils";
 import { ZoteroLibrary } from "../types/zotero";
+import { fileStatusAtom } from "./files";
 
 // Profile and plan state
 export const isProfileInvalidAtom = atom<boolean>(false);
@@ -121,4 +122,13 @@ export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
 export const syncWithZoteroAtom = atom<boolean>((get) => {
     const profile = get(profileWithPlanAtom);
     return profile?.use_zotero_sync || false;
+});
+
+/**
+ * Indexing progress atom - returns the current indexing progress (0-100)
+ * from files_status realtime subscription, or from profile as fallback.
+ */
+export const indexingProgressAtom = atom<number>((get) => {
+    const fileStatus = get(fileStatusAtom);
+    return fileStatus?.indexing_progress ?? 0;
 });
