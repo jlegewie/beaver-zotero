@@ -134,14 +134,14 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
                     {/* Progress bar and text */}
                     {fileStats.totalFiles > 0 && connectionStatus === 'connected' && (
                         <div className="w-full">
-                            <ProgressBar progress={fileStats.progress} />
+                            <ProgressBar progress={fileStats.indexingProgress} />
                             <div className="display-flex flex-row gap-4">
                                 <div className="font-color-tertiary text-base">
                                     {getStatusText()}
                                 </div>
                                 <div className="flex-1"/>
                                 <div className="font-color-tertiary text-base">
-                                    {`${fileStats.progress.toFixed(1)}%`}
+                                    {`${fileStats.indexingProgress}%`}
                                 </div>
                             </div>
                         </div>
