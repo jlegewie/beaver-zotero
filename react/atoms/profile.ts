@@ -53,6 +53,11 @@ export const planDisplayNameAtom = atom<string>((get) => {
     return profile?.plan.display_name || 'Unknown';
 });
 
+export const isDatabaseSyncSupportedAtom = atom<boolean>((get) => {
+    const planFeatures = get(planFeaturesAtom);
+    return planFeatures?.databaseSync || false;
+});
+
 export const isBackendIndexingCompleteAtom = atom<boolean>((get) => {
     const profile = get(profileWithPlanAtom);
     const fileStatus = get(fileStatusAtom);
@@ -72,7 +77,7 @@ export const isBackendIndexingCompleteAtom = atom<boolean>((get) => {
 
 export const processingModeAtom = atom<ProcessingMode>((get) => {
     const isBackendIndexingComplete = get(isBackendIndexingCompleteAtom);
-    if (get(planFeaturesAtom).databaseSync && isBackendIndexingComplete) {
+    if (get(isDatabaseSyncSupportedAtom) && isBackendIndexingComplete) {
         return ProcessingMode.BACKEND;
     } else {
         return ProcessingMode.FRONTEND;
@@ -127,11 +132,11 @@ export const hasAuthorizedAccessAtom = atom<boolean>((get) => {
 
 export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
     const profile = get(profileWithPlanAtom);
-    const planFeatures = get(planFeaturesAtom);
+    const isDatabaseSyncSupported = get(isDatabaseSyncSupportedAtom);
     return (
         profile?.has_completed_onboarding ||
         // Free accounts don't need to complete onboarding
-        (planFeatures && !planFeatures.databaseSync) ||
+        !isDatabaseSyncSupported ||
         false
     );
 });

@@ -3,7 +3,7 @@ import { syncZoteroDatabase, syncingItemFilter, ItemFilterFunction } from "../..
 import { useAtomValue } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
 import { fileUploader } from "../../src/services/FileUploader";
-import { hasAuthorizedProAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom, syncWithZoteroAtom } from "../atoms/profile";
+import { hasAuthorizedProAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom, syncWithZoteroAtom, isDatabaseSyncSupportedAtom } from "../atoms/profile";
 import { store } from "../store";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
@@ -178,7 +178,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         if (!hasAuthorizedProAccess) return;
         if (!isDeviceAuthorized) return;
         if (syncLibraryIds.length === 0) return;
-        if (!store.get(planFeaturesAtom).databaseSync) return;
+        if (!store.get(isDatabaseSyncSupportedAtom)) return;
 
         let isMounted = true;
 
@@ -452,5 +452,5 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             eventsRef.current.changedLibraries.clear();
             eventsRef.current.delete.clear();
         };
-    }, [isAuthenticated, filterFunction, debounceMs, hasAuthorizedProAccess, isDeviceAuthorized, syncLibraryIds, syncWithZotero]);
+    }, [isAuthenticated, isDatabaseSyncSupportedAtom, filterFunction, debounceMs, hasAuthorizedProAccess, isDeviceAuthorized, syncLibraryIds, syncWithZotero]);
 }

@@ -6,7 +6,7 @@ import { FileStatus } from '../types/fileStatus';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
-import { hasAuthorizedProAccessAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from '../atoms/profile';
+import { hasAuthorizedProAccessAtom, isDatabaseSyncSupportedAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'polling' | 'error';
 
@@ -88,7 +88,7 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
     const hasAuthorizedProAccess = useAtomValue(hasAuthorizedProAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const user = useAtomValue(userAtom);
-    const planFeatures = useAtomValue(planFeaturesAtom);
+    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
 
     const [connection, setConnection] = useState<FileStatusConnection>({
         connectionStatus: 'idle',
@@ -312,7 +312,7 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
             user &&
             hasAuthorizedProAccess &&
             isDeviceAuthorized &&
-            planFeatures.databaseSync
+            isDatabaseSyncSupported
         );
         const currentUserId = user?.id;
         const shouldConnect = isEligible && currentUserId;
@@ -339,7 +339,7 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
         return () => {
             cleanupConnection();
         };
-    }, [enabled, isAuthenticated, user, hasAuthorizedProAccess, isDeviceAuthorized, setupConnection, cleanupConnection]);
+    }, [enabled, isDatabaseSyncSupported, isAuthenticated, user, hasAuthorizedProAccess, isDeviceAuthorized, setupConnection, cleanupConnection]);
 
     // Handle auth state changes for token refresh
     useEffect(() => {

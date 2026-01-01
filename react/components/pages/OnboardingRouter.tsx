@@ -1,6 +1,6 @@
 import React from "react";
 import { useAtomValue } from "jotai";
-import { planFeaturesAtom } from "../../atoms/profile";
+import { isDatabaseSyncSupportedAtom, } from "../../atoms/profile";
 import ProOnboardingPage from "./ProOnboardingPage";
 import FreeOnboardingPage from "./FreeOnboardingPage";
 
@@ -17,10 +17,10 @@ import FreeOnboardingPage from "./FreeOnboardingPage";
  * - Downgrade from Pro to Free flow
  */
 const OnboardingRouter: React.FC = () => {
-    const planFeatures = useAtomValue(planFeaturesAtom);
+    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
 
     // Pro/Beta plans have databaseSync enabled - use full onboarding flow
-    if (planFeatures.databaseSync) {
+    if (isDatabaseSyncSupported) {
         return <ProOnboardingPage />;
     }
 

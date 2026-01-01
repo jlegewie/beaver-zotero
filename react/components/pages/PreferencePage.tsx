@@ -5,7 +5,7 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, SearchIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, planFeaturesAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
@@ -54,7 +54,7 @@ const PreferencePage: React.FC = () => {
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
     const profileBalance = useAtomValue(profileBalanceAtom);
-    const planFeatures = useAtomValue(planFeaturesAtom);
+    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -434,7 +434,7 @@ const PreferencePage: React.FC = () => {
             )}
 
             {/* --- Library Syncing Section --- */}
-            {planFeatures.databaseSync && (
+            {isDatabaseSyncSupported && (
                 <>
                     <SectionHeader>Beaver Syncing</SectionHeader>
 
@@ -472,7 +472,7 @@ const PreferencePage: React.FC = () => {
             {/* <LibrarySelection /> */}
 
             {/* --- Search Index Section (only for users without databaseSync) --- */}
-            {!planFeatures.databaseSync && (
+            {!isDatabaseSyncSupported && (
                 <>
                     <SectionHeader>Search Index</SectionHeader>
                     <div className="font-color-secondary mb-3">

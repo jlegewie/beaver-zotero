@@ -14,7 +14,7 @@ import ThreadsMenu from './ui/menus/ThreadsMenu';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
-import { planFeaturesAtom, hasCompletedOnboardingAtom } from '../atoms/profile';
+import { hasCompletedOnboardingAtom, isDatabaseSyncSupportedAtom } from '../atoms/profile';
 import Button from './ui/Button';
 import { getWindowFromElement } from '../utils/windowContext';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
@@ -32,9 +32,9 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
-    const planFeatures = useAtomValue(planFeaturesAtom);
     const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
+    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const currentMessageContent = useAtomValue(currentMessageContentAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -121,11 +121,11 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
             {isAuthenticated && !settingsPage && (
                 <div className="display-flex gap-4">
                     {/* Show embedding index status for users without databaseSync */}
-                    {!planFeatures.databaseSync && hasCompletedOnboarding && (
+                    {!isDatabaseSyncSupported && hasCompletedOnboarding && (
                         <EmbeddingIndexStatusButton />
                     )}
                     {/* Show database status for users with databaseSync */}
-                    {planFeatures.databaseSync && hasCompletedOnboarding && (
+                    {isDatabaseSyncSupported && hasCompletedOnboarding && (
                         <DatabaseStatusButton />
                     )}
                     {/* Show chat history menu */}

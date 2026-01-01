@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { embeddingIndexStateAtom, EmbeddingIndexState } from '../atoms/embeddingIndex';
 import { addPopupMessageAtom, updatePopupMessageAtom, removePopupMessageAtom } from '../utils/popupMessageUtils';
-import { planFeaturesAtom } from '../atoms/profile';
+import { isDatabaseSyncSupportedAtom } from '../atoms/profile';
 
 const EMBEDDING_INDEXING_POPUP_ID = 'embedding-indexing-progress';
 
@@ -17,7 +17,7 @@ export function useEmbeddingIndexProgress() {
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const updatePopupMessage = useSetAtom(updatePopupMessageAtom);
     const removePopupMessage = useSetAtom(removePopupMessageAtom);
-    const planFeatures = useAtomValue(planFeaturesAtom);
+    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     
     // Track if we've shown the popup for this indexing session
     const hasShownPopupRef = useRef(false);
@@ -25,7 +25,7 @@ export function useEmbeddingIndexProgress() {
 
     useEffect(() => {
         // Remove popup if user upgrades to databaseSync plan
-        if (planFeatures.databaseSync) {
+        if (isDatabaseSyncSupported) {
             removePopupMessage(EMBEDDING_INDEXING_POPUP_ID);
             return;
         }
@@ -96,7 +96,7 @@ export function useEmbeddingIndexProgress() {
 
         // Update previous status for next comparison
         previousStatusRef.current = status;
-    }, [indexState, planFeatures, addPopupMessage, updatePopupMessage, removePopupMessage]);
+    }, [indexState, isDatabaseSyncSupported, addPopupMessage, updatePopupMessage, removePopupMessage]);
 
     // Cleanup on unmount
     useEffect(() => {
