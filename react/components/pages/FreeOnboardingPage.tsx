@@ -27,8 +27,12 @@ const FreeOnboardingPage: React.FC = () => {
 
     // Local state
     const [agreedToTerms, setAgreedToTerms] = useState<boolean>(false);
-    const [consentToShare, setConsentToShare] = useState<boolean>(false);
-    const [emailNotifications, setEmailNotifications] = useState<boolean>(false);
+    const [consentToShare, setConsentToShare] = useState<boolean>(
+        profileWithPlan?.consent_to_share || false
+    );
+    const [emailNotifications, setEmailNotifications] = useState<boolean>(
+        profileWithPlan?.email_notifications || false
+    );
     const [isAuthorizing, setIsAuthorizing] = useState(false);
 
     const handleConsentChange = (checked: boolean) => {

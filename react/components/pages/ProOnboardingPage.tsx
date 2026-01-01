@@ -35,8 +35,12 @@ const ProOnboardingPage: React.FC = () => {
 
     // Step 1: Consent state
     const [agreedToTerms, setAgreedToTerms] = useState<boolean>(false);
-    const [consentToShare, setConsentToShare] = useState<boolean>(false);
-    const [emailNotifications, setEmailNotifications] = useState<boolean>(false);
+    const [consentToShare, setConsentToShare] = useState<boolean>(
+        profileWithPlan?.consent_to_share || false
+    );
+    const [emailNotifications, setEmailNotifications] = useState<boolean>(
+        profileWithPlan?.email_notifications || false
+    );
     const [isSubmittingConsent, setIsSubmittingConsent] = useState(false);
 
     // Step 2: Library selection state
