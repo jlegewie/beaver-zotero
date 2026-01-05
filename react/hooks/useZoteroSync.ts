@@ -45,6 +45,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
+    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
 
     // ref for collected events - using ref to persist between renders
     const eventsRef = useRef<CollectedEvents>({
@@ -178,7 +179,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         if (!hasAuthorizedProAccess) return;
         if (!isDeviceAuthorized) return;
         if (syncLibraryIds.length === 0) return;
-        if (!store.get(isDatabaseSyncSupportedAtom)) return;
+        if (!isDatabaseSyncSupported) return;
 
         let isMounted = true;
 
@@ -452,5 +453,5 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             eventsRef.current.changedLibraries.clear();
             eventsRef.current.delete.clear();
         };
-    }, [isAuthenticated, isDatabaseSyncSupportedAtom, filterFunction, debounceMs, hasAuthorizedProAccess, isDeviceAuthorized, syncLibraryIds, syncWithZotero]);
+    }, [isAuthenticated, isDatabaseSyncSupported, filterFunction, debounceMs, hasAuthorizedProAccess, isDeviceAuthorized, syncLibraryIds, syncWithZotero]);
 }
