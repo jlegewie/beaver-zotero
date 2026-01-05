@@ -16,11 +16,24 @@ import DeviceAuthorizationPage from './pages/DeviceAuthorizationPage';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
-import { hasAuthorizedFreeAccessAtom, hasAuthorizedProAccessAtom, hasCompletedOnboardingAtom, isDeviceAuthorizedAtom, isProfileLoadedAtom, isMigratingDataAtom, syncLibrariesAtom, isDatabaseSyncSupportedAtom } from '../atoms/profile';
+import UpgradeConsentPage from './pages/UpgradeConsentPage';
+import DowngradeAcknowledgmentPage from './pages/DowngradeAcknowledgmentPage';
 import { store } from '../store';
 import { isLoadingThreadAtom } from '../atoms/threads';
 import { Spinner } from './icons/icons';
 import PreviewAndPopupContainer from './PreviewAndPopupContainer';
+import {
+    hasAuthorizedFreeAccessAtom,
+    hasAuthorizedProAccessAtom,
+    hasCompletedOnboardingAtom,
+    isDeviceAuthorizedAtom,
+    isProfileLoadedAtom,
+    isMigratingDataAtom,
+    syncLibrariesAtom,
+    isDatabaseSyncSupportedAtom,
+    pendingUpgradeConsentAtom,
+    pendingDowngradeAckAtom
+} from '../atoms/profile';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -44,6 +57,8 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const isLoadingThread = useAtomValue(isLoadingThreadAtom);
     const isMigratingData = useAtomValue(isMigratingDataAtom);
+    const pendingUpgradeConsent = useAtomValue(pendingUpgradeConsentAtom);
+    const pendingDowngradeAck = useAtomValue(pendingDowngradeAckAtom);
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -84,6 +99,28 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
             <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
                 <Header isWindow={isWindow} />
                 <LoginPage emailInputRef={loginEmailRef} />
+                <DialogContainer />
+            </div>
+        );
+    }
+
+    {/* Plan transition: Downgrade acknowledgment page (Pro → Free) */}
+    if (pendingDowngradeAck) {
+        return (
+            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                <Header isWindow={isWindow} />
+                <DowngradeAcknowledgmentPage />
+                <DialogContainer />
+            </div>
+        );
+    }
+
+    {/* Plan transition: Upgrade consent page (Free → Pro) */}
+    if (pendingUpgradeConsent) {
+        return (
+            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                <Header isWindow={isWindow} />
+                <UpgradeConsentPage />
                 <DialogContainer />
             </div>
         );
