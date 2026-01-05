@@ -282,6 +282,33 @@ export class AccountService extends ApiService {
     async migrateData(): Promise<MigrationResponse> {
         return this.post<MigrationResponse>('/api/v1/account/migrate-data', {});
     }
+
+    /**
+     * Completes the upgrade consent process (Free → Pro)
+     * Sets has_authorized_access and clears pending_upgrade_consent.
+     * After this, user is routed to library selection (ProOnboardingPage Step 2).
+     * @returns Promise with the response message
+     */
+    async completeUpgradeConsent(): Promise<{ message: string }> {
+        const { userID, localUserKey } = getZoteroUserIdentifier();
+        return this.post<{ message: string }>('/api/v1/account/complete-upgrade-consent', {
+            zotero_local_id: localUserKey,
+            zotero_user_id: userID,
+        });
+    }
+
+    /**
+     * Acknowledges the downgrade from Pro to Free
+     * Sets has_authorized_free_access and clears pending_downgrade_ack.
+     * @returns Promise with the response message
+     */
+    async acknowledgeDowngrade(): Promise<{ message: string }> {
+        const { userID, localUserKey } = getZoteroUserIdentifier();
+        return this.post<{ message: string }>('/api/v1/account/acknowledge-downgrade', {
+            zotero_local_id: localUserKey,
+            zotero_user_id: userID,
+        });
+    }
 }
 
 // Export accountService
