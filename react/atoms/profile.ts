@@ -141,6 +141,22 @@ export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
     );
 });
 
+// Plan transition atoms
+export const pendingUpgradeConsentAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => profile?.pending_upgrade_consent || false
+);
+
+export const pendingDowngradeAckAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => profile?.pending_downgrade_ack || false
+);
+
+export const dataDeletionScheduledForAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => profile?.data_deletion_scheduled_for || null
+);
+
 export const syncWithZoteroAtom = atom<boolean>((get) => {
     const profile = get(profileWithPlanAtom);
     return profile?.use_zotero_sync || false;
