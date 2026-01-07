@@ -76,8 +76,12 @@ const PaginatedFailedProcessingList: React.FC<PaginatedFailedProcessingListProps
                 const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
                 if (zoteroItem) await loadFullItemData([zoteroItem]);
                 if (zoteroItem && zoteroItem.isAttachment()) {
-                    fileHash = await zoteroItem.attachmentHash;
-                    if (fileHash !== item.file_hash) enableRetry = true;
+                    try {
+                        fileHash = await zoteroItem.attachmentHash;
+                        if (fileHash !== item.file_hash) enableRetry = true;
+                    } catch {
+                        // File may be locked or inaccessible - skip retry functionality
+                    }
                 }
                 const errorCode = item.md_error_code;
 
