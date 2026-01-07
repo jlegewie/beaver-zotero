@@ -4,7 +4,7 @@ import { profileWithPlanAtom, dataDeletionScheduledForAtom } from "../../atoms/p
 import { accountService } from "../../../src/services/accountService";
 import { logger } from "../../../src/utils/logger";
 import { OnboardingHeader, OnboardingFooter } from "./onboarding";
-import { Icon, InformationCircleIcon, AlertCircleIcon, CancelCircleIcon } from "../icons/icons";
+import { Icon, InformationCircleIcon, AlertCircleIcon, CancelIcon, TickIcon, LockIcon } from "../icons/icons";
 
 /**
  * Downgrade acknowledgment page for Pro → Free transitions
@@ -51,7 +51,7 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
 
     // Calculate days until deletion
     const getDaysUntilDeletion = (): number => {
-        if (!dataDeletionScheduledFor) return 14;
+        if (!dataDeletionScheduledFor) return 7;
         const now = new Date();
         const deletionDate = new Date(dataDeletionScheduledFor);
         const diffTime = deletionDate.getTime() - now.getTime();
@@ -65,20 +65,37 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
         return (
             <div className="display-flex flex-col gap-4 py-2 mt-2">
                 <div>
-                    You're now on the Free plan. Here's what's different:
+                    Your plan has changed to the <b>Free plan</b>. Here's what changed:
                 </div>
                 <div className="display-flex flex-col gap-2 ml-1">
-                    <div className="display-flex flex-row gap-2 items-center">
-                        <Icon icon={CancelCircleIcon} className="scale-09 font-color-secondary" />
-                        <span>Full-text PDF search is no longer available</span>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
+                        <span>Same AI agent with seamless Zotero integration</span>
                     </div>
-                    <div className="display-flex flex-row gap-2 items-center">
-                        <Icon icon={CancelCircleIcon} className="scale-09 font-color-secondary" />
-                        <span>Server-side indexing is disabled</span>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
+                        <span>Chat with your entire library</span>
                     </div>
-                    <div className="display-flex flex-row gap-2 items-center">
-                        <Icon icon={CancelCircleIcon} className="scale-09 font-color-secondary" />
-                        <span>Chat with your library continues to work locally</span>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
+                        <span>Metadata & semantic search (runs locally)</span>
+                    </div>
+                </div>
+                <div>
+                    Not included in Free
+                </div>
+                <div className="display-flex flex-col gap-2 ml-1">
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={CancelIcon} className="scale-90 font-color-secondary mt-020" />
+                        <span>Full-text PDF search</span>
+                    </div>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={CancelIcon} className="scale-90 font-color-secondary mt-020" />
+                        <span>Server-side processing for improved search and document understanding</span>
+                    </div>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={CancelIcon} className="scale-90 font-color-secondary mt-020" />
+                        <span>Precise sentence-level citations (Free uses page-level citations)</span>
                     </div>
                 </div>
             </div>
@@ -95,31 +112,37 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
             {/* Scrollable content area */}
             <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1 display-flex flex-col">
                 {/* Header */}
-                <OnboardingHeader 
-                    title="Your Plan Has Changed"
-                    message={getHeaderMessage()} 
-                    tag="Free"
-                />
+                <OnboardingHeader message={getHeaderMessage()} tag="Free"/>
 
                 {/* Main content */}
+                <div className="display-flex flex-1"/>
                 <div className="display-flex flex-col gap-4 flex-1">
                     {/* Data deletion notice */}
                     <div className="display-flex flex-col gap-3 p-4 rounded-lg bg-senary mt-4">
                         <div className="display-flex flex-row gap-3 items-start">
-                            <Icon icon={InformationCircleIcon} className="mt-020 scale-11" />
+                            <Icon icon={LockIcon} className="mt-020 scale-11" />
                             <div className="display-flex flex-col gap-2">
-                                <div className="font-semibold">Your Synced Data</div>
+                                <div className="font-semibold">Free Plan Privacy Notice</div>
                                 <div className="font-color-secondary">
-                                    Your previously synced data will be removed from our servers 
-                                    in <strong>{daysUntilDeletion} days</strong>. Upgrade again within this time to 
-                                    preserve your data and restore full-text search.
+                                    The Free plan does not sync your Zotero library or upload PDFs.
+                                    Semantic search uses embeddings generated on our server from titles and abstracts that are only stored on your device.
+                                    Your chat history is stored server-side and may include selected file and library content.
+                                    It can be exported or deleted anytime.
+                                    {/* Your Zotero data and files are never synced or stored on our servers.
+                                    File processing and search is handled locally on your device.
+                                    Metadata is processed temporarily server-side (not stored) to support local search.
+                                    Your chat history is stored on our servers. It can be exported or deleted anytime. */}
+                                </div>
+                                <div className="font-color-secondary">
+                                    Your previously synced data will be deleted from our servers 
+                                    within <strong>{daysUntilDeletion} days</strong>.
                                 </div>
                             </div>
                         </div>
                     </div>
 
                     {/* Upgrade reminder */}
-                    <div className="display-flex flex-col gap-3 p-4 rounded-lg border-quinary">
+                    {/* <div className="display-flex flex-col gap-3 p-4 rounded-lg border-quinary">
                         <div className="display-flex flex-row gap-3 items-start">
                             <Icon icon={AlertCircleIcon} className="mt-020 scale-11 font-color-warning" />
                             <div className="display-flex flex-col gap-2">
@@ -130,7 +153,7 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    </div> */}
 
                     {/* Spacer */}
                     <div className="flex-1" />
