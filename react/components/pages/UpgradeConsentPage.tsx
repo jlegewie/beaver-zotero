@@ -4,7 +4,7 @@ import { profileWithPlanAtom } from "../../atoms/profile";
 import { accountService } from "../../../src/services/accountService";
 import { logger } from "../../../src/utils/logger";
 import { OnboardingHeader, OnboardingFooter } from "./onboarding";
-import { LockIcon, Icon, CheckmarkCircleIcon } from "../icons/icons";
+import { LockIcon, Icon, TickIcon } from "../icons/icons";
 import PreferenceToggle from "../preferences/PreferenceToggle";
 
 /**
@@ -60,16 +60,16 @@ const UpgradeConsentPage: React.FC = () => {
                 </div>
                 <div className="display-flex flex-col gap-2 ml-1">
                     <div className="display-flex flex-row gap-2 items-center">
-                        <Icon icon={CheckmarkCircleIcon} className="scale-09 font-color-success" />
+                        <Icon icon={TickIcon} className="scale-09 font-color-success" />
                         <span>Full-text search across all your PDFs</span>
                     </div>
-                    <div className="display-flex flex-row gap-2 items-center">
-                        <Icon icon={CheckmarkCircleIcon} className="scale-09 font-color-success" />
-                        <span>Sentence-level citations in answers</span>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-90 font-color-secondary mt-020" />
+                        <span>Server-side processing for improved search and document understanding</span>
                     </div>
                     <div className="display-flex flex-row gap-2 items-center">
-                        <Icon icon={CheckmarkCircleIcon} className="scale-09 font-color-success" />
-                        <span>Faster processing with server-side indexing</span>
+                        <Icon icon={TickIcon} className="scale-09 font-color-success" />
+                        <span>Precise sentence-level citations</span>
                     </div>
                 </div>
             </div>
@@ -87,24 +87,20 @@ const UpgradeConsentPage: React.FC = () => {
             {/* Scrollable content area */}
             <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1 display-flex flex-col">
                 {/* Header */}
-                <OnboardingHeader 
-                    title={`Welcome to Beaver ${planDisplayName}!`}
-                    message={getHeaderMessage()} 
-                    tag={profileWithPlan?.plan?.name === 'beta' ? 'Beta' : 'Pro'}
-                />
+                <OnboardingHeader message={getHeaderMessage()} tag="Beta" />
 
                 {/* Main content */}
+                <div className="display-flex flex-1"/>
                 <div className="display-flex flex-col gap-4 flex-1">
                     {/* Data sync notice */}
                     <div className="display-flex flex-col gap-3 p-4 rounded-lg bg-senary mt-4">
                         <div className="display-flex flex-row gap-3 items-start">
                             <Icon icon={LockIcon} className="mt-020 scale-11" />
                             <div className="display-flex flex-col gap-2">
-                                <div className="font-semibold">Data Sync Required</div>
+                                <div className="font-semibold">Beta Plan Privacy Notice</div>
                                 <div className="font-color-secondary">
-                                    Beaver Pro syncs your Zotero library and uploads attachments for indexing. 
-                                    By continuing, you confirm you're authorized to upload these files and 
-                                    link your Zotero and Beaver accounts.
+                                    Beaver Beta syncs your Zotero library and uploads PDFs/attachments for indexing and search.
+                                    By continuing, you confirm you're authorized to upload these files and connect Zotero to your Beaver account.
                                 </div>
                             </div>
                         </div>
@@ -117,7 +113,7 @@ const UpgradeConsentPage: React.FC = () => {
                     <div className="display-flex flex-col gap-4">
                         <div className="h-1 border-top-quinary" />
                         
-                        <PreferenceToggle
+                        {/* <PreferenceToggle
                             checked={agreedToSync}
                             onChange={setAgreedToSync}
                             disabled={isSubmitting}
@@ -125,6 +121,15 @@ const UpgradeConsentPage: React.FC = () => {
                             subtitle="(required)"
                             className="font-medium"
                             description="By continuing, you agree to our <a href='https://www.beaverapp.ai/terms' target='_blank' rel='noopener noreferrer'>Terms of Service</a> and <a href='https://www.beaverapp.ai/privacy-policy' target='_blank' rel='noopener noreferrer'>Privacy Policy</a>"
+                        /> */}
+                        <PreferenceToggle
+                            checked={agreedToSync}
+                            onChange={setAgreedToSync}
+                            disabled={isSubmitting}
+                            title="Terms and Privacy Policy"
+                            subtitle="(required)"
+                            className="font-medium"
+                            description="I agree to the <a href='https://www.beaverapp.ai/terms' target='_blank' rel='noopener noreferrer'>Terms of Service</a> and <a href='https://www.beaverapp.ai/privacy-policy' target='_blank' rel='noopener noreferrer'>Privacy Policy</a>"
                         />
                     </div>
                 </div>
