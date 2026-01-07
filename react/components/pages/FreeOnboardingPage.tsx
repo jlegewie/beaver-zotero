@@ -110,7 +110,7 @@ const FreeOnboardingPage: React.FC = () => {
                     {/* Your Zotero library stays local. Chats stored securely and deletable anytime. */}
                     {/* Privacy-first: Your library data remains local and is never stored on our servers. Metadata is processed temporarily for indexing only.
                     Chat history is saved securely to your account and is fully deletable at any time. */}
-                    Privacy-first: We never store your library data. Metadata is processed temporarily server-side for local indexing only.
+                    Privacy-first: We never store your library data. Metadata is processed temporarily server-side for local search only.
                     Chat history is saved to your account and is fully deletable.
                 </div>
             </div>
