@@ -312,7 +312,14 @@ export async function serializeAttachment(
         const existsLocal = await item.fileExists();
         
         if (existsLocal) {
-            file_hash = await item.attachmentHash;
+            try {
+                file_hash = await item.attachmentHash;
+            } catch (error: any) {
+                // File may be locked by another application or have permission issues
+                logger(`Beaver Sync: Cannot access file for attachment ${item.key}: ${error.message}. Skipping.`, 2);
+                skippedItemsManager.upsert(item, 'file access denied');
+                return null;
+            }
         } else if (isAttachmentOnServer(item)) {
             // isAttachmentOnServer returns true only when attachmentSyncedHash is available
             file_hash = item.attachmentSyncedHash;
