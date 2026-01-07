@@ -287,8 +287,8 @@ const ProOnboardingPage: React.FC = () => {
                 <div>AI research assistant that lives in Zotero. Chat with your entire library, discover new research and much more.</div>
                 <div className="display-flex flex-row gap-3 items-start">
                     <Icon icon={LockIcon} className="mt-020 scale-11" />
-                    Beaver syncs your Zotero data and uploads attachments for indexing.
-                    By continuing, you confirm you're authorized to upload these files and link your Zotero and Beaver account.
+                    Beaver Beta syncs your Zotero library and uploads PDFs/attachments for indexing and search.
+                    By continuing, you confirm you're authorized to upload these files and connect Zotero to your Beaver account.
                 </div>
             </div>
         );
