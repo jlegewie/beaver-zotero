@@ -4,7 +4,7 @@ import { profileWithPlanAtom, dataDeletionScheduledForAtom } from "../../atoms/p
 import { accountService } from "../../../src/services/accountService";
 import { logger } from "../../../src/utils/logger";
 import { OnboardingHeader, OnboardingFooter } from "./onboarding";
-import { Icon, InformationCircleIcon, AlertCircleIcon, CancelIcon, TickIcon, LockIcon } from "../icons/icons";
+import { Icon, CancelIcon, TickIcon, LockIcon } from "../icons/icons";
 
 /**
  * Downgrade acknowledgment page for Pro → Free transitions
