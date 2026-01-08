@@ -13,7 +13,7 @@ import LoginPage from './pages/LoginPage';
 import OnboardingRouter from './pages/OnboardingRouter';
 import PreferencePage from './pages/PreferencePage';
 import DeviceAuthorizationPage from './pages/DeviceAuthorizationPage';
-import { isAuthenticatedAtom } from '../atoms/auth';
+import { isAuthenticatedAtom, authLoadingAtom } from '../atoms/auth';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
 import UpgradeConsentPage from './pages/UpgradeConsentPage';
@@ -57,6 +57,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const isLoadingThread = useAtomValue(isLoadingThreadAtom);
     const isMigratingData = useAtomValue(isMigratingDataAtom);
+    const authLoading = useAtomValue(authLoadingAtom);
     const pendingUpgradeConsent = useAtomValue(pendingUpgradeConsentAtom);
     const pendingDowngradeAck = useAtomValue(pendingDowngradeAckAtom);
 
@@ -77,7 +78,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         }
     };
 
-    if (isLoadingThread || isMigratingData) {
+    if (authLoading || isLoadingThread || isMigratingData) {
         return (
             <div id="thread-loading" className="display-flex flex-col flex-1 w-full">
                 <Header isWindow={isWindow} />

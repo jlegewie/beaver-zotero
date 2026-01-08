@@ -11,9 +11,9 @@
  *
  * @returns {{ loading: boolean, signOut: () => Promise<{ error: AuthError | null }> }} An object containing the authentication loading state and the signOut function. Session and user data should be accessed directly via their respective Jotai atoms (`sessionAtom`, `userAtom`).
  */
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
-import { sessionAtom, userAtom, AuthUser } from '../atoms/auth';
+import { sessionAtom, userAtom, AuthUser, authLoadingAtom } from '../atoms/auth';
 import { supabase } from '../../src/services/supabaseClient';
 import { logger } from '../../src/utils/logger';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
@@ -43,7 +43,7 @@ function hasSessionChanged(oldSession: Session | null, newSession: Session | nul
 export function useAuth() {
     const [session, setSession] = useAtom(sessionAtom);
     const [user, setUser] = useAtom(userAtom);
-    const [loading, setLoading] = useState(true);
+    const [authLoading, setAuthLoading] = useAtom(authLoadingAtom);
     
     // useRef for current atom values to avoid re-rendering
     const sessionRef = useRef(session);
@@ -123,7 +123,7 @@ export function useAuth() {
         // Skip initialization if already done by another instance
         if (authListenerInitialized && authListenerCleanup) {
             logger('auth: listener already initialized globally, skipping setup.');
-            setLoading(false);
+            setAuthLoading(false);
             return () => {
                 authListenerRefCount--;
                 logger(`auth: component unmounting, ref count: ${authListenerRefCount}`);
@@ -143,10 +143,10 @@ export function useAuth() {
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             (event, session) => {
                 handleAuthStateChange(event, session);
-                // Set loading to false after the first event (INITIAL_SESSION) is processed
-                if (event === 'INITIAL_SESSION') {
-                    setLoading(false);
-                    logger('auth: INITIAL_SESSION processed, setting loading to false.');
+                // Set loading to false after terminal auth events are processed
+                if (event === 'INITIAL_SESSION' || event === 'SIGNED_OUT') {
+                    setAuthLoading(false);
+                    logger(`auth: ${event} processed, setting loading to false.`);
                 }
             }
         );
@@ -169,16 +169,16 @@ export function useAuth() {
                 authListenerCleanup();
             }
         };
-    }, [handleAuthStateChange]);
+    }, [handleAuthStateChange, setAuthLoading]);
     
     const signOut = async () => {
-        setLoading(true);
+        setAuthLoading(true);
         const { error } = await supabase.auth.signOut();
         setProfileWithPlan(null);
         setIsProfileLoaded(false);
         if (error) {
             logger(`auth: sign out error: ${error.message}`);
-            setLoading(false);
+            setAuthLoading(false);
             return { error };
         }
         // State updates (session/user null) will be handled by the SIGNED_OUT event
@@ -186,7 +186,7 @@ export function useAuth() {
     };
     
     return {
-        loading,
+        loading: authLoading,
         signOut
         // session and user are available via useAtom(sessionAtom) / useAtom(userAtom) directly
     };
