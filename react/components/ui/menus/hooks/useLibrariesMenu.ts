@@ -5,7 +5,7 @@ import { LibraryMenuItemContext, createLibraryMenuItem } from '../utils/menuItem
 interface UseLibrariesMenuOptions {
     isActive: boolean;
     searchQuery: string;
-    syncLibraryIds: number[];
+    searchableLibraryIds: number[];
     libraryMenuItemContext: LibraryMenuItemContext;
 }
 
@@ -16,7 +16,7 @@ interface UseLibrariesMenuResult {
 export const useLibrariesMenu = ({
     isActive,
     searchQuery,
-    syncLibraryIds,
+    searchableLibraryIds,
     libraryMenuItemContext
 }: UseLibrariesMenuOptions): UseLibrariesMenuResult => {
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
@@ -33,7 +33,7 @@ export const useLibrariesMenu = ({
 
         const fetchLibraries = async () => {
             const allLibraries = await Zotero.Libraries.getAll();
-            const filtered = allLibraries.filter((library) => syncLibraryIds.includes(library.libraryID));
+            const filtered = allLibraries.filter((library) => searchableLibraryIds.includes(library.libraryID));
             if (!isCancelled) {
                 setLibraries(filtered);
             }
@@ -44,7 +44,7 @@ export const useLibrariesMenu = ({
         return () => {
             isCancelled = true;
         };
-    }, [isActive, syncLibraryIds]);
+    }, [isActive, searchableLibraryIds]);
 
     useEffect(() => {
         if (!isActive) {

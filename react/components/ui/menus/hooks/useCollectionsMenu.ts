@@ -6,7 +6,7 @@ import { getActiveZoteroLibraryId } from '../../../../../src/utils/zoteroUtils';
 interface UseCollectionsMenuOptions {
     isActive: boolean;
     searchQuery: string;
-    syncLibraryIds: number[];
+    searchableLibraryIds: number[];
     collectionMenuItemContext: CollectionMenuItemContext;
 }
 
@@ -17,7 +17,7 @@ interface UseCollectionsMenuResult {
 export const useCollectionsMenu = ({
     isActive,
     searchQuery,
-    syncLibraryIds,
+    searchableLibraryIds,
     collectionMenuItemContext
 }: UseCollectionsMenuOptions): UseCollectionsMenuResult => {
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
@@ -25,10 +25,10 @@ export const useCollectionsMenu = ({
     const [activeLibraryId, setActiveLibraryId] = useState<number | null>(null);
 
     const getEffectiveLibraryId = (libraryId: number | null): number | null => {
-        if (libraryId && syncLibraryIds.includes(libraryId)) {
+        if (libraryId && searchableLibraryIds.includes(libraryId)) {
             return libraryId;
         }
-        if (syncLibraryIds.includes(1)) {
+        if (searchableLibraryIds.includes(1)) {
             return 1;
         }
         return null;
@@ -86,7 +86,7 @@ export const useCollectionsMenu = ({
         return () => {
             isCancelled = true;
         };
-    }, [isActive, syncLibraryIds]);
+    }, [isActive, searchableLibraryIds]);
 
     useEffect(() => {
         if (!isActive) {
