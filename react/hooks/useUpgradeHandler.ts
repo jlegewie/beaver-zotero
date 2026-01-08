@@ -10,7 +10,7 @@ import { logger } from '../../src/utils/logger';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { getPendingVersionNotifications, removePendingVersionNotification } from '../../src/utils/versionNotificationPrefs';
 import { getVersionUpdateMessageConfig } from '../constants/versionUpdateMessages';
-import { syncLibraryIdsAtom, syncWithZoteroAtom } from '../atoms/profile';
+import { syncedLibraryIdsAtom, syncWithZoteroAtom } from '../atoms/profile';
 import { getStorageModeForLibrary } from '../../src/utils/webAPI';
 import { retryUploads } from '../../src/services/FileUploader';
 
@@ -23,7 +23,7 @@ export const useUpgradeHandler = () => {
     const hasRunConsistencyCheckRef = useRef(false);
     const hasRunCollectionSyncRef = useRef(false);
     const hasRunWebDAVSyncRef = useRef(false);
-    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const processedVersionsRef = useRef<Set<string>>(new Set());
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
@@ -65,7 +65,7 @@ export const useUpgradeHandler = () => {
     // Run collection sync after version upgrade and full consistency for non-Zotero synced libraries
     useEffect(() => {
         const runCollectionSync = async () => {
-            if (!isAuthenticated || !syncLibraryIds || syncLibraryIds.length === 0 || hasRunCollectionSyncRef.current) return;
+            if (!isAuthenticated || !syncedLibraryIds || syncedLibraryIds.length === 0 || hasRunCollectionSyncRef.current) return;
 
             const needsCollectionSync = getPref('runCollectionSync');
             if (!needsCollectionSync) return;
@@ -76,10 +76,10 @@ export const useUpgradeHandler = () => {
 
             try {
                 if (syncWithZotero) {
-                    await syncCollectionsOnly(syncLibraryIds);
+                    await syncCollectionsOnly(syncedLibraryIds);
                     logger("useUpgradeHandler: Full collection sync completed for all synced libraries.");
                 } else {
-                    for (const libraryID of syncLibraryIds) {
+                    for (const libraryID of syncedLibraryIds) {
                         await performConsistencyCheck(libraryID);
                     }
                     logger("useUpgradeHandler: Full collection sync and consistency check completed for all synced libraries.");
@@ -95,18 +95,18 @@ export const useUpgradeHandler = () => {
 
         runCollectionSync();
 
-    }, [isAuthenticated, syncLibraryIds, syncWithZotero]);
+    }, [isAuthenticated, syncedLibraryIds, syncWithZotero]);
 
     // Run retry uploads for WebDAV users after upgrade
     useEffect(() => {
         const runWebDAVRetryUploads = async () => {
-            if (!isAuthenticated || !syncLibraryIds || syncLibraryIds.length === 0 || hasRunWebDAVSyncRef.current) return;
+            if (!isAuthenticated || !syncedLibraryIds || syncedLibraryIds.length === 0 || hasRunWebDAVSyncRef.current) return;
 
             const needsWebDAVSync = getPref('runWebDAVSync');
             if (!needsWebDAVSync) return;
 
             // Check if primary library (ID 1) is being synced
-            if (!syncLibraryIds.includes(1)) {
+            if (!syncedLibraryIds.includes(1)) {
                 // Primary library not synced, clear the flag
                 setPref('runWebDAVSync', false);
                 return;
@@ -138,7 +138,7 @@ export const useUpgradeHandler = () => {
 
         runWebDAVRetryUploads();
 
-    }, [isAuthenticated, syncLibraryIds]);
+    }, [isAuthenticated, syncedLibraryIds]);
 
     // Run version notification popup after upgrade
     useEffect(() => {

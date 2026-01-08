@@ -1,18 +1,18 @@
 import { useAtom, useAtomValue } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
-import { syncLibraryIdsAtom, profileWithPlanAtom } from '../atoms/profile';
+import { syncedLibraryIdsAtom, profileWithPlanAtom } from '../atoms/profile';
 import { accountService } from '../../src/services/accountService';
 import { useLibraryDeletions } from './useLibraryDeletions';
 import { ZoteroLibrary } from '../types/zotero';
 import { logger } from '../../src/utils/logger';
 
 /**
- * Validates that libraries in syncLibraryIds exist in Zotero.
+ * Validates that libraries in syncedLibraryIds exist in Zotero.
  * For missing libraries, prompts the user once per session to remove them
  * and, if confirmed, updates backend/profile and schedules deletion.
  */
 export function useValidateSyncLibraries() {
-    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
     const { startDeletion, activeDeletionIds } = useLibraryDeletions();
     const askedRef = useRef<Set<number>>(new Set());
@@ -42,9 +42,9 @@ export function useValidateSyncLibraries() {
 
     useEffect(() => {
         const run = async () => {
-            if (!profileWithPlan?.libraries || syncLibraryIds.length === 0) return;
+            if (!profileWithPlan?.libraries || syncedLibraryIds.length === 0) return;
 
-            const missing = syncLibraryIds.filter((id) => {
+            const missing = syncedLibraryIds.filter((id) => {
                 const exists = !!Zotero.Libraries.get(id);
                 const asked = askedRef.current.has(id);
                 const deleting = activeDeletionIds.has(id);
@@ -86,5 +86,5 @@ export function useValidateSyncLibraries() {
         };
 
         void run();
-    }, [syncLibraryIds, profileWithPlan, activeDeletionIds, removeLibraries]);
+    }, [syncedLibraryIds, profileWithPlan, activeDeletionIds, removeLibraries]);
 }

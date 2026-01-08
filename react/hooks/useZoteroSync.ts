@@ -3,7 +3,7 @@ import { syncZoteroDatabase, syncingItemFilter, ItemFilterFunction } from "../..
 import { useAtomValue } from "jotai";
 import { isAuthenticatedAtom, userAtom } from "../atoms/auth";
 import { fileUploader } from "../../src/services/FileUploader";
-import { hasAuthorizedProAccessAtom, syncLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom, syncWithZoteroAtom, isDatabaseSyncSupportedAtom } from "../atoms/profile";
+import { hasAuthorizedProAccessAtom, syncedLibraryIdsAtom, isDeviceAuthorizedAtom, planFeaturesAtom, syncWithZoteroAtom, isDatabaseSyncSupportedAtom } from "../atoms/profile";
 import { store } from "../store";
 import { logger } from "../../src/utils/logger";
 import { deleteItems } from "../../src/utils/sync";
@@ -43,7 +43,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const hasAuthorizedProAccess = useAtomValue(hasAuthorizedProAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
-    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
 
@@ -64,7 +64,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const initializeLibraryVersionCache = () => {
         libraryVersionCacheRef.current.clear();
         
-        for (const libraryId of syncLibraryIds) {
+        for (const libraryId of syncedLibraryIds) {
             const library = Zotero.Libraries.get(libraryId);
             if (library) {
                 libraryVersionCacheRef.current.set(libraryId, library.libraryVersion);
@@ -79,7 +79,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
     const updateLibraryVersionCache = (): number[] => {
         const changedLibraries: number[] = [];
         
-        for (const libraryId of syncLibraryIds) {
+        for (const libraryId of syncedLibraryIds) {
             const library = Zotero.Libraries.get(libraryId);
             if (library) {
                 const cachedVersion = libraryVersionCacheRef.current.get(libraryId) || 0;
@@ -104,8 +104,8 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         if (changedLibraryIds.length === 0) return;
         
         try {
-            // Filter to only sync libraries that are in syncLibraryIds
-            const librariesToSync = changedLibraryIds.filter(libraryId => syncLibraryIds.includes(libraryId));
+            // Filter to only sync libraries that are in syncedLibraryIds
+            const librariesToSync = changedLibraryIds.filter(libraryId => syncedLibraryIds.includes(libraryId));
             
             if (librariesToSync.length === 0) {
                 logger(`useZoteroSync: No libraries to sync`, 3);
@@ -137,7 +137,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             const keysByLibrary = new Map<number, string[]>();
             
             for (const { libraryID, key } of eventsRef.current.delete.values()) {
-                if(syncLibraryIds.includes(libraryID)) {
+                if(syncedLibraryIds.includes(libraryID)) {
                     if (!keysByLibrary.has(libraryID)) {
                         keysByLibrary.set(libraryID, []);
                     }
@@ -178,7 +178,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
         if (!isAuthenticated) return;
         if (!hasAuthorizedProAccess) return;
         if (!isDeviceAuthorized) return;
-        if (syncLibraryIds.length === 0) return;
+        if (syncedLibraryIds.length === 0) return;
         if (!isDatabaseSyncSupported) return;
 
         let isMounted = true;
@@ -233,7 +233,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                         if (!syncWithZotero && (event === 'add' || event === 'modify')) {
                             const items = await Zotero.Items.getAsync(ids as number[]);
                             items
-                                .filter(item => syncLibraryIds.includes(item.libraryID))
+                                .filter(item => syncedLibraryIds.includes(item.libraryID))
                                 .forEach(item => {
                                     eventsRef.current.changedLibraries.add(item.libraryID);
                                     eventsRef.current.delete.delete(item.id);
@@ -246,7 +246,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                             ids.forEach(id => {
                                 if (extraData && extraData[id]) {
                                     const { libraryID, key } = extraData[id];
-                                    if (libraryID && key && syncLibraryIds.includes(libraryID)) {
+                                    if (libraryID && key && syncedLibraryIds.includes(libraryID)) {
                                         // Check if this item was created by an agent action
                                         const agentActions = store.get(threadAgentActionsAtom);
                                         const matchingAgentActions = agentActions
@@ -306,7 +306,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                             ids.forEach(id => {
                                 if (extraData && extraData[id]) {
                                     const { libraryID } = extraData[id];
-                                    if (libraryID && syncLibraryIds.includes(libraryID)) {
+                                    if (libraryID && syncedLibraryIds.includes(libraryID)) {
                                         eventsRef.current.changedLibraries.add(libraryID);
                                         
                                         // For tag operations, extract itemID from the composite ID (itemID-tagID)
@@ -339,7 +339,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                         if (!syncWithZotero && (event === 'add' || event === 'modify')) {
                             const collections = await Zotero.Collections.getAsync(ids as number[]);
                             collections
-                                .filter(collection => syncLibraryIds.includes(collection.libraryID))
+                                .filter(collection => syncedLibraryIds.includes(collection.libraryID))
                                 .forEach(collection => {
                                     eventsRef.current.changedLibraries.add(collection.libraryID);
                                 });
@@ -351,7 +351,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                             ids.forEach(id => {
                                 if (extraData && extraData[id]) {
                                     const { libraryID, key } = extraData[id];
-                                    if (libraryID && key && syncLibraryIds.includes(libraryID)) {
+                                    if (libraryID && key && syncedLibraryIds.includes(libraryID)) {
                                         // Queue collection for backend deletion (same as items)
                                         eventsRef.current.delete.set(id, { libraryID, key });
                                         logger(`useZoteroSync: Queued collection ${key} from library ${libraryID} for deletion`, 3);
@@ -393,7 +393,7 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 initializeLibraryVersionCache();
                 
                 // First sync the database
-                await syncZoteroDatabase(syncLibraryIds, { filterFunction, batchSize: SYNC_BATCH_SIZE_INITIAL });
+                await syncZoteroDatabase(syncedLibraryIds, { filterFunction, batchSize: SYNC_BATCH_SIZE_INITIAL });
                 
                 // Update cache after initial sync
                 updateLibraryVersionCache();
@@ -453,5 +453,5 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             eventsRef.current.changedLibraries.clear();
             eventsRef.current.delete.clear();
         };
-    }, [isAuthenticated, isDatabaseSyncSupported, filterFunction, debounceMs, hasAuthorizedProAccess, isDeviceAuthorized, syncLibraryIds, syncWithZotero]);
+    }, [isAuthenticated, isDatabaseSyncSupported, filterFunction, debounceMs, hasAuthorizedProAccess, isDeviceAuthorized, syncedLibraryIds, syncWithZotero]);
 }
