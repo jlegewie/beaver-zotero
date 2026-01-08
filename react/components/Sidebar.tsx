@@ -78,7 +78,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         }
     };
 
-    if (authLoading || isLoadingThread || isMigratingData) {
+    if (authLoading || (isAuthenticated && !isProfileLoaded) || isLoadingThread || isMigratingData) {
         return (
             <div id="thread-loading" className="display-flex flex-col flex-1 w-full">
                 <Header isWindow={isWindow} />
@@ -95,7 +95,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     }
 
     {/* Login page */}
-    if (!isAuthenticated || !isProfileLoaded) {
+    if (!isAuthenticated) {
         return (
             <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
                 <Header isWindow={isWindow} />

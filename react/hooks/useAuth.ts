@@ -123,7 +123,6 @@ export function useAuth() {
         // Skip initialization if already done by another instance
         if (authListenerInitialized && authListenerCleanup) {
             logger('auth: listener already initialized globally, skipping setup.');
-            setAuthLoading(false);
             return () => {
                 authListenerRefCount--;
                 logger(`auth: component unmounting, ref count: ${authListenerRefCount}`);
