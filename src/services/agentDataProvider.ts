@@ -9,7 +9,7 @@
 
 import { logger } from '../utils/logger';
 import { ZoteroItemStatus, ItemDataWithStatus, FrontendFileStatus, AttachmentDataWithStatus } from '../../react/types/zotero';
-import { safeIsInTrash } from '../utils/zoteroUtils';
+import { safeIsInTrash, deduplicateItems } from '../utils/zoteroUtils';
 import { syncingItemFilter, syncingItemFilterAsync } from '../utils/sync';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../react/atoms/profile';
 import { userIdAtom } from '../../react/atoms/auth';
@@ -1052,18 +1052,18 @@ export async function handleItemSearchByMetadataRequest(
         }
     }
 
-    // Convert to array and apply limit
+    // Convert to array
     let items = Array.from(uniqueItems.values());
-    if (request.limit > 0) {
-        items = items.slice(0, request.limit);
-    }
 
+    // Deduplicate items, prioritizing items from user's main library (library ID 1)
+    items = deduplicateItems(items, 1);
+    
     logger('handleItemSearchByMetadataRequest: Final items', {
         libraryIds,
         items: items.length,
     }, 1);
 
-    // Step 2: Apply limit
+    // Apply limit
     const limitedItems = request.limit > 0 ? items.slice(0, request.limit) : items;
 
     // Get sync configuration from store for status computation
@@ -1259,7 +1259,7 @@ export async function handleItemSearchByTopicRequest(
     // Load items from search results
     const itemIds = searchResults.map(r => r.itemId);
     const items = await Zotero.Items.getAsync(itemIds);
-    const validItems = items.filter((item): item is Zotero.Item => item !== null);
+    let validItems = items.filter((item): item is Zotero.Item => item !== null);
 
     if (validItems.length === 0) {
         return {
@@ -1269,14 +1269,21 @@ export async function handleItemSearchByTopicRequest(
         };
     }
 
-    // Load item data
+    // Load item data (needed for deduplication which checks title, DOI, ISBN, creators)
     await Zotero.Items.loadDataTypes(validItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]);
 
+    // Deduplicate items, prioritizing items from user's main library (library ID 1)
+    validItems = deduplicateItems(validItems, 1);
+    const deduplicatedItemIds = new Set(validItems.map(item => item.id));
+    
     // Create a map for item lookup by ID
     const itemById = new Map<number, Zotero.Item>();
     for (const item of validItems) {
         itemById.set(item.id, item);
     }
+    
+    // Filter searchResults to only include items that survived deduplication
+    searchResults = searchResults.filter(result => deduplicatedItemIds.has(result.itemId));
 
     // Create similarity map
     const similarityByItemId = new Map<number, number>();
