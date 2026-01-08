@@ -29,7 +29,7 @@ import {
     isDeviceAuthorizedAtom,
     isProfileLoadedAtom,
     isMigratingDataAtom,
-    syncLibrariesAtom,
+    syncedLibrariesAtom,
     isDatabaseSyncSupportedAtom,
     pendingUpgradeConsentAtom,
     pendingDowngradeAckAtom
@@ -51,7 +51,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const hasAuthorizedFreeAccess = useAtomValue(hasAuthorizedFreeAccessAtom);
     const hasAuthorizedProAccess = useAtomValue(hasAuthorizedProAccessAtom);
-    const syncLibraries = useAtomValue(syncLibrariesAtom);
+    const syncedLibraries = useAtomValue(syncedLibrariesAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
@@ -132,7 +132,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const isFreeUser = !isDatabaseSyncSupported;
     const needsOnboarding = isFreeUser 
         ? !hasAuthorizedFreeAccess 
-        : (!hasAuthorizedProAccess || !hasCompletedOnboarding || syncLibraries.length === 0);
+        : (!hasAuthorizedProAccess || !hasCompletedOnboarding || syncedLibraries.length === 0);
     
     if (needsOnboarding) {
         return (

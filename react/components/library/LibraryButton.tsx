@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { CSSIcon } from '../icons/icons';
-import { removeLibraryIdAtom, currentMessageFiltersAtom } from '../../atoms/messageComposition';
+import { removeLibraryIdAtom } from '../../atoms/messageComposition';
 import { truncateText } from '../../utils/stringUtils';
 import { selectLibrary } from '../../../src/utils/selectItem';
-import { syncLibraryIdsAtom} from '../../atoms/profile';
+import { searchableLibraryIdsAtom } from '../../atoms/profile';
 
 const MAX_LIBRARYBUTTON_TEXT_LENGTH = 20;
 
@@ -23,8 +23,9 @@ export const LibraryButton: React.FC<LibraryButtonProps> = ({
 }) => {
     const [isHovered, setIsHovered] = useState(false);
     const removeLibraryId = useSetAtom(removeLibraryIdAtom);
-    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
-    const isValid = syncLibraryIds.includes(library.libraryID);
+    // Use searchableLibraryIds: Free users can search ALL libraries, Pro users can search synced only
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    const isValid = searchableLibraryIds.includes(library.libraryID);
 
     const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
         e.stopPropagation();

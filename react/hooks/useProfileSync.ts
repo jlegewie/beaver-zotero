@@ -1,13 +1,14 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { fileUploader } from '../../src/services/FileUploader';
-import { isProfileInvalidAtom, isProfileLoadedAtom, profileWithPlanAtom, isMigratingDataAtom, requiredDataVersionAtom } from '../atoms/profile';
+import { isProfileInvalidAtom, isProfileLoadedAtom, profileWithPlanAtom, isMigratingDataAtom, requiredDataVersionAtom, localZoteroLibrariesAtom } from '../atoms/profile';
 import { isAuthenticatedAtom, logoutAtom, userAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
 import { logger } from '../../src/utils/logger';
 import { ZoteroInstanceMismatchError, ServerError } from '../../react/types/apiErrors';
 import { setModelsAtom } from '../atoms/models';
 import { isSidebarVisibleAtom, isPreferencePageVisibleAtom } from '../atoms/ui';
+import { serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 
 const REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
 
@@ -23,6 +24,7 @@ export const useProfileSync = () => {
     const setModels = useSetAtom(setModelsAtom);
     const setIsMigratingData = useSetAtom(isMigratingDataAtom);
     const setRequiredDataVersion = useSetAtom(requiredDataVersionAtom);
+    const setLocalZoteroLibraries = useSetAtom(localZoteroLibrariesAtom);
     const logout = useSetAtom(logoutAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const user = useAtomValue(userAtom);
@@ -73,6 +75,19 @@ export const useProfileSync = () => {
             setIsProfileInvalid(false);
             lastRefreshRef.current = new Date();
             logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
+
+            // Populate local Zotero libraries
+            try {
+                const allLibraries = Zotero.Libraries.getAll();
+                const localLibraries = allLibraries
+                    .filter(lib => lib.libraryType === 'user' || lib.libraryType === 'group')
+                    .map(lib => serializeZoteroLibrary(lib))
+                    .filter(lib => lib !== null);
+                setLocalZoteroLibraries(localLibraries);
+                logger(`useProfileSync: Populated ${localLibraries.length} local libraries.`);
+            } catch (libError) {
+                logger(`useProfileSync: Failed to populate local libraries: ${libError}`, 2);
+            }
 
             // If the plan allows file uploads, start the file uploader
             if (profileData.profile.plan.upload_files && profileData.profile.has_authorized_access) {

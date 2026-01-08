@@ -20,7 +20,6 @@ interface AuthorizationRequest {
 interface FreeAuthorizationRequest {
     zotero_local_id: string;
     zotero_user_id: string | undefined;
-    libraries: ZoteroLibrary[];
     consent_to_share: boolean;
     email_notifications: boolean;
 }
@@ -182,14 +181,13 @@ export class AccountService extends ApiService {
      * Key differences from Pro/Beta authorization:
      * - Sets has_authorized_free_access instead of has_authorized_access
      * - Does NOT set has_completed_onboarding (free users don't need full onboarding)
+     * - Does NOT send libraries (per privacy policy - Free users don't sync data)
      * 
-     * @param libraries List of Zotero libraries
      * @param consentToShare Whether user consents to share data
      * @param emailNotifications Whether user wants email notifications
      * @returns Promise with the response message
      */
     async authorizeFreeAccess(
-        libraries: ZoteroLibrary[],
         consentToShare: boolean = false,
         emailNotifications: boolean = false
     ): Promise<{ message: string }> {
@@ -197,7 +195,6 @@ export class AccountService extends ApiService {
         return this.post<{ message: string }>('/api/v1/account/authorize-free', {
             zotero_local_id: localUserKey,
             zotero_user_id: userID,
-            libraries: libraries,
             consent_to_share: consentToShare,
             email_notifications: emailNotifications
         } as FreeAuthorizationRequest);

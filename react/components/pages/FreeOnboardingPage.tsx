@@ -6,7 +6,6 @@ import { accountService } from "../../../src/services/accountService";
 import { logger } from "../../../src/utils/logger";
 import { setPref } from "../../../src/utils/prefs";
 import { getZoteroUserIdentifier } from "../../../src/utils/zoteroUtils";
-import { serializeZoteroLibrary } from "../../../src/utils/zoteroSerializers";
 import { OnboardingHeader, OnboardingFooter, ExamplePrompts } from "./onboarding";
 import { LockIcon, Icon } from "../icons/icons";
 import ConsentToggles from "./onboarding/ConsentToggles";
@@ -51,6 +50,7 @@ const FreeOnboardingPage: React.FC = () => {
      * Handle the "Get Started" button click
      * Authorizes free access and completes onboarding.
      * Note: Embedding indexing will be triggered automatically by the useEmbeddingIndex hook.
+     * Note: Libraries are NOT sent to backend per privacy policy - Free users don't sync data.
      */
     const handleGetStarted = async () => {
         if (isAuthorizing || !profileWithPlan) return;
@@ -58,17 +58,10 @@ const FreeOnboardingPage: React.FC = () => {
         setIsAuthorizing(true);
 
         try {
-            // Get all libraries (free users sync all libraries metadata-only)
-            const allLibraries = Zotero.Libraries.getAll();
-            const libraries = allLibraries
-                .map(library => serializeZoteroLibrary(library))
-                .filter(library => library !== null);
+            logger(`FreeOnboardingPage: Authorizing free access (libraries not synced per privacy policy)`, 2);
 
-            logger(`FreeOnboardingPage: Authorizing free access with ${libraries.length} libraries`, 2);
-
-            // Authorize free access (uses new /authorize-free endpoint)
+            // Authorize free access
             await accountService.authorizeFreeAccess(
-                libraries,
                 consentToShare,
                 emailNotifications
             );
@@ -79,7 +72,7 @@ const FreeOnboardingPage: React.FC = () => {
             const { userID, localUserKey } = getZoteroUserIdentifier();
             setProfileWithPlan({
                 ...profileWithPlan,
-                libraries: libraries,
+                libraries: [],
                 has_authorized_free_access: true,
                 free_consented_at: new Date(),
                 consent_to_share: consentToShare,

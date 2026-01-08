@@ -25,17 +25,42 @@ export const isDeviceAuthorizedAtom = selectAtom(
     }
 );
 
-// Sync libraries
-export const syncLibrariesAtom = atom<ZoteroLibrary[]>((get) => {
+// --- Library atoms ---
+
+// Local Zotero libraries (populated from Zotero.Libraries.getAll on app init and profile update)
+// This is used for Free users who don't store libraries in the backend per privacy policy
+export const localZoteroLibrariesAtom = atom<ZoteroLibrary[]>([]);
+
+// Libraries with synced=true (for Pro sync operations)
+export const syncedLibrariesAtom = atom<ZoteroLibrary[]>((get) => {
     const profile = get(profileWithPlanAtom);
+    // return (profile?.libraries || []).filter(lib => lib.synced);
     return profile?.libraries || [];
 });
 
-export const syncLibraryIdsAtom = selectAtom(
-    profileWithPlanAtom,
-    (profile: SafeProfileWithPlan | null) => profile?.libraries?.map((library) => library.library_id) || [],
-    (a: number[], b: number[]) => a.length === b.length && a.every((value, index) => value === b[index]) // only notify if value actually changed
+// Library IDs for synced libraries (for sync operations)
+export const syncedLibraryIdsAtom = selectAtom(
+    syncedLibrariesAtom,
+    (libraries) => libraries.map(lib => lib.library_id),
+    (a, b) => a.length === b.length && a.every((v, i) => v === b[i])
 );
+
+// Searchable library IDs (for embedding index, search filtering)
+// Free: all local libraries, Pro: synced only
+export const searchableLibraryIdsAtom = atom<number[]>((get) => {
+    const isDatabaseSyncSupported = get(isDatabaseSyncSupportedAtom);
+    
+    if (isDatabaseSyncSupported) {
+        // Pro: only synced libraries are searchable
+        return get(syncedLibrariesAtom).map(lib => lib.library_id);
+    } else {
+        // Free: all local libraries are searchable
+        return get(localZoteroLibrariesAtom).map(lib => lib.library_id);
+    }
+});
+
+// Backward compatibility: keep existing atoms as aliases
+export const syncLibraryIdsAtom = syncedLibraryIdsAtom;
 
 // Plan data
 export const planIdAtom = atom<string>((get) => {

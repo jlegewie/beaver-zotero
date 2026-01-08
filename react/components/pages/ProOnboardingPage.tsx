@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { overallSyncStatusAtom, syncStatusAtom, LibrarySyncStatus } from "../../atoms/sync";
-import { hasAuthorizedProAccessAtom, syncLibrariesAtom } from '../../atoms/profile';
+import { hasAuthorizedProAccessAtom, syncedLibrariesAtom } from '../../atoms/profile';
 import { setPref } from "../../../src/utils/prefs";
 import { LibraryStatistics } from "../../../src/utils/libraries";
 import { logger } from "../../../src/utils/logger";
@@ -228,7 +228,7 @@ const ProOnboardingPage: React.FC = () => {
                 const completedLibraryIds = Object.values(syncStatus as Record<number, LibrarySyncStatus>)
                     .filter((library: LibrarySyncStatus) => library.status === 'completed')
                     .map(library => library.libraryID);
-                updatedLibraries = (store.get(syncLibrariesAtom) as ZoteroLibrary[])
+                updatedLibraries = (store.get(syncedLibrariesAtom) as ZoteroLibrary[])
                     .filter((library: ZoteroLibrary) => completedLibraryIds.includes(library.library_id));
             }
             
