@@ -10,7 +10,7 @@ import { logger } from '../../src/utils/logger';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { getPendingVersionNotifications, removePendingVersionNotification } from '../../src/utils/versionNotificationPrefs';
 import { getVersionUpdateMessageConfig } from '../constants/versionUpdateMessages';
-import { syncedLibraryIdsAtom, syncWithZoteroAtom } from '../atoms/profile';
+import { isDatabaseSyncSupportedAtom, profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom } from '../atoms/profile';
 import { getStorageModeForLibrary } from '../../src/utils/webAPI';
 import { retryUploads } from '../../src/services/FileUploader';
 
@@ -26,15 +26,25 @@ export const useUpgradeHandler = () => {
     const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const processedVersionsRef = useRef<Set<string>>(new Set());
+    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
+    const profile = useAtomValue(profileWithPlanAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     // Run consistency check after upgrade
     useEffect(() => {
         const runUpgradeTasks = async () => {
-            if (!isAuthenticated || hasRunConsistencyCheckRef.current) return;
-
+            if (!isAuthenticated || hasRunConsistencyCheckRef.current || profile === null) return;
+            
             const needsCheck = getPref('runConsistencyCheck');
             if (!needsCheck) return;
+
+            // If database sync is not supported, clear the flag and return
+            if (!isDatabaseSyncSupported) {
+                if (needsCheck) {
+                    setPref('runConsistencyCheck', false);
+                }
+                return;
+            }
             
             // Mark as run to prevent re-execution in the same session
             hasRunConsistencyCheckRef.current = true;
@@ -60,15 +70,23 @@ export const useUpgradeHandler = () => {
 
         runUpgradeTasks();
 
-    }, [isAuthenticated]);
+    }, [isAuthenticated, profile, isDatabaseSyncSupported]);
 
     // Run collection sync after version upgrade and full consistency for non-Zotero synced libraries
     useEffect(() => {
         const runCollectionSync = async () => {
-            if (!isAuthenticated || !syncedLibraryIds || syncedLibraryIds.length === 0 || hasRunCollectionSyncRef.current) return;
+            if (!isAuthenticated || profile === null || !syncedLibraryIds || syncedLibraryIds.length === 0 || hasRunCollectionSyncRef.current) return;
 
             const needsCollectionSync = getPref('runCollectionSync');
             if (!needsCollectionSync) return;
+
+            // If database sync is not supported, clear the flag and return
+            if (!isDatabaseSyncSupported) {
+                if (needsCollectionSync) {
+                    setPref('runCollectionSync', false);
+                }
+                return;
+            }
             
             // Mark as run to prevent re-execution in the same session
             hasRunCollectionSyncRef.current = true;
@@ -95,15 +113,23 @@ export const useUpgradeHandler = () => {
 
         runCollectionSync();
 
-    }, [isAuthenticated, syncedLibraryIds, syncWithZotero]);
+    }, [isAuthenticated, profile, syncedLibraryIds, syncWithZotero, isDatabaseSyncSupported]);
 
     // Run retry uploads for WebDAV users after upgrade
     useEffect(() => {
         const runWebDAVRetryUploads = async () => {
-            if (!isAuthenticated || !syncedLibraryIds || syncedLibraryIds.length === 0 || hasRunWebDAVSyncRef.current) return;
+            if (!isAuthenticated || profile === null || !syncedLibraryIds || syncedLibraryIds.length === 0 || hasRunWebDAVSyncRef.current) return;
 
             const needsWebDAVSync = getPref('runWebDAVSync');
             if (!needsWebDAVSync) return;
+
+            // If database sync is not supported, clear the flag and return
+            if (!isDatabaseSyncSupported) {
+                if (needsWebDAVSync) {
+                    setPref('runWebDAVSync', false);
+                }
+                return;
+            }
 
             // Check if primary library (ID 1) is being synced
             if (!syncedLibraryIds.includes(1)) {
@@ -138,7 +164,7 @@ export const useUpgradeHandler = () => {
 
         runWebDAVRetryUploads();
 
-    }, [isAuthenticated, syncedLibraryIds]);
+    }, [isAuthenticated, profile, syncedLibraryIds, isDatabaseSyncSupported]);
 
     // Run version notification popup after upgrade
     useEffect(() => {
