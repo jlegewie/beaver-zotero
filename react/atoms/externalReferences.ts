@@ -190,17 +190,20 @@ export const checkExternalReferencesAtom = atom(
                         if (ref.library_items && ref.library_items.length > 0) {
                             const libraryItems = ref.library_items.map(element => `${element.library_id}-${element.zotero_key}`);
                             logger(`checkExternalReferences: Checking ${refId} backend data (${libraryItems.join(', ')})`, 1);
-                            const firstItem = ref.library_items[0];
+                            const mainLibraryItem = ref.library_items.find(element => element.library_id === 1);
+                            const focalItem = mainLibraryItem
+                                ? mainLibraryItem
+                                : ref.library_items[0];
                             try {
                                 const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                                    firstItem.library_id,
-                                    firstItem.zotero_key
+                                    focalItem.library_id,
+                                    focalItem.zotero_key
                                 );
                                 
                                 if (item) {
                                     result = {
-                                        library_id: firstItem.library_id,
-                                        zotero_key: firstItem.zotero_key
+                                        library_id: focalItem.library_id,
+                                        zotero_key: focalItem.zotero_key
                                     };
                                     foundItems.push(item);
                                     logger(`checkExternalReferences: Backend data validated for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
