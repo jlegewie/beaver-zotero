@@ -8,7 +8,7 @@ import { logger } from '../utils/logger';
  * Minimum combined length of title + abstract required for indexing.
  * Items with less content are skipped.
  */
-export const MIN_CONTENT_LENGTH = 50;
+export const MIN_CONTENT_LENGTH = 40;
 
 /**
  * Default batch size for embedding API requests (max 500)
