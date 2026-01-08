@@ -3,7 +3,7 @@ import { userAtom, isAuthenticatedAtom, authLoadingAtom } from "../atoms/auth"
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
 import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom } from "../atoms/messageComposition"
 import { supportedModelsAtom, selectedModelAtom, availableModelsAtom } from "../atoms/models"
-import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncLibraryIdsAtom, planFeaturesAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
+import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncLibraryIdsAtom, planFeaturesAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasAuthorizedProAccessAtom, hasAuthorizedFreeAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
 import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, overallSyncStatusAtom } from "../atoms/sync"
 import { recentThreadsAtom, currentThreadIdAtom } from "../atoms/threads"
 import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, activePreviewAtom, popupMessagesAtom } from "../atoms/ui"
@@ -76,6 +76,8 @@ export const atomRegistry = {
     planFeatures: planFeaturesAtom,
     profileBalance: profileBalanceAtom,
     hasAuthorizedAccess: hasAuthorizedAccessAtom,
+    hasAuthorizedProAccess: hasAuthorizedProAccessAtom,
+    hasAuthorizedFreeAccess: hasAuthorizedFreeAccessAtom,
     hasCompletedOnboarding: hasCompletedOnboardingAtom,
     syncWithZotero: syncWithZoteroAtom,
 

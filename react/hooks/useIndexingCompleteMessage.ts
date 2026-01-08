@@ -22,10 +22,10 @@ export const useIndexingCompleteMessage = () => {
             setPref("showIndexingCompleteMessage", false);
 
             // Add the indexing complete message
-            const message = `We completed indexing your files for the ${planDisplayName} plan.`;
+            const message = `We completed indexing your files. You can now use all of Beaver's features to search, chat with, and explore your research library.`;
 
             addPopupMessage({
-                title: "File Indexing Complete",
+                title: "Your library is ready!",
                 text: message,
                 type: "indexing_complete",
                 expire: false,

@@ -1,6 +1,7 @@
 import React, { useRef, useCallback } from 'react';
 import { CancelIcon, PlusSignIcon, SettingsIcon, Share05Icon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
+import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
 import { newThreadAtom } from '../atoms/threads';
@@ -13,7 +14,7 @@ import ThreadsMenu from './ui/menus/ThreadsMenu';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
-import { planFeaturesAtom, hasCompletedOnboardingAtom } from '../atoms/profile';
+import { hasCompletedOnboardingAtom, isDatabaseSyncSupportedAtom } from '../atoms/profile';
 import Button from './ui/Button';
 import { getWindowFromElement } from '../utils/windowContext';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
@@ -31,9 +32,9 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
-    const planFeatures = useAtomValue(planFeaturesAtom);
     const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
+    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const currentMessageContent = useAtomValue(currentMessageContentAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -116,18 +117,25 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                 )}
             </div>
 
-            {/* Database status and user account menu */}
+            {/* Database status, embedding index status, and user account menu */}
             {isAuthenticated && !settingsPage && (
                 <div className="display-flex gap-4">
-                    {planFeatures.databaseSync && hasCompletedOnboarding &&
+                    {/* Show embedding index status for users without databaseSync */}
+                    {!isDatabaseSyncSupported && hasCompletedOnboarding && (
+                        <EmbeddingIndexStatusButton />
+                    )}
+                    {/* Show database status for users with databaseSync */}
+                    {isDatabaseSyncSupported && hasCompletedOnboarding && (
                         <DatabaseStatusButton />
-                    }
+                    )}
+                    {/* Show chat history menu */}
                     {isAuthenticated && hasCompletedOnboarding && (
                         <ThreadsMenu
                             className="scale-14"
                             ariaLabel="Show chat history"
                         />
                     )}
+                    {/* Show user account menu */}
                     <UserAccountMenuButton
                         className="scale-14"
                         ariaLabel="User settings"

@@ -8,8 +8,6 @@ import { logger } from '../../src/utils/logger';
 import { ZoteroInstanceMismatchError, ServerError } from '../../react/types/apiErrors';
 import { setModelsAtom } from '../atoms/models';
 import { isSidebarVisibleAtom, isPreferencePageVisibleAtom } from '../atoms/ui';
-import { getPref, setPref } from '../../src/utils/prefs';
-import { planTransitionMessage } from '../utils/planTransitionMessage';
 
 const REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
 
@@ -75,16 +73,6 @@ export const useProfileSync = () => {
             setIsProfileInvalid(false);
             lastRefreshRef.current = new Date();
             logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
-
-            // Plan change handling
-            const currentPlanId = getPref("currentPlanId");
-            if (currentPlanId === "") {
-                setPref("currentPlanId", profileData.profile.current_plan_id);
-            } else if (currentPlanId !== profileData.profile.current_plan_id) {
-                logger(`useProfileSync: Plan changed from ${currentPlanId} to ${profileData.profile.current_plan_id} (${profileData.profile.plan.display_name}).`);
-                setPref("currentPlanId", profileData.profile.current_plan_id);
-                planTransitionMessage(profileData.profile);
-            }
 
             // If the plan allows file uploads, start the file uploader
             if (profileData.profile.plan.upload_files && profileData.profile.has_authorized_access) {

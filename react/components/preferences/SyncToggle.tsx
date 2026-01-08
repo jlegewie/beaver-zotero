@@ -20,7 +20,7 @@ const ZoteroSyncToggle: React.FC<ZoteroSyncToggleProps> = ({ checked, onChange, 
             tooltip="When enabled, Beaver will build on Zotero sync for multi-device support and improved sync. When disabled, you can only use Beaver on this device."
             disabledTooltip="Enable Zotero sync for your main library to use this feature."
             errorTooltip="Unable to sync with Beaver. Please enable Zotero sync in Zotero preferences, sign into your Zotero account or disable the Beaver preference 'Sync with Zotero'."
-            showRecommended={true}
+            tag="Recommended"
         />
     );
 };

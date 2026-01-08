@@ -902,6 +902,31 @@ export class EmbeddingIndexer {
     }
 
     /**
+     * Clear all failed embeddings for synced libraries.
+     * This resets the backoff state for all items that previously failed,
+     * allowing them to be retried on the next indexing run.
+     * @param syncedLibraryIds Array of library IDs to clear failed state for
+     * @returns Number of failed records cleared
+     */
+    async clearFailedEmbeddings(syncedLibraryIds: number[]): Promise<number> {
+        if (syncedLibraryIds.length === 0) {
+            return 0;
+        }
+
+        let totalCleared = 0;
+        for (const libraryId of syncedLibraryIds) {
+            const count = await this.db.getFailedEmbeddingCount(libraryId);
+            if (count > 0) {
+                await this.db.deleteFailedEmbeddingsByLibrary(libraryId);
+                totalCleared += count;
+                logger(`clearFailedEmbeddings: Cleared ${count} failed records for library ${libraryId}`, 3);
+            }
+        }
+        
+        return totalCleared;
+    }
+
+    /**
      * Get indexing statistics for a library.
      * @param libraryId Optional library ID (all libraries if not specified)
      */

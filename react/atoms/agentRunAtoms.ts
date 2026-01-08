@@ -30,7 +30,7 @@ import { MessageAttachment, ReaderState, SourceAttachment } from '../types/attac
 import { toMessageAttachment } from '../types/attachments/converters';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '../types/profile';
-import { planFeaturesAtom } from './profile';
+import { isDatabaseSyncSupportedAtom } from './profile';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import {
     currentMessageItemsAtom,
@@ -565,7 +565,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             
             // Show popup if subscription is active but using frontend processing
             if (data.subscriptionStatus === SubscriptionStatus.ACTIVE &&
-                store.get(planFeaturesAtom).databaseSync &&
+                store.get(isDatabaseSyncSupportedAtom) &&
                 data.processingMode === ProcessingMode.FRONTEND) {
                 set(addPopupMessageAtom, {
                     type: 'info',

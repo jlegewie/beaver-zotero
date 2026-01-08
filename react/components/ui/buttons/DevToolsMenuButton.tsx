@@ -241,37 +241,40 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
                 return;
             }
 
-            // Get all library IDs that have embeddings
-            const libraryIds = await db.getEmbeddedLibraryIds();
-            console.log(`[Embedding Reset] Found ${libraryIds.length} libraries with embeddings`);
+            // Get library IDs from all three tables (there might be orphaned records)
+            const embeddingLibraryIds = await db.getEmbeddedLibraryIds();
+            
+            // Get total counts before deletion
+            const totalEmbeddings = await db.getEmbeddingCount();
+            const totalFailed = await db.getFailedEmbeddingCount();
+            
+            console.log(`[Embedding Reset] Found ${embeddingLibraryIds.length} libraries with embeddings`);
+            console.log(`[Embedding Reset] Total records: ${totalEmbeddings} embeddings, ${totalFailed} failed records`);
 
-            let totalEmbeddings = 0;
-            let totalFailed = 0;
-            let totalStates = 0;
-
-            // Clear embeddings, failed records, and index state for each library
-            for (const libraryId of libraryIds) {
-                // Get counts before deletion
+            // Clear all records from each table (per library to track progress)
+            for (const libraryId of embeddingLibraryIds) {
                 const embeddingCount = await db.getEmbeddingCount(libraryId);
                 const failedCount = await db.getFailedEmbeddingCount(libraryId);
 
-                // Delete embeddings
                 await db.deleteEmbeddingsByLibrary(libraryId);
-                totalEmbeddings += embeddingCount;
-
-                // Delete failed embedding records
                 await db.deleteFailedEmbeddingsByLibrary(libraryId);
-                totalFailed += failedCount;
-
-                // Delete index state
                 await db.deleteEmbeddingIndexState(libraryId);
-                totalStates++;
 
                 console.log(`[Embedding Reset] Cleared library ${libraryId}: ${embeddingCount} embeddings, ${failedCount} failed records`);
             }
 
+            // Clean up any orphaned records in failed_embeddings and embedding_index_state
+            // by using raw SQL to delete all remaining records
+            const remainingFailed = await db.getFailedEmbeddingCount();
+            if (remainingFailed > 0) {
+                console.log(`[Embedding Reset] Cleaning up ${remainingFailed} orphaned failed_embeddings records...`);
+                await (db as any).conn.queryAsync('DELETE FROM failed_embeddings');
+            }
+            
+            await (db as any).conn.queryAsync('DELETE FROM embedding_index_state');
+
             console.log("[Embedding Reset] ✓ Reset complete!");
-            console.log(`[Embedding Reset] Total cleared: ${totalEmbeddings} embeddings, ${totalFailed} failed records, ${totalStates} index states`);
+            console.log(`[Embedding Reset] Total cleared: ${totalEmbeddings} embeddings, ${totalFailed} failed records`);
             console.log("[Embedding Reset] Plugin is now in fresh user state - restart required for re-indexing");
             
         } catch (error) {

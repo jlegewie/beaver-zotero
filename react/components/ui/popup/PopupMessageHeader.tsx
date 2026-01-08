@@ -10,6 +10,7 @@ interface PopupMessageHeaderProps {
     count?: number;
     buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     buttonOnClick?: () => void;
+    cancelable?: boolean;
 }
 
 const PopupMessageHeader: React.FC<PopupMessageHeaderProps> = ({
@@ -19,7 +20,8 @@ const PopupMessageHeader: React.FC<PopupMessageHeaderProps> = ({
     buttonIcon,
     buttonOnClick,
     fontColor = 'font-color-secondary',
-    handleDismiss
+    handleDismiss,
+    cancelable = true,
 }) => {
 
     return (
@@ -44,12 +46,14 @@ const PopupMessageHeader: React.FC<PopupMessageHeaderProps> = ({
                         iconClassName="font-color-secondary scale-11"
                     />
                 )}
-                <IconButton
-                    icon={CancelIcon}
-                    variant="ghost-secondary"
-                    onClick={handleDismiss}
-                    // iconClassName={`${fontColor}`}
-                />
+                {cancelable && (
+                    <IconButton
+                        icon={CancelIcon}
+                        variant="ghost-secondary"
+                        onClick={handleDismiss}
+                        // iconClassName={`${fontColor}`}
+                    />
+                )}
             </div>
         </div>
     )

@@ -2,36 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAtom } from 'jotai';
 import { fileStatusSummaryAtom } from '../../../atoms/files';
 import Button from '../Button';
-import { CheckmarkCircleIcon, CancelCircleIcon, UploadCircleIcon, ClockIcon, SyncIcon } from '../../icons/icons';
-import { Icon } from '../../icons/icons';
+import FileStatusIcons from '../FileStatusIcons';
 
-interface StatusItemProps {
-    icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
-    count: number;
-    className?: string;
-    textClassName?: string;
-    iconClassName?: string;
-}
-
-function formatCount(count: number): string {
-    if (count >= 1000) {
-        return (count / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
-    }
-    return count.toString();
-}
-
-
-export const StatusItem: React.FC<StatusItemProps> = ({ icon, count, className = '', textClassName = '', iconClassName = '' }) => {
-    // Format count to always take at least 2 characters, padding with a non-breaking space
-    const formattedCount = formatCount(count);
-
-    return (
-        <span className={`display-flex items-center gap-1 ${className}`}>
-            <Icon icon={icon} className={`${iconClassName}`} />
-            <span className={`${textClassName}`}>{formattedCount}</span>
-        </span>
-    );
-};
 
 /**
  * Button component displaying aggregated file processing status.
@@ -80,12 +52,7 @@ const FileStatusButton: React.FC<{
             onClick={() => setShowFileStatus(!showFileStatus)}
         >
             {/* <div className="display-flex flex-row gap-2"> */}
-            <div className="display-flex flex-row gap-4">
-                <StatusItem icon={ClockIcon} count={fileStatusSummary.queuedProcessingCount} textClassName="text-lg" iconClassName="scale-115" />
-                <StatusItem icon={SyncIcon} count={fileStatusSummary.processingProcessingCount} textClassName="text-lg" iconClassName={syncIconClassName} />
-                <StatusItem icon={CheckmarkCircleIcon} count={fileStatusSummary.completedFiles} textClassName="text-lg" iconClassName="scale-115 text-green-500" />
-                <StatusItem icon={CancelCircleIcon} count={fileStatusSummary.failedCount} textClassName="text-lg" iconClassName="scale-115 text-red-500" />
-            </div>
+            <FileStatusIcons />
         </Button>
     );
 };

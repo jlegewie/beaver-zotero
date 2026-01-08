@@ -4,7 +4,7 @@ import { fileStatusAtom } from '../atoms/files';
 import { FileStatus } from '../types/fileStatus';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
-import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from '../atoms/profile';
+import { hasAuthorizedProAccessAtom, isDeviceAuthorizedAtom, planFeaturesAtom } from '../atoms/profile';
 import { fetchFileStatus, FileStatusConnection } from './useFileStatus';
 import { isEqual } from 'lodash';
 import { store } from '../store';
@@ -65,7 +65,7 @@ const getPollingInterval = (lastDataChange?: Date): number => {
 export const useFileStatusPolling = (): FileStatusPollingConnection => {
     const setFileStatus = useSetAtom(fileStatusAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
-    const hasAuthorizedAccess = useAtomValue(hasAuthorizedAccessAtom);
+    const hasAuthorizedProAccess = useAtomValue(hasAuthorizedProAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const user = useAtomValue(userAtom);
 
@@ -265,7 +265,7 @@ export const useFileStatusPolling = (): FileStatusPollingConnection => {
     }, [cleanupPolling, setFileStatus]);
 
     useEffect(() => {
-        const isEligible = isAuthenticated && user && hasAuthorizedAccess && isDeviceAuthorized;
+        const isEligible = isAuthenticated && user && hasAuthorizedProAccess && isDeviceAuthorized;
         const currentUserId = user?.id;
         const shouldBePolling = isEligible && currentUserId;
         const isCurrentlyPolling = !!userIdRef.current;
@@ -288,7 +288,7 @@ export const useFileStatusPolling = (): FileStatusPollingConnection => {
         }
 
         return cleanupConnection;
-    }, [isAuthenticated, user, hasAuthorizedAccess, isDeviceAuthorized, setupPolling, cleanupConnection]);
+    }, [isAuthenticated, user, hasAuthorizedProAccess, isDeviceAuthorized, setupPolling, cleanupConnection]);
 
     return connection;
 };

@@ -14,6 +14,15 @@ interface AuthorizationRequest {
     require_onboarding: boolean;
     use_zotero_sync: boolean;
     consent_to_share: boolean;
+    email_notifications: boolean;
+}
+
+interface FreeAuthorizationRequest {
+    zotero_local_id: string;
+    zotero_user_id: string | undefined;
+    libraries: ZoteroLibrary[];
+    consent_to_share: boolean;
+    email_notifications: boolean;
 }
 
 interface ProfileRequest {
@@ -41,7 +50,7 @@ interface SyncLibrariesRequest {
 
 
 interface PreferenceRequest {
-    preference: "consent_to_share" | "use_zotero_sync";
+    preference: "consent_to_share" | "use_zotero_sync" | "email_notifications";
     value: boolean;
 }
 
@@ -131,13 +140,28 @@ export class AccountService extends ApiService {
     /**
      * Sets the user's authorization status to authorized and records consent timestamp
      * @param requireOnboarding Whether the user needs to complete onboarding
+     * @param libraries List of Zotero libraries to sync
+     * @param syncWithZotero Whether to sync with Zotero
+     * @param consentToShare Whether user consents to share data
+     * @param emailNotifications Whether user wants email notifications
+     * @returns Promise with the response message
+     */
+    /**
+     * Sets the user's authorization status to authorized and records consent timestamp.
+     * Used for Pro/Beta plan users who go through the full onboarding flow.
+     * @param requireOnboarding Whether the user needs to complete onboarding
+     * @param libraries List of Zotero libraries to sync
+     * @param syncWithZotero Whether to sync with Zotero
+     * @param consentToShare Whether user consents to share data
+     * @param emailNotifications Whether user wants email notifications
      * @returns Promise with the response message
      */
     async authorizeAccess(
         requireOnboarding: boolean = true,
         libraries: ZoteroLibrary[],
         syncWithZotero: boolean = false,
-        consentToShare: boolean = false
+        consentToShare: boolean = false,
+        emailNotifications: boolean = false
     ): Promise<{ message: string }> {
         const { userID, localUserKey } = getZoteroUserIdentifier();
         return this.post<{ message: string }>('/api/v1/account/authorize', {
@@ -146,8 +170,37 @@ export class AccountService extends ApiService {
             require_onboarding: requireOnboarding,
             libraries: libraries,
             use_zotero_sync: syncWithZotero,
-            consent_to_share: consentToShare
+            consent_to_share: consentToShare,
+            email_notifications: emailNotifications
         } as AuthorizationRequest);
+    }
+
+    /**
+     * Sets the free plan user's authorization status and records consent timestamp.
+     * Used for Free plan users who go through the simplified onboarding flow.
+     * 
+     * Key differences from Pro/Beta authorization:
+     * - Sets has_authorized_free_access instead of has_authorized_access
+     * - Does NOT set has_completed_onboarding (free users don't need full onboarding)
+     * 
+     * @param libraries List of Zotero libraries
+     * @param consentToShare Whether user consents to share data
+     * @param emailNotifications Whether user wants email notifications
+     * @returns Promise with the response message
+     */
+    async authorizeFreeAccess(
+        libraries: ZoteroLibrary[],
+        consentToShare: boolean = false,
+        emailNotifications: boolean = false
+    ): Promise<{ message: string }> {
+        const { userID, localUserKey } = getZoteroUserIdentifier();
+        return this.post<{ message: string }>('/api/v1/account/authorize-free', {
+            zotero_local_id: localUserKey,
+            zotero_user_id: userID,
+            libraries: libraries,
+            consent_to_share: consentToShare,
+            email_notifications: emailNotifications
+        } as FreeAuthorizationRequest);
     }
 
     /**
@@ -228,6 +281,33 @@ export class AccountService extends ApiService {
      */
     async migrateData(): Promise<MigrationResponse> {
         return this.post<MigrationResponse>('/api/v1/account/migrate-data', {});
+    }
+
+    /**
+     * Completes the upgrade consent process (Free → Pro)
+     * Sets has_authorized_access and clears pending_upgrade_consent.
+     * After this, user is routed to library selection (ProOnboardingPage Step 2).
+     * @returns Promise with the response message
+     */
+    async completeUpgradeConsent(): Promise<{ message: string }> {
+        const { userID, localUserKey } = getZoteroUserIdentifier();
+        return this.post<{ message: string }>('/api/v1/account/complete-upgrade-consent', {
+            zotero_local_id: localUserKey,
+            zotero_user_id: userID,
+        });
+    }
+
+    /**
+     * Acknowledges the downgrade from Pro to Free
+     * Sets has_authorized_free_access and clears pending_downgrade_ack.
+     * @returns Promise with the response message
+     */
+    async acknowledgeDowngrade(): Promise<{ message: string }> {
+        const { userID, localUserKey } = getZoteroUserIdentifier();
+        return this.post<{ message: string }>('/api/v1/account/acknowledge-downgrade', {
+            zotero_local_id: localUserKey,
+            zotero_user_id: userID,
+        });
     }
 }
 

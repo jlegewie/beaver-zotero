@@ -231,7 +231,21 @@ export class AgentService {
         }
 
         const message = JSON.stringify(data);
-        logger(`AgentService: Sending message: ${message}`, 1);
+        
+        // Sanitize sensitive data for logging
+        const sanitizedData = { ...data };
+        if ('api_key' in sanitizedData) {
+            sanitizedData.api_key = '[REDACTED]';
+        }
+        if ('custom_model' in sanitizedData && typeof sanitizedData.custom_model === 'object') {
+            sanitizedData.custom_model = {
+                ...sanitizedData.custom_model,
+                api_key: sanitizedData.custom_model.api_key ? '[REDACTED]' : undefined
+            };
+        }
+        const sanitizedMessage = JSON.stringify(sanitizedData);
+        logger(`AgentService: Sending message: ${sanitizedMessage}`, 1);
+        
         this.ws.send(message);
     }
 
