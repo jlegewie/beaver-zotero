@@ -192,26 +192,29 @@ export const checkExternalReferencesAtom = atom(
                         if (ref.library_items && ref.library_items.length > 0) {
                             const libraryItems = ref.library_items.map(element => `${element.library_id}-${element.zotero_key}`);
                             logger(`checkExternalReferences: Checking ${refId} backend data (${libraryItems.join(', ')})`, 1);
-                            const mainLibraryItem = ref.library_items.find(element => element.library_id === 1);
-                            const focalItem = mainLibraryItem
-                                ? mainLibraryItem
-                                : ref.library_items[0];
-                            try {
-                                const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                                    focalItem.library_id,
-                                    focalItem.zotero_key
-                                );
-                                
-                                if (item) {
-                                    result = {
-                                        library_id: focalItem.library_id,
-                                        zotero_key: focalItem.zotero_key
-                                    };
-                                    foundItems.push(item);
-                                    logger(`checkExternalReferences: Backend data validated for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
+                            const mainLibraryItems = ref.library_items.filter(element => element.library_id === 1);
+                            const itemsToTry = mainLibraryItems.length > 0
+                                ? [...mainLibraryItems, ...ref.library_items.filter(element => element.library_id !== 1)]
+                                : ref.library_items;
+                            for (const itemRef of itemsToTry) {
+                                try {
+                                    const item = await Zotero.Items.getByLibraryAndKeyAsync(
+                                        itemRef.library_id,
+                                        itemRef.zotero_key
+                                    );
+                                    
+                                    if (item) {
+                                        result = {
+                                            library_id: itemRef.library_id,
+                                            zotero_key: itemRef.zotero_key
+                                        };
+                                        foundItems.push(item);
+                                        logger(`checkExternalReferences: Backend data validated for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
+                                        break;
+                                    }
+                                } catch (backendError) {
+                                    logger(`checkExternalReferences: Backend validation failed for ${refId} (${itemRef.library_id}-${itemRef.zotero_key}): ${backendError}`, 2);
                                 }
-                            } catch (backendError) {
-                                logger(`checkExternalReferences: Backend validation failed for ${refId}: ${backendError}`, 2);
                             }
                         }
                         
