@@ -161,6 +161,8 @@ export const checkExternalReferencesAtom = atom(
             return refId && !(refId in cache) && !checking.has(refId);
         });
         
+        logger(`checkExternalReferences: After filtering, ${refsToCheck.length} refs to check (${externalRefs.length - refsToCheck.length} already cached/checking)`, 1);
+        
         if (refsToCheck.length === 0) {
             return;
         }
