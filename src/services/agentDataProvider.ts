@@ -851,9 +851,17 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
 /**
  * Handle external_reference_check_request event.
+ * 
+ * If library_ids is provided, only search those libraries.
+ * If library_ids is not provided or empty, search all accessible libraries.
  */
 export async function handleExternalReferenceCheckRequest(request: WSExternalReferenceCheckRequest): Promise<WSExternalReferenceCheckResponse> {
     const results: ExternalReferenceCheckResult[] = [];
+
+    // Determine which libraries to search
+    const libraryIds: number[] = request.library_ids && request.library_ids.length > 0
+        ? request.library_ids
+        : Zotero.Libraries.getAll().map(lib => lib.libraryID);
 
     // Process all items in parallel for efficiency
     const checkPromises = request.items.map(async (item): Promise<ExternalReferenceCheckResult> => {
@@ -866,17 +874,20 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
                 creators: item.creators
             };
 
-            const existingItem = await findExistingReference(request.library_id, referenceData);
+            // Search across all specified libraries until found
+            for (const libraryId of libraryIds) {
+                const existingItem = await findExistingReference(libraryId, referenceData);
 
-            if (existingItem) {
-                return {
-                    id: item.id,
-                    exists: true,
-                    item: {
-                        library_id: existingItem.libraryID,
-                        zotero_key: existingItem.key
-                    }
-                };
+                if (existingItem) {
+                    return {
+                        id: item.id,
+                        exists: true,
+                        item: {
+                            library_id: existingItem.libraryID,
+                            zotero_key: existingItem.key
+                        }
+                    };
+                }
             }
 
             return {

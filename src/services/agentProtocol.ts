@@ -219,8 +219,8 @@ export interface ExternalReferenceCheckItem {
 export interface WSExternalReferenceCheckRequest extends WSBaseEvent {
     event: 'external_reference_check_request';
     request_id: string;
-    /** Library ID to search in */
-    library_id: number;
+    /** Library IDs to search in. If not provided, search all libraries. */
+    library_ids?: number[];
     /** References to check */
     items: ExternalReferenceCheckItem[];
 }
