@@ -71,7 +71,7 @@ import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
 import { store } from '../store';
-import { syncedLibraryIdsAtom, syncWithZoteroAtom } from './profile';
+import { searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
 import { syncingItemFilterAsync } from '../../src/utils/sync';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
@@ -354,12 +354,12 @@ type MissingItemReason =
  */
 async function determineMissingReason(ref: ZoteroItemReference, userId: string | null): Promise<MissingItemReason> {
     try {
-        // Get sync configuration from store
-        const syncedLibraryIds = store.get(syncedLibraryIdsAtom);
+        // Get searchable libraries from store
+        const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
         const syncWithZotero = store.get(syncWithZoteroAtom);
 
-        // Check if library is synced
-        if (!syncedLibraryIds.includes(ref.library_id)) {
+        // Check if library is searchable (synced for Pro, all local for Free)
+        if (!searchableLibraryIds.includes(ref.library_id)) {
             return 'library_not_synced';
         }
 
