@@ -1,7 +1,7 @@
 import React from 'react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
-import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from '../../../atoms/profile';
+import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom } from '../../../atoms/profile';
 import { PlusSignIcon, CSSIcon, Icon } from '../../icons/icons';
 import SearchMenu, { MenuPosition, SearchMenuItem } from '../../ui/menus/SearchMenu';
 import { getLibraryItemCounts, LibraryStatistics } from '../../../../src/utils/libraries';
@@ -18,7 +18,7 @@ interface AddLibraryButtonProps {
 
 const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) => {
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
-    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
 
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -75,7 +75,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
         if (buttonIndex !== 0) return;
 
         // Add the library to the sync libraries
-        const newSyncLibraryIds = [...syncLibraryIds, libraryID];
+        const newSyncLibraryIds = [...syncedLibraryIds, libraryID];
 
         try {
             const libraries = newSyncLibraryIds
@@ -96,7 +96,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
         } finally {
             handleOnClose();
         }
-    }, [profileWithPlan, setProfileWithPlan, syncLibraryIds]);
+    }, [profileWithPlan, setProfileWithPlan, syncedLibraryIds]);
 
     useEffect(() => {
         if (!isMenuOpen) return;
@@ -105,7 +105,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
 
         const fetchLibrariesAndStats = async () => {
             const allLibraries = (await Zotero.Libraries.getAll())
-                .filter(lib => !syncLibraryIds.includes(lib.libraryID));
+                .filter(lib => !syncedLibraryIds.includes(lib.libraryID));
 
             if (isCancelled) return;
 
@@ -139,7 +139,7 @@ const AddLibraryButton: React.FC<AddLibraryButtonProps> = ({ disabled=false }) =
         return () => {
             isCancelled = true;
         };
-    }, [isMenuOpen, syncLibraryIds]);
+    }, [isMenuOpen, syncedLibraryIds]);
 
     const handleSearch = async (query: string) => {
         setSearchQuery(query);
