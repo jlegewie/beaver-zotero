@@ -151,6 +151,7 @@ export const checkExternalReferenceAtom = atom(
 export const checkExternalReferencesAtom = atom(
     null,
     async (get, set, externalRefs: ExternalReference[]): Promise<void> => {
+        logger(`checkExternalReferences: Checking ${externalRefs.length} external references`, 1);
         const cache = get(externalReferenceItemMappingAtom);
         const checking = get(checkingExternalReferencesAtom);
         
@@ -187,6 +188,8 @@ export const checkExternalReferencesAtom = atom(
                         
                         // Validate backend data first
                         if (ref.library_items && ref.library_items.length > 0) {
+                            const libraryItems = ref.library_items.map(element => `${element.library_id}-${element.zotero_key}`);
+                            logger(`checkExternalReferences: Checking ${refId} backend data (${libraryItems.join(', ')})`, 1);
                             const firstItem = ref.library_items[0];
                             try {
                                 const item = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -200,6 +203,7 @@ export const checkExternalReferencesAtom = atom(
                                         zotero_key: firstItem.zotero_key
                                     };
                                     foundItems.push(item);
+                                    logger(`checkExternalReferences: Backend data validated for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
                                 }
                             } catch (backendError) {
                                 logger(`checkExternalReferences: Backend validation failed for ${refId}: ${backendError}`, 2);
@@ -209,6 +213,7 @@ export const checkExternalReferencesAtom = atom(
                         // Fall back to findExistingReference
                         if (!result) {
                             try {
+                                logger(`checkExternalReferences: Searching for ${refId}`, { title: ref.title, date: ref.publication_date, DOI: ref.identifiers?.doi, ISBN: ref.identifiers?.isbn, creators: ref.authors?.map(author => extractAuthorLastName(author)) }, 1);
                                 const existingItem = await findExistingReference(1, {
                                     title: ref.title,
                                     date: ref.publication_date,
@@ -222,6 +227,7 @@ export const checkExternalReferencesAtom = atom(
                                         zotero_key: existingItem.key
                                     };
                                     foundItems.push(existingItem);
+                                    logger(`checkExternalReferences: Found match for ${refId}: ${result.library_id}-${result.zotero_key}`, 1);
                                 }
                             } catch (searchError) {
                                 logger(`checkExternalReferences: Search failed for ${refId}: ${searchError}`, 2);
