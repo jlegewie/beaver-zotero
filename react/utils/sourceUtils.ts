@@ -4,7 +4,7 @@ import { isValidAnnotationType, SourceAttachment } from '../types/attachments/ap
 import { selectItemById } from '../../src/utils/selectItem';
 import { CitationData } from '../types/citations';
 import { ZoteroItemReference } from '../types/zotero';
-import { syncLibraryIdsAtom, syncWithZoteroAtom} from '../atoms/profile';
+import { searchableLibraryIdsAtom, syncWithZoteroAtom} from '../atoms/profile';
 import { store } from '../store';
 import { userIdAtom } from '../atoms/auth';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
@@ -119,8 +119,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         return {valid: false, error: "Library not found"};
     }
 
-    // Is library synced?
-    const libraryIds = store.get(syncLibraryIdsAtom);
+    // Is library searchable?
+    const libraryIds = store.get(searchableLibraryIdsAtom);
     if (!libraryIds.includes(item.libraryID)) {
         const library_name = library ? library.name : undefined;
         return {

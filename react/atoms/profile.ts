@@ -59,9 +59,6 @@ export const searchableLibraryIdsAtom = atom<number[]>((get) => {
     }
 });
 
-// Backward compatibility: keep existing atoms as aliases
-export const syncLibraryIdsAtom = syncedLibraryIdsAtom;
-
 // Plan data
 export const planIdAtom = atom<string>((get) => {
     const profile = get(profileWithPlanAtom);

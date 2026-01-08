@@ -3,7 +3,7 @@ import { itemsService } from './itemsService';
 import { isValidZoteroItem } from '../../react/utils/sourceUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
-import { planFeaturesAtom, syncLibraryIdsAtom } from '../../react/atoms/profile';
+import { planFeaturesAtom, searchableLibraryIdsAtom } from '../../react/atoms/profile';
 import { isAttachmentOnServer } from '../utils/webAPI';
 import { getPref } from '../utils/prefs';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
@@ -377,16 +377,16 @@ class ItemValidationManager {
      * Check if item's library is synced with Beaver
      * Simple check for frontend validation
      */
-    private checkLibrarySynced(item: Zotero.Item): { isValid: boolean; reason?: string } {
+    private checkLibrarySearchable(item: Zotero.Item): { isValid: boolean; reason?: string } {
         // Check if library exists
         const library = Zotero.Libraries.get(item.libraryID);
         if (!library) {
             return { isValid: false, reason: 'Library not found' };
         }
 
-        // Check if library is in synced libraries
-        const syncedLibraries = store.get(syncLibraryIdsAtom);
-        if (!syncedLibraries.includes(item.libraryID)) {
+        // Check if library is in searchable libraries
+        const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+        if (!searchableLibraryIds.includes(item.libraryID)) {
             return { 
                 isValid: false, 
                 reason: `Library "${library.name}" is excluded from Beaver. You can update this setting in Beaver Preferences.` 
@@ -405,8 +405,8 @@ class ItemValidationManager {
     private async performFrontendValidation(
         item: Zotero.Item
     ): Promise<{ isValid: boolean; reason?: string }> {
-        // Check if library is synced/excluded from Beaver (applies to all item types)
-        const libraryCheck = this.checkLibrarySynced(item);
+        // Check if library is searchable for Beaver (applies to all item types)
+        const libraryCheck = this.checkLibrarySearchable(item);
         if (!libraryCheck.isValid) {
             return libraryCheck;
         }

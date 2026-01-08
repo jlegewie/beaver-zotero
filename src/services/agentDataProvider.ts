@@ -11,7 +11,7 @@ import { logger } from '../utils/logger';
 import { ZoteroItemStatus, ItemDataWithStatus, FrontendFileStatus, AttachmentDataWithStatus } from '../../react/types/zotero';
 import { safeIsInTrash } from '../utils/zoteroUtils';
 import { syncingItemFilter, syncingItemFilterAsync } from '../utils/sync';
-import { syncLibraryIdsAtom, syncWithZoteroAtom } from '../../react/atoms/profile';
+import { searchableLibraryIdsAtom, syncedLibraryIdsAtom, syncWithZoteroAtom } from '../../react/atoms/profile';
 import { userIdAtom } from '../../react/atoms/auth';
 import { getPref } from '../utils/prefs';
 
@@ -198,18 +198,18 @@ async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boole
  * Determines why an item might not be available in the backend.
  * 
  * @param item - Zotero item to compute status for
- * @param syncLibraryIds - List of library IDs configured for sync
+ * @param syncedLibraryIds - List of library IDs configured for sync
  * @param syncWithZotero - Sync settings from profile
  * @param userId - Current user ID (for pending sync detection)
  * @returns Status information for the item
  */
 async function computeItemStatus(
     item: Zotero.Item,
-    syncLibraryIds: number[],
+    syncedLibraryIds: number[],
     syncWithZotero: any,
     userId: string | null
 ): Promise<ZoteroItemStatus> {
-    const isSyncedLibrary = syncLibraryIds.includes(item.libraryID);
+    const isSyncedLibrary = syncedLibraryIds.includes(item.libraryID);
     const trashState = safeIsInTrash(item);
     const isInTrash = trashState === true;
     const availableLocallyOrOnServer = !item.isAttachment() || (await item.fileExists()) || isAttachmentOnServer(item);
@@ -244,7 +244,7 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
     const errors: WSDataError[] = [];
 
     // Get sync configuration from store
-    const syncLibraryIds = store.get(syncLibraryIdsAtom);
+    const syncedLibraryIds = store.get(syncedLibraryIdsAtom);
     const syncWithZotero = store.get(syncWithZoteroAtom);
     const userId = store.get(userIdAtom);
 
@@ -376,7 +376,7 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
     const [itemResults, attachmentResults] = await Promise.all([
         Promise.all(itemsToSerialize.map(async (item): Promise<ItemDataWithStatus | null> => {
             const serialized = await serializeItem(item, undefined);
-            const status = await computeItemStatus(item, syncLibraryIds, syncWithZotero, userId);
+            const status = await computeItemStatus(item, syncedLibraryIds, syncWithZotero, userId);
             return { item: serialized, status };
         })),
         Promise.all(attachmentsToSerialize.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
@@ -389,7 +389,7 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
                 });
                 return null;
             }
-            const status = await computeItemStatus(attachment, syncLibraryIds, syncWithZotero, userId);
+            const status = await computeItemStatus(attachment, syncedLibraryIds, syncWithZotero, userId);
             
             // Determine if this is the primary attachment for its parent
             let isPrimary = false;
@@ -972,8 +972,8 @@ export async function handleItemSearchByMetadataRequest(
             }
         }
     } else {
-        const syncLibraryIds = store.get(syncLibraryIdsAtom);
-        libraryIds.push(...syncLibraryIds);
+        const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+        libraryIds.push(...searchableLibraryIds);
     }
 
     // Convert collections_filter names to keys if needed
@@ -1067,7 +1067,7 @@ export async function handleItemSearchByMetadataRequest(
     const limitedItems = request.limit > 0 ? items.slice(0, request.limit) : items;
 
     // Get sync configuration from store for status computation
-    const syncLibraryIds = store.get(syncLibraryIdsAtom);
+    const syncedLibraryIds = store.get(syncedLibraryIdsAtom);
     const syncWithZotero = store.get(syncWithZoteroAtom);
     const userId = store.get(userIdAtom);
 
@@ -1103,7 +1103,7 @@ export async function handleItemSearchByMetadataRequest(
                         const attachmentData = await serializeAttachment(attachment, undefined, { skipSyncingFilter: true });
                         if (attachmentData) {
                             // Compute sync status
-                            const status = await computeItemStatus(attachment, syncLibraryIds, syncWithZotero, userId);
+                            const status = await computeItemStatus(attachment, syncedLibraryIds, syncWithZotero, userId);
                             
                             // Get file status for this attachment
                             const isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
@@ -1186,8 +1186,8 @@ export async function handleItemSearchByTopicRequest(
         }
     } else {
         // Default to synced libraries if no filter provided
-        const syncLibraryIds = store.get(syncLibraryIdsAtom);
-        libraryIds.push(...syncLibraryIds);
+        const syncedLibraryIds = store.get(syncedLibraryIdsAtom);
+        libraryIds.push(...syncedLibraryIds);
     }
 
     // Convert collections_filter names to keys if needed
@@ -1285,7 +1285,7 @@ export async function handleItemSearchByTopicRequest(
     }
 
     // Get sync configuration from store for status computation
-    const syncLibraryIds = store.get(syncLibraryIdsAtom);
+    const syncedLibraryIds = store.get(syncedLibraryIdsAtom);
     const syncWithZotero = store.get(syncWithZoteroAtom);
     const userId = store.get(userIdAtom);
 
@@ -1363,7 +1363,7 @@ export async function handleItemSearchByTopicRequest(
                     if (isValidAttachment) {
                         const attachmentData = await serializeAttachment(attachment, undefined, { skipSyncingFilter: true });
                         if (attachmentData) {
-                            const status = await computeItemStatus(attachment, syncLibraryIds, syncWithZotero, userId);
+                            const status = await computeItemStatus(attachment, syncedLibraryIds, syncWithZotero, userId);
                             const isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
                             const fileStatus = await getAttachmentFileStatus(attachment, isPrimary);
                             

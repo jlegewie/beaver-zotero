@@ -5,7 +5,7 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, SearchIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
@@ -45,7 +45,7 @@ const PreferencePage: React.FC = () => {
     const [anthropicKey, setAnthropicKey] = useState(() => getPref('anthropicApiKey'));
     const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
     const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>(getCustomPromptsFromPreferences());
-    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
     const [addSelectedOnNewThread, setAddSelectedOnNewThread] = useState(() => getPref('addSelectedItemsOnNewThread'));
     const [addSelectedOnOpen, setAddSelectedOnOpen] = useState(() => getPref('addSelectedItemsOnOpen'));
@@ -76,11 +76,11 @@ const PreferencePage: React.FC = () => {
      // --- Load last synced timestamp from local DB ---
      const loadLastSynced = useCallback(async () => {
          try {
-             if (!user?.id || !syncLibraryIds?.length) {
+             if (!user?.id || !syncedLibraryIds?.length) {
                 setLastSyncedText('Unable to retrieve');
                 return;
              }
-             const latest = await Zotero.Beaver.db.getMostRecentSyncLogForLibraries(user.id, syncLibraryIds);
+             const latest = await Zotero.Beaver.db.getMostRecentSyncLogForLibraries(user.id, syncedLibraryIds);
              if (!latest) {
                 setLastSyncedText('Never');
                 return;
@@ -102,7 +102,7 @@ const PreferencePage: React.FC = () => {
             logger(`Failed to load last sync time: ${e.message}`, 1);
             setLastSyncedText('—');
         }
-    }, [user?.id, syncLibraryIds]);
+    }, [user?.id, syncedLibraryIds]);
 
     React.useEffect(() => {
         loadLastSynced();
@@ -171,7 +171,7 @@ const PreferencePage: React.FC = () => {
         
         try {
             // Run consistency check for all sync libraries
-            for (const libraryID of syncLibraryIds) {
+            for (const libraryID of syncedLibraryIds) {
                 await performConsistencyCheck(libraryID);
             }
             
@@ -188,7 +188,7 @@ const PreferencePage: React.FC = () => {
             Zotero.logError(error);
             setVerifyStatus('idle');
         }
-    }, [syncLibraryIds, verifyStatus]);
+    }, [syncedLibraryIds, verifyStatus]);
 
     // --- Remove Prompt Handler ---
     const handleRemovePrompt = useCallback((indexToRemove: number) => {
