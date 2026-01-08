@@ -4,7 +4,7 @@ import { isValidAnnotationType, SourceAttachment } from '../types/attachments/ap
 import { selectItemById } from '../../src/utils/selectItem';
 import { CitationData } from '../types/citations';
 import { ZoteroItemReference } from '../types/zotero';
-import { searchableLibraryIdsAtom, syncWithZoteroAtom} from '../atoms/profile';
+import { isDatabaseSyncSupportedAtom, searchableLibraryIdsAtom, syncWithZoteroAtom} from '../atoms/profile';
 import { store } from '../store';
 import { userIdAtom } from '../atoms/auth';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
@@ -113,6 +113,9 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
     const userID = store.get(userIdAtom);
     if (!userID) return {valid: false, error: "User ID not found. Make sure you are logged in."};
 
+    // Is database sync supported?
+    const isDatabaseSyncSupported = store.get(isDatabaseSyncSupportedAtom);
+
     // Item library
     const library = Zotero.Libraries.get(item.libraryID);
     if (!library) {
@@ -132,11 +135,11 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
     // Is the library valid for sync?
     const syncWithZotero = store.get(syncWithZoteroAtom);
-    if (library.isGroup && !syncWithZotero) {
+    if (isDatabaseSyncSupported && library.isGroup && !syncWithZotero) {
         return {valid: false, error: `The group library "${library.name}" cannot be synced with Beaver because the setting "Coordinate with Zotero Sync" is disabled.`};
     }
 
-    if (!isLibraryValidForSync(library, syncWithZotero)) {
+    if (isDatabaseSyncSupported && !isLibraryValidForSync(library, syncWithZotero)) {
         return {valid: false, error: `The group library "${library.name}" cannot be synced with Beaver. Please check Beaver Preferences to resolve this issue.`};
     }
 
@@ -146,16 +149,16 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
         // (a) Pass the syncing filter
         if (!(await syncingItemFilterAsync(item))) {
-            return {valid: false, error: "File not available for sync"};
+            return {valid: false, error: "File not available to use in Beaver"};
         }
 
         // (b) If syncWithZotero is true, check whether item has been synced with Zotero
-        if (syncWithZotero && item.version === 0 && !item.synced) {
+        if (isDatabaseSyncSupported && syncWithZotero && item.version === 0 && !item.synced) {
             return {valid: false, error: "Item not yet synced with Zotero and therefore not available in Beaver."};
         }
         
         // (c) Check whether item was added after the last sync
-        if (!(await wasItemAddedBeforeLastSync(item, syncWithZotero, userID))) {
+        if (isDatabaseSyncSupported && !(await wasItemAddedBeforeLastSync(item, syncWithZotero, userID))) {
             return {valid: false, error: "Item not yet synced with Beaver. Please wait for sync to complete or sync manually in settings."};
         }
 
@@ -185,12 +188,12 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         }
         
         // (e) If syncWithZotero is true, check whether item has been synced with Zotero
-        if (syncWithZotero && item.version === 0 && !item.synced) {
+        if (isDatabaseSyncSupported && syncWithZotero && item.version === 0 && !item.synced) {
             return {valid: false, error: "Attachment not yet synced with Zotero and therefore not available in Beaver."};
         }
 
         // (f) Check whether attachment was added after the last sync
-        if (!(await wasItemAddedBeforeLastSync(item, syncWithZotero, userID))) {
+        if (isDatabaseSyncSupported && !(await wasItemAddedBeforeLastSync(item, syncWithZotero, userID))) {
             return {valid: false, error: "Attachment not yet synced with Beaver. Please wait for sync to complete or sync manually in settings."};
         }
 
@@ -225,12 +228,12 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         if (!hasFile) return {valid: false, error: "Parent file does not exist"};
 
         // (f) If syncWithZotero is true, check whether item has been synced with Zotero
-        if (syncWithZotero && parent.version === 0 && !parent.synced) {
+        if (isDatabaseSyncSupported && syncWithZotero && parent.version === 0 && !parent.synced) {
             return {valid: false, error: "Attachment not yet synced with Zotero and therefore not available in Beaver."};
         }
 
         // (g) Check whether attachment was added after the last sync
-        if (!(await wasItemAddedBeforeLastSync(parent, syncWithZotero, userID))) {
+        if (isDatabaseSyncSupported && !(await wasItemAddedBeforeLastSync(parent, syncWithZotero, userID))) {
             return {valid: false, error: "Attachment not yet synced with Beaver. Please wait for sync to complete or sync manually in settings."};
         }
 
