@@ -1046,8 +1046,9 @@ export async function handleItemSearchByMetadataRequest(
             logger(`handleItemSearchByMetadataRequest: Error searching library ${libraryId}: ${error}`, 1);
         }
 
-        // Early exit if we have enough results
-        if (request.limit > 0 && uniqueItems.size >= request.limit) {
+        // Early exit if we have enough results (fetch extra to account for cross-library duplicates)
+        const preDedupBuffer = request.limit * 2;
+        if (request.limit > 0 && uniqueItems.size >= preDedupBuffer) {
             break;
         }
     }
