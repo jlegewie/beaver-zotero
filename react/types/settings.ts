@@ -2,13 +2,25 @@ import { getPref } from "../../src/utils/prefs";
 
 export type ModelProvider = "anthropic" | "google" | "openai" | "mistralai" | "meta-llama" | "deepseek-ai" | "groq";
 
+/**
+ * Configuration for custom models.
+ * 
+ * Either:
+ * - provider="openrouter" to use OpenRouter's API, OR
+ * - api_base with format to use a custom OpenAI/Anthropic-compatible endpoint
+ * 
+ * When api_base is provided, provider defaults to "custom" for logging purposes.
+ */
 export interface CustomChatModel {
-    provider: string;
+    provider?: string;  // defaults to "custom"
+    api_base?: string;
+    format?: 'openai' | 'anthropic';
     api_key: string;
     name: string;
     snapshot: string;
     context_window?: number;
-    api_base?: string;
+    reasoning_effort?: 'low' | 'medium' | 'high';
+    supports_vision?: boolean;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => {
@@ -18,19 +30,39 @@ const isObject = (value: unknown): value is Record<string, unknown> => {
 export const isCustomChatModel = (obj: unknown): obj is CustomChatModel => {
     if (!isObject(obj)) return false;
 
-    const { provider, api_key, name, snapshot, context_window } = obj as Record<string, unknown>;
+    const { 
+        provider, 
+        api_base, 
+        format, 
+        api_key, 
+        name, 
+        snapshot, 
+        context_window,
+        reasoning_effort,
+        supports_vision
+    } = obj as Record<string, unknown>;
 
-    return (
-        typeof provider === 'string' &&
-        provider.length > 0 &&
-        typeof api_key === 'string' &&
-        api_key.length > 0 &&
-        typeof name === 'string' &&
-        name.length > 0 &&
-        typeof snapshot === 'string' &&
-        snapshot.length > 0 &&
-        (context_window === undefined || typeof context_window === 'number')
-    );
+    // Required fields
+    if (typeof api_key !== 'string' || api_key.trim().length === 0) return false;
+    if (typeof name !== 'string' || name.trim().length === 0) return false;
+    if (typeof snapshot !== 'string' || snapshot.trim().length === 0) return false;
+
+    // Either provider is 'openrouter' or api_base must be provided
+    const normalizedProvider = typeof provider === 'string' ? provider.toLowerCase() : 'custom';
+    if (normalizedProvider === 'custom' && !api_base) return false;
+
+    // Optional field validations
+    if (provider !== undefined && typeof provider !== 'string') return false;
+    if (api_base !== undefined && typeof api_base !== 'string') return false;
+    if (format !== undefined && format !== 'openai' && format !== 'anthropic') return false;
+    if (context_window !== undefined && typeof context_window !== 'number') return false;
+    if (reasoning_effort !== undefined && 
+        reasoning_effort !== 'low' && 
+        reasoning_effort !== 'medium' && 
+        reasoning_effort !== 'high') return false;
+    if (supports_vision !== undefined && typeof supports_vision !== 'boolean') return false;
+
+    return true;
 };
 
 export const getCustomChatModelsFromPreferences = (): CustomChatModel[] => {
