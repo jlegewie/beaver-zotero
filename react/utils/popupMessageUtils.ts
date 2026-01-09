@@ -12,6 +12,7 @@ import { truncateText } from '../utils/stringUtils';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
 import type { ItemValidationState } from '../atoms/itemValidation';
 import { buildMessageItemSummary } from '../hooks/useMessageItemSummary';
+import { TimeoutError, ApiError, ServerError } from '../types/apiErrors';
 
 /**
  * Adds a new popup message to the list.
@@ -316,6 +317,86 @@ export const addRegularItemsSummaryPopupAtom = atom(
             }),
             expire: true,
             duration: hasIssues ? 3000 : 2000
+        });
+    }
+);
+
+/**
+ * Get a user-friendly error message from an error object.
+ * Handles TimeoutError, ApiError, ServerError, and generic errors.
+ */
+export const getErrorMessage = (error: unknown, context?: string): { title: string; text: string } => {
+    const contextPrefix = context ? `${context}: ` : '';
+    
+    if (error instanceof TimeoutError) {
+        return {
+            title: 'Request Timed Out',
+            text: `${contextPrefix}The server took too long to respond. Please check your connection and try again.`
+        };
+    }
+    
+    if (error instanceof ServerError) {
+        return {
+            title: 'Server Error',
+            text: `${contextPrefix}Something went wrong on our end. Please try again later.`
+        };
+    }
+    
+    if (error instanceof ApiError) {
+        if (error.status === 401) {
+            return {
+                title: 'Authentication Error',
+                text: `${contextPrefix}Your session may have expired. Please sign in again.`
+            };
+        }
+        if (error.status === 404) {
+            return {
+                title: 'Not Found',
+                text: `${contextPrefix}The requested resource could not be found.`
+            };
+        }
+        return {
+            title: 'Request Failed',
+            text: `${contextPrefix}${error.message}`
+        };
+    }
+    
+    // Generic error
+    const message = error instanceof Error ? error.message : 'An unexpected error occurred';
+    return {
+        title: 'Error',
+        text: `${contextPrefix}${message}`
+    };
+};
+
+/**
+ * Atom to show an error popup message from an error object.
+ * Automatically formats the message based on error type.
+ * Deduplicates by checking if an identical error popup already exists.
+ * 
+ * @param error The error object
+ * @param context Optional context string (e.g., "Loading thread")
+ */
+export const showErrorPopupAtom = atom(
+    null,
+    (get, set, { error, context }: { error: unknown; context?: string }) => {
+        const { title, text } = getErrorMessage(error, context);
+        
+        // Check for duplicate - skip if identical error popup already exists
+        const existingMessages = get(popupMessagesAtom);
+        const isDuplicate = existingMessages.some(
+            msg => msg.type === 'error' && msg.title === title && msg.text === text
+        );
+        if (isDuplicate) {
+            return;
+        }
+        
+        set(addPopupMessageAtom, {
+            type: 'error',
+            title,
+            text,
+            expire: true,
+            duration: 6000
         });
     }
 );

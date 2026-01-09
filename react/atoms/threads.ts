@@ -16,6 +16,7 @@ import { threadAgentActionsAtom, isCreateItemAgentAction, AgentAction, validateA
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
 import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
+import { showErrorPopupAtom } from "../utils/popupMessageUtils";
 
 // Thread types
 export interface ThreadData {
@@ -274,7 +275,11 @@ export const loadThreadAtom = atom(
                 set(citationMetadataAtom, []);
             }
         } catch (error) {
-            console.error('Error loading thread:', error);
+            logger(`Error loading thread: ${error}`, 2);
+            set(showErrorPopupAtom, { error, context: 'Failed to load conversation' });
+            // Reset to clean state on error
+            await set(newThreadAtom);
+            return; // Exit early - newThreadAtom already clears message state
         } finally {
             set(isLoadingThreadAtom, false);
         }

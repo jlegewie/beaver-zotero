@@ -10,6 +10,7 @@ import { userAtom } from '../../../atoms/auth';
 import Spinner from '../../icons/Spinner';
 import { getDateGroup } from '../../../utils/dateUtils';
 import { getPref } from '../../../../src/utils/prefs';
+import { showErrorPopupAtom } from '../../../utils/popupMessageUtils';
 
 interface ThreadsMenuProps {
     className?: string;
@@ -52,6 +53,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState<string>('');
     const [allowBlur, setAllowBlur] = useState<boolean>(true);
+    const showErrorPopup = useSetAtom(showErrorPopupAtom);
     
     // State for pagination
     const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -90,13 +92,14 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
                 }
             } catch (error) {
                 console.error('Error fetching recent threads:', error);
+                showErrorPopup({ error, context: 'Failed to load chat history' });
             } finally {
                 setIsLoading(false);
             }
         };
         
         fetchThreads();
-    }, [setThreads, user, isMenuOpen, statefulChat]);
+    }, [setThreads, user, isMenuOpen, statefulChat, showErrorPopup]);
 
     // Load more threads
     const loadMoreThreads = async () => {
@@ -127,6 +130,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             }
         } catch (error) {
             console.error('Error loading more threads:', error);
+            showErrorPopup({ error, context: 'Failed to load more conversations' });
         } finally {
             setIsLoading(false);
         }
@@ -159,6 +163,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             setThreads((prev) => prev.filter(thread => thread.id !== threadId));
         } catch (error) {
             console.error('Error deleting thread:', error);
+            showErrorPopup({ error, context: 'Failed to delete conversation' });
         }
     };
 
@@ -191,6 +196,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             ));
         } catch (error) {
             console.error('Error renaming thread:', error);
+            showErrorPopup({ error, context: 'Failed to rename conversation' });
         } finally {
             setEditingThreadId(null);
         }
