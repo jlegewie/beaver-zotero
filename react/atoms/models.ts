@@ -65,7 +65,7 @@ export interface ModelConfig {
 const createCustomModelId = (model: CustomChatModel): string => {
     return [
         CUSTOM_MODEL_ID_PREFIX,
-        model.provider,
+        model.provider ?? 'custom',
         encodeURIComponent(model.snapshot),
         encodeURIComponent(model.name)
     ].join(':');
@@ -76,14 +76,17 @@ const mapCustomModelsToConfigs = (): ModelConfig[] => {
 
     return customModels.map((model) => {
         const id = createCustomModelId(model);
+        const hasReasoningEffort = !!model.reasoning_effort;
 
         return {
             id,
-            provider: model.provider as ProviderType,
+            provider: (model.provider ?? 'custom') as ProviderType,
             name: model.name,
             snapshot: model.snapshot,
             context_window: model.context_window,
-            reasoning_model: false,
+            reasoning_model: hasReasoningEffort,
+            reasoning_effort: model.reasoning_effort,
+            supports_vision: model.supports_vision,
             pricing: {
                 input: 0,
                 output: 0,
