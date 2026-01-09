@@ -1,15 +1,20 @@
-import { ApiError, ServerError } from '../../react/types/apiErrors';
+import { ApiError, ServerError, TimeoutError } from '../../react/types/apiErrors';
 import { logger } from '../utils/logger';
 import { supabase } from './supabaseClient';
+
+/** Default timeout for API requests (30 seconds) */
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
 * Base API service that handles authentication and common HTTP methods
 */
 export class ApiService {
     protected baseUrl: string;
+    protected defaultTimeoutMs: number;
     
-    constructor(baseUrl: string) {
+    constructor(baseUrl: string, defaultTimeoutMs: number = DEFAULT_TIMEOUT_MS) {
         this.baseUrl = baseUrl;
+        this.defaultTimeoutMs = defaultTimeoutMs;
     }
     
     /**
@@ -88,17 +93,52 @@ export class ApiService {
             }
         }
     }
+
+    /**
+    * Performs a fetch request with timeout support
+    * @param url The URL to fetch
+    * @param options Fetch options
+    * @param timeoutMs Timeout in milliseconds (uses default if not provided)
+    * @returns Promise with the response
+    */
+    private async fetchWithTimeout(
+        url: string,
+        options: RequestInit,
+        timeoutMs?: number
+    ): Promise<Response> {
+        const timeout = timeoutMs ?? this.defaultTimeoutMs;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+        try {
+            const response = await fetch(url, {
+                ...options,
+                signal: controller.signal,
+            });
+            return response;
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                throw new TimeoutError(timeout, `Request timed out after ${timeout}ms`);
+            }
+            throw error;
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    }
     
     /**
     * Performs a GET request
+    * @param endpoint API endpoint
+    * @param timeoutMs Optional timeout in milliseconds
     */
-    async get<T>(endpoint: string): Promise<T> {
+    async get<T>(endpoint: string, timeoutMs?: number): Promise<T> {
         const headers = await this.getAuthHeaders();
         logger(`GET: ${endpoint}`);
-        const response = await fetch(`${this.baseUrl}${endpoint}`, {
-            method: 'GET',
-            headers
-        });
+        const response = await this.fetchWithTimeout(
+            `${this.baseUrl}${endpoint}`,
+            { method: 'GET', headers },
+            timeoutMs
+        );
         
         if (!response.ok) {
             await this.handleApiError(response);
@@ -116,15 +156,18 @@ export class ApiService {
     
     /**
     * Performs a POST request
+    * @param endpoint API endpoint
+    * @param body Request body
+    * @param timeoutMs Optional timeout in milliseconds
     */
-    async post<T>(endpoint: string, body: any): Promise<T> {
+    async post<T>(endpoint: string, body: any, timeoutMs?: number): Promise<T> {
         const headers = await this.getAuthHeaders();
         logger(`POST: ${endpoint}`);
-        const response = await fetch(`${this.baseUrl}${endpoint}`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(body)
-        });
+        const response = await this.fetchWithTimeout(
+            `${this.baseUrl}${endpoint}`,
+            { method: 'POST', headers, body: JSON.stringify(body) },
+            timeoutMs
+        );
         
         if (!response.ok) {
             await this.handleApiError(response);
@@ -142,15 +185,18 @@ export class ApiService {
     
     /**
     * Performs a PATCH request
+    * @param endpoint API endpoint
+    * @param body Request body
+    * @param timeoutMs Optional timeout in milliseconds
     */
-    async patch<T>(endpoint: string, body: any): Promise<T> {
+    async patch<T>(endpoint: string, body: any, timeoutMs?: number): Promise<T> {
         const headers = await this.getAuthHeaders();
         logger(`PATCH: ${endpoint} ${JSON.stringify(body)}`);
-        const response = await fetch(`${this.baseUrl}${endpoint}`, {
-            method: 'PATCH',
-            headers,
-            body: JSON.stringify(body)
-        });
+        const response = await this.fetchWithTimeout(
+            `${this.baseUrl}${endpoint}`,
+            { method: 'PATCH', headers, body: JSON.stringify(body) },
+            timeoutMs
+        );
         
         if (!response.ok) {
             await this.handleApiError(response);
@@ -168,14 +214,17 @@ export class ApiService {
     
     /**
     * Performs a DELETE request
+    * @param endpoint API endpoint
+    * @param timeoutMs Optional timeout in milliseconds
     */
-    async delete(endpoint: string): Promise<void> {
+    async delete(endpoint: string, timeoutMs?: number): Promise<void> {
         const headers = await this.getAuthHeaders();
         logger(`DELETE: ${endpoint}`);
-        const response = await fetch(`${this.baseUrl}${endpoint}`, {
-            method: 'DELETE',
-            headers
-        });
+        const response = await this.fetchWithTimeout(
+            `${this.baseUrl}${endpoint}`,
+            { method: 'DELETE', headers },
+            timeoutMs
+        );
         
         if (!response.ok) {
             await this.handleApiError(response);

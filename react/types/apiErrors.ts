@@ -32,3 +32,16 @@ export class ServerError extends Error {
         this.name = 'ServerError';
     }
 }
+
+/**
+ * Error thrown when a request times out
+ */
+export class TimeoutError extends Error {
+    public readonly timeoutMs: number;
+
+    constructor(timeoutMs: number, message?: string) {
+        super(message || `Request timed out after ${timeoutMs}ms`);
+        this.name = 'TimeoutError';
+        this.timeoutMs = timeoutMs;
+    }
+}
