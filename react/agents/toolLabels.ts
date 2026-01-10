@@ -43,6 +43,8 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     // Reading tools
     read_pages: 'Reading',
     search_in_documents: 'Search in documents',
+    search_in_attachment: 'Search in attachment',
+    search_in_attachments: 'Search in attachments',
     read_file: 'Retrieving data',
     view_pages: 'Viewing pages',
     view_page_images: 'Viewing pages',
@@ -226,6 +228,14 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             const label = description || (query ? truncate(query, 50) : null);
             if (label) {
                 return `${baseLabel}: ${label}`;
+            }
+            return baseLabel;
+        }
+
+        case 'search_in_attachment': {
+            const query = args.query as string | undefined;
+            if (query) {
+                return `${baseLabel}: "${truncate(query, 40)}"`;
             }
             return baseLabel;
         }

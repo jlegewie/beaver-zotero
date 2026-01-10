@@ -401,6 +401,79 @@ export interface WSZoteroAttachmentPageImagesResponse {
     error_code?: AttachmentPageImagesErrorCode | null;
 }
 
+/** Error codes for attachment search failures */
+export type AttachmentSearchErrorCode =
+    | 'not_found'           // Attachment not found in Zotero
+    | 'not_pdf'             // Attachment is not a PDF
+    | 'file_missing'        // PDF file not available locally
+    | 'file_too_large'      // PDF file exceeds size limit
+    | 'encrypted'           // PDF is password-protected
+    | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'too_many_pages'      // PDF exceeds page count limit
+    | 'search_failed';      // General search failure
+
+/** Request from backend to search text within an attachment */
+export interface WSZoteroAttachmentSearchRequest extends WSBaseEvent {
+    event: 'zotero_attachment_search_request';
+    request_id: string;
+    attachment: ZoteroItemReference;
+    /** Search query (literal phrase match, case-insensitive) */
+    query: string;
+    /** Maximum hits to return per page. Default: 100 */
+    max_hits_per_page?: number;
+    /** Skip local file size and page count limits. Default: false */
+    skip_local_limits?: boolean;
+}
+
+/** A single search hit within a page */
+export interface WSSearchHit {
+    /** Hit bounding box in MuPDF format {x, y, w, h} */
+    bbox: { x: number; y: number; w: number; h: number };
+    /** Text role: heading, body, caption, footnote, unknown */
+    role: string;
+    /** Role weight applied to this hit */
+    weight: number;
+    /** Matched text content (if available) */
+    matched_text?: string;
+}
+
+/** Search results for a single page */
+export interface WSPageSearchResult {
+    /** 0-indexed page number */
+    page_index: number;
+    /** Page label (e.g., "iv", "220") if available */
+    label?: string;
+    /** Number of matches on this page */
+    match_count: number;
+    /** Computed relevance score for ranking */
+    score: number;
+    /** Total text length on the page (for context) */
+    text_length: number;
+    /** Individual search hits with positions */
+    hits: WSSearchHit[];
+}
+
+/** Response to zotero attachment search request */
+export interface WSZoteroAttachmentSearchResponse {
+    type: 'zotero_attachment_search';
+    request_id: string;
+    attachment: ZoteroItemReference;
+    /** Search query that was executed */
+    query: string;
+    /** Total number of matches across all pages */
+    total_matches: number;
+    /** Number of pages with at least one match */
+    pages_with_matches: number;
+    /** Total pages in the document */
+    total_pages: number | null;
+    /** Pages with matches, sorted by relevance score (highest first) */
+    pages: WSPageSearchResult[];
+    /** Error message if search failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: AttachmentSearchErrorCode | null;
+}
+
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
@@ -418,6 +491,7 @@ export type WSEvent =
     | WSMissingZoteroDataEvent
     | WSZoteroAttachmentPagesRequest
     | WSZoteroAttachmentPageImagesRequest
+    | WSZoteroAttachmentSearchRequest
     | WSExternalReferenceCheckRequest
     | WSZoteroDataRequest
     | WSItemSearchByMetadataRequest

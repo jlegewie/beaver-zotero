@@ -9,6 +9,7 @@ import {
     ExtractionError, 
     ExtractionErrorCode,
     PDFExtractor,
+    searchFromZoteroItem,
 } from '../../../../src/services/pdf';
 import { 
     visualizeCurrentPageColumns, 
@@ -460,11 +461,115 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
     };
 
+    // Test PDF text search on selected item
+    const handleTestPdfSearch = async () => {
+        const query = currentMessageContent?.trim();
+        if (!query || query.length === 0) {
+            console.log("[PDF Search Test] No search query provided. Enter text in the message input.");
+            return;
+        }
+
+        const selectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
+        
+        if (selectedItems.length === 0) {
+            console.log("[PDF Search Test] No item selected");
+            return;
+        }
+
+        let pdfItem = selectedItems[0];
+
+        // If it's a parent item, try to get the first PDF attachment
+        if (!pdfItem.isPDFAttachment()) {
+            const attachmentIDs = pdfItem.getAttachments();
+            const pdfAttachment = attachmentIDs
+                .map(id => Zotero.Items.get(id))
+                .find(item => item.isPDFAttachment());
+            
+            if (!pdfAttachment) {
+                console.log("[PDF Search Test] Selected item is not a PDF and has no PDF attachments");
+                return;
+            }
+            pdfItem = pdfAttachment;
+        }
+
+        const title = pdfItem.getField("title") || pdfItem.getDisplayTitle();
+        console.log(`[PDF Search Test] Searching in: ${title}`);
+        console.log(`[PDF Search Test] Query: "${query}"`);
+
+        try {
+            const result = await searchFromZoteroItem(pdfItem, query);
+            
+            if (!result) {
+                console.log("[PDF Search Test] File not found");
+                return;
+            }
+
+            // Log summary
+            console.log("\n" + "=".repeat(60));
+            console.log(`[PDF Search Test] RESULTS: "${query}"`);
+            console.log("=".repeat(60));
+            
+            console.group("[PDF Search Test] Summary");
+            console.log(`Total matches: ${result.totalMatches}`);
+            console.log(`Pages with matches: ${result.pagesWithMatches} of ${result.totalPages}`);
+            console.log(`Search duration: ${result.metadata.durationMs}ms`);
+            console.groupEnd();
+
+            if (result.pages.length === 0) {
+                console.log("[PDF Search Test] No matches found");
+                return;
+            }
+
+            // Log page results (ranked by score)
+            console.group("[PDF Search Test] Page Results (ranked by relevance score)");
+            for (const page of result.pages) {
+                const labelStr = page.label ? ` (${page.label})` : '';
+                console.group(`Page ${page.pageIndex + 1}${labelStr}: score=${page.score.toFixed(2)}, ${page.matchCount} match${page.matchCount !== 1 ? 'es' : ''}`);
+                console.log(`  Raw score: ${page.rawScore.toFixed(2)}`);
+                console.log(`  Text length: ${page.textLength} chars`);
+                console.log(`  Dimensions: ${page.width.toFixed(0)} × ${page.height.toFixed(0)} pt`);
+                
+                // Count hits by role
+                const roleCount: Record<string, number> = {};
+                for (const hit of page.hits) {
+                    roleCount[hit.role] = (roleCount[hit.role] || 0) + 1;
+                }
+                console.log(`  Hits by role: ${Object.entries(roleCount).map(([r, c]) => `${r}=${c}`).join(', ')}`);
+                
+                // Show first few hits with role and weight
+                const hitsToShow = Math.min(page.hits.length, 5);
+                for (let i = 0; i < hitsToShow; i++) {
+                    const hit = page.hits[i];
+                    const bbox = hit.bbox;
+                    const text = hit.matchedText ? ` "${hit.matchedText.slice(0, 50)}${hit.matchedText.length > 50 ? '...' : ''}"` : '';
+                    console.log(`  Hit ${i + 1}: [${hit.role}] weight=${hit.weight}${text}`);
+                }
+                if (page.hits.length > hitsToShow) {
+                    console.log(`  ... ${page.hits.length - hitsToShow} more hits`);
+                }
+                console.groupEnd();
+            }
+            console.groupEnd();
+
+            // Log full result object
+            console.log("[PDF Search Test] Full result object:", result);
+            
+        } catch (error) {
+            console.error("[PDF Search Test] Search failed:", error);
+        }
+    };
+
     // Create menu items for dev testing functions
     const menuItems: MenuItem[] = [
         {
             label: "Test Semantic Search",
             onClick: handleTestSemanticSearch,
+            icon: SearchIcon,
+            disabled: false,
+        },
+        {
+            label: "Test PDF Search",
+            onClick: handleTestPdfSearch,
             icon: SearchIcon,
             disabled: false,
         },

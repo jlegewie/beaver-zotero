@@ -11,6 +11,8 @@ import {
     extractViewPageImagesData,
     isSearchInDocumentsResult,
     extractSearchInDocumentsData,
+    isSearchInAttachmentResult,
+    extractSearchInAttachmentData,
     isExternalSearchResult,
     extractExternalSearchData,
     isReadPagesFrontendResult,
@@ -79,6 +81,14 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         const data = extractSearchInDocumentsData(content, metadata);
         if (data) {
             return <FulltextSearchResultView chunks={data.chunks} />;
+        }
+    }
+
+    // Search in attachment results (search_in_attachment - keyword search)
+    if (isSearchInAttachmentResult(toolName, content, metadata)) {
+        const data = extractSearchInAttachmentData(content, metadata);
+        if (data) {
+            return <ReadPagesResultView pages={data.pages} />;
         }
     }
 

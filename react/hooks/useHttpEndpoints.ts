@@ -17,6 +17,7 @@ import {
     handleExternalReferenceCheckRequest,
     handleZoteroAttachmentPagesRequest,
     handleZoteroAttachmentPageImagesRequest,
+    handleZoteroAttachmentSearchRequest,
     handleItemSearchByMetadataRequest,
     handleItemSearchByTopicRequest,
 } from '../../src/services/agentDataProvider';
@@ -25,6 +26,7 @@ import type {
     WSExternalReferenceCheckRequest,
     WSZoteroAttachmentPagesRequest,
     WSZoteroAttachmentPageImagesRequest,
+    WSZoteroAttachmentSearchRequest,
     WSItemSearchByMetadataRequest,
     WSItemSearchByTopicRequest,
 } from '../../src/services/agentProtocol';
@@ -56,6 +58,7 @@ const ENDPOINT_PATHS = [
     '/beaver/search/topic',
     '/beaver/attachment/pages',
     '/beaver/attachment/page-images',
+    '/beaver/attachment/search',
 ] as const;
 
 /**
@@ -224,6 +227,30 @@ async function handleAttachmentPageImagesHttpRequest(request: any) {
     };
 }
 
+async function handleAttachmentSearchHttpRequest(request: any) {
+    const wsRequest: WSZoteroAttachmentSearchRequest = {
+        event: 'zotero_attachment_search_request',
+        request_id: generateRequestId(),
+        attachment: request.attachment,
+        query: request.query,
+        max_hits_per_page: request.max_hits_per_page,
+        skip_local_limits: request.skip_local_limits,
+    };
+    
+    const response = await handleZoteroAttachmentSearchRequest(wsRequest);
+    
+    return {
+        attachment: response.attachment,
+        query: response.query,
+        total_matches: response.total_matches,
+        pages_with_matches: response.pages_with_matches,
+        total_pages: response.total_pages,
+        pages: response.pages,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
 
 // =============================================================================
 // Registration Functions
@@ -252,6 +279,9 @@ function registerEndpoints(): boolean {
     
     Zotero.Server.Endpoints['/beaver/attachment/page-images'] = 
         createEndpoint(handleAttachmentPageImagesHttpRequest);
+    
+    Zotero.Server.Endpoints['/beaver/attachment/search'] = 
+        createEndpoint(handleAttachmentSearchHttpRequest);
     
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
     return true;

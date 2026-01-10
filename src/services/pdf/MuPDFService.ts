@@ -5,7 +5,18 @@
  * Handles initialization, caching, and provides typed access to raw PDF data.
  */
 
-import type { RawPageData, RawBlock, RawDocumentData, PageImageOptions, PageImageResult, ImageFormat } from "./types";
+import type { 
+    RawPageData, 
+    RawBlock, 
+    RawDocumentData, 
+    PageImageOptions, 
+    PageImageResult, 
+    ImageFormat,
+    PDFPageSearchResult,
+    PDFSearchHit,
+    QuadPoint,
+    RawBBox,
+} from "./types";
 import { ExtractionError, ExtractionErrorCode, DEFAULT_PAGE_IMAGE_OPTIONS } from "./types";
 
 // ============================================================================
@@ -89,6 +100,8 @@ interface MuPDFPage {
     getLabel(): string;
     toStructuredText(options?: string): MuPDFStructuredText;
     toPixmap(matrix: number[], colorspace: MuPDFColorSpace, alpha?: boolean, showExtras?: boolean): MuPDFPixmap;
+    /** Search for text on the page. Returns array of QuadPoint arrays (one per hit). */
+    search(needle: string, maxHits?: number): QuadPoint[][];
     destroy(): void;
 }
 
@@ -422,6 +435,123 @@ export class MuPDFService {
             : Array.from({ length: pageCount }, (_, i) => i);
 
         return indices.map(i => this.renderPageToImage(i, options));
+    }
+
+    /**
+     * Search for text on a single page.
+     * 
+     * Uses MuPDF's built-in search which performs:
+     * - Case-insensitive matching
+     * - Literal phrase search (no regex, no boolean operators)
+     * 
+     * @param pageIndex - Page index (0-based)
+     * @param query - Text to search for
+     * @param maxHits - Maximum number of hits to return (default: 100)
+     * @returns PDFPageSearchResult with hits and their positions
+     */
+    searchPage(pageIndex: number, query: string, maxHits: number = 100): PDFPageSearchResult {
+        this.ensureOpen();
+        const page = this.doc!.loadPage(pageIndex);
+
+        try {
+            // Get page dimensions
+            const pageBounds = page.getBounds("CropBox");
+            const width = pageBounds[2] - pageBounds[0];
+            const height = pageBounds[3] - pageBounds[1];
+
+            // Get page label
+            let label: string | undefined;
+            try {
+                label = page.getLabel();
+            } catch {
+                // Label not available
+            }
+
+            // Perform search
+            // MuPDF returns: QuadPoint[][] where each inner array is one hit
+            const searchResults = page.search(query, maxHits);
+
+            // Convert to PDFSearchHit format
+            const hits: PDFSearchHit[] = searchResults.map(quads => {
+                // Calculate bounding box from all quads in this hit
+                const bbox = this.computeBBoxFromQuads(quads);
+                return { quads, bbox };
+            });
+
+            return {
+                pageIndex,
+                label,
+                matchCount: hits.length,
+                hits,
+                width,
+                height,
+            };
+        } finally {
+            page.destroy();
+        }
+    }
+
+    /**
+     * Search for text across multiple pages.
+     * @param query - Text to search for
+     * @param pageIndices - Pages to search (0-based). If undefined, searches all.
+     * @param maxHitsPerPage - Maximum hits per page (default: 100)
+     * @returns Array of PDFPageSearchResult for pages with matches
+     */
+    searchPages(
+        query: string, 
+        pageIndices?: number[], 
+        maxHitsPerPage: number = 100
+    ): PDFPageSearchResult[] {
+        this.ensureOpen();
+        const pageCount = this.getPageCount();
+
+        const indices = pageIndices?.length
+            ? pageIndices.filter(i => i >= 0 && i < pageCount)
+            : Array.from({ length: pageCount }, (_, i) => i);
+
+        const results: PDFPageSearchResult[] = [];
+
+        for (const pageIndex of indices) {
+            const pageResult = this.searchPage(pageIndex, query, maxHitsPerPage);
+            if (pageResult.matchCount > 0) {
+                results.push(pageResult);
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * Compute bounding box from an array of QuadPoints.
+     * QuadPoint format: [ulx, uly, urx, ury, llx, lly, lrx, lry]
+     */
+    private computeBBoxFromQuads(quads: QuadPoint[]): RawBBox {
+        if (quads.length === 0) {
+            return { x: 0, y: 0, w: 0, h: 0 };
+        }
+
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+
+        for (const quad of quads) {
+            // QuadPoint: [ulx, uly, urx, ury, llx, lly, lrx, lry]
+            const [ulx, uly, urx, ury, llx, lly, lrx, lry] = quad;
+            
+            minX = Math.min(minX, ulx, urx, llx, lrx);
+            minY = Math.min(minY, uly, ury, lly, lry);
+            maxX = Math.max(maxX, ulx, urx, llx, lrx);
+            maxY = Math.max(maxY, uly, ury, lly, lry);
+        }
+
+        return {
+            x: minX,
+            y: minY,
+            w: maxX - minX,
+            h: maxY - minY,
+        };
     }
 
     /** Ensure the document is open */
