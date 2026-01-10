@@ -32,8 +32,10 @@ import {
     syncedLibrariesAtom,
     isDatabaseSyncSupportedAtom,
     pendingUpgradeConsentAtom,
-    pendingDowngradeAckAtom
+    pendingDowngradeAckAtom,
+    updateRequiredAtom
 } from '../atoms/profile';
+import UpdateRequiredPage from './pages/UpdateRequiredPage';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -59,6 +61,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const isMigratingData = useAtomValue(isMigratingDataAtom);
     const pendingUpgradeConsent = useAtomValue(pendingUpgradeConsentAtom);
     const pendingDowngradeAck = useAtomValue(pendingDowngradeAckAtom);
+    const updateRequired = useAtomValue(updateRequiredAtom);
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -99,6 +102,17 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
             <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
                 <Header isWindow={isWindow} />
                 <LoginPage emailInputRef={loginEmailRef} />
+                <DialogContainer />
+            </div>
+        );
+    }
+
+    {/* Update required page - blocks access until user updates */}
+    if (updateRequired) {
+        return (
+            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                <Header isWindow={isWindow} />
+                <UpdateRequiredPage />
                 <DialogContainer />
             </div>
         );

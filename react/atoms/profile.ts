@@ -14,6 +14,42 @@ export const profileWithPlanAtom = atom<SafeProfileWithPlan | null>(null);
 export const isMigratingDataAtom = atom<boolean>(false);
 export const requiredDataVersionAtom = atom<number>(0);
 
+// Minimum frontend version required by backend
+export const minimumFrontendVersionAtom = atom<string | null>(null);
+
+/**
+ * Compares two semantic version strings
+ * @returns -1 if v1 < v2, 0 if equal, 1 if v1 > v2
+ */
+function compareVersions(v1: string, v2: string): number {
+    // Strip any pre-release suffix for comparison (e.g., "0.9.0-beta.3" -> "0.9.0")
+    const normalize = (v: string) => v.split('-')[0];
+    const parts1 = normalize(v1).split('.').map(Number);
+    const parts2 = normalize(v2).split('.').map(Number);
+    
+    for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+        const num1 = parts1[i] || 0;
+        const num2 = parts2[i] || 0;
+        if (num1 < num2) return -1;
+        if (num1 > num2) return 1;
+    }
+    return 0;
+}
+
+/**
+ * Derived atom that checks if the current frontend version is outdated
+ * Returns true if an update is required
+ */
+export const updateRequiredAtom = atom<boolean>((get) => {
+    const minimumVersion = get(minimumFrontendVersionAtom);
+    if (!minimumVersion) return false;
+    
+    const currentVersion = Zotero.Beaver?.pluginVersion;
+    if (!currentVersion) return false;
+    
+    return compareVersions(currentVersion, minimumVersion) < 0;
+});
+
 // Device authorization state
 // A device is authorized if the user has completed authorization (pro or free) AND the device is in the list
 const { localUserKey } = getZoteroUserIdentifier();
