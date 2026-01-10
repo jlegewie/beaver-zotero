@@ -543,6 +543,92 @@ export class ExtractionError extends Error {
 }
 
 // ============================================================================
+// PDF Search Types
+// ============================================================================
+
+/**
+ * A QuadPoint defines a quadrilateral region on a page.
+ * Format: [ulx, uly, urx, ury, llx, lly, lrx, lry]
+ * - ul = upper-left, ur = upper-right, ll = lower-left, lr = lower-right
+ */
+export type QuadPoint = [number, number, number, number, number, number, number, number];
+
+/**
+ * A single search hit on a page.
+ * Each hit represents one occurrence of the search term.
+ */
+export interface PDFSearchHit {
+    /** QuadPoints defining the hit region(s) - one quad per character in match */
+    quads: QuadPoint[];
+    /** Bounding box enclosing all quads (for convenience) */
+    bbox: RawBBox;
+}
+
+/**
+ * Search results for a single page.
+ */
+export interface PDFPageSearchResult {
+    /** 0-based page index */
+    pageIndex: number;
+    /** Page label (e.g., "iv", "220") if available */
+    label?: string;
+    /** Number of matches on this page */
+    matchCount: number;
+    /** Individual search hits with positions */
+    hits: PDFSearchHit[];
+    /** Page dimensions for coordinate conversion */
+    width: number;
+    height: number;
+}
+
+/**
+ * Options for PDF search.
+ */
+export interface PDFSearchOptions {
+    /** Maximum hits per page (default: 100) */
+    maxHitsPerPage?: number;
+    /** Pages to search (0-based). If undefined, searches all pages */
+    pages?: number[];
+}
+
+/** Default search options */
+export const DEFAULT_PDF_SEARCH_OPTIONS: Required<PDFSearchOptions> = {
+    maxHitsPerPage: 100,
+    pages: [],
+};
+
+/**
+ * Complete PDF search result.
+ * 
+ * Search Behavior:
+ * - Simple phrase search (grep-like) - matches literal text
+ * - Case-insensitive matching
+ * - No boolean operators (AND/OR) - use multiple searches if needed
+ * - Returns whole pages ranked by match count (most matches first)
+ */
+export interface PDFSearchResult {
+    /** Search query used */
+    query: string;
+    /** Total number of matches across all pages */
+    totalMatches: number;
+    /** Number of pages with at least one match */
+    pagesWithMatches: number;
+    /** Total pages in document */
+    totalPages: number;
+    /** 
+     * Page results ranked by match count (highest first).
+     * Only includes pages with at least one match.
+     */
+    pages: PDFPageSearchResult[];
+    /** Search metadata */
+    metadata: {
+        searchedAt: string;
+        durationMs: number;
+        options: PDFSearchOptions;
+    };
+}
+
+// ============================================================================
 // Page Image Rendering Types
 // ============================================================================
 

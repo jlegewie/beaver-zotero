@@ -35,6 +35,9 @@ import {
     PageImageOptions,
     PageImageResult,
     DEFAULT_PAGE_IMAGE_OPTIONS,
+    PDFSearchOptions,
+    PDFSearchResult,
+    DEFAULT_PDF_SEARCH_OPTIONS,
 } from "./types";
 
 // Re-export types and classes for convenience
@@ -535,6 +538,79 @@ export class PDFExtractor {
             this.mupdf.close();
         }
     }
+
+    /**
+     * Search for text within a PDF document.
+     * 
+     * Search Behavior:
+     * - Simple phrase search (grep-like) - matches literal text
+     * - Case-insensitive matching (handled by MuPDF)
+     * - No boolean operators (AND/OR) - for multiple terms, perform separate searches
+     * - Returns whole pages ranked by match count (most matches first)
+     * - Each hit includes QuadPoint coordinates for highlighting
+     * 
+     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
+     * @param query - Text to search for (literal phrase match)
+     * @param options - Search options
+     * @returns PDFSearchResult with ranked pages and hit positions
+     * 
+     * @example
+     * ```typescript
+     * const extractor = new PDFExtractor();
+     * const result = await extractor.search(pdfData, "machine learning");
+     * console.log(`Found ${result.totalMatches} matches in ${result.pagesWithMatches} pages`);
+     * 
+     * // Iterate through ranked pages (most matches first)
+     * for (const page of result.pages) {
+     *   console.log(`Page ${page.pageIndex + 1}: ${page.matchCount} matches`);
+     * }
+     * ```
+     */
+    async search(
+        pdfData: Uint8Array | ArrayBuffer,
+        query: string,
+        options: PDFSearchOptions = {}
+    ): Promise<PDFSearchResult> {
+        const startTime = Date.now();
+        const opts = { ...DEFAULT_PDF_SEARCH_OPTIONS, ...options };
+
+        try {
+            await this.mupdf.open(pdfData);
+            const totalPages = this.mupdf.getPageCount();
+
+            // Determine pages to search
+            const pageIndices = opts.pages?.length
+                ? opts.pages.filter(i => i >= 0 && i < totalPages)
+                : undefined; // undefined = search all
+
+            // Perform search
+            const pageResults = this.mupdf.searchPages(query, pageIndices, opts.maxHitsPerPage);
+
+            // Sort pages by match count (highest first)
+            pageResults.sort((a, b) => b.matchCount - a.matchCount);
+
+            // Calculate totals
+            const totalMatches = pageResults.reduce((sum, p) => sum + p.matchCount, 0);
+            const pagesWithMatches = pageResults.length;
+
+            const durationMs = Date.now() - startTime;
+
+            return {
+                query,
+                totalMatches,
+                pagesWithMatches,
+                totalPages,
+                pages: pageResults,
+                metadata: {
+                    searchedAt: new Date().toISOString(),
+                    durationMs,
+                    options: opts,
+                },
+            };
+        } finally {
+            this.mupdf.close();
+        }
+    }
 }
 
 // ============================================================================
@@ -664,4 +740,48 @@ export async function renderPagesToImagesFromZoteroItem(
     const pdfData = await IOUtils.read(path);
     const extractor = new PDFExtractor();
     return extractor.renderPagesToImages(pdfData, pageIndices, options);
+}
+
+/**
+ * Search for text within a PDF from a Zotero attachment item.
+ * 
+ * Search Behavior:
+ * - Simple phrase search (grep-like) - matches literal text
+ * - Case-insensitive matching
+ * - No boolean operators (AND/OR) - for multiple terms, perform separate searches
+ * - Returns whole pages ranked by match count (most matches first)
+ * - Each hit includes QuadPoint coordinates for highlighting
+ *
+ * @param item - Zotero attachment item
+ * @param query - Text to search for (literal phrase match)
+ * @param options - Search options
+ * @returns PDFSearchResult or null if file not found
+ * 
+ * @example
+ * ```typescript
+ * const result = await searchFromZoteroItem(item, "machine learning");
+ * if (result) {
+ *   console.log(`Found ${result.totalMatches} matches in ${result.pagesWithMatches} pages`);
+ *   
+ *   // Get top 3 pages with most matches
+ *   const topPages = result.pages.slice(0, 3);
+ *   for (const page of topPages) {
+ *     console.log(`Page ${page.pageIndex + 1}: ${page.matchCount} matches`);
+ *   }
+ * }
+ * ```
+ */
+export async function searchFromZoteroItem(
+    item: Zotero.Item,
+    query: string,
+    options: PDFSearchOptions = {}
+): Promise<PDFSearchResult | null> {
+    const path = await item.getFilePathAsync();
+    if (!path) {
+        return null;
+    }
+
+    const pdfData = await IOUtils.read(path);
+    const extractor = new PDFExtractor();
+    return extractor.search(pdfData, query, options);
 }

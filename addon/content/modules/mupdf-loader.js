@@ -544,6 +544,90 @@ var MuPDFLoader = {
             return new Pixmap(result);
         };
 
+        // Helper function to read a Quad from WASM memory (8 floats)
+        const fromQuad = (ptr) => {
+            let addr = ptr >> 2;
+            return [
+                libmupdf.HEAPF32[addr + 0],
+                libmupdf.HEAPF32[addr + 1],
+                libmupdf.HEAPF32[addr + 2],
+                libmupdf.HEAPF32[addr + 3],
+                libmupdf.HEAPF32[addr + 4],
+                libmupdf.HEAPF32[addr + 5],
+                libmupdf.HEAPF32[addr + 6],
+                libmupdf.HEAPF32[addr + 7],
+            ];
+        };
+
+        /**
+         * Run a search on a page or structured text.
+         * Returns an array of arrays of quads, where each inner array
+         * represents one search hit (may span multiple quads for multi-line matches).
+         * 
+         * @param {function} searchFun - The WASM search function to call
+         * @param {number} searchThis - Pointer to the page or stext object
+         * @param {string} needle - Text to search for
+         * @param {number} maxHits - Maximum number of hits to return
+         * @returns {Array<Array<number[]>>} - Array of hits, each hit is an array of quads
+         */
+        const runSearch = (searchFun, searchThis, needle, maxHits = 500) => {
+            let hits = 0;
+            let marks = 0;
+            try {
+                // Each quad is 8 floats (32 bytes), marks is 4 bytes per hit
+                hits = Malloc(32 * maxHits);
+                marks = Malloc(4 * maxHits);
+                
+                // Call the WASM search function
+                const n = searchFun(searchThis, STRING(needle), marks, hits, maxHits);
+                
+                const outer = [];
+                if (n > 0) {
+                    let inner = [];
+                    for (let i = 0; i < n; i++) {
+                        const mark = libmupdf.HEAP32[(marks >> 2) + i];
+                        const quad = fromQuad(hits + i * 32);
+                        // mark indicates start of a new hit
+                        if (i > 0 && mark) {
+                            outer.push(inner);
+                            inner = [];
+                        }
+                        inner.push(quad);
+                    }
+                    outer.push(inner);
+                }
+                return outer;
+            } finally {
+                Free(marks);
+                Free(hits);
+            }
+        };
+
+        /**
+         * Search for text on a page.
+         * Returns an array of search hits, where each hit is an array of quads
+         * (one quad per character in the match).
+         * 
+         * @param {string} needle - Text to search for
+         * @param {number} maxHits - Maximum number of hits (default: 500)
+         * @returns {Array<Array<number[]>>} - Array of hits
+         */
+        Page.prototype.search = function (needle, maxHits = 500) {
+            return runSearch(libmupdf._wasm_search_page, this.pointer, needle, maxHits);
+        };
+
+        /**
+         * Search for text in structured text.
+         * Returns an array of search hits, where each hit is an array of quads.
+         * 
+         * @param {string} needle - Text to search for
+         * @param {number} maxHits - Maximum number of hits (default: 500)
+         * @returns {Array<Array<number[]>>} - Array of hits
+         */
+        StructuredText.prototype.search = function (needle, maxHits = 500) {
+            return runSearch(libmupdf._wasm_search_stext_page, this.pointer, needle, maxHits);
+        };
+
         return {
             Document,
             Page,

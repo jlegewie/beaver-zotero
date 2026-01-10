@@ -9,6 +9,7 @@ import {
     ExtractionError, 
     ExtractionErrorCode,
     PDFExtractor,
+    searchFromZoteroItem,
 } from '../../../../src/services/pdf';
 import { 
     visualizeCurrentPageColumns, 
@@ -460,11 +461,105 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
     };
 
+    // Test PDF text search on selected item
+    const handleTestPdfSearch = async () => {
+        const query = currentMessageContent?.trim();
+        if (!query || query.length === 0) {
+            console.log("[PDF Search Test] No search query provided. Enter text in the message input.");
+            return;
+        }
+
+        const selectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
+        
+        if (selectedItems.length === 0) {
+            console.log("[PDF Search Test] No item selected");
+            return;
+        }
+
+        let pdfItem = selectedItems[0];
+
+        // If it's a parent item, try to get the first PDF attachment
+        if (!pdfItem.isPDFAttachment()) {
+            const attachmentIDs = pdfItem.getAttachments();
+            const pdfAttachment = attachmentIDs
+                .map(id => Zotero.Items.get(id))
+                .find(item => item.isPDFAttachment());
+            
+            if (!pdfAttachment) {
+                console.log("[PDF Search Test] Selected item is not a PDF and has no PDF attachments");
+                return;
+            }
+            pdfItem = pdfAttachment;
+        }
+
+        const title = pdfItem.getField("title") || pdfItem.getDisplayTitle();
+        console.log(`[PDF Search Test] Searching in: ${title}`);
+        console.log(`[PDF Search Test] Query: "${query}"`);
+
+        try {
+            const result = await searchFromZoteroItem(pdfItem, query);
+            
+            if (!result) {
+                console.log("[PDF Search Test] File not found");
+                return;
+            }
+
+            // Log summary
+            console.log("\n" + "=".repeat(60));
+            console.log(`[PDF Search Test] RESULTS: "${query}"`);
+            console.log("=".repeat(60));
+            
+            console.group("[PDF Search Test] Summary");
+            console.log(`Total matches: ${result.totalMatches}`);
+            console.log(`Pages with matches: ${result.pagesWithMatches} of ${result.totalPages}`);
+            console.log(`Search duration: ${result.metadata.durationMs}ms`);
+            console.groupEnd();
+
+            if (result.pages.length === 0) {
+                console.log("[PDF Search Test] No matches found");
+                return;
+            }
+
+            // Log page results (ranked by match count)
+            console.group("[PDF Search Test] Page Results (ranked by matches)");
+            for (const page of result.pages) {
+                const labelStr = page.label ? ` (${page.label})` : '';
+                console.group(`Page ${page.pageIndex + 1}${labelStr}: ${page.matchCount} match${page.matchCount !== 1 ? 'es' : ''}`);
+                console.log(`  Dimensions: ${page.width.toFixed(0)} × ${page.height.toFixed(0)} pt`);
+                
+                // Show first few hits with positions
+                const hitsToShow = Math.min(page.hits.length, 5);
+                for (let i = 0; i < hitsToShow; i++) {
+                    const hit = page.hits[i];
+                    const bbox = hit.bbox;
+                    console.log(`  Hit ${i + 1}: position (${bbox.x.toFixed(0)}, ${bbox.y.toFixed(0)}), size ${bbox.w.toFixed(0)}×${bbox.h.toFixed(0)}pt`);
+                }
+                if (page.hits.length > hitsToShow) {
+                    console.log(`  ... ${page.hits.length - hitsToShow} more hits`);
+                }
+                console.groupEnd();
+            }
+            console.groupEnd();
+
+            // Log full result object
+            console.log("[PDF Search Test] Full result object:", result);
+            
+        } catch (error) {
+            console.error("[PDF Search Test] Search failed:", error);
+        }
+    };
+
     // Create menu items for dev testing functions
     const menuItems: MenuItem[] = [
         {
             label: "Test Semantic Search",
             onClick: handleTestSemanticSearch,
+            icon: SearchIcon,
+            disabled: false,
+        },
+        {
+            label: "Test PDF Search",
+            onClick: handleTestPdfSearch,
             icon: SearchIcon,
             disabled: false,
         },
