@@ -4,6 +4,7 @@ import { SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode } fro
 import { getZoteroUserIdentifier } from "../../src/utils/zoteroUtils";
 import { ZoteroLibrary } from "../types/zotero";
 import { fileStatusAtom } from "./files";
+import { compareVersions } from "../utils/compareVersions";
 
 // Profile and plan state
 export const isProfileInvalidAtom = atom<boolean>(false);
@@ -13,6 +14,23 @@ export const profileWithPlanAtom = atom<SafeProfileWithPlan | null>(null);
 // Data migration state
 export const isMigratingDataAtom = atom<boolean>(false);
 export const requiredDataVersionAtom = atom<number>(0);
+
+// Minimum frontend version required by backend
+export const minimumFrontendVersionAtom = atom<string | null>(null);
+
+/**
+ * Derived atom that checks if the current frontend version is outdated
+ * Returns true if an update is required
+ */
+export const updateRequiredAtom = atom<boolean>((get) => {
+    const minimumVersion = get(minimumFrontendVersionAtom);
+    if (!minimumVersion) return false;
+    
+    const currentVersion = Zotero.Beaver?.pluginVersion;
+    if (!currentVersion) return false;
+    
+    return compareVersions(currentVersion, minimumVersion) < 0;
+});
 
 // Device authorization state
 // A device is authorized if the user has completed authorization (pro or free) AND the device is in the list

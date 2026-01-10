@@ -35,6 +35,7 @@ interface ProfileResponse {
     model_configs: ModelConfig[]
     device_requires_authorization: boolean;
     required_data_version: number;
+    minimum_frontend_version: string;
 }
 
 interface OnboardingRequest {

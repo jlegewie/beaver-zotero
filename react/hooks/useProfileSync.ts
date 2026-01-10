@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { fileUploader } from '../../src/services/FileUploader';
-import { isProfileInvalidAtom, isProfileLoadedAtom, profileWithPlanAtom, isMigratingDataAtom, requiredDataVersionAtom, localZoteroLibrariesAtom } from '../atoms/profile';
+import { isProfileInvalidAtom, isProfileLoadedAtom, profileWithPlanAtom, isMigratingDataAtom, requiredDataVersionAtom, localZoteroLibrariesAtom, minimumFrontendVersionAtom } from '../atoms/profile';
 import { isAuthenticatedAtom, logoutAtom, userAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
 import { logger } from '../../src/utils/logger';
@@ -24,6 +24,7 @@ export const useProfileSync = () => {
     const setModels = useSetAtom(setModelsAtom);
     const setIsMigratingData = useSetAtom(isMigratingDataAtom);
     const setRequiredDataVersion = useSetAtom(requiredDataVersionAtom);
+    const setMinimumFrontendVersion = useSetAtom(minimumFrontendVersionAtom);
     const setLocalZoteroLibraries = useSetAtom(localZoteroLibrariesAtom);
     const logout = useSetAtom(logoutAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
@@ -38,8 +39,9 @@ export const useProfileSync = () => {
         try {
             const profileData = await accountService.getProfileWithPlan();
             
-            // Store required data version
+            // Store required data version and minimum frontend version
             setRequiredDataVersion(profileData.required_data_version);
+            setMinimumFrontendVersion(profileData.minimum_frontend_version);
 
             // Check if data migration is needed
             if (profileData.profile.data_version < profileData.required_data_version) {
@@ -111,7 +113,7 @@ export const useProfileSync = () => {
                 setIsProfileLoaded(false);
             }
         }
-    }, [setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid, setModels, setIsMigratingData, setRequiredDataVersion, logout]);
+    }, [setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid, setModels, setIsMigratingData, setRequiredDataVersion, setMinimumFrontendVersion, setLocalZoteroLibraries, logout]);
 
     const refreshProfile = useCallback(async (force = false) => {
         if (!user) return;
