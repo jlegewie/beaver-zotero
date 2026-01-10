@@ -13,6 +13,7 @@ import {
 } from "../atoms/embeddingIndex";
 import { EmbeddingIndexer, MIN_CONTENT_LENGTH, INDEX_BATCH_SIZE } from "../../src/services/embeddingIndexer";
 import { BeaverDB } from "../../src/services/database";
+import { embeddingsService } from "../../src/services/embeddingsService";
 import { logger } from "../../src/utils/logger";
 import { store } from "../store";
 
@@ -247,6 +248,9 @@ export function useEmbeddingIndex() {
 
             // Third pass: process each library and save state
             let processedItems = 0;
+            let totalIndexed = 0;
+            let totalSkipped = 0;
+            let totalFailed = 0;
             const db = getDB();
 
             for (const libraryId of librariesToProcess) {
@@ -281,6 +285,9 @@ export function useEmbeddingIndex() {
                     });
 
                     processedItems += result.indexed + result.skipped + result.failed;
+                    totalIndexed += result.indexed;
+                    totalSkipped += result.skipped;
+                    totalFailed += result.failed;
                     logger(`useEmbeddingIndex: Library ${libraryId} complete: ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed`, 3);
                 }
 
@@ -306,6 +313,9 @@ export function useEmbeddingIndex() {
                 });
 
                 processedItems += result.indexed + result.skipped + result.failed;
+                totalIndexed += result.indexed;
+                totalSkipped += result.skipped;
+                totalFailed += result.failed;
                 logger(`useEmbeddingIndex: Retry items complete: ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed`, 3);
             }
 
@@ -319,6 +329,21 @@ export function useEmbeddingIndex() {
             const duration = Date.now() - startTime;
             logger(`useEmbeddingIndex: Initial indexing complete - took ${formatDuration(duration)}`, 3);
             setIndexStatus({ status: 'idle', phase: 'incremental' });
+
+            // Report indexing completion to backend (fire-and-forget)
+            // Only report if there was actual work done
+            if (totalIndexed > 0 || totalFailed > 0 || totalToDelete > 0) {
+                embeddingsService.reportIndexingComplete({
+                    items_indexed: totalIndexed,
+                    items_failed: totalFailed,
+                    items_skipped: totalSkipped,
+                    libraries_count: libraryIds.length,
+                    duration_ms: duration,
+                    is_force_reindex: forceFullDiff,
+                }).catch(() => {
+                    // Silently ignore - already logged in the service
+                });
+            }
 
         } catch (error) {
             const duration = Date.now() - startTime;

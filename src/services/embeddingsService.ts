@@ -45,6 +45,18 @@ interface QueryEmbeddingResponse {
 }
 
 /**
+ * Stats for indexing completion report
+ */
+export interface IndexingCompleteStats {
+    items_indexed: number;
+    items_failed: number;
+    items_skipped: number;
+    libraries_count: number;
+    duration_ms: number;
+    is_force_reindex: boolean;
+}
+
+/**
  * Default retry configuration
  */
 const DEFAULT_MAX_RETRIES = 3;
@@ -225,6 +237,21 @@ export class EmbeddingsService extends ApiService {
         }
         
         throw lastError;
+    }
+
+    /**
+     * Report indexing completion stats to backend for analytics.
+     * Fire-and-forget - errors are logged but don't affect the user.
+     * @param stats Indexing completion statistics
+     */
+    async reportIndexingComplete(stats: IndexingCompleteStats): Promise<void> {
+        try {
+            await this.post<{ success: boolean }>('/api/v1/embeddings/indexing-complete', stats);
+            logger(`EmbeddingsService: Reported indexing completion - ${stats.items_indexed} indexed, ${stats.items_failed} failed`, 3);
+        } catch (error) {
+            // Log but don't throw - this is non-critical analytics
+            logger(`EmbeddingsService: Failed to report indexing completion: ${(error as Error).message}`, 2);
+        }
     }
 
     /**
