@@ -14,6 +14,7 @@ import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { store } from './store';
 import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
+import { useHttpEndpoints } from './hooks/useHttpEndpoints';
 
 
 /**
@@ -48,6 +49,9 @@ const GlobalContextInitializer = () => {
 
     // Control visibility of the sidebar (e.g., setup global listeners/state)
     useToggleSidebar();
+
+    // Register HTTP endpoints for local FrontendCapability (when authenticated)
+    useHttpEndpoints();
 
     return null; // This component does not render any UI
 };
