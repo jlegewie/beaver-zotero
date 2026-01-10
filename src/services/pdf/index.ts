@@ -38,7 +38,10 @@ import {
     PDFSearchOptions,
     PDFSearchResult,
     DEFAULT_PDF_SEARCH_OPTIONS,
+    SearchScoringOptions,
+    DEFAULT_SEARCH_SCORING_OPTIONS,
 } from "./types";
+import { SearchScorer } from "./SearchScorer";
 
 // Re-export types and classes for convenience
 export * from "./types";
@@ -74,6 +77,7 @@ export type {
     ParagraphDetectionSettings,
     ItemCounters,
 } from "./ParagraphDetector";
+export { SearchScorer } from "./SearchScorer";
 
 /**
  * PDFExtractor - High-level API for extracting text from PDFs.
@@ -546,12 +550,17 @@ export class PDFExtractor {
      * - Simple phrase search (grep-like) - matches literal text
      * - Case-insensitive matching (handled by MuPDF)
      * - No boolean operators (AND/OR) - for multiple terms, perform separate searches
-     * - Returns whole pages ranked by match count (most matches first)
+     * - Returns whole pages ranked by relevance score (highest first)
      * - Each hit includes QuadPoint coordinates for highlighting
+     * 
+     * Scoring Methodology:
+     * - Each hit is weighted by text role (heading=3.0, body=1.0, caption=0.7, footnote=0.3)
+     * - Page score = sum of weighted hits, normalized by sqrt(text_length)
+     * - This prioritizes pages where matches appear in significant content
      * 
      * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
      * @param query - Text to search for (literal phrase match)
-     * @param options - Search options
+     * @param options - Search options including scoring configuration
      * @returns PDFSearchResult with ranked pages and hit positions
      * 
      * @example
@@ -560,9 +569,9 @@ export class PDFExtractor {
      * const result = await extractor.search(pdfData, "machine learning");
      * console.log(`Found ${result.totalMatches} matches in ${result.pagesWithMatches} pages`);
      * 
-     * // Iterate through ranked pages (most matches first)
+     * // Iterate through ranked pages (highest score first)
      * for (const page of result.pages) {
-     *   console.log(`Page ${page.pageIndex + 1}: ${page.matchCount} matches`);
+     *   console.log(`Page ${page.pageIndex + 1}: score=${page.score.toFixed(2)}, matches=${page.matchCount}`);
      * }
      * ```
      */
@@ -573,6 +582,7 @@ export class PDFExtractor {
     ): Promise<PDFSearchResult> {
         const startTime = Date.now();
         const opts = { ...DEFAULT_PDF_SEARCH_OPTIONS, ...options };
+        const scoringOpts = { ...DEFAULT_SEARCH_SCORING_OPTIONS, ...opts.scoring };
 
         try {
             await this.mupdf.open(pdfData);
@@ -583,15 +593,38 @@ export class PDFExtractor {
                 ? opts.pages.filter(i => i >= 0 && i < totalPages)
                 : undefined; // undefined = search all
 
-            // Perform search
+            // Perform search (returns unscored results)
             const pageResults = this.mupdf.searchPages(query, pageIndices, opts.maxHitsPerPage);
 
-            // Sort pages by match count (highest first)
-            pageResults.sort((a, b) => b.matchCount - a.matchCount);
+            if (pageResults.length === 0) {
+                // No matches - return early
+                const durationMs = Date.now() - startTime;
+                return {
+                    query,
+                    totalMatches: 0,
+                    pagesWithMatches: 0,
+                    totalPages,
+                    pages: [],
+                    metadata: {
+                        searchedAt: new Date().toISOString(),
+                        durationMs,
+                        options: opts,
+                        scoringOptions: scoringOpts,
+                    },
+                };
+            }
+
+            // Extract raw pages for scoring (only pages with matches)
+            const matchedPageIndices = pageResults.map(pr => pr.pageIndex);
+            const rawPages = this.mupdf.extractRawPages(matchedPageIndices);
+
+            // Score results using SearchScorer
+            const scorer = new SearchScorer(rawPages.pages, scoringOpts);
+            const scoredResults = scorer.scorePageResults(pageResults);
 
             // Calculate totals
-            const totalMatches = pageResults.reduce((sum, p) => sum + p.matchCount, 0);
-            const pagesWithMatches = pageResults.length;
+            const totalMatches = scoredResults.reduce((sum, p) => sum + p.matchCount, 0);
+            const pagesWithMatches = scoredResults.length;
 
             const durationMs = Date.now() - startTime;
 
@@ -600,11 +633,12 @@ export class PDFExtractor {
                 totalMatches,
                 pagesWithMatches,
                 totalPages,
-                pages: pageResults,
+                pages: scoredResults,
                 metadata: {
                     searchedAt: new Date().toISOString(),
                     durationMs,
                     options: opts,
+                    scoringOptions: scoringOpts,
                 },
             };
         } finally {

@@ -589,13 +589,83 @@ export interface PDFSearchOptions {
     maxHitsPerPage?: number;
     /** Pages to search (0-based). If undefined, searches all pages */
     pages?: number[];
+    /** Scoring options for ranking results */
+    scoring?: SearchScoringOptions;
 }
 
 /** Default search options */
-export const DEFAULT_PDF_SEARCH_OPTIONS: Required<PDFSearchOptions> = {
+export const DEFAULT_PDF_SEARCH_OPTIONS: Required<Omit<PDFSearchOptions, 'scoring'>> & { scoring: SearchScoringOptions } = {
     maxHitsPerPage: 100,
     pages: [],
+    scoring: {},
 };
+
+// ============================================================================
+// Search Scoring Types
+// ============================================================================
+
+/** Semantic role of text where a match was found */
+export type TextRole = "heading" | "body" | "caption" | "footnote" | "unknown";
+
+/** Weights for different text roles in search scoring */
+export interface SearchRoleWeights {
+    heading: number;
+    body: number;
+    caption: number;
+    footnote: number;
+    unknown: number;
+}
+
+/** Default role weights - headings are most significant, footnotes least */
+export const DEFAULT_SEARCH_ROLE_WEIGHTS: SearchRoleWeights = {
+    heading: 3.0,
+    body: 1.0,
+    caption: 0.7,
+    footnote: 0.3,
+    unknown: 0.5,
+};
+
+/** Options for search scoring */
+export interface SearchScoringOptions {
+    /** Role weights for scoring (default: DEFAULT_SEARCH_ROLE_WEIGHTS) */
+    roleWeights?: Partial<SearchRoleWeights>;
+    /** Whether to normalize by page text length (default: true) */
+    normalizeByTextLength?: boolean;
+    /** Minimum text length for normalization (prevents divide-by-tiny-number) */
+    minTextLengthForNormalization?: number;
+    /** Base score multiplier (default: 100) */
+    baseMultiplier?: number;
+}
+
+/** Default scoring options */
+export const DEFAULT_SEARCH_SCORING_OPTIONS: Required<SearchScoringOptions> = {
+    roleWeights: DEFAULT_SEARCH_ROLE_WEIGHTS,
+    normalizeByTextLength: true,
+    minTextLengthForNormalization: 200,
+    baseMultiplier: 100,
+};
+
+/** Extended search hit with scoring information */
+export interface ScoredSearchHit extends PDFSearchHit {
+    /** Semantic role of the text where match was found */
+    role: TextRole;
+    /** Weight applied to this hit based on role */
+    weight: number;
+    /** The matched text (if extracted) */
+    matchedText?: string;
+}
+
+/** Extended page search result with scoring */
+export interface ScoredPageSearchResult extends Omit<PDFPageSearchResult, 'hits'> {
+    /** Scored hits with role information */
+    hits: ScoredSearchHit[];
+    /** Computed relevance score for ranking */
+    score: number;
+    /** Raw weighted sum before normalization */
+    rawScore: number;
+    /** Total text length on page (for context) */
+    textLength: number;
+}
 
 /**
  * Complete PDF search result.
@@ -604,7 +674,12 @@ export const DEFAULT_PDF_SEARCH_OPTIONS: Required<PDFSearchOptions> = {
  * - Simple phrase search (grep-like) - matches literal text
  * - Case-insensitive matching
  * - No boolean operators (AND/OR) - use multiple searches if needed
- * - Returns whole pages ranked by match count (most matches first)
+ * - Returns whole pages ranked by relevance score (highest first)
+ * 
+ * Scoring Methodology:
+ * - Each hit is weighted by text role (heading=3.0, body=1.0, caption=0.7, footnote=0.3)
+ * - Page score = sum of weighted hits, optionally normalized by text length
+ * - This prioritizes pages where matches appear in significant content (headings, body)
  */
 export interface PDFSearchResult {
     /** Search query used */
@@ -616,15 +691,16 @@ export interface PDFSearchResult {
     /** Total pages in document */
     totalPages: number;
     /** 
-     * Page results ranked by match count (highest first).
+     * Page results ranked by relevance score (highest first).
      * Only includes pages with at least one match.
      */
-    pages: PDFPageSearchResult[];
+    pages: ScoredPageSearchResult[];
     /** Search metadata */
     metadata: {
         searchedAt: string;
         durationMs: number;
         options: PDFSearchOptions;
+        scoringOptions: SearchScoringOptions;
     };
 }
 

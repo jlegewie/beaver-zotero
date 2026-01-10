@@ -520,19 +520,29 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
                 return;
             }
 
-            // Log page results (ranked by match count)
-            console.group("[PDF Search Test] Page Results (ranked by matches)");
+            // Log page results (ranked by score)
+            console.group("[PDF Search Test] Page Results (ranked by relevance score)");
             for (const page of result.pages) {
                 const labelStr = page.label ? ` (${page.label})` : '';
-                console.group(`Page ${page.pageIndex + 1}${labelStr}: ${page.matchCount} match${page.matchCount !== 1 ? 'es' : ''}`);
+                console.group(`Page ${page.pageIndex + 1}${labelStr}: score=${page.score.toFixed(2)}, ${page.matchCount} match${page.matchCount !== 1 ? 'es' : ''}`);
+                console.log(`  Raw score: ${page.rawScore.toFixed(2)}`);
+                console.log(`  Text length: ${page.textLength} chars`);
                 console.log(`  Dimensions: ${page.width.toFixed(0)} × ${page.height.toFixed(0)} pt`);
                 
-                // Show first few hits with positions
+                // Count hits by role
+                const roleCount: Record<string, number> = {};
+                for (const hit of page.hits) {
+                    roleCount[hit.role] = (roleCount[hit.role] || 0) + 1;
+                }
+                console.log(`  Hits by role: ${Object.entries(roleCount).map(([r, c]) => `${r}=${c}`).join(', ')}`);
+                
+                // Show first few hits with role and weight
                 const hitsToShow = Math.min(page.hits.length, 5);
                 for (let i = 0; i < hitsToShow; i++) {
                     const hit = page.hits[i];
                     const bbox = hit.bbox;
-                    console.log(`  Hit ${i + 1}: position (${bbox.x.toFixed(0)}, ${bbox.y.toFixed(0)}), size ${bbox.w.toFixed(0)}×${bbox.h.toFixed(0)}pt`);
+                    const text = hit.matchedText ? ` "${hit.matchedText.slice(0, 50)}${hit.matchedText.length > 50 ? '...' : ''}"` : '';
+                    console.log(`  Hit ${i + 1}: [${hit.role}] weight=${hit.weight}${text}`);
                 }
                 if (page.hits.length > hitsToShow) {
                     console.log(`  ... ${page.hits.length - hitsToShow} more hits`);
