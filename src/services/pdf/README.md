@@ -14,6 +14,7 @@ This service provides high-quality text extraction from PDFs using **MuPDF WASM*
 - Encrypted PDF detection
 - Coordinate-accurate bounding boxes for highlighting
 - **Page-to-image rendering** with configurable DPI/scale and format (PNG/JPEG)
+- **Full-text search** with relevance scoring based on text role (heading, body, footnote)
 
 ---
 
@@ -74,6 +75,7 @@ src/services/pdf/
 ├── LineDetector.ts            # Line detection within columns
 ├── ParagraphDetector.ts       # Paragraph/heading grouping
 ├── PageExtractor.ts           # Final page processing
+├── SearchScorer.ts            # Search result scoring & ranking
 └── README.md                  # This file
 
 addon/content/modules/
@@ -95,6 +97,7 @@ react/utils/
 | **LineDetector**      | Line extraction     | `RawPageData`, columns | `PageLineResult`        |
 | **ParagraphDetector** | Semantic grouping   | `PageLineResult`       | `PageParagraphResult`   |
 | **PageExtractor**     | Orchestration       | All above              | `ProcessedPage`         |
+| **SearchScorer**      | Search scoring      | `RawPageData[]`, hits  | `ScoredPageSearchResult[]` |
 
 ---
 
@@ -689,6 +692,240 @@ const allImages = await extractor.renderPagesToImages(pdfData);
 | `scale`     | number     | Scale factor used         |
 | `dpi`       | number     | Effective DPI             |
 
+### PDF Text Search
+
+Search for text within PDFs with relevance-ranked results. The search uses MuPDF's built-in text search with custom scoring based on document structure analysis.
+
+#### Search Query Syntax
+
+| Feature | Supported | Notes |
+|---------|-----------|-------|
+| **Literal phrase** | ✅ Yes | `"machine learning"` finds exact phrase |
+| **Case-insensitive** | ✅ Yes | `Machine` matches `machine`, `MACHINE` |
+| **Partial words** | ✅ Yes | `learn` matches `learning`, `learner` |
+| **Multiple words** | ✅ Yes | `neural network` finds the exact phrase |
+| **Boolean AND** | ❌ No | Use multiple searches instead |
+| **Boolean OR** | ❌ No | Use multiple searches instead |
+| **Wildcards** | ❌ No | Not supported by MuPDF |
+| **Regular expressions** | ❌ No | Not supported by MuPDF |
+| **Fuzzy matching** | ❌ No | Must match exactly |
+
+#### Writing Effective Search Queries
+
+**Best Practices:**
+
+```typescript
+// ✅ Good: Specific phrase
+await searchFromZoteroItem(item, "random forest classifier");
+
+// ✅ Good: Key technical term
+await searchFromZoteroItem(item, "gradient descent");
+
+// ✅ Good: Partial word to catch variations
+await searchFromZoteroItem(item, "optim");  // matches: optimize, optimization, optimal
+
+// ❌ Avoid: Very short queries (too many matches)
+await searchFromZoteroItem(item, "of");  // Matches everywhere
+
+// ❌ Avoid: Very long phrases (may not match exactly)
+await searchFromZoteroItem(item, "the implementation of our novel approach");
+```
+
+**For Multiple Terms (Simulating AND):**
+
+```typescript
+// Search for pages containing BOTH terms
+const result1 = await searchFromZoteroItem(item, "machine learning");
+const result2 = await searchFromZoteroItem(item, "neural network");
+
+// Find pages that appear in both results
+const pagesWithBoth = result1.pages.filter(p1 =>
+  result2.pages.some(p2 => p2.pageIndex === p1.pageIndex)
+);
+```
+
+#### Basic Usage
+
+```typescript
+import { searchFromZoteroItem } from "src/services/pdf";
+
+// Simple search
+const result = await searchFromZoteroItem(item, "machine learning");
+
+if (result) {
+  console.log(`Found ${result.totalMatches} matches in ${result.pagesWithMatches} pages`);
+  
+  // Pages are ranked by relevance score (highest first)
+  for (const page of result.pages) {
+    console.log(`Page ${page.pageIndex + 1}: score=${page.score.toFixed(2)}`);
+  }
+}
+```
+
+#### Manual Usage with Raw PDF Data
+
+```typescript
+import { PDFExtractor } from "src/services/pdf";
+
+const extractor = new PDFExtractor();
+const result = await extractor.search(pdfData, "neural network");
+
+// Access ranked pages
+for (const page of result.pages) {
+  console.log(`Page ${page.pageIndex + 1}:`);
+  console.log(`  Score: ${page.score.toFixed(2)}`);
+  console.log(`  Matches: ${page.matchCount}`);
+  console.log(`  Text length: ${page.textLength} chars`);
+  
+  // Access individual hits with role information
+  for (const hit of page.hits) {
+    console.log(`  Hit: [${hit.role}] weight=${hit.weight}`);
+    if (hit.matchedText) {
+      console.log(`    Context: "${hit.matchedText}"`);
+    }
+  }
+}
+```
+
+#### Scoring Methodology
+
+Results are ranked using a **weighted role-based scoring system** that prioritizes matches in significant content:
+
+```
+Page Score = Σ(hit_weight) × base_multiplier / √(text_length)
+```
+
+**Role Weights (Default):**
+
+| Text Role | Weight | Description |
+|-----------|--------|-------------|
+| `heading` | 3.0 | Section titles, chapter headings |
+| `body` | 1.0 | Main content text (baseline) |
+| `caption` | 0.7 | Figure/table captions |
+| `footnote` | 0.3 | Footnotes, endnotes |
+| `unknown` | 0.5 | Text with undetermined role |
+
+**How Roles Are Determined:**
+
+The `StyleAnalyzer` builds a typography profile of the document:
+- **Body text**: Style with most characters (by frequency analysis)
+- **Heading**: Font size > 120% of body size
+- **Footnote**: Font size < 85% of body size
+- **Caption**: Font size 85-95% of body size
+
+**Why Normalization?**
+
+The `√(text_length)` normalization prevents long pages from dominating results. A page with 5 matches in 500 words ranks higher than 5 matches in 5000 words.
+
+#### Customizing Scoring
+
+```typescript
+const result = await searchFromZoteroItem(item, "query", {
+  scoring: {
+    // Custom role weights
+    roleWeights: {
+      heading: 5.0,    // Prioritize headings even more
+      body: 1.0,
+      caption: 0.5,
+      footnote: 0.1,   // Heavily de-prioritize footnotes
+    },
+    
+    // Disable text length normalization
+    normalizeByTextLength: false,
+    
+    // Adjust base multiplier
+    baseMultiplier: 100,
+  }
+});
+```
+
+#### Search Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `maxHitsPerPage` | number | 100 | Maximum hits to return per page |
+| `pages` | number[] | [] | Limit search to specific pages (empty = all) |
+| `scoring` | object | {} | Scoring configuration (see below) |
+
+**Scoring Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `roleWeights` | object | See above | Weight multipliers for text roles |
+| `normalizeByTextLength` | boolean | true | Divide score by √(text_length) |
+| `minTextLengthForNormalization` | number | 200 | Floor for normalization denominator |
+| `baseMultiplier` | number | 100 | Base score multiplier |
+
+#### Result Types
+
+**PDFSearchResult:**
+
+```typescript
+interface PDFSearchResult {
+  query: string;                    // Search query used
+  totalMatches: number;             // Total matches across all pages
+  pagesWithMatches: number;         // Number of pages with matches
+  totalPages: number;               // Total pages in document
+  pages: ScoredPageSearchResult[];  // Ranked page results
+  metadata: {
+    searchedAt: string;             // ISO timestamp
+    durationMs: number;             // Search duration
+    options: PDFSearchOptions;
+    scoringOptions: SearchScoringOptions;
+  };
+}
+```
+
+**ScoredPageSearchResult:**
+
+```typescript
+interface ScoredPageSearchResult {
+  pageIndex: number;          // 0-based page index
+  label?: string;             // Page label (e.g., "iv", "220")
+  matchCount: number;         // Number of matches on page
+  score: number;              // Computed relevance score
+  rawScore: number;           // Sum of hit weights (before normalization)
+  textLength: number;         // Total text on page
+  width: number;              // Page width in points
+  height: number;             // Page height in points
+  hits: ScoredSearchHit[];    // Individual hits with positions
+}
+```
+
+**ScoredSearchHit:**
+
+```typescript
+interface ScoredSearchHit {
+  quads: QuadPoint[];         // Hit coordinates (for highlighting)
+  bbox: RawBBox;              // Bounding box of hit
+  role: TextRole;             // "heading" | "body" | "caption" | "footnote" | "unknown"
+  weight: number;             // Role weight applied
+  matchedText?: string;       // Text context of the match
+}
+```
+
+#### Performance Considerations
+
+| Document Size | Typical Search Time | Notes |
+|---------------|---------------------|-------|
+| 10 pages | ~50ms | Fast for most documents |
+| 100 pages | ~200ms | Still responsive |
+| 500+ pages | ~500-1000ms | Consider limiting `pages` option |
+
+**Optimization Tips:**
+
+```typescript
+// Limit to first 50 pages for faster results
+const result = await searchFromZoteroItem(item, "query", {
+  pages: Array.from({ length: 50 }, (_, i) => i)
+});
+
+// Reduce max hits per page if you only need top results
+const result = await searchFromZoteroItem(item, "query", {
+  maxHitsPerPage: 20
+});
+```
+
 ### Detection Functions
 
 ```typescript
@@ -796,6 +1033,9 @@ for (let i = 0; i < pageCount; i += 10) {
 - **Margin Zone**: Region near page edges where headers/footers appear
 - **Smart Removal**: Frequency-based detection of repeating elements
 - **OCR**: Optical Character Recognition (for scanned PDFs)
+- **QuadPoint**: A quadrilateral defining a text region (8 floats: ul, ur, ll, lr corners)
+- **Text Role**: Semantic classification of text (heading, body, caption, footnote)
+- **Relevance Score**: Computed ranking value based on match context and text role
 
 ---
 
