@@ -10,7 +10,6 @@ import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
 import { disposeMuPDF } from "./utils/mupdf";
-import { registerHttpEndpoints, unregisterHttpEndpoints } from "./services/httpEndpoints";
 
 /**
  * Compares two semantic version strings.
@@ -116,9 +115,6 @@ async function onStartup() {
 
 	// -------- Add event bus to window --------
 	Zotero.getMainWindow().__beaverEventBus = eventBus;
-
-	// -------- Register HTTP endpoints for local FrontendCapability --------
-	registerHttpEndpoints();
 	
 	// -------- Load UI for all windows --------
 	await Promise.all(
@@ -277,9 +273,6 @@ async function onShutdown(): Promise<void> {
 	
 	// Unregister keyboard shortcuts
 	BeaverUIFactory.unregisterShortcuts();
-
-	// Unregister HTTP endpoints
-	unregisterHttpEndpoints();
 
     // Close separate window if open
     BeaverUIFactory.closeBeaverWindow();
