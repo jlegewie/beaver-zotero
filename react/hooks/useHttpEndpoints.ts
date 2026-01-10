@@ -290,6 +290,11 @@ export function useHttpEndpoints() {
         if (!isAuthenticated) {
             return;
         }
+        // Only register endpoints in development and staging
+        if(process.env.NODE_ENV !== 'development' && process.env.BUILD_ENV !== 'staging') {
+            logger('useHttpEndpoints: Not registering endpoints in production', 3);
+            return;
+        }
 
         logger('useHttpEndpoints: Registering endpoints (authenticated)', 3);
         const registered = registerEndpoints();
