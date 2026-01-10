@@ -335,7 +335,9 @@ export class AgentService {
                     // Use a small delay to avoid race with server-initiated close.
                     setTimeout(() => {
                         if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
-                            this.close(1011, `Client closing after error: ${event.type}`);
+                            // Firefox/Zotero only allows code 1000 or 3000-4999 for close()
+                            // 1011 causes InvalidAccessError, so we use 1000 (Normal Closure)
+                            this.close(1000, `Client closing after error: ${event.type}`);
                         }
                     }, 100);
                     break;
