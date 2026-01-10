@@ -337,6 +337,7 @@ export function useEmbeddingIndex() {
                     items_indexed: totalIndexed,
                     items_failed: totalFailed,
                     items_skipped: totalSkipped,
+                    items_deleted: totalToDelete,
                     libraries_count: libraryIds.length,
                     duration_ms: duration,
                     is_force_reindex: forceFullDiff,

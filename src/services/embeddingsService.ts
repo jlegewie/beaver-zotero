@@ -51,6 +51,7 @@ export interface IndexingCompleteStats {
     items_indexed: number;
     items_failed: number;
     items_skipped: number;
+    items_deleted: number;
     libraries_count: number;
     duration_ms: number;
     is_force_reindex: boolean;
