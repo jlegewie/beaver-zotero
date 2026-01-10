@@ -569,8 +569,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 data.processingMode === ProcessingMode.FRONTEND) {
                 set(addPopupMessageAtom, {
                     type: 'info',
-                    title: 'Indexing in progress',
-                    text: `Library indexing is not yet complete. Some features are limited until indexing finishes. Learn more <a href="${process.env.WEBAPP_BASE_URL}/docs/indexing" className="text-link" target="_blank">here</a>.`,
+                    title: 'Indexing your library',
+                    text: 'We are processing your library to enable Pro features. You can use standard features in the meantime.',
                     expire: true,
                     duration: 10000
                 });
