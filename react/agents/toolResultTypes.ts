@@ -108,6 +108,30 @@ export interface SearchInDocumentsToolResultSummary {
     chunks: ChunkReference[];
 }
 
+/**
+ * Page search reference with ZoteroItemReference fields, page number, match info.
+ * Matches PageSearchReference from backend.
+ */
+export interface PageSearchReference {
+    library_id: number;
+    zotero_key: string;
+    page_number: number;
+    match_count: number;
+    score: number;
+}
+
+/**
+ * Search in attachment result summary.
+ * Matches SearchInAttachmentResultSummary from backend.
+ */
+export interface SearchInAttachmentResultSummary {
+    tool_name: string;
+    query: string;
+    total_matches: number;
+    pages_with_matches: number;
+    pages: PageSearchReference[];
+}
+
 // ========================
 // External Search Results 
 // ========================
@@ -193,6 +217,11 @@ const VIEW_PAGE_IMAGES_TOOL_NAMES: readonly string[] = [
 /** Valid tool names for chunk-based passage retrieval results */
 const SEARCH_IN_DOCUMENTS_TOOL_NAMES: readonly string[] = [
     'search_in_documents',
+] as const;
+
+/** Valid tool names for keyword search in attachment results */
+const SEARCH_IN_ATTACHMENT_TOOL_NAMES: readonly string[] = [
+    'search_in_attachment',
 ] as const;
 
 /**
@@ -395,6 +424,41 @@ export function isSearchInDocumentsResult(
 }
 
 /**
+ * Type guard for search in attachment results (keyword search).
+ * Checks if metadata.summary is SearchInAttachmentResultSummary.
+ */
+export function isSearchInAttachmentResult(
+    toolName: string,
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): metadata is { summary: SearchInAttachmentResultSummary } {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+
+    const toolNameIsSearchInAttachment = SEARCH_IN_ATTACHMENT_TOOL_NAMES.includes(toolName);
+    if (!toolNameIsSearchInAttachment) {
+        const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
+        if (!summaryToolName || !SEARCH_IN_ATTACHMENT_TOOL_NAMES.includes(summaryToolName)) return false;
+    }
+    
+    return (
+        typeof summary.tool_name === 'string' &&
+        typeof summary.total_matches === 'number' &&
+        typeof summary.pages_with_matches === 'number' &&
+        Array.isArray(summary.pages) &&
+        summary.pages.every((page: unknown) => {
+            if (!page || typeof page !== 'object') return false;
+            const obj = page as Record<string, unknown>;
+            return (
+                typeof obj.library_id === 'number' &&
+                typeof obj.zotero_key === 'string' &&
+                typeof obj.page_number === 'number'
+            );
+        })
+    );
+}
+
+/**
  * Type guard for external search results.
  * Checks content has references array with external_id, and optionally
  * metadata.supplemental_data has array with external_id.
@@ -592,6 +656,35 @@ export function extractSearchInDocumentsData(
 }
 
 /**
+ * Normalized search in attachment data.
+ */
+export interface SearchInAttachmentViewData {
+    pages: PageReference[];
+}
+
+/**
+ * Extract page-level data from metadata.summary for search in attachment.
+ * @returns SearchInAttachmentViewData or null if summary is not available
+ */
+export function extractSearchInAttachmentData(
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): SearchInAttachmentViewData | null {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as SearchInAttachmentResultSummary;
+    
+    if (!Array.isArray(summary.pages)) return null;
+
+    const pages: PageReference[] = summary.pages.map(page => ({
+        library_id: page.library_id,
+        zotero_key: page.zotero_key,
+        page_number: page.page_number,
+    }));
+
+    return { pages };
+}
+
+/**
  * Normalized external search data ready for rendering.
  */
 export interface ExternalSearchViewData {
@@ -699,6 +792,12 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
     if (isSearchInDocumentsResult(tool_name, content, metadata)) {
         const data = extractSearchInDocumentsData(content, metadata);
         return data?.chunks ?? [];
+    }
+
+    // Search in attachment results (pages)
+    if (isSearchInAttachmentResult(tool_name, content, metadata)) {
+        const data = extractSearchInAttachmentData(content, metadata);
+        return data?.pages ?? [];
     }
 
     return [];
