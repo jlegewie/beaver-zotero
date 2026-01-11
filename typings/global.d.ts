@@ -164,6 +164,13 @@ declare namespace Zotero {
              */
             deleteSyncLogsForLibraryIds(user_id: string, library_ids: number[]): Promise<void>;
 
+            /**
+             * Deletes all sync log records for a user.
+             * Used during onboarding to ensure fresh sync state (e.g., after plan transitions).
+             * @param user_id The user_id to delete logs for
+             */
+            deleteAllSyncLogsForUser(user_id: string): Promise<void>;
+
             // --- Embedding Methods ---
 
             /**

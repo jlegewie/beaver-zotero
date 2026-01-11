@@ -652,6 +652,18 @@ export class BeaverDB {
         );
     }
 
+    /**
+     * Deletes all sync log records for a user.
+     * Used during onboarding to ensure fresh sync state (e.g., after plan transitions).
+     * @param user_id The user_id to delete logs for
+     */
+    public async deleteAllSyncLogsForUser(user_id: string): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM sync_logs WHERE user_id = ?`,
+            [user_id]
+        );
+    }
+
     // --- Embedding Methods ---
 
     /**
