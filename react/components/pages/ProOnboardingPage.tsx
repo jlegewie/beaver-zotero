@@ -149,6 +149,14 @@ const ProOnboardingPage: React.FC = () => {
         
         setIsStartingSync(true);
         try {
+            // Clear existing sync logs to ensure fresh sync state.
+            // This handles plan transitions (e.g., user downgraded, data was deleted,
+            // and now they're upgrading again). Without this, local sync logs would
+            // incorrectly indicate data is already synced.
+            if (user?.id) {
+                logger(`ProOnboardingPage: Clearing sync logs for fresh sync state`, 2);
+                await Zotero.Beaver.db.deleteAllSyncLogsForUser(user.id);
+            }
             // Create sync status for selected libraries
             const selectedLibraries = Object.fromEntries(
                 validLibraryIds.map(id => {
