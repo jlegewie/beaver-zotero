@@ -3,7 +3,7 @@ import { userAtom, isAuthenticatedAtom, isWaitingForProfileAtom, authLoadingAtom
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
 import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom } from "../atoms/messageComposition"
 import { supportedModelsAtom, selectedModelAtom, availableModelsAtom } from "../atoms/models"
-import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncedLibraryIdsAtom, updateRequiredAtom, planFeaturesAtom, isDatabaseSyncSupportedAtom, processingModeAtom, isBackendIndexingCompleteAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasAuthorizedProAccessAtom, hasAuthorizedFreeAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
+import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncedLibraryIdsAtom, updateRequiredAtom, minimumFrontendVersionAtom, planFeaturesAtom, isDatabaseSyncSupportedAtom, processingModeAtom, isBackendIndexingCompleteAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasAuthorizedProAccessAtom, hasAuthorizedFreeAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
 import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, overallSyncStatusAtom } from "../atoms/sync"
 import { recentThreadsAtom, currentThreadIdAtom } from "../atoms/threads"
 import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, activePreviewAtom, popupMessagesAtom } from "../atoms/ui"
@@ -70,6 +70,7 @@ export const atomRegistry = {
     availableModels: availableModelsAtom,
 
     // Profile
+    currentBeaverVersion: Zotero.Beaver?.pluginVersion,
     isProfileInvalid: isProfileInvalidAtom,
     isProfileLoaded: isProfileLoadedAtom,
     profileWithPlan: profileWithPlanAtom,
@@ -79,6 +80,7 @@ export const atomRegistry = {
     processingModeAtom: processingModeAtom,
     planFeatures: planFeaturesAtom,
     updateRequired: updateRequiredAtom,
+    minimumFrontendVersion: minimumFrontendVersionAtom,
     profileBalance: profileBalanceAtom,
     hasAuthorizedAccess: hasAuthorizedAccessAtom,
     hasAuthorizedProAccess: hasAuthorizedProAccessAtom,
