@@ -220,19 +220,26 @@ async function computeItemStatus(
     
     // Determine if item is available locally or on server
     // For attachments: check file exists (but skip for linked URLs which have no file)
+    // Note: fileExists() throws on linked URL attachments, so we must check link mode first
     let availableLocallyOrOnServer = true;
+    let passesSyncFilters = true;
+    
     if (item.isAttachment()) {
         const isLinkedUrl = item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL;
         if (isLinkedUrl) {
-            // Linked URLs are just web links, always "available" but not synced as files
+            // Linked URLs are web links with no file - they don't pass sync filters
+            // Skip fileExists() and syncingItemFilterAsync() which would throw
             availableLocallyOrOnServer = true;
+            passesSyncFilters = false;
         } else {
             // For file attachments, check if file exists locally or on server
             availableLocallyOrOnServer = (await item.fileExists()) || isAttachmentOnServer(item);
+            passesSyncFilters = availableLocallyOrOnServer && (await syncingItemFilterAsync(item));
         }
+    } else {
+        // Regular items - check sync filters normally
+        passesSyncFilters = await syncingItemFilterAsync(item);
     }
-    
-    const passesSyncFilters = availableLocallyOrOnServer && (await syncingItemFilterAsync(item));
     
     // Compute is_pending_sync only if we have a userId
     let isPendingSync: boolean | null = null;
