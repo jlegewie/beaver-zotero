@@ -123,7 +123,12 @@ export function getYearFromItem(item: Zotero.Item): number | undefined {
  * @returns Promise resolving to FileData object or null.
  */
 async function getFileDataFromItem(item: Zotero.Item): Promise<FileData | null> {
-    if (!item.isAttachment() || !(await item.fileExists())) return null;
+    if (!item.isAttachment()) return null;
+    
+    // Linked URLs have no associated file - skip them
+    // Note: fileExists() throws on linked URL attachments
+    const isLinkedUrl = item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL;
+    if (isLinkedUrl || !(await item.fileExists())) return null;
 
     try {
         // const fileName = item.attachmentFilename;

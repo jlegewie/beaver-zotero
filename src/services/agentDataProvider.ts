@@ -217,7 +217,21 @@ async function computeItemStatus(
     const isSyncedLibrary = syncedLibraryIds.includes(item.libraryID);
     const trashState = safeIsInTrash(item);
     const isInTrash = trashState === true;
-    const availableLocallyOrOnServer = !item.isAttachment() || (await item.fileExists()) || isAttachmentOnServer(item);
+    
+    // Determine if item is available locally or on server
+    // For attachments: check file exists (but skip for linked URLs which have no file)
+    let availableLocallyOrOnServer = true;
+    if (item.isAttachment()) {
+        const isLinkedUrl = item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL;
+        if (isLinkedUrl) {
+            // Linked URLs are just web links, always "available" but not synced as files
+            availableLocallyOrOnServer = true;
+        } else {
+            // For file attachments, check if file exists locally or on server
+            availableLocallyOrOnServer = (await item.fileExists()) || isAttachmentOnServer(item);
+        }
+    }
+    
     const passesSyncFilters = availableLocallyOrOnServer && (await syncingItemFilterAsync(item));
     
     // Compute is_pending_sync only if we have a userId
