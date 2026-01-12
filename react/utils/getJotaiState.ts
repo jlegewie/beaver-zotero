@@ -1,9 +1,9 @@
 import { citationMetadataAtom, citationDataListAtom, citationsByRunIdAtom } from "../atoms/citations"
-import { userAtom, isAuthenticatedAtom, authLoadingAtom } from "../atoms/auth"
+import { userAtom, isAuthenticatedAtom, isWaitingForProfileAtom, authLoadingAtom } from "../atoms/auth"
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
 import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom } from "../atoms/messageComposition"
 import { supportedModelsAtom, selectedModelAtom, availableModelsAtom } from "../atoms/models"
-import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncedLibraryIdsAtom, planFeaturesAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasAuthorizedProAccessAtom, hasAuthorizedFreeAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
+import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncedLibraryIdsAtom, updateRequiredAtom, planFeaturesAtom, isDatabaseSyncSupportedAtom, processingModeAtom, isBackendIndexingCompleteAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasAuthorizedProAccessAtom, hasAuthorizedFreeAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
 import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, overallSyncStatusAtom } from "../atoms/sync"
 import { recentThreadsAtom, currentThreadIdAtom } from "../atoms/threads"
 import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, activePreviewAtom, popupMessagesAtom } from "../atoms/ui"
@@ -17,6 +17,7 @@ import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, wsReadyDataAtom,
 export const atomRegistry = {
     // Auth
     isAuthenticated: isAuthenticatedAtom,
+    isWaitingForProfile: isWaitingForProfileAtom,
     user: userAtom,
     authLoading: authLoadingAtom,
 
@@ -73,7 +74,11 @@ export const atomRegistry = {
     isProfileLoaded: isProfileLoadedAtom,
     profileWithPlan: profileWithPlanAtom,
     syncedLibraryIds: syncedLibraryIdsAtom,
+    isDatabaseSyncSupported: isDatabaseSyncSupportedAtom,
+    isBackendIndexingCompleteAtom: isBackendIndexingCompleteAtom,
+    processingModeAtom: processingModeAtom,
     planFeatures: planFeaturesAtom,
+    updateRequired: updateRequiredAtom,
     profileBalance: profileBalanceAtom,
     hasAuthorizedAccess: hasAuthorizedAccessAtom,
     hasAuthorizedProAccess: hasAuthorizedProAccessAtom,
