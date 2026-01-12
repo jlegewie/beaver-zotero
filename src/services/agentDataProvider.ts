@@ -19,7 +19,7 @@ import { store } from '../../react/store';
 import { isAttachmentOnServer } from '../utils/webAPI';
 import { wasItemAddedBeforeLastSync } from '../../react/utils/sourceUtils';
 import { serializeAttachment, serializeItem } from '../utils/zoteroSerializers';
-import { FindReferenceData, findExistingReference } from '../../react/utils/findExistingReference';
+import { batchFindExistingReferences, BatchReferenceCheckItem } from '../../react/utils/batchFindExistingReferences';
 import {
     WSZoteroDataRequest,
     WSZoteroDataResponse,
@@ -1068,60 +1068,61 @@ export async function handleZoteroAttachmentSearchRequest(
 /**
  * Handle external_reference_check_request event.
  * 
+ * Uses batch lookups for optimal performance:
+ * - Phase 1: Batch DOI/ISBN lookup across all libraries in 2 queries
+ * - Phase 2: Batch title candidate collection in 1 query
+ * - Phase 3: Single batch load of all candidate item data
+ * - Phase 4: In-memory fuzzy matching
+ * 
  * If library_ids is provided, only search those libraries.
  * If library_ids is not provided or empty, search all accessible libraries.
  */
 export async function handleExternalReferenceCheckRequest(request: WSExternalReferenceCheckRequest): Promise<WSExternalReferenceCheckResponse> {
-    const results: ExternalReferenceCheckResult[] = [];
-
     // Determine which libraries to search
     const libraryIds: number[] = request.library_ids && request.library_ids.length > 0
         ? request.library_ids
         : Zotero.Libraries.getAll().map(lib => lib.libraryID);
 
-    // Process all items in parallel for efficiency
-    const checkPromises = request.items.map(async (item): Promise<ExternalReferenceCheckResult> => {
-        try {
-            const referenceData: FindReferenceData = {
-                title: item.title,
-                date: item.date,
-                DOI: item.doi,
-                ISBN: item.isbn,
-                creators: item.creators
-            };
+    // Convert request items to batch format
+    const batchItems: BatchReferenceCheckItem[] = request.items.map(item => ({
+        id: item.id,
+        data: {
+            title: item.title,
+            date: item.date,
+            DOI: item.doi,
+            ISBN: item.isbn,
+            creators: item.creators
+        }
+    }));
 
-            // Search across all specified libraries until found
-            for (const libraryId of libraryIds) {
-                const existingItem = await findExistingReference(libraryId, referenceData);
+    // Use batch lookup for all items at once
+    let batchResults;
+    try {
+        batchResults = await batchFindExistingReferences(batchItems, libraryIds);
+    } catch (error) {
+        logger(`AgentService: Batch reference check failed: ${error}`, 1);
+        // Return all as not found on error
+        batchResults = batchItems.map(item => ({ id: item.id, item: null }));
+    }
 
-                if (existingItem) {
-                    return {
-                        id: item.id,
-                        exists: true,
-                        item: {
-                            library_id: existingItem.libraryID,
-                            zotero_key: existingItem.key
-                        }
-                    };
+    // Convert batch results to response format
+    const results: ExternalReferenceCheckResult[] = batchResults.map(result => {
+        if (result.item) {
+            return {
+                id: result.id,
+                exists: true,
+                item: {
+                    library_id: result.item.libraryID,
+                    zotero_key: result.item.key
                 }
-            }
-
-            return {
-                id: item.id,
-                exists: false
             };
-        } catch (error) {
-            logger(`AgentService: Failed to check reference ${item.id}: ${error}`, 1);
-            // Return as not found on error
+        } else {
             return {
-                id: item.id,
+                id: result.id,
                 exists: false
             };
         }
     });
-
-    const resolvedResults = await Promise.all(checkPromises);
-    results.push(...resolvedResults);
 
     const response: WSExternalReferenceCheckResponse = {
         type: 'external_reference_check',
