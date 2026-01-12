@@ -824,6 +824,39 @@ export const safeIsInTrash = (item: any): boolean | null => {
 };
 
 /**
+ * Safely check if an attachment file exists.
+ * 
+ * Unlike item.fileExists(), this handles linked URL attachments which have no
+ * associated file. Calling fileExists() on a linked URL throws an error.
+ * 
+ * @param item - Zotero item to check
+ * @returns Promise<boolean> - true if file exists, false otherwise (including for linked URLs and non-attachments)
+ */
+export async function safeFileExists(item: Zotero.Item): Promise<boolean> {
+    if (!item.isAttachment()) return false;
+    
+    // Linked URLs are web links with no associated file - fileExists() throws on them
+    if (item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL) {
+        return false;
+    }
+    
+    return item.fileExists();
+}
+
+/**
+ * Check if an attachment is a linked URL (web link with no file).
+ * 
+ * Linked URL attachments don't have an associated file and calling fileExists()
+ * on them throws an error.
+ * 
+ * @param item - Zotero item to check
+ * @returns true if the item is a linked URL attachment
+ */
+export function isLinkedUrlAttachment(item: Zotero.Item): boolean {
+    return item.isAttachment() && item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL;
+}
+
+/**
  * Check if two Zotero items are duplicates based on metadata similarity.
  * Uses logic similar to Zotero's built-in duplicate detection:
  * 1. Same ID = duplicate
