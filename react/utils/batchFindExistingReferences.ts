@@ -142,16 +142,28 @@ async function batchFindByIdentifiers(
         
         try {
             const params = [...libraryIds, doiFieldID, ...doisLower];
-            const rows = await Zotero.DB.queryAsync(sql, params);
             
-            if (rows && rows.length > 0) {
+            // Use onRow callback to avoid Proxy issues with Zotero.DB.queryAsync
+            const doiRows: { itemID: number; doi: string }[] = [];
+            await Zotero.DB.queryAsync(sql, params, {
+                onRow: (row: any) => {
+                    doiRows.push({
+                        itemID: row.getResultByIndex(0),
+                        doi: row.getResultByIndex(1)
+                    });
+                }
+            });
+            
+            logger(`batchFindByIdentifiers: DOI query returned ${doiRows.length} rows for ${doisLower.length} DOIs`, 1);
+            
+            if (doiRows.length > 0) {
                 // Collect all item IDs to load in batch
-                const itemIds = rows.map((row: any) => row.itemID);
+                const itemIds = doiRows.map(row => row.itemID);
                 const zoteroItems = await Zotero.Items.getAsync(itemIds);
                 
                 // Map DOI values to items (using lowercase for lookup)
-                for (let i = 0; i < rows.length; i++) {
-                    const row = rows[i];
+                for (let i = 0; i < doiRows.length; i++) {
+                    const row = doiRows[i];
                     const zoteroItem = zoteroItems[i];
                     if (zoteroItem) {
                         const cleanDOI = Zotero.Utilities.cleanDOI(row.doi);
@@ -191,14 +203,24 @@ async function batchFindByIdentifiers(
         
         try {
             const params = [...libraryIds, isbnFieldID, ...isbns];
-            const rows = await Zotero.DB.queryAsync(sql, params);
             
-            if (rows && rows.length > 0) {
-                const itemIds = rows.map((row: any) => row.itemID);
+            // Use onRow callback to avoid Proxy issues with Zotero.DB.queryAsync
+            const isbnRows: { itemID: number; isbn: string }[] = [];
+            await Zotero.DB.queryAsync(sql, params, {
+                onRow: (row: any) => {
+                    isbnRows.push({
+                        itemID: row.getResultByIndex(0),
+                        isbn: row.getResultByIndex(1)
+                    });
+                }
+            });
+            
+            if (isbnRows.length > 0) {
+                const itemIds = isbnRows.map(row => row.itemID);
                 const zoteroItems = await Zotero.Items.getAsync(itemIds);
                 
-                for (let i = 0; i < rows.length; i++) {
-                    const row = rows[i];
+                for (let i = 0; i < isbnRows.length; i++) {
+                    const row = isbnRows[i];
                     const zoteroItem = zoteroItems[i];
                     if (zoteroItem) {
                         const cleanISBN = Zotero.Utilities.cleanISBN(String(row.isbn));
@@ -263,6 +285,10 @@ async function batchFindTitleCandidates(
         return new Map();
     }
     
+    // Log sample of what we're looking for
+    const sampleTitles = Array.from(normalizedInputTitles.keys()).slice(0, 3);
+    logger(`batchFindTitleCandidates: Looking for normalized titles like: ${JSON.stringify(sampleTitles)}`, 1);
+    
     // Build library placeholders
     const libraryPlaceholders = libraryIds.map(() => '?').join(', ');
     
@@ -282,38 +308,44 @@ async function batchFindTitleCandidates(
     
     try {
         const params = [...libraryIds, titleFieldID];
-        const rows = await Zotero.DB.queryAsync(sql, params);
         
-        if (rows && rows.length > 0) {
-            // Filter candidates by normalized title match
-            const matchingRows: any[] = [];
-            
-            for (const row of rows) {
-                const normalizedDbTitle = normalizeString(row.title);
+        // Use onRow callback to avoid Proxy issues with Zotero.DB.queryAsync
+        // Filter candidates by normalized title match during iteration
+        const matchingRows: { itemID: number; title: string; normalizedTitle: string }[] = [];
+        let totalRows = 0;
+        
+        await Zotero.DB.queryAsync(sql, params, {
+            onRow: (row: any) => {
+                totalRows++;
+                const itemID = row.getResultByIndex(0);
+                const title = row.getResultByIndex(1);
+                const normalizedDbTitle = normalizeString(title);
                 if (normalizedDbTitle && normalizedInputTitles.has(normalizedDbTitle)) {
-                    matchingRows.push({ ...row, normalizedTitle: normalizedDbTitle });
+                    matchingRows.push({ itemID, title, normalizedTitle: normalizedDbTitle });
                 }
             }
+        });
+        
+        logger(`batchFindTitleCandidates: SQL returned ${totalRows} rows, found ${matchingRows.length} matching normalized titles`, 1);
+        
+        if (matchingRows.length > 0) {
+            // Load all matching items in batch
+            const itemIds = matchingRows.map(row => row.itemID);
+            const zoteroItems = await Zotero.Items.getAsync(itemIds);
             
-            if (matchingRows.length > 0) {
-                // Load all matching items in batch
-                const itemIds = matchingRows.map((row: any) => row.itemID);
-                const zoteroItems = await Zotero.Items.getAsync(itemIds);
-                
-                // Phase 3: Single batch load of all item data
-                if (zoteroItems.length > 0) {
-                    await Zotero.Items.loadDataTypes(zoteroItems, ["itemData", "creators", "childItems"]);
-                }
-                
-                // Build the candidate map
-                for (let i = 0; i < matchingRows.length; i++) {
-                    const zoteroItem = zoteroItems[i];
-                    if (zoteroItem && zoteroItem.isRegularItem() && !zoteroItem.deleted) {
-                        candidateItems.set(zoteroItem.id, {
-                            item: zoteroItem,
-                            normalizedTitle: matchingRows[i].normalizedTitle
-                        });
-                    }
+            // Phase 3: Single batch load of all item data
+            if (zoteroItems.length > 0) {
+                await Zotero.Items.loadDataTypes(zoteroItems, ["itemData", "creators", "childItems"]);
+            }
+            
+            // Build the candidate map
+            for (let i = 0; i < matchingRows.length; i++) {
+                const zoteroItem = zoteroItems[i];
+                if (zoteroItem && zoteroItem.isRegularItem() && !zoteroItem.deleted) {
+                    candidateItems.set(zoteroItem.id, {
+                        item: zoteroItem,
+                        normalizedTitle: matchingRows[i].normalizedTitle
+                    });
                 }
             }
         }
@@ -447,6 +479,7 @@ export async function batchFindExistingReferences(
     
     logger(`batchFindExistingReferences: Checking ${items.length} items across ${libraryIds.length} libraries`, 1);
     const startTime = Date.now();
+    
     
     // Initialize results map
     const results = new Map<string, Zotero.Item | null>();
