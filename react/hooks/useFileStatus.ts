@@ -14,6 +14,7 @@ export interface FileStatusConnection {
     connectionStatus: ConnectionStatus;
     lastError: string | null;
     lastDataReceived?: Date;
+    refreshFileStatus: () => Promise<void>;
 }
 
 const formatStatus = (statusData: any): FileStatus => ({
@@ -84,7 +85,7 @@ export const useFileStatus = (): FileStatusConnection => {
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const user = useAtomValue(userAtom);
 
-    const [connection, setConnection] = useState<FileStatusConnection>({
+    const [connection, setConnection] = useState<Omit<FileStatusConnection, 'refreshFileStatus'>>({
         connectionStatus: 'idle',
         lastError: null,
         lastDataReceived: undefined,
@@ -94,6 +95,7 @@ export const useFileStatus = (): FileStatusConnection => {
     const userIdRef = useRef<string | null>(null);
     const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const isReconnectingRef = useRef(false);
+    const channelCounterRef = useRef(0); // Counter for unique channel names
 
     // Handle data changes from realtime subscription
     const handleDataChange = useCallback((payload: any) => {
@@ -119,13 +121,22 @@ export const useFileStatus = (): FileStatusConnection => {
 
         isReconnectingRef.current = true;
         logger(`useFileStatus: Re-establishing subscription for user ${userId}`, 1);
+        
+        setConnection(prev => ({
+            ...prev,
+            connectionStatus: 'reconnecting',
+            lastError: null,
+        }));
 
         try {
-            // Clean up existing channel
+            // Clean up existing channel (fire-and-forget to avoid blocking on broken connections)
             if (channelRef.current) {
-                // await channelRef.current.unsubscribe();
-                await supabase.realtime.removeChannel(channelRef.current);
+                const oldChannel = channelRef.current;
                 channelRef.current = null;
+                // Don't await - this can hang if the connection is already broken
+                supabase.realtime.removeChannel(oldChannel).catch(err => {
+                    logger(`useFileStatus: Channel cleanup failed (non-blocking): ${err}`, 2);
+                });
             }
 
             // Refresh auth token if needed
@@ -134,13 +145,29 @@ export const useFileStatus = (): FileStatusConnection => {
                 supabase.realtime.setAuth(sessionData.session.access_token);
             }
 
-            // Re-fetch initial data
+            // Re-fetch initial data - this is the critical part for UI feedback
             const initialStatus = await fetchFileStatus(userId);
             setFileStatus(initialStatus);
+            
+            // Mark as connected based on successful HTTP fetch (not subscription)
+            // Even if initialStatus is null (no data in DB), the fetch succeeded
+            // This makes Retry more reliable since HTTP fetch is more stable than websockets
+            logger(`useFileStatus: Data fetch completed (status: ${initialStatus ? 'has data' : 'no data'}), marking as connected`, 1);
+            setConnection(prev => ({
+                ...prev,
+                connectionStatus: 'connected',
+                lastDataReceived: new Date(),
+                lastError: null,
+            }));
 
-            // Create new subscription
+            // Create new subscription with unique channel name to avoid conflicts
+            // This happens in the background - the UI is already updated
+            channelCounterRef.current += 1;
+            const channelName = `file-status:${userId}:${channelCounterRef.current}`;
+            logger(`useFileStatus: Creating channel ${channelName}`, 1);
+            
             const channel = supabase
-                .channel(`file-status:${userId}`)
+                .channel(channelName)
                 .on<FileStatus>('postgres_changes', {
                     event: '*',
                     schema: 'public',
@@ -150,11 +177,6 @@ export const useFileStatus = (): FileStatusConnection => {
                 .subscribe(handleSubscriptionStatus);
 
             channelRef.current = channel;
-            
-            setConnection(prev => ({
-                ...prev,
-                connectionStatus: 'reconnecting'
-            }));
 
         } catch (error) {
             logger(`useFileStatus: Reestablish failed: ${error instanceof Error ? error.message : String(error)}`, 3);
@@ -171,6 +193,13 @@ export const useFileStatus = (): FileStatusConnection => {
     // Handle subscription status changes
     const handleSubscriptionStatus = useCallback((status: string, err?: Error) => {
         logger(`useFileStatus: Subscription status changed to ${status}${err ? ` with error: ${err.message}` : ''}`, err ? 3 : 1);
+
+        // Ignore CLOSED/error events from old channels during reconnection
+        // (these fire when we clean up the old channel while setting up a new one)
+        if (isReconnectingRef.current && status !== REALTIME_SUBSCRIBE_STATES.SUBSCRIBED) {
+            logger(`useFileStatus: Ignoring ${status} during reconnection`, 1);
+            return;
+        }
 
         switch (status) {
             case REALTIME_SUBSCRIBE_STATES.SUBSCRIBED:
@@ -238,9 +267,13 @@ export const useFileStatus = (): FileStatusConnection => {
                 supabase.realtime.setAuth(sessionData.session.access_token);
             }
 
-            // Create and configure channel
+            // Create and configure channel with unique name
+            channelCounterRef.current += 1;
+            const channelName = `file-status:${userId}:${channelCounterRef.current}`;
+            logger(`useFileStatus: Creating channel ${channelName}`, 1);
+            
             const channel = supabase
-                .channel(`file-status:${userId}`)
+                .channel(channelName)
                 .on<FileStatus>('postgres_changes', {
                     event: '*',
                     schema: 'public',
@@ -344,5 +377,17 @@ export const useFileStatus = (): FileStatusConnection => {
         };
     }, []);
 
-    return connection;
+    // Manual refresh function for when connection fails or data is stale
+    // Note: Retry button only appears when connection is broken, but we handle both cases defensively
+    const refreshFileStatus = useCallback(async () => {
+        if (!user?.id) {
+            logger('useFileStatus: Cannot refresh - no user ID', 2);
+            return;
+        }
+
+        logger('useFileStatus: Manual refresh triggered - reestablishing connection', 1);
+        await reestablishSubscription(user.id);
+    }, [user?.id, reestablishSubscription]);
+
+    return { ...connection, refreshFileStatus };
 };

@@ -42,7 +42,7 @@ const OnboardingPage: React.FC = () => {
     const [consentToShare, setConsentToShare] = useState<boolean>(false);
 
     // Realtime listening for file status updates
-    const { connectionStatus } = useFileStatus();
+    const { connectionStatus, refreshFileStatus } = useFileStatus();
 
     // Library sync state
     const setSyncStatus = useSetAtom(syncStatusAtom);
@@ -57,6 +57,18 @@ const OnboardingPage: React.FC = () => {
     // Loading states for service calls
     const [isAuthorizing, setIsAuthorizing] = useState(false);
     const [isCompletingOnboarding, setIsCompletingOnboarding] = useState(false);
+    const [isRefreshingFileStatus, setIsRefreshingFileStatus] = useState(false);
+
+    // Handle manual file status refresh
+    const handleRefreshFileStatus = async () => {
+        if (isRefreshingFileStatus) return;
+        setIsRefreshingFileStatus(true);
+        try {
+            await refreshFileStatus();
+        } finally {
+            setIsRefreshingFileStatus(false);
+        }
+    };
 
     // Initialize sync toggle state
     useEffect(() => {
@@ -227,6 +239,12 @@ const OnboardingPage: React.FC = () => {
             return `Initial syncing failed. Please retry or contact support.`;
         } else if (fileStatusSummary.pageBalanceExhausted) {
             return "Free file processing limit reached. Continue to use Beaver with processed files.";
+        } else if (!fileStatusSummary.fileStatusAvailable) {
+            // File status not yet loaded - show appropriate message based on connection status
+            if (connectionStatus === 'error' || connectionStatus === 'disconnected') {
+                return "Unable to load file status.";
+            }
+            return "Loading file status...";
         } else if (!isUploadProcessed) {
             return `Waiting for file uploads to complete (${fileStatusSummary.uploadPendingCount.toLocaleString()} remaining).`;
         } else if (isUploadProcessed && fileStatusSummary?.uploadFailedCount > 0) {
@@ -338,6 +356,15 @@ const OnboardingPage: React.FC = () => {
                         {/* Footer message */}
                         <div className="font-color-secondary text-sm">
                             {getFooterMessage()}
+                            {/* Retry link when file status fails to load */}
+                            {!fileStatusSummary.fileStatusAvailable && (connectionStatus === 'error' || connectionStatus === 'disconnected') && (
+                                <span
+                                    className={`text-link cursor-pointer ml-1 ${isRefreshingFileStatus ? 'opacity-50' : ''}`}
+                                    onClick={isRefreshingFileStatus ? undefined : handleRefreshFileStatus}
+                                >
+                                    {isRefreshingFileStatus ? 'Retrying...' : 'Retry'}
+                                </span>
+                            )}
                         </div>
 
                         <div className="flex-1" />
