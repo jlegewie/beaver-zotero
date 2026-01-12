@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { useAtom } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { profileWithPlanAtom } from "../../atoms/profile";
+import { userAtom } from "../../atoms/auth";
 import { accountService } from "../../../src/services/accountService";
 import { logger } from "../../../src/utils/logger";
 import { OnboardingHeader, OnboardingFooter } from "./onboarding";
@@ -19,6 +20,7 @@ import PreferenceToggle from "../preferences/PreferenceToggle";
  */
 const UpgradeConsentPage: React.FC = () => {
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
+    const user = useAtomValue(userAtom);
     const [agreedToSync, setAgreedToSync] = useState<boolean>(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -29,6 +31,15 @@ const UpgradeConsentPage: React.FC = () => {
 
         try {
             logger(`UpgradeConsentPage: Completing upgrade consent`, 2);
+
+            // Clear existing sync logs to ensure fresh sync state.
+            // This handles plan transitions (e.g., user downgraded, data was deleted,
+            // and now they're upgrading again). Without this, local sync logs would
+            // incorrectly indicate data is already synced.
+            if (user?.id) {
+                logger(`UpgradeConsentPage: Clearing sync logs for fresh sync state`, 2);
+                await Zotero.Beaver.db.deleteAllSyncLogsForUser(user.id);
+            }
 
             // Call the service to complete upgrade consent
             await accountService.completeUpgradeConsent();
