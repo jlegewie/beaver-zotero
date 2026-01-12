@@ -7,6 +7,7 @@ import { planFeaturesAtom, searchableLibraryIdsAtom } from '../../react/atoms/pr
 import { isAttachmentOnServer } from '../utils/webAPI';
 import { getPref } from '../utils/prefs';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
+import { safeFileExists } from '../utils/zoteroUtils';
 
 /**
  * Types of item validation
@@ -204,7 +205,7 @@ class ItemValidationManager {
         }
 
         // 3. Check file availability (same logic as syncingItemFilterAsync)
-        const isLocalFile = await item.fileExists();
+        const isLocalFile = await safeFileExists(item);
         const isServerFile = isAttachmentOnServer(item);
         
         // If file is not available locally or on server, it is invalid
@@ -304,7 +305,7 @@ class ItemValidationManager {
             return { isValid: false, reason };
         }
 
-        const fileExists = await attachment.fileExists();
+        const fileExists = await safeFileExists(attachment);
         if (!fileExists) {
             return { isValid: false, reason: 'File is not available' };
         }

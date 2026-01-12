@@ -8,6 +8,7 @@ import { isDatabaseSyncSupportedAtom, searchableLibraryIdsAtom, syncWithZoteroAt
 import { store } from '../store';
 import { userIdAtom } from '../atoms/auth';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
+import { safeFileExists } from '../../src/utils/zoteroUtils';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -178,7 +179,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
         
         // (c) Check if file exists locally or on server
-        if (!(await item.fileExists()) && !isAttachmentOnServer(item)) {
+        if (!(await safeFileExists(item)) && !isAttachmentOnServer(item)) {
             return {valid: false, error: "File unavailable locally and on server"};
         }
 
@@ -224,7 +225,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         if (!syncingItemFilter(parent)) return {valid: false, error: "Parent item is not syncing"};
 
         // (e) Check if the parent file exists
-        const hasFile = await parent.fileExists();
+        const hasFile = await safeFileExists(parent);
         if (!hasFile) return {valid: false, error: "Parent file does not exist"};
 
         // (f) If syncWithZotero is true, check whether item has been synced with Zotero

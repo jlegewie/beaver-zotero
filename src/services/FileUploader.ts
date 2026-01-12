@@ -18,7 +18,7 @@ import { FileHashReference, ZoteroItemReference } from '../../react/types/zotero
 import { supabase } from "./supabaseClient";
 import { addOrUpdateFailedUploadMessageAtom } from '../../react/utils/popupMessageUtils';
 import { showFileStatusDetailsAtom, zoteroServerCredentialsErrorAtom, zoteroServerDownloadErrorAtom } from '../../react/atoms/ui';
-import { getMimeType, getMimeTypeFromData } from '../utils/zoteroUtils';
+import { getMimeType, getMimeTypeFromData, safeFileExists } from '../utils/zoteroUtils';
 import { isAttachmentOnServer, getAttachmentDataInMemory } from '../utils/webAPI';
 import { PlanFeatures } from '../../react/types/profile';
 
@@ -426,7 +426,7 @@ export class FileUploader {
             }
 
             // Check if file exists locally
-            const useLocalFile = await attachment.fileExists();
+            const useLocalFile = await safeFileExists(attachment);
             context.useLocalFile = useLocalFile;
             
             // Check if file exists on server

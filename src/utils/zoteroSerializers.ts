@@ -1,11 +1,10 @@
 import { calculateObjectHash } from '../utils/hash';
 import { logger } from './logger';
 import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary } from '../../react/types/zotero';
-import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType } from './zoteroUtils';
+import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
-import { safeIsInTrash } from './zoteroUtils';
 
 export interface FileData {
     // filename: string;
@@ -123,12 +122,7 @@ export function getYearFromItem(item: Zotero.Item): number | undefined {
  * @returns Promise resolving to FileData object or null.
  */
 async function getFileDataFromItem(item: Zotero.Item): Promise<FileData | null> {
-    if (!item.isAttachment()) return null;
-    
-    // Linked URLs have no associated file - skip them
-    // Note: fileExists() throws on linked URL attachments
-    const isLinkedUrl = item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL;
-    if (isLinkedUrl || !(await item.fileExists())) return null;
+    if (!item.isAttachment() || !(await safeFileExists(item))) return null;
 
     try {
         // const fileName = item.attachmentFilename;
@@ -314,7 +308,7 @@ export async function serializeAttachment(
     let file_hash: string = '';
 
     if (!skipFileHash) {
-        const existsLocal = await item.fileExists();
+        const existsLocal = await safeFileExists(item);
         
         if (existsLocal) {
             try {
