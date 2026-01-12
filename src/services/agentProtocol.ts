@@ -281,11 +281,22 @@ export interface WSItemSearchByMetadataRequest extends WSBaseEvent {
     limit: number;
 }
 
+/** Error codes for item search failures */
+export type ItemSearchErrorCode =
+    | 'internal_error'      // General internal error
+    | 'database_error'      // Database/indexing error
+    | 'invalid_request'     // Invalid request parameters
+    | 'timeout';            // Operation timed out
+
 /** Response to item metadata search request */
 export interface WSItemSearchByMetadataResponse {
     type: 'item_search_by_metadata';
     request_id: string;
     items: ItemSearchFrontendResultItem[];
+    /** Error message if search failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: ItemSearchErrorCode | null;
 }
 
 /** Request from backend to search Zotero library by topic using semantic search */
@@ -320,6 +331,10 @@ export interface WSItemSearchByTopicResponse {
     type: 'item_search_by_topic';
     request_id: string;
     items: ItemSearchFrontendResultItem[];
+    /** Error message if search failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: ItemSearchErrorCode | null;
 }
 
 /** Request from backend to fetch Zotero item/attachment data */

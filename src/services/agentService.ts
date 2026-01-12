@@ -363,49 +363,130 @@ export class AgentService {
                     logger(`AgentService: Received zotero_attachment_pages_request for ${event.attachment.library_id}-${event.attachment.zotero_key} (pages: ${event.start_page ?? 1}-${event.end_page ?? 'end'})`, 1);
                     handleZoteroAttachmentPagesRequest(event)
                         .then(res => this.send(res))
-                        .catch(err => this.handleProviderError(err, 'zotero_attachment_pages_request_failed'));
+                        .catch(err => {
+                            logger(`AgentService: zotero_attachment_pages_request failed: ${err}`, 1);
+                            // Send error response to backend so it doesn't timeout
+                            this.send({
+                                type: 'zotero_attachment_pages',
+                                request_id: event.request_id,
+                                attachment: event.attachment,
+                                pages: [],
+                                total_pages: null,
+                                error: String(err),
+                                error_code: 'extraction_failed',
+                            });
+                        });
                     break;
 
                 case 'zotero_attachment_page_images_request':
                     logger(`AgentService: Received zotero_attachment_page_images_request for ${event.attachment.library_id}-${event.attachment.zotero_key} (pages: ${event.pages?.join(',') ?? 'all'})`, 1);
                     handleZoteroAttachmentPageImagesRequest(event)
                         .then(res => this.send(res))
-                        .catch(err => this.handleProviderError(err, 'zotero_attachment_page_images_request_failed'));
+                        .catch(err => {
+                            logger(`AgentService: zotero_attachment_page_images_request failed: ${err}`, 1);
+                            // Send error response to backend so it doesn't timeout
+                            this.send({
+                                type: 'zotero_attachment_page_images',
+                                request_id: event.request_id,
+                                attachment: event.attachment,
+                                pages: [],
+                                total_pages: null,
+                                error: String(err),
+                                error_code: 'render_failed',
+                            });
+                        });
                     break;
 
                 case 'zotero_attachment_search_request':
                     logger(`AgentService: Received zotero_attachment_search_request for ${event.attachment.library_id}-${event.attachment.zotero_key} (query: "${event.query}")`, 1);
                     handleZoteroAttachmentSearchRequest(event)
                         .then(res => this.send(res))
-                        .catch(err => this.handleProviderError(err, 'zotero_attachment_search_request_failed'));
+                        .catch(err => {
+                            logger(`AgentService: zotero_attachment_search_request failed: ${err}`, 1);
+                            // Send error response to backend so it doesn't timeout
+                            this.send({
+                                type: 'zotero_attachment_search',
+                                request_id: event.request_id,
+                                attachment: event.attachment,
+                                query: event.query,
+                                total_matches: 0,
+                                pages_with_matches: 0,
+                                total_pages: null,
+                                pages: [],
+                                error: String(err),
+                                error_code: 'search_failed',
+                            });
+                        });
                     break;
 
                 case 'external_reference_check_request':
                     logger(`AgentService: Received external_reference_check_request for ${event.items.length} items`, 1);
                     handleExternalReferenceCheckRequest(event)
                         .then(res => this.send(res))
-                        .catch(err => this.handleProviderError(err, 'external_reference_check_request_failed'));
+                        .catch(err => {
+                            logger(`AgentService: external_reference_check_request failed: ${err}`, 1);
+                            // Send error response with empty results - backend will treat as "none found"
+                            this.send({
+                                type: 'external_reference_check',
+                                request_id: event.request_id,
+                                results: [],
+                            });
+                        });
                     break;
 
                 case 'zotero_data_request':
                     logger(`AgentService: Received zotero_data_request for ${event.items.length} items (parents: ${!!event.include_parents}, attachments: ${!!event.include_attachments})`, 1);
                     handleZoteroDataRequest(event)
                         .then(res => this.send(res))
-                        .catch(err => this.handleProviderError(err, 'zotero_data_request_failed'));
+                        .catch(err => {
+                            logger(`AgentService: zotero_data_request failed: ${err}`, 1);
+                            // Send error response with empty data and errors for all requested items
+                            this.send({
+                                type: 'zotero_data',
+                                request_id: event.request_id,
+                                items: [],
+                                attachments: [],
+                                errors: event.items.map(ref => ({
+                                    reference: ref,
+                                    error: String(err),
+                                    error_code: 'load_failed',
+                                })),
+                            });
+                        });
                     break;
 
                 case 'item_search_by_metadata_request':
                     logger(`AgentService: Received item_search_by_metadata_request: title="${event.title_query || ''}", author="${event.author_query || ''}", pub="${event.publication_query || ''}"`, 1);
                     handleItemSearchByMetadataRequest(event)
                         .then(res => this.send(res))
-                        .catch(err => this.handleProviderError(err, 'item_search_by_metadata_request_failed'));
+                        .catch(err => {
+                            logger(`AgentService: item_search_by_metadata_request failed: ${err}`, 1);
+                            // Send error response to backend so it doesn't timeout
+                            this.send({
+                                type: 'item_search_by_metadata',
+                                request_id: event.request_id,
+                                items: [],
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
                     break;
 
                 case 'item_search_by_topic_request':
                     logger(`AgentService: Received item_search_by_topic_request: topic="${event.topic_query}", limit=${event.limit}`, 1);
                     handleItemSearchByTopicRequest(event)
                         .then(res => this.send(res))
-                        .catch(err => this.handleProviderError(err, 'item_search_by_topic_request_failed'));
+                        .catch(err => {
+                            logger(`AgentService: item_search_by_topic_request failed: ${err}`, 1);
+                            // Send error response to backend so it doesn't timeout
+                            this.send({
+                                type: 'item_search_by_topic',
+                                request_id: event.request_id,
+                                items: [],
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
                     break;
 
                 default:
@@ -473,14 +554,6 @@ export class AgentService {
         this.close(1000, 'User cancelled');
     }
 
-    private handleProviderError(error: any, event: string) {
-        logger(`AgentService: Failed to handle ${event}: ${error}`, 1);
-        this.callbacks?.onError({
-            event: 'error',
-            type: event,
-            message: String(error),
-        });
-    }
 }
 
 // =============================================================================
