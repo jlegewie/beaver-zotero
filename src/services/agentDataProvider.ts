@@ -19,7 +19,7 @@ import { store } from '../../react/store';
 import { isAttachmentOnServer } from '../utils/webAPI';
 import { wasItemAddedBeforeLastSync } from '../../react/utils/sourceUtils';
 import { serializeAttachment, serializeItem } from '../utils/zoteroSerializers';
-import { FindReferenceData, findExistingReference } from '../../react/utils/findExistingReference';
+import { batchFindExistingReferences, BatchReferenceCheckItem } from '../../react/utils/batchFindExistingReferences';
 import {
     WSZoteroDataRequest,
     WSZoteroDataResponse,
@@ -282,29 +282,35 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
 
     const makeKey = (libraryId: number, zoteroKey: string) => `${libraryId}-${zoteroKey}`;
 
-    // Phase 1: Collect primary items from request (don't access parentID/getAttachments yet)
+    // Phase 1: Collect primary items from request IN PARALLEL
     const primaryItems: Zotero.Item[] = [];
     const referenceToItem = new Map<string, Zotero.Item>();
     
-    for (const reference of request.items) {
-        try {
-            const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
-            if (!zoteroItem) {
-                errors.push({
-                    reference,
-                    error: 'Item not found in local database',
-                    error_code: 'not_found'
-                });
-                continue;
+    const loadResults = await Promise.all(
+        request.items.map(async (reference) => {
+            try {
+                const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(reference.library_id, reference.zotero_key);
+                if (!zoteroItem) {
+                    return { reference, error: 'Item not found in local database', error_code: 'not_found' as const };
+                }
+                return { reference, item: zoteroItem };
+            } catch (error: any) {
+                logger(`AgentService: Failed to load zotero item ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+                return { reference, error: 'Failed to load item', error_code: 'load_failed' as const };
             }
-            primaryItems.push(zoteroItem);
-            referenceToItem.set(makeKey(reference.library_id, reference.zotero_key), zoteroItem);
-        } catch (error: any) {
-            logger(`AgentService: Failed to load zotero item ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+        })
+    );
+    
+    // Process results, preserving order
+    for (const result of loadResults) {
+        if ('item' in result && result.item) {
+            primaryItems.push(result.item);
+            referenceToItem.set(makeKey(result.reference.library_id, result.reference.zotero_key), result.item);
+        } else if ('error' in result) {
             errors.push({
-                reference,
-                error: 'Failed to load item',
-                error_code: 'load_failed'
+                reference: result.reference,
+                error: result.error,
+                error_code: result.error_code
             });
         }
     }
@@ -314,10 +320,14 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
         await Zotero.Items.loadDataTypes(primaryItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]);
     }
 
-    // Phase 3: Now expand to parents and children (safe to access parentID/getAttachments)
+    // Phase 3: Collect all parent/attachment IDs first, then batch load
+    const parentIdsToLoad = new Set<number>();
+    const attachmentIdsToLoad = new Set<number>();
+    
+    // First pass: collect IDs and categorize items
     for (const reference of request.items) {
         const zoteroItem = referenceToItem.get(makeKey(reference.library_id, reference.zotero_key));
-        if (!zoteroItem) continue; // Already recorded error in Phase 1
+        if (!zoteroItem) continue;
 
         try {
             if (zoteroItem.isAttachment()) {
@@ -326,10 +336,67 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
                     attachmentKeys.add(key);
                     attachmentsToSerialize.push(zoteroItem);
                 }
-
-                // Include parent item if requested
+                // Collect parent ID for batch loading
                 if (request.include_parents && zoteroItem.parentID) {
-                    const parentItem = await Zotero.Items.getAsync(zoteroItem.parentID);
+                    parentIdsToLoad.add(zoteroItem.parentID);
+                }
+            } else if (zoteroItem.isRegularItem()) {
+                const key = makeKey(zoteroItem.libraryID, zoteroItem.key);
+                if (!itemKeys.has(key)) {
+                    itemKeys.add(key);
+                    itemsToSerialize.push(zoteroItem);
+                }
+                // Collect attachment IDs for batch loading
+                if (request.include_attachments) {
+                    const attachmentIds = zoteroItem.getAttachments();
+                    for (const attachmentId of attachmentIds) {
+                        attachmentIdsToLoad.add(attachmentId);
+                    }
+                }
+            } else {
+                errors.push({
+                    reference,
+                    error: 'Item is not a regular item or attachment',
+                    error_code: 'filtered_from_sync'
+                });
+            }
+        } catch (error: any) {
+            logger(`AgentService: Failed to categorize zotero item ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+            errors.push({
+                reference,
+                error: 'Failed to load item/attachment',
+                error_code: 'load_failed'
+            });
+        }
+    }
+    
+    // Batch load parents and attachments in parallel
+    const [parentItemsArray, attachmentItemsArray] = await Promise.all([
+        parentIdsToLoad.size > 0 ? Zotero.Items.getAsync([...parentIdsToLoad]) : Promise.resolve([]),
+        attachmentIdsToLoad.size > 0 ? Zotero.Items.getAsync([...attachmentIdsToLoad]) : Promise.resolve([])
+    ]);
+    
+    // Create lookup maps
+    const parentItemsById = new Map<number, Zotero.Item>();
+    for (const item of parentItemsArray) {
+        if (item) parentItemsById.set(item.id, item);
+    }
+    
+    const attachmentItemsById = new Map<number, Zotero.Item>();
+    for (const item of attachmentItemsArray) {
+        if (item) attachmentItemsById.set(item.id, item);
+    }
+    
+    // Second pass: add parents and attachments using the pre-loaded items
+    for (const reference of request.items) {
+        const zoteroItem = referenceToItem.get(makeKey(reference.library_id, reference.zotero_key));
+        if (!zoteroItem) continue;
+
+        try {
+            if (zoteroItem.isAttachment()) {
+                // Add parent item if requested (using pre-loaded data)
+                if (request.include_parents && zoteroItem.parentID) {
+                    const parentItem = parentItemsById.get(zoteroItem.parentID);
                     if (parentItem && !parentItem.isAttachment()) {
                         const parentKey = makeKey(parentItem.libraryID, parentItem.key);
                         if (!itemKeys.has(parentKey)) {
@@ -339,17 +406,11 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
                     }
                 }
             } else if (zoteroItem.isRegularItem()) {
-                const key = makeKey(zoteroItem.libraryID, zoteroItem.key);
-                if (!itemKeys.has(key)) {
-                    itemKeys.add(key);
-                    itemsToSerialize.push(zoteroItem);
-                }
-
-                // Include attachments if requested
+                // Add attachments if requested (using pre-loaded data)
                 if (request.include_attachments) {
                     const attachmentIds = zoteroItem.getAttachments();
                     for (const attachmentId of attachmentIds) {
-                        const attachment = await Zotero.Items.getAsync(attachmentId);
+                        const attachment = attachmentItemsById.get(attachmentId);
                         if (attachment) {
                             const attKey = makeKey(attachment.libraryID, attachment.key);
                             if (!attachmentKeys.has(attKey)) {
@@ -359,12 +420,6 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
                         }
                     }
                 }
-            } else {
-                errors.push({
-                    reference,
-                    error: 'Item is not a regular item or attachment',
-                    error_code: 'filtered_from_sync'
-                });
             }
         } catch (error: any) {
             logger(`AgentService: Failed to expand zotero data ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
@@ -396,7 +451,28 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
         }
     }
 
-    // Phase 5: Serialize all items and attachments with status
+    // Phase 5: Pre-compute primary attachments per parent (cache getBestAttachment)
+    const primaryAttachmentByParentId = new Map<number, Zotero.Item | false>();
+    const parentIdsForPrimaryCheck = [...new Set(
+        attachmentsToSerialize
+            .filter(att => att.parentID)
+            .map(att => att.parentID as number)
+    )];
+    
+    // Batch load parent items and their best attachments
+    if (parentIdsForPrimaryCheck.length > 0) {
+        const parentsForCheck = await Zotero.Items.getAsync(parentIdsForPrimaryCheck);
+        await Promise.all(
+            parentsForCheck.map(async (parentItem) => {
+                if (parentItem) {
+                    const bestAttachment = await parentItem.getBestAttachment();
+                    primaryAttachmentByParentId.set(parentItem.id, bestAttachment || false);
+                }
+            })
+        );
+    }
+
+    // Phase 6: Serialize all items and attachments with status
     const [itemResults, attachmentResults] = await Promise.all([
         Promise.all(itemsToSerialize.map(async (item): Promise<ItemDataWithStatus | null> => {
             const serialized = await serializeItem(item, undefined);
@@ -415,14 +491,11 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
             }
             const status = await computeItemStatus(attachment, searchableLibraryIds, syncWithZotero, userId);
             
-            // Determine if this is the primary attachment for its parent
+            // Determine if this is the primary attachment for its parent (using cached data)
             let isPrimary = false;
             if (attachment.parentID) {
-                const parentItem = await Zotero.Items.getAsync(attachment.parentID);
-                if (parentItem) {
-                    const primaryAttachment = await parentItem.getBestAttachment();
-                    isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
-                }
+                const primaryAttachment = primaryAttachmentByParentId.get(attachment.parentID);
+                isPrimary = primaryAttachment !== false && primaryAttachment !== undefined && attachment.id === primaryAttachment.id;
             }
             
             // Get file status (optional but recommended)
@@ -1068,60 +1141,61 @@ export async function handleZoteroAttachmentSearchRequest(
 /**
  * Handle external_reference_check_request event.
  * 
+ * Uses batch lookups for optimal performance:
+ * - Phase 1: Batch DOI/ISBN lookup across all libraries in 2 queries
+ * - Phase 2: Batch title candidate collection in 1 query
+ * - Phase 3: Single batch load of all candidate item data
+ * - Phase 4: In-memory fuzzy matching
+ * 
  * If library_ids is provided, only search those libraries.
  * If library_ids is not provided or empty, search all accessible libraries.
  */
 export async function handleExternalReferenceCheckRequest(request: WSExternalReferenceCheckRequest): Promise<WSExternalReferenceCheckResponse> {
-    const results: ExternalReferenceCheckResult[] = [];
-
     // Determine which libraries to search
     const libraryIds: number[] = request.library_ids && request.library_ids.length > 0
         ? request.library_ids
         : Zotero.Libraries.getAll().map(lib => lib.libraryID);
 
-    // Process all items in parallel for efficiency
-    const checkPromises = request.items.map(async (item): Promise<ExternalReferenceCheckResult> => {
-        try {
-            const referenceData: FindReferenceData = {
-                title: item.title,
-                date: item.date,
-                DOI: item.doi,
-                ISBN: item.isbn,
-                creators: item.creators
-            };
+    // Convert request items to batch format
+    const batchItems: BatchReferenceCheckItem[] = request.items.map(item => ({
+        id: item.id,
+        data: {
+            title: item.title,
+            date: item.date,
+            DOI: item.doi,
+            ISBN: item.isbn,
+            creators: item.creators
+        }
+    }));
 
-            // Search across all specified libraries until found
-            for (const libraryId of libraryIds) {
-                const existingItem = await findExistingReference(libraryId, referenceData);
+    // Use batch lookup for all items at once
+    let batchResults;
+    try {
+        batchResults = await batchFindExistingReferences(batchItems, libraryIds);
+    } catch (error) {
+        logger(`AgentService: Batch reference check failed: ${error}`, 1);
+        // Return all as not found on error
+        batchResults = batchItems.map(item => ({ id: item.id, item: null }));
+    }
 
-                if (existingItem) {
-                    return {
-                        id: item.id,
-                        exists: true,
-                        item: {
-                            library_id: existingItem.libraryID,
-                            zotero_key: existingItem.key
-                        }
-                    };
+    // Convert batch results to response format
+    const results: ExternalReferenceCheckResult[] = batchResults.map(result => {
+        if (result.item) {
+            return {
+                id: result.id,
+                exists: true,
+                item: {
+                    library_id: result.item.libraryID,
+                    zotero_key: result.item.key
                 }
-            }
-
-            return {
-                id: item.id,
-                exists: false
             };
-        } catch (error) {
-            logger(`AgentService: Failed to check reference ${item.id}: ${error}`, 1);
-            // Return as not found on error
+        } else {
             return {
-                id: item.id,
+                id: result.id,
                 exists: false
             };
         }
     });
-
-    const resolvedResults = await Promise.all(checkPromises);
-    results.push(...resolvedResults);
 
     const response: WSExternalReferenceCheckResponse = {
         type: 'external_reference_check',
