@@ -412,7 +412,12 @@ const ProOnboardingPage: React.FC = () => {
                                 <div className="items-start display-flex flex-col gap-2">
                                     <div className="mt-020 font-semibold">Syncing complete</div>
                                     <div className="text-base">
-                                        {parseTextWithLinksAndNewlines('We\'re now processing your library in the background (uploading and processing PDFs). This can take an hour or more depending on your library. You can start using Beaver now. Your <a href="https://beaverapp.ai/pricing" target="_blank" className="text-link">Pro features</a> will unlock automatically when processing finishes.')}
+                                        {parseTextWithLinksAndNewlines(
+                                            'We\'re now processing your library in the background (uploading and processing PDFs). ' +
+                                            'This can take an hour or more depending on your library.\n\n' +
+                                            'You can start using Beaver now. ' +
+                                            'Your <a href="https://beaverapp.ai/pricing" target="_blank" className="text-link">Pro features</a> will unlock automatically when processing finishes.'
+                                        )}
                                     </div>
 
                                     {/* File Processing Status */}
