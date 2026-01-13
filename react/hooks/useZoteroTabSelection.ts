@@ -1,8 +1,14 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useSetAtom } from "jotai";
 import { logger } from "../../src/utils/logger";
 import { isLibraryTabAtom } from "../atoms/ui";
 import { uiManager } from '../ui/UIManager';
+
+/**
+ * Module-level variable to track the Zotero notifier observer ID.
+ * This persists across hot-reloads to ensure proper cleanup.
+ */
+let moduleTabNotifierId: string | null = null;
 
 /**
  * Listens to changes in Zotero tab selection.
@@ -12,8 +18,6 @@ import { uiManager } from '../ui/UIManager';
  */
 export function useZoteroTabSelection() {
     const setIsLibraryTab = useSetAtom(isLibraryTabAtom);
-    // Reference to id of zotero notifier
-    const zoteroNotifierIdRef = useRef<string | null>(null);
     
     // define main window
     const window = Zotero.getMainWindow();
@@ -53,17 +57,30 @@ export function useZoteroTabSelection() {
             }
         };
 
+        // Unregister any existing observer before registering a new one
+        // This handles hot-reload scenarios where cleanup may not have run
+        if (moduleTabNotifierId) {
+            try {
+                Zotero.Notifier.unregisterObserver(moduleTabNotifierId);
+                logger("useZoteroTabSelection: Unregistered stale observer before re-registering", 4);
+            } catch (e) {
+                // Ignore errors if observer was already unregistered
+            }
+            moduleTabNotifierId = null;
+        }
+
         // Register the observer
-        zoteroNotifierIdRef.current = Zotero.Notifier.registerObserver(tabObserver, ['tab'], 'beaver-tabSelectionObserver');
+        const myObserverId = Zotero.Notifier.registerObserver(tabObserver, ['tab'], 'beaver-tabSelectionObserver');
+        moduleTabNotifierId = myObserverId;
         logger("useZoteroTabSelection: registered tab selection observer");
         
         // Cleanup function
         return () => {
             logger("useZoteroTabSelection: cleaning up tab observer");
-            if (zoteroNotifierIdRef.current) {
+            if (moduleTabNotifierId === myObserverId) {
                 logger("useZoteroTabSelection: unregistering tab observer");
-                Zotero.Notifier.unregisterObserver(zoteroNotifierIdRef.current);
-                zoteroNotifierIdRef.current = null;
+                Zotero.Notifier.unregisterObserver(myObserverId);
+                moduleTabNotifierId = null;
             }
         };
     }, [setIsLibraryTab, window]);

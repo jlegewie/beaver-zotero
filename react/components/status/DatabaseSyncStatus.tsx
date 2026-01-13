@@ -9,13 +9,13 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { CancelIcon, CheckmarkIcon, AlertIcon as AlertIconIcon, SpinnerIcon } from "../status/icons";
 import { syncZoteroDatabase } from "../../../src/utils/sync";
 import { LibrarySyncStatus } from "../../atoms/sync";
-import { syncLibraryIdsAtom } from "../../atoms/profile";
+import { syncedLibraryIdsAtom } from "../../atoms/profile";
 import { isErrorReportDialogVisibleAtom } from '../../atoms/ui';
 
 
 export const DatabaseSyncStatus: React.FC = () => {
 
-    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const syncStatusSummary = useAtomValue(syncStatusSummaryAtom);
     const failedSyncLibraryIds = useAtomValue(failedSyncLibraryIdsAtom);
     const setSyncStatus = useSetAtom(syncStatusAtom);
@@ -52,7 +52,7 @@ export const DatabaseSyncStatus: React.FC = () => {
             }
             return newStatus;
         });
-        await syncZoteroDatabase(syncLibraryIds, { resetSyncStatus: true });
+        await syncZoteroDatabase(syncedLibraryIds, { resetSyncStatus: true });
     };
     
     const getLeftText = (): string => {

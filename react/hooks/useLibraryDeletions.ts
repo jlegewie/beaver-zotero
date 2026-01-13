@@ -5,7 +5,7 @@ import { getPref, setPref } from '../../src/utils/prefs';
 import { scheduleLibraryDeletion } from '../../src/utils/sync';
 import { syncService, DeletionStatusRequestItem, DeletionStatusResponse, DeleteLibraryTask } from '../../src/services/syncService';
 import { logger } from '../../src/utils/logger';
-import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
+import { hasAuthorizedProAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
 import { isAuthenticatedAtom } from '../atoms/auth';
 
 const PREF_KEY = 'deletionJobs';
@@ -94,7 +94,7 @@ export async function scheduleSingleLibraryDeletion(
 export function useLibraryDeletions() {
     const [jobs, setJobs] = useAtom(deletionJobsAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
-    const isAuthorized = useAtomValue(hasAuthorizedAccessAtom);
+    const isProAuthorized = useAtomValue(hasAuthorizedProAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const timerRef = useRef<number | null>(null);
     const jobsRef = useRef(jobs);
@@ -108,7 +108,6 @@ export function useLibraryDeletions() {
     useEffect(() => {
         const initial = readJobsPref();
         if (Object.keys(initial).length) setJobs(initial);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Persist on change
@@ -227,7 +226,7 @@ export function useLibraryDeletions() {
     useEffect(() => {
         // Guard: only poll if authenticated
         if (!isAuthenticated) return;
-        if (!isAuthorized) return;
+        if (!isProAuthorized) return;
         if (!isDeviceAuthorized) return;
         
         const hasActiveJobs = activeJobs.length > 0;
@@ -246,7 +245,7 @@ export function useLibraryDeletions() {
         return () => { 
             if (timerRef.current) clearTimeout(timerRef.current); 
         };
-    }, [activeJobs.length, scheduleNextPoll, isAuthenticated, isAuthorized, isDeviceAuthorized]);
+    }, [activeJobs.length, scheduleNextPoll, isAuthenticated, isProAuthorized, isDeviceAuthorized]);
 
     const activeDeletionIds = useMemo(
         () => new Set(activeJobs.map(j => j.libraryID)),

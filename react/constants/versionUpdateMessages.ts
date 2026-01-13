@@ -157,6 +157,21 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         ],
         footer: "Full changelog <a href='https://github.com/jlegewie/beaver-zotero/releases/tag/v0.9.4' target='_blank'>here</a>."
     },
+    {
+        version: "0.10.0",
+        title: "Beaver Version 0.10",
+        text: "Version 0.10 introduces Beaver Free, ensuring the platform remains sustainable and available to everyone in the long term.",
+        featureList: [
+            {
+                title: "Introducing Beaver Free",
+                description: "This new tier supports core features without cloud costs. Going forward, all new users will start on this plan. Read more <a href='https://www.beaverapp.ai/docs/free-plan'>here</a>.",
+            },
+            {
+                title: "Impact on existing accounts",
+                description: "Active users remain on Pro (Beta). To manage server costs, only long-term inactive accounts are migrated to the Free plan. Read more <a href='https://www.beaverapp.ai/free-plan#what-does-this-mean-for-current-beta-users'>here</a>.",
+            },
+        ]
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));

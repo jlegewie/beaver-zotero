@@ -4,7 +4,7 @@ import { syncingAtom, syncErrorAtom } from "../../../atoms/sync";
 import { syncZoteroDatabase } from '../../../../src/utils/sync';
 import IconButton from "../IconButton";
 import { AlertIcon, SyncIcon } from "../../icons/icons";
-import { syncLibraryIdsAtom } from "../../../atoms/profile";
+import { syncedLibraryIdsAtom } from "../../../atoms/profile";
 import { logger } from '../../../../src/utils/logger';
 import Tooltip from "../Tooltip";
 
@@ -15,13 +15,13 @@ const DatabaseStatusButton: React.FC = () => {
     // Combined atoms
     const isSyncing = useAtomValue(syncingAtom);
     const hasError = useAtomValue(syncErrorAtom);
-    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     
     // Handle manual sync button click
     const handleSyncClick = () => {
         if (!isSyncing) {
             logger(`Beaver Sync: User-initiated database sync`);
-            syncZoteroDatabase(syncLibraryIds, { resetSyncStatus: true });
+            syncZoteroDatabase(syncedLibraryIds, { resetSyncStatus: true });
         }
     };
     

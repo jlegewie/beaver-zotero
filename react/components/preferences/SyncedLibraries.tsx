@@ -2,7 +2,7 @@ import React from 'react';
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useAtom, useAtomValue, useStore, useSetAtom } from 'jotai';
 import { userAtom } from '../../atoms/auth';
-import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom } from '../../atoms/profile';
+import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom } from '../../atoms/profile';
 import { Icon, LibraryIcon, SyncIcon, DeleteIcon, CSSIcon, TickIcon, CancelCircleIcon } from '../icons/icons';
 import { accountService } from '../../../src/services/accountService';
 import { isLibraryValidForSync, syncZoteroDatabase } from '../../../src/utils/sync';
@@ -32,7 +32,7 @@ function formatSyncTimestamp(ts?: string): string {
 const SyncedLibraries: React.FC = () => {
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
     const user = useAtomValue(userAtom);
-    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const syncStatusMap = useAtomValue(syncStatusAtom);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const store = useStore();
@@ -50,7 +50,7 @@ const SyncedLibraries: React.FC = () => {
 
     const libraries = useMemo(() => {
         // Get synced libraries
-        const synced = syncLibraryIds
+        const synced = syncedLibraryIds
             .map((id) => Zotero.Libraries.get(id))
             .filter((lib): lib is Zotero.Library => !!lib);
         
@@ -66,7 +66,7 @@ const SyncedLibraries: React.FC = () => {
         
         // Return sorted by libraryID
         return Array.from(map.values()).sort((a, b) => a.libraryID - b.libraryID);
-    }, [syncLibraryIds, jobs]);
+    }, [syncedLibraryIds, jobs]);
 
     // Load last-synced timestamps for each library
     useEffect(() => {
@@ -180,7 +180,7 @@ const SyncedLibraries: React.FC = () => {
 
             // Update list of libraries in backend/profile
             if (profileWithPlan) {
-                const remainingIds = syncLibraryIds.filter((id) => id !== libraryID);
+                const remainingIds = syncedLibraryIds.filter((id) => id !== libraryID);
                 const updated = remainingIds
                     .map((id) => Zotero.Libraries.get(id))
                     .filter((l): l is Zotero.Library => !!l)
@@ -195,7 +195,7 @@ const SyncedLibraries: React.FC = () => {
         } finally {
             setIsDeleting((s) => ({ ...s, [libraryID]: false }));
         }
-    }, [profileWithPlan, setProfileWithPlan, syncLibraryIds, isDeleting, setJobs]);
+    }, [profileWithPlan, setProfileWithPlan, syncedLibraryIds, isDeleting, setJobs]);
 
     return (
         <div className="display-flex flex-col gap-3">
@@ -322,7 +322,7 @@ const SyncedLibraries: React.FC = () => {
                                                 onClick={() => handleDeleteOne(lib.libraryID)}
                                                 variant="ghost-secondary"
                                                 ariaLabel="Remove Library from Beaver"
-                                                disabled={!!deleting || isSyncingNow || syncLibraryIds.length <= 1}
+                                                disabled={!!deleting || isSyncingNow || syncedLibraryIds.length <= 1}
                                                 title="Delete Library from Beaver"
                                                 icon={DeleteIcon}
                                                 className="scale-11"

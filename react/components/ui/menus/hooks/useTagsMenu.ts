@@ -7,7 +7,7 @@ import { ZoteroTag } from '../../../../types/zotero';
 interface UseTagsMenuOptions {
     isActive: boolean;
     searchQuery: string;
-    syncLibraryIds: number[];
+    searchableLibraryIds: number[];
     tagMenuItemContext: TagMenuItemContext;
 }
 
@@ -18,7 +18,7 @@ interface UseTagsMenuResult {
 export const useTagsMenu = ({
     isActive,
     searchQuery,
-    syncLibraryIds,
+    searchableLibraryIds,
     tagMenuItemContext
 }: UseTagsMenuOptions): UseTagsMenuResult => {
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
@@ -39,7 +39,7 @@ export const useTagsMenu = ({
             const libraryId = getActiveZoteroLibraryId();
             setActiveLibraryId(libraryId);
 
-            if (!libraryId || !syncLibraryIds.includes(libraryId)) {
+            if (!libraryId || !searchableLibraryIds.includes(libraryId)) {
                 if (!isCancelled) {
                     setTags([]);
                 }
@@ -117,7 +117,7 @@ export const useTagsMenu = ({
         return () => {
             isCancelled = true;
         };
-    }, [isActive, syncLibraryIds, tagMenuItemContext]);
+    }, [isActive, searchableLibraryIds, tagMenuItemContext]);
 
     useEffect(() => {
         if (!isActive) {

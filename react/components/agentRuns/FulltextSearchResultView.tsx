@@ -1,37 +1,53 @@
 import React, { useMemo } from 'react';
 import { ChunkReference } from '../../agents/toolResultTypes';
-import { ZoteroItemReference } from '../../types/zotero';
-import ZoteroItemsList from '../ui/ZoteroItemsList';
+import ZoteroItemsList, { ZoteroItemReferenceWithLabel } from '../ui/ZoteroItemsList';
+import { formatNumberRanges } from '../../utils/stringUtils';
 
 interface FulltextSearchResultViewProps {
     chunks: ChunkReference[];
 }
 
 /**
- * Aggregate chunks to unique attachments.
- * TODO: In the future, we may show page numbers alongside attachments.
+ * Aggregate chunks to unique attachments with page numbers.
  */
-function aggregateToAttachments(chunks: ChunkReference[]): ZoteroItemReference[] {
-    const seen = new Set<string>();
-    const attachments: ZoteroItemReference[] = [];
-
+function aggregateToAttachmentsWithPages(chunks: ChunkReference[]): (ZoteroItemReferenceWithLabel | { library_id: number; zotero_key: string })[] {
+    const attachmentMap = new Map<string, { library_id: number; zotero_key: string; pages: number[] }>();
+    
     for (const chunk of chunks) {
         const key = `${chunk.library_id}-${chunk.zotero_key}`;
-        if (!seen.has(key)) {
-            seen.add(key);
-            attachments.push({ library_id: chunk.library_id, zotero_key: chunk.zotero_key });
+        if (!attachmentMap.has(key)) {
+            attachmentMap.set(key, {
+                library_id: chunk.library_id,
+                zotero_key: chunk.zotero_key,
+                pages: []
+            });
+        }
+        if (chunk.page !== undefined) {
+            attachmentMap.get(key)!.pages.push(chunk.page + 1);
         }
     }
 
-    return attachments;
+    return Array.from(attachmentMap.values()).map(data => {
+        if (data.pages.length > 0) {
+            return {
+                library_id: data.library_id,
+                zotero_key: data.zotero_key,
+                label: `Page ${formatNumberRanges(data.pages, ",")}`
+            };
+        }
+        return {
+            library_id: data.library_id,
+            zotero_key: data.zotero_key
+        };
+    });
 }
 
 /**
  * Renders the result of a fulltext search tool.
- * Currently shows unique attachments; can be extended to show chunk-level details.
+ * Shows unique attachments with page numbers from chunks.
  */
 export const FulltextSearchResultView: React.FC<FulltextSearchResultViewProps> = ({ chunks }) => {
-    const attachments = useMemo(() => aggregateToAttachments(chunks), [chunks]);
+    const attachments = useMemo(() => aggregateToAttachmentsWithPages(chunks), [chunks]);
 
     if (attachments.length === 0) {
         return (

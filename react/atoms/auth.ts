@@ -132,8 +132,8 @@ export const authLoadingAtom = atom<boolean>(true);
  */
 export const logoutAtom = atom(
     null,
-    (_, set) => {
-        supabase.auth.signOut();
+    async (_, set) => {
+        await supabase.auth.signOut();
         set(profileWithPlanAtom, null);
         set(isProfileLoadedAtom, false);
         

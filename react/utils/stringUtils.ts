@@ -5,7 +5,7 @@ export const truncateText = (text: string, maxLength: number) => {
 }
 
 
-export function formatNumberRanges(numbers: number[]): string {
+export function formatNumberRanges(numbers: number[], separator: string = ", "): string {
     if (numbers.length === 0) return "";
 
     // Sort and remove duplicates just in case
@@ -33,5 +33,5 @@ export function formatNumberRanges(numbers: number[]): string {
         }
     }
 
-    return parts.join(", ");
+    return parts.join(separator);
 }

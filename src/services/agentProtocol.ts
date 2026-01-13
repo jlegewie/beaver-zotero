@@ -5,6 +5,7 @@ import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../react/types/
 import { ReaderState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
+import { AttachmentData, ItemData } from '../../react/types/zotero';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -144,15 +145,55 @@ export interface WSDataError {
 }
 
 export interface WSPageContent {
+    /** 1-indexed page number */
     page_number: number;
+    /** Text content of the page */
     content: string;
 }
 
-export interface WSAttachmentContentRequest extends WSBaseEvent {
-    event: 'attachment_content_request';
+export interface WSPageImage {
+    /** 1-indexed page number */
+    page_number: number;
+    /** Base64-encoded image data */
+    image_data: string;
+    /** Image format (png or jpeg) */
+    format: 'png' | 'jpeg';
+    /** Image width in pixels */
+    width: number;
+    /** Image height in pixels */
+    height: number;
+}
+
+/** Request from backend to fetch attachment page content */
+export interface WSZoteroAttachmentPagesRequest extends WSBaseEvent {
+    event: 'zotero_attachment_pages_request';
     request_id: string;
     attachment: ZoteroItemReference;
-    page_numbers?: number[] | null;
+    /** 1-indexed start page (inclusive, defaults to 1) */
+    start_page?: number;
+    /** 1-indexed end page (inclusive, defaults to total pages) */
+    end_page?: number;
+    /** Skip local file size and page count limits. Default: false */
+    skip_local_limits?: boolean;
+}
+
+/** Request from backend to render attachment pages as images */
+export interface WSZoteroAttachmentPageImagesRequest extends WSBaseEvent {
+    event: 'zotero_attachment_page_images_request';
+    request_id: string;
+    attachment: ZoteroItemReference;
+    /** 1-indexed page numbers to render (defaults to all pages if not specified) */
+    pages?: number[];
+    /** Scale factor (1.0 = 72 DPI, 2.0 = 144 DPI, etc.). Default: 1.0 */
+    scale?: number;
+    /** Target DPI (alternative to scale, takes precedence if provided) */
+    dpi?: number;
+    /** Output format. Default: "png" */
+    format?: 'png' | 'jpeg';
+    /** JPEG quality (1-100), only used for format="jpeg". Default: 85 */
+    jpeg_quality?: number;
+    /** Skip local file size and page count limits. Default: false */
+    skip_local_limits?: boolean;
 }
 
 /**
@@ -178,8 +219,8 @@ export interface ExternalReferenceCheckItem {
 export interface WSExternalReferenceCheckRequest extends WSBaseEvent {
     event: 'external_reference_check_request';
     request_id: string;
-    /** Library ID to search in */
-    library_id: number;
+    /** Library IDs to search in. If not provided, search all libraries. */
+    library_ids?: number[];
     /** References to check */
     items: ExternalReferenceCheckItem[];
 }
@@ -199,6 +240,101 @@ export interface WSExternalReferenceCheckResponse {
     type: 'external_reference_check';
     request_id: string;
     results: ExternalReferenceCheckResult[];
+}
+
+/** Item search result with attachments (unified format) */
+export interface ItemSearchFrontendResultItem {
+    item: ItemData;
+    attachments: AttachmentDataWithStatus[];
+    /** Semantic similarity score (0-1) for topic searches, undefined for metadata searches */
+    similarity?: number;
+}
+
+/** Request from backend to search Zotero library by metadata */
+export interface WSItemSearchByMetadataRequest extends WSBaseEvent {
+    event: 'item_search_by_metadata_request';
+    request_id: string;
+
+    // Query parameters (at least one required, combined with AND)
+    /** Keyword or phrase from the title (substring match) */
+    title_query?: string;
+    /** Author name to search (substring match) */
+    author_query?: string;
+    /** Publication/journal name to search (substring match) */
+    publication_query?: string;
+
+    // Filters (optional, narrow results further)
+    /** Minimum publication year (inclusive) */
+    year_min?: number;
+    /** Maximum publication year (inclusive) */
+    year_max?: number;
+    /** Filter by item type (e.g., "journalArticle") */
+    item_type_filter?: string;
+    /** Filter by library names or IDs (OR logic) */
+    libraries_filter?: (string | number)[];
+    /** Filter by tag names (OR logic) */
+    tags_filter?: string[];
+    /** Filter by collection names or keys (OR logic) */
+    collections_filter?: (string | number)[];
+
+    // Options
+    limit: number;
+}
+
+/** Error codes for item search failures */
+export type ItemSearchErrorCode =
+    | 'internal_error'      // General internal error
+    | 'database_error'      // Database/indexing error
+    | 'invalid_request'     // Invalid request parameters
+    | 'timeout';            // Operation timed out
+
+/** Response to item metadata search request */
+export interface WSItemSearchByMetadataResponse {
+    type: 'item_search_by_metadata';
+    request_id: string;
+    items: ItemSearchFrontendResultItem[];
+    /** Error message if search failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: ItemSearchErrorCode | null;
+}
+
+/** Request from backend to search Zotero library by topic using semantic search */
+export interface WSItemSearchByTopicRequest extends WSBaseEvent {
+    event: 'item_search_by_topic_request';
+    request_id: string;
+
+    // Query parameter (required)
+    /** A concise topic phrase (2-8 words) for semantic search */
+    topic_query: string;
+
+    // Filters (optional, narrow results further)
+    /** List of author last names to filter results (OR'd) */
+    author_filter?: string[];
+    /** Minimum publication year (inclusive) */
+    year_min?: number;
+    /** Maximum publication year (inclusive) */
+    year_max?: number;
+    /** Filter by library names or IDs (OR logic) */
+    libraries_filter?: (string | number)[];
+    /** Filter by tag names (OR logic) */
+    tags_filter?: string[];
+    /** Filter by collection names or keys (OR logic) */
+    collections_filter?: (string | number)[];
+
+    // Options
+    limit: number;
+}
+
+/** Response to item topic search request */
+export interface WSItemSearchByTopicResponse {
+    type: 'item_search_by_topic';
+    request_id: string;
+    items: ItemSearchFrontendResultItem[];
+    /** Error message if search failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: ItemSearchErrorCode | null;
 }
 
 /** Request from backend to fetch Zotero item/attachment data */
@@ -225,13 +361,132 @@ export interface WSZoteroDataResponse {
     errors?: WSDataError[];
 }
 
-export interface WSAttachmentContentResponse {
-    type: 'attachment_content';
+/** Error codes for attachment page extraction failures */
+export type AttachmentPagesErrorCode =
+    | 'not_found'           // Attachment not found in Zotero
+    | 'not_pdf'             // Attachment is not a PDF
+    | 'file_missing'        // PDF file not available locally
+    | 'file_too_large'      // PDF file exceeds size limit
+    | 'encrypted'           // PDF is password-protected
+    | 'no_text_layer'       // PDF needs OCR
+    | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'too_many_pages'      // PDF exceeds page count limit
+    | 'page_out_of_range'   // Requested pages are out of range
+    | 'extraction_failed';  // General extraction failure
+
+/** Response to zotero attachment pages request */
+export interface WSZoteroAttachmentPagesResponse {
+    type: 'zotero_attachment_pages';
     request_id: string;
     attachment: ZoteroItemReference;
+    /** Extracted page content (empty array if error) */
     pages: WSPageContent[];
-    total_pages?: number | null;
+    /** Total number of pages in the document */
+    total_pages: number | null;
+    /** Error message if extraction failed */
     error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: AttachmentPagesErrorCode | null;
+}
+
+/** Error codes for attachment page image rendering failures */
+export type AttachmentPageImagesErrorCode =
+    | 'not_found'           // Attachment not found in Zotero
+    | 'not_pdf'             // Attachment is not a PDF
+    | 'file_missing'        // PDF file not available locally
+    | 'file_too_large'      // PDF file exceeds size limit
+    | 'encrypted'           // PDF is password-protected
+    | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'too_many_pages'      // PDF exceeds page count limit
+    | 'page_out_of_range'   // Requested pages are out of range
+    | 'render_failed';      // General rendering failure
+
+/** Response to zotero attachment page images request */
+export interface WSZoteroAttachmentPageImagesResponse {
+    type: 'zotero_attachment_page_images';
+    request_id: string;
+    attachment: ZoteroItemReference;
+    /** Rendered page images (empty array if error) */
+    pages: WSPageImage[];
+    /** Total number of pages in the document */
+    total_pages: number | null;
+    /** Error message if rendering failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: AttachmentPageImagesErrorCode | null;
+}
+
+/** Error codes for attachment search failures */
+export type AttachmentSearchErrorCode =
+    | 'not_found'           // Attachment not found in Zotero
+    | 'not_pdf'             // Attachment is not a PDF
+    | 'file_missing'        // PDF file not available locally
+    | 'file_too_large'      // PDF file exceeds size limit
+    | 'encrypted'           // PDF is password-protected
+    | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'too_many_pages'      // PDF exceeds page count limit
+    | 'search_failed';      // General search failure
+
+/** Request from backend to search text within an attachment */
+export interface WSZoteroAttachmentSearchRequest extends WSBaseEvent {
+    event: 'zotero_attachment_search_request';
+    request_id: string;
+    attachment: ZoteroItemReference;
+    /** Search query (literal phrase match, case-insensitive) */
+    query: string;
+    /** Maximum hits to return per page. Default: 100 */
+    max_hits_per_page?: number;
+    /** Skip local file size and page count limits. Default: false */
+    skip_local_limits?: boolean;
+}
+
+/** A single search hit within a page */
+export interface WSSearchHit {
+    /** Hit bounding box in MuPDF format {x, y, w, h} */
+    bbox: { x: number; y: number; w: number; h: number };
+    /** Text role: heading, body, caption, footnote, unknown */
+    role: string;
+    /** Role weight applied to this hit */
+    weight: number;
+    /** Matched text content (if available) */
+    matched_text?: string;
+}
+
+/** Search results for a single page */
+export interface WSPageSearchResult {
+    /** 0-indexed page number */
+    page_index: number;
+    /** Page label (e.g., "iv", "220") if available */
+    label?: string;
+    /** Number of matches on this page */
+    match_count: number;
+    /** Computed relevance score for ranking */
+    score: number;
+    /** Total text length on the page (for context) */
+    text_length: number;
+    /** Individual search hits with positions */
+    hits: WSSearchHit[];
+}
+
+/** Response to zotero attachment search request */
+export interface WSZoteroAttachmentSearchResponse {
+    type: 'zotero_attachment_search';
+    request_id: string;
+    attachment: ZoteroItemReference;
+    /** Search query that was executed */
+    query: string;
+    /** Total number of matches across all pages */
+    total_matches: number;
+    /** Number of pages with at least one match */
+    pages_with_matches: number;
+    /** Total pages in the document */
+    total_pages: number | null;
+    /** Pages with matches, sorted by relevance score (highest first) */
+    pages: WSPageSearchResult[];
+    /** Error message if search failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: AttachmentSearchErrorCode | null;
 }
 
 /** Union type for all WebSocket events */
@@ -249,9 +504,13 @@ export type WSEvent =
     | WSRetryEvent
     | WSAgentActionsEvent
     | WSMissingZoteroDataEvent
-    | WSAttachmentContentRequest
+    | WSZoteroAttachmentPagesRequest
+    | WSZoteroAttachmentPageImagesRequest
+    | WSZoteroAttachmentSearchRequest
     | WSExternalReferenceCheckRequest
-    | WSZoteroDataRequest;
+    | WSZoteroDataRequest
+    | WSItemSearchByMetadataRequest
+    | WSItemSearchByTopicRequest;
 
 
 // =============================================================================

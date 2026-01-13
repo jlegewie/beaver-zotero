@@ -1,0 +1,756 @@
+/**
+ * PDF Extraction Types
+ *
+ * Core type definitions for the PDF text extraction pipeline.
+ */
+
+// ============================================================================
+// Settings & Options
+// ============================================================================
+
+/** Margin thresholds in PDF points (1 point = 1/72 inch) */
+export interface MarginSettings {
+    /** Left margin threshold */
+    left: number;
+    /** Top margin threshold */
+    top: number;
+    /** Right margin threshold */
+    right: number;
+    /** Bottom margin threshold */
+    bottom: number;
+}
+
+/** Default margin settings for simple filtering (in PDF points) */
+export const DEFAULT_MARGINS: MarginSettings = {
+    left: 25,
+    top: 40,
+    right: 25,
+    bottom: 40,
+};
+
+/** Margin zone for smart filtering (larger area to collect candidates) */
+export const DEFAULT_MARGIN_ZONE: MarginSettings = {
+    left: 60,
+    top: 80,
+    right: 60,
+    bottom: 80,
+};
+
+/** Options for text extraction */
+export interface ExtractionSettings {
+    /** Page indices to extract (0-based). If undefined, extracts all pages. */
+    pages?: number[];
+    /** Whether to check for text layer before processing */
+    checkTextLayer?: boolean;
+    /** Minimum text per page to consider it has a text layer */
+    minTextPerPage?: number;
+    /** Simple margin filtering thresholds (exclude content outside these) */
+    margins?: MarginSettings;
+    /** Margin zone for smart filtering (collect elements for analysis) */
+    marginZone?: MarginSettings;
+    /** Minimum pages a text must appear on to be considered "repeating" */
+    repeatThreshold?: number;
+    /** Whether to detect and remove page number sequences */
+    detectPageSequences?: boolean;
+    /** Number of pages to sample for style analysis (0 = all pages) */
+    styleSampleSize?: number;
+    /** Use line detection for high-quality extraction (default: false) */
+    useLineDetection?: boolean;
+}
+
+/** Default extraction settings */
+export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
+    pages: [],
+    checkTextLayer: true,
+    minTextPerPage: 100,
+    margins: DEFAULT_MARGINS,
+    marginZone: DEFAULT_MARGIN_ZONE,
+    repeatThreshold: 3,
+    detectPageSequences: true,
+    styleSampleSize: 100,
+    useLineDetection: false,
+};
+
+// ============================================================================
+// Raw MuPDF Data Structures (from WASM JSON output)
+// ============================================================================
+
+/**
+ * Bounding box from MuPDF structured text JSON.
+ * Format: { x, y, w, h } where x,y is top-left corner
+ */
+export interface RawBBox {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+}
+
+/** Convert RawBBox to tuple format [x0, y0, x1, y1] */
+export function bboxToTuple(bbox: RawBBox): [number, number, number, number] {
+    return [bbox.x, bbox.y, bbox.x + bbox.w, bbox.y + bbox.h];
+}
+
+/**
+ * Font information from MuPDF structured text JSON.
+ */
+export interface RawFont {
+    name: string;
+    family: string;
+    weight: "normal" | "bold" | string;
+    style: "normal" | "italic" | string;
+    size: number;
+}
+
+/**
+ * Raw line data from MuPDF structured text JSON.
+ * Each line contains text with uniform styling.
+ */
+export interface RawLine {
+    /** Writing mode: 0 = horizontal, 1 = vertical */
+    wmode: number;
+    /** Bounding box */
+    bbox: RawBBox;
+    /** Font information */
+    font: RawFont;
+    /** Baseline X coordinate */
+    x: number;
+    /** Baseline Y coordinate */
+    y: number;
+    /** Text content */
+    text: string;
+}
+
+/**
+ * Raw block data from MuPDF structured text JSON.
+ */
+export interface RawBlock {
+    /** Block type: "text" or "image" */
+    type: "text" | "image";
+    /** Bounding box */
+    bbox: RawBBox;
+    /** Lines (only for text blocks) */
+    lines?: RawLine[];
+}
+
+/**
+ * Raw page data extracted from MuPDF.
+ */
+export interface RawPageData {
+    /** 0-based page index */
+    pageIndex: number;
+    /** 1-based page number */
+    pageNumber: number;
+    /** Page width in points */
+    width: number;
+    /** Page height in points */
+    height: number;
+    /** Page label (e.g., "iv", "220") */
+    label?: string;
+    /** Structured text blocks */
+    blocks: RawBlock[];
+}
+
+/**
+ * Complete raw document data from extraction pass.
+ */
+export interface RawDocumentData {
+    /** Total page count */
+    pageCount: number;
+    /** Raw page data for all extracted pages */
+    pages: RawPageData[];
+}
+
+// ============================================================================
+// Style Analysis Types
+// ============================================================================
+
+/**
+ * Text style key for grouping spans.
+ * Based on font properties that define visual appearance.
+ */
+export interface TextStyle {
+    /** Rounded font size */
+    size: number;
+    /** Font name */
+    font: string;
+    /** Is bold (from font weight or name) */
+    bold: boolean;
+    /** Is italic (from font style or name) */
+    italic: boolean;
+}
+
+/** Create a unique key string for a TextStyle */
+export function styleToKey(style: TextStyle): string {
+    return `${style.size}-${style.font}-${style.bold}-${style.italic}`;
+}
+
+/**
+ * Style profile computed from document analysis.
+ * Identifies body text styles by character frequency.
+ */
+export interface StyleProfile {
+    /** Primary body text style (highest character count) */
+    primaryBodyStyle: TextStyle;
+    /** All styles considered "body text" (above threshold) */
+    bodyStyles: TextStyle[];
+    /** Map of style key -> character count */
+    styleCounts: Map<string, { count: number; style: TextStyle }>;
+}
+
+// ============================================================================
+// Margin Analysis Types
+// ============================================================================
+
+/** Position of an element relative to page margins */
+export type MarginPosition = "top" | "bottom" | "left" | "right";
+
+/**
+ * Element found in a margin zone.
+ * Used for smart header/footer detection.
+ */
+export interface MarginElement {
+    /** The text content */
+    text: string;
+    /** Which margin zone it's in */
+    position: MarginPosition;
+    /** Bounding box */
+    bbox: RawBBox;
+    /** Page index where this appears */
+    pageIndex: number;
+    /** Full line data for context */
+    line: RawLine;
+}
+
+/**
+ * Margin analysis results.
+ */
+export interface MarginAnalysis {
+    /** Elements found in margin zones, grouped by position */
+    elements: Map<MarginPosition, MarginElement[]>;
+    /** Total elements found per zone */
+    counts: Record<MarginPosition, number>;
+}
+
+/**
+ * Element identified for removal with metadata.
+ */
+export interface RemovalCandidate {
+    /** Normalized text that should be removed */
+    text: string;
+    /** Original (non-normalized) text samples */
+    originalText: string;
+    /** Page indices where this text appears */
+    pageIndices: number[];
+    /** Reason for removal */
+    reason: "repeat" | "page_number";
+    /** Which margin zone */
+    position: MarginPosition;
+}
+
+/**
+ * Result of smart margin removal analysis.
+ */
+export interface MarginRemovalResult {
+    /** Candidates identified for removal */
+    candidates: RemovalCandidate[];
+    /** Set of normalized text strings to remove */
+    textsToRemove: Set<string>;
+    /** Map of pageIndex -> set of texts to remove on that page */
+    removalsByPage: Map<number, Set<string>>;
+}
+
+// ============================================================================
+// Processed Data Structures
+// ============================================================================
+
+/** A processed text line with style information */
+export interface ProcessedLine {
+    text: string;
+    bbox: RawBBox;
+    style: TextStyle;
+}
+
+/** A processed text block */
+export interface ProcessedBlock {
+    type: "text" | "image";
+    bbox: RawBBox;
+    lines: ProcessedLine[];
+    text: string;
+    /** Semantic role detected by style analysis */
+    role?: "heading" | "body" | "caption" | "footnote";
+}
+
+/** Column bounding box (for output) */
+export interface ColumnBBox {
+    /** Left edge */
+    l: number;
+    /** Top edge */
+    t: number;
+    /** Right edge */
+    r: number;
+    /** Bottom edge */
+    b: number;
+}
+
+/** Line bounding box (same format as ColumnBBox) */
+export interface LineBBox {
+    /** Left edge */
+    l: number;
+    /** Top edge */
+    t: number;
+    /** Right edge */
+    r: number;
+    /** Bottom edge */
+    b: number;
+    /** Width */
+    width: number;
+    /** Height */
+    height: number;
+}
+
+/** A single line of text with metadata */
+export interface ExtractedLine {
+    /** Text content */
+    text: string;
+    /** Bounding box */
+    bbox: LineBBox;
+    /** Font size (median of spans) */
+    fontSize?: number;
+    /** Column index (0-based) */
+    columnIndex: number;
+}
+
+/** A fully processed page */
+export interface ProcessedPage {
+    /** 0-based page index */
+    index: number;
+    /** Page label (e.g., "iv", "220") if available */
+    label?: string;
+    /** Page dimensions */
+    width: number;
+    height: number;
+    /** Processed text blocks */
+    blocks: ProcessedBlock[];
+    /** Plain text content (in reading order) */
+    content: string;
+    /** Detected columns (in reading order) */
+    columns?: ColumnBBox[];
+    /** Detected lines (only present if useLineDetection=true) */
+    lines?: ExtractedLine[];
+}
+
+// ============================================================================
+// Document-Level Analysis
+// ============================================================================
+
+/** Information about repeated elements (headers/footers) */
+export interface RepeatedElement {
+    /** The text content that repeats */
+    text: string;
+    /** Approximate Y position (top or bottom of page) */
+    position: "header" | "footer";
+    /** Bounding box pattern */
+    bbox: RawBBox;
+    /** Pages where this element appears */
+    pageIndices: number[];
+}
+
+/** Document analysis results */
+export interface DocumentAnalysis {
+    /** Total page count */
+    pageCount: number;
+    /** Whether the document has a text layer */
+    hasTextLayer: boolean;
+    /** Style profile */
+    styleProfile: StyleProfile;
+    /** Margin analysis (elements in margin zones) */
+    marginAnalysis: MarginAnalysis;
+}
+
+// ============================================================================
+// Final Extraction Result
+// ============================================================================
+
+/** The complete extraction result */
+export interface ExtractionResult {
+    /** Processed pages */
+    pages: ProcessedPage[];
+    /** Document-level analysis */
+    analysis: DocumentAnalysis;
+    /** Combined plain text from all pages */
+    fullText: string;
+    /** Extraction metadata */
+    metadata: {
+        extractedAt: string;
+        version: string;
+        settings: ExtractionSettings;
+    };
+}
+
+/**
+ * Line-based extraction result for high-quality content
+ * Returns structured content by page with line-level granularity
+ */
+export interface LineExtractionResult {
+    /** Processed pages with line information */
+    pages: ProcessedPage[];
+    /** Document-level analysis */
+    analysis: DocumentAnalysis;
+    /** Combined plain text from all pages */
+    fullText: string;
+    /** Extraction metadata */
+    metadata: {
+        extractedAt: string;
+        version: string;
+        settings: ExtractionSettings;
+    };
+}
+
+// ============================================================================
+// OCR Detection Types
+// ============================================================================
+
+/** Options for OCR detection analysis */
+export interface OCRDetectionOptions {
+    /** Minimum text characters per page to consider valid (default: 100) */
+    minTextPerPage?: number;
+    /** Initial pages to sample for analysis (default: 6) */
+    sampleSize?: number;
+    /** Expanded sample size when uncertain (default: 20) */
+    expandedSampleSize?: number;
+    /** Lower bound of "uncertain zone" - expand if issue ratio is above this (default: 0.1 = 10%) */
+    expandLowerThreshold?: number;
+    /** Upper bound of "uncertain zone" - don't expand if issue ratio is above this (default: 0.8 = 80%) */
+    expandUpperThreshold?: number;
+    /** Final threshold to confirm OCR needed - requires majority agreement (default: 0.5 = 50%) */
+    confirmationThreshold?: number;
+
+    // Text quality thresholds
+    /** Max ratio of whitespace to content (default: 0.7) */
+    maxWhitespaceRatio?: number;
+    /** Max ratio of newlines to content (default: 0.6) */
+    maxNewlineRatio?: number;
+    /** Min ratio of alphanumeric chars (default: 0.3) */
+    minAlphanumericRatio?: number;
+    /** Max ratio of invalid/replacement characters before flagging (default: 0.3 = 30%) */
+    maxInvalidCharRatio?: number;
+    /** Minimum valid characters to accept a page despite invalid chars (default: 1000) */
+    minValidCharsToAccept?: number;
+
+    // Image coverage threshold
+    /** Image area ratio to page that suggests a scan (default: 0.65) */
+    imageCoverageThreshold?: number;
+
+    // Bounding box validation (primarily for word-level accuracy)
+    /** Max overlap ratio between lines (default: 0.1) */
+    maxLineOverlapRatio?: number;
+    /** Margin in points for boundary overflow check (default: 5) */
+    boundaryMargin?: number;
+    /** Whether to check bounding boxes - useful for word-level accuracy, less so for page-level (default: false) */
+    checkBoundingBoxes?: boolean;
+}
+
+/** Reasons why a page might need OCR */
+export type OCRIssueReason =
+    | "no_text_blocks"
+    | "insufficient_text"
+    | "high_whitespace_ratio"
+    | "high_newline_ratio"
+    | "low_alphanumeric_ratio"
+    | "invalid_characters"
+    | "large_image_coverage"
+    | "bbox_overflow"
+    | "excessive_line_overlap";
+
+/** Result of analyzing a single page for OCR issues */
+export interface PageOCRAnalysis {
+    /** Page index (0-based) */
+    pageIndex: number;
+    /** Whether this page has issues */
+    hasIssues: boolean;
+    /** Detected issues */
+    issues: OCRIssueReason[];
+    /** Text length found on page */
+    textLength: number;
+    /** Whether page has images */
+    hasImages: boolean;
+}
+
+/** Detailed result of document-level OCR detection */
+export interface OCRDetectionResult {
+    /** Whether the document likely needs OCR */
+    needsOCR: boolean;
+    /** Primary reason for the decision */
+    primaryReason: string;
+    /** Ratio of pages with issues (0-1) */
+    issueRatio: number;
+    /** Breakdown by issue type */
+    issueBreakdown: Record<OCRIssueReason, number>;
+    /** Per-page analysis (for sampled pages) */
+    pageAnalyses: PageOCRAnalysis[];
+    /** Total pages in document */
+    totalPages: number;
+    /** Pages actually sampled */
+    sampledPages: number;
+}
+
+/** Default OCR detection options */
+export const DEFAULT_OCR_DETECTION_OPTIONS: Required<OCRDetectionOptions> = {
+    minTextPerPage: 100,
+    sampleSize: 6,
+    expandedSampleSize: 20,
+    expandLowerThreshold: 0.1,   // Expand if >10% issues (uncertain)
+    expandUpperThreshold: 0.8,   // Don't expand if >80% issues (clearly bad)
+    confirmationThreshold: 0.5,  // Require majority (50%) to confirm OCR needed
+
+    maxWhitespaceRatio: 0.7,
+    maxNewlineRatio: 0.6,
+    minAlphanumericRatio: 0.3,
+    maxInvalidCharRatio: 0.3,      // 30% invalid chars threshold
+    minValidCharsToAccept: 1000,   // Accept page if it has >= 1000 valid chars despite issues
+
+    imageCoverageThreshold: 0.65,
+
+    maxLineOverlapRatio: 0.1,
+    boundaryMargin: 5,
+    checkBoundingBoxes: false, // Disabled by default - only needed for word-level accuracy
+};
+
+// ============================================================================
+// Error Types
+// ============================================================================
+
+/** Error codes for extraction failures */
+export enum ExtractionErrorCode {
+    NO_TEXT_LAYER = "NO_TEXT_LAYER",
+    ENCRYPTED = "ENCRYPTED",
+    INVALID_PDF = "INVALID_PDF",
+    PAGE_OUT_OF_RANGE = "PAGE_OUT_OF_RANGE",
+    WASM_ERROR = "WASM_ERROR",
+}
+
+/** Structured error for extraction failures */
+export class ExtractionError extends Error {
+    constructor(
+        public code: ExtractionErrorCode,
+        message: string,
+        public details?: unknown
+    ) {
+        super(message);
+        this.name = "ExtractionError";
+    }
+}
+
+// ============================================================================
+// PDF Search Types
+// ============================================================================
+
+/**
+ * A QuadPoint defines a quadrilateral region on a page.
+ * Format: [ulx, uly, urx, ury, llx, lly, lrx, lry]
+ * - ul = upper-left, ur = upper-right, ll = lower-left, lr = lower-right
+ */
+export type QuadPoint = [number, number, number, number, number, number, number, number];
+
+/**
+ * A single search hit on a page.
+ * Each hit represents one occurrence of the search term.
+ */
+export interface PDFSearchHit {
+    /** QuadPoints defining the hit region(s) - one quad per character in match */
+    quads: QuadPoint[];
+    /** Bounding box enclosing all quads (for convenience) */
+    bbox: RawBBox;
+}
+
+/**
+ * Search results for a single page.
+ */
+export interface PDFPageSearchResult {
+    /** 0-based page index */
+    pageIndex: number;
+    /** Page label (e.g., "iv", "220") if available */
+    label?: string;
+    /** Number of matches on this page */
+    matchCount: number;
+    /** Individual search hits with positions */
+    hits: PDFSearchHit[];
+    /** Page dimensions for coordinate conversion */
+    width: number;
+    height: number;
+}
+
+/**
+ * Options for PDF search.
+ */
+export interface PDFSearchOptions {
+    /** Maximum hits per page (default: 100) */
+    maxHitsPerPage?: number;
+    /** Pages to search (0-based). If undefined, searches all pages */
+    pages?: number[];
+    /** Scoring options for ranking results */
+    scoring?: SearchScoringOptions;
+}
+
+/** Default search options */
+export const DEFAULT_PDF_SEARCH_OPTIONS: Required<Omit<PDFSearchOptions, 'scoring'>> & { scoring: SearchScoringOptions } = {
+    maxHitsPerPage: 100,
+    pages: [],
+    scoring: {},
+};
+
+// ============================================================================
+// Search Scoring Types
+// ============================================================================
+
+/** Semantic role of text where a match was found */
+export type TextRole = "heading" | "body" | "caption" | "footnote" | "unknown";
+
+/** Weights for different text roles in search scoring */
+export interface SearchRoleWeights {
+    heading: number;
+    body: number;
+    caption: number;
+    footnote: number;
+    unknown: number;
+}
+
+/** Default role weights - headings are most significant, footnotes least */
+export const DEFAULT_SEARCH_ROLE_WEIGHTS: SearchRoleWeights = {
+    heading: 3.0,
+    body: 1.0,
+    caption: 0.7,
+    footnote: 0.3,
+    unknown: 0.5,
+};
+
+/** Options for search scoring */
+export interface SearchScoringOptions {
+    /** Role weights for scoring (default: DEFAULT_SEARCH_ROLE_WEIGHTS) */
+    roleWeights?: Partial<SearchRoleWeights>;
+    /** Whether to normalize by page text length (default: true) */
+    normalizeByTextLength?: boolean;
+    /** Minimum text length for normalization (prevents divide-by-tiny-number) */
+    minTextLengthForNormalization?: number;
+    /** Base score multiplier (default: 100) */
+    baseMultiplier?: number;
+}
+
+/** Default scoring options */
+export const DEFAULT_SEARCH_SCORING_OPTIONS: Required<SearchScoringOptions> = {
+    roleWeights: DEFAULT_SEARCH_ROLE_WEIGHTS,
+    normalizeByTextLength: true,
+    minTextLengthForNormalization: 200,
+    baseMultiplier: 100,
+};
+
+/** Extended search hit with scoring information */
+export interface ScoredSearchHit extends PDFSearchHit {
+    /** Semantic role of the text where match was found */
+    role: TextRole;
+    /** Weight applied to this hit based on role */
+    weight: number;
+    /** The matched text (if extracted) */
+    matchedText?: string;
+}
+
+/** Extended page search result with scoring */
+export interface ScoredPageSearchResult extends Omit<PDFPageSearchResult, 'hits'> {
+    /** Scored hits with role information */
+    hits: ScoredSearchHit[];
+    /** Computed relevance score for ranking */
+    score: number;
+    /** Raw weighted sum before normalization */
+    rawScore: number;
+    /** Total text length on page (for context) */
+    textLength: number;
+}
+
+/**
+ * Complete PDF search result.
+ * 
+ * Search Behavior:
+ * - Simple phrase search (grep-like) - matches literal text
+ * - Case-insensitive matching
+ * - No boolean operators (AND/OR) - use multiple searches if needed
+ * - Returns whole pages ranked by relevance score (highest first)
+ * 
+ * Scoring Methodology:
+ * - Each hit is weighted by text role (heading=3.0, body=1.0, caption=0.7, footnote=0.3)
+ * - Page score = sum of weighted hits, optionally normalized by text length
+ * - This prioritizes pages where matches appear in significant content (headings, body)
+ */
+export interface PDFSearchResult {
+    /** Search query used */
+    query: string;
+    /** Total number of matches across all pages */
+    totalMatches: number;
+    /** Number of pages with at least one match */
+    pagesWithMatches: number;
+    /** Total pages in document */
+    totalPages: number;
+    /** 
+     * Page results ranked by relevance score (highest first).
+     * Only includes pages with at least one match.
+     */
+    pages: ScoredPageSearchResult[];
+    /** Search metadata */
+    metadata: {
+        searchedAt: string;
+        durationMs: number;
+        options: PDFSearchOptions;
+        scoringOptions: SearchScoringOptions;
+    };
+}
+
+// ============================================================================
+// Page Image Rendering Types
+// ============================================================================
+
+/** Image output format for page rendering */
+export type ImageFormat = "png" | "jpeg";
+
+/** Options for rendering a page to an image */
+export interface PageImageOptions {
+    /** Scale factor (1.0 = 72 DPI, 2.0 = 144 DPI, etc.). Default: 1.0 */
+    scale?: number;
+    /** Target DPI (alternative to scale, takes precedence if provided) */
+    dpi?: number;
+    /** Whether to render with transparent background. Default: false */
+    alpha?: boolean;
+    /** Whether to render annotations and widgets. Default: true */
+    showExtras?: boolean;
+    /** Output format. Default: "png" */
+    format?: ImageFormat;
+    /** JPEG quality (1-100), only used for format="jpeg". Default: 85 */
+    jpegQuality?: number;
+}
+
+/** Default page image options */
+export const DEFAULT_PAGE_IMAGE_OPTIONS: Required<PageImageOptions> = {
+    scale: 1.0,
+    dpi: 0, // 0 means use scale instead
+    alpha: false,
+    showExtras: true,
+    format: "png",
+    jpegQuality: 85,
+};
+
+/** Result of rendering a page to an image */
+export interface PageImageResult {
+    /** Page index (0-based) */
+    pageIndex: number;
+    /** Image data as Uint8Array */
+    data: Uint8Array;
+    /** Image format */
+    format: ImageFormat;
+    /** Image width in pixels */
+    width: number;
+    /** Image height in pixels */
+    height: number;
+    /** Scale factor used */
+    scale: number;
+    /** Effective DPI */
+    dpi: number;
+}

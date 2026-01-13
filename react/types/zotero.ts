@@ -222,8 +222,27 @@ export interface ItemDataWithStatus {
     status: ZoteroItemStatus;
 }
 
+/**
+ * File availability status - describes whether full text content is available for AI use.
+ * Used to communicate to the LLM what content can be extracted from attachments.
+ */
+export interface FrontendFileStatus {
+    /** Is this the primary attachment for the parent item? */
+    is_primary: boolean;
+    /** MIME type (e.g., "application/pdf") */
+    mime_type: string;
+    /** Number of pages (null if unknown or not applicable) */
+    page_count?: number | null;
+    /** Full text availability status */
+    status: "available" | "processing" | "unavailable";
+    /** Reason if status is not "available" */
+    status_reason?: string | null;
+}
+
 /** Attachment data with sync status information */
 export interface AttachmentDataWithStatus {
     attachment: AttachmentDataWithMimeType;
     status: ZoteroItemStatus;
+    /** File availability status (optional but recommended) */
+    file_status?: FrontendFileStatus;
 }

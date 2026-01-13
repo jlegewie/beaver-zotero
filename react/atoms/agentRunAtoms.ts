@@ -29,6 +29,9 @@ import { getPref } from '../../src/utils/prefs';
 import { MessageAttachment, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
+import { SubscriptionStatus, ProcessingMode } from '../types/profile';
+import { isDatabaseSyncSupportedAtom } from './profile';
+import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import {
     currentMessageItemsAtom,
     currentReaderAttachmentAtom,
@@ -68,7 +71,7 @@ import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
 import { store } from '../store';
-import { syncLibraryIdsAtom, syncWithZoteroAtom } from './profile';
+import { searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
 import { syncingItemFilterAsync } from '../../src/utils/sync';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
@@ -351,12 +354,12 @@ type MissingItemReason =
  */
 async function determineMissingReason(ref: ZoteroItemReference, userId: string | null): Promise<MissingItemReason> {
     try {
-        // Get sync configuration from store
-        const syncLibraryIds = store.get(syncLibraryIdsAtom);
+        // Get searchable libraries from store
+        const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
         const syncWithZotero = store.get(syncWithZoteroAtom);
 
-        // Check if library is synced
-        if (!syncLibraryIds.includes(ref.library_id)) {
+        // Check if library is searchable (synced for Pro, all local for Free)
+        if (!searchableLibraryIds.includes(ref.library_id)) {
             return 'library_not_synced';
         }
 
@@ -559,6 +562,19 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             logger('WS onReady:', data, 1);
             set(isWSReadyAtom, true);
             set(wsReadyDataAtom, data);
+            
+            // Show popup if subscription is active but using frontend processing
+            if (data.subscriptionStatus === SubscriptionStatus.ACTIVE &&
+                store.get(isDatabaseSyncSupportedAtom) &&
+                data.processingMode === ProcessingMode.FRONTEND) {
+                set(addPopupMessageAtom, {
+                    type: 'info',
+                    title: 'Indexing your library',
+                    text: 'We are processing your library to enable Pro features. You can use standard features in the meantime.',
+                    expire: true,
+                    duration: 10000
+                });
+            }
         },
 
         onRequestAck: (data: WSRequestAckData) => {
@@ -763,6 +779,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 async function executeWSRequest(
     run: AgentRun,
     request: AgentRunRequest,
+    get: Getter,
     set: Setter
 ): Promise<void> {
     const callbacks = createWSCallbacks(set);
@@ -774,6 +791,18 @@ async function executeWSRequest(
         logger('WS Connection established and ready');
     } catch (error) {
         logger('WS connection error:', error, 1);
+        
+        // Check if an error was already set by the onError callback
+        // If so, don't overwrite it with a generic connection_error
+        const currentError = get(wsErrorAtom);
+        if (currentError && currentError.type !== 'connection_error') {
+            // An error was already set by onError callback, don't overwrite
+            logger('WS connection error: Error already set by onError callback, not overwriting', 1);
+            set(isWSChatPendingAtom, false);
+            return;
+        }
+        
+        // No error was set yet, so set a generic connection error
         const errorMessage = error instanceof Error ? error.message : 'Connection failed';
         set(wsErrorAtom, {
             event: 'error',
@@ -958,7 +987,7 @@ export const sendWSMessageAtom = atom(
             set(currentMessageItemsAtom, []);
 
             // Execute the WebSocket request
-            await executeWSRequest(run, request, set);
+            await executeWSRequest(run, request, get, set);
         } catch (error) {
             // Catch any unexpected errors during message preparation
             logger('sendWSMessageAtom: Unexpected error:', error, 1);
@@ -1090,7 +1119,7 @@ export const regenerateFromRunAtom = atom(
             set(activeRunAtom, newRun);
 
             // Execute the WebSocket request
-            await executeWSRequest(newRun, request, set);
+            await executeWSRequest(newRun, request, get, set);
         } catch (error) {
             // Catch any unexpected errors during regeneration
             logger('regenerateFromRunAtom: Unexpected error:', error, 1);
@@ -1215,7 +1244,7 @@ export const regenerateWithEditedPromptAtom = atom(
             set(activeRunAtom, newRun);
 
             // Execute the WebSocket request
-            await executeWSRequest(newRun, request, set);
+            await executeWSRequest(newRun, request, get, set);
         } catch (error) {
             logger('regenerateWithEditedPromptAtom: Unexpected error:', error, 1);
             set(wsErrorAtom, {
@@ -1323,7 +1352,7 @@ export const resumeFromRunAtom = atom(
             set(activeRunAtom, newRun);
 
             // Execute the WebSocket request
-            await executeWSRequest(newRun, request, set);
+            await executeWSRequest(newRun, request, get, set);
         } catch (error) {
             // Catch any unexpected errors during resume
             logger('resumeFromRunAtom: Unexpected error:', error, 1);

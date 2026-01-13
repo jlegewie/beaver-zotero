@@ -126,6 +126,8 @@ export const calculateFileStatusSummary = (fileStatus: FileStatus | null) => {
         // Processing summary
         totalProcessingCount,
         uploadProgress,
+        indexingProgress: fileStatus?.indexing_progress || 0,
+        indexingComplete: fileStatus?.indexing_complete || false,
         progress,
         pageBalanceExhausted: fileStatus?.page_balance_exhausted || false,
     } as FileStatusSummary;

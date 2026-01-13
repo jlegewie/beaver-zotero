@@ -1,6 +1,7 @@
 import React, { useRef, useCallback } from 'react';
 import { CancelIcon, PlusSignIcon, SettingsIcon, Share05Icon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
+import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
 import { newThreadAtom } from '../atoms/threads';
@@ -8,14 +9,17 @@ import { runsCountAtom } from '../agents/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './ui/IconButton';
 import Tooltip from './ui/Tooltip';
-import { isAuthenticatedAtom } from '../atoms/auth';
+import { isAuthenticatedAtom, isWaitingForProfileAtom } from '../atoms/auth';
 import ThreadsMenu from './ui/menus/ThreadsMenu';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
+import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
-import { planFeaturesAtom, hasCompletedOnboardingAtom } from '../atoms/profile';
+import { hasCompletedOnboardingAtom, isDatabaseSyncSupportedAtom, updateRequiredAtom } from '../atoms/profile';
 import Button from './ui/Button';
 import { getWindowFromElement } from '../utils/windowContext';
+import { currentMessageContentAtom } from '../atoms/messageComposition';
 import { getPref } from '../../src/utils/prefs';
+
 
 interface HeaderProps {
     onClose?: () => void;
@@ -27,10 +31,13 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
     const runsCount = useAtomValue(runsCountAtom);
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+    const isWaitingForProfile = useAtomValue(isWaitingForProfileAtom);
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
-    const planFeatures = useAtomValue(planFeaturesAtom);
     const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
+    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
+    const updateRequired = useAtomValue(updateRequiredAtom);
+    const currentMessageContent = useAtomValue(currentMessageContentAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
     const handleNewThread = async () => {
@@ -76,7 +83,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                 )}
                 
                 {/* New chat and chat history */}
-                {isAuthenticated && hasCompletedOnboarding && (
+                {isAuthenticated && hasCompletedOnboarding && !updateRequired && !isWaitingForProfile && (
                     <>
                     <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
                         <IconButton
@@ -91,7 +98,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                 )}
 
                 {/* Only show "Open in Separate Window" button when not already in a separate window and user is authenticated and has completed onboarding */}
-                {!isWindow && isAuthenticated && hasCompletedOnboarding && (
+                {!isWindow && isAuthenticated && hasCompletedOnboarding && !updateRequired && !isWaitingForProfile && (
                     <Tooltip content="Open in Separate Window" secondaryContent={openWindowShortcut} showArrow singleLine>
                         <IconButton
                             icon={Share05Icon}
@@ -101,20 +108,36 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                         />
                     </Tooltip>
                 )}
+
+                {/* Development tools */}
+                {process.env.NODE_ENV === 'development' && (
+                    <DevToolsMenuButton
+                        className="scale-14"
+                        ariaLabel="Development tools"
+                        currentMessageContent={currentMessageContent}
+                    />
+                )}
             </div>
 
-            {/* Database status and user account menu */}
+            {/* Database status, embedding index status, and user account menu */}
             {isAuthenticated && !settingsPage && (
                 <div className="display-flex gap-4">
-                    {planFeatures.databaseSync && hasCompletedOnboarding &&
+                    {/* Show embedding index status for users without databaseSync */}
+                    {!isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && !isWaitingForProfile && (
+                        <EmbeddingIndexStatusButton />
+                    )}
+                    {/* Show database status for users with databaseSync */}
+                    {isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && !isWaitingForProfile && (
                         <DatabaseStatusButton />
-                    }
-                    {isAuthenticated && hasCompletedOnboarding && (
+                    )}
+                    {/* Show chat history menu */}
+                    {isAuthenticated && hasCompletedOnboarding && !updateRequired && !isWaitingForProfile && (
                         <ThreadsMenu
                             className="scale-14"
                             ariaLabel="Show chat history"
                         />
                     )}
+                    {/* Show user account menu */}
                     <UserAccountMenuButton
                         className="scale-14"
                         ariaLabel="User settings"

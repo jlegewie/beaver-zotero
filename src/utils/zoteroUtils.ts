@@ -822,3 +822,162 @@ export const safeIsInTrash = (item: any): boolean | null => {
         return null;
     }
 };
+
+/**
+ * Safely check if an attachment file exists.
+ * 
+ * Unlike item.fileExists(), this handles linked URL attachments which have no
+ * associated file. Calling fileExists() on a linked URL throws an error.
+ * 
+ * @param item - Zotero item to check
+ * @returns Promise<boolean> - true if file exists, false otherwise (including for linked URLs and non-attachments)
+ */
+export async function safeFileExists(item: Zotero.Item): Promise<boolean> {
+    if (!item.isAttachment()) return false;
+    
+    // Linked URLs are web links with no associated file - fileExists() throws on them
+    if (item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL) {
+        return false;
+    }
+    
+    return item.fileExists();
+}
+
+/**
+ * Check if an attachment is a linked URL (web link with no file).
+ * 
+ * Linked URL attachments don't have an associated file and calling fileExists()
+ * on them throws an error.
+ * 
+ * @param item - Zotero item to check
+ * @returns true if the item is a linked URL attachment
+ */
+export function isLinkedUrlAttachment(item: Zotero.Item): boolean {
+    return item.isAttachment() && item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL;
+}
+
+/**
+ * Check if two Zotero items are duplicates based on metadata similarity.
+ * Uses logic similar to Zotero's built-in duplicate detection:
+ * 1. Same ID = duplicate
+ * 2. Different item types = not duplicate
+ * 3. Matching DOI (case-insensitive) = duplicate
+ * 4. Matching ISBN (cleaned) = duplicate
+ * 5. Matching normalized title + (year within 1 OR matching creator) = duplicate
+ * 
+ * @param item1 First Zotero item to compare
+ * @param item2 Second Zotero item to compare
+ * @returns true if items are considered duplicates
+ */
+export function areItemsDuplicates(item1: Zotero.Item, item2: Zotero.Item): boolean {
+    // Same item
+    if (item1.id === item2.id) return true;
+    
+    // Different item types are not duplicates
+    if (item1.itemTypeID !== item2.itemTypeID) return false;
+    
+    // DOI match (case-insensitive)
+    const doi1 = item1.getField('DOI') as string;
+    const doi2 = item2.getField('DOI') as string;
+    if (doi1 && doi2) {
+        return doi1.trim().toUpperCase() === doi2.trim().toUpperCase();
+    }
+    
+    // ISBN match (cleaned)
+    const isbn1 = item1.getField('ISBN') as string;
+    const isbn2 = item2.getField('ISBN') as string;
+    if (isbn1 && isbn2) {
+        return Zotero.Utilities.cleanISBN(isbn1) === Zotero.Utilities.cleanISBN(isbn2);
+    }
+    
+    // Title normalization and comparison
+    const title1Raw = item1.getField('title') as string;
+    const title2Raw = item2.getField('title') as string;
+    
+    if (!title1Raw || !title2Raw) return false;
+    
+    const normalizeTitle = (title: string): string => {
+        return Zotero.Utilities.removeDiacritics(title)
+            .replace(/[ !-/:-@[-`{-~]+/g, ' ')
+            .trim()
+            .toLowerCase();
+    };
+    
+    const title1 = normalizeTitle(title1Raw);
+    const title2 = normalizeTitle(title2Raw);
+    
+    if (title1 !== title2 || !title1) return false;
+    
+    // Year match (within 1 year)
+    const year1 = parseInt(item1.getField('date') as string);
+    const year2 = parseInt(item2.getField('date') as string);
+    if (!isNaN(year1) && !isNaN(year2) && Math.abs(year1 - year2) <= 1) {
+        return true;
+    }
+    
+    // Creator match (at least one last name + first initial)
+    const creators1 = item1.getCreators();
+    const creators2 = item2.getCreators();
+    
+    for (const c1 of creators1) {
+        const ln1 = Zotero.Utilities.removeDiacritics(c1.lastName || '').toLowerCase();
+        const fi1 = c1.firstName 
+            ? Zotero.Utilities.removeDiacritics(c1.firstName[0]).toLowerCase() 
+            : '';
+        
+        for (const c2 of creators2) {
+            const ln2 = Zotero.Utilities.removeDiacritics(c2.lastName || '').toLowerCase();
+            const fi2 = c2.firstName 
+                ? Zotero.Utilities.removeDiacritics(c2.firstName[0]).toLowerCase() 
+                : '';
+            
+            if (ln1 === ln2 && fi1 === fi2) return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Deduplicate an array of Zotero items, prioritizing items from a preferred library.
+ * When duplicates are found, keeps the item from the preferred library (default: 1).
+ * 
+ * @param items Array of Zotero items to deduplicate
+ * @param preferredLibraryId Library ID to prioritize when choosing between duplicates (default: 1)
+ * @returns Deduplicated array of items
+ */
+export function deduplicateItems(
+    items: Zotero.Item[],
+    preferredLibraryId: number = 1
+): Zotero.Item[] {
+    if (items.length <= 1) return items;
+    
+    const result: Zotero.Item[] = [];
+    const processedIndices = new Set<number>();
+    
+    for (let i = 0; i < items.length; i++) {
+        if (processedIndices.has(i)) continue;
+        
+        const item = items[i];
+        let bestItem = item;
+        
+        // Find all duplicates of this item
+        for (let j = i + 1; j < items.length; j++) {
+            if (processedIndices.has(j)) continue;
+            
+            const otherItem = items[j];
+            if (areItemsDuplicates(item, otherItem)) {
+                processedIndices.add(j);
+                
+                // Prefer item from preferred library
+                if (otherItem.libraryID === preferredLibraryId && bestItem.libraryID !== preferredLibraryId) {
+                    bestItem = otherItem;
+                }
+            }
+        }
+        
+        result.push(bestItem);
+    }
+    
+    return result;
+}

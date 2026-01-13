@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { Provider } from 'jotai';
 import LibrarySidebar from './components/LibrarySidebar';
 import { useZoteroSync } from './hooks/useZoteroSync';
+import { useEmbeddingIndex } from './hooks/useEmbeddingIndex';
+import { useEmbeddingIndexProgress } from './hooks/useEmbeddingIndexProgress';
 import { useAuth } from './hooks/useAuth';
 import ReaderSidebar from './components/ReaderSidebar';
 import WindowSidebar from './components/WindowSidebar';
@@ -12,6 +14,7 @@ import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { store } from './store';
 import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
+import { useHttpEndpoints } from './hooks/useHttpEndpoints';
 
 
 /**
@@ -21,6 +24,12 @@ import { useUpgradeHandler } from './hooks/useUpgradeHandler';
 const GlobalContextInitializer = () => {
     // Handle Supabase authentication
     useAuth();
+
+    // Handle embedding index
+    useEmbeddingIndex();
+
+    // Show embedding index progress popup
+    useEmbeddingIndexProgress();
 
     // Handle plugin upgrade tasks
     useUpgradeHandler();
@@ -40,6 +49,9 @@ const GlobalContextInitializer = () => {
 
     // Control visibility of the sidebar (e.g., setup global listeners/state)
     useToggleSidebar();
+
+    // Register HTTP endpoints for local FrontendCapability (when authenticated)
+    useHttpEndpoints();
 
     return null; // This component does not render any UI
 };

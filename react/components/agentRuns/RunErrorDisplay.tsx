@@ -67,6 +67,7 @@ const typeMap: Record<string, string> = {
     llm_encoding_error: 'Request Problem',
 
     // System Errors
+    frontend_version_error: 'Update Required',
     internal_error: 'System Error',
     llm_unexpected_error: 'System Error',
     llm_internal_error: 'System Error',

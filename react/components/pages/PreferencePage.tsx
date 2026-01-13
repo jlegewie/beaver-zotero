@@ -2,19 +2,25 @@ import React, { useState, useCallback } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, SearchIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
+import { 
+    embeddingIndexStateAtom, 
+    forceReindexAtom, 
+    isEmbeddingIndexingAtom 
+} from "../../atoms/embeddingIndex";
 import ApiKeyInput from "../preferences/ApiKeyInput";
 import CustomPromptSettings from "../preferences/CustomPromptSettings";
 import ZoteroSyncToggle from "../preferences/SyncToggle";
 import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { accountService } from "../../../src/services/accountService";
-import ConsentToggle from "../preferences/ConsentToggle";
+import HelpImproveBeaverToggle from "../preferences/HelpImproveBeaverToggle";
+import EmailToggle from "../preferences/EmailToggle";
 import CitationFormatToggle from "../preferences/CitationFormatToggle";
 import AddSelectedItemsOnNewThreadToggle from "../preferences/AddSelectedItemsOnNewThreadToggle";
 import AddSelectedItemsOnOpenToggle from "../preferences/AddSelectedItemsOnOpenToggle";
@@ -39,34 +45,42 @@ const PreferencePage: React.FC = () => {
     const [anthropicKey, setAnthropicKey] = useState(() => getPref('anthropicApiKey'));
     const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
     const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>(getCustomPromptsFromPreferences());
-    const syncLibraryIds = useAtomValue(syncLibraryIdsAtom);
+    const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
     const [addSelectedOnNewThread, setAddSelectedOnNewThread] = useState(() => getPref('addSelectedItemsOnNewThread'));
     const [addSelectedOnOpen, setAddSelectedOnOpen] = useState(() => getPref('addSelectedItemsOnOpen'));
     const [consentToShare, setConsentToShare] = useState(() => profileWithPlan?.consent_to_share || false);
+    const [emailNotifications, setEmailNotifications] = useState(() => profileWithPlan?.email_notifications || false);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
     const profileBalance = useAtomValue(profileBalanceAtom);
+    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
 
     // Update local state when atom changes
     React.useEffect(() => {
         setLocalSyncToggle(syncWithZotero);
         setConsentToShare(profileWithPlan?.consent_to_share || false);
-    }, [syncWithZotero, profileWithPlan?.consent_to_share]);
+        setEmailNotifications(profileWithPlan?.email_notifications || false);
+    }, [syncWithZotero, profileWithPlan?.consent_to_share, profileWithPlan?.email_notifications]);
 
     // --- Sync and Verify Status States ---
     const [syncStatus, setSyncStatus] = useState<'idle' | 'running' | 'completed'>('idle');
     const [verifyStatus, setVerifyStatus] = useState<'idle' | 'running' | 'completed'>('idle');
     const [lastSyncedText, setLastSyncedText] = useState<string>('Never');
+    
+    // --- Embedding Index ---
+    const embeddingIndexState = useAtomValue(embeddingIndexStateAtom);
+    const isEmbeddingIndexing = useAtomValue(isEmbeddingIndexingAtom);
+    const forceReindex = useSetAtom(forceReindexAtom);
  
      // --- Load last synced timestamp from local DB ---
      const loadLastSynced = useCallback(async () => {
          try {
-             if (!user?.id || !syncLibraryIds?.length) {
+             if (!user?.id || !syncedLibraryIds?.length) {
                 setLastSyncedText('Unable to retrieve');
                 return;
              }
-             const latest = await Zotero.Beaver.db.getMostRecentSyncLogForLibraries(user.id, syncLibraryIds);
+             const latest = await Zotero.Beaver.db.getMostRecentSyncLogForLibraries(user.id, syncedLibraryIds);
              if (!latest) {
                 setLastSyncedText('Never');
                 return;
@@ -88,7 +102,7 @@ const PreferencePage: React.FC = () => {
             logger(`Failed to load last sync time: ${e.message}`, 1);
             setLastSyncedText('—');
         }
-    }, [user?.id, syncLibraryIds]);
+    }, [user?.id, syncedLibraryIds]);
 
     React.useEffect(() => {
         loadLastSynced();
@@ -157,7 +171,7 @@ const PreferencePage: React.FC = () => {
         
         try {
             // Run consistency check for all sync libraries
-            for (const libraryID of syncLibraryIds) {
+            for (const libraryID of syncedLibraryIds) {
                 await performConsistencyCheck(libraryID);
             }
             
@@ -174,7 +188,7 @@ const PreferencePage: React.FC = () => {
             Zotero.logError(error);
             setVerifyStatus('idle');
         }
-    }, [syncLibraryIds, verifyStatus]);
+    }, [syncedLibraryIds, verifyStatus]);
 
     // --- Remove Prompt Handler ---
     const handleRemovePrompt = useCallback((indexToRemove: number) => {
@@ -203,6 +217,27 @@ const PreferencePage: React.FC = () => {
             Zotero.logError(error as Error);
             // Revert the toggle on error
             setConsentToShare(!checked);
+        }
+    }, [setProfileWithPlan]);
+
+    // --- Email Notifications Toggle Change Handler ---
+    const handleEmailNotificationsChange = useCallback(async (checked: boolean) => {
+        const action = checked ? 'enable' : 'disable';
+        try {
+            logger(`User confirmed to ${action} email notifications. New value: ${checked}`);
+            await accountService.updatePreference('email_notifications', checked);
+
+            setProfileWithPlan((prev) => {
+                if (!prev) return null;
+                return { ...prev, email_notifications: checked };
+            });
+            setEmailNotifications(checked);
+            logger('Successfully updated email notifications preference.');
+        } catch (error) {
+            logger(`Failed to update email notifications preference: ${error}`, 1);
+            Zotero.logError(error as Error);
+            // Revert the toggle on error
+            setEmailNotifications(!checked);
         }
     }, [setProfileWithPlan]);
 
@@ -241,6 +276,40 @@ const PreferencePage: React.FC = () => {
             }
         }
     }, [setProfileWithPlan]);
+
+    // --- Rebuild Search Index Handler ---
+    const handleRebuildSearchIndex = useCallback(() => {
+        if (isEmbeddingIndexing) return;
+        logger('handleRebuildSearchIndex: User-initiated search index rebuild');
+        forceReindex();
+    }, [isEmbeddingIndexing, forceReindex]);
+
+    // Helper function to get rebuild index button props
+    const getRebuildIndexButtonProps = () => {
+        if (isEmbeddingIndexing) {
+            const progress = embeddingIndexState.progress > 0 ? ` (${embeddingIndexState.progress}%)` : '';
+            return {
+                icon: Spinner,
+                iconClassName: 'animate-spin',
+                disabled: true,
+                text: `Indexing${progress}`
+            };
+        }
+        if (embeddingIndexState.failedItems > 0) {
+            return {
+                icon: SearchIcon,
+                iconClassName: '',
+                disabled: false,
+                text: `Rebuild & Retry Failed (${embeddingIndexState.failedItems})`
+            };
+        }
+        return {
+            icon: SearchIcon,
+            iconClassName: '',
+            disabled: false,
+            text: 'Rebuild Search Index'
+        };
+    };
 
     // Helper function to get sync button props
     const getSyncButtonProps = () => {
@@ -298,6 +367,7 @@ const PreferencePage: React.FC = () => {
 
     const syncButtonProps = getSyncButtonProps();
     const verifyButtonProps = getVerifyButtonProps();
+    const rebuildIndexButtonProps = getRebuildIndexButtonProps();
 
     return (
         <div
@@ -323,7 +393,7 @@ const PreferencePage: React.FC = () => {
                         <div className="font-color-secondary">Plan:</div>
                         <div className="font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</div>
                     </div>
-                    {profileBalance.pagesRemaining !== undefined && 
+                    {isDatabaseSyncSupported && profileBalance.pagesRemaining !== undefined && 
                         <div className="display-flex flex-row items-center gap-2">
                             <div className="font-color-secondary">Remaining Page Balance:</div>
                             <div className="font-color-primary">{profileBalance.pagesRemaining.toLocaleString() || 'Unknown'}</div>
@@ -364,41 +434,78 @@ const PreferencePage: React.FC = () => {
             )}
 
             {/* --- Library Syncing Section --- */}
-            <SectionHeader>Beaver Syncing</SectionHeader>
+            {isDatabaseSyncSupported && (
+                <>
+                    <SectionHeader>Beaver Syncing</SectionHeader>
 
-            {/* <div className="text-sm font-color-secondary mb-3">
-                Beaver syncs your library, uploads your PDFs, and indexes your files for search.
-            </div> */}
 
-            <div className="display-flex flex-col gap-3">
-                {/* Synced Libraries */}
-                <SyncedLibraries />
+                    <div className="display-flex flex-col gap-3">
+                        {/* Synced Libraries */}
+                        <SyncedLibraries />
 
-                {/* Verify Data Button */}
-                <div className="display-flex flex-row items-center gap-4 justify-end" style={{ marginRight: '1px' }}>
-                    <Button 
-                        variant="outline" 
-                        rightIcon={verifyButtonProps.icon}
-                        iconClassName={verifyButtonProps.iconClassName}
-                        onClick={handleVerifySync}
-                        disabled={verifyButtonProps.disabled}
-                    >
-                        {verifyButtonProps.text}
-                    </Button>
-                </div>
+                        {/* Verify Data Button */}
+                        <div className="display-flex flex-row items-center gap-4 justify-end" style={{ marginRight: '1px' }}>
+                            <Button 
+                                variant="outline" 
+                                rightIcon={verifyButtonProps.icon}
+                                iconClassName={verifyButtonProps.iconClassName}
+                                onClick={handleVerifySync}
+                                disabled={verifyButtonProps.disabled}
+                            >
+                                {verifyButtonProps.text}
+                            </Button>
+                        </div>
 
-                {/* Sync with Zotero Toggle */}
-                <div className="mt-2">
-                    <ZoteroSyncToggle 
-                        checked={localSyncToggle}
-                        onChange={handleSyncToggleChange}
-                        disabled={!isLibrarySynced(1) && !syncWithZotero}
-                        error={!isLibrarySynced(1) && syncWithZotero}
-                    />
-                </div>
-            </div>
+                        {/* Sync with Zotero Toggle */}
+                        <div className="mt-2">
+                            <ZoteroSyncToggle 
+                                checked={localSyncToggle}
+                                onChange={handleSyncToggleChange}
+                                disabled={!isLibrarySynced(1) && !syncWithZotero}
+                                error={!isLibrarySynced(1) && syncWithZotero}
+                            />
+                        </div>
+                    </div>
+                </>
+            )}
             
             {/* <LibrarySelection /> */}
+
+            {/* --- Search Index Section (only for users without databaseSync) --- */}
+            {!isDatabaseSyncSupported && (
+                <>
+                    <SectionHeader>Search Index</SectionHeader>
+                    <div className="font-color-secondary mb-3">
+                        Beaver indexes your library locally for semantic search. Rebuilding the index will retry any failed items and reindex all libraries.
+                    </div>
+                    <div className="display-flex flex-col gap-3">
+                        <div className="display-flex flex-row items-center gap-4 justify-between">
+                            <div className="display-flex flex-col gap-1">
+                                {embeddingIndexState.failedItems > 0 && (
+                                    <div className="text-sm font-color-yellow">
+                                        {embeddingIndexState.failedItems} items failed to index
+                                    </div>
+                                )}
+                                {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
+                                    <div className="text-sm font-color-red">
+                                        Error: {embeddingIndexState.error}
+                                    </div>
+                                )}
+                            </div>
+                            <Button 
+                                variant="outline" 
+                                rightIcon={rebuildIndexButtonProps.icon}
+                                iconClassName={rebuildIndexButtonProps.iconClassName}
+                                onClick={handleRebuildSearchIndex}
+                                disabled={rebuildIndexButtonProps.disabled}
+                                loading={isEmbeddingIndexing}
+                            >
+                                {rebuildIndexButtonProps.text}
+                            </Button>
+                        </div>
+                    </div>
+                </>
+            )}
 
             {/* --- General Settings Section --- */}
             <SectionHeader>General Settings</SectionHeader>
@@ -415,9 +522,13 @@ const PreferencePage: React.FC = () => {
                     checked={addSelectedOnOpen} 
                     onChange={setAddSelectedOnOpen} 
                 />
-                <ConsentToggle
+                <HelpImproveBeaverToggle
                     checked={consentToShare}
                     onChange={handleConsentChange}
+                />
+                <EmailToggle
+                    checked={emailNotifications}
+                    onChange={handleEmailNotificationsChange}
                 />
             </div>
 

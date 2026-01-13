@@ -9,7 +9,7 @@ interface UseSourcesMenuOptions {
     isActive: boolean;
     searchResults: ItemSearchResult[];
     sourceMenuItemContext: SourceMenuItemContext;
-    syncLibraryIds: number[];
+    searchableLibraryIds: number[];
     activeZoteroLibraryId: number | null;
     onNavigateToLibraries: () => void;
     onNavigateToCollections: (libraryId: number) => void;
@@ -26,7 +26,7 @@ export const useSourcesMenu = ({
     isActive,
     searchResults,
     sourceMenuItemContext,
-    syncLibraryIds,
+    searchableLibraryIds,
     activeZoteroLibraryId,
     onNavigateToLibraries,
     onNavigateToCollections,
@@ -37,10 +37,10 @@ export const useSourcesMenu = ({
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
 
     const getEffectiveLibraryId = (libraryId: number | null): number | null => {
-        if (libraryId && syncLibraryIds.includes(libraryId)) {
+        if (libraryId && searchableLibraryIds.includes(libraryId)) {
             return libraryId;
         }
-        if (syncLibraryIds.includes(1)) {
+        if (searchableLibraryIds.includes(1)) {
             return 1;
         }
         return null;
@@ -103,7 +103,7 @@ export const useSourcesMenu = ({
             const filterByHeader: SearchMenuItem = { label: 'Filter Search by', isGroupHeader: true, onClick: () => {} };
             const filterItems: SearchMenuItem[] = [filterByHeader];
 
-            if (syncLibraryIds.length > 1) {
+            if (searchableLibraryIds.length > 1) {
                 filterItems.unshift({
                     label: '"Select Library"',
                     onClick: async () => {
@@ -217,7 +217,7 @@ export const useSourcesMenu = ({
     }, [
         isActive,
         sourceMenuItemContext,
-        syncLibraryIds,
+        searchableLibraryIds,
         activeZoteroLibraryId,
         onNavigateToLibraries,
         onNavigateToCollections,

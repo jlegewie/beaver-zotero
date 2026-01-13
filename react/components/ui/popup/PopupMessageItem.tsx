@@ -1,16 +1,18 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../../../types/popupMessage';
-import { Icon, AlertIcon, InformationCircleIcon, PuzzleIcon, SettingsIcon, AiMagicIcon } from '../../icons/icons';
+import { Icon, AlertIcon, InformationCircleIcon, PuzzleIcon, SettingsIcon, AiMagicIcon, SearchIcon } from '../../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { removePopupMessageAtom, updatePopupMessageAtom } from '../../../utils/popupMessageUtils';
 import PlanChangeMessageContent from './PlanChangeMessageContent';
 import IndexingCompleteMessageContent from './IndexingCompleteMessageContent';
 import VersionUpdateMessageContent from './VersionUpdateMessageContent';
+import EmbeddingIndexingMessageContent from './EmbeddingIndexingMessageContent';
 import { newThreadAtom, currentThreadIdAtom } from '../../../atoms/threads';
 import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../../atoms/ui';
 import Button from "../Button";
 import PopupMessageHeader from './PopupMessageHeader';
 import { getWindowFromElement } from '../../../utils/windowContext';
+import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinksAndNewlines';
 
 interface PopupMessageItemProps {
     message: PopupMessage;
@@ -88,6 +90,8 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                 return <Icon icon={PuzzleIcon} className="scale-12 mt-020 font-color-secondary" />;
             case 'version_update':
                 return <Icon icon={AiMagicIcon} className="scale-12 mt-020 font-color-secondary" />;
+            case 'embedding_indexing':
+                return <Icon icon={SearchIcon} className="scale-12 mt-020 font-color-secondary" />;
             case 'info':
             default:
                 return <Icon icon={InformationCircleIcon} className="scale-12 mt-020 font-color-secondary" />;
@@ -107,6 +111,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
         case 'plan_change':
         case 'indexing_complete':
         case 'version_update':
+        case 'embedding_indexing':
         default:
             fontColor = 'font-color-secondary';
             backgroundColor = 'var(--material-mix-quarternary)';
@@ -135,6 +140,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                     buttonOnClick={message.buttonOnClick}
                     fontColor={fontColor}
                     handleDismiss={handleDismiss}
+                    cancelable={message.cancelable}
                 />
 
                 {/* Content for info, warning, error */}
@@ -145,7 +151,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                         </div>
                     ) : (
                         <div className='text-base font-color-tertiary'>
-                            {message.text}
+                            {message.text && parseTextWithLinksAndNewlines(message.text)}
                             {message.learnMoreUrl && (
                                 <>
                                     {' '}
@@ -177,6 +183,10 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
 
                 {message.type === 'version_update' && (
                     <VersionUpdateMessageContent message={message} />
+                )}
+
+                {message.type === 'embedding_indexing' && (
+                    <EmbeddingIndexingMessageContent message={message} />
                 )}
 
                 {message.showGoToFileStatusButton && (

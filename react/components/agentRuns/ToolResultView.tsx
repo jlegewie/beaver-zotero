@@ -7,14 +7,21 @@ import {
     extractFulltextSearchData,
     isReadPagesResult,
     extractReadPagesData,
+    isViewPageImagesResult,
+    extractViewPageImagesData,
     isSearchInDocumentsResult,
     extractSearchInDocumentsData,
+    isSearchInAttachmentResult,
+    extractSearchInAttachmentData,
     isExternalSearchResult,
     extractExternalSearchData,
+    isReadPagesFrontendResult,
+    extractReadPagesFrontendData,
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
 import { ReadPagesResultView } from './ReadPagesResultView';
+import { ViewPageImagesResultView } from './ViewPageImagesResultView';
 import { ExternalSearchResultView } from './ExternalSearchResultView';
 
 interface ToolResultViewProps {
@@ -51,19 +58,37 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         }
     }
 
-    // Fulltext retrieval results (read_pages)
-    if (isReadPagesResult(toolName, content, metadata)) {
-        const data = extractReadPagesData(content, metadata);
+    // Read pages results (read_pages)
+    if (isReadPagesResult(toolName, content, metadata) || isReadPagesFrontendResult(toolName, content, metadata)) {
+        const data = isReadPagesResult(toolName, content, metadata)
+            ? extractReadPagesData(content, metadata)
+            : extractReadPagesFrontendData(content, metadata);
         if (data) {
-            return <ReadPagesResultView attachment={data.attachment} />;
+            return <ReadPagesResultView pages={data.pages} />;
         }
     }
 
-    // Passage retrieval results (search_in_documents)
+    // View page images results (view_page_images)
+    if (isViewPageImagesResult(toolName, content, metadata)) {
+        const data = extractViewPageImagesData(content, metadata);
+        if (data) {
+            return <ViewPageImagesResultView pages={data.pages} />;
+        }
+    }
+
+    // Search in documents results (search_in_documents)
     if (isSearchInDocumentsResult(toolName, content, metadata)) {
         const data = extractSearchInDocumentsData(content, metadata);
         if (data) {
             return <FulltextSearchResultView chunks={data.chunks} />;
+        }
+    }
+
+    // Search in attachment results (search_in_attachment - keyword search)
+    if (isSearchInAttachmentResult(toolName, content, metadata)) {
+        const data = extractSearchInAttachmentData(content, metadata);
+        if (data) {
+            return <ReadPagesResultView pages={data.pages} />;
         }
     }
 
@@ -97,13 +122,18 @@ const GenericResultView: React.FC<{ content: unknown }> = ({ content }) => {
         }
     };
 
-    const formattedContent = formatContent();
-
     return (
         <div className="tool-result-view p-3 text-sm overflow-x-auto">
-            <pre className="whitespace-pre-wrap font-mono text-xs opacity-80">
-                {formattedContent}
-            </pre>
+            {Zotero.Beaver.data.env === "development" ? (
+                <pre className="whitespace-pre-wrap font-mono text-xs opacity-80">
+                    {formatContent()}
+                </pre>
+            ) : (
+                <div className="font-color-secondary">
+                    No result to display
+                </div>
+            )}
+            
         </div>
     );
 };

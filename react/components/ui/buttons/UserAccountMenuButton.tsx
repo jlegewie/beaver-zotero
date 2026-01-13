@@ -4,7 +4,7 @@ import { MenuItem } from '../menu/ContextMenu';
 import { SettingsIcon, UserIcon, LogoutIcon, BugIcon } from '../../icons/icons';
 import { isPreferencePageVisibleAtom, isErrorReportDialogVisibleAtom } from '../../../atoms/ui';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { hasCompletedOnboardingAtom } from '../../../atoms/profile';
+import { hasCompletedOnboardingAtom, updateRequiredAtom } from '../../../atoms/profile';
 import { logoutAtom } from '../../../atoms/auth';
 
 interface UserAccountMenuButtonProps {
@@ -20,18 +20,20 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
     ariaLabel = 'User Account Menu',
 }) => {
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
+    const updateRequired = useAtomValue(updateRequiredAtom);
     const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
     const setErrorReportDialogVisible = useSetAtom(isErrorReportDialogVisibleAtom);
     const logout = useSetAtom(logoutAtom);
 
-    // Create menu items from threads
+    // Create menu items (filter out settings when update is required)
     const menuItems: MenuItem[] = [
-        {
+        // Hide settings when update is required
+        ...(!updateRequired ? [{
             label: "Settings",
             onClick: () => togglePreferencePage((prev) => !prev),
             icon: SettingsIcon,
             disabled: !hasCompletedOnboarding,
-        },
+        }] : []),
         {
             label: "Manage Account",
             onClick: () => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/login'),
