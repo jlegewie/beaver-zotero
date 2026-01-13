@@ -152,6 +152,21 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                     ) : (
                         <div className='text-base font-color-tertiary'>
                             {message.text && parseTextWithLinksAndNewlines(message.text)}
+                            {message.learnMoreUrl && (
+                                <>
+                                    {' '}
+                                    <a
+                                        href={message.learnMoreUrl}
+                                        className="text-link"
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            Zotero.launchURL(message.learnMoreUrl!);
+                                        }}
+                                    >
+                                        {message.learnMoreLabel || 'Learn more'}
+                                    </a>
+                                </>
+                            )}
                         </div>
                     )
                 )}
