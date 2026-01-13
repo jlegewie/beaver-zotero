@@ -65,22 +65,26 @@ const UpgradeConsentPage: React.FC = () => {
 
     const getHeaderMessage = () => {
         return (
-            <div className="display-flex flex-col gap-4 py-2 mt-2">
+            <div className="display-flex flex-col gap-3 py-2 mt-2">
                 <div>
                     You're upgrading to Pro. Here's what's new:
                 </div>
-                <div className="display-flex flex-col gap-2 ml-1">
-                    <div className="display-flex flex-row gap-2 items-center">
-                        <Icon icon={TickIcon} className="scale-09 font-color-success" />
+                <div className="display-flex flex-col gap-4 ml-1 mt-2">
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-success mt-020" />
                         <span>Full-text keyword and semantic search</span>
                     </div>
                     <div className="display-flex flex-row gap-2 items-start">
-                        <Icon icon={TickIcon} className="scale-90 font-color-secondary mt-020" />
-                        <span>Cloud processing for tables, figures & complex layouts</span>
+                        <Icon icon={TickIcon} className="scale-09 font-color-success mt-020" />
+                        <span>Cloud processing for better document understanding (figures, tables, equations, etc.)</span>
                     </div>
-                    <div className="display-flex flex-row gap-2 items-center">
-                        <Icon icon={TickIcon} className="scale-09 font-color-success" />
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-success mt-020" />
                         <span>Sentence-level citations</span>
+                    </div>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-success mt-020" />
+                        <span>Auto-Annotate your PDFs</span>
                     </div>
                 </div>
             </div>
