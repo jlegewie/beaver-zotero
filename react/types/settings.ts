@@ -1,6 +1,11 @@
 import { getPref } from "../../src/utils/prefs";
+import { store } from "../store";
+import { addPopupMessageAtom } from "../utils/popupMessageUtils";
 
 export type ModelProvider = "anthropic" | "google" | "openai" | "mistralai" | "meta-llama" | "deepseek-ai" | "groq";
+
+// Session flag to prevent repeated popup warnings
+let hasShownCustomModelsParsingWarning = false;
 
 /**
  * Configuration for custom models.
@@ -75,6 +80,19 @@ export const getCustomChatModelsFromPreferences = (): CustomChatModel[] => {
         }
     } catch (e) {
         console.error("Error parsing customChatModels:", e);
+        
+        // Show warning popup once per session
+        if (!hasShownCustomModelsParsingWarning) {
+            hasShownCustomModelsParsingWarning = true;
+            store.set(addPopupMessageAtom, {
+                type: 'warning',
+                title: 'Custom Models Configuration Error',
+                text: 'Failed to parse custom models configuration. Please check that beaver.customChatModels contains valid JSON.',
+                expire: false,
+                learnMoreUrl: 'https://www.beaverapp.ai/docs/custom-models',
+                learnMoreLabel: 'Configuration Guide'
+            });
+        }
         return [];
     }
     return [];
