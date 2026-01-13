@@ -14,7 +14,7 @@ import ThreadsMenu from './ui/menus/ThreadsMenu';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
 import { isPreferencePageVisibleAtom } from '../atoms/ui';
-import { hasCompletedOnboardingAtom, isDatabaseSyncSupportedAtom, updateRequiredAtom } from '../atoms/profile';
+import { hasCompletedOnboardingAtom, isDatabaseSyncSupportedAtom, updateRequiredAtom, isProfileLoadedAtom } from '../atoms/profile';
 import Button from './ui/Button';
 import { getWindowFromElement } from '../utils/windowContext';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
@@ -37,6 +37,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const updateRequired = useAtomValue(updateRequiredAtom);
+    const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const currentMessageContent = useAtomValue(currentMessageContentAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -83,7 +84,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                 )}
                 
                 {/* New chat and chat history */}
-                {isAuthenticated && hasCompletedOnboarding && !updateRequired && !isWaitingForProfile && (
+                {isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                     <>
                     <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
                         <IconButton
@@ -98,7 +99,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                 )}
 
                 {/* Only show "Open in Separate Window" button when not already in a separate window and user is authenticated and has completed onboarding */}
-                {!isWindow && isAuthenticated && hasCompletedOnboarding && !updateRequired && !isWaitingForProfile && (
+                {!isWindow && isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                     <Tooltip content="Open in Separate Window" secondaryContent={openWindowShortcut} showArrow singleLine>
                         <IconButton
                             icon={Share05Icon}
@@ -123,15 +124,15 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
             {isAuthenticated && !settingsPage && (
                 <div className="display-flex gap-4">
                     {/* Show embedding index status for users without databaseSync */}
-                    {!isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && !isWaitingForProfile && (
+                    {!isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                         <EmbeddingIndexStatusButton />
                     )}
                     {/* Show database status for users with databaseSync */}
-                    {isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && !isWaitingForProfile && (
+                    {isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                         <DatabaseStatusButton />
                     )}
                     {/* Show chat history menu */}
-                    {isAuthenticated && hasCompletedOnboarding && !updateRequired && !isWaitingForProfile && (
+                    {isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                         <ThreadsMenu
                             className="scale-14"
                             ariaLabel="Show chat history"

@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { fileUploader } from '../../src/services/FileUploader';
 import { isProfileInvalidAtom, isProfileLoadedAtom, profileWithPlanAtom, isMigratingDataAtom, requiredDataVersionAtom, localZoteroLibrariesAtom, minimumFrontendVersionAtom } from '../atoms/profile';
-import { isAuthenticatedAtom, logoutAtom, userAtom } from '../atoms/auth';
+import { isAuthenticatedAtom, logoutAtom, userAtom, isWaitingForProfileAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
 import { logger } from '../../src/utils/logger';
 import { ZoteroInstanceMismatchError, ServerError } from '../../react/types/apiErrors';
@@ -21,6 +21,7 @@ export const useProfileSync = () => {
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
     const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
     const setIsProfileInvalid = useSetAtom(isProfileInvalidAtom);
+    const setIsWaitingForProfile = useSetAtom(isWaitingForProfileAtom);
     const setModels = useSetAtom(setModelsAtom);
     const setIsMigratingData = useSetAtom(isMigratingDataAtom);
     const setRequiredDataVersion = useSetAtom(requiredDataVersionAtom);
@@ -75,6 +76,7 @@ export const useProfileSync = () => {
 
             setIsProfileLoaded(true);
             setIsProfileInvalid(false);
+            setIsWaitingForProfile(false);
             lastRefreshRef.current = new Date();
             logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
 
@@ -113,7 +115,7 @@ export const useProfileSync = () => {
                 setIsProfileLoaded(false);
             }
         }
-    }, [setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid, setModels, setIsMigratingData, setRequiredDataVersion, setMinimumFrontendVersion, setLocalZoteroLibraries, logout]);
+    }, [setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid, setIsWaitingForProfile, setModels, setIsMigratingData, setRequiredDataVersion, setMinimumFrontendVersion, setLocalZoteroLibraries, logout]);
 
     const refreshProfile = useCallback(async (force = false) => {
         if (!user) return;
