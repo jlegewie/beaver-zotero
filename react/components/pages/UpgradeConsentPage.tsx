@@ -67,20 +67,20 @@ const UpgradeConsentPage: React.FC = () => {
         return (
             <div className="display-flex flex-col gap-4 py-2 mt-2">
                 <div>
-                    You're upgrading from the Free plan. Here's what's new:
+                    You're upgrading to Pro. Here's what's new:
                 </div>
                 <div className="display-flex flex-col gap-2 ml-1">
                     <div className="display-flex flex-row gap-2 items-center">
                         <Icon icon={TickIcon} className="scale-09 font-color-success" />
-                        <span>Full-text search across all your PDFs</span>
+                        <span>Full-text keyword and semantic search</span>
                     </div>
                     <div className="display-flex flex-row gap-2 items-start">
                         <Icon icon={TickIcon} className="scale-90 font-color-secondary mt-020" />
-                        <span>Server-side processing for improved search and document understanding</span>
+                        <span>Cloud processing for tables, figures & complex layouts</span>
                     </div>
                     <div className="display-flex flex-row gap-2 items-center">
                         <Icon icon={TickIcon} className="scale-09 font-color-success" />
-                        <span>Precise sentence-level citations</span>
+                        <span>Sentence-level citations</span>
                     </div>
                 </div>
             </div>
@@ -108,10 +108,10 @@ const UpgradeConsentPage: React.FC = () => {
                         <div className="display-flex flex-row gap-3 items-start">
                             <Icon icon={LockIcon} className="mt-020 scale-11" />
                             <div className="display-flex flex-col gap-2">
-                                <div className="font-semibold">Beta Plan Privacy Notice</div>
+                                <div className="font-semibold">Beta/Pro Plan Privacy Notice</div>
                                 <div className="font-color-secondary">
-                                    Beaver Beta syncs your Zotero library and uploads PDFs/attachments for indexing and search.
-                                    By continuing, you confirm you're authorized to upload these files and connect Zotero to your Beaver account.
+                                    Beaver Beta/Pro syncs your Zotero library and uploads PDFs for cloud-based indexing and search.
+                                    By continuing, you confirm you're authorized to upload these files.
                                 </div>
                             </div>
                         </div>
