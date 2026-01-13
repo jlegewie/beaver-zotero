@@ -63,39 +63,51 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
 
     const getHeaderMessage = () => {
         return (
-            <div className="display-flex flex-col gap-4 py-2 mt-2">
+            <div className="display-flex flex-col gap-3 py-2 mt-2">
                 <div>
-                    Your plan has changed to the <b>Free plan</b>. Here's what changed:
+                    Your plan has changed to <b>Free</b>. Here's what's different:
                 </div>
-                <div className="display-flex flex-col gap-2 ml-1">
-                    <div className="display-flex flex-row gap-2 items-start">
-                        <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
-                        <span>Same AI agent with seamless Zotero integration</span>
-                    </div>
+                <div className="display-flex flex-col gap-4 ml-1">
                     <div className="display-flex flex-row gap-2 items-start">
                         <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
                         <span>Chat with your entire library</span>
                     </div>
                     <div className="display-flex flex-row gap-2 items-start">
                         <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
-                        <span>Metadata & semantic search (runs locally)</span>
+                        <span>Reading Assistant</span>
+                    </div>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
+                        <span>Discover New Research</span>
+                    </div>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
+                        <span>Limited free AI credits OR use your own API key</span>
+                    </div>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
+                        <span>Metadata & semantic search</span>
+                    </div>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
+                        <span>Local file processing with page-level citations</span>
                     </div>
                 </div>
-                <div>
-                    Not included in Free
+                <div className="mt-2">
+                    No longer included
                 </div>
-                <div className="display-flex flex-col gap-2 ml-1">
+                <div className="display-flex flex-col gap-4 ml-1">
                     <div className="display-flex flex-row gap-2 items-start">
                         <Icon icon={CancelIcon} className="scale-90 font-color-secondary mt-020" />
-                        <span>Full-text PDF search</span>
+                        <span>Full-text keyword and semantic search</span>
                     </div>
                     <div className="display-flex flex-row gap-2 items-start">
                         <Icon icon={CancelIcon} className="scale-90 font-color-secondary mt-020" />
-                        <span>Server-side processing for improved search and document understanding</span>
+                        <span>Cloud processing for tables, figures & complex layouts</span>
                     </div>
                     <div className="display-flex flex-row gap-2 items-start">
                         <Icon icon={CancelIcon} className="scale-90 font-color-secondary mt-020" />
-                        <span>Precise sentence-level citations (Free uses page-level citations)</span>
+                        <span>Sentence-level citations</span>
                     </div>
                 </div>
             </div>
@@ -124,14 +136,8 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
                             <div className="display-flex flex-col gap-2">
                                 <div className="font-semibold">Free Plan Privacy Notice</div>
                                 <div className="font-color-secondary">
-                                    The Free plan does not sync your Zotero library or upload PDFs.
-                                    Semantic search uses embeddings generated on our server from titles and abstracts that are only stored on your device.
-                                    Your chat history is stored server-side and may include selected file and library content.
-                                    It can be exported or deleted anytime.
-                                    {/* Your Zotero data and files are never synced or stored on our servers.
-                                    File processing and search is handled locally on your device.
-                                    Metadata is processed temporarily server-side (not stored) to support local search.
-                                    Your chat history is stored on our servers. It can be exported or deleted anytime. */}
+                                    The Free plan processes files locally on your device. Your library and PDFs are not synced to our servers.
+                                    Chat history is stored server-side and can be exported or deleted anytime.
                                 </div>
                                 <div className="font-color-secondary">
                                     Your previously synced data will be deleted from our servers 
