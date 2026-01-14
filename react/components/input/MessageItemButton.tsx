@@ -10,7 +10,7 @@ import { navigateToAnnotation } from '../../utils/readerUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { toAnnotation } from '../../types/attachments/converters';
 
-const MAX_ITEM_TEXT_LENGTH = 20;
+const MAX_ITEM_TEXT_LENGTH = 30;
 
 const ANNOTATION_TEXT_BY_TYPE = {
     highlight: 'Highlight',
@@ -75,7 +75,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         const displayName = isAnnotation && annotation
             ? ANNOTATION_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation'
             : item.isRegularItem() 
-                ? getDisplayNameFromItem(item) 
+                ? truncateText(getDisplayNameFromItem(item), MAX_ITEM_TEXT_LENGTH)
                 : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH);
 
         // Handle remove
