@@ -86,7 +86,6 @@ export class BeaverUIFactory {
                 typeof win.BeaverReact.renderGlobalInitializer === 'function' &&
                 typeof win.BeaverReact.unmountFromElement === 'function') {
                 
-                // All functions verified, proceed with mounting
                 ztoolkit.log("registerChatPanel: BeaverReact API verified");
             } else {
                 ztoolkit.log("Error: BeaverReact bundle did not load correctly");
@@ -165,31 +164,44 @@ export class BeaverUIFactory {
         }
     }
 
+    /**
+     * Remove the chat panel and unmount React components.
+     * 
+     * IMPORTANT: This must always attempt to unmount React components even if
+     * win.closed is true, because React cleanup effects need to run to unregister
+     * Zotero.Notifier observers. Skipping this causes SIGSEGV during shutdown.
+     */
     static removeChatPanel(win: BeaverWindow) {
         ztoolkit.log("BeaverUIFactory.removeChatPanel called.");
 
-        // Unmount React components using the correct API
-        if (win.BeaverReact && typeof win.BeaverReact.unmountFromElement === 'function') {
-            const elementIds = ["beaver-react-root-library", "beaver-react-root-reader", "beaver-global-initializer-root"];
-            elementIds.forEach(id => {
-                const element = win.document.getElementById(id);
-                if (element) {
+        try {
+            if (!win) {
+                return;
+            }
+
+            // Unmount React components - CRITICAL for triggering cleanup effects
+            if (win.BeaverReact && typeof win.BeaverReact.unmountFromElement === 'function') {
+                const elementIds = ["beaver-react-root-library", "beaver-react-root-reader", "beaver-global-initializer-root"];
+                elementIds.forEach(id => {
                     try {
-                        const unmounted = win.BeaverReact!.unmountFromElement(element);
-                        if (unmounted) {
-                            ztoolkit.log(`Unmounted React component from #${id}`);
-                        } else {
-                            ztoolkit.log(`No React root found for #${id}`);
+                        const element = win.document?.getElementById?.(id);
+                        if (element) {
+                            const unmounted = win.BeaverReact!.unmountFromElement(element);
+                            if (unmounted) {
+                                ztoolkit.log(`Unmounted React component from #${id}`);
+                            } else {
+                                ztoolkit.log(`No React root found for #${id}`);
+                            }
                         }
                     } catch (e: any) {
                         ztoolkit.log(`Error unmounting React component from #${id}: ${e.message}`);
                     }
-                }
-            });
-        } else {
-            // Fallback: unmount all roots for this window
+                });
+            }
+            
+            // Fallback: try to unmount using stored roots
             const roots = this.windowRoots.get(win);
-            if (roots) {
+            if (roots && roots.size > 0) {
                 roots.forEach(root => {
                     try {
                         root.unmount();
@@ -200,33 +212,46 @@ export class BeaverUIFactory {
                 });
                 roots.clear();
             }
-            ztoolkit.log("unmountFromElement function not available on window object during cleanup.");
-        }
 
-        // Clean up roots tracking
-        this.windowRoots.delete(win);
+            this.windowRoots.delete(win);
 
-        // Remove DOM elements
-        const elementIds = [
-            "beaver-pane-library", 
-            "beaver-pane-reader", 
-            "zotero-beaver-tb-chat-toggle", 
-            "beaver-tb-separator",
-            "beaver-global-initializer-root"
-        ];
-        elementIds.forEach(id => {
-            const element = win.document.getElementById(id);
-            if (element) {
-                element.remove();
-                ztoolkit.log(`Removed element #${id}`);
+            // Only try to remove DOM elements if document is still accessible
+            if (win.document) {
+                try {
+                    const elementIds = [
+                        "beaver-pane-library", 
+                        "beaver-pane-reader", 
+                        "zotero-beaver-tb-chat-toggle", 
+                        "beaver-tb-separator",
+                        "beaver-global-initializer-root"
+                    ];
+                    elementIds.forEach(id => {
+                        try {
+                            const element = win.document.getElementById(id);
+                            if (element) {
+                                element.remove();
+                                ztoolkit.log(`Removed element #${id}`);
+                            }
+                        } catch (e) {
+                            // Ignore errors during shutdown
+                        }
+                    });
+
+                    try {
+                        const scriptTag = win.document.querySelector('script[src="chrome://beaver/content/reactBundle.js"]');
+                        if (scriptTag) {
+                            scriptTag.remove();
+                            ztoolkit.log("Removed React bundle script tag.");
+                        }
+                    } catch (e) {
+                        // Ignore errors during shutdown
+                    }
+                } catch (e) {
+                    // Document access failed, ignore
+                }
             }
-        });
-
-        // Remove the React bundle script tag
-        const scriptTag = win.document.querySelector('script[src="chrome://beaver/content/reactBundle.js"]');
-        if (scriptTag) {
-            scriptTag.remove();
-            ztoolkit.log("Removed React bundle script tag.");
+        } catch (error: any) {
+            ztoolkit.log(`Error in removeChatPanel: ${error.message}`);
         }
     }
 
@@ -238,22 +263,16 @@ export class BeaverUIFactory {
 
         const keyboardShortcut = getPref("keyboardShortcut").toLowerCase() || "l";
 
-        // Register keyboard shortcut for toggling chat panel (accel+key only, no other modifiers)
+        // Register keyboard shortcut for toggling chat panel
         keyboardManager.register(
             (ev, keyOptions) => {
-                
-                // Check for accel+key shortcut (Cmd+L on Mac, Ctrl+L on Windows) with NO other modifiers
                 const isMacToggle = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey;
                 const isWindowsToggle = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && !ev.altKey && !ev.shiftKey;
                 
                 if (isMacToggle || isWindowsToggle) {
-                    // Prevent default behavior
                     ev.preventDefault();
                     
-                    // The Reader view requires a different approach than the library view
                     let win;
-                    
-                    // First check if we're in a reader window
                     if (ev.target && (ev.target as HTMLElement).ownerDocument) {
                         const doc = (ev.target as HTMLElement).ownerDocument;
                         if (doc.defaultView) {
@@ -261,31 +280,23 @@ export class BeaverUIFactory {
                         }
                     }
                     
-                    // If we couldn't get the window from the event target,
-                    // fall back to the main window
                     if (!win) {
                         win = Zotero.getMainWindow();
                     }
                     
-                    // Toggle the chat panel
                     triggerToggleChat(win);
                 }
             }
         );
 
-        // Register keyboard shortcut for opening separate window (Cmd+Shift+key on Mac, Ctrl+Shift+key on Windows)
+        // Register keyboard shortcut for opening separate window
         keyboardManager.register(
             (ev, keyOptions) => {
-                
-                // Check for Cmd+Shift+key (Mac) or Ctrl+Shift+key (Windows)
                 const isMacShortcut = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && ev.shiftKey && !ev.ctrlKey;
                 const isWindowsShortcut = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && ev.shiftKey && !ev.metaKey;
                 
                 if (isMacShortcut || isWindowsShortcut) {
-                    // Prevent default behavior
                     ev.preventDefault();
-                    
-                    // Open Beaver in a separate window
                     this.openBeaverWindow();
                 }
             }
@@ -293,8 +304,11 @@ export class BeaverUIFactory {
     }
     
     /**
-     * Unregister all keyboard shortcuts 
-     * Should be called during plugin shutdown or window unload
+     * Unregister all keyboard shortcuts.
+     * 
+     * CRITICAL: This must be called during shutdown to:
+     * 1. Clear the interval in KeyboardManager
+     * 2. Unregister Zotero.Reader event listeners
      */
     static unregisterShortcuts() {
         keyboardManager.unregisterAll();
@@ -302,26 +316,27 @@ export class BeaverUIFactory {
 
     /**
      * Find an existing Beaver separate window
-     * @returns The window if found, undefined otherwise
      */
     static findBeaverWindow(): Window | undefined {
-        const wm = Services.wm;
-        const enumerator = wm.getEnumerator('beaver:window');
-        while (enumerator.hasMoreElements()) {
-            const win = enumerator.getNext() as Window;
-            if (win.name === BEAVER_WINDOW_NAME) {
-                return win;
+        try {
+            const wm = Services.wm;
+            const enumerator = wm.getEnumerator('beaver:window');
+            while (enumerator.hasMoreElements()) {
+                const win = enumerator.getNext() as Window;
+                if (win.name === BEAVER_WINDOW_NAME) {
+                    return win;
+                }
             }
+        } catch (e) {
+            // Silently handle errors
         }
         return undefined;
     }
 
     /**
      * Open Beaver in a separate window
-     * If window already exists, focus it instead
      */
     static openBeaverWindow(): void {
-        // Check if window already exists
         const existingWindow = this.findBeaverWindow();
         if (existingWindow) {
             existingWindow.focus();
@@ -329,7 +344,6 @@ export class BeaverUIFactory {
             return;
         }
 
-        // Open new window
         const mainWindow = Zotero.getMainWindow();
         mainWindow.openDialog(
             'chrome://beaver/content/beaverWindow.xhtml',

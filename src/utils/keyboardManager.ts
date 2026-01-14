@@ -1,43 +1,52 @@
 import { KeyModifier } from "zotero-plugin-toolkit";
 
 /**
- * Custom keyboard manager that properly handles accelerator key combinations
+ * Custom keyboard manager that properly handles accelerator key combinations.
+ * 
+ * IMPORTANT: This class registers event listeners with Zotero.Reader that MUST
+ * be unregistered during shutdown to prevent SIGSEGV crashes. Always call
+ * unregisterAll() before Zotero shuts down.
  */
 export class KeyboardManager {
     private _keyboardCallbacks = new Set<(event: KeyboardEvent, options: { keyboard?: KeyModifier; type: "keydown" | "keyup" }) => void>();
-    // Track keyboard events that are currently being processed to prevent duplicates
     private _activeKeyEvents = new Map<string, number>();
     private id: string;
     private _initializedWindows = new Set<Window>();
     private _initializedReaders = new Set<any>();
-    private _addonID = "beaver@jlegewie.com"; // Keep the hardcoded ID for now
+    private _addonID = "beaver@jlegewie.com";
+    private _intervalId: ReturnType<typeof setInterval> | null = null;
+    private _readerListenerRegistered = false;
+    private _readerEventCallback: ((event: { reader: any }) => void) | null = null;
 
     constructor() {
         this.id = Math.random().toString(36).substring(2, 15);
         this.initKeyboardListener();
         
         // Re-initialize on a regular basis to catch any new windows/readers
-        // that might have been opened
-        setInterval(() => {
+        this._intervalId = setInterval(() => {
             this.initKeyboardListener();
         }, 5000);
     }
 
     /**
      * Register a keyboard event listener.
-     * @param callback The callback function.
      */
     register(callback: (event: KeyboardEvent, options: { keyboard?: KeyModifier; type: "keydown" | "keyup" }) => void) {
         this._keyboardCallbacks.add(callback);
-        
-        // Re-initialize listeners - ensures we capture any new windows/readers
         this.initKeyboardListener();
+        
+        // Restart the interval if it was stopped (e.g., after unregisterAll)
+        if (!this._intervalId) {
+            this._intervalId = setInterval(() => {
+                this.initKeyboardListener();
+            }, 5000);
+        }
+        
         return this;
     }
 
     /**
      * Unregister a keyboard event listener.
-     * @param callback The callback function.
      */
     unregister(callback: (event: KeyboardEvent, options: { keyboard?: KeyModifier; type: "keydown" | "keyup" }) => void) {
         this._keyboardCallbacks.delete(callback);
@@ -45,54 +54,79 @@ export class KeyboardManager {
     }
 
     /**
-     * Unregister all keyboard event listeners.
+     * Unregister all keyboard event listeners and clean up resources.
+     * 
+     * CRITICAL: This must be called during shutdown to:
+     * 1. Clear the interval to prevent it from firing during cleanup
+     * 2. Unregister Zotero.Reader event listeners to prevent SIGSEGV
      */
     unregisterAll() {
+        // Clear the interval first to prevent it from firing during cleanup
+        if (this._intervalId) {
+            clearInterval(this._intervalId);
+            this._intervalId = null;
+        }
+        
         this._keyboardCallbacks.clear();
         this.unInitKeyboardListener();
         this._activeKeyEvents.clear();
     }
 
     private initKeyboardListener() {
-        // Initialize for main window
-        const win = Zotero.getMainWindow();
-        if (win) {
-            this._initKeyboardListener(win);
-        }
-
-        // Observe for any new windows
-        Zotero.getMainWindows().forEach(window => {
-            if (!this._initializedWindows.has(window)) {
-                this._initKeyboardListener(window);
+        try {
+            // Initialize for main window
+            const win = Zotero.getMainWindow();
+            if (win && !win.closed) {
+                this._initKeyboardListener(win);
             }
-        });
 
-        // Initialize for reader windows
-        this.initReaderKeyboardListener();
+            // Initialize for any additional windows
+            const mainWindows = Zotero.getMainWindows();
+            mainWindows?.forEach(window => {
+                if (window && !window.closed && !this._initializedWindows.has(window)) {
+                    this._initKeyboardListener(window);
+                }
+            });
+
+            // Initialize for reader windows
+            this.initReaderKeyboardListener();
+        } catch (e) {
+            // Silently handle errors during initialization
+        }
     }
 
     private initReaderKeyboardListener() {
-        const addonID = this._addonID;
-        
-        // Register for future readers
-        Zotero.Reader.registerEventListener(
-            "renderToolbar", 
-            (event) => this.addReaderKeyboardCallback(event), 
-            addonID
-        );
-        
-        // Initialize for existing readers
-        Zotero.Reader._readers.forEach((reader) => {
-            if (!this._initializedReaders.has(reader)) {
-                this.addReaderKeyboardCallback({ reader });
+        try {
+            if (!Zotero?.Reader) {
+                return;
             }
-        });
+            
+            // Only register once to avoid duplicate registrations
+            if (!this._readerListenerRegistered) {
+                // Store callback reference for later unregistration
+                this._readerEventCallback = (event) => this.addReaderKeyboardCallback(event);
+                Zotero.Reader.registerEventListener(
+                    "renderToolbar", 
+                    this._readerEventCallback, 
+                    this._addonID
+                );
+                this._readerListenerRegistered = true;
+            }
+            
+            // Initialize for existing readers
+            Zotero.Reader._readers?.forEach((reader) => {
+                if (!this._initializedReaders.has(reader)) {
+                    this.addReaderKeyboardCallback({ reader });
+                }
+            });
+        } catch (e) {
+            // Silently handle errors
+        }
     }
 
     private async addReaderKeyboardCallback(event: { reader: any }) {
         const reader = event.reader;
         
-        // Skip if already initialized
         if (this._initializedReaders.has(reader)) {
             return;
         }
@@ -100,11 +134,10 @@ export class KeyboardManager {
         this._initializedReaders.add(reader);
         
         try {
-            // Simplify the reader window initialization
             if (reader._iframeWindow) {
                 this._initKeyboardListener(reader._iframeWindow);
             } else {
-                // For readers that are still loading
+                // Wait for reader window to be available
                 const waitForReaderWindow = () => {
                     return new Promise<Window | null>((resolve) => {
                         const checkInterval = setInterval(() => {
@@ -114,7 +147,6 @@ export class KeyboardManager {
                             }
                         }, 100);
                         
-                        // Set a timeout to avoid waiting forever
                         setTimeout(() => {
                             clearInterval(checkInterval);
                             resolve(null);
@@ -128,7 +160,6 @@ export class KeyboardManager {
                 }
             }
             
-            // Also initialize the internal PDF reader if it exists
             if (reader._internalReader?._iframe?.contentWindow) {
                 this._initKeyboardListener(reader._internalReader._iframe.contentWindow);
             }
@@ -144,13 +175,16 @@ export class KeyboardManager {
         
         this._initializedWindows.add(win);
         
-        // Add event listeners for keydown and keyup
         win.addEventListener('keydown', this.triggerKeydown, true);
         win.addEventListener('keyup', this.triggerKeyup, true);
         
-        // Add cleanup when window is closed
+        // Clean up when window is closed
         win.addEventListener('unload', () => {
-            this._unInitKeyboardListener(win);
+            try {
+                this._unInitKeyboardListener(win);
+            } catch (e) {
+                // Ignore errors during cleanup
+            }
         }, { once: true });
     }
 
@@ -160,14 +194,15 @@ export class KeyboardManager {
             this._unInitKeyboardListener(win);
         }
         
-        // Clean up reader event listeners
-        try {
-            // Note: We should unregister the reader event listener here
-            // but there are type mismatches with Zotero.Reader.unregisterEventListener
-            // This should be revisited later
-            // Zotero.Reader.unregisterEventListener("renderToolbar", this._addonID);
-        } catch (e) {
-            // Ignore errors during cleanup
+        // CRITICAL: Unregister reader event listener to prevent SIGSEGV during shutdown
+        if (this._readerListenerRegistered && this._readerEventCallback && Zotero?.Reader) {
+            try {
+                Zotero.Reader.unregisterEventListener("renderToolbar", this._readerEventCallback);
+                this._readerListenerRegistered = false;
+                this._readerEventCallback = null;
+            } catch (e) {
+                // Ignore errors during cleanup
+            }
         }
         
         this._initializedWindows.clear();
@@ -184,27 +219,19 @@ export class KeyboardManager {
             win.removeEventListener('keyup', this.triggerKeyup, true);
             this._initializedWindows.delete(win);
         } catch (e) {
-            // Window might be closed already, just remove from our set
             this._initializedWindows.delete(win);
         }
     }
 
     private triggerKeydown = (e: KeyboardEvent) => {
-        // Create the keyboard modifier
         const keyboard = new KeyModifier(e);
-        
-        // Get string representation for tracking
-        const keyId = keyboard.toString();
-        
         
         // Special handling for modifier-only keypresses
         if (e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift' || e.key === 'Meta') {
-            // Just track modifiers without triggering callbacks
             this._activeKeyEvents.set(e.key, Date.now());
             return;
         }
         
-        // For all other keys, especially when combined with modifiers
         try {
             this.dispatchCallback(e, { keyboard, type: "keydown" });
         } catch (err) {
@@ -214,15 +241,12 @@ export class KeyboardManager {
 
     private triggerKeyup = (e: KeyboardEvent) => {
         const keyboard = new KeyModifier(e);
-        const keyId = keyboard.toString();
         
-        // Clean up tracking
         if (e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift' || e.key === 'Meta') {
             this._activeKeyEvents.delete(e.key);
             return;
         }
         
-        // Only dispatch for non-modifier keys
         try {
             this.dispatchCallback(e, { keyboard, type: "keyup" });
         } catch (err) {
@@ -239,4 +263,4 @@ export class KeyboardManager {
             }
         }
     }
-} 
+}
