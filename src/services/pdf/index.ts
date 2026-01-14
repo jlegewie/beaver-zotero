@@ -141,14 +141,20 @@ export class PDFExtractor {
                 : undefined; // undefined = all pages
 
             // 4. EXTRACTION PASS: Get all raw data in one pass
-            console.log("[PDFExtractor] Starting extraction pass...");
+            if (process.env.NODE_ENV === "development") {
+                console.log("[PDFExtractor] Starting extraction pass...");
+            }
             const rawData = this.mupdf.extractRawPages(pageIndices);
-            console.log(`[PDFExtractor] Extracted ${rawData.pages.length} pages`);
+            if (process.env.NODE_ENV === "development") {
+                console.log(`[PDFExtractor] Extracted ${rawData.pages.length} pages`);
+            }
 
             // 5. DOCUMENT ANALYSIS
 
             // 5a. Style analysis
-            console.log("[PDFExtractor] Analyzing styles...");
+            if (process.env.NODE_ENV === "development") {
+                console.log("[PDFExtractor] Analyzing styles...");
+            }
             const styleAnalyzer = new StyleAnalyzer();
             const styleProfile = styleAnalyzer.analyze(
                 rawData.pages,
@@ -159,14 +165,18 @@ export class PDFExtractor {
             StyleAnalyzer.logStyleProfile(styleProfile);
 
             // 5b. Margin analysis (smart filtering - collect elements)
-            console.log("[PDFExtractor] Analyzing margins...");
+            if (process.env.NODE_ENV === "development") {
+                console.log("[PDFExtractor] Analyzing margins...");
+            }
             const marginAnalysis = MarginFilter.collectMarginElements(
                 rawData.pages,
                 opts.marginZone
             );
 
             // 5c. Identify repeating elements for smart removal
-            console.log("[PDFExtractor] Identifying repeating margin elements...");
+            if (process.env.NODE_ENV === "development") {
+                console.log("[PDFExtractor] Identifying repeating margin elements...");
+            }
             const removalResult = MarginFilter.identifyElementsToRemove(
                 marginAnalysis,
                 opts.repeatThreshold,
@@ -175,7 +185,9 @@ export class PDFExtractor {
             MarginFilter.logRemovalCandidates(removalResult);
 
             // 6. PAGE PROCESSING: Process each page with smart filtering and column detection
-            console.log("[PDFExtractor] Processing pages with smart margin removal and column detection...");
+            if (process.env.NODE_ENV === "development") {
+                console.log("[PDFExtractor] Processing pages with smart margin removal and column detection...");
+            }
             const pageExtractor = new PageExtractor({ styleProfile });
 
             const pages: ProcessedPage[] = rawData.pages.map(rawPage => {
@@ -209,8 +221,10 @@ export class PDFExtractor {
                 marginAnalysis,
             };
 
-            console.log("[PDFExtractor] Extraction complete!");
-            console.log(`[PDFExtractor] Total text length: ${fullText.length} chars`);
+            if (process.env.NODE_ENV === "development") {
+                console.log("[PDFExtractor] Extraction complete!");
+                console.log(`[PDFExtractor] Total text length: ${fullText.length} chars`);
+            }
 
             return {
                 pages,
@@ -290,14 +304,20 @@ export class PDFExtractor {
                 : undefined; // undefined = all pages
 
             // 4. EXTRACTION PASS: Get all raw data in one pass
-            console.log("[PDFExtractor] Starting line-based extraction pass...");
+            if (process.env.NODE_ENV === "development") {
+                console.log("[PDFExtractor] Starting line-based extraction pass...");
+            }
             const rawData = this.mupdf.extractRawPages(pageIndices);
-            console.log(`[PDFExtractor] Extracted ${rawData.pages.length} pages`);
+            if (process.env.NODE_ENV === "development") {
+                console.log(`[PDFExtractor] Extracted ${rawData.pages.length} pages`);
+            }
 
             // 5. DOCUMENT ANALYSIS
 
             // 5a. Style analysis
-            console.log("[PDFExtractor] Analyzing styles...");
+            if (process.env.NODE_ENV === "development") {
+                console.log("[PDFExtractor] Analyzing styles...");
+            }
             const styleAnalyzer = new StyleAnalyzer();
             const styleProfile = styleAnalyzer.analyze(
                 rawData.pages,
@@ -308,14 +328,18 @@ export class PDFExtractor {
             StyleAnalyzer.logStyleProfile(styleProfile);
 
             // 5b. Margin analysis (smart filtering - collect elements)
-            console.log("[PDFExtractor] Analyzing margins...");
+            if (process.env.NODE_ENV === "development") {
+                console.log("[PDFExtractor] Analyzing margins...");
+            }
             const marginAnalysis = MarginFilter.collectMarginElements(
                 rawData.pages,
                 opts.marginZone
             );
 
             // 5c. Identify repeating elements for smart removal
-            console.log("[PDFExtractor] Identifying repeating margin elements...");
+            if (process.env.NODE_ENV === "development") {
+                console.log("[PDFExtractor] Identifying repeating margin elements...");
+            }
             const removalResult = MarginFilter.identifyElementsToRemove(
                 marginAnalysis,
                 opts.repeatThreshold,
@@ -324,7 +348,9 @@ export class PDFExtractor {
             MarginFilter.logRemovalCandidates(removalResult);
 
             // 6. PAGE PROCESSING: Process each page with line detection
-            console.log("[PDFExtractor] Processing pages with line detection...");
+            if (process.env.NODE_ENV === "development") {
+                console.log("[PDFExtractor] Processing pages with line detection...");
+            }
             const pages: ProcessedPage[] = [];
 
             for (const rawPage of rawData.pages) {
@@ -393,8 +419,10 @@ export class PDFExtractor {
                 marginAnalysis,
             };
 
-            console.log("[PDFExtractor] Line-based extraction complete!");
-            console.log(`[PDFExtractor] Total text length: ${fullText.length} chars`);
+            if (process.env.NODE_ENV === "development") {
+                console.log("[PDFExtractor] Line-based extraction complete!");
+                console.log(`[PDFExtractor] Total text length: ${fullText.length} chars`);
+            }
 
             return {
                 pages,

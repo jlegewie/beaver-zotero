@@ -615,9 +615,12 @@ export function detectLinesOnPage(
 }
 
 /**
- * Log line detection results for debugging
+ * Log line detection results for debugging.
+ * Only logs in development mode.
  */
 export function logLineDetection(result: PageLineResult): void {
+    if (process.env.NODE_ENV !== "development") return;
+
     console.log(
         `[LineDetector] Page ${result.pageIndex}: ${result.allLines.length} lines detected ` +
             `across ${result.columnResults.length} column(s)`

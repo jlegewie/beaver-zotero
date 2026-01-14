@@ -354,8 +354,10 @@ export class MarginFilter {
                             removalsByPage.get(el.pageIndex)!.add(normalized);
                         }
 
-                        // Log the page number sequence detection
-                        console.log(`[MarginFilter] Detected page number sequence in ${position} zone: ${values.slice(0, 5).join(", ")}...`);
+                        // Log the page number sequence detection (development only)
+                        if (process.env.NODE_ENV === "development") {
+                            console.log(`[MarginFilter] Detected page number sequence in ${position} zone: ${values.slice(0, 5).join(", ")}...`);
+                        }
                     }
                 }
             }
@@ -426,8 +428,11 @@ export class MarginFilter {
 
     /**
      * Log what elements will be removed.
+     * Only logs in development mode.
      */
     static logRemovalCandidates(result: MarginRemovalResult): void {
+        if (process.env.NODE_ENV !== "development") return;
+
         if (result.candidates.length === 0) {
             console.log("[MarginFilter] No margin elements identified for removal");
             return;

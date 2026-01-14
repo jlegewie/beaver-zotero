@@ -242,8 +242,11 @@ export class SearchScorer {
 
     /**
      * Log scoring details for debugging.
+     * Only logs in development mode.
      */
     static logScoredResult(result: ScoredPageSearchResult): void {
+        if (process.env.NODE_ENV !== "development") return;
+
         console.group(`Page ${result.pageIndex + 1} (score: ${result.score.toFixed(2)})`);
         console.log(`  Matches: ${result.matchCount}`);
         console.log(`  Raw score: ${result.rawScore.toFixed(2)}`);

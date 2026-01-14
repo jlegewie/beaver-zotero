@@ -221,8 +221,11 @@ export class StyleAnalyzer {
 
     /**
      * Log style analysis for debugging.
+     * Only logs in development mode.
      */
     static logStyleProfile(profile: StyleProfile): void {
+        if (process.env.NODE_ENV !== "development") return;
+
         console.log("[StyleAnalyzer] Style analysis:");
         console.log(`  Primary body style: ${styleToKey(profile.primaryBodyStyle)}`);
         console.log(`  Body styles count: ${profile.bodyStyles.length}`);

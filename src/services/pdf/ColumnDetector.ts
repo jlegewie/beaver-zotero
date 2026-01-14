@@ -905,11 +905,14 @@ function sortForReadingOrder(
 
 /**
  * Log column detection results for debugging.
+ * Only logs in development mode.
  */
 export function logColumnDetection(
     pageIndex: number,
     result: ColumnDetectionResult
 ): void {
+    if (process.env.NODE_ENV !== "development") return;
+
     console.log(
         `[ColumnDetector] Page ${pageIndex}: ${result.columnCount} column(s) detected` +
             (result.isBroken ? " [BROKEN]" : "")

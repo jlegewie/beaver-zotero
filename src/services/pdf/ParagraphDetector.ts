@@ -819,9 +819,12 @@ export function detectParagraphs(
 }
 
 /**
- * Log paragraph detection results for debugging
+ * Log paragraph detection results for debugging.
+ * Only logs in development mode.
  */
 export function logParagraphDetection(result: PageParagraphResult): void {
+    if (process.env.NODE_ENV !== "development") return;
+
     console.log(
         `[ParagraphDetector] Page ${result.pageIndex}: ` +
             `${result.items.length} items (${result.paragraphCount} paragraphs, ${result.headerCount} headers)`
