@@ -245,7 +245,7 @@ export class AgentService {
             };
         }
         const sanitizedMessage = JSON.stringify(sanitizedData);
-        logger(`AgentService: Sending message: ${sanitizedMessage}`, 1);
+        logger(`AgentService: Sending "${sanitizedData.type}"`, sanitizedData, 1);
         
         this.ws.send(message);
     }
@@ -360,7 +360,7 @@ export class AgentService {
                     break;
 
                 case 'zotero_attachment_pages_request':
-                    logger(`AgentService: Received zotero_attachment_pages_request for ${event.attachment.library_id}-${event.attachment.zotero_key} (pages: ${event.start_page ?? 1}-${event.end_page ?? 'end'})`, 1);
+                    logger("AgentService: Received zotero_attachment_pages_request", event, 1);
                     handleZoteroAttachmentPagesRequest(event)
                         .then(res => this.send(res))
                         .catch(err => {
@@ -379,7 +379,7 @@ export class AgentService {
                     break;
 
                 case 'zotero_attachment_page_images_request':
-                    logger(`AgentService: Received zotero_attachment_page_images_request for ${event.attachment.library_id}-${event.attachment.zotero_key} (pages: ${event.pages?.join(',') ?? 'all'})`, 1);
+                    logger("AgentService: Received zotero_attachment_page_images_request", event, 1);
                     handleZoteroAttachmentPageImagesRequest(event)
                         .then(res => this.send(res))
                         .catch(err => {
@@ -398,7 +398,7 @@ export class AgentService {
                     break;
 
                 case 'zotero_attachment_search_request':
-                    logger(`AgentService: Received zotero_attachment_search_request for ${event.attachment.library_id}-${event.attachment.zotero_key} (query: "${event.query}")`, 1);
+                    logger("AgentService: Received zotero_attachment_search_request", event, 1);
                     handleZoteroAttachmentSearchRequest(event)
                         .then(res => this.send(res))
                         .catch(err => {
@@ -420,7 +420,7 @@ export class AgentService {
                     break;
 
                 case 'external_reference_check_request':
-                    logger(`AgentService: Received external_reference_check_request for ${event.items.length} items`, 1);
+                    logger("AgentService: Received external_reference_check_request", event, 1);
                     handleExternalReferenceCheckRequest(event)
                         .then(res => this.send(res))
                         .catch(err => {
@@ -435,7 +435,7 @@ export class AgentService {
                     break;
 
                 case 'zotero_data_request':
-                    logger(`AgentService: Received zotero_data_request for ${event.items.length} items (parents: ${!!event.include_parents}, attachments: ${!!event.include_attachments})`, 1);
+                    logger("AgentService: Received zotero_data_request", event, 1);
                     handleZoteroDataRequest(event)
                         .then(res => this.send(res))
                         .catch(err => {
@@ -456,7 +456,7 @@ export class AgentService {
                     break;
 
                 case 'item_search_by_metadata_request':
-                    logger(`AgentService: Received item_search_by_metadata_request: title="${event.title_query || ''}", author="${event.author_query || ''}", pub="${event.publication_query || ''}"`, 1);
+                    logger("AgentService: Received item_search_by_metadata_request", event, 1);
                     handleItemSearchByMetadataRequest(event)
                         .then(res => this.send(res))
                         .catch(err => {
@@ -473,7 +473,7 @@ export class AgentService {
                     break;
 
                 case 'item_search_by_topic_request':
-                    logger(`AgentService: Received item_search_by_topic_request: topic="${event.topic_query}", limit=${event.limit}`, 1);
+                    logger("AgentService: Received item_search_by_topic_request", event, 1);
                     handleItemSearchByTopicRequest(event)
                         .then(res => this.send(res))
                         .catch(err => {
