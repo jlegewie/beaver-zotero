@@ -168,6 +168,31 @@ async function onMainWindowUnload(win: Window): Promise<void> {
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
     
     try {
+        // Clean up window-specific resources first
+        // These are safe to clean up for any window
+        
+        // Clean up event bus for this window
+        if (win.__beaverEventBus) {
+            win.__beaverEventBus = null;
+        }
+
+        // Remove React components and DOM elements for this window
+        BeaverUIFactory.removeChatPanel(win);
+
+        // Check if this is the last main window
+        // Only run global cleanup if no other main windows remain
+        const remainingWindows = Zotero.getMainWindows().filter(w => w !== win && !w.closed);
+        const isLastWindow = remainingWindows.length === 0;
+        
+        if (!isLastWindow) {
+            ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
+            return;
+        }
+
+        ztoolkit.log("onMainWindowUnload: Last window closing, running global cleanup");
+
+        // Global cleanup - only run when last window closes
+        
         // 1. Dispose MuPDF WASM module to release native resources
         await disposeMuPDF();
 
@@ -191,26 +216,18 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             uiManager.cleanup();
         }
 
-        // 6. Remove React components and DOM elements
-        BeaverUIFactory.removeChatPanel(win);
-
-        // 7. Unload stylesheets
+        // 6. Unload stylesheets
         unloadKatexStylesheet();
         unloadStylesheet();
 
-        // 8. Unregister ztoolkit
+        // 7. Unregister ztoolkit
         ztoolkit.unregisterAll();
         addon.data.dialog?.window?.close();
 
-        // 9. Clean up event bus for this window
-        if (win.__beaverEventBus) {
-            win.__beaverEventBus = null;
-        }
-
-        // 10. Close separate Beaver window if open
+        // 8. Close separate Beaver window if open
         BeaverUIFactory.closeBeaverWindow();
 
-        // 11. Mark addon as not alive to prevent any further callbacks
+        // 9. Mark addon as not alive to prevent any further callbacks
         addon.data.alive = false;
 
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
