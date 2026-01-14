@@ -129,8 +129,7 @@ export async function getMuPDFAPI(): Promise<MuPDFAPI> {
     }
 
     mupdfPromise = (async () => {
-        const win = Zotero.getMainWindow();
-        const { MuPDFLoader } = win.ChromeUtils.import(
+        const { MuPDFLoader } = ChromeUtils.import(
             "chrome://beaver/content/modules/mupdf-loader.js"
         );
         return MuPDFLoader.init("chrome://beaver/content/") as Promise<MuPDFAPI>;
@@ -147,8 +146,7 @@ export async function disposeMuPDF(): Promise<void> {
     if (!mupdfPromise) return;
 
     try {
-        const win = Zotero.getMainWindow();
-        const { MuPDFLoader } = win.ChromeUtils.import(
+        const { MuPDFLoader } = ChromeUtils.import(
             "chrome://beaver/content/modules/mupdf-loader.js"
         );
         await MuPDFLoader.dispose();
