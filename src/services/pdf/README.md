@@ -79,7 +79,7 @@ src/services/pdf/
 └── README.md                  # This file
 
 addon/content/modules/
-└── mupdf-loader.js            # WASM loader (JSM format)
+└── mupdf-loader.mjs           # WASM loader (ES module)
 
 react/utils/
 └── extractionVisualizer.ts    # Debug visualization tools
@@ -999,7 +999,7 @@ When adding features:
 ### WASM Initialization Errors
 
 **Symptom**: `$libmupdf_load_font_file is not a function`  
-**Fix**: Already handled with stub in `mupdf-loader.js`
+**Fix**: Already handled with stub in `mupdf-loader.mjs`
 
 ### Memory Issues
 

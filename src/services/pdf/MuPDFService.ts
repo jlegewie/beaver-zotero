@@ -129,8 +129,8 @@ export async function getMuPDFAPI(): Promise<MuPDFAPI> {
     }
 
     mupdfPromise = (async () => {
-        const { MuPDFLoader } = ChromeUtils.import(
-            "chrome://beaver/content/modules/mupdf-loader.js"
+        const { MuPDFLoader } = ChromeUtils.importESModule(
+            "chrome://beaver/content/modules/mupdf-loader.mjs"
         );
         return MuPDFLoader.init("chrome://beaver/content/") as Promise<MuPDFAPI>;
     })();
@@ -146,8 +146,8 @@ export async function disposeMuPDF(): Promise<void> {
     if (!mupdfPromise) return;
 
     try {
-        const { MuPDFLoader } = ChromeUtils.import(
-            "chrome://beaver/content/modules/mupdf-loader.js"
+        const { MuPDFLoader } = ChromeUtils.importESModule(
+            "chrome://beaver/content/modules/mupdf-loader.mjs"
         );
         await MuPDFLoader.dispose();
     } catch {

@@ -1,14 +1,12 @@
-var EXPORTED_SYMBOLS = ["MuPDFLoader"];
-
 /**
  * Lightweight loader for MuPDF WASM packaged in the add-on.
  *
  * Usage from Zotero JS Playground (async mode):
- * const { MuPDFLoader } = ChromeUtils.import("chrome://beaver/content/modules/mupdf-loader.js");
+ * const { MuPDFLoader } = ChromeUtils.importESModule("chrome://beaver/content/modules/mupdf-loader.mjs");
  * const mupdf = await MuPDFLoader.init("chrome://beaver/content/");
  * const text = await MuPDFLoader.extractText(pdfUint8Array);
  */
-var MuPDFLoader = {
+export var MuPDFLoader = {
     _libmupdf: null,
     _initPromise: null,
 
