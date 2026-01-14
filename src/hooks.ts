@@ -52,16 +52,14 @@ async function handleUpgrade(lastVersion: string, currentVersion: string) {
         });
     }
 
-	// Upgrade to 0.5.0 or newer from a version before 0.5.0
+    // Upgrade to 0.5.0 or newer from a version before 0.5.0
     if (compareVersions(lastVersion, '0.5.0') < 0 && compareVersions(currentVersion, '0.5.0') >= 0) {
-        // Set flag to run consistency check from UI context
         setPref('runConsistencyCheck', true);
         ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flag set for consistency check.`);
     }
 
     // Upgrade to 0.6.2 or newer from a version before 0.6.2
     if (compareVersions(lastVersion, '0.6.2') < 0 && compareVersions(currentVersion, '0.6.2') >= 0) {
-        // Set flag to run collection sync from UI context
         setPref('runCollectionSync', true);
         ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flag set for collection sync.`);
     }
@@ -74,222 +72,248 @@ async function handleUpgrade(lastVersion: string, currentVersion: string) {
 }
 
 async function onStartup() {
-	await Promise.all([
-		Zotero.initializationPromise,
-		Zotero.unlockPromise,
-		Zotero.uiReadyPromise,
-	]);
-	
-	initLocale();
-	ztoolkit.log("Startup");
+    await Promise.all([
+        Zotero.initializationPromise,
+        Zotero.unlockPromise,
+        Zotero.uiReadyPromise,
+    ]);
+    
+    initLocale();
+    ztoolkit.log("Startup");
 
-	// -------- Store plugin version --------
-	addon.pluginVersion = version;
-	ztoolkit.log(`Plugin version: ${version}`);
+    // -------- Store plugin version --------
+    addon.pluginVersion = version;
+    ztoolkit.log(`Plugin version: ${version}`);
 
-	// -------- Initialize database --------
-	const dbConnection = new Zotero.DBConnection("beaver");
-	const beaverDB = new BeaverDB(dbConnection);
-	addon.db = beaverDB;
+    // -------- Initialize database --------
+    const dbConnection = new Zotero.DBConnection("beaver");
+    const beaverDB = new BeaverDB(dbConnection);
+    addon.db = beaverDB;
 
-	// Test connection and initialize schema
-	await dbConnection.test();
-	await beaverDB.initDatabase(version);
-	
-	// -------- Initialize Generative AI provider for direct API calls --------
-	// let provider;
-	// if (getPref("googleGenerativeAiApiKey")) {
-	// 	provider = new GeminiProvider(getPref("googleGenerativeAiApiKey"));
-	// } else if (getPref("openAiApiKey")) {
-	// 	provider = new OpenAIProvider(getPref("openAiApiKey"));
-	// }
-	// addon.aiProvider = provider;
-	
-	// -------- Initialize Citation Service with caching --------
-	const citationService = new CitationService(ztoolkit);
-	addon.citationService = citationService;
-	ztoolkit.log("CitationService initialized successfully");
-	
-	// -------- Register keyboard shortcuts --------
-	BeaverUIFactory.registerShortcuts();
+    // Test connection and initialize schema
+    await dbConnection.test();
+    await beaverDB.initDatabase(version);
+    
+    // -------- Initialize Citation Service with caching --------
+    const citationService = new CitationService(ztoolkit);
+    addon.citationService = citationService;
+    ztoolkit.log("CitationService initialized successfully");
+    
+    // -------- Register keyboard shortcuts --------
+    BeaverUIFactory.registerShortcuts();
 
-	// -------- Add event bus to window --------
-	Zotero.getMainWindow().__beaverEventBus = eventBus;
-	
-	// -------- Load UI for all windows --------
-	await Promise.all(
-		Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
-	);
+    // -------- Add event bus to window --------
+    Zotero.getMainWindow().__beaverEventBus = eventBus;
+    
+    // -------- Load UI for all windows --------
+    await Promise.all(
+        Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
+    );
 
-	// -------- Handle plugin upgrade --------
-	const lastVersion = getPref('installedVersion');
-	if (lastVersion && lastVersion !== version) {
-		await handleUpgrade(lastVersion, version);
-	}
+    // -------- Handle plugin upgrade --------
+    const lastVersion = getPref('installedVersion');
+    if (lastVersion && lastVersion !== version) {
+        await handleUpgrade(lastVersion, version);
+    }
 
-
-	// -------- Set installed version --------
-	setPref('installedVersion', version);
-	ztoolkit.log(`Installed version: ${getPref('installedVersion')}`);
+    // -------- Set installed version --------
+    setPref('installedVersion', version);
+    ztoolkit.log(`Installed version: ${getPref('installedVersion')}`);
 }
 
 async function onMainWindowLoad(win: Window): Promise<void> {
-	// Create ztoolkit for every window
-	addon.data.ztoolkit = createZToolkit();
+    // Create ztoolkit for every window
+    addon.data.ztoolkit = createZToolkit();
 
-	win.MozXULElement.insertFTLIfNeeded(
-		`${addon.data.config.addonRef}-mainWindow.ftl`,
-	);
+    win.MozXULElement.insertFTLIfNeeded(
+        `${addon.data.config.addonRef}-mainWindow.ftl`,
+    );
 
-	// Wait for the UI to be ready
-	await Promise.all([
-    	Zotero.initializationPromise,
-		Zotero.unlockPromise,
-		Zotero.uiReadyPromise,
-	]);
+    // Wait for the UI to be ready
+    await Promise.all([
+        Zotero.initializationPromise,
+        Zotero.unlockPromise,
+        Zotero.uiReadyPromise,
+    ]);
 
-	// Assign the global eventBus instance to this window.
-	// This ensures all windows share the same event bus.
-	win.__beaverEventBus = eventBus;
+    // Assign the global eventBus instance to this window.
+    win.__beaverEventBus = eventBus;
 
-	BeaverUIFactory.registerChatPanel(win);
+    BeaverUIFactory.registerChatPanel(win);
 
-	ztoolkit.log("UI ready");
-	
-	// Load styles for this window
-	loadStylesheet();
-	loadKatexStylesheet();
-	ztoolkit.log("Styles loaded for window");
+    ztoolkit.log("UI ready");
+    
+    // Load styles for this window
+    loadStylesheet();
+    loadKatexStylesheet();
+    ztoolkit.log("Styles loaded for window");
 }
 
+/**
+ * Cleanup handler for main window unload.
+ * 
+ * IMPORTANT: This is where ALL cleanup must happen because:
+ * 1. onShutdown() is called AFTER Zotero's internal shutdown begins
+ * 2. By the time onShutdown() runs, the crash has already occurred
+ * 3. Cleanup must happen during window unload, before Zotero's internal cleanup
+ * 
+ * The cleanup order matters to prevent SIGSEGV crashes:
+ * 1. Dispose native resources (MuPDF WASM, database)
+ * 2. Unregister Zotero.Reader event listeners 
+ * 3. Restore Zotero.Reader.onChangeSidebarWidth
+ * 4. Unmount React components
+ * 5. Unload stylesheets
+ */
 async function onMainWindowUnload(win: Window): Promise<void> {
-	// Clean up Chat Panel for this window
-	BeaverUIFactory.removeChatPanel(win);
+    ztoolkit.log("onMainWindowUnload: Starting cleanup");
+    
+    try {
+        // 1. Dispose MuPDF WASM module to release native resources
+        await disposeMuPDF();
 
-	// Unload the stylesheet
-	unloadKatexStylesheet();
-	unloadStylesheet();
+        // 2. Close database connection
+        if (addon.db) {
+            await addon.db.closeDatabase();
+            addon.db = undefined;
+        }
 
-	ztoolkit.unregisterAll();
-	addon.data.dialog?.window?.close();
+        // 3. Dispose CitationService
+        if (addon.citationService) {
+            addon.citationService.dispose();
+            addon.citationService = undefined;
+        }
 
-	// Clean up event bus for this window
-	if (win.__beaverEventBus) {
-		win.__beaverEventBus = null;
-	}
+        // 4. Unregister keyboard shortcuts (clears interval, unregisters Zotero.Reader listeners)
+        BeaverUIFactory.unregisterShortcuts();
+
+        // 5. Clean up UIManager (restores Zotero.Reader.onChangeSidebarWidth)
+        if (uiManager) {
+            uiManager.cleanup();
+        }
+
+        // 6. Remove React components and DOM elements
+        BeaverUIFactory.removeChatPanel(win);
+
+        // 7. Unload stylesheets
+        unloadKatexStylesheet();
+        unloadStylesheet();
+
+        // 8. Unregister ztoolkit
+        ztoolkit.unregisterAll();
+        addon.data.dialog?.window?.close();
+
+        // 9. Clean up event bus for this window
+        if (win.__beaverEventBus) {
+            win.__beaverEventBus = null;
+        }
+
+        // 10. Close separate Beaver window if open
+        BeaverUIFactory.closeBeaverWindow();
+
+        // 11. Mark addon as not alive to prevent any further callbacks
+        addon.data.alive = false;
+
+        ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
+    } catch (error: any) {
+        ztoolkit.log(`onMainWindowUnload: Error during cleanup: ${error.message}`);
+    }
 }
 
 function loadStylesheet() {
-	// Load the stylesheet
-	const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/beaver.css`;
+    const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/beaver.css`;
     const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
         .getService(Ci.nsIStyleSheetService);
     const styleSheet = Services.io.newURI(styleURI);
     const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
-	if (ssService.sheetRegistered(styleSheet, sheetType)) {
-		ssService.unregisterSheet(styleSheet, sheetType);
-	}
+    if (ssService.sheetRegistered(styleSheet, sheetType)) {
+        ssService.unregisterSheet(styleSheet, sheetType);
+    }
     ssService.loadAndRegisterSheet(styleSheet, sheetType);
 }
-
 
 function unloadStylesheet() {
-	// Unload the stylesheet
-	const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/beaver.css`;
-	const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
-		.getService(Ci.nsIStyleSheetService);
-	const styleSheet = Services.io.newURI(styleURI);
-	const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
-	if (ssService.sheetRegistered(styleSheet, sheetType)) {
-		ssService.unregisterSheet(styleSheet, sheetType);
-	}	
-}
-
-/**
- * Load the KaTeX CSS stylesheet
- */
-function loadKatexStylesheet() {
-	const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/katex-embedded.css`;
+    const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/beaver.css`;
     const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
         .getService(Ci.nsIStyleSheetService);
     const styleSheet = Services.io.newURI(styleURI);
     const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
-	if (ssService.sheetRegistered(styleSheet, sheetType)) {
-		ssService.unregisterSheet(styleSheet, sheetType);
-	}
+    if (ssService.sheetRegistered(styleSheet, sheetType)) {
+        ssService.unregisterSheet(styleSheet, sheetType);
+    }	
+}
+
+function loadKatexStylesheet() {
+    const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/katex-embedded.css`;
+    const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
+        .getService(Ci.nsIStyleSheetService);
+    const styleSheet = Services.io.newURI(styleURI);
+    const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
+    if (ssService.sheetRegistered(styleSheet, sheetType)) {
+        ssService.unregisterSheet(styleSheet, sheetType);
+    }
     ssService.loadAndRegisterSheet(styleSheet, sheetType);
 }
 
-/**
- * Unload the KaTeX CSS stylesheet
- */
 function unloadKatexStylesheet() {
-	const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/katex-embedded.css`;
-	const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
-		.getService(Ci.nsIStyleSheetService);
-	const styleSheet = Services.io.newURI(styleURI);
-	const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
-	if (ssService.sheetRegistered(styleSheet, sheetType)) {
-		ssService.unregisterSheet(styleSheet, sheetType);
-	}	
+    const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/katex-embedded.css`;
+    const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
+        .getService(Ci.nsIStyleSheetService);
+    const styleSheet = Services.io.newURI(styleURI);
+    const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
+    if (ssService.sheetRegistered(styleSheet, sheetType)) {
+        ssService.unregisterSheet(styleSheet, sheetType);
+    }	
 }
 
+/**
+ * Plugin shutdown handler.
+ * 
+ * NOTE: Most cleanup should happen in onMainWindowUnload() instead.
+ * This function runs AFTER Zotero's internal cleanup has begun,
+ * which can cause SIGSEGV if we try to access destroyed objects.
+ * 
+ * This is kept as a fallback for any remaining cleanup.
+ */
 async function onShutdown(): Promise<void> {
-	try {
-		ztoolkit.log("Cleaning up Beaver during shutdown.");
-				
-		// Clear MuPDF module cache to allow GC to reclaim WASM memory
-		await disposeMuPDF();
+    ztoolkit.log("onShutdown: Running fallback cleanup");
+    
+    try {
+        // These should already be done in onMainWindowUnload, but just in case
+        await disposeMuPDF();
 
-		// Close database connection if it exists
-		if (addon.db) {
-			await addon.db.closeDatabase();
-			addon.db = undefined;
-		}
-
-		// Clean up main window event bus
-		const mainWin = Zotero.getMainWindow();
-		if (mainWin && mainWin.__beaverEventBus) {
-			mainWin.__beaverEventBus = null;
-		}
-
-		// Dispose CitationService if it exists
-		if (addon.citationService) {
-			addon.citationService.dispose();
-			addon.citationService = undefined;
-		}
-
-		// Call UIManager cleanup
-		if (uiManager) {
-            uiManager.cleanup();
-            ztoolkit.log("UIManager cleanup executed.");
-        } else {
-            ztoolkit.log("UIManager instance not found during shutdown.");
+        if (addon.db) {
+            await addon.db.closeDatabase();
+            addon.db = undefined;
         }
 
-	} catch (error) {
-		ztoolkit.log("Error during shutdown:", error);
-	}
-	
-	// Unregister keyboard shortcuts
-	BeaverUIFactory.unregisterShortcuts();
+        if (addon.citationService) {
+            addon.citationService.dispose();
+            addon.citationService = undefined;
+        }
 
-    // Close separate window if open
-    BeaverUIFactory.closeBeaverWindow();
-	
-	// Unload stylesheets
-	unloadKatexStylesheet();
-	unloadStylesheet();
-	
-	ztoolkit.unregisterAll();
-	addon.data.dialog?.window?.close();
-	addon.data.alive = false;
-	delete Zotero[addon.data.config.addonInstance as keyof typeof Zotero];
+        BeaverUIFactory.unregisterShortcuts();
+
+        if (uiManager) {
+            uiManager.cleanup();
+        }
+
+        BeaverUIFactory.closeBeaverWindow();
+        
+        unloadKatexStylesheet();
+        unloadStylesheet();
+        
+        ztoolkit.unregisterAll();
+        addon.data.dialog?.window?.close();
+        addon.data.alive = false;
+        delete Zotero[addon.data.config.addonInstance as keyof typeof Zotero];
+    } catch (error) {
+        ztoolkit.log("onShutdown: Error during cleanup:", error);
+    }
 }
 
 export default {
-	onStartup,
-	onShutdown,
-	onMainWindowLoad,
-	onMainWindowUnload
+    onStartup,
+    onShutdown,
+    onMainWindowLoad,
+    onMainWindowUnload
 };

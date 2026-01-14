@@ -1,9 +1,18 @@
 import { DOMElements, SidebarLocation, UIState, CollapseState } from './types';
 
+/**
+ * UIManager handles the Beaver sidebar UI state and interactions.
+ * 
+ * IMPORTANT: This class replaces Zotero.Reader.onChangeSidebarWidth with a custom
+ * handler. The cleanup() method MUST be called during shutdown to restore the
+ * original handler, otherwise a SIGSEGV crash will occur when Zotero tries to
+ * call the handler after this instance is destroyed.
+ */
 class UIManager {
     private elements: DOMElements;
     private collapseState: CollapseState;
     private sidebarWidth: number = 350;
+    private originalOnChangeSidebarWidth = Zotero.Reader.onChangeSidebarWidth;
 
     constructor() {
         this.collapseState = {
@@ -11,48 +20,43 @@ class UIManager {
             reader: null
         };
         this.elements = this.initializeElements();
-
-        // Initialize sidebar width tracking
         this.initSidebarWidthTracking();
     }
 
     private initSidebarWidthTracking(): void {
-        // Observe width changes and maintain consistency
-        const win = Zotero.getMainWindow();
-        if (win) {
-            // Store initial width from reader sidebar if available
-            const readerSidebarWidth = Zotero.Reader.getSidebarWidth();
-            if (readerSidebarWidth) {
-                this.sidebarWidth = readerSidebarWidth;
-            }
-            
-            // Override the reader's width change handler to maintain fixed width
-            const originalOnChangeSidebarWidth = Zotero.Reader.onChangeSidebarWidth;
-            Zotero.Reader.onChangeSidebarWidth = (width) => {
-                // Only call the original handler with our fixed width
-                if (originalOnChangeSidebarWidth) {
-                    originalOnChangeSidebarWidth(this.sidebarWidth);
+        try {
+            const win = Zotero.getMainWindow();
+            if (win && !win.closed) {
+                const readerSidebarWidth = Zotero.Reader?.getSidebarWidth?.();
+                if (readerSidebarWidth) {
+                    this.sidebarWidth = readerSidebarWidth;
                 }
                 
-                // Force our desired width after a short delay
-                setTimeout(() => {
-                    this.enforceConsistentWidth();
-                }, 50);
-            };
+                // Override the reader's width change handler to maintain fixed width
+                if (Zotero.Reader) {
+                    Zotero.Reader.onChangeSidebarWidth = (width) => {
+                        if (this.originalOnChangeSidebarWidth) {
+                            this.originalOnChangeSidebarWidth(this.sidebarWidth);
+                        }
+                        setTimeout(() => this.enforceConsistentWidth(), 50);
+                    };
+                }
+            }
+        } catch (e) {
+            // Silently handle initialization errors
         }
     }
 
     private enforceConsistentWidth(): void {
-        // Apply consistent width to both sidebars
-        if (this.elements.librarySidebar) {
-            (this.elements.librarySidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
-        }
-        
-        if (this.elements.readerSidebar) {
-            (this.elements.readerSidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
-            
-            // Force reader to use our width
-            // Zotero.Reader.setSidebarWidth(this.sidebarWidth);
+        try {
+            if (this.elements.librarySidebar) {
+                (this.elements.librarySidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
+            }
+            if (this.elements.readerSidebar) {
+                (this.elements.readerSidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
+            }
+        } catch (e) {
+            // Silently handle errors
         }
     }
 
@@ -80,7 +84,6 @@ class UIManager {
     }
 
     public handleCleanup(location: SidebarLocation): void {
-        // Handle DOM cleanup after collapse
         if (location === 'library') {
             this.handleLibraryCleanup();
         } else {
@@ -103,69 +106,64 @@ class UIManager {
     }
 
     private handleLibraryPane(show: boolean): void {
-        const win = Zotero.getMainWindow() as unknown as CustomZoteroWindow;
-        const itemPane = win.ZoteroPane.itemPane;
-        
-        if (show && itemPane) {
-            // Store current collapse state
-            this.collapseState.library = itemPane?.collapsed || null;
-            
-            // Uncollapse if needed
-            if (this.collapseState.library) {
-                itemPane.collapsed = false;
-            }
-            
-            // Update visibility
-            this.elements.libraryContent?.forEach(el => (el as HTMLElement).style.display = 'none');
-            if (this.elements.librarySidebar) {
-                (this.elements.librarySidebar as HTMLElement).style.removeProperty('display');
-                (this.elements.librarySidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
-            }
-        } else {
-            // Restore collapse state
-            if (this.collapseState.library && itemPane) {
-                // collapse triggers a mutation observer that updates the UI
-                itemPane.collapsed = true;
+        try {
+            const win = Zotero.getMainWindow() as unknown as CustomZoteroWindow;
+            if (!win || win.closed || !win.ZoteroPane) {
                 return;
             }
-
-            // Cleanup the library pane
-            this.handleLibraryCleanup();
+            const itemPane = win.ZoteroPane.itemPane;
+            
+            if (show && itemPane) {
+                this.collapseState.library = itemPane?.collapsed || null;
+                if (this.collapseState.library) {
+                    itemPane.collapsed = false;
+                }
+                this.elements.libraryContent?.forEach(el => (el as HTMLElement).style.display = 'none');
+                if (this.elements.librarySidebar) {
+                    (this.elements.librarySidebar as HTMLElement).style.removeProperty('display');
+                    (this.elements.librarySidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
+                }
+            } else {
+                if (this.collapseState.library && itemPane) {
+                    itemPane.collapsed = true;
+                    return;
+                }
+                this.handleLibraryCleanup();
+            }
+        } catch (e) {
+            // Silently handle errors
         }
     }
 
     private handleReaderPane(show: boolean): void {
-        const readerPane = Zotero.getMainWindow().ZoteroContextPane;
-        
-        if (show) {
-            // Store current collapse state
-            // @ts-ignore: collapsed is not typed
-            this.collapseState.reader = readerPane.collapsed || null;
-            
-            // Uncollapse if needed
-            if (this.collapseState.reader) {
-                readerPane.togglePane();
-            }
-            
-            // Update visibility
-            this.elements.readerContent?.forEach(el => (el as HTMLElement).style.display = 'none');
-            if (this.elements.readerSidebar) {
-                (this.elements.readerSidebar as HTMLElement).style.removeProperty('display');
-                (this.elements.readerSidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
-                // Force Zotero to use our fixed width
-                // Zotero.Reader.setSidebarWidth(this.sidebarWidth);
-            }
-        } else {
-            // Restore collapse state
-            // @ts-ignore: collapsed is not typed
-            if (this.collapseState.reader && !readerPane.collapsed) {
-                // collapse triggers a mutation observer that updates the UI
-                readerPane.togglePane();
+        try {
+            const win = Zotero.getMainWindow();
+            if (!win || win.closed || !win.ZoteroContextPane) {
                 return;
             }
-
-            // Cleanup the reader pane
-            this.handleReaderCleanup();
+            const readerPane = win.ZoteroContextPane;
+            
+            if (show) {
+                // @ts-ignore: collapsed is not typed
+                this.collapseState.reader = readerPane.collapsed || null;
+                if (this.collapseState.reader) {
+                    readerPane.togglePane();
+                }
+                this.elements.readerContent?.forEach(el => (el as HTMLElement).style.display = 'none');
+                if (this.elements.readerSidebar) {
+                    (this.elements.readerSidebar as HTMLElement).style.removeProperty('display');
+                    (this.elements.readerSidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
+                }
+            } else {
+                // @ts-ignore: collapsed is not typed
+                if (this.collapseState.reader && !readerPane.collapsed) {
+                    readerPane.togglePane();
+                    return;
+                }
+                this.handleReaderCleanup();
+            }
+        } catch (e) {
+            // Silently handle errors
         }
     }
 
@@ -195,28 +193,55 @@ class UIManager {
         }
     }
 
+    /**
+     * Clean up UIManager resources.
+     * 
+     * CRITICAL: This must be called during shutdown to:
+     * 1. Restore the original Zotero.Reader.onChangeSidebarWidth handler
+     * 2. Clear stale DOM element references
+     * 
+     * Failure to call this will result in SIGSEGV when Zotero tries to call
+     * our custom handler after this instance is destroyed.
+     */
     public cleanup(): void {
-        // Restore all UI elements to their original state
-        this.handleLibraryPane(false);
-        this.handleReaderPane(false);
-        this.updateToolbarButton(false);
-
-        // Restore original onChangeSidebarWidth if needed
-        const win = Zotero.getMainWindow();
-        if (win && this.originalOnChangeSidebarWidth) {
-            Zotero.Reader.onChangeSidebarWidth = this.originalOnChangeSidebarWidth;
+        // CRITICAL: Restore Zotero.Reader.onChangeSidebarWidth FIRST
+        try {
+            if (this.originalOnChangeSidebarWidth && Zotero?.Reader) {
+                Zotero.Reader.onChangeSidebarWidth = this.originalOnChangeSidebarWidth;
+            }
+        } catch (e) {
+            // Ignore errors during cleanup
         }
-        if (win) {
-            const chatToggleButton = win.document.querySelector("#zotero-beaver-tb-chat-toggle") as HTMLElement | null;
-            if (chatToggleButton) {
-                chatToggleButton.remove();
+
+        // Clear stored element references to prevent stale access
+        this.elements = {
+            chatToggleButton: null,
+            libraryPane: null,
+            libraryContent: null,
+            librarySidebar: null,
+            readerPane: null,
+            readerContent: null,
+            readerSidebar: null
+        };
+
+        // Only do UI cleanup if window is still valid
+        const win = Zotero.getMainWindow();
+        if (win && !win.closed) {
+            try {
+                this.handleLibraryPane(false);
+                this.handleReaderPane(false);
+                this.updateToolbarButton(false);
+                
+                const chatToggleButton = win.document.querySelector("#zotero-beaver-tb-chat-toggle") as HTMLElement | null;
+                if (chatToggleButton) {
+                    chatToggleButton.remove();
+                }
+            } catch (e) {
+                // Ignore UI cleanup errors during shutdown
             }
         }
     }
-
-    // Store the original handler
-    private originalOnChangeSidebarWidth = Zotero.Reader.onChangeSidebarWidth;
 }
 
 // Export a singleton instance
-export const uiManager = new UIManager(); 
+export const uiManager = new UIManager();
