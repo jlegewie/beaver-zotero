@@ -566,7 +566,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Show popup if subscription is active but using frontend processing
             if (data.subscriptionStatus === SubscriptionStatus.ACTIVE &&
                 store.get(isDatabaseSyncSupportedAtom) &&
-                data.processingMode === ProcessingMode.FRONTEND) {
+                data.processingMode === ProcessingMode.FRONTEND
+            ) {
                 set(addPopupMessageAtom, {
                     type: 'info',
                     title: 'Indexing your library',
