@@ -1,10 +1,11 @@
 import React, { useState, useRef } from 'react';
 import { getPref } from '../../../src/utils/prefs';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { CSSItemTypeIcon } from '../icons/zotero';
+import { CSSItemTypeIcon, CSSIcon } from '../icons/zotero';
 import { isValidAnnotationType } from '../../types/attachments/apiTypes';
-import { addItemToCurrentMessageItemsAtom, addItemsToCurrentMessageItemsAtom } from '../../atoms/messageComposition';
-import { useSetAtom } from 'jotai';
+import { addItemToCurrentMessageItemsAtom, addItemsToCurrentMessageItemsAtom, currentMessageFiltersAtom } from '../../atoms/messageComposition';
+import { useSetAtom, useAtomValue } from 'jotai';
+import { searchableLibraryIdsAtom } from '../../atoms/profile';
 
 interface DragDropWrapperProps {
     children: React.ReactNode;
@@ -18,12 +19,31 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     const [isDragging, setIsDragging] = useState(false);
     const [dragError, setDragError] = useState<string | null>(null);
     const [dragCount, setDragCount] = useState<number>(0);
-    const [dragType, setDragType] = useState<'item' | 'annotation' | null>(null);
+    const [dragType, setDragType] = useState<'item' | 'annotation' | 'collection' | null>(null);
     const dragErrorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const addItemsToCurrentMessageItems = useSetAtom(addItemsToCurrentMessageItemsAtom);
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    const setCurrentMessageFilters = useSetAtom(currentMessageFiltersAtom);
 
     const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage') as number || 10;
+
+    /**
+     * Validate if a collection can be added as a filter
+     * @param collection The collection to validate
+     * @returns Object with valid status and optional error message
+     */
+    const validateCollection = (collection: Zotero.Collection): { valid: boolean; error?: string } => {
+        // Check if collection is deleted
+        if (collection.deleted) {
+            return { valid: false, error: "Collection is deleted" };
+        }
+        // Check if collection is in a searchable library
+        if (!searchableLibraryIds.includes(collection.libraryID)) {
+            return { valid: false, error: "Collection is not in a synced library" };
+        }
+        return { valid: true };
+    };
 
     // Show error message temporarily
     const showErrorMessage = (message: string) => {
@@ -79,7 +99,8 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         // Set appropriate drop effect
         if (
             e.dataTransfer.types.includes('zotero/annotation') || 
-            e.dataTransfer.types.includes('zotero/item')
+            e.dataTransfer.types.includes('zotero/item') ||
+            e.dataTransfer.types.includes('zotero/collection')
         ) {
             e.dataTransfer.dropEffect = 'copy';
         }
@@ -103,6 +124,42 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 }
             } catch (error) {
                 console.error("Error parsing annotation data:", error);
+            }
+        }
+        
+        // Handle Zotero collections
+        else if (e.dataTransfer.types.includes('zotero/collection')) {
+            try {
+                const collectionData = e.dataTransfer.getData('zotero/collection');
+                if (collectionData) {
+                    const ids = collectionData.split(',').map(id => parseInt(id));
+                    const validCollections = ids
+                        .map(id => Zotero.Collections.get(id))
+                        .filter((collection): collection is Zotero.Collection => {
+                            if (!collection) return false;
+                            const validation = validateCollection(collection);
+                            return validation.valid;
+                        });
+                    
+                    if (validCollections.length > 0) {
+                        setObjectIcon(null); // We'll use CSSIcon for collections
+                        setIsDragging(true);
+                        setDragType('collection');
+                        setDragCount(validCollections.length);
+                    } else {
+                        // All collections are invalid
+                        const firstCollection = ids.length > 0 ? Zotero.Collections.get(ids[0]) : null;
+                        if (firstCollection) {
+                            const validation = validateCollection(firstCollection);
+                            showErrorMessage(validation.error || "Collection not supported");
+                        } else {
+                            showErrorMessage("Collection not found");
+                        }
+                        e.dataTransfer.dropEffect = 'none';
+                    }
+                }
+            } catch (error) {
+                console.error("Error handling collection data:", error);
             }
         }
         
@@ -167,6 +224,40 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 }
             } catch (error) {
                 console.error("Error parsing annotation data:", error);
+            }
+        }
+        
+        // Handle Zotero collections
+        else if (e.dataTransfer.types.includes('zotero/collection')) {
+            try {
+                const collectionData = e.dataTransfer.getData('zotero/collection');
+                if (collectionData) {
+                    const ids = collectionData.split(',').map(id => parseInt(id));
+                    const validCollections = ids
+                        .map(id => Zotero.Collections.get(id))
+                        .filter((collection): collection is Zotero.Collection => {
+                            if (!collection) return false;
+                            const validation = validateCollection(collection);
+                            return validation.valid;
+                        });
+                    
+                    if (validCollections.length > 0) {
+                        setObjectIcon(null);
+                        setIsDragging(true);
+                        setDragType('collection');
+                        setDragCount(validCollections.length);
+                    } else {
+                        const firstCollection = ids.length > 0 ? Zotero.Collections.get(ids[0]) : null;
+                        if (firstCollection) {
+                            const validation = validateCollection(firstCollection);
+                            showErrorMessage(validation.error || "Collection not supported");
+                        } else {
+                            showErrorMessage("Collection not found");
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("Error handling collection data:", error);
             }
         }
         
@@ -244,6 +335,37 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             return;
         }
 
+        // Handle Zotero collections
+        if (e.dataTransfer.types.includes('zotero/collection')) {
+            const collectionData = e.dataTransfer.getData('zotero/collection');
+            if (collectionData) {
+                const ids = collectionData.split(',').map(id => parseInt(id));
+                const validCollections = ids
+                    .map(id => Zotero.Collections.get(id))
+                    .filter((collection): collection is Zotero.Collection => {
+                        if (!collection) return false;
+                        const validation = validateCollection(collection);
+                        return validation.valid;
+                    });
+                
+                if (validCollections.length === 0) {
+                    showErrorMessage("No valid collections to add");
+                    return;
+                }
+                
+                // Add valid collection IDs to the message filters
+                // Following the same pattern as AddSourcesMenu.handleSelectCollection
+                const validCollectionIds = validCollections.map(c => c.id);
+                setCurrentMessageFilters((prev) => ({
+                    ...prev,
+                    libraryIds: [],
+                    collectionIds: [...new Set([...prev.collectionIds, ...validCollectionIds])],
+                    tagSelections: []
+                }));
+            }
+            return;
+        }
+
         // Handle Zotero annotations
         if (e.dataTransfer.types.includes("zotero/annotation")) {
             const annotationData = JSON.parse(e.dataTransfer.getData('zotero/annotation'));
@@ -306,6 +428,10 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                         <div className="scale-12 mb-2">
                             <CSSItemTypeIcon itemType={objectIcon} />
                         </div>
+                    ) : dragType === 'collection' ? (
+                        <div className="scale-12 mb-2">
+                            <CSSIcon name="collection" className="icon-16" />
+                        </div>
                     ) : (
                         <div>
                             <ZoteroIcon 
@@ -318,6 +444,8 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                     <div className="text-lg">
                         {dragType === 'annotation' 
                             ? `Drop here to add ${dragCount} annotation${dragCount !== 1 ? 's' : ''}` 
+                            : dragType === 'collection'
+                            ? `Drop here to filter by ${dragCount} collection${dragCount !== 1 ? 's' : ''}`
                             : `Drop here to add ${dragCount} item${dragCount !== 1 ? 's' : ''}`}
                     </div>
                 </div>
