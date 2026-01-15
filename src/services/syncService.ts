@@ -3,8 +3,8 @@ import API_BASE_URL from '../utils/getAPIBaseURL';
 import { UploadStatus } from './attachmentsService';
 import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroCollection } from '../../react/types/zotero';
 import { ZoteroItemReference } from '../../react/types/zotero';
-import { getZoteroUserIdentifier } from '../utils/zoteroUtils';
 import { SyncMethod, SyncType } from '../../react/atoms/sync';
+import { logger } from '../utils/logger';
 
 // Types that match the backend models
 export interface ItemBatchRequest {
@@ -240,16 +240,41 @@ export class SyncService extends ApiService {
     }
 
     /**
-     * Deletes items and/or collections based on their Zotero keys and library
+     * Deletes items and/or collections based on their Zotero keys and library.
+     * Retries up to 3 times on server errors (5xx) with exponential backoff.
      * @param libraryId The Zotero library ID
      * @param zoteroKeys Array of Zotero keys for items and/or collections to delete
      * @returns Promise with the deletion result
      */
     async deleteItems(libraryId: number, zoteroKeys: string[]): Promise<DeleteZoteroDataResponse> {
-        return this.post<DeleteZoteroDataResponse>('/api/v1/sync/items/delete', {
-            library_id: libraryId,
-            zotero_keys: zoteroKeys
-        });
+        const maxRetries = 3;
+        const baseDelayMs = 1000;
+        let lastError: Error | null = null;
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                return await this.post<DeleteZoteroDataResponse>('/api/v1/sync/items/delete', {
+                    library_id: libraryId,
+                    zotero_keys: zoteroKeys
+                });
+            } catch (error: any) {
+                lastError = error;
+
+                // Only retry on server errors (5xx)
+                const isServerError = error?.status >= 500 || error?.name === 'ServerError';
+                if (isServerError && attempt < maxRetries) {
+                    const delayMs = baseDelayMs * Math.pow(2, attempt);
+                    logger(`deleteItems: Server error, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`, 2);
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
+                    continue;
+                }
+
+                // For non-server errors or final attempt, throw immediately
+                throw error;
+            }
+        }
+
+        throw lastError;
     }
 
     /**
