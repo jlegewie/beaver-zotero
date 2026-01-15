@@ -296,7 +296,8 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
                 return { reference, item: zoteroItem };
             } catch (error: any) {
                 logger(`AgentService: Failed to load zotero item ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
-                return { reference, error: 'Failed to load item', error_code: 'load_failed' as const };
+                const details = error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error);
+                return { reference, error: 'Failed to load item', error_code: 'load_failed' as const, details };
             }
         })
     );
@@ -310,7 +311,8 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
             errors.push({
                 reference: result.reference,
                 error: result.error,
-                error_code: result.error_code
+                error_code: result.error_code,
+                details: result.details
             });
         }
     }
@@ -362,10 +364,12 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
             }
         } catch (error: any) {
             logger(`AgentService: Failed to categorize zotero item ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+            const details = error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error);
             errors.push({
                 reference,
                 error: 'Failed to load item/attachment',
-                error_code: 'load_failed'
+                error_code: 'load_failed',
+                details
             });
         }
     }
@@ -423,10 +427,12 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
             }
         } catch (error: any) {
             logger(`AgentService: Failed to expand zotero data ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
+            const details = error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error);
             errors.push({
                 reference,
                 error: 'Failed to load item/attachment',
-                error_code: 'load_failed'
+                error_code: 'load_failed',
+                details
             });
         }
     }

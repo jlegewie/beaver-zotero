@@ -142,6 +142,8 @@ export interface WSDataError {
     reference: ZoteroItemReference;
     error: string;
     error_code?: string;
+    /** Technical details for debugging/logging */
+    details?: string;
 }
 
 export interface WSPageContent {
