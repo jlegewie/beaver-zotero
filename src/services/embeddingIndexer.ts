@@ -526,26 +526,30 @@ export class EmbeddingIndexer {
         `;
         const params = [libraryId, noteItemTypeID, annotationItemTypeID, attachmentItemTypeID];
 
-        const rows = await Zotero.DB.queryAsync(sql, params);
-        
-        if (!rows || rows.length === 0) {
-            return { maxClientDateModified: null, itemCount: 0 };
-        }
-        
-        const row = rows[0];
+        let maxDate: string | null = null;
+        let itemCount = 0;
+
+        await Zotero.DB.queryAsync(sql, params, {
+            onRow: (row: any) => {
+                const rawMaxDate = row.getResultByIndex(0);
+                const rawCount = row.getResultByIndex(1);
+                maxDate = rawMaxDate;
+                itemCount = rawCount || 0;
+            }
+        });
 
         let maxClientDateModified: string | null = null;
-        if (row?.max_date) {
+        if (maxDate) {
             try {
-                maxClientDateModified = Zotero.Date.sqlToISO8601(row.max_date);
+                maxClientDateModified = Zotero.Date.sqlToISO8601(maxDate);
             } catch (e) {
-                maxClientDateModified = row.max_date;
+                maxClientDateModified = maxDate;
             }
         }
 
         return {
             maxClientDateModified,
-            itemCount: row?.item_count || 0,
+            itemCount,
         };
     }
 
