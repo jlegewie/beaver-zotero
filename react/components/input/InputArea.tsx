@@ -8,12 +8,13 @@ import Button from '../ui/Button';
 import { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
-import { getCustomPromptsFromPreferences } from '../../types/settings';
+import { getCustomPromptsForContext } from '../../types/settings';
 import { logger } from '../../../src/utils/logger';
 import { isLibraryTabAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { selectedModelAtom } from '../../atoms/models';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
+import { isDatabaseSyncSupportedAtom, processingModeAtom } from '../../atoms/profile';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -30,6 +31,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
+    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
+    const processingMode = useAtomValue(processingModeAtom);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -91,7 +94,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     };
 
     const handleCustomPrompt = (i: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9) => {
-        const customPrompts = getCustomPromptsFromPreferences();
+        const customPrompts = getCustomPromptsForContext({
+            isDatabaseSyncSupported,
+            processingMode: processingMode
+        });
         if (!customPrompts[i - 1]) return;
         const customPrompt = customPrompts[i - 1];
         logger(`Custom prompt: ${i} ${customPrompt.text} ${currentMessageItems.length}`);

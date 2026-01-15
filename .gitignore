@@ -27,3 +27,6 @@ reactBundle.js.map
 /dist
 *.js.LICENSE.txt
 *.reactBundle.js
+
+# Zotero documentation
+docs-zotero

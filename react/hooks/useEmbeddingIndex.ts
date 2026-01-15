@@ -390,15 +390,16 @@ export function useEmbeddingIndex() {
             }
 
             // Handle modifications - indexItemIdsBatch handles per-batch loading
-            // and skips items that don't meet criteria or haven't changed
+            // skipUnchanged: compare content hashes to avoid unnecessary API calls
             if (modifiedIds.length > 0) {
                 const result = await indexer.indexItemIdsBatch(modifiedIds, {
                     batchSize: INDEX_BATCH_SIZE,
+                    skipUnchanged: true,
                 });
                 logger(`useEmbeddingIndex: Updated ${result.indexed} embeddings (${result.skipped} skipped, ${result.failed} failed)`, 3);
 
                 // Items that were skipped might need their embeddings removed
-                // (e.g., if title/abstract were cleared below min length)
+                // (e.g., if title/abstract were cleared below min length, or item was trashed)
                 // Only delete embeddings for items that exist but don't meet criteria anymore
                 if (result.skipped > 0 && db) {
                     // Get existing embeddings for these items
@@ -411,7 +412,8 @@ export function useEmbeddingIndex() {
                         const stillValidIds = new Set<number>();
                         
                         for (const item of items) {
-                            if (item && item.isRegularItem() && indexer.isItemIndexable(item, MIN_CONTENT_LENGTH)) {
+                            // Item must exist, be a regular item, not be trashed, and meet content requirements
+                            if (item && item.isRegularItem() && !item.deleted && indexer.isItemIndexable(item, MIN_CONTENT_LENGTH)) {
                                 stillValidIds.add(item.id);
                             }
                         }

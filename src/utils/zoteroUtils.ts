@@ -245,24 +245,26 @@ export async function getClientDateModifiedBatch(
         const sql = `SELECT itemID, clientDateModified FROM items WHERE itemID IN (${placeholders})`;
         
         try {
-            const rows = await Zotero.DB.queryAsync(sql, chunk);
-            
-            for (const row of rows || []) {
-                if (row.clientDateModified) {
-                    try {
-                        result.set(
-                            row.itemID,
-                            Zotero.Date.sqlToISO8601(row.clientDateModified),
-                        );
-                    } catch (e) {
-                        logger(`getClientDateModifiedBatch: Could not parse clientDateModified '${row.clientDateModified}' for item ${row.itemID}. This item will not be included in date-based batching.`, 2);
+            // Use onRow callback to avoid Proxy issues with Zotero.DB.queryAsync
+            await Zotero.DB.queryAsync(sql, chunk, {
+                onRow: (row: any) => {
+                    const itemID = row.getResultByIndex(0);
+                    const clientDateModified = row.getResultByIndex(1);
+                    if (clientDateModified) {
+                        try {
+                            result.set(
+                                itemID,
+                                Zotero.Date.sqlToISO8601(clientDateModified),
+                            );
+                        } catch (e) {
+                            logger(`getClientDateModifiedBatch: Could not parse clientDateModified '${clientDateModified}' for item ${itemID}. This item will not be included in date-based batching.`, 2);
+                        }
                     }
                 }
-            }
+            });
         } catch (error) {
             logger(`getClientDateModifiedBatch: Error processing chunk ${i}-${i + chunk.length}: ${(error as Error).message}`, 1);
             throw error;
-            // Continue with next chunk even if one fails
         }
     }
 

@@ -5,7 +5,7 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, SearchIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
@@ -25,6 +25,7 @@ import CitationFormatToggle from "../preferences/CitationFormatToggle";
 import AddSelectedItemsOnNewThreadToggle from "../preferences/AddSelectedItemsOnNewThreadToggle";
 import AddSelectedItemsOnOpenToggle from "../preferences/AddSelectedItemsOnOpenToggle";
 import SyncedLibraries from "../preferences/SyncedLibraries";
+import { ProcessingMode } from "../../types/profile";
 
 const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <h2 className="text-xl font-semibold mt-6 mb-2 font-color-primary">
@@ -55,6 +56,7 @@ const PreferencePage: React.FC = () => {
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
     const profileBalance = useAtomValue(profileBalanceAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
+    const processingMode = useAtomValue(processingModeAtom);
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -198,6 +200,17 @@ const PreferencePage: React.FC = () => {
             return newPrompts;
         });
     }, [saveCustomPromptsToPrefs]);
+
+    const getCustomPromptAvailabilityNote = useCallback((prompt: CustomPrompt): string | undefined => {
+        if (!prompt.requiresDatabaseSync) return undefined;
+        if (!isDatabaseSyncSupported) {
+            return 'Only available with Beaver Pro';
+        }
+        if (processingMode === ProcessingMode.FRONTEND) {
+            return 'Available after indexing is complete';
+        }
+        return undefined;
+    }, [isDatabaseSyncSupported, processingMode]);
 
     // --- Consent Toggle Change Handler ---
     const handleConsentChange = useCallback(async (checked: boolean) => {
@@ -601,6 +614,7 @@ const PreferencePage: React.FC = () => {
                         prompt={prompt}
                         onChange={handleCustomPromptChange}
                         onRemove={handleRemovePrompt}
+                        availabilityNote={getCustomPromptAvailabilityNote(prompt)}
                     />
                 ))}
                 

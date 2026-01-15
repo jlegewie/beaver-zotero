@@ -186,10 +186,9 @@ async function batchFindByIdentifiers(
     }
     
     // Batch ISBN lookup (for items not already found)
+    // Note: We fetch ALL ISBNs from the libraries and normalize them for comparison,
+    // since ISBNs can be stored with various formatting (hyphens, spaces, etc.)
     if (isbnMap.size > 0 && isbnFieldID) {
-        const isbns = Array.from(isbnMap.keys());
-        const isbnPlaceholders = isbns.map(() => '?').join(', ');
-        
         const sql = `
             SELECT itemID, value as isbn 
             FROM items 
@@ -197,40 +196,40 @@ async function batchFindByIdentifiers(
             JOIN itemDataValues USING (valueID)
             WHERE libraryID IN (${libraryPlaceholders}) 
             AND fieldID = ? 
-            AND value IN (${isbnPlaceholders})
             AND itemID NOT IN (SELECT itemID FROM deletedItems)
         `;
         
         try {
-            const params = [...libraryIds, isbnFieldID, ...isbns];
+            const params = [...libraryIds, isbnFieldID];
             
             // Use onRow callback to avoid Proxy issues with Zotero.DB.queryAsync
-            const isbnRows: { itemID: number; isbn: string }[] = [];
+            // Normalize each DB ISBN and check if it matches any of our requested ISBNs
+            const matchedRows: { itemID: number; cleanISBN: string }[] = [];
             await Zotero.DB.queryAsync(sql, params, {
                 onRow: (row: any) => {
-                    isbnRows.push({
-                        itemID: row.getResultByIndex(0),
-                        isbn: row.getResultByIndex(1)
-                    });
+                    const itemID = row.getResultByIndex(0);
+                    const dbISBN = row.getResultByIndex(1);
+                    const cleanISBN = Zotero.Utilities.cleanISBN(String(dbISBN));
+                    // Only keep rows where the normalized ISBN matches one we're looking for
+                    if (cleanISBN && isbnMap.has(cleanISBN)) {
+                        matchedRows.push({ itemID, cleanISBN });
+                    }
                 }
             });
             
-            if (isbnRows.length > 0) {
-                const itemIds = isbnRows.map(row => row.itemID);
+            if (matchedRows.length > 0) {
+                const itemIds = matchedRows.map(row => row.itemID);
                 const zoteroItems = await Zotero.Items.getAsync(itemIds);
                 
-                for (let i = 0; i < isbnRows.length; i++) {
-                    const row = isbnRows[i];
+                for (let i = 0; i < matchedRows.length; i++) {
+                    const row = matchedRows[i];
                     const zoteroItem = zoteroItems[i];
                     if (zoteroItem) {
-                        const cleanISBN = Zotero.Utilities.cleanISBN(String(row.isbn));
-                        if (cleanISBN) {
-                            const requestItemIds = isbnMap.get(cleanISBN);
-                            if (requestItemIds) {
-                                for (const requestItemId of requestItemIds) {
-                                    if (!results.has(requestItemId)) {
-                                        results.set(requestItemId, zoteroItem);
-                                    }
+                        const requestItemIds = isbnMap.get(row.cleanISBN);
+                        if (requestItemIds) {
+                            for (const requestItemId of requestItemIds) {
+                                if (!results.has(requestItemId)) {
+                                    results.set(requestItemId, zoteroItem);
                                 }
                             }
                         }

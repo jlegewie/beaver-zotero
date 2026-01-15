@@ -306,10 +306,11 @@ export class EmbeddingIndexer {
         itemIds: number[],
         options: {
             batchSize?: number;         // Items per API batch (default: INDEX_BATCH_SIZE)
+            skipUnchanged?: boolean;    // Skip items with unchanged content hash (default: false)
             onProgress?: (indexed: number, total: number) => void;
         } = {}
     ): Promise<IndexingResult> {
-        const { batchSize = INDEX_BATCH_SIZE, onProgress } = options;
+        const { batchSize = INDEX_BATCH_SIZE, skipUnchanged = false, onProgress } = options;
 
         const result: IndexingResult = {
             indexed: 0,
@@ -337,6 +338,7 @@ export class EmbeddingIndexer {
                 // Filter to valid items and extract data
                 const itemsData: ItemIndexData[] = [];
                 const clientDatesMap = new Map<number, string>();
+                const textsForHashCheck: Map<number, string> = new Map();
 
                 for (const item of items) {
                     if (!item || !item.isRegularItem()) {
@@ -357,7 +359,7 @@ export class EmbeddingIndexer {
                     const clientDateModified = await getClientDateModifiedAsISOString(item);
                     clientDatesMap.set(item.id, clientDateModified);
 
-                    itemsData.push({
+                    const itemData: ItemIndexData = {
                         itemId: item.id,
                         libraryId: item.libraryID,
                         zoteroKey: item.key,
@@ -365,16 +367,49 @@ export class EmbeddingIndexer {
                         title,
                         abstract,
                         clientDateModified,
-                    });
+                    };
+                    
+                    itemsData.push(itemData);
+                    
+                    // Pre-compute text for hash checking
+                    if (skipUnchanged) {
+                        textsForHashCheck.set(item.id, this.buildEmbeddingText(title, abstract));
+                    }
                 }
 
                 if (itemsData.length === 0) {
                     continue;
                 }
 
+                // Filter out items with unchanged content if requested
+                let itemsToProcess = itemsData;
+                if (skipUnchanged && textsForHashCheck.size > 0) {
+                    const itemIdsToCheck = itemsData.map(d => d.itemId);
+                    const existingHashes = await this.db.getContentHashes(itemIdsToCheck);
+                    
+                    itemsToProcess = itemsData.filter(itemData => {
+                        const text = textsForHashCheck.get(itemData.itemId);
+                        if (!text) return true; // Shouldn't happen, but include if no text
+                        
+                        const newHash = BeaverDB.computeContentHash(text);
+                        const existingHash = existingHashes.get(itemData.itemId);
+                        
+                        // Include if no existing hash (new item) or hash changed
+                        const needsIndexing = existingHash === undefined || existingHash !== newHash;
+                        if (!needsIndexing) {
+                            result.skipped++;
+                        }
+                        return needsIndexing;
+                    });
+                }
+
+                if (itemsToProcess.length === 0) {
+                    continue;
+                }
+
                 // Build texts for embedding
-                const texts = itemsData.map(item => this.buildEmbeddingText(item.title, item.abstract));
-                const ids = itemsData.map(item => item.itemId);
+                const texts = itemsToProcess.map(item => this.buildEmbeddingText(item.title, item.abstract));
+                const ids = itemsToProcess.map(item => item.itemId);
 
                 // Generate embeddings via API with retry
                 const response = await embeddingsService.generateEmbeddingsWithRetry(texts, ids);
@@ -383,8 +418,8 @@ export class EmbeddingIndexer {
                 const embeddingRecords: Array<Omit<EmbeddingRecord, 'indexed_at'>> = [];
                 const successfulItemIds: number[] = [];
 
-                for (let j = 0; j < itemsData.length; j++) {
-                    const itemData = itemsData[j];
+                for (let j = 0; j < itemsToProcess.length; j++) {
+                    const itemData = itemsToProcess[j];
                     const embeddingData = response.embeddings.find(e => e.item_id === itemData.itemId);
 
                     if (!embeddingData) {
@@ -491,26 +526,30 @@ export class EmbeddingIndexer {
         `;
         const params = [libraryId, noteItemTypeID, annotationItemTypeID, attachmentItemTypeID];
 
-        const rows = await Zotero.DB.queryAsync(sql, params);
-        
-        if (!rows || rows.length === 0) {
-            return { maxClientDateModified: null, itemCount: 0 };
-        }
-        
-        const row = rows[0];
+        let maxDate: string | null = null;
+        let itemCount = 0;
+
+        await Zotero.DB.queryAsync(sql, params, {
+            onRow: (row: any) => {
+                const rawMaxDate = row.getResultByIndex(0);
+                const rawCount = row.getResultByIndex(1);
+                maxDate = rawMaxDate;
+                itemCount = rawCount || 0;
+            }
+        });
 
         let maxClientDateModified: string | null = null;
-        if (row?.max_date) {
+        if (maxDate) {
             try {
-                maxClientDateModified = Zotero.Date.sqlToISO8601(row.max_date);
+                maxClientDateModified = Zotero.Date.sqlToISO8601(maxDate);
             } catch (e) {
-                maxClientDateModified = row.max_date;
+                maxClientDateModified = maxDate;
             }
         }
 
         return {
             maxClientDateModified,
-            itemCount: row?.item_count || 0,
+            itemCount,
         };
     }
 
