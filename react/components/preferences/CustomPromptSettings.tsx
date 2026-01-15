@@ -8,9 +8,16 @@ interface CustomPromptSettingsProps {
     prompt: CustomPrompt;
     onChange: (index: number, updatedPrompt: CustomPrompt) => void;
     onRemove: (index: number) => void;
+    availabilityNote?: string;
 }
 
-const CustomPromptSettings: React.FC<CustomPromptSettingsProps> = ({ index, prompt, onChange, onRemove }) => {
+const CustomPromptSettings: React.FC<CustomPromptSettingsProps> = ({
+    index,
+    prompt,
+    onChange,
+    onRemove,
+    availabilityNote
+}) => {
     const [text, setText] = useState(prompt.text);
     const [title, setTitle] = useState(prompt.title);
 
@@ -94,6 +101,12 @@ const CustomPromptSettings: React.FC<CustomPromptSettingsProps> = ({ index, prom
                     />
                     Requires Attachment
                 </label>
+                <div className="display-flex flex-1" />
+                {availabilityNote && (
+                    <div className="text-xs font-color-secondary">
+                        {availabilityNote}
+                    </div>
+                )}
             </div>
         </div>
     );

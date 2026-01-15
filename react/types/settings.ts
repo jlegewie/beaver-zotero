@@ -1,6 +1,7 @@
 import { getPref } from "../../src/utils/prefs";
 import { store } from "../store";
 import { addPopupMessageAtom } from "../utils/popupMessageUtils";
+import { ProcessingMode } from "./profile";
 
 export type ModelProvider = "anthropic" | "google" | "openai" | "mistralai" | "meta-llama" | "deepseek-ai" | "groq";
 
@@ -103,6 +104,7 @@ export interface CustomPrompt {
     text: string;
     librarySearch: boolean;
     requiresAttachment: boolean;
+    requiresDatabaseSync?: boolean;
     id_model?: string;
     index?: number;
 }
@@ -115,6 +117,7 @@ export const isCustomPrompt = (obj: any): obj is CustomPrompt => {
         typeof obj.text === 'string' &&
         typeof obj.librarySearch === 'boolean' &&
         typeof obj.requiresAttachment === 'boolean' &&
+        (obj.requiresDatabaseSync === undefined || typeof obj.requiresDatabaseSync === 'boolean') &&
         (obj.id_model === undefined || typeof obj.id_model === 'string')
     );
 };
@@ -137,4 +140,31 @@ export const getCustomPromptsFromPreferences = (): CustomPrompt[] => {
         return [];
     }
     return [];
+};
+
+export interface CustomPromptAvailabilityContext {
+    isDatabaseSyncSupported: boolean;
+    processingMode: ProcessingMode;
+}
+
+const isCustomPromptAvailable = (
+    prompt: CustomPrompt,
+    context: CustomPromptAvailabilityContext
+): boolean => {
+    if (prompt.requiresDatabaseSync && (!context.isDatabaseSyncSupported || context.processingMode === ProcessingMode.FRONTEND)) {
+        return false;
+    }
+    return true;
+};
+
+export const getCustomPromptsForContext = (
+    context: CustomPromptAvailabilityContext
+): CustomPrompt[] => {
+    const prompts = getCustomPromptsFromPreferences();
+    return prompts
+        .filter((prompt) => isCustomPromptAvailable(prompt, context))
+        .map((prompt, index) => ({
+            ...prompt,
+            index: index + 1
+        }));
 };

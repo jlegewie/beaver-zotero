@@ -8,10 +8,10 @@ import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { isStreamingAtom } from '../../agents/atoms';
 import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atoms/messageComposition";
-import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
+import { getCustomPromptsForContext, CustomPrompt } from "../../types/settings";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import FileStatusDisplay from "../status/FileStatusDisplay";
-import { isDatabaseSyncSupportedAtom } from "../../atoms/profile";
+import { isDatabaseSyncSupportedAtom, processingModeAtom } from "../../atoms/profile";
 
 interface HomePageProps {
     isWindow?: boolean;
@@ -26,6 +26,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
+    const processingMode = useAtomValue(processingModeAtom);
 
     // Realtime listening for file status updates (only in sidebar, not in separate windows)
     const { connectionStatus } = useFileStatus(!isWindow);
@@ -41,7 +42,10 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
         await sendWSMessage(prompt.text);
     };
 
-    const prompts: CustomPrompt[] = getCustomPromptsFromPreferences();
+    const prompts: CustomPrompt[] = getCustomPromptsForContext({
+        isDatabaseSyncSupported,
+        processingMode
+    });
     const shortcutKey = Zotero.isMac ? '⌘^' : 'Ctrl+Win+';
 
     return (
