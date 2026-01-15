@@ -213,17 +213,6 @@ class UIManager {
             // Ignore errors during cleanup
         }
 
-        // Clear stored element references to prevent stale access
-        this.elements = {
-            chatToggleButton: null,
-            libraryPane: null,
-            libraryContent: null,
-            librarySidebar: null,
-            readerPane: null,
-            readerContent: null,
-            readerSidebar: null
-        };
-
         // Only do UI cleanup if window is still valid
         const win = Zotero.getMainWindow();
         if (win && !win.closed) {
@@ -240,6 +229,17 @@ class UIManager {
                 // Ignore UI cleanup errors during shutdown
             }
         }
+
+        // Clear stored element references to prevent stale access
+        this.elements = {
+            chatToggleButton: null,
+            libraryPane: null,
+            libraryContent: null,
+            librarySidebar: null,
+            readerPane: null,
+            readerContent: null,
+            readerSidebar: null
+        };
     }
 }
 

@@ -295,6 +295,14 @@ async function onShutdown(): Promise<void> {
     ztoolkit.log("onShutdown: Running fallback cleanup");
     
     try {
+        const isAppShuttingDown = Services?.startup?.shuttingDown ?? false;
+        if (!isAppShuttingDown) {
+            const openWindows = Zotero.getMainWindows?.().filter(w => w && !w.closed) ?? [];
+            openWindows.forEach((win) => {
+                BeaverUIFactory.removeChatPanel(win as Window);
+            });
+        }
+
         // These should already be done in onMainWindowUnload, but just in case
         await disposeMuPDF();
 
