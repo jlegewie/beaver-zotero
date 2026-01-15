@@ -51,23 +51,32 @@ function parseYear(yearStr: string | undefined | null): number | null {
 export const findExistingReference = async (libraryID: number, data: FindReferenceData): Promise<Zotero.Item | null> => {
 
     // 1. Check by ISBN (Books only)
+    // Note: We normalize both the input ISBN and DB values for comparison,
+    // since ISBNs can be stored with various formatting (hyphens, spaces, etc.)
     if (data.ISBN) {
-        const cleanISBN = Zotero.Utilities.cleanISBN(String(data.ISBN));
-        if (cleanISBN) {
+        const cleanInputISBN = Zotero.Utilities.cleanISBN(String(data.ISBN));
+        if (cleanInputISBN) {
             const isbnFieldID = Zotero.ItemFields.getID('ISBN');
             if (isbnFieldID) {
-                const sql = "SELECT itemID FROM items " +
+                // Fetch all ISBNs from the library and compare normalized versions
+                const sql = "SELECT itemID, value FROM items " +
                     "JOIN itemData USING (itemID) " +
                     "JOIN itemDataValues USING (valueID) " +
-                    "WHERE libraryID=? AND fieldID=? AND value=? " +
+                    "WHERE libraryID=? AND fieldID=? " +
                     "AND itemID NOT IN (SELECT itemID FROM deletedItems)";
                 
                 // Use onRow callback to avoid Proxy issues with Zotero.DB.queryAsync
                 let foundItemID: number | null = null;
-                await Zotero.DB.queryAsync(sql, [libraryID, isbnFieldID, cleanISBN], {
+                await Zotero.DB.queryAsync(sql, [libraryID, isbnFieldID], {
                     onRow: (row: any) => {
                         if (foundItemID === null) {
-                            foundItemID = row.getResultByIndex(0);
+                            const itemID = row.getResultByIndex(0);
+                            const dbISBN = row.getResultByIndex(1);
+                            // Normalize the DB ISBN and compare with our cleaned input
+                            const cleanDbISBN = Zotero.Utilities.cleanISBN(String(dbISBN));
+                            if (cleanDbISBN === cleanInputISBN) {
+                                foundItemID = itemID;
+                            }
                         }
                     }
                 });
