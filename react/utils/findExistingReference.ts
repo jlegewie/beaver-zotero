@@ -62,10 +62,18 @@ export const findExistingReference = async (libraryID: number, data: FindReferen
                     "WHERE libraryID=? AND fieldID=? AND value=? " +
                     "AND itemID NOT IN (SELECT itemID FROM deletedItems)";
                 
-                const rows = await Zotero.DB.queryAsync(sql, [libraryID, isbnFieldID, cleanISBN]);
+                // Use onRow callback to avoid Proxy issues with Zotero.DB.queryAsync
+                let foundItemID: number | null = null;
+                await Zotero.DB.queryAsync(sql, [libraryID, isbnFieldID, cleanISBN], {
+                    onRow: (row: any) => {
+                        if (foundItemID === null) {
+                            foundItemID = row.getResultByIndex(0);
+                        }
+                    }
+                });
                 
-                if (rows && rows.length) {
-                    const item = await Zotero.Items.getAsync(rows[0].itemID);
+                if (foundItemID !== null) {
+                    const item = await Zotero.Items.getAsync(foundItemID);
                     if (item) {
                         await Zotero.Items.loadDataTypes([item], ["itemData", "creators", "childItems"]);
                     }
@@ -87,10 +95,18 @@ export const findExistingReference = async (libraryID: number, data: FindReferen
                     "WHERE libraryID=? AND fieldID=? AND value LIKE ? " +
                     "AND itemID NOT IN (SELECT itemID FROM deletedItems)";
                 
-                const rows = await Zotero.DB.queryAsync(sql, [libraryID, doiFieldID, cleanDOI]);
+                // Use onRow callback to avoid Proxy issues with Zotero.DB.queryAsync
+                let foundItemID: number | null = null;
+                await Zotero.DB.queryAsync(sql, [libraryID, doiFieldID, cleanDOI], {
+                    onRow: (row: any) => {
+                        if (foundItemID === null) {
+                            foundItemID = row.getResultByIndex(0);
+                        }
+                    }
+                });
                 
-                if (rows && rows.length) {
-                    const item = await Zotero.Items.getAsync(rows[0].itemID);
+                if (foundItemID !== null) {
+                    const item = await Zotero.Items.getAsync(foundItemID);
                     if (item) {
                         await Zotero.Items.loadDataTypes([item], ["itemData", "creators", "childItems"]);
                     }
