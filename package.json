@@ -1,7 +1,7 @@
 {
     "name": "beaver-zotero",
     "type": "module",
-    "version": "0.10.1",
+    "version": "0.10.2",
     "description": "Academic research agent that lives in Zotero, instantly searching through all your documents and explaining complex concepts as you read.",
     "config": {
         "addonName": "Beaver",
