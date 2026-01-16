@@ -45,6 +45,15 @@ import {
     ItemSearchFrontendResultItem,
     WSItemSearchByTopicRequest,
     WSItemSearchByTopicResponse,
+    // Library management tools
+    WSZoteroSearchRequest,
+    WSZoteroSearchResponse,
+    ZoteroSearchResultItem,
+    WSListItemsRequest,
+    WSListItemsResponse,
+    ListItemsResultItem,
+    WSGetMetadataRequest,
+    WSGetMetadataResponse,
 } from './agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions, ZoteroItemSearchFilters } from '../../react/utils/searchTools';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
@@ -1705,4 +1714,549 @@ export async function handleItemSearchByTopicRequest(
     };
 
     return response;
+}
+
+
+// =============================================================================
+// Library Management Tool Handlers
+// =============================================================================
+
+/**
+ * Format creators array into a string for display.
+ */
+function formatCreatorsString(creators: any[] | undefined): string | null {
+    if (!creators || creators.length === 0) return null;
+    
+    const names = creators.map(c => {
+        if (c.lastName && c.firstName) {
+            return c.lastName;
+        } else if (c.lastName) {
+            return c.lastName;
+        } else if (c.name) {
+            return c.name;
+        }
+        return null;
+    }).filter(Boolean);
+    
+    if (names.length === 0) return null;
+    if (names.length === 1) return names[0] as string;
+    if (names.length === 2) return `${names[0]} & ${names[1]}`;
+    return `${names[0]} et al.`;
+}
+
+/**
+ * Extract year from a date string.
+ */
+function extractYear(dateStr: string | undefined): number | null {
+    if (!dateStr) return null;
+    const match = dateStr.match(/(\d{4})/);
+    return match ? parseInt(match[1], 10) : null;
+}
+
+/**
+ * Get library by ID or name, or return the user's default library.
+ * 
+ * Supports:
+ * - Number: Looks up by library ID
+ * - String: First tries to parse as ID, then looks up by name
+ * - null/undefined: Returns user's default library
+ */
+function getLibraryByIdOrName(libraryIdOrName: number | string | null | undefined): _ZoteroTypes.Library.LibraryLike {
+    if (libraryIdOrName == null) {
+        // Default to user's library
+        return Zotero.Libraries.userLibrary;
+    }
+    
+    // If it's a number, look up by ID
+    if (typeof libraryIdOrName === 'number') {
+        const lib = Zotero.Libraries.get(libraryIdOrName);
+        if (lib) return lib;
+        // Fall back to user library if not found
+        return Zotero.Libraries.userLibrary;
+    }
+    
+    // It's a string - try to parse as ID first
+    const parsedId = parseInt(libraryIdOrName, 10);
+    if (!isNaN(parsedId)) {
+        const lib = Zotero.Libraries.get(parsedId);
+        if (lib) return lib;
+    }
+    
+    // Look up by name
+    const allLibraries = Zotero.Libraries.getAll();
+    const libByName = allLibraries.find((l: any) => l.name === libraryIdOrName);
+    if (libByName) return libByName;
+    
+    // Fall back to user library if not found
+    return Zotero.Libraries.userLibrary;
+}
+
+/**
+ * Handle zotero_search request from backend.
+ * Uses Zotero's native search API.
+ */
+export async function handleZoteroSearchRequest(
+    request: WSZoteroSearchRequest
+): Promise<WSZoteroSearchResponse> {
+    logger(`handleZoteroSearchRequest: Processing ${request.conditions.length} conditions`, 1);
+    
+    try {
+        const library = getLibraryByIdOrName(request.library_id);
+        
+        // Create search object
+        const search = new Zotero.Search();
+        search.libraryID = library.libraryID;
+        
+        // Set join mode first (if 'any')
+        if (request.join_mode === 'any') {
+            search.addCondition('joinMode', 'any', '');
+        }
+        
+        // Add search conditions
+        for (const condition of request.conditions) {
+            let operator = condition.operator;
+            let value = condition.value ?? '';
+            
+            // Map operator names if needed
+            const operatorMap: Record<string, string> = {
+                'is': 'is',
+                'isNot': 'isNot',
+                'contains': 'contains',
+                'doesNotContain': 'doesNotContain',
+                'beginsWith': 'beginsWith',
+                'isLessThan': 'isLessThan',
+                'isGreaterThan': 'isGreaterThan',
+                'isBefore': 'isBefore',
+                'isAfter': 'isAfter',
+                'isInTheLast': 'isInTheLast',
+            };
+            
+            operator = operatorMap[operator] || operator;
+
+            // Handle search for empty fields
+            if (operator === 'is' && (value === null || value === undefined || value === '')) {
+                operator = 'doesNotContain';
+                value = '';
+            }
+            
+            try {
+                
+                search.addCondition(
+                    condition.field as _ZoteroTypes.Search.Conditions,
+                    operator as _ZoteroTypes.Search.Operator,
+                    value as string | number
+                );
+            } catch (err) {
+                logger(`handleZoteroSearchRequest: Invalid condition ${condition.field} ${operator}: ${err}`, 1);
+                // Continue with other conditions or throw error
+            }
+        }
+
+        // Item type: Regular items only
+        search.addCondition('itemType', 'isNot', 'attachment');
+        search.addCondition('itemType', 'isNot', 'note');
+        search.addCondition('itemType', 'isNot', 'annotation');
+        
+        // Set recursive search
+        if (request.recursive) {
+            search.addCondition('recursive', 'true', '');
+        }
+        
+        // Exclude child items (attachments and notes)
+        if (!request.include_children) {
+            search.addCondition('noChildren', 'true', '');
+        }
+        
+        // Execute search - returns array of item IDs
+        const itemIds = await search.search();
+        const totalCount = itemIds.length;
+        
+        // Apply pagination on IDs
+        const startIndex = request.offset || 0;
+        const endIndex = startIndex + (request.limit || 50);
+        const paginatedIds = itemIds.slice(startIndex, endIndex);
+        
+        // Fetch items in batch
+        const zoteroItems = await Zotero.Items.getAsync(paginatedIds);
+        
+        // Build result items
+        const items: ZoteroSearchResultItem[] = [];
+        
+        for (const item of zoteroItems) {
+            if (!item) continue;
+            
+            // Get creators and format
+            const creators = item.getCreators();
+            const creatorsString = creators
+                .map(c => c.lastName || '')
+                .filter(n => n)
+                .join(', ');
+            
+            // Get date and extract year
+            const dateStr = item.getField('date') as string;
+            const year = extractYear(dateStr);
+            
+            const resultItem: ZoteroSearchResultItem = {
+                item_id: `${item.libraryID}-${item.key}`,
+                item_type: item.itemType,
+                title: item.getField('title') as string,
+                creators: creatorsString || null,
+                year: year,
+            };
+            
+            // Include extra fields if requested
+            if (request.fields && request.fields.length > 0) {
+                const extraFields: Record<string, any> = {};
+                for (const field of request.fields) {
+                    try {
+                        extraFields[field] = item.getField(field);
+                    } catch (err) {
+                        // Field not applicable for this item type
+                    }
+                }
+                if (Object.keys(extraFields).length > 0) {
+                    resultItem.extra_fields = extraFields;
+                }
+            }
+            
+            items.push(resultItem);
+        }
+        
+        logger(`handleZoteroSearchRequest: Returning ${items.length}/${totalCount} items`, 1);
+        
+        return {
+            type: 'zotero_search',
+            request_id: request.request_id,
+            items,
+            total_count: totalCount,
+        };
+    } catch (error) {
+        logger(`handleZoteroSearchRequest: Error: ${error}`, 1);
+        return {
+            type: 'zotero_search',
+            request_id: request.request_id,
+            items: [],
+            total_count: 0,
+            error: String(error),
+            error_code: 'search_failed',
+        };
+    }
+}
+
+/**
+ * Handle list_items request from backend.
+ * Lists items in a library, collection, or by tag.
+ */
+export async function handleListItemsRequest(
+    request: WSListItemsRequest
+): Promise<WSListItemsResponse> {
+    logger(`handleListItemsRequest: collection=${request.collection_key}, tag=${request.tag}`, 1);
+    
+    try {
+        const library = getLibraryByIdOrName(request.library_id);
+        const libraryName = library.name;
+        let collectionName: string | null = null;
+        
+        // Build search to list items
+        const search = new Zotero.Search();
+        search.libraryID = library.libraryID || Zotero.Libraries.userLibraryID;
+        
+        // Add collection filter if specified (supports both key and name)
+        if (request.collection_key) {
+            let collection: any = null;
+            
+            // First try to find by key
+            collection = Zotero.Collections.getByLibraryAndKey(library.libraryID, request.collection_key);
+            
+            // If not found by key, try to find by name
+            if (!collection) {
+                // getByLibrary with true = recursive (all collections in library)
+                const allCollections = Zotero.Collections.getByLibrary(library.libraryID, true);
+                collection = allCollections.find((c: any) => c.name === request.collection_key);
+            }
+            
+            if (collection) {
+                collectionName = collection.name;
+                search.addCondition('collectionID', 'is', String(collection.id));
+                search.addCondition('recursive', 'true', '');
+            } else {
+                return {
+                    type: 'list_items',
+                    request_id: request.request_id,
+                    items: [],
+                    total_count: 0,
+                    error: `Collection not found: ${request.collection_key}`,
+                    error_code: 'collection_not_found',
+                };
+            }
+        }
+        
+        // Add tag filter if specified
+        if (request.tag) {
+            search.addCondition('tag', 'is', request.tag);
+        }
+        
+        // Filter by item types
+        if (request.item_types && request.item_types.length > 0) {
+            for (const itemType of request.item_types) {
+                search.addCondition('itemType', 'is', itemType);
+            }
+        }
+        
+        // Exclude attachments and notes from top-level results
+        search.addCondition('noChildren', 'true', '');
+        
+        // Execute search
+        const itemIds = await search.search();
+        const totalCount = itemIds.length;
+        
+        // Get full items for sorting
+        const itemsWithData: { id: number; item: any; sortValue: any }[] = [];
+        for (const itemId of itemIds) {
+            try {
+                const item = await Zotero.Items.getAsync(itemId);
+                if (!item) continue;
+                
+                let sortValue: any;
+                switch (request.sort_by) {
+                    case 'dateAdded':
+                        sortValue = item.dateAdded || '';
+                        break;
+                    case 'dateModified':
+                        sortValue = item.dateModified || '';
+                        break;
+                    case 'title':
+                        sortValue = (item.getField ? item.getField('title') : '') || '';
+                        break;
+                    case 'creator': {
+                        const creators = item.getCreators ? item.getCreators() : [];
+                        sortValue = creators.length > 0 ? (creators[0].lastName || '') : '';
+                        break;
+                    }
+                    case 'year': {
+                        const date = item.getField ? (item.getField('date') as string) : '';
+                        sortValue = extractYear(date) || 0;
+                        break;
+                    }
+                    case 'itemType':
+                        sortValue = item.itemType || '';
+                        break;
+                    default:
+                        sortValue = item.dateModified || '';
+                }
+                
+                itemsWithData.push({ id: itemId, item, sortValue });
+            } catch {
+                // Skip failed items
+            }
+        }
+        
+        // Sort
+        itemsWithData.sort((a, b) => {
+            if (a.sortValue < b.sortValue) return request.sort_order === 'asc' ? -1 : 1;
+            if (a.sortValue > b.sortValue) return request.sort_order === 'asc' ? 1 : -1;
+            return 0;
+        });
+        
+        // Apply pagination
+        const paginatedItems = itemsWithData.slice(request.offset, request.offset + request.limit);
+        
+        // Build result items
+        const items: ListItemsResultItem[] = [];
+        for (const { item } of paginatedItems) {
+            const creators = item.getCreators ? item.getCreators() : undefined;
+            const date = item.getField ? (item.getField('date') as string) : undefined;
+            
+            const resultItem: ListItemsResultItem = {
+                item_id: `${library.libraryID}-${item.key}`,
+                item_type: item.itemType,
+                title: item.getField ? (item.getField('title') as string) : undefined,
+                creators: formatCreatorsString(creators),
+                year: extractYear(date),
+                date_added: item.dateAdded,
+                date_modified: item.dateModified,
+            };
+            
+            // Include extra fields if requested
+            if (request.fields && request.fields.length > 0) {
+                const extraFields: Record<string, any> = {};
+                for (const field of request.fields) {
+                    if (item.getField) {
+                        try {
+                            extraFields[field] = item.getField(field);
+                        } catch {
+                            // Field not applicable
+                        }
+                    }
+                }
+                if (Object.keys(extraFields).length > 0) {
+                    resultItem.extra_fields = extraFields;
+                }
+            }
+            
+            items.push(resultItem);
+        }
+        
+        logger(`handleListItemsRequest: Returning ${items.length}/${totalCount} items`, 1);
+        
+        return {
+            type: 'list_items',
+            request_id: request.request_id,
+            items,
+            total_count: totalCount,
+            library_name: libraryName,
+            collection_name: collectionName,
+        };
+    } catch (error) {
+        logger(`handleListItemsRequest: Error: ${error}`, 1);
+        return {
+            type: 'list_items',
+            request_id: request.request_id,
+            items: [],
+            total_count: 0,
+            error: String(error),
+            error_code: 'list_failed',
+        };
+    }
+}
+
+/**
+ * Handle get_metadata request from backend.
+ * Returns full Zotero metadata for specific items.
+ */
+export async function handleGetMetadataRequest(
+    request: WSGetMetadataRequest
+): Promise<WSGetMetadataResponse> {
+    logger(`handleGetMetadataRequest: Getting metadata for ${request.item_ids.length} items`, 1);
+    
+    const items: Record<string, any>[] = [];
+    const notFound: string[] = [];
+    
+    for (const itemId of request.item_ids) {
+        try {
+            // Parse item_id format: "<library_id>-<zotero_key>"
+            const dashIndex = itemId.indexOf('-');
+            if (dashIndex === -1) {
+                notFound.push(itemId);
+                continue;
+            }
+            
+            const libraryId = parseInt(itemId.substring(0, dashIndex), 10);
+            const key = itemId.substring(dashIndex + 1);
+            
+            if (isNaN(libraryId) || !key) {
+                notFound.push(itemId);
+                continue;
+            }
+            
+            // Get the item
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, key);
+            if (!item) {
+                notFound.push(itemId);
+                continue;
+            }
+            
+            // Get full item data via toJSON()
+            const itemData: Record<string, any> = item.toJSON ? item.toJSON() : {};
+            itemData.item_id = itemId;
+            
+            // Handle field filtering
+            if (request.fields && request.fields.length > 0) {
+                const filteredData: Record<string, any> = {
+                    item_id: itemId,
+                    itemType: itemData.itemType,
+                    key: itemData.key,
+                };
+                for (const field of request.fields) {
+                    if (field in itemData) {
+                        filteredData[field] = itemData[field];
+                    }
+                }
+                // Include tags if requested
+                if (request.include_tags && 'tags' in itemData) {
+                    filteredData.tags = itemData.tags;
+                }
+                items.push(filteredData);
+            } else {
+                // Return all fields, but optionally exclude some
+                const result = { ...itemData };
+                
+                if (!request.include_tags) {
+                    delete result.tags;
+                }
+                if (!request.include_collections) {
+                    delete result.collections;
+                }
+                
+                items.push(result);
+            }
+            
+            // Handle attachments if requested
+            if (request.include_attachments && item.isRegularItem && item.isRegularItem()) {
+                const attachmentIds = item.getAttachments ? item.getAttachments() : [];
+                const attachments: any[] = [];
+                
+                for (const attachmentId of attachmentIds) {
+                    try {
+                        const attachment = await Zotero.Items.getAsync(attachmentId);
+                        if (attachment) {
+                            attachments.push({
+                                attachment_id: `${libraryId}-${attachment.key}`,
+                                title: attachment.getField ? attachment.getField('title') : null,
+                                filename: attachment.attachmentFilename,
+                                contentType: attachment.attachmentContentType,
+                                path: attachment.getFilePath ? await attachment.getFilePath() : null,
+                                url: attachment.getField ? attachment.getField('url') : null,
+                            });
+                        }
+                    } catch {
+                        // Skip failed attachments
+                    }
+                }
+                
+                if (attachments.length > 0) {
+                    // Add to the last item we pushed
+                    items[items.length - 1].attachments = attachments;
+                }
+            }
+            
+            // Handle notes if requested
+            if (request.include_notes && item.isRegularItem && item.isRegularItem()) {
+                const noteIds = item.getNotes ? item.getNotes() : [];
+                const notes: any[] = [];
+                
+                for (const noteId of noteIds) {
+                    try {
+                        const note = await Zotero.Items.getAsync(noteId);
+                        if (note && note.isNote && note.isNote()) {
+                            notes.push({
+                                note_id: `${libraryId}-${note.key}`,
+                                title: note.getDisplayTitle ? note.getDisplayTitle() : null,
+                                note: note.getNote ? note.getNote() : '',
+                            });
+                        }
+                    } catch {
+                        // Skip failed notes
+                    }
+                }
+                
+                if (notes.length > 0) {
+                    items[items.length - 1].notes = notes;
+                }
+            }
+            
+        } catch (error) {
+            logger(`handleGetMetadataRequest: Failed to get item ${itemId}: ${error}`, 1);
+            notFound.push(itemId);
+        }
+    }
+    
+    logger(`handleGetMetadataRequest: Returning ${items.length} items, ${notFound.length} not found`, 1);
+    
+    return {
+        type: 'get_metadata',
+        request_id: request.request_id,
+        items,
+        not_found: notFound,
+    };
 }

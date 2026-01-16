@@ -20,6 +20,10 @@ import {
     handleZoteroAttachmentSearchRequest,
     handleItemSearchByMetadataRequest,
     handleItemSearchByTopicRequest,
+    // Library management tools
+    handleZoteroSearchRequest,
+    handleListItemsRequest,
+    handleGetMetadataRequest,
 } from '../../src/services/agentDataProvider';
 import type {
     WSZoteroDataRequest,
@@ -29,6 +33,10 @@ import type {
     WSZoteroAttachmentSearchRequest,
     WSItemSearchByMetadataRequest,
     WSItemSearchByTopicRequest,
+    // Library management tools
+    WSZoteroSearchRequest,
+    WSListItemsRequest,
+    WSGetMetadataRequest,
 } from '../../src/services/agentProtocol';
 
 
@@ -59,6 +67,10 @@ const ENDPOINT_PATHS = [
     '/beaver/attachment/pages',
     '/beaver/attachment/page-images',
     '/beaver/attachment/search',
+    // Library management tools
+    '/beaver/library/search',
+    '/beaver/library/list',
+    '/beaver/library/metadata',
 ] as const;
 
 /**
@@ -253,6 +265,84 @@ async function handleAttachmentSearchHttpRequest(request: any) {
 
 
 // =============================================================================
+// Library Management HTTP Handlers
+// =============================================================================
+
+async function handleLibrarySearchHttpRequest(request: any) {
+    const wsRequest: WSZoteroSearchRequest = {
+        event: 'zotero_search_request',
+        request_id: generateRequestId(),
+        conditions: request.conditions || [],
+        join_mode: request.join_mode || 'all',
+        library_id: request.library_id,
+        include_children: request.include_children ?? false,
+        recursive: request.recursive ?? true,
+        limit: request.limit ?? 10,
+        offset: request.offset ?? 0,
+        fields: request.fields,
+    };
+    
+    const response = await handleZoteroSearchRequest(wsRequest);
+    
+    return {
+        items: response.items,
+        total_count: response.total_count,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
+async function handleLibraryListHttpRequest(request: any) {
+    const wsRequest: WSListItemsRequest = {
+        event: 'list_items_request',
+        request_id: generateRequestId(),
+        library_id: request.library_id,
+        collection_key: request.collection_key,
+        tag: request.tag,
+        item_types: request.item_types,
+        sort_by: request.sort_by || 'dateModified',
+        sort_order: request.sort_order || 'desc',
+        limit: request.limit ?? 50,
+        offset: request.offset ?? 0,
+        fields: request.fields,
+    };
+    
+    const response = await handleListItemsRequest(wsRequest);
+    
+    return {
+        items: response.items,
+        total_count: response.total_count,
+        library_name: response.library_name,
+        collection_name: response.collection_name,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
+async function handleLibraryMetadataHttpRequest(request: any) {
+    const wsRequest: WSGetMetadataRequest = {
+        event: 'get_metadata_request',
+        request_id: generateRequestId(),
+        item_ids: request.item_ids || [],
+        fields: request.fields,
+        include_attachments: request.include_attachments ?? false,
+        include_notes: request.include_notes ?? false,
+        include_tags: request.include_tags ?? true,
+        include_collections: request.include_collections ?? false,
+    };
+    
+    const response = await handleGetMetadataRequest(wsRequest);
+    
+    return {
+        items: response.items,
+        not_found: response.not_found,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
+
+// =============================================================================
 // Registration Functions
 // =============================================================================
 
@@ -282,6 +372,16 @@ function registerEndpoints(): boolean {
     
     Zotero.Server.Endpoints['/beaver/attachment/search'] = 
         createEndpoint(handleAttachmentSearchHttpRequest);
+    
+    // Library management endpoints
+    Zotero.Server.Endpoints['/beaver/library/search'] = 
+        createEndpoint(handleLibrarySearchHttpRequest);
+    
+    Zotero.Server.Endpoints['/beaver/library/list'] = 
+        createEndpoint(handleLibraryListHttpRequest);
+    
+    Zotero.Server.Endpoints['/beaver/library/metadata'] = 
+        createEndpoint(handleLibraryMetadataHttpRequest);
     
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
     return true;

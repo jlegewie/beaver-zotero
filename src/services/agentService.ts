@@ -21,6 +21,9 @@ import {
     handleZoteroAttachmentSearchRequest,
     handleItemSearchByMetadataRequest,
     handleItemSearchByTopicRequest,
+    handleZoteroSearchRequest,
+    handleListItemsRequest,
+    handleGetMetadataRequest,
 } from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
 import {
@@ -483,6 +486,57 @@ export class AgentService {
                                 type: 'item_search_by_topic',
                                 request_id: event.request_id,
                                 items: [],
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'zotero_search_request':
+                    logger("AgentService: Received zotero_search_request", event, 1);
+                    handleZoteroSearchRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: zotero_search_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'zotero_search',
+                                request_id: event.request_id,
+                                items: [],
+                                total_count: 0,
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'list_items_request':
+                    logger("AgentService: Received list_items_request", event, 1);
+                    handleListItemsRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: list_items_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'list_items',
+                                request_id: event.request_id,
+                                items: [],
+                                total_count: 0,
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'get_metadata_request':
+                    logger("AgentService: Received get_metadata_request", event, 1);
+                    handleGetMetadataRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: get_metadata_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'get_metadata',
+                                request_id: event.request_id,
+                                items: [],
+                                not_found: event.item_ids,
                                 error: String(err),
                                 error_code: 'internal_error',
                             });

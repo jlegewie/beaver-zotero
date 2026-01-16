@@ -491,6 +491,115 @@ export interface WSZoteroAttachmentSearchResponse {
     error_code?: AttachmentSearchErrorCode | null;
 }
 
+// =============================================================================
+// Library Management Tools (Request/Response)
+// =============================================================================
+
+/** Search condition for zotero_search */
+export interface ZoteroSearchCondition {
+    /** Zotero field to search */
+    field: string;
+    /** Comparison operator */
+    operator: string;
+    /** Value to compare against */
+    value?: string | null;
+}
+
+/** Request from backend for zotero_search */
+export interface WSZoteroSearchRequest extends WSBaseEvent {
+    event: 'zotero_search_request';
+    request_id: string;
+    conditions: ZoteroSearchCondition[];
+    join_mode: 'all' | 'any';
+    library_id?: number | string | null;
+    include_children: boolean;
+    recursive: boolean;
+    limit: number;
+    offset: number;
+    fields?: string[] | null;
+}
+
+/** Result item from zotero_search */
+export interface ZoteroSearchResultItem {
+    item_id: string;
+    item_type: string;
+    title?: string | null;
+    creators?: string | null;
+    year?: number | null;
+    extra_fields?: Record<string, any> | null;
+}
+
+/** Response to zotero_search request */
+export interface WSZoteroSearchResponse {
+    type: 'zotero_search';
+    request_id: string;
+    items: ZoteroSearchResultItem[];
+    total_count: number;
+    error?: string | null;
+    error_code?: string | null;
+}
+
+/** Request from backend for list_items */
+export interface WSListItemsRequest extends WSBaseEvent {
+    event: 'list_items_request';
+    request_id: string;
+    library_id?: number | string | null;
+    collection_key?: string | null;
+    tag?: string | null;
+    item_types?: string[] | null;
+    sort_by: string;
+    sort_order: string;
+    limit: number;
+    offset: number;
+    fields?: string[] | null;
+}
+
+/** Result item from list_items */
+export interface ListItemsResultItem {
+    item_id: string;
+    item_type: string;
+    title?: string | null;
+    creators?: string | null;
+    year?: number | null;
+    date_added?: string | null;
+    date_modified?: string | null;
+    extra_fields?: Record<string, any> | null;
+}
+
+/** Response to list_items request */
+export interface WSListItemsResponse {
+    type: 'list_items';
+    request_id: string;
+    items: ListItemsResultItem[];
+    total_count: number;
+    library_name?: string | null;
+    collection_name?: string | null;
+    error?: string | null;
+    error_code?: string | null;
+}
+
+/** Request from backend for get_metadata */
+export interface WSGetMetadataRequest extends WSBaseEvent {
+    event: 'get_metadata_request';
+    request_id: string;
+    item_ids: string[];
+    fields?: string[] | null;
+    include_attachments: boolean;
+    include_notes: boolean;
+    include_tags: boolean;
+    include_collections: boolean;
+}
+
+/** Response to get_metadata request */
+export interface WSGetMetadataResponse {
+    type: 'get_metadata';
+    request_id: string;
+    items: Record<string, any>[];
+    not_found: string[];
+    error?: string | null;
+    error_code?: string | null;
+}
+
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
@@ -512,7 +621,11 @@ export type WSEvent =
     | WSExternalReferenceCheckRequest
     | WSZoteroDataRequest
     | WSItemSearchByMetadataRequest
-    | WSItemSearchByTopicRequest;
+    | WSItemSearchByTopicRequest
+    // Library management tools
+    | WSZoteroSearchRequest
+    | WSListItemsRequest
+    | WSGetMetadataRequest;
 
 
 // =============================================================================
