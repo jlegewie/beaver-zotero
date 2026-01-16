@@ -2176,14 +2176,15 @@ export async function handleGetMetadataRequest(
                 continue;
             }
             
-            // Get full item data via toJSON()
-            const itemData: Record<string, any> = item.toJSON ? item.toJSON() : {};
+            // Get full item data via toJSON() - this is the canonical Zotero method
+            const itemData: Record<string, any> = item.toJSON();
             itemData.item_id = itemId;
             
             // Handle field filtering
+            let result: Record<string, any>;
             if (request.fields && request.fields.length > 0) {
                 // Core fields are always included
-                const filteredData: Record<string, any> = {
+                result = {
                     item_id: itemId,
                     itemType: itemData.itemType,
                     key: itemData.key,
@@ -2194,21 +2195,20 @@ export async function handleGetMetadataRequest(
                 // Add requested fields
                 for (const field of request.fields) {
                     if (field in itemData) {
-                        filteredData[field] = itemData[field];
+                        result[field] = itemData[field];
                     }
                 }
                 // Include tags if requested
                 if (request.include_tags && 'tags' in itemData) {
-                    filteredData.tags = itemData.tags;
+                    result.tags = itemData.tags;
                 }
                 // Include collections if requested
                 if (request.include_collections && 'collections' in itemData) {
-                    filteredData.collections = itemData.collections;
+                    result.collections = itemData.collections;
                 }
-                items.push(filteredData);
             } else {
                 // Return all fields, but optionally exclude some
-                const result = { ...itemData };
+                result = { ...itemData };
                 
                 if (!request.include_tags) {
                     delete result.tags;
@@ -2216,63 +2216,68 @@ export async function handleGetMetadataRequest(
                 if (!request.include_collections) {
                     delete result.collections;
                 }
-                
-                items.push(result);
             }
             
             // Handle attachments if requested
-            if (request.include_attachments && item.isRegularItem && item.isRegularItem()) {
-                const attachmentIds = item.getAttachments ? item.getAttachments() : [];
-                const attachments: any[] = [];
-                
-                for (const attachmentId of attachmentIds) {
-                    try {
-                        const attachment = await Zotero.Items.getAsync(attachmentId);
-                        if (attachment) {
+            if (request.include_attachments && item.isRegularItem()) {
+                const attachmentIds = item.getAttachments();
+                if (attachmentIds.length > 0) {
+                    // Batch fetch all attachments at once
+                    const attachmentItems = await Zotero.Items.getAsync(attachmentIds);
+                    const attachments: any[] = [];
+                    
+                    for (const attachment of attachmentItems) {
+                        if (!attachment) continue;
+                        
+                        try {
                             attachments.push({
                                 attachment_id: `${libraryId}-${attachment.key}`,
-                                title: attachment.getField ? attachment.getField('title') : null,
-                                filename: attachment.attachmentFilename,
-                                contentType: attachment.attachmentContentType,
-                                path: attachment.getFilePath ? await attachment.getFilePath() : null,
-                                url: attachment.getField ? attachment.getField('url') : null,
+                                title: attachment.getField('title') || null,
+                                filename: attachment.attachmentFilename || null,
+                                contentType: attachment.attachmentContentType || null,
+                                path: await attachment.getFilePath() || null,
+                                url: attachment.getField('url') || null,
                             });
+                        } catch (error) {
+                            logger(`handleGetMetadataRequest: Error processing attachment ${attachment.key}: ${error}`, 2);
                         }
-                    } catch {
-                        // Skip failed attachments
                     }
-                }
-                
-                if (attachments.length > 0) {
-                    // Add to the last item we pushed
-                    items[items.length - 1].attachments = attachments;
+                    
+                    if (attachments.length > 0) {
+                        result.attachments = attachments;
+                    }
                 }
             }
             
             // Handle notes if requested
-            if (request.include_notes && item.isRegularItem && item.isRegularItem()) {
-                const noteIds = item.getNotes ? item.getNotes() : [];
-                const notes: any[] = [];
-                
-                for (const noteId of noteIds) {
-                    try {
-                        const note = await Zotero.Items.getAsync(noteId);
-                        if (note && note.isNote && note.isNote()) {
+            if (request.include_notes && item.isRegularItem()) {
+                const noteIds = item.getNotes();
+                if (noteIds.length > 0) {
+                    // Batch fetch all notes at once
+                    const noteItems = await Zotero.Items.getAsync(noteIds);
+                    const notes: any[] = [];
+                    
+                    for (const note of noteItems) {
+                        if (!note || !note.isNote()) continue;
+                        
+                        try {
                             notes.push({
                                 note_id: `${libraryId}-${note.key}`,
-                                title: note.getDisplayTitle ? note.getDisplayTitle() : null,
-                                note: note.getNote ? note.getNote() : '',
+                                title: note.getDisplayTitle() || null,
+                                note: note.getNote() || '',
                             });
+                        } catch (error) {
+                            logger(`handleGetMetadataRequest: Error processing note ${note.key}: ${error}`, 2);
                         }
-                    } catch {
-                        // Skip failed notes
+                    }
+                    
+                    if (notes.length > 0) {
+                        result.notes = notes;
                     }
                 }
-                
-                if (notes.length > 0) {
-                    items[items.length - 1].notes = notes;
-                }
             }
+            
+            items.push(result);
             
         } catch (error) {
             logger(`handleGetMetadataRequest: Failed to get item ${itemId}: ${error}`, 1);
