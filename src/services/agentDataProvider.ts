@@ -2349,6 +2349,15 @@ export async function handleListCollectionsRequest(
             collectionIdToName.set(coll.id, coll.name);
         }
         
+        // Build a map of collection IDs to subcollection counts
+        const subcollectionCountById: Map<number, number> = new Map();
+        for (const coll of allCollections) {
+            if (coll.parentID) {
+                const currentCount = subcollectionCountById.get(coll.parentID) || 0;
+                subcollectionCountById.set(coll.parentID, currentCount + 1);
+            }
+        }
+        
         for (const collection of filteredCollections) {
             const info: CollectionInfo = {
                 collection_key: collection.key,
@@ -2356,6 +2365,7 @@ export async function handleListCollectionsRequest(
                 parent_key: collection.parentKey || null,
                 parent_name: collection.parentID ? collectionIdToName.get(collection.parentID) || null : null,
                 item_count: 0,
+                subcollection_count: subcollectionCountById.get(collection.id) || 0,
             };
             
             // Get item count if requested
@@ -2384,6 +2394,7 @@ export async function handleListCollectionsRequest(
             request_id: request.request_id,
             collections,
             total_count: totalCount,
+            library_id: library.libraryID,
             library_name: libraryName,
         };
     } catch (error) {
@@ -2507,6 +2518,7 @@ export async function handleListTagsRequest(
             request_id: request.request_id,
             tags: paginatedTags,
             total_count: totalCount,
+            library_id: library.libraryID,
             library_name: libraryName,
         };
     } catch (error) {

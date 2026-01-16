@@ -627,6 +627,7 @@ export interface CollectionInfo {
     parent_key?: string | null;
     parent_name?: string | null;
     item_count: number;
+    subcollection_count: number;
 }
 
 /** Response to list_collections request */
@@ -635,6 +636,7 @@ export interface WSListCollectionsResponse {
     request_id: string;
     collections: CollectionInfo[];
     total_count: number;
+    library_id?: number | null;
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;
@@ -668,6 +670,7 @@ export interface WSListTagsResponse {
     request_id: string;
     tags: TagInfo[];
     total_count: number;
+    library_id?: number | null;
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;
