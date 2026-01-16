@@ -586,8 +586,10 @@ export interface WSGetMetadataRequest extends WSBaseEvent {
     event: 'get_metadata_request';
     request_id: string;
     item_ids: string[];
+    /** Specific field names to include. null = all fields. */
     fields?: string[] | null;
     include_attachments: boolean;
+    /** Not supported yet - always false from backend */
     include_notes: boolean;
     include_tags: boolean;
     include_collections: boolean;

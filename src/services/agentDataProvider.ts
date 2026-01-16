@@ -2179,11 +2179,16 @@ export async function handleGetMetadataRequest(
             
             // Handle field filtering
             if (request.fields && request.fields.length > 0) {
+                // Core fields are always included
                 const filteredData: Record<string, any> = {
                     item_id: itemId,
                     itemType: itemData.itemType,
                     key: itemData.key,
+                    title: itemData.title,
+                    creators: itemData.creators,
+                    date: itemData.date,
                 };
+                // Add requested fields
                 for (const field of request.fields) {
                     if (field in itemData) {
                         filteredData[field] = itemData[field];
@@ -2192,6 +2197,10 @@ export async function handleGetMetadataRequest(
                 // Include tags if requested
                 if (request.include_tags && 'tags' in itemData) {
                     filteredData.tags = itemData.tags;
+                }
+                // Include collections if requested
+                if (request.include_collections && 'collections' in itemData) {
+                    filteredData.collections = itemData.collections;
                 }
                 items.push(filteredData);
             } else {
