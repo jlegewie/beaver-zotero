@@ -1804,7 +1804,7 @@ export async function handleZoteroSearchRequest(
         const library = getLibraryByIdOrName(request.library_id);
         
         // Create search object
-        const search = new Zotero.Search();
+        const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
         search.libraryID = library.libraryID;
         
         // Set join mode first (if 'any')
@@ -1958,7 +1958,7 @@ export async function handleListItemsRequest(
         let collectionName: string | null = null;
         
         // Build search to list items
-        const search = new Zotero.Search();
+        const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
         search.libraryID = library.libraryID || Zotero.Libraries.userLibraryID;
         
         // Add collection filter if specified (supports both key and name)
