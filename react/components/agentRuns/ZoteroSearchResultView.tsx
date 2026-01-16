@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ZoteroSearchResultItem, ListItemsResultItem } from '../../agents/toolResultTypes';
-import { CSSItemTypeIcon } from '../icons/icons';
+import { ZoteroItemReference } from '../../types/zotero';
+import ZoteroItemsList from '../ui/ZoteroItemsList';
 
 /** Unified item type for display */
 type DisplayItem = ZoteroSearchResultItem | ListItemsResultItem;
@@ -8,21 +9,36 @@ type DisplayItem = ZoteroSearchResultItem | ListItemsResultItem;
 interface ZoteroSearchResultViewProps {
     items: DisplayItem[];
     totalCount: number;
-    libraryName?: string | null;
-    collectionName?: string | null;
+}
+
+/**
+ * Parse item_id format '<library_id>-<zotero_key>' to ZoteroItemReference.
+ */
+function parseItemId(itemId: string): ZoteroItemReference | null {
+    const [libraryIdStr, zoteroKey] = itemId.split('-');
+    if (!libraryIdStr || !zoteroKey) return null;
+    
+    const libraryId = parseInt(libraryIdStr, 10);
+    if (isNaN(libraryId)) return null;
+    
+    return { library_id: libraryId, zotero_key: zoteroKey };
 }
 
 /**
  * Renders the result of zotero_search or list_items tools.
- * Shows items with type icon, title, creators, and year.
+ * Uses ZoteroItemsList to display items with clickable links to reveal in Zotero.
  */
 export const ZoteroSearchResultView: React.FC<ZoteroSearchResultViewProps> = ({
     items,
-    totalCount,
-    libraryName,
-    collectionName
+    totalCount
 }) => {
-    if (items.length === 0) {
+    const itemReferences = useMemo(() => {
+        return items
+            .map(item => parseItemId(item.item_id))
+            .filter((ref): ref is ZoteroItemReference => ref !== null);
+    }, [items]);
+
+    if (itemReferences.length === 0) {
         return (
             <div className="p-3 text-sm font-color-tertiary">
                 No items found
@@ -30,42 +46,9 @@ export const ZoteroSearchResultView: React.FC<ZoteroSearchResultViewProps> = ({
         );
     }
 
-    const headerText = [libraryName, collectionName].filter(Boolean).join(' / ');
-
     return (
         <div className="display-flex flex-col">
-            {headerText && (
-                <div className="px-15 py-1 text-xs font-color-tertiary border-b border-primary">
-                    {headerText}
-                </div>
-            )}
-            {items.map((item, index) => (
-                <div
-                    key={item.item_id}
-                    className={`display-flex flex-row gap-1 items-start px-15 py-15 ${
-                        index < items.length - 1 ? 'border-b border-primary' : ''
-                    }`}
-                >
-                    <span className="scale-75" style={{ marginTop: '-2px' }}>
-                        <CSSItemTypeIcon itemType={item.item_type} />
-                    </span>
-                    <div className="display-flex flex-col flex-1 min-w-0">
-                        <div className="display-flex flex-row gap-1 min-w-0">
-                            <span className="text-sm font-color-primary truncate flex-1">
-                                {item.creators || 'Unknown'}
-                            </span>
-                            {item.year && (
-                                <span className="text-sm font-color-tertiary whitespace-nowrap">
-                                    ({item.year})
-                                </span>
-                            )}
-                        </div>
-                        <span className="text-sm font-color-secondary truncate">
-                            {item.title || 'Untitled'}
-                        </span>
-                    </div>
-                </div>
-            ))}
+            <ZoteroItemsList messageAttachments={itemReferences} />
             {totalCount > items.length && (
                 <div className="px-15 py-2 text-xs font-color-tertiary border-t border-primary">
                     Showing {items.length} of {totalCount} items

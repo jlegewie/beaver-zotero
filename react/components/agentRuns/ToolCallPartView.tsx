@@ -42,6 +42,10 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     list_tags: BookmarkIcon,
     list_libraries: DatabaseIcon,
 
+    // Metadata tools
+    get_metadata: DocumentValidationIcon,
+    edit_metadata: DocumentValidationIcon,
+
     // Reading tools
     search_in_documents: TextAlignLeftIcon,
     search_in_attachment: SearchIcon,

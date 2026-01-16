@@ -827,6 +827,11 @@ const LIST_TAGS_TOOL_NAMES: readonly string[] = [
     'list_tags',
 ] as const;
 
+/** Valid tool names for get metadata results */
+const GET_METADATA_TOOL_NAMES: readonly string[] = [
+    'get_metadata',
+] as const;
+
 /**
  * Result item from zotero_search.
  * Matches ZoteroSearchResultItem from backend.
@@ -878,6 +883,23 @@ export interface TagInfo {
 }
 
 /**
+ * Metadata item from get_metadata.
+ * Contains item_id and metadata fields.
+ */
+export interface MetadataResultItem {
+    item_id: string;
+    [key: string]: unknown;
+}
+
+/**
+ * Content structure for get_metadata results.
+ */
+export interface GetMetadataResultContent {
+    items: MetadataResultItem[];
+    not_found: string[];
+}
+
+/**
  * Content structure for zotero_search results.
  */
 export interface ZoteroSearchResultContent {
@@ -901,6 +923,7 @@ export interface ListItemsResultContent {
 export interface ListCollectionsResultContent {
     collections: CollectionInfo[];
     total_count: number;
+    library_id?: number | null;
     library_name?: string | null;
 }
 
@@ -910,6 +933,7 @@ export interface ListCollectionsResultContent {
 export interface ListTagsResultContent {
     tags: TagInfo[];
     total_count: number;
+    library_id?: number | null;
     library_name?: string | null;
 }
 
@@ -970,6 +994,20 @@ export function isListTagsResult(
 }
 
 /**
+ * Type guard for get_metadata results.
+ */
+export function isGetMetadataResult(
+    toolName: string,
+    content: unknown,
+    _metadata?: Record<string, unknown>
+): content is GetMetadataResultContent {
+    if (!GET_METADATA_TOOL_NAMES.includes(toolName)) return false;
+    if (!content || typeof content !== 'object') return false;
+    const obj = content as Record<string, unknown>;
+    return Array.isArray(obj.items);
+}
+
+/**
  * Normalized zotero search view data.
  */
 export interface ZoteroSearchViewData {
@@ -1018,6 +1056,7 @@ export function extractListItemsData(content: unknown): ListItemsViewData | null
 export interface ListCollectionsViewData {
     collections: CollectionInfo[];
     totalCount: number;
+    libraryId?: number | null;
     libraryName?: string | null;
 }
 
@@ -1031,6 +1070,7 @@ export function extractListCollectionsData(content: unknown): ListCollectionsVie
     return {
         collections: obj.collections,
         totalCount: obj.total_count,
+        libraryId: obj.library_id,
         libraryName: obj.library_name,
     };
 }
@@ -1041,6 +1081,7 @@ export function extractListCollectionsData(content: unknown): ListCollectionsVie
 export interface ListTagsViewData {
     tags: TagInfo[];
     totalCount: number;
+    libraryId?: number | null;
     libraryName?: string | null;
 }
 
@@ -1054,7 +1095,29 @@ export function extractListTagsData(content: unknown): ListTagsViewData | null {
     return {
         tags: obj.tags,
         totalCount: obj.total_count,
+        libraryId: obj.library_id,
         libraryName: obj.library_name,
+    };
+}
+
+/**
+ * Normalized get metadata view data.
+ */
+export interface GetMetadataViewData {
+    items: MetadataResultItem[];
+    notFound: string[];
+}
+
+/**
+ * Extract get metadata data from content.
+ */
+export function extractGetMetadataData(content: unknown): GetMetadataViewData | null {
+    if (!content || typeof content !== 'object') return null;
+    const obj = content as GetMetadataResultContent;
+    if (!Array.isArray(obj.items)) return null;
+    return {
+        items: obj.items,
+        notFound: obj.not_found ?? [],
     };
 }
 

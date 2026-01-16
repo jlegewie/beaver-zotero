@@ -25,6 +25,8 @@ import {
     extractListCollectionsData,
     isListTagsResult,
     extractListTagsData,
+    isGetMetadataResult,
+    extractGetMetadataData,
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
@@ -127,8 +129,6 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
                 <ZoteroSearchResultView
                     items={data.items}
                     totalCount={data.totalCount}
-                    libraryName={data.libraryName}
-                    collectionName={data.collectionName}
                 />
             );
         }
@@ -142,7 +142,7 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
                 <ListCollectionsResultView
                     collections={data.collections}
                     totalCount={data.totalCount}
-                    libraryName={data.libraryName}
+                    libraryId={data.libraryId}
                 />
             );
         }
@@ -156,9 +156,30 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
                 <ListTagsResultView
                     tags={data.tags}
                     totalCount={data.totalCount}
-                    libraryName={data.libraryName}
+                    libraryId={data.libraryId}
                 />
             );
+        }
+    }
+
+    // Get metadata results (get_metadata)
+    if (isGetMetadataResult(toolName, content, metadata)) {
+        const data = extractGetMetadataData(content);
+        if (data && data.items.length > 0) {
+            // Convert item_ids to ZoteroItemReference format
+            const itemRefs = data.items
+                .map(item => {
+                    const [libraryIdStr, zoteroKey] = item.item_id.split('-');
+                    if (!libraryIdStr || !zoteroKey) return null;
+                    const libraryId = parseInt(libraryIdStr, 10);
+                    if (isNaN(libraryId)) return null;
+                    return { library_id: libraryId, zotero_key: zoteroKey };
+                })
+                .filter((ref): ref is { library_id: number; zotero_key: string } => ref !== null);
+            
+            if (itemRefs.length > 0) {
+                return <ItemSearchResultView items={itemRefs} />;
+            }
         }
     }
 
