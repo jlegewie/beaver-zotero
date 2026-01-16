@@ -2492,72 +2492,125 @@ export async function handleListTagsRequest(
         const library = getLibraryByIdOrName(request.library_id);
         const libraryName = library.name;
         
-        // Get all tags in the library
-        // Zotero.Tags.getAll returns an array of { tag: string, type: number }
-        const allTags = await Zotero.Tags.getAll(library.libraryID);
-        
-        // Get tag colors
+        // Get tag colors (this is a sync operation from cache)
         const tagColors = Zotero.Tags.getColors(library.libraryID);
         
-        // Build tag info with item counts
-        const tags: TagInfo[] = [];
-        
-        // If a collection is specified, we need to filter tags by items in that collection
-        let collectionItemIds: Set<number> | null = null;
+        // Build tag info with item counts using efficient SQL
+        const tagMap: Map<string, { count: number; type: number }> = new Map();
         
         if (request.collection_key) {
             // Find collection by key or name
             let collection: any = Zotero.Collections.getByLibraryAndKey(library.libraryID, request.collection_key);
             
             if (!collection) {
-                // Try to find by name
-                const allCollections = Zotero.Collections.getByLibrary(library.libraryID, true);
+                const allCollections = Zotero.Collections.getByLibrary(library.libraryID, true, false);
                 collection = allCollections.find((c: any) => c.name === request.collection_key);
             }
             
-            if (collection) {
-                // Get all items in this collection (recursive)
-                const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
-                search.libraryID = library.libraryID;
-                search.addCondition('collectionID', 'is', String(collection.id));
-                search.addCondition('recursive', 'true', '');
-                search.addCondition('itemType', 'isNot', 'attachment');
-                search.addCondition('itemType', 'isNot', 'note');
-                search.addCondition('itemType', 'isNot', 'annotation');
-                const itemIds = await search.search();
-                collectionItemIds = new Set(itemIds);
+            if (!collection) {
+                return {
+                    type: 'list_tags',
+                    request_id: request.request_id,
+                    tags: [],
+                    total_count: 0,
+                    library_id: library.libraryID,
+                    library_name: libraryName,
+                    error: `Collection not found: ${request.collection_key}`,
+                    error_code: 'collection_not_found',
+                };
             }
+            
+            // Get all descendant collection IDs (including the collection itself)
+            const allDescendants = collection.getDescendents(false, 'collection', false);
+            const collectionIds = [collection.id, ...allDescendants.map((d: any) => d.id)];
+            const placeholders = collectionIds.map(() => '?').join(',');
+            
+            // Get tags with item counts for items in this collection (recursive)
+            // Only count top-level regular items (not attachments, notes, annotations)
+            const sql = `
+                SELECT T.name, IT.type, COUNT(DISTINCT I.itemID) as itemCount
+                FROM itemTags IT
+                JOIN tags T ON IT.tagID = T.tagID
+                JOIN items I ON IT.itemID = I.itemID
+                JOIN collectionItems CI ON I.itemID = CI.itemID
+                LEFT JOIN itemAttachments IA ON I.itemID = IA.itemID
+                LEFT JOIN itemNotes INo ON I.itemID = INo.itemID
+                LEFT JOIN itemAnnotations IAn ON I.itemID = IAn.itemID
+                WHERE I.libraryID = ?
+                AND CI.collectionID IN (${placeholders})
+                AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+                AND IA.itemID IS NULL
+                AND INo.itemID IS NULL
+                AND IAn.itemID IS NULL
+                GROUP BY T.tagID, T.name, IT.type
+            `;
+            
+            await Zotero.DB.queryAsync(sql, [library.libraryID, ...collectionIds], {
+                onRow: (row: any) => {
+                    const name = row.getResultByIndex(0) as string;
+                    const type = row.getResultByIndex(1) as number;
+                    const count = row.getResultByIndex(2) as number;
+                    
+                    // Combine counts for same tag name (different types)
+                    const existing = tagMap.get(name);
+                    if (existing) {
+                        existing.count += count;
+                    } else {
+                        tagMap.set(name, { count, type });
+                    }
+                }
+            });
+        } else {
+            // Get all tags with item counts for the entire library
+            // Only count top-level regular items (not attachments, notes, annotations)
+            const sql = `
+                SELECT T.name, IT.type, COUNT(DISTINCT I.itemID) as itemCount
+                FROM itemTags IT
+                JOIN tags T ON IT.tagID = T.tagID
+                JOIN items I ON IT.itemID = I.itemID
+                LEFT JOIN itemAttachments IA ON I.itemID = IA.itemID
+                LEFT JOIN itemNotes INo ON I.itemID = INo.itemID
+                LEFT JOIN itemAnnotations IAn ON I.itemID = IAn.itemID
+                WHERE I.libraryID = ?
+                AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+                AND IA.itemID IS NULL
+                AND INo.itemID IS NULL
+                AND IAn.itemID IS NULL
+                GROUP BY T.tagID, T.name, IT.type
+            `;
+            
+            await Zotero.DB.queryAsync(sql, [library.libraryID], {
+                onRow: (row: any) => {
+                    const name = row.getResultByIndex(0) as string;
+                    const type = row.getResultByIndex(1) as number;
+                    const count = row.getResultByIndex(2) as number;
+                    
+                    // Combine counts for same tag name (different types)
+                    const existing = tagMap.get(name);
+                    if (existing) {
+                        existing.count += count;
+                    } else {
+                        tagMap.set(name, { count, type });
+                    }
+                }
+            });
         }
         
-        // Iterate over tags and count items
-        for (const tagData of allTags as Array<{ tag: string; type: number }>) {
-            const tagName = tagData.tag;
-            
-            // Get tag ID for item lookup
-            const tagId = await Zotero.Tags.getID(tagName);
-            if (!tagId) continue;
-            
-            // Get items with this tag
-            const itemsWithTag = await Zotero.Tags.getTagItems(library.libraryID, tagId);
-            
-            // Filter by collection if specified
-            let itemCount = itemsWithTag.length;
-            if (collectionItemIds) {
-                itemCount = itemsWithTag.filter((itemId: number) => collectionItemIds!.has(itemId)).length;
-            }
-            
+        // Build tag info array
+        const tags: TagInfo[] = [];
+        for (const [name, data] of tagMap) {
             // Skip if below minimum count
-            if (itemCount < request.min_item_count) {
+            if (data.count < (request.min_item_count ?? 0)) {
                 continue;
             }
             
             // Get color if any
-            const color = tagColors.get(tagName) || null;
+            const colorInfo = tagColors.get(name);
             
             tags.push({
-                name: tagName,
-                item_count: itemCount,
-                color: color?.color || null,
+                name,
+                item_count: data.count,
+                color: colorInfo?.color || null,
             });
         }
         
