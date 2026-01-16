@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { ArrowRightIcon, Spinner, LogoutIcon } from '../icons/icons';
 import Button from '../ui/Button';
-import { profileWithPlanAtom, syncWithZoteroAtom } from '../../atoms/profile';
+import { profileWithPlanAtom, syncWithZoteroAtom, isDatabaseSyncSupportedAtom } from '../../atoms/profile';
 import { logoutAtom } from '../../atoms/auth';
 import { accountService } from '../../../src/services/accountService';
 import { logger } from '../../../src/utils/logger';
@@ -12,6 +12,7 @@ const DeviceAuthorizationPage: React.FC = () => {
     // Auth state
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
+    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const logout = useSetAtom(logoutAtom);
     
     // Loading state
@@ -23,8 +24,13 @@ const DeviceAuthorizationPage: React.FC = () => {
     // Device id and user id
     const { userID, localUserKey } = getZoteroUserIdentifier();
 
-    // If no user ID, sign out (shouldn't happen)
-    // if (!userID) logout();
+    // Determine if device authorization is possible
+    // - Requires Zotero account (userID) for device identity verification
+    // - Free users: can authorize for chat history access
+    // - Pro users: need syncWithZotero enabled for full data sync
+    const hasZoteroAccount = !!userID;
+    const isFreeUser = !isDatabaseSyncSupported;
+    const canAuthorizeDevice = hasZoteroAccount && (isFreeUser || syncWithZotero);
 
     // Handle device authorization
     const handleAuthorizeDevice = async () => {
@@ -34,9 +40,6 @@ const DeviceAuthorizationPage: React.FC = () => {
         setErrorMsg(null);
         
         try {
-            // Get libraries from existing profile
-            const libraries = profileWithPlan.libraries || [];
-            
             // Call the service to authorize this device
             await accountService.authorizeDevice(userID, localUserKey);
 
@@ -68,9 +71,37 @@ const DeviceAuthorizationPage: React.FC = () => {
                 {/* Header section */}
                 <div className="display-flex flex-col items-start mb-6">
                     <h1 className="text-2xl font-semibold mb-3">New Device Detected</h1>
-                    {syncWithZotero ? (
+                    
+                    {/* Case 1: Can authorize (Free user with Zotero account OR Pro user with sync enabled) */}
+                    {canAuthorizeDevice && (
+                        <>
+                            <p className="text-base font-color-secondary mb-4">
+                                You're signing in to Beaver from a new device. To continue, you'll need to authorize this device to access your Beaver account.
+                                {' '}<a 
+                                    href={process.env.WEBAPP_BASE_URL + '/docs/multiple-devices'}
+                                    className="link"
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/multiple-devices');
+                                    }}
+                                >Learn more</a>
+                            </p>
+                            {/* Show sync reminder */}
+                            <div className="p-4 rounded-md bg-senary border-popup">
+                                <div className="text-base font-semibold mb-2">Important: Stay in Sync with Zotero</div>
+                                <div className="text-sm font-color-secondary">
+                                    Be sure to use <strong>Zotero Sync</strong> to keep your libraries up to date across all devices.
+                                    If your library is not synced across all devices, Beaver might experience issues with data consistency and search results.
+                                </div>
+                            </div>
+                        </>
+                    )}
+                    
+                    {/* Case 2: No Zotero account - cannot verify device ownership */}
+                    {!canAuthorizeDevice && !hasZoteroAccount && (
                         <p className="text-base font-color-secondary mb-4">
-                            You're signing in to Beaver from a new device. To continue, you'll need to authorize this device to sync with your Beaver account.
+                            Multi-device access requires a Zotero account to verify device ownership.
+                            Please sign in to Zotero on this device (Edit → Settings → Sync) and restart Beaver.
                             {' '}<a 
                                 href={process.env.WEBAPP_BASE_URL + '/docs/multiple-devices'}
                                 className="link"
@@ -80,7 +111,10 @@ const DeviceAuthorizationPage: React.FC = () => {
                                 }}
                             >Learn more</a>
                         </p>
-                    ) : (
+                    )}
+                    
+                    {/* Case 3: Pro user without syncWithZotero - need to enable sync */}
+                    {!canAuthorizeDevice && hasZoteroAccount && !isFreeUser && (
                         <p className="text-base font-color-secondary mb-4">
                             To use Beaver from a different device, please sync your library with Zotero and enable the Preference "Sync with Zotero" in the Beaver Preferences of your existing device.
                             {' '}<a 
@@ -93,14 +127,6 @@ const DeviceAuthorizationPage: React.FC = () => {
                             >Learn more</a>
                         </p>
                     )}
-                    {syncWithZotero && (
-                        <div className="p-4 rounded-md bg-senary border-popup">
-                            <div className="text-base font-semibold mb-2">Important: Stay in Sync with Zotero</div>
-                            <div className="text-sm font-color-secondary">
-                                Be sure to use <strong>Zotero Sync</strong> to keep your libraries up to date across all devices. This helps Beaver synchronize your data and allows you to access the same items everywhere you work.
-                            </div>
-                        </div>
-                    )}
 
                     {/* Error messages */}
                     {errorMsg && (
@@ -111,7 +137,7 @@ const DeviceAuthorizationPage: React.FC = () => {
 
             {/* Fixed button area */}
             <div className="p-4 border-top-quinary">
-                {syncWithZotero ? (
+                {canAuthorizeDevice ? (
                     <div className="display-flex flex-row items-center gap-4">
                         {/* Logout button */}
                         <Button
