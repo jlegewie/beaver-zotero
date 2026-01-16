@@ -16,6 +16,9 @@ import {
     GlobalSearchIcon,
     TextAlignLeftIcon,
     DocumentValidationIcon,
+    LibraryIcon,
+    BookmarkIcon,
+    DatabaseIcon,
 } from '../icons/icons';
 import { searchToolVisibilityAtom, toggleSearchToolVisibilityAtom } from '../../atoms/messageUIState';
 
@@ -31,6 +34,13 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     item_search_by_metadata: SearchIcon,
     fulltext_search: SearchIcon,
     fulltext_search_keywords: SearchIcon,
+    zotero_search: SearchIcon,
+
+    // List tools - library management
+    list_items: TextAlignLeftIcon,
+    list_collections: LibraryIcon,
+    list_tags: BookmarkIcon,
+    list_libraries: DatabaseIcon,
 
     // Reading tools
     search_in_documents: TextAlignLeftIcon,

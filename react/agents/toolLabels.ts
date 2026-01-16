@@ -40,6 +40,17 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     fulltext_search: 'Fulltext search',
     fulltext_search_keywords: 'Keyword search',
 
+    // List tools
+    list_items: 'List items',
+    list_collections: 'List collections',
+    list_tags: 'List tags',
+    list_libraries: 'List libraries',
+    zotero_search: 'Zotero search',
+
+    // Metadata tools
+    get_metadata: 'Get metadata',
+    edit_metadata: 'Edit metadata',
+
     // Reading tools
     read_pages: 'Reading',
     search_in_documents: 'Search in documents',
@@ -309,11 +320,56 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
         }
 
+        // === Library management tools ===
+        case 'zotero_search': {
+            const conditions = args.conditions as Array<{ field?: string; value?: string }> | undefined;
+            if (conditions && conditions.length > 0) {
+                // Show first condition as summary
+                const firstCond = conditions[0];
+                if (firstCond.value) {
+                    const field = firstCond.field || 'any';
+                    return `${baseLabel}: ${field} = "${truncate(firstCond.value, 30)}"`;
+                }
+            }
+            return baseLabel;
+        }
+
+        case 'list_items': {
+            const parts: string[] = [];
+            const collectionKey = args.collection_key as string | undefined;
+            const tag = args.tag as string | undefined;
+            
+            if (collectionKey) parts.push(`collection`);
+            if (tag) parts.push(`tag "${truncate(tag, 20)}"`);
+            
+            if (parts.length > 0) {
+                return `${baseLabel}: ${parts.join(', ')}`;
+            }
+            return baseLabel;
+        }
+
+        case 'list_collections': {
+            const parentKey = args.parent_collection_key as string | undefined;
+            if (parentKey) {
+                return `${baseLabel}: subcollections`;
+            }
+            return baseLabel;
+        }
+
+        case 'list_tags': {
+            const collectionKey = args.collection_key as string | undefined;
+            if (collectionKey) {
+                return `${baseLabel}: in collection`;
+            }
+            return baseLabel;
+        }
+
         // === Tools without dynamic labels ===
         case 'view_page_images':
         case 'add_highlight_annotations':
         case 'add_note_annotations':
         case 'create_zotero_item':
+        case 'list_libraries':
         default:
             return baseLabel;
     }
