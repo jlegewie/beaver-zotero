@@ -276,6 +276,7 @@ async function handleLibrarySearchHttpRequest(request: any) {
         join_mode: request.join_mode || 'all',
         library_id: request.library_id,
         include_children: request.include_children ?? false,
+        item_category: request.item_category ?? 'regular',
         recursive: request.recursive ?? true,
         limit: request.limit ?? 10,
         offset: request.offset ?? 0,

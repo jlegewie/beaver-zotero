@@ -512,6 +512,7 @@ export interface WSZoteroSearchRequest extends WSBaseEvent {
     conditions: ZoteroSearchCondition[];
     join_mode: 'all' | 'any';
     library_id?: number | string | null;
+    item_category?: 'regular' | 'attachment' | 'note' | 'annotation' | 'all' | null;
     include_children: boolean;
     recursive: boolean;
     limit: number;

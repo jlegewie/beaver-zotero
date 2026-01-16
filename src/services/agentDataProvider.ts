@@ -1852,10 +1852,26 @@ export async function handleZoteroSearchRequest(
             }
         }
 
-        // Item type: Regular items only
-        search.addCondition('itemType', 'isNot', 'attachment');
-        search.addCondition('itemType', 'isNot', 'note');
-        search.addCondition('itemType', 'isNot', 'annotation');
+        // Item category: Filter by Zotero item category (regular/attachment/note/annotation)
+        // Only apply if there's no explicit itemType condition in the search
+        const anyItemTypeCondition = request.conditions.some((condition) => condition.field === 'itemType');
+        if (!anyItemTypeCondition) {
+            // Default to regular items if item_category is not specified
+            const itemCategory = request.item_category ?? 'regular';
+            if (itemCategory === 'all') {
+                // Do nothing
+            } else if (itemCategory === 'regular') {
+                search.addCondition('itemType', 'isNot', 'attachment');
+                search.addCondition('itemType', 'isNot', 'note');
+                search.addCondition('itemType', 'isNot', 'annotation');
+            } else if (itemCategory === 'attachment') {
+                search.addCondition('itemType', 'is', 'attachment');
+            } else if (itemCategory === 'note') {
+                search.addCondition('itemType', 'is', 'note');
+            } else if (itemCategory === 'annotation') {
+                search.addCondition('itemType', 'is', 'annotation');
+            }
+        }
         
         // Set recursive search
         if (request.recursive) {
