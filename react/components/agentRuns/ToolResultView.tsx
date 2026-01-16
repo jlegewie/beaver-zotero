@@ -17,12 +17,23 @@ import {
     extractExternalSearchData,
     isReadPagesFrontendResult,
     extractReadPagesFrontendData,
+    isZoteroSearchResult,
+    extractZoteroSearchData,
+    isListItemsResult,
+    extractListItemsData,
+    isListCollectionsResult,
+    extractListCollectionsData,
+    isListTagsResult,
+    extractListTagsData,
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
 import { ReadPagesResultView } from './ReadPagesResultView';
 import { ViewPageImagesResultView } from './ViewPageImagesResultView';
 import { ExternalSearchResultView } from './ExternalSearchResultView';
+import { ZoteroSearchResultView } from './ZoteroSearchResultView';
+import { ListCollectionsResultView } from './ListCollectionsResultView';
+import { ListTagsResultView } from './ListTagsResultView';
 
 interface ToolResultViewProps {
     toolcall: ToolCallPart;
@@ -97,6 +108,57 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         const data = extractExternalSearchData(content, metadata);
         if (data) {
             return <ExternalSearchResultView references={data.references} />;
+        }
+    }
+
+    // Zotero search results (zotero_search)
+    if (isZoteroSearchResult(toolName, content, metadata)) {
+        const data = extractZoteroSearchData(content);
+        if (data) {
+            return <ZoteroSearchResultView items={data.items} totalCount={data.totalCount} />;
+        }
+    }
+
+    // List items results (list_items)
+    if (isListItemsResult(toolName, content, metadata)) {
+        const data = extractListItemsData(content);
+        if (data) {
+            return (
+                <ZoteroSearchResultView
+                    items={data.items}
+                    totalCount={data.totalCount}
+                    libraryName={data.libraryName}
+                    collectionName={data.collectionName}
+                />
+            );
+        }
+    }
+
+    // List collections results (list_collections)
+    if (isListCollectionsResult(toolName, content, metadata)) {
+        const data = extractListCollectionsData(content);
+        if (data) {
+            return (
+                <ListCollectionsResultView
+                    collections={data.collections}
+                    totalCount={data.totalCount}
+                    libraryName={data.libraryName}
+                />
+            );
+        }
+    }
+
+    // List tags results (list_tags)
+    if (isListTagsResult(toolName, content, metadata)) {
+        const data = extractListTagsData(content);
+        if (data) {
+            return (
+                <ListTagsResultView
+                    tags={data.tags}
+                    totalCount={data.totalCount}
+                    libraryName={data.libraryName}
+                />
+            );
         }
     }
 

@@ -804,6 +804,261 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
 }
 
 // ============================================================================
+// Library Management Tool Results
+// ============================================================================
+
+/** Valid tool names for zotero search results */
+const ZOTERO_SEARCH_TOOL_NAMES: readonly string[] = [
+    'zotero_search',
+] as const;
+
+/** Valid tool names for list items results */
+const LIST_ITEMS_TOOL_NAMES: readonly string[] = [
+    'list_items',
+] as const;
+
+/** Valid tool names for list collections results */
+const LIST_COLLECTIONS_TOOL_NAMES: readonly string[] = [
+    'list_collections',
+] as const;
+
+/** Valid tool names for list tags results */
+const LIST_TAGS_TOOL_NAMES: readonly string[] = [
+    'list_tags',
+] as const;
+
+/**
+ * Result item from zotero_search.
+ * Matches ZoteroSearchResultItem from backend.
+ */
+export interface ZoteroSearchResultItem {
+    item_id: string;
+    item_type: string;
+    title?: string | null;
+    creators?: string | null;
+    year?: number | null;
+    extra_fields?: Record<string, unknown> | null;
+}
+
+/**
+ * Result item from list_items.
+ * Matches ListItemsResultItem from backend.
+ */
+export interface ListItemsResultItem {
+    item_id: string;
+    item_type: string;
+    title?: string | null;
+    creators?: string | null;
+    year?: number | null;
+    date_added?: string | null;
+    date_modified?: string | null;
+}
+
+/**
+ * Collection info from list_collections.
+ * Matches CollectionInfo from backend.
+ */
+export interface CollectionInfo {
+    collection_key: string;
+    name: string;
+    parent_key?: string | null;
+    parent_name?: string | null;
+    item_count: number;
+    subcollection_count: number;
+}
+
+/**
+ * Tag info from list_tags.
+ * Matches TagInfo from backend.
+ */
+export interface TagInfo {
+    name: string;
+    item_count: number;
+    color?: string | null;
+}
+
+/**
+ * Content structure for zotero_search results.
+ */
+export interface ZoteroSearchResultContent {
+    items: ZoteroSearchResultItem[];
+    total_count: number;
+}
+
+/**
+ * Content structure for list_items results.
+ */
+export interface ListItemsResultContent {
+    items: ListItemsResultItem[];
+    total_count: number;
+    library_name?: string | null;
+    collection_name?: string | null;
+}
+
+/**
+ * Content structure for list_collections results.
+ */
+export interface ListCollectionsResultContent {
+    collections: CollectionInfo[];
+    total_count: number;
+    library_name?: string | null;
+}
+
+/**
+ * Content structure for list_tags results.
+ */
+export interface ListTagsResultContent {
+    tags: TagInfo[];
+    total_count: number;
+    library_name?: string | null;
+}
+
+/**
+ * Type guard for zotero_search results.
+ */
+export function isZoteroSearchResult(
+    toolName: string,
+    content: unknown,
+    _metadata?: Record<string, unknown>
+): content is ZoteroSearchResultContent {
+    if (!ZOTERO_SEARCH_TOOL_NAMES.includes(toolName)) return false;
+    if (!content || typeof content !== 'object') return false;
+    const obj = content as Record<string, unknown>;
+    return Array.isArray(obj.items) && typeof obj.total_count === 'number';
+}
+
+/**
+ * Type guard for list_items results.
+ */
+export function isListItemsResult(
+    toolName: string,
+    content: unknown,
+    _metadata?: Record<string, unknown>
+): content is ListItemsResultContent {
+    if (!LIST_ITEMS_TOOL_NAMES.includes(toolName)) return false;
+    if (!content || typeof content !== 'object') return false;
+    const obj = content as Record<string, unknown>;
+    return Array.isArray(obj.items) && typeof obj.total_count === 'number';
+}
+
+/**
+ * Type guard for list_collections results.
+ */
+export function isListCollectionsResult(
+    toolName: string,
+    content: unknown,
+    _metadata?: Record<string, unknown>
+): content is ListCollectionsResultContent {
+    if (!LIST_COLLECTIONS_TOOL_NAMES.includes(toolName)) return false;
+    if (!content || typeof content !== 'object') return false;
+    const obj = content as Record<string, unknown>;
+    return Array.isArray(obj.collections) && typeof obj.total_count === 'number';
+}
+
+/**
+ * Type guard for list_tags results.
+ */
+export function isListTagsResult(
+    toolName: string,
+    content: unknown,
+    _metadata?: Record<string, unknown>
+): content is ListTagsResultContent {
+    if (!LIST_TAGS_TOOL_NAMES.includes(toolName)) return false;
+    if (!content || typeof content !== 'object') return false;
+    const obj = content as Record<string, unknown>;
+    return Array.isArray(obj.tags) && typeof obj.total_count === 'number';
+}
+
+/**
+ * Normalized zotero search view data.
+ */
+export interface ZoteroSearchViewData {
+    items: ZoteroSearchResultItem[];
+    totalCount: number;
+}
+
+/**
+ * Extract zotero search data from content.
+ */
+export function extractZoteroSearchData(content: unknown): ZoteroSearchViewData | null {
+    if (!content || typeof content !== 'object') return null;
+    const obj = content as ZoteroSearchResultContent;
+    if (!Array.isArray(obj.items)) return null;
+    return { items: obj.items, totalCount: obj.total_count };
+}
+
+/**
+ * Normalized list items view data.
+ */
+export interface ListItemsViewData {
+    items: ListItemsResultItem[];
+    totalCount: number;
+    libraryName?: string | null;
+    collectionName?: string | null;
+}
+
+/**
+ * Extract list items data from content.
+ */
+export function extractListItemsData(content: unknown): ListItemsViewData | null {
+    if (!content || typeof content !== 'object') return null;
+    const obj = content as ListItemsResultContent;
+    if (!Array.isArray(obj.items)) return null;
+    return {
+        items: obj.items,
+        totalCount: obj.total_count,
+        libraryName: obj.library_name,
+        collectionName: obj.collection_name,
+    };
+}
+
+/**
+ * Normalized list collections view data.
+ */
+export interface ListCollectionsViewData {
+    collections: CollectionInfo[];
+    totalCount: number;
+    libraryName?: string | null;
+}
+
+/**
+ * Extract list collections data from content.
+ */
+export function extractListCollectionsData(content: unknown): ListCollectionsViewData | null {
+    if (!content || typeof content !== 'object') return null;
+    const obj = content as ListCollectionsResultContent;
+    if (!Array.isArray(obj.collections)) return null;
+    return {
+        collections: obj.collections,
+        totalCount: obj.total_count,
+        libraryName: obj.library_name,
+    };
+}
+
+/**
+ * Normalized list tags view data.
+ */
+export interface ListTagsViewData {
+    tags: TagInfo[];
+    totalCount: number;
+    libraryName?: string | null;
+}
+
+/**
+ * Extract list tags data from content.
+ */
+export function extractListTagsData(content: unknown): ListTagsViewData | null {
+    if (!content || typeof content !== 'object') return null;
+    const obj = content as ListTagsResultContent;
+    if (!Array.isArray(obj.tags)) return null;
+    return {
+        tags: obj.tags,
+        totalCount: obj.total_count,
+        libraryName: obj.library_name,
+    };
+}
+
+// ============================================================================
 // Annotation Tool Results
 // ============================================================================
 
