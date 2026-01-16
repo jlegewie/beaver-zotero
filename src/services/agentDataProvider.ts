@@ -2308,19 +2308,19 @@ export async function handleListCollectionsRequest(
         const library = getLibraryByIdOrName(request.library_id);
         const libraryName = library.name;
         
-        // Get collections from the library
-        // getByLibrary with true = recursive (all collections in library)
+        // Get all collections from the library (excluding deleted)
         const allCollections = Zotero.Collections.getByLibrary(library.libraryID, true);
         
         // Filter by parent collection if specified
         let filteredCollections: any[];
         
         if (request.parent_collection_key) {
-            // Find parent collection by key or name
-            let parentCollection: any = Zotero.Collections.getByLibraryAndKey(library.libraryID, request.parent_collection_key);
+            let parentCollection: any = Zotero.Collections.getByLibraryAndKey(
+                library.libraryID, 
+                request.parent_collection_key
+            );
             
             if (!parentCollection) {
-                // Try to find by name
                 parentCollection = allCollections.find((c: any) => c.name === request.parent_collection_key);
             }
             
@@ -2336,50 +2336,102 @@ export async function handleListCollectionsRequest(
                 };
             }
             
-            // Get direct children of the parent collection
             filteredCollections = allCollections.filter((c: any) => c.parentID === parentCollection.id);
         } else {
-            // Get top-level collections (no parent)
             filteredCollections = allCollections.filter((c: any) => !c.parentID);
         }
         
-        // Build result (before pagination)
-        const allResults: CollectionInfo[] = [];
+        // Build lookup maps
+        const collectionIdToName: Map<number, string> = new Map(
+            allCollections.map((c: any) => [c.id, c.name])
+        );
         
-        // Build a map of collection IDs to names for parent_name lookup
-        const collectionIdToName: Map<number, string> = new Map();
-        for (const coll of allCollections) {
-            collectionIdToName.set(coll.id, coll.name);
-        }
-        
-        // Build a map of collection IDs to subcollection counts
         const subcollectionCountById: Map<number, number> = new Map();
         for (const coll of allCollections) {
             if (coll.parentID) {
-                const currentCount = subcollectionCountById.get(coll.parentID) || 0;
-                subcollectionCountById.set(coll.parentID, currentCount + 1);
+                subcollectionCountById.set(coll.parentID, (subcollectionCountById.get(coll.parentID) || 0) + 1);
             }
         }
         
-        for (const collection of filteredCollections) {
-            const info: CollectionInfo = {
-                collection_key: collection.key,
-                name: collection.name,
-                parent_key: collection.parentKey || null,
-                parent_name: collection.parentID ? collectionIdToName.get(collection.parentID) || null : null,
-                item_count: 0,
-                subcollection_count: subcollectionCountById.get(collection.id) || 0,
-            };
-            
-            // Get item count if requested
-            if (request.include_item_counts) {
-                // getChildItems returns only regular items (not attachments/notes)
-                const childItems = collection.getChildItems(false); // false = not recursive
-                info.item_count = childItems.length;
+        // Pre-fetch item counts for all collections if needed
+        const itemCountById: Map<number, number> = new Map();
+        const attachmentCountById: Map<number, number> = new Map();
+        const noteCountById: Map<number, number> = new Map();
+        
+        if (request.include_item_counts) {
+            try {
+                const collectionIds = filteredCollections.map((c: any) => c.id);
+                if (collectionIds.length > 0) {
+                    const placeholders = collectionIds.map(() => '?').join(',');
+                    
+                    // Count top-level regular items (same as library count for consistency)
+                    const itemSql = `
+                        SELECT CI.collectionID, COUNT(*) as itemCount
+                        FROM collectionItems CI
+                        JOIN items I ON CI.itemID = I.itemID
+                        LEFT JOIN itemAttachments IA ON I.itemID = IA.itemID
+                        LEFT JOIN itemNotes INo ON I.itemID = INo.itemID
+                        LEFT JOIN itemAnnotations IAn ON I.itemID = IAn.itemID
+                        WHERE CI.collectionID IN (${placeholders})
+                        AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+                        AND IA.itemID IS NULL
+                        AND INo.itemID IS NULL
+                        AND IAn.itemID IS NULL
+                        GROUP BY CI.collectionID
+                    `;
+                    const itemRows = await Zotero.DB.queryAsync(itemSql, collectionIds);
+                    for (const row of itemRows || []) {
+                        itemCountById.set(row.collectionID, row.itemCount);
+                    }
+                    
+                    // Count standalone attachments (no parent)
+                    const attachmentSql = `
+                        SELECT CI.collectionID, COUNT(*) as attachmentCount
+                        FROM collectionItems CI
+                        JOIN items I ON CI.itemID = I.itemID
+                        JOIN itemAttachments IA ON I.itemID = IA.itemID
+                        WHERE CI.collectionID IN (${placeholders})
+                        AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+                        AND IA.parentItemID IS NULL
+                        GROUP BY CI.collectionID
+                    `;
+                    const attachmentRows = await Zotero.DB.queryAsync(attachmentSql, collectionIds);
+                    for (const row of attachmentRows || []) {
+                        attachmentCountById.set(row.collectionID, row.attachmentCount);
+                    }
+                    
+                    // Count standalone notes (no parent)
+                    const noteSql = `
+                        SELECT CI.collectionID, COUNT(*) as noteCount
+                        FROM collectionItems CI
+                        JOIN items I ON CI.itemID = I.itemID
+                        JOIN itemNotes INo ON I.itemID = INo.itemID
+                        WHERE CI.collectionID IN (${placeholders})
+                        AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+                        AND INo.parentItemID IS NULL
+                        GROUP BY CI.collectionID
+                    `;
+                    const noteRows = await Zotero.DB.queryAsync(noteSql, collectionIds);
+                    for (const row of noteRows || []) {
+                        noteCountById.set(row.collectionID, row.noteCount);
+                    }
+                }
+            } catch (error) {
+                logger(`handleListCollectionsRequest: Error fetching item counts: ${error}`, 2);
             }
-            
-            allResults.push(info);
         }
+        
+        // Build results
+        const allResults: CollectionInfo[] = filteredCollections.map((collection: any) => ({
+            collection_key: collection.key,
+            name: collection.name,
+            parent_key: collection.parentKey || null,
+            parent_name: collection.parentID ? collectionIdToName.get(collection.parentID) || null : null,
+            item_count: request.include_item_counts ? (itemCountById.get(collection.id) || 0) : 0,
+            standalone_attachment_count: request.include_item_counts ? (attachmentCountById.get(collection.id) || 0) : 0,
+            standalone_note_count: request.include_item_counts ? (noteCountById.get(collection.id) || 0) : 0,
+            subcollection_count: subcollectionCountById.get(collection.id) || 0,
+        }));
         
         // Sort by name
         allResults.sort((a, b) => a.name.localeCompare(b.name));
