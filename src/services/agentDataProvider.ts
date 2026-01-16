@@ -2503,7 +2503,7 @@ export async function handleListTagsRequest(
             let collection: any = Zotero.Collections.getByLibraryAndKey(library.libraryID, request.collection_key);
             
             if (!collection) {
-                const allCollections = Zotero.Collections.getByLibrary(library.libraryID, true, false);
+                const allCollections = Zotero.Collections.getByLibrary(library.libraryID, true);
                 collection = allCollections.find((c: any) => c.name === request.collection_key);
             }
             
