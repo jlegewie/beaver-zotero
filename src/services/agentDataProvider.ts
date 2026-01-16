@@ -2017,6 +2017,24 @@ export async function handleListItemsRequest(
             for (const itemType of request.item_types) {
                 search.addCondition('itemType', 'is', itemType);
             }
+
+        // Item category: Filter by Zotero item category (regular/attachment/note/annotation)
+        } else {
+            // Default to regular items if item_category is not specified
+            const itemCategory = request.item_category ?? 'regular';
+            if (itemCategory === 'all') {
+                // Do nothing
+            } else if (itemCategory === 'regular') {
+                search.addCondition('itemType', 'isNot', 'attachment');
+                search.addCondition('itemType', 'isNot', 'note');
+                search.addCondition('itemType', 'isNot', 'annotation');
+            } else if (itemCategory === 'attachment') {
+                search.addCondition('itemType', 'is', 'attachment');
+            } else if (itemCategory === 'note') {
+                search.addCondition('itemType', 'is', 'note');
+            } else if (itemCategory === 'annotation') {
+                search.addCondition('itemType', 'is', 'annotation');
+            }
         }
         
         // Exclude attachments and notes from top-level results

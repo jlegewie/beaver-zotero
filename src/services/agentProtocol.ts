@@ -505,6 +505,9 @@ export interface ZoteroSearchCondition {
     value?: string | null;
 }
 
+/** Zotero item category */
+export type ZoteroItemCategory = 'regular' | 'attachment' | 'note' | 'annotation' | 'all';
+
 /** Request from backend for zotero_search */
 export interface WSZoteroSearchRequest extends WSBaseEvent {
     event: 'zotero_search_request';
@@ -512,7 +515,7 @@ export interface WSZoteroSearchRequest extends WSBaseEvent {
     conditions: ZoteroSearchCondition[];
     join_mode: 'all' | 'any';
     library_id?: number | string | null;
-    item_category?: 'regular' | 'attachment' | 'note' | 'annotation' | 'all' | null;
+    item_category?: ZoteroItemCategory | null;
     include_children: boolean;
     recursive: boolean;
     limit: number;
@@ -547,6 +550,7 @@ export interface WSListItemsRequest extends WSBaseEvent {
     library_id?: number | string | null;
     collection_key?: string | null;
     tag?: string | null;
+    item_category?: ZoteroItemCategory | null;
     item_types?: string[] | null;
     sort_by: string;
     sort_order: string;
