@@ -1842,34 +1842,29 @@ export async function handleZoteroSearchRequest(
             
             operator = operatorMap[operator] || operator;
 
-            // Handle search for empty fields
+            // Handle search for empty fields (Zotero quirk)
+            // "field is empty" must be expressed as "field doesNotContain ''"
             if (operator === 'is' && (value === null || value === undefined || value === '')) {
                 operator = 'doesNotContain';
                 value = '';
             }
             
             try {
-                
                 search.addCondition(
                     condition.field as _ZoteroTypes.Search.Conditions,
                     operator as _ZoteroTypes.Search.Operator,
-                    value as string | number
+                    String(value)  // Ensure value is always a string
                 );
             } catch (err) {
                 logger(`handleZoteroSearchRequest: Invalid condition ${condition.field} ${operator}: ${err}`, 1);
-                // Continue with other conditions or throw error
             }
         }
 
-        // Item category: Filter by Zotero item category (regular/attachment/note/annotation)
-        // Only apply if there's no explicit itemType condition in the search
+        // Item category filter
         const anyItemTypeCondition = request.conditions.some((condition) => condition.field === 'itemType');
         if (!anyItemTypeCondition) {
-            // Default to regular items if item_category is not specified
             const itemCategory = request.item_category ?? 'regular';
-            if (itemCategory === 'all') {
-                // Do nothing
-            } else if (itemCategory === 'regular') {
+            if (itemCategory === 'regular') {
                 search.addCondition('itemType', 'isNot', 'attachment');
                 search.addCondition('itemType', 'isNot', 'note');
                 search.addCondition('itemType', 'isNot', 'annotation');
@@ -1880,53 +1875,70 @@ export async function handleZoteroSearchRequest(
             } else if (itemCategory === 'annotation') {
                 search.addCondition('itemType', 'is', 'annotation');
             }
+            // 'all' = no filter, do nothing
         }
         
-        // Set recursive search
+        // Search recursively within collections (only affects collectionID conditions)
         if (request.recursive) {
             search.addCondition('recursive', 'true', '');
         }
         
-        // Exclude child items (attachments and notes)
+        // Exclude child items
         if (!request.include_children) {
             search.addCondition('noChildren', 'true', '');
         }
         
-        // Execute search - returns array of item IDs
+        // Execute search
         const itemIds = await search.search();
         const totalCount = itemIds.length;
         
-        // Apply pagination on IDs
-        const startIndex = request.offset || 0;
-        const endIndex = startIndex + (request.limit || 50);
-        const paginatedIds = itemIds.slice(startIndex, endIndex);
+        // Apply pagination
+        const offset = request.offset || 0;
+        const limit = request.limit || 50;
+        const paginatedIds = itemIds.slice(offset, offset + limit);
         
-        // Fetch items in batch
+        // Batch fetch items
         const zoteroItems = await Zotero.Items.getAsync(paginatedIds);
         
-        // Build result items
+        // Build results
         const items: ZoteroSearchResultItem[] = [];
         
         for (const item of zoteroItems) {
             if (!item) continue;
             
-            // Get creators and format
+            // Get creators
             const creators = item.getCreators();
             const creatorsString = creators
-                .map(c => c.lastName || '')
-                .filter(n => n)
+                .map((c: any) => c.lastName || c.name || '')
+                .filter((n: string) => n)
                 .join(', ');
             
             // Get date and extract year
-            const dateStr = item.getField('date') as string;
-            const year = extractYear(dateStr);
+            let year: number | null = null;
+            try {
+                const dateStr = item.getField('date') as string;
+                if (dateStr) {
+                    year = extractYear(dateStr);
+                }
+            } catch {
+                // Date field may not exist for some item types
+            }
+            
+            // Get title safely
+            let title = '';
+            try {
+                title = (item.getField('title') as string) || '';
+            } catch {
+                // Some item types (like annotations) may not have title field
+                title = item.getDisplayTitle?.() || '';
+            }
             
             const resultItem: ZoteroSearchResultItem = {
                 item_id: `${item.libraryID}-${item.key}`,
                 item_type: item.itemType,
-                title: item.getField('title') as string,
+                title,
                 creators: creatorsString || null,
-                year: year,
+                year,
             };
             
             // Include extra fields if requested
@@ -1934,9 +1946,12 @@ export async function handleZoteroSearchRequest(
                 const extraFields: Record<string, any> = {};
                 for (const field of request.fields) {
                     try {
-                        extraFields[field] = item.getField(field);
-                    } catch (err) {
-                        // Field not applicable for this item type
+                        const value = item.getField(field);
+                        if (value !== undefined && value !== '') {
+                            extraFields[field] = value;
+                        }
+                    } catch {
+                        // Field not valid for this item type - skip silently
                     }
                 }
                 if (Object.keys(extraFields).length > 0) {
