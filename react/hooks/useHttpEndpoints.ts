@@ -300,12 +300,12 @@ async function handleLibraryListHttpRequest(request: any) {
         library_id: request.library_id,
         collection_key: request.collection_key,
         tag: request.tag,
-        item_types: request.item_types,
+        item_category: request.item_category ?? 'regular',
+        recursive: request.recursive ?? true,
         sort_by: request.sort_by || 'dateModified',
         sort_order: request.sort_order || 'desc',
-        limit: request.limit ?? 50,
+        limit: request.limit ?? 20,
         offset: request.offset ?? 0,
-        fields: request.fields,
     };
     
     const response = await handleListItemsRequest(wsRequest);

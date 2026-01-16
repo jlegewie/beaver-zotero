@@ -54,6 +54,12 @@ import {
     ListItemsResultItem,
     WSGetMetadataRequest,
     WSGetMetadataResponse,
+    WSListCollectionsRequest,
+    WSListCollectionsResponse,
+    CollectionInfo,
+    WSListTagsRequest,
+    WSListTagsResponse,
+    TagInfo,
 } from './agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions, ZoteroItemSearchFilters } from '../../react/utils/searchTools';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
@@ -1994,7 +2000,10 @@ export async function handleListItemsRequest(
             if (collection) {
                 collectionName = collection.name;
                 search.addCondition('collectionID', 'is', String(collection.id));
-                search.addCondition('recursive', 'true', '');
+                // Use recursive parameter from request (default true)
+                if (request.recursive !== false) {
+                    search.addCondition('recursive', 'true', '');
+                }
             } else {
                 return {
                     type: 'list_items',
@@ -2012,29 +2021,20 @@ export async function handleListItemsRequest(
             search.addCondition('tag', 'is', request.tag);
         }
         
-        // Filter by item types
-        if (request.item_types && request.item_types.length > 0) {
-            for (const itemType of request.item_types) {
-                search.addCondition('itemType', 'is', itemType);
-            }
-
         // Item category: Filter by Zotero item category (regular/attachment/note/annotation)
-        } else {
-            // Default to regular items if item_category is not specified
-            const itemCategory = request.item_category ?? 'regular';
-            if (itemCategory === 'all') {
-                // Do nothing
-            } else if (itemCategory === 'regular') {
-                search.addCondition('itemType', 'isNot', 'attachment');
-                search.addCondition('itemType', 'isNot', 'note');
-                search.addCondition('itemType', 'isNot', 'annotation');
-            } else if (itemCategory === 'attachment') {
-                search.addCondition('itemType', 'is', 'attachment');
-            } else if (itemCategory === 'note') {
-                search.addCondition('itemType', 'is', 'note');
-            } else if (itemCategory === 'annotation') {
-                search.addCondition('itemType', 'is', 'annotation');
-            }
+        const itemCategory = request.item_category ?? 'regular';
+        if (itemCategory === 'all') {
+            // Do nothing - include all item types
+        } else if (itemCategory === 'regular') {
+            search.addCondition('itemType', 'isNot', 'attachment');
+            search.addCondition('itemType', 'isNot', 'note');
+            search.addCondition('itemType', 'isNot', 'annotation');
+        } else if (itemCategory === 'attachment') {
+            search.addCondition('itemType', 'is', 'attachment');
+        } else if (itemCategory === 'note') {
+            search.addCondition('itemType', 'is', 'note');
+        } else if (itemCategory === 'annotation') {
+            search.addCondition('itemType', 'is', 'annotation');
         }
         
         // Exclude attachments and notes from top-level results
@@ -2110,23 +2110,6 @@ export async function handleListItemsRequest(
                 date_added: item.dateAdded,
                 date_modified: item.dateModified,
             };
-            
-            // Include extra fields if requested
-            if (request.fields && request.fields.length > 0) {
-                const extraFields: Record<string, any> = {};
-                for (const field of request.fields) {
-                    if (item.getField) {
-                        try {
-                            extraFields[field] = item.getField(field);
-                        } catch {
-                            // Field not applicable
-                        }
-                    }
-                }
-                if (Object.keys(extraFields).length > 0) {
-                    resultItem.extra_fields = extraFields;
-                }
-            }
             
             items.push(resultItem);
         }
@@ -2293,4 +2276,239 @@ export async function handleGetMetadataRequest(
         items,
         not_found: notFound,
     };
+}
+
+
+// =============================================================================
+// List Collections Handler
+// =============================================================================
+
+/**
+ * Handle list_collections request from backend.
+ * Lists collections in a library.
+ */
+export async function handleListCollectionsRequest(
+    request: WSListCollectionsRequest
+): Promise<WSListCollectionsResponse> {
+    logger(`handleListCollectionsRequest: library=${request.library_id}, parent=${request.parent_collection_key}`, 1);
+    
+    try {
+        const library = getLibraryByIdOrName(request.library_id);
+        const libraryName = library.name;
+        
+        // Get collections from the library
+        // getByLibrary with true = recursive (all collections in library)
+        const allCollections = Zotero.Collections.getByLibrary(library.libraryID, true);
+        
+        // Filter by parent collection if specified
+        let filteredCollections: any[];
+        
+        if (request.parent_collection_key) {
+            // Find parent collection by key or name
+            let parentCollection: any = Zotero.Collections.getByLibraryAndKey(library.libraryID, request.parent_collection_key);
+            
+            if (!parentCollection) {
+                // Try to find by name
+                parentCollection = allCollections.find((c: any) => c.name === request.parent_collection_key);
+            }
+            
+            if (!parentCollection) {
+                return {
+                    type: 'list_collections',
+                    request_id: request.request_id,
+                    collections: [],
+                    total_count: 0,
+                    library_name: libraryName,
+                    error: `Parent collection not found: ${request.parent_collection_key}`,
+                    error_code: 'collection_not_found',
+                };
+            }
+            
+            // Get direct children of the parent collection
+            filteredCollections = allCollections.filter((c: any) => c.parentID === parentCollection.id);
+        } else {
+            // Get top-level collections (no parent)
+            filteredCollections = allCollections.filter((c: any) => !c.parentID);
+        }
+        
+        // Build result (before pagination)
+        const allResults: CollectionInfo[] = [];
+        
+        // Build a map of collection IDs to names for parent_name lookup
+        const collectionIdToName: Map<number, string> = new Map();
+        for (const coll of allCollections) {
+            collectionIdToName.set(coll.id, coll.name);
+        }
+        
+        for (const collection of filteredCollections) {
+            const info: CollectionInfo = {
+                collection_key: collection.key,
+                name: collection.name,
+                parent_key: collection.parentKey || null,
+                parent_name: collection.parentID ? collectionIdToName.get(collection.parentID) || null : null,
+                item_count: 0,
+            };
+            
+            // Get item count if requested
+            if (request.include_item_counts) {
+                // getChildItems returns only regular items (not attachments/notes)
+                const childItems = collection.getChildItems(false); // false = not recursive
+                info.item_count = childItems.length;
+            }
+            
+            allResults.push(info);
+        }
+        
+        // Sort by name
+        allResults.sort((a, b) => a.name.localeCompare(b.name));
+        
+        // Apply pagination
+        const totalCount = allResults.length;
+        const offset = request.offset ?? 0;
+        const limit = request.limit ?? 50;
+        const collections = allResults.slice(offset, offset + limit);
+        
+        logger(`handleListCollectionsRequest: Returning ${collections.length}/${totalCount} collections`, 1);
+        
+        return {
+            type: 'list_collections',
+            request_id: request.request_id,
+            collections,
+            total_count: totalCount,
+            library_name: libraryName,
+        };
+    } catch (error) {
+        logger(`handleListCollectionsRequest: Error: ${error}`, 1);
+        return {
+            type: 'list_collections',
+            request_id: request.request_id,
+            collections: [],
+            total_count: 0,
+            error: String(error),
+            error_code: 'list_failed',
+        };
+    }
+}
+
+
+// =============================================================================
+// List Tags Handler
+// =============================================================================
+
+/**
+ * Handle list_tags request from backend.
+ * Lists tags in a library.
+ */
+export async function handleListTagsRequest(
+    request: WSListTagsRequest
+): Promise<WSListTagsResponse> {
+    logger(`handleListTagsRequest: library=${request.library_id}, collection=${request.collection_key}`, 1);
+    
+    try {
+        const library = getLibraryByIdOrName(request.library_id);
+        const libraryName = library.name;
+        
+        // Get all tags in the library
+        // Zotero.Tags.getAll returns an array of { tag: string, type: number }
+        const allTags = await Zotero.Tags.getAll(library.libraryID);
+        
+        // Get tag colors
+        const tagColors = Zotero.Tags.getColors(library.libraryID);
+        
+        // Build tag info with item counts
+        const tags: TagInfo[] = [];
+        
+        // If a collection is specified, we need to filter tags by items in that collection
+        let collectionItemIds: Set<number> | null = null;
+        
+        if (request.collection_key) {
+            // Find collection by key or name
+            let collection: any = Zotero.Collections.getByLibraryAndKey(library.libraryID, request.collection_key);
+            
+            if (!collection) {
+                // Try to find by name
+                const allCollections = Zotero.Collections.getByLibrary(library.libraryID, true);
+                collection = allCollections.find((c: any) => c.name === request.collection_key);
+            }
+            
+            if (collection) {
+                // Get all items in this collection (recursive)
+                const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
+                search.libraryID = library.libraryID;
+                search.addCondition('collectionID', 'is', String(collection.id));
+                search.addCondition('recursive', 'true', '');
+                search.addCondition('itemType', 'isNot', 'attachment');
+                search.addCondition('itemType', 'isNot', 'note');
+                search.addCondition('itemType', 'isNot', 'annotation');
+                const itemIds = await search.search();
+                collectionItemIds = new Set(itemIds);
+            }
+        }
+        
+        // Iterate over tags and count items
+        for (const tagData of allTags as Array<{ tag: string; type: number }>) {
+            const tagName = tagData.tag;
+            
+            // Get tag ID for item lookup
+            const tagId = await Zotero.Tags.getID(tagName);
+            if (!tagId) continue;
+            
+            // Get items with this tag
+            const itemsWithTag = await Zotero.Tags.getTagItems(library.libraryID, tagId);
+            
+            // Filter by collection if specified
+            let itemCount = itemsWithTag.length;
+            if (collectionItemIds) {
+                itemCount = itemsWithTag.filter((itemId: number) => collectionItemIds!.has(itemId)).length;
+            }
+            
+            // Skip if below minimum count
+            if (itemCount < request.min_item_count) {
+                continue;
+            }
+            
+            // Get color if any
+            const color = tagColors.get(tagName) || null;
+            
+            tags.push({
+                name: tagName,
+                item_count: itemCount,
+                color: color?.color || null,
+            });
+        }
+        
+        // Sort by item count (descending), then by name
+        tags.sort((a, b) => {
+            if (b.item_count !== a.item_count) {
+                return b.item_count - a.item_count;
+            }
+            return a.name.localeCompare(b.name);
+        });
+        
+        // Apply pagination
+        const totalCount = tags.length;
+        const offset = request.offset ?? 0;
+        const limit = request.limit ?? 50;
+        const paginatedTags = tags.slice(offset, offset + limit);
+        
+        logger(`handleListTagsRequest: Returning ${paginatedTags.length}/${totalCount} tags`, 1);
+        
+        return {
+            type: 'list_tags',
+            request_id: request.request_id,
+            tags: paginatedTags,
+            total_count: totalCount,
+            library_name: libraryName,
+        };
+    } catch (error) {
+        logger(`handleListTagsRequest: Error: ${error}`, 1);
+        return {
+            type: 'list_tags',
+            request_id: request.request_id,
+            tags: [],
+            total_count: 0,
+            error: String(error),
+            error_code: 'list_failed',
+        };
+    }
 }

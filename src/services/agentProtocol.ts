@@ -550,13 +550,12 @@ export interface WSListItemsRequest extends WSBaseEvent {
     library_id?: number | string | null;
     collection_key?: string | null;
     tag?: string | null;
-    item_category?: ZoteroItemCategory | null;
-    item_types?: string[] | null;
+    item_category: ZoteroItemCategory;
+    recursive: boolean;
     sort_by: string;
     sort_order: string;
     limit: number;
     offset: number;
-    fields?: string[] | null;
 }
 
 /** Result item from list_items */
@@ -568,7 +567,6 @@ export interface ListItemsResultItem {
     year?: number | null;
     date_added?: string | null;
     date_modified?: string | null;
-    extra_fields?: Record<string, any> | null;
 }
 
 /** Response to list_items request */
@@ -605,6 +603,74 @@ export interface WSGetMetadataResponse {
     error_code?: string | null;
 }
 
+// =============================================================================
+// Library Management: List Collections
+// =============================================================================
+
+/** Request to list collections in a library */
+export interface WSListCollectionsRequest extends WSBaseEvent {
+    event: 'list_collections_request';
+    request_id: string;
+    library_id?: number | string | null;
+    parent_collection_key?: string | null;
+    include_item_counts: boolean;
+    limit: number;
+    offset: number;
+}
+
+/** Collection information */
+export interface CollectionInfo {
+    collection_key: string;
+    name: string;
+    parent_key?: string | null;
+    parent_name?: string | null;
+    item_count: number;
+}
+
+/** Response to list_collections request */
+export interface WSListCollectionsResponse {
+    type: 'list_collections';
+    request_id: string;
+    collections: CollectionInfo[];
+    total_count: number;
+    library_name?: string | null;
+    error?: string | null;
+    error_code?: string | null;
+}
+
+// =============================================================================
+// Library Management: List Tags
+// =============================================================================
+
+/** Request to list tags in a library */
+export interface WSListTagsRequest extends WSBaseEvent {
+    event: 'list_tags_request';
+    request_id: string;
+    library_id?: number | string | null;
+    collection_key?: string | null;
+    min_item_count: number;
+    limit: number;
+    offset: number;
+}
+
+/** Tag information */
+export interface TagInfo {
+    name: string;
+    item_count: number;
+    color?: string | null;
+}
+
+/** Response to list_tags request */
+export interface WSListTagsResponse {
+    type: 'list_tags';
+    request_id: string;
+    tags: TagInfo[];
+    total_count: number;
+    library_name?: string | null;
+    error?: string | null;
+    error_code?: string | null;
+}
+
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
@@ -630,6 +696,8 @@ export type WSEvent =
     // Library management tools
     | WSZoteroSearchRequest
     | WSListItemsRequest
+    | WSListCollectionsRequest
+    | WSListTagsRequest
     | WSGetMetadataRequest;
 
 

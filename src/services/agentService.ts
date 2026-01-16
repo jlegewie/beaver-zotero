@@ -23,6 +23,8 @@ import {
     handleItemSearchByTopicRequest,
     handleZoteroSearchRequest,
     handleListItemsRequest,
+    handleListCollectionsRequest,
+    handleListTagsRequest,
     handleGetMetadataRequest,
 } from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
@@ -537,6 +539,38 @@ export class AgentService {
                                 request_id: event.request_id,
                                 items: [],
                                 not_found: event.item_ids,
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'list_collections_request':
+                    logger("AgentService: Received list_collections_request", event, 1);
+                    handleListCollectionsRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: list_collections_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'list_collections',
+                                request_id: event.request_id,
+                                collections: [],
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'list_tags_request':
+                    logger("AgentService: Received list_tags_request", event, 1);
+                    handleListTagsRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: list_tags_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'list_tags',
+                                request_id: event.request_id,
+                                tags: [],
                                 error: String(err),
                                 error_code: 'internal_error',
                             });
