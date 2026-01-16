@@ -1900,6 +1900,9 @@ export async function handleZoteroSearchRequest(
         // Batch fetch items
         const zoteroItems = await Zotero.Items.getAsync(paginatedIds);
         
+        // Ensure item data is loaded (Zotero uses lazy loading)
+        await Zotero.Items.loadDataTypes(zoteroItems, ['primaryData', 'creators', 'itemData']);
+        
         // Build results
         const items: ZoteroSearchResultItem[] = [];
         
@@ -2239,6 +2242,10 @@ export async function handleGetMetadataRequest(
                 if (attachmentIds.length > 0) {
                     // Batch fetch all attachments at once
                     const attachmentItems = await Zotero.Items.getAsync(attachmentIds);
+                    
+                    // Ensure attachment data is loaded
+                    await Zotero.Items.loadDataTypes(attachmentItems, ['primaryData', 'itemData']);
+                    
                     const attachments: any[] = [];
                     
                     for (const attachment of attachmentItems) {
@@ -2270,6 +2277,10 @@ export async function handleGetMetadataRequest(
                 if (noteIds.length > 0) {
                     // Batch fetch all notes at once
                     const noteItems = await Zotero.Items.getAsync(noteIds);
+                    
+                    // Ensure note data is loaded
+                    await Zotero.Items.loadDataTypes(noteItems, ['primaryData', 'itemData', 'note']);
+                    
                     const notes: any[] = [];
                     
                     for (const note of noteItems) {
