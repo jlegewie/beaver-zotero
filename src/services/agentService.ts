@@ -13,8 +13,8 @@ import { logger } from '../utils/logger';
 import { AgentRun } from '../../react/agents/types';
 import { AgentAction, toAgentAction } from '../../react/agents/agentActions';
 import { ApiService } from './apiService';
-import { 
-    handleZoteroDataRequest, 
+import {
+    handleZoteroDataRequest,
     handleExternalReferenceCheckRequest,
     handleZoteroAttachmentPagesRequest,
     handleZoteroAttachmentPageImagesRequest,
@@ -25,6 +25,7 @@ import {
     handleListItemsRequest,
     handleListCollectionsRequest,
     handleListTagsRequest,
+    handleListLibrariesRequest,
     handleGetMetadataRequest,
 } from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
@@ -571,6 +572,23 @@ export class AgentService {
                                 type: 'list_tags',
                                 request_id: event.request_id,
                                 tags: [],
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'list_libraries_request':
+                    logger("AgentService: Received list_libraries_request", event, 1);
+                    handleListLibrariesRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: list_libraries_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'list_libraries',
+                                request_id: event.request_id,
+                                libraries: [],
+                                total_count: 0,
                                 error: String(err),
                                 error_code: 'internal_error',
                             });

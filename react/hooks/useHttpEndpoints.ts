@@ -24,6 +24,7 @@ import {
     handleZoteroSearchRequest,
     handleListItemsRequest,
     handleGetMetadataRequest,
+    handleListLibrariesRequest,
 } from '../../src/services/agentDataProvider';
 import type {
     WSZoteroDataRequest,
@@ -37,6 +38,7 @@ import type {
     WSZoteroSearchRequest,
     WSListItemsRequest,
     WSGetMetadataRequest,
+    WSListLibrariesRequest,
 } from '../../src/services/agentProtocol';
 
 
@@ -71,6 +73,7 @@ const ENDPOINT_PATHS = [
     '/beaver/library/search',
     '/beaver/library/list',
     '/beaver/library/metadata',
+    '/beaver/library/libraries',
 ] as const;
 
 /**
@@ -331,12 +334,28 @@ async function handleLibraryMetadataHttpRequest(request: any) {
         include_tags: request.include_tags ?? true,
         include_collections: request.include_collections ?? false,
     };
-    
+
     const response = await handleGetMetadataRequest(wsRequest);
-    
+
     return {
         items: response.items,
         not_found: response.not_found,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
+async function handleListLibrariesHttpRequest(_request: any) {
+    const wsRequest: WSListLibrariesRequest = {
+        event: 'list_libraries_request',
+        request_id: generateRequestId(),
+    };
+
+    const response = await handleListLibrariesRequest(wsRequest);
+
+    return {
+        libraries: response.libraries,
+        total_count: response.total_count,
         error: response.error,
         error_code: response.error_code,
     };
@@ -381,9 +400,12 @@ function registerEndpoints(): boolean {
     Zotero.Server.Endpoints['/beaver/library/list'] = 
         createEndpoint(handleLibraryListHttpRequest);
     
-    Zotero.Server.Endpoints['/beaver/library/metadata'] = 
+    Zotero.Server.Endpoints['/beaver/library/metadata'] =
         createEndpoint(handleLibraryMetadataHttpRequest);
-    
+
+    Zotero.Server.Endpoints['/beaver/library/libraries'] =
+        createEndpoint(handleListLibrariesHttpRequest);
+
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
     return true;
 }

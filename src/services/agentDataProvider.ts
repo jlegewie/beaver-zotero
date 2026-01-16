@@ -60,6 +60,9 @@ import {
     WSListTagsRequest,
     WSListTagsResponse,
     TagInfo,
+    WSListLibrariesRequest,
+    WSListLibrariesResponse,
+    LibraryInfo,
 } from './agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions, ZoteroItemSearchFilters } from '../../react/utils/searchTools';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
@@ -2527,6 +2530,113 @@ export async function handleListTagsRequest(
             type: 'list_tags',
             request_id: request.request_id,
             tags: [],
+            total_count: 0,
+            error: String(error),
+            error_code: 'list_failed',
+        };
+    }
+}
+
+
+// =============================================================================
+// List Libraries Handler
+// =============================================================================
+
+/**
+ * Handle list_libraries request from backend.
+ * Lists all available libraries in the user's Zotero.
+ *
+ * Primarily for testing purposes.
+ */
+export async function handleListLibrariesRequest(
+    request: WSListLibrariesRequest
+): Promise<WSListLibrariesResponse> {
+    logger(`handleListLibrariesRequest: Listing all libraries`, 1);
+
+    try {
+        // Get all libraries
+        const allLibraries = Zotero.Libraries.getAll();
+
+        // Build library info
+        const libraries: LibraryInfo[] = [];
+
+        for (const library of allLibraries) {
+            // Get top-level item count (excluding deleted, attachments, notes, and annotations)
+            // This matches the logic from Zotero.Items.getAll with onlyTopLevel=true
+            let itemCount = 0;
+            try {
+                const sql = `
+                    SELECT COUNT(*) 
+                    FROM items A
+                    LEFT JOIN itemNotes B USING (itemID)
+                    LEFT JOIN itemAttachments C USING (itemID)
+                    LEFT JOIN itemAnnotations D USING (itemID)
+                    WHERE A.libraryID = ?
+                    AND B.parentItemID IS NULL 
+                    AND C.parentItemID IS NULL
+                    AND D.itemID IS NULL
+                    AND A.itemID NOT IN (SELECT itemID FROM deletedItems)
+                `;
+                itemCount = await Zotero.DB.valueQueryAsync(sql, [library.libraryID]) as number;
+            } catch (error) {
+                logger(`handleListLibrariesRequest: Error counting items for library ${library.libraryID}: ${error}`, 2);
+                // Leave itemCount as 0
+            }
+
+            // Get collection count (excluding deleted collections)
+            let collectionCount = 0;
+            try {
+                const sql = `
+                    SELECT COUNT(*) 
+                    FROM collections 
+                    WHERE libraryID = ?
+                    AND collectionID NOT IN (SELECT collectionID FROM deletedCollections)
+                `;
+                collectionCount = await Zotero.DB.valueQueryAsync(sql, [library.libraryID]) as number;
+            } catch (error) {
+                logger(`handleListLibrariesRequest: Error counting collections for library ${library.libraryID}: ${error}`, 2);
+                // Leave collectionCount as 0
+            }
+
+            // Get tag count
+            // Note: Tags don't have a deleted state, so we just count unique tags in use
+            let tagCount = 0;
+            try {
+                const tags = await Zotero.Tags.getAll(library.libraryID);
+                tagCount = tags.length;
+            } catch (error) {
+                logger(`handleListLibrariesRequest: Error counting tags for library ${library.libraryID}: ${error}`, 2);
+                // Leave tagCount as 0
+            }
+
+            libraries.push({
+                library_id: library.libraryID,
+                name: library.name,
+                is_group: library.isGroup,
+                read_only: !library.editable || !library.filesEditable,
+                item_count: itemCount,
+                collection_count: collectionCount,
+                tag_count: tagCount,
+            });
+        }
+
+        // Sort by library_id (user library first, then groups)
+        libraries.sort((a, b) => a.library_id - b.library_id);
+
+        logger(`handleListLibrariesRequest: Returning ${libraries.length} libraries`, 1);
+
+        return {
+            type: 'list_libraries',
+            request_id: request.request_id,
+            libraries,
+            total_count: libraries.length,
+        };
+    } catch (error) {
+        logger(`handleListLibrariesRequest: Error: ${error}`, 1);
+        return {
+            type: 'list_libraries',
+            request_id: request.request_id,
+            libraries: [],
             total_count: 0,
             error: String(error),
             error_code: 'list_failed',

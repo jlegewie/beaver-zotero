@@ -676,6 +676,37 @@ export interface WSListTagsResponse {
     error_code?: string | null;
 }
 
+// =============================================================================
+// Library Management: List Libraries
+// =============================================================================
+
+/** Request to list all available libraries */
+export interface WSListLibrariesRequest extends WSBaseEvent {
+    event: 'list_libraries_request';
+    request_id: string;
+}
+
+/** Library information */
+export interface LibraryInfo {
+    library_id: number;
+    name: string;
+    is_group: boolean;
+    read_only: boolean;
+    item_count: number;
+    collection_count: number;
+    tag_count: number;
+}
+
+/** Response to list_libraries request */
+export interface WSListLibrariesResponse {
+    type: 'list_libraries';
+    request_id: string;
+    libraries: LibraryInfo[];
+    total_count: number;
+    error?: string | null;
+    error_code?: string | null;
+}
+
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
@@ -703,7 +734,8 @@ export type WSEvent =
     | WSListItemsRequest
     | WSListCollectionsRequest
     | WSListTagsRequest
-    | WSGetMetadataRequest;
+    | WSGetMetadataRequest
+    | WSListLibrariesRequest;
 
 
 // =============================================================================
