@@ -2615,59 +2615,59 @@ export async function handleListLibrariesRequest(
     logger(`handleListLibrariesRequest: Listing all libraries`, 1);
 
     try {
-        // Get all libraries
         const allLibraries = Zotero.Libraries.getAll();
-
-        // Build library info
         const libraries: LibraryInfo[] = [];
 
         for (const library of allLibraries) {
-            // Get top-level item count (excluding deleted, attachments, notes, and annotations)
-            // This matches the logic from Zotero.Items.getAll with onlyTopLevel=true
+            // Get top-level regular item count (excluding attachments, notes, annotations, and deleted)
             let itemCount = 0;
             try {
                 const sql = `
-                    SELECT COUNT(*) 
+                    SELECT COUNT(*) as cnt
                     FROM items A
                     LEFT JOIN itemNotes B USING (itemID)
                     LEFT JOIN itemAttachments C USING (itemID)
                     LEFT JOIN itemAnnotations D USING (itemID)
                     WHERE A.libraryID = ?
-                    AND B.parentItemID IS NULL 
-                    AND C.parentItemID IS NULL
+                    AND B.itemID IS NULL
+                    AND C.itemID IS NULL
                     AND D.itemID IS NULL
                     AND A.itemID NOT IN (SELECT itemID FROM deletedItems)
                 `;
-                itemCount = await Zotero.DB.valueQueryAsync(sql, [library.libraryID]) as number;
+                await Zotero.DB.queryAsync(sql, [library.libraryID], {
+                    onRow: (row: any) => {
+                        itemCount = row.getResultByIndex(0) as number;
+                    }
+                });
             } catch (error) {
                 logger(`handleListLibrariesRequest: Error counting items for library ${library.libraryID}: ${error}`, 2);
-                // Leave itemCount as 0
             }
 
-            // Get collection count (excluding deleted collections)
+            // Get collection count (excluding deleted)
             let collectionCount = 0;
             try {
                 const sql = `
-                    SELECT COUNT(*) 
+                    SELECT COUNT(*) as cnt
                     FROM collections 
                     WHERE libraryID = ?
                     AND collectionID NOT IN (SELECT collectionID FROM deletedCollections)
                 `;
-                collectionCount = await Zotero.DB.valueQueryAsync(sql, [library.libraryID]) as number;
+                await Zotero.DB.queryAsync(sql, [library.libraryID], {
+                    onRow: (row: any) => {
+                        collectionCount = row.getResultByIndex(0) as number;
+                    }
+                });
             } catch (error) {
                 logger(`handleListLibrariesRequest: Error counting collections for library ${library.libraryID}: ${error}`, 2);
-                // Leave collectionCount as 0
             }
 
             // Get tag count
-            // Note: Tags don't have a deleted state, so we just count unique tags in use
             let tagCount = 0;
             try {
                 const tags = await Zotero.Tags.getAll(library.libraryID);
-                tagCount = tags.length;
+                tagCount = (tags as any[]).length;
             } catch (error) {
                 logger(`handleListLibrariesRequest: Error counting tags for library ${library.libraryID}: ${error}`, 2);
-                // Leave tagCount as 0
             }
 
             libraries.push({
@@ -2681,7 +2681,6 @@ export async function handleListLibrariesRequest(
             });
         }
 
-        // Sort by library_id (user library first, then groups)
         libraries.sort((a, b) => a.library_id - b.library_id);
 
         logger(`handleListLibrariesRequest: Returning ${libraries.length} libraries`, 1);
