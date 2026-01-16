@@ -2379,10 +2379,13 @@ export async function handleListCollectionsRequest(
                         AND IAn.itemID IS NULL
                         GROUP BY CI.collectionID
                     `;
-                    const itemRows = await Zotero.DB.queryAsync(itemSql, collectionIds);
-                    for (const row of itemRows || []) {
-                        itemCountById.set(row.collectionID, row.itemCount);
-                    }
+                    await Zotero.DB.queryAsync(itemSql, collectionIds, {
+                        onRow: (row: any) => {
+                            const collectionID = row.getResultByIndex(0);
+                            const count = row.getResultByIndex(1);
+                            itemCountById.set(collectionID, count);
+                        }
+                    });
                     
                     // Count standalone attachments (no parent)
                     const attachmentSql = `
@@ -2395,10 +2398,13 @@ export async function handleListCollectionsRequest(
                         AND IA.parentItemID IS NULL
                         GROUP BY CI.collectionID
                     `;
-                    const attachmentRows = await Zotero.DB.queryAsync(attachmentSql, collectionIds);
-                    for (const row of attachmentRows || []) {
-                        attachmentCountById.set(row.collectionID, row.attachmentCount);
-                    }
+                    await Zotero.DB.queryAsync(attachmentSql, collectionIds, {
+                        onRow: (row: any) => {
+                            const collectionID = row.getResultByIndex(0);
+                            const count = row.getResultByIndex(1);
+                            attachmentCountById.set(collectionID, count);
+                        }
+                    });
                     
                     // Count standalone notes (no parent)
                     const noteSql = `
@@ -2411,10 +2417,13 @@ export async function handleListCollectionsRequest(
                         AND INo.parentItemID IS NULL
                         GROUP BY CI.collectionID
                     `;
-                    const noteRows = await Zotero.DB.queryAsync(noteSql, collectionIds);
-                    for (const row of noteRows || []) {
-                        noteCountById.set(row.collectionID, row.noteCount);
-                    }
+                    await Zotero.DB.queryAsync(noteSql, collectionIds, {
+                        onRow: (row: any) => {
+                            const collectionID = row.getResultByIndex(0);
+                            const count = row.getResultByIndex(1);
+                            noteCountById.set(collectionID, count);
+                        }
+                    });
                 }
             } catch (error) {
                 logger(`handleListCollectionsRequest: Error fetching item counts: ${error}`, 2);
