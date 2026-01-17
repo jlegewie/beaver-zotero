@@ -1294,28 +1294,12 @@ export async function handleItemSearchByMetadataRequest(
     const collectionKeys: string[] = [];
     if (request.collections_filter && request.collections_filter.length > 0) {
         for (const collectionFilter of request.collections_filter) {
-            if (typeof collectionFilter === 'string') {
-                // Could be a key or a name
-                // Check if it looks like a Zotero key (8 alphanumeric characters)
-                if (/^[A-Z0-9]{8}$/i.test(collectionFilter)) {
-                    collectionKeys.push(collectionFilter);
-                } else {
-                    // Treat as name, search for matching collections across libraries
-                    for (const libraryId of Zotero.Libraries.getAll().map(lib => lib.libraryID)) {
-                        const collections = Zotero.Collections.getByLibrary(libraryId);
-                        for (const collection of collections) {
-                            if (collection.name.toLowerCase().includes(collectionFilter.toLowerCase())) {
-                                collectionKeys.push(collection.key);
-                            }
-                        }
-                    }
-                }
-            } else if (typeof collectionFilter === 'number') {
-                // It's a collection ID - convert to key
-                const collection = Zotero.Collections.get(collectionFilter);
-                if (collection) {
-                    collectionKeys.push(collection.key);
-                }
+            const collection = typeof collectionFilter === 'number'
+                ? Zotero.Collections.get(collectionFilter)
+                : getCollectionByIdOrName(collectionFilter);
+            
+            if (collection) {
+                collectionKeys.push(collection.key);
             }
         }
     }
@@ -1509,28 +1493,12 @@ export async function handleItemSearchByTopicRequest(
     const collectionKeys: string[] = [];
     if (request.collections_filter && request.collections_filter.length > 0) {
         for (const collectionFilter of request.collections_filter) {
-            if (typeof collectionFilter === 'string') {
-                // Could be a key or a name
-                // Check if it looks like a Zotero key (8 alphanumeric characters)
-                if (/^[A-Z0-9]{8}$/i.test(collectionFilter)) {
-                    collectionKeys.push(collectionFilter);
-                } else {
-                    // Treat as name, search for matching collections across libraries
-                    for (const libraryId of libraryIds) {
-                        const collections = Zotero.Collections.getByLibrary(libraryId);
-                        for (const collection of collections) {
-                            if (collection.name.toLowerCase().includes(collectionFilter.toLowerCase())) {
-                                collectionKeys.push(collection.key);
-                            }
-                        }
-                    }
-                }
-            } else if (typeof collectionFilter === 'number') {
-                // It's a collection ID - convert to key
-                const collection = Zotero.Collections.get(collectionFilter);
-                if (collection) {
-                    collectionKeys.push(collection.key);
-                }
+            const collection = typeof collectionFilter === 'number'
+                ? Zotero.Collections.get(collectionFilter)
+                : getCollectionByIdOrName(collectionFilter);
+            
+            if (collection) {
+                collectionKeys.push(collection.key);
             }
         }
     }
@@ -1770,7 +1738,7 @@ function extractYear(dateStr: string | undefined): number | null {
  * - String: First tries to parse as ID, then looks up by name
  * - null/undefined: Returns user's default library
  */
-function getLibraryByIdOrName(libraryIdOrName: number | string | null | undefined): _ZoteroTypes.Library.LibraryLike {
+export function getLibraryByIdOrName(libraryIdOrName: number | string | null | undefined): _ZoteroTypes.Library.LibraryLike {
     if (libraryIdOrName == null) {
         // Default to user's library
         return Zotero.Libraries.userLibrary;
@@ -1798,6 +1766,70 @@ function getLibraryByIdOrName(libraryIdOrName: number | string | null | undefine
     
     // Fall back to user library if not found
     return Zotero.Libraries.userLibrary;
+}
+
+/**
+ * Get collection by ID, key, or name.
+ * 
+ * Supports:
+ * - Number: Looks up by collection ID
+ * - String: Tries to parse as ID, then checks if it's a key (8 alphanumeric chars), then searches by name
+ * - null/undefined: Returns null
+ * 
+ * @param collectionIdOrName - Collection ID, key, or name
+ * @param libraryId - Optional library ID to narrow the search (recommended for better performance)
+ * @returns Collection object or null if not found
+ */
+export function getCollectionByIdOrName(
+    collectionIdOrName: number | string | null | undefined,
+    libraryId?: number
+): Zotero.Collection | null {
+    if (collectionIdOrName == null) {
+        return null;
+    }
+    
+    // If it's a number, look up by ID
+    if (typeof collectionIdOrName === 'number') {
+        return Zotero.Collections.get(collectionIdOrName) || null;
+    }
+    
+    // It's a string - try different approaches
+    
+    // First, try to parse as collection ID
+    const parsedId = parseInt(collectionIdOrName, 10);
+    if (!isNaN(parsedId)) {
+        const collection = Zotero.Collections.get(parsedId);
+        if (collection) return collection;
+    }
+    
+    // Check if it looks like a Zotero key (8 alphanumeric characters)
+    if (/^[A-Z0-9]{8}$/i.test(collectionIdOrName)) {
+        // If we have a library ID, use it
+        if (libraryId !== undefined) {
+            const collection = Zotero.Collections.getByLibraryAndKey(libraryId, collectionIdOrName);
+            if (collection) return collection;
+        } else {
+            // Search across all libraries
+            const allLibraries = Zotero.Libraries.getAll();
+            for (const lib of allLibraries) {
+                const collection = Zotero.Collections.getByLibraryAndKey(lib.libraryID, collectionIdOrName);
+                if (collection) return collection;
+            }
+        }
+    }
+    
+    // Look up by name
+    const librariesToSearch = libraryId !== undefined 
+        ? [libraryId] 
+        : Zotero.Libraries.getAll().map(lib => lib.libraryID);
+    
+    for (const libId of librariesToSearch) {
+        const collections = Zotero.Collections.getByLibrary(libId, true);
+        const collectionByName = collections.find((c: Zotero.Collection) => c.name === collectionIdOrName);
+        if (collectionByName) return collectionByName;
+    }
+    
+    return null;
 }
 
 /**
@@ -2006,17 +2038,7 @@ export async function handleListItemsRequest(
         
         // Add collection filter if specified (supports both key and name)
         if (request.collection_key) {
-            let collection: any = null;
-            
-            // First try to find by key
-            collection = Zotero.Collections.getByLibraryAndKey(library.libraryID, request.collection_key);
-            
-            // If not found by key, try to find by name
-            if (!collection) {
-                // getByLibrary with true = recursive (all collections in library)
-                const allCollections = Zotero.Collections.getByLibrary(library.libraryID, true);
-                collection = allCollections.find((c: any) => c.name === request.collection_key);
-            }
+            const collection = getCollectionByIdOrName(request.collection_key, library.libraryID);
             
             if (collection) {
                 collectionName = collection.name;
@@ -2346,14 +2368,7 @@ export async function handleListCollectionsRequest(
         let filteredCollections: any[];
         
         if (request.parent_collection_key) {
-            let parentCollection: any = Zotero.Collections.getByLibraryAndKey(
-                library.libraryID, 
-                request.parent_collection_key
-            );
-            
-            if (!parentCollection) {
-                parentCollection = allCollections.find((c: any) => c.name === request.parent_collection_key);
-            }
+            const parentCollection = getCollectionByIdOrName(request.parent_collection_key, library.libraryID);
             
             if (!parentCollection) {
                 return {
@@ -2531,12 +2546,7 @@ export async function handleListTagsRequest(
         
         if (request.collection_key) {
             // Find collection by key or name
-            let collection: any = Zotero.Collections.getByLibraryAndKey(library.libraryID, request.collection_key);
-            
-            if (!collection) {
-                const allCollections = Zotero.Collections.getByLibrary(library.libraryID, true);
-                collection = allCollections.find((c: any) => c.name === request.collection_key);
-            }
+            const collection = getCollectionByIdOrName(request.collection_key, library.libraryID);
             
             if (!collection) {
                 return {
