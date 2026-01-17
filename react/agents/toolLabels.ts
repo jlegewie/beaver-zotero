@@ -269,7 +269,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             if (parts.length > 0) {
                 return `${baseLabel}: ${truncate(parts.join(' '), 50)}`;
             }
-            return baseLabel;
+            return `${baseLabel}: "My Library"`;
         }
 
         // === Reading tools ===
@@ -380,11 +380,11 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                 ? libraryParam 
                 : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
             
-            const parentKey = args.parent_collection_key as string | undefined;
+            const parentKey = args.parent_collection as string | undefined;
             if (parentKey) {
                 const collection = getCollectionByIdOrName(parentKey, libraryId);
                 if (collection) {
-                    return `${baseLabel}: in "${collection.name}"`;
+                    return `${baseLabel} in "${collection.name}"`;
                 }
                 return `${baseLabel}: subcollections`;
             }
@@ -396,7 +396,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                     return `${baseLabel}: "${library.name}"`;
                 }
             }
-            return baseLabel;
+            return `${baseLabel}: "My Library"`;
         }
 
         case 'list_tags': {
@@ -409,9 +409,9 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             if (collectionKey) {
                 const collection = getCollectionByIdOrName(collectionKey, libraryId);
                 if (collection) {
-                    return `${baseLabel}: in "${collection.name}"`;
+                    return `${baseLabel} in "${collection.name}"`;
                 }
-                return `${baseLabel}: in collection`;
+                return `${baseLabel} in collection`;
             }
             
             // Show library name when listing all tags in a library
@@ -421,7 +421,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                     return `${baseLabel}: "${library.name}"`;
                 }
             }
-            return baseLabel;
+            return `${baseLabel}: "My Library"`;
         }
 
         // === Tools without dynamic labels ===
