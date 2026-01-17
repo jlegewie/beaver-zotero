@@ -238,7 +238,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             const parts: string[] = [];
             
             // Handle library parameter
-            const libraryParam = args.library_id as string | number | undefined;
+            const libraryParam = args.library as string | number | undefined;
             const libraryId = typeof libraryParam === 'number' 
                 ? libraryParam 
                 : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
@@ -269,7 +269,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             if (parts.length > 0) {
                 return `${baseLabel}: ${truncate(parts.join(' '), 50)}`;
             }
-            return `${baseLabel}: "My Library"`;
+            return `${baseLabel}`;
         }
 
         // === Reading tools ===
@@ -375,7 +375,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
         }
 
         case 'list_collections': {
-            const libraryParam = args.library_id as string | number | undefined;
+            const libraryParam = args.library as string | number | undefined;
             const libraryId = typeof libraryParam === 'number' 
                 ? libraryParam 
                 : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
@@ -396,11 +396,11 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                     return `${baseLabel}: "${library.name}"`;
                 }
             }
-            return `${baseLabel}: "My Library"`;
+            return `${baseLabel}`;
         }
 
         case 'list_tags': {
-            const libraryParam = args.library_id as string | number | undefined;
+            const libraryParam = args.library as string | number | undefined;
             const libraryId = typeof libraryParam === 'number' 
                 ? libraryParam 
                 : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
@@ -421,7 +421,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                     return `${baseLabel}: "${library.name}"`;
                 }
             }
-            return `${baseLabel}: "My Library"`;
+            return `${baseLabel}`;
         }
 
         // === Tools without dynamic labels ===
