@@ -27,6 +27,8 @@ import {
     handleListTagsRequest,
     handleListLibrariesRequest,
     handleGetMetadataRequest,
+    handleAgentActionValidateRequest,
+    handleAgentActionExecuteRequest,
 } from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
 import {
@@ -595,6 +597,56 @@ export class AgentService {
                         });
                     break;
 
+                // Deferred tool events
+                case 'agent_action_validate':
+                    logger("AgentService: Received agent_action_validate", event, 1);
+                    handleAgentActionValidateRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: agent_action_validate failed: ${err}`, 1);
+                            this.send({
+                                type: 'agent_action_validate_response',
+                                request_id: event.request_id,
+                                valid: false,
+                                error: String(err),
+                                error_code: 'internal_error',
+                                preference: 'always_ask',
+                            });
+                        });
+                    break;
+
+                case 'agent_action_execute':
+                    logger("AgentService: Received agent_action_execute", event, 1);
+                    handleAgentActionExecuteRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: agent_action_execute failed: ${err}`, 1);
+                            this.send({
+                                type: 'agent_action_execute_response',
+                                request_id: event.request_id,
+                                success: false,
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'deferred_approval_request':
+                    logger("AgentService: Received deferred_approval_request", event, 1);
+                    // This event is handled by the UI via callback
+                    if (this.callbacks?.onDeferredApprovalRequest) {
+                        this.callbacks.onDeferredApprovalRequest(event);
+                    } else {
+                        // No handler - auto-reject to avoid blocking the agent
+                        logger("AgentService: No deferred approval handler, auto-rejecting", 1);
+                        this.send({
+                            type: 'deferred_approval_response',
+                            action_id: event.action_id,
+                            approved: false,
+                        });
+                    }
+                    break;
+
                 default:
                     logger(`AgentService: Unknown event type: ${(event as any).event}`, 1);
             }
@@ -658,6 +710,21 @@ export class AgentService {
 
         // Close the connection
         this.close(1000, 'User cancelled');
+    }
+
+    /**
+     * Send a response to a deferred approval request.
+     * Called by the UI when the user approves or rejects an action.
+     * @param actionId The action ID from the approval request
+     * @param approved Whether the user approved the action
+     */
+    sendApprovalResponse(actionId: string, approved: boolean): void {
+        logger(`AgentService: Sending approval response for ${actionId}: ${approved}`, 1);
+        this.send({
+            type: 'deferred_approval_response',
+            action_id: actionId,
+            approved,
+        });
     }
 
 }

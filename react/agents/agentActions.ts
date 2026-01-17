@@ -13,6 +13,7 @@ import {
     normalizeNotePosition,
 } from '../types/agentActions/annotations';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
+import type { WSDeferredApprovalRequest, AgentActionType } from '../../src/services/agentProtocol';
 
 // =============================================================================
 // Agent Action Types
@@ -79,6 +80,13 @@ export const isZoteroNoteAgentAction = (action: AgentAction): boolean => {
  */
 export const isCreateItemAgentAction = (action: AgentAction): action is CreateItemAgentAction => {
     return action.action_type === 'create_item';
+};
+
+/**
+ * Type guard for edit metadata actions
+ */
+export const isEditMetadataAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'edit_metadata';
 };
 
 /**
@@ -211,6 +219,15 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             collection_keys: proposedData.collection_keys ?? proposedData.collectionKeys,
             suggested_tags: proposedData.suggested_tags ?? proposedData.suggestedTags,
         } as CreateItemProposedData;
+    } else if (actionType === 'edit_metadata') {
+        // Normalize edit_metadata proposed data
+        proposedData = {
+            library_id: typeof proposedData.library_id === 'number' 
+                ? proposedData.library_id 
+                : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
+            zotero_key: proposedData.zotero_key ?? proposedData.zoteroKey ?? '',
+            edits: proposedData.edits ?? [],
+        };
     }
     
     // Normalize result_data if present
@@ -571,6 +588,71 @@ export const clearAgentActionsAtom = atom(
     null,
     (_, set) => {
         set(threadAgentActionsAtom, []);
+    }
+);
+
+
+// =============================================================================
+// Deferred Tool Approval State
+// =============================================================================
+
+/**
+ * Pending approval request from the backend.
+ * When set, the UI should show an approval dialog for this action.
+ * Only one approval can be pending at a time since the agent run is blocked.
+ */
+export interface PendingApproval {
+    actionId: string;
+    /** Tool call ID for UI matching (always provided by backend) */
+    toolcallId: string;
+    actionType: AgentActionType;
+    actionData: Record<string, any>;
+    currentValue?: any;
+}
+
+/**
+ * Atom storing the currently pending approval request.
+ * null when no approval is pending.
+ */
+export const pendingApprovalAtom = atom<PendingApproval | null>(null);
+
+/**
+ * Atom to set a pending approval from a WS event.
+ */
+export const setPendingApprovalAtom = atom(
+    null,
+    (_, set, event: WSDeferredApprovalRequest) => {
+        set(pendingApprovalAtom, {
+            actionId: event.action_id,
+            toolcallId: event.toolcall_id,
+            actionType: event.action_type as AgentActionType,
+            actionData: event.action_data,
+            currentValue: event.current_value,
+        });
+    }
+);
+
+/**
+ * Atom to clear the pending approval (after user responds).
+ */
+export const clearPendingApprovalAtom = atom(
+    null,
+    (_, set) => {
+        set(pendingApprovalAtom, null);
+    }
+);
+
+/**
+ * Get pending approval for a specific toolcall_id.
+ * Returns the pending approval if it matches the toolcall_id.
+ */
+export const getPendingApprovalForToolcallAtom = atom(
+    (get) => (toolcallId: string): PendingApproval | null => {
+        const pending = get(pendingApprovalAtom);
+        if (pending && pending.toolcallId === toolcallId) {
+            return pending;
+        }
+        return null;
     }
 );
 

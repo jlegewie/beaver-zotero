@@ -22,6 +22,7 @@ import {
     WSAgentActionsEvent,
     WSToolCallProgressEvent,
     WSMissingZoteroDataEvent,
+    WSDeferredApprovalRequest,
 } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
@@ -66,6 +67,7 @@ import {
     isAnnotationAgentAction,
     hasAppliedZoteroItem,
     AgentAction,
+    setPendingApprovalAtom,
 } from '../agents/agentActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
@@ -757,6 +759,16 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             );
         },
 
+        onDeferredApprovalRequest: (event: WSDeferredApprovalRequest) => {
+            logger('WS onDeferredApprovalRequest:', {
+                actionId: event.action_id,
+                toolcallId: event.toolcall_id,
+                actionType: event.action_type,
+            }, 1);
+            // Set the pending approval in the atom - UI will render ApprovalView
+            set(setPendingApprovalAtom, event);
+        },
+
         onOpen: () => {
             logger('WS onOpen: Connection established, waiting for ready...', 1);
             set(isWSConnectedAtom, true);
@@ -1410,3 +1422,15 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
     set(clearWarningsAtom);
 });
+
+/**
+ * Send approval response for a deferred action.
+ * Called by the UI when user approves/rejects an action.
+ */
+export const sendApprovalResponseAtom = atom(
+    null,
+    (_get, _set, { actionId, approved }: { actionId: string; approved: boolean }) => {
+        logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}`, 1);
+        agentService.sendApprovalResponse(actionId, approved);
+    }
+);

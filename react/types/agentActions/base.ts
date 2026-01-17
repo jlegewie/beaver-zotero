@@ -16,7 +16,7 @@ export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'erro
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata';
 
 /**
  * Union type for all proposed data types

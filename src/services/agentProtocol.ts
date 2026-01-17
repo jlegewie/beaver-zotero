@@ -721,6 +721,74 @@ export interface WSListLibrariesResponse {
     error_code?: string | null;
 }
 
+// =============================================================================
+// Deferred Tool Events (Agent Action Approval Workflow)
+// =============================================================================
+
+/** User preference for how deferred tools should behave */
+export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
+
+/** Agent action type for deferred tools */
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata';
+
+/** Request from backend to validate an agent action */
+export interface WSAgentActionValidateRequest extends WSBaseEvent {
+    event: 'agent_action_validate';
+    request_id: string;
+    action_type: AgentActionType;
+    action_data: Record<string, any>;
+}
+
+/** Response to agent action validation request */
+export interface WSAgentActionValidateResponse {
+    type: 'agent_action_validate_response';
+    request_id: string;
+    valid: boolean;
+    error?: string | null;
+    error_code?: string | null;
+    /** Current value for before/after tracking. Shape depends on action_type. */
+    current_value?: any;
+    preference: DeferredToolPreference;
+}
+
+/** Request from backend to execute an agent action */
+export interface WSAgentActionExecuteRequest extends WSBaseEvent {
+    event: 'agent_action_execute';
+    request_id: string;
+    action_type: AgentActionType;
+    action_data: Record<string, any>;
+}
+
+/** Response to agent action execution request */
+export interface WSAgentActionExecuteResponse {
+    type: 'agent_action_execute_response';
+    request_id: string;
+    success: boolean;
+    error?: string | null;
+    error_code?: string | null;
+    result_data?: Record<string, any>;
+}
+
+/** Request from backend for user approval of a deferred action */
+export interface WSDeferredApprovalRequest extends WSBaseEvent {
+    event: 'deferred_approval_request';
+    /** The AgentAction ID awaiting approval */
+    action_id: string;
+    /** The tool call ID this action belongs to (for UI matching) */
+    toolcall_id: string;
+    action_type: AgentActionType;
+    action_data: Record<string, any>;
+    /** Current value before the change. Shape depends on action_type. */
+    current_value?: any;
+}
+
+/** Response to deferred approval request (user's decision) */
+export interface WSDeferredApprovalResponse {
+    type: 'deferred_approval_response';
+    action_id: string;
+    approved: boolean;
+}
+
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
@@ -749,7 +817,11 @@ export type WSEvent =
     | WSListCollectionsRequest
     | WSListTagsRequest
     | WSGetMetadataRequest
-    | WSListLibrariesRequest;
+    | WSListLibrariesRequest
+    // Deferred tool events
+    | WSAgentActionValidateRequest
+    | WSAgentActionExecuteRequest
+    | WSDeferredApprovalRequest;
 
 
 // =============================================================================
@@ -907,6 +979,13 @@ export interface WSCallbacks {
      * @param event The missing zotero data event with item references
      */
     onMissingZoteroData?: (event: WSMissingZoteroDataEvent) => void;
+
+    /**
+     * Called when the backend requests user approval for a deferred action.
+     * The frontend should show an approval UI and call the provided callback.
+     * @param event The deferred approval request with action details
+     */
+    onDeferredApprovalRequest?: (event: WSDeferredApprovalRequest) => void;
 
     /**
      * Called when the WebSocket connection is established

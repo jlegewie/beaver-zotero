@@ -63,6 +63,13 @@ import {
     WSListLibrariesRequest,
     WSListLibrariesResponse,
     LibraryInfo,
+    // Deferred tool events
+    WSAgentActionValidateRequest,
+    WSAgentActionValidateResponse,
+    WSAgentActionExecuteRequest,
+    WSAgentActionExecuteResponse,
+    DeferredToolPreference,
+    AgentActionType,
 } from './agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions, ZoteroItemSearchFilters } from '../../react/utils/searchTools';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
@@ -2950,4 +2957,225 @@ export async function handleListLibrariesRequest(
             error_code: 'list_failed',
         };
     }
+}
+
+
+// =============================================================================
+// Agent Action Validate Handler (Deferred Tools)
+// =============================================================================
+
+/**
+ * Handle agent_action_validate request from backend.
+ * Validates that an action can be performed and returns the current value
+ * for before/after tracking, plus the user's preference.
+ */
+export async function handleAgentActionValidateRequest(
+    request: WSAgentActionValidateRequest
+): Promise<WSAgentActionValidateResponse> {
+    logger(`handleAgentActionValidateRequest: Validating ${request.action_type}`, 1);
+
+    try {
+        if (request.action_type === 'edit_metadata') {
+            return await validateEditMetadataAction(request);
+        }
+
+        // Unsupported action type
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Unsupported action type: ${request.action_type}`,
+            error_code: 'unsupported_action_type',
+            preference: 'always_ask',
+        };
+    } catch (error) {
+        logger(`handleAgentActionValidateRequest: Error: ${error}`, 1);
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: String(error),
+            error_code: 'validation_failed',
+            preference: 'always_ask',
+        };
+    }
+}
+
+/**
+ * Validate an edit_metadata action.
+ * Checks if the item exists and returns current field values.
+ */
+async function validateEditMetadataAction(
+    request: WSAgentActionValidateRequest
+): Promise<WSAgentActionValidateResponse> {
+    const { library_id, zotero_key, edits } = request.action_data as {
+        library_id: number;
+        zotero_key: string;
+        edits: Array<{ field: string; new_value: string }>;
+    };
+
+    // Validate item exists
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Item not found: ${library_id}-${zotero_key}`,
+            error_code: 'item_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    // Check if library is editable
+    const library = Zotero.Libraries.get(library_id);
+    if (!library || !library.editable) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library ${library_id} is read only and cannot be edited`,
+            error_code: 'library_not_editable',
+            preference: 'always_ask',
+        };
+    }
+
+    // Get current values for all edited fields
+    const currentValue: Record<string, string | null> = {};
+    for (const edit of edits) {
+        try {
+            const value = item.getField(edit.field);
+            // getField returns empty string for missing fields, or the field value
+            currentValue[edit.field] = value ? String(value) : null;
+        } catch {
+            currentValue[edit.field] = null;
+        }
+    }
+
+    // TODO: Get user preference from settings
+    // For now, always use 'always_ask' as per initial implementation plan
+    const preference: DeferredToolPreference = 'always_ask';
+
+    return {
+        type: 'agent_action_validate_response',
+        request_id: request.request_id,
+        valid: true,
+        current_value: currentValue,
+        preference,
+    };
+}
+
+
+// =============================================================================
+// Agent Action Execute Handler (Deferred Tools)
+// =============================================================================
+
+/**
+ * Handle agent_action_execute request from backend.
+ * Executes the action and returns the result.
+ */
+export async function handleAgentActionExecuteRequest(
+    request: WSAgentActionExecuteRequest
+): Promise<WSAgentActionExecuteResponse> {
+    logger(`handleAgentActionExecuteRequest: Executing ${request.action_type}`, 1);
+
+    try {
+        if (request.action_type === 'edit_metadata') {
+            return await executeEditMetadataAction(request);
+        }
+
+        // Unsupported action type
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: `Unsupported action type: ${request.action_type}`,
+            error_code: 'unsupported_action_type',
+        };
+    } catch (error) {
+        logger(`handleAgentActionExecuteRequest: Error: ${error}`, 1);
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: String(error),
+            error_code: 'execution_failed',
+        };
+    }
+}
+
+/**
+ * Execute an edit_metadata action.
+ * Applies the field edits to the Zotero item.
+ */
+async function executeEditMetadataAction(
+    request: WSAgentActionExecuteRequest
+): Promise<WSAgentActionExecuteResponse> {
+    const { library_id, zotero_key, edits } = request.action_data as {
+        library_id: number;
+        zotero_key: string;
+        edits: Array<{ field: string; new_value: string }>;
+    };
+
+    // Get the item
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: `Item not found: ${library_id}-${zotero_key}`,
+            error_code: 'item_not_found',
+        };
+    }
+
+    const appliedEdits: Array<{ field: string; old_value: string | null; new_value: string }> = [];
+    const failedEdits: Array<{ field: string; error: string }> = [];
+
+    // Apply each edit
+    for (const edit of edits) {
+        try {
+            const oldValue = item.getField(edit.field);
+            item.setField(edit.field, edit.new_value);
+            appliedEdits.push({
+                field: edit.field,
+                old_value: oldValue ? String(oldValue) : null,
+                new_value: edit.new_value,
+            });
+        } catch (error) {
+            failedEdits.push({
+                field: edit.field,
+                error: String(error),
+            });
+        }
+    }
+
+    // Save the item if any edits were applied
+    if (appliedEdits.length > 0) {
+        try {
+            await item.saveTx();
+            logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits to ${library_id}-${zotero_key}`, 1);
+        } catch (error) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: `Failed to save item: ${error}`,
+                error_code: 'save_failed',
+            };
+        }
+    }
+
+    const allSucceeded = failedEdits.length === 0;
+
+    return {
+        type: 'agent_action_execute_response',
+        request_id: request.request_id,
+        success: allSucceeded,
+        error: allSucceeded ? undefined : `Some edits failed: ${failedEdits.map(e => e.field).join(', ')}`,
+        result_data: {
+            applied_edits: appliedEdits,
+            failed_edits: failedEdits,
+        },
+    };
 }

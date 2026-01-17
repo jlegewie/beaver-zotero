@@ -19,4 +19,6 @@ export { TokenUsageDisplay } from './TokenUsageDisplay';
 export { AgentActionsDisplay } from './AgentActionsDisplay';
 export { default as CreateItemAgentActionDisplay } from './CreateItemAgentActionDisplay';
 export { default as AgentActionItemButtons } from './AgentActionItemButtons';
+export { ApprovalView } from './ApprovalView';
+export { EditMetadataPreview } from './EditMetadataPreview';
 

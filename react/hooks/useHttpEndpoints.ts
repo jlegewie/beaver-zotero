@@ -27,6 +27,9 @@ import {
     handleListLibrariesRequest,
     handleListCollectionsRequest,
     handleListTagsRequest,
+    // Deferred tools
+    handleAgentActionValidateRequest,
+    handleAgentActionExecuteRequest,
 } from '../../src/services/agentDataProvider';
 import type {
     WSZoteroDataRequest,
@@ -43,6 +46,9 @@ import type {
     WSListLibrariesRequest,
     WSListCollectionsRequest,
     WSListTagsRequest,
+    // Deferred tools
+    WSAgentActionValidateRequest,
+    WSAgentActionExecuteRequest,
 } from '../../src/services/agentProtocol';
 
 
@@ -80,6 +86,9 @@ const ENDPOINT_PATHS = [
     '/beaver/library/libraries',
     '/beaver/library/collections',
     '/beaver/library/tags',
+    // Deferred tools
+    '/beaver/agent-action/validate',
+    '/beaver/agent-action/execute',
 ] as const;
 
 /**
@@ -413,6 +422,43 @@ async function handleListTagsHttpRequest(request: any) {
     };
 }
 
+async function handleAgentActionValidateHttpRequest(request: any) {
+    const wsRequest: WSAgentActionValidateRequest = {
+        event: 'agent_action_validate',
+        request_id: generateRequestId(),
+        action_type: request.action_type,
+        action_data: request.action_data,
+    };
+
+    const response = await handleAgentActionValidateRequest(wsRequest);
+
+    return {
+        valid: response.valid,
+        error: response.error,
+        error_code: response.error_code,
+        current_value: response.current_value,
+        preference: response.preference,
+    };
+}
+
+async function handleAgentActionExecuteHttpRequest(request: any) {
+    const wsRequest: WSAgentActionExecuteRequest = {
+        event: 'agent_action_execute',
+        request_id: generateRequestId(),
+        action_type: request.action_type,
+        action_data: request.action_data,
+    };
+
+    const response = await handleAgentActionExecuteRequest(wsRequest);
+
+    return {
+        success: response.success,
+        error: response.error,
+        error_code: response.error_code,
+        result_data: response.result_data,
+    };
+}
+
 
 // =============================================================================
 // Registration Functions
@@ -463,6 +509,13 @@ function registerEndpoints(): boolean {
 
     Zotero.Server.Endpoints['/beaver/library/tags'] =
         createEndpoint(handleListTagsHttpRequest);
+
+    // Deferred tool endpoints
+    Zotero.Server.Endpoints['/beaver/agent-action/validate'] =
+        createEndpoint(handleAgentActionValidateHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/agent-action/execute'] =
+        createEndpoint(handleAgentActionExecuteHttpRequest);
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
     return true;

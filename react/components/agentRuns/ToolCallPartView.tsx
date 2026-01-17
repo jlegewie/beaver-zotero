@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart } from '../../agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
+import { sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { getToolCallLabel } from '../../agents/toolLabels';
 import { ToolResultView } from './ToolResultView';
+import { ApprovalView } from './ApprovalView';
+import { getPendingApprovalForToolcallAtom } from '../../agents/agentActions';
 import {
     Spinner,
     AlertIcon,
@@ -19,6 +22,7 @@ import {
     LibraryIcon,
     BookmarkIcon,
     DatabaseIcon,
+    UserIcon,
 } from '../icons/icons';
 import { searchToolVisibilityAtom, toggleSearchToolVisibilityAtom } from '../../atoms/messageUIState';
 
@@ -82,12 +86,19 @@ interface ToolCallPartViewProps {
  * Renders a tool call with its status and result.
  * Uses toolResultsMapAtom to look up the result for this tool call.
  * Visibility state is managed globally via searchToolVisibilityAtom.
+ * Shows approval UI when there's a pending approval for this tool call.
  */
 export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId, runStatus }) => {
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const result = resultsMap.get(part.tool_call_id);
     const status = getToolCallStatus(part.tool_call_id, resultsMap);
     const baseLabel = getToolCallLabel(part, status);
+    
+    // Check for pending approval for this tool call
+    const getPendingApproval = useAtomValue(getPendingApprovalForToolcallAtom);
+    const pendingApproval = getPendingApproval(part.tool_call_id);
+    const isAwaitingApproval = pendingApproval !== null;
+    const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
 
     const resultCount =
         result && result.part_kind === 'tool-return'
@@ -126,7 +137,14 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         }
     };
 
+    const handleApprovalResponse = useCallback((approved: boolean) => {
+        if (pendingApproval) {
+            sendApprovalResponse({ actionId: pendingApproval.actionId, approved });
+        }
+    }, [pendingApproval, sendApprovalResponse]);
+
     const getIcon = () => {
+        if (isAwaitingApproval) return Spinner;
         if (isInProgress && (runStatus === 'canceled' || runStatus === 'error')) return AlertIcon;
         if (isInProgress) return Spinner;
         if (hasError) return AlertIcon;
@@ -137,49 +155,62 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     };
 
     const hasExpandedResult = effectiveExpanded && canExpand;
-    const isShimmering = isInProgress && !hasResult && runStatus === 'in_progress';
+    const isShimmering = isInProgress && !hasResult && runStatus === 'in_progress' && !isAwaitingApproval;
+
+    // Label override for awaiting approval
+    const displayLabel = isAwaitingApproval ? `${baseLabel} - Awaiting approval` : label;
 
     return (
         <div
             id={`tool-${part.tool_call_id}`}
             className={`
                 rounded-md flex flex-col min-w-0
-                ${effectiveExpanded ? 'border-popup' : 'border-transparent'}
-                ${hasExpandedResult ? 'mb-2' : ''}
+                ${effectiveExpanded || isAwaitingApproval ? 'border-popup' : 'border-transparent'}
+                ${hasExpandedResult || isAwaitingApproval ? 'mb-2' : ''}
             `}
         >
             <div
                 className={`
                     display-flex flex-row py-15
-                    ${effectiveExpanded ? 'border-bottom-quinary bg-senary' : ''}
+                    ${effectiveExpanded || isAwaitingApproval ? 'border-bottom-quinary bg-senary' : ''}
                 `}
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
             >
                 <button
                     type="button"
-                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left ${canExpand ? 'cursor-pointer' : ''}`}
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left ${canExpand && !isAwaitingApproval ? 'cursor-pointer' : ''}`}
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={effectiveExpanded}
                     aria-controls={`tool-result-${part.tool_call_id}`}
                     onClick={toggleExpanded}
-                    disabled={!canExpand}
+                    disabled={!canExpand || isAwaitingApproval}
                 >
                     <div className="display-flex flex-row px-3 gap-2">
-                        <div className={`flex-1 display-flex mt-010 ${effectiveExpanded ? 'font-color-primary' : ''}`}>
+                        <div className={`flex-1 display-flex mt-010 ${effectiveExpanded || isAwaitingApproval ? 'font-color-primary' : ''}`}>
                             <Icon icon={getIcon()} />
                         </div>
                         
-                        <div className={`display-flex ${effectiveExpanded ? 'font-color-primary' : ''} ${isShimmering ? 'shimmer-text' : ''}`}>
-                            {label}
+                        <div className={`display-flex ${effectiveExpanded || isAwaitingApproval ? 'font-color-primary' : ''} ${isShimmering ? 'shimmer-text' : ''}`}>
+                            {displayLabel}
                         </div>
                     </div>
                 </button>
                 <div className="flex-1"/>
             </div>
 
+            {/* Approval UI when awaiting user decision */}
+            {isAwaitingApproval && pendingApproval && (
+                <div className="p-3">
+                    <ApprovalView
+                        approval={pendingApproval}
+                        onRespond={handleApprovalResponse}
+                    />
+                </div>
+            )}
+
             {/* Expanded result view */}
-            {hasExpandedResult && (
+            {hasExpandedResult && !isAwaitingApproval && (
                 <div id={`tool-result-${part.tool_call_id}`}>
                     <ToolResultView toolcall={part} result={result} />
                 </div>
