@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { TagInfo } from '../../agents/toolResultTypes';
+import { TagReference } from '../../agents/toolResultTypes';
 
 interface ListTagsResultViewProps {
-    tags: TagInfo[];
+    tags: TagReference[];
     totalCount: number;
     libraryId?: number | null;
 }
@@ -58,20 +58,14 @@ export const ListTagsResultView: React.FC<ListTagsResultViewProps> = ({
                     return (
                         <div
                             key={tag.name}
-                            className={`display-flex flex-row items-center gap-1 px-2 py-05 rounded cursor-pointer transition-colors duration-150 ${
-                                isHovered ? 'bg-tertiary' : 'bg-secondary'
+                            className={`display-flex flex-row items-center gap-1 px-2 py-05 rounded-md cursor-pointer transition-colors duration-150 ${
+                                isHovered ? 'bg-quinary' : 'bg-quaternary'
                             }`}
                             title={`${tag.item_count} item${tag.item_count !== 1 ? 's' : ''} - Click to filter by tag`}
                             onClick={() => handleTagClick(tag.name)}
                             onMouseEnter={() => setHoveredTag(tag.name)}
                             onMouseLeave={() => setHoveredTag(null)}
                         >
-                            {tag.color && (
-                                <span
-                                    className="w-2 h-2 rounded-full flex-shrink-0"
-                                    style={{ backgroundColor: tag.color }}
-                                />
-                            )}
                             <span className="text-sm font-color-primary">
                                 {tag.name}
                             </span>
