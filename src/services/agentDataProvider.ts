@@ -1297,7 +1297,7 @@ export async function handleItemSearchByMetadataRequest(
             const collection = typeof collectionFilter === 'number'
                 ? Zotero.Collections.get(collectionFilter)
                 : getCollectionByIdOrName(collectionFilter);
-            
+
             if (collection) {
                 collectionKeys.push(collection.key);
             }
@@ -1490,18 +1490,33 @@ export async function handleItemSearchByTopicRequest(
     }
 
     // Convert collections_filter names to keys if needed
-    const collectionKeys: string[] = [];
+    const collectionKeysSet = new Set<string>();
     if (request.collections_filter && request.collections_filter.length > 0) {
         for (const collectionFilter of request.collections_filter) {
-            const collection = typeof collectionFilter === 'number'
-                ? Zotero.Collections.get(collectionFilter)
-                : getCollectionByIdOrName(collectionFilter);
-            
-            if (collection) {
-                collectionKeys.push(collection.key);
+            if (typeof collectionFilter === 'number') {
+                const collection = Zotero.Collections.get(collectionFilter);
+                if (collection && (libraryIds.length === 0 || libraryIds.includes(collection.libraryID))) {
+                    collectionKeysSet.add(collection.key);
+                }
+                continue;
+            }
+
+            if (libraryIds.length > 0) {
+                for (const libId of libraryIds) {
+                    const collection = getCollectionByIdOrName(collectionFilter, libId);
+                    if (collection && libraryIds.includes(collection.libraryID)) {
+                        collectionKeysSet.add(collection.key);
+                    }
+                }
+            } else {
+                const collection = getCollectionByIdOrName(collectionFilter);
+                if (collection) {
+                    collectionKeysSet.add(collection.key);
+                }
             }
         }
     }
+    const collectionKeys = Array.from(collectionKeysSet);
 
     logger('handleItemSearchByTopicRequest: Searching by topic', {
         topic_query: request.topic_query,
@@ -1773,7 +1788,7 @@ export function getLibraryByIdOrName(libraryIdOrName: number | string | null | u
  * 
  * Supports:
  * - Number: Looks up by collection ID
- * - String: Tries to parse as ID, then checks if it's a key (8 alphanumeric chars), then searches by name
+ * - String: Checks for a key (8 alphanumeric chars), then numeric ID (digits only), then searches by name
  * - null/undefined: Returns null
  * 
  * @param collectionIdOrName - Collection ID, key, or name
@@ -1795,13 +1810,6 @@ export function getCollectionByIdOrName(
     
     // It's a string - try different approaches
     
-    // First, try to parse as collection ID
-    const parsedId = parseInt(collectionIdOrName, 10);
-    if (!isNaN(parsedId)) {
-        const collection = Zotero.Collections.get(parsedId);
-        if (collection) return collection;
-    }
-    
     // Check if it looks like a Zotero key (8 alphanumeric characters)
     if (/^[A-Z0-9]{8}$/i.test(collectionIdOrName)) {
         // If we have a library ID, use it
@@ -1817,15 +1825,25 @@ export function getCollectionByIdOrName(
             }
         }
     }
+
+    // If it's a purely numeric string, try to parse as collection ID
+    if (/^\d+$/.test(collectionIdOrName)) {
+        const parsedId = parseInt(collectionIdOrName, 10);
+        const collection = Zotero.Collections.get(parsedId);
+        if (collection) return collection;
+    }
     
     // Look up by name
     const librariesToSearch = libraryId !== undefined 
         ? [libraryId] 
         : Zotero.Libraries.getAll().map(lib => lib.libraryID);
     
+    const collectionNameLower = collectionIdOrName.toLowerCase();
     for (const libId of librariesToSearch) {
         const collections = Zotero.Collections.getByLibrary(libId, true);
-        const collectionByName = collections.find((c: Zotero.Collection) => c.name === collectionIdOrName);
+        const collectionByName = collections.find(
+            (c: Zotero.Collection) => c.name.toLowerCase().includes(collectionNameLower)
+        );
         if (collectionByName) return collectionByName;
     }
     
