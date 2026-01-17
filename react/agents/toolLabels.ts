@@ -1,5 +1,6 @@
 import { ToolCallStatus } from './atoms';
 import { ToolCallPart } from './types';
+import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../src/services/agentDataProvider';
 
 /**
  * Get display name from a Zotero item (Author Year format).
@@ -232,6 +233,45 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
         }
 
+        // === List tools ===
+        case 'list_items': {
+            const parts: string[] = [];
+            
+            // Handle library parameter
+            const libraryParam = args.library_id as string | number | undefined;
+            const libraryId = typeof libraryParam === 'number' 
+                ? libraryParam 
+                : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
+            
+            // Handle collection parameter
+            const collectionParam = args.collection_key as string | undefined;
+            if (collectionParam) {
+                const collection = getCollectionByIdOrName(collectionParam, libraryId);
+                if (collection) {
+                    parts.push(`"${collection.name}"`);
+                }
+            }
+            
+            // Handle tag parameter
+            const tag = args.tag as string | undefined;
+            if (tag) {
+                parts.push(`tag "${truncate(tag, 20)}"`);
+            }
+            
+            // Show library name only when no collection/tag filter and library is specified
+            if (parts.length === 0 && libraryParam) {
+                const library = getLibraryByIdOrName(libraryParam);
+                if (library) {
+                    parts.push(`"${library.name}"`);
+                }
+            }
+            
+            if (parts.length > 0) {
+                return `${baseLabel}: ${truncate(parts.join(' '), 50)}`;
+            }
+            return baseLabel;
+        }
+
         // === Reading tools ===
         case 'search_in_documents': {
             const description = args.description as string | undefined;
@@ -334,32 +374,52 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
         }
 
-        case 'list_items': {
-            const parts: string[] = [];
-            const collectionKey = args.collection_key as string | undefined;
-            const tag = args.tag as string | undefined;
-            
-            if (collectionKey) parts.push(`collection`);
-            if (tag) parts.push(`tag "${truncate(tag, 20)}"`);
-            
-            if (parts.length > 0) {
-                return `${baseLabel}: ${parts.join(', ')}`;
-            }
-            return baseLabel;
-        }
-
         case 'list_collections': {
+            const libraryParam = args.library_id as string | number | undefined;
+            const libraryId = typeof libraryParam === 'number' 
+                ? libraryParam 
+                : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
+            
             const parentKey = args.parent_collection_key as string | undefined;
             if (parentKey) {
+                const collection = getCollectionByIdOrName(parentKey, libraryId);
+                if (collection) {
+                    return `${baseLabel}: in "${collection.name}"`;
+                }
                 return `${baseLabel}: subcollections`;
+            }
+            
+            // Show library name when listing top-level collections
+            if (libraryParam) {
+                const library = getLibraryByIdOrName(libraryParam);
+                if (library) {
+                    return `${baseLabel}: "${library.name}"`;
+                }
             }
             return baseLabel;
         }
 
         case 'list_tags': {
+            const libraryParam = args.library_id as string | number | undefined;
+            const libraryId = typeof libraryParam === 'number' 
+                ? libraryParam 
+                : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
+            
             const collectionKey = args.collection_key as string | undefined;
             if (collectionKey) {
+                const collection = getCollectionByIdOrName(collectionKey, libraryId);
+                if (collection) {
+                    return `${baseLabel}: in "${collection.name}"`;
+                }
                 return `${baseLabel}: in collection`;
+            }
+            
+            // Show library name when listing all tags in a library
+            if (libraryParam) {
+                const library = getLibraryByIdOrName(libraryParam);
+                if (library) {
+                    return `${baseLabel}: "${library.name}"`;
+                }
             }
             return baseLabel;
         }
