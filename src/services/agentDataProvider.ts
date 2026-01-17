@@ -1290,19 +1290,35 @@ export async function handleItemSearchByMetadataRequest(
         libraryIds.push(...searchableLibraryIds);
     }
 
-    // Convert collections_filter names to keys if needed
-    const collectionKeys: string[] = [];
+    // Convert collections_filter names to keys if needed (scoped to libraryIds)
+    const collectionKeysSet = new Set<string>();
     if (request.collections_filter && request.collections_filter.length > 0) {
         for (const collectionFilter of request.collections_filter) {
-            const collection = typeof collectionFilter === 'number'
-                ? Zotero.Collections.get(collectionFilter)
-                : getCollectionByIdOrName(collectionFilter);
+            if (typeof collectionFilter === 'number') {
+                const collection = Zotero.Collections.get(collectionFilter);
+                if (collection && (libraryIds.length === 0 || libraryIds.includes(collection.libraryID))) {
+                    collectionKeysSet.add(collection.key);
+                }
+                continue;
+            }
 
-            if (collection) {
-                collectionKeys.push(collection.key);
+            // String filter: search within each library
+            if (libraryIds.length > 0) {
+                for (const libId of libraryIds) {
+                    const collection = getCollectionByIdOrName(collectionFilter, libId);
+                    if (collection) {
+                        collectionKeysSet.add(collection.key);
+                    }
+                }
+            } else {
+                const collection = getCollectionByIdOrName(collectionFilter);
+                if (collection) {
+                    collectionKeysSet.add(collection.key);
+                }
             }
         }
     }
+    const collectionKeys = Array.from(collectionKeysSet);
 
     logger('handleItemSearchByMetadataRequest: Metadata search', {
         libraryIds,
@@ -1489,7 +1505,7 @@ export async function handleItemSearchByTopicRequest(
         libraryIds.push(...searchableLibraryIds);
     }
 
-    // Convert collections_filter names to keys if needed
+    // Convert collections_filter names to keys if needed (scoped to libraryIds)
     const collectionKeysSet = new Set<string>();
     if (request.collections_filter && request.collections_filter.length > 0) {
         for (const collectionFilter of request.collections_filter) {
@@ -1501,10 +1517,11 @@ export async function handleItemSearchByTopicRequest(
                 continue;
             }
 
+            // String filter: search within each library
             if (libraryIds.length > 0) {
                 for (const libId of libraryIds) {
                     const collection = getCollectionByIdOrName(collectionFilter, libId);
-                    if (collection && libraryIds.includes(collection.libraryID)) {
+                    if (collection) {
                         collectionKeysSet.add(collection.key);
                     }
                 }
@@ -1842,7 +1859,7 @@ export function getCollectionByIdOrName(
     for (const libId of librariesToSearch) {
         const collections = Zotero.Collections.getByLibrary(libId, true);
         const collectionByName = collections.find(
-            (c: Zotero.Collection) => c.name.toLowerCase().includes(collectionNameLower)
+            (c: Zotero.Collection) => c.name.toLowerCase() === collectionNameLower
         );
         if (collectionByName) return collectionByName;
     }
