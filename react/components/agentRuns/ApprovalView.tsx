@@ -29,10 +29,12 @@ export const ApprovalView: React.FC<ApprovalViewProps> = ({ approval, onRespond 
     };
 
     return (
-        <div className="approval-view overflow-hidden">
-            {/* Preview section */}
-            <ApprovalPreview approval={approval} />
+        <div className="display-flex flex-col gap-3">
+            <div className="approval-view overflow-hidden">
+                {/* Preview section */}
+                <ApprovalPreview approval={approval} />
 
+            </div>
             {/* Action buttons */}
             <div className="display-flex flex-row gap-2 p-3 border-top-quinary">
                 <div className="flex-1" />

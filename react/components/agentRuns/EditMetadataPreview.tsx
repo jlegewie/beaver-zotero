@@ -19,9 +19,6 @@ interface EditMetadataPreviewProps {
 export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({ edits, currentValues }) => {
     return (
         <div className="edit-metadata-preview">
-            <div className="text-sm font-color-secondary mb-2">
-                Proposed metadata changes:
-            </div>
             <div className="flex flex-col gap-3">
                 {edits.map((edit, index) => {
                     const currentValue = currentValues[edit.field];
