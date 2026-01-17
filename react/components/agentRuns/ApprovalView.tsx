@@ -3,6 +3,7 @@ import { useSetAtom } from 'jotai';
 import { PendingApproval, clearPendingApprovalAtom } from '../../agents/agentActions';
 import { EditMetadataPreview } from './EditMetadataPreview';
 import { TickIcon, CancelIcon } from '../icons/icons';
+import Button from '../ui/Button';
 
 interface ApprovalViewProps {
     approval: PendingApproval;
@@ -30,28 +31,27 @@ export const ApprovalView: React.FC<ApprovalViewProps> = ({ approval, onRespond 
     return (
         <div className="approval-view border-popup rounded-md overflow-hidden">
             {/* Preview section */}
-            <div className="p-3 bg-senary">
+            <div className="p-3 border-quinary">
                 <ApprovalPreview approval={approval} />
             </div>
 
             {/* Action buttons */}
-            <div className="flex flex-row gap-2 p-3 border-top-quinary bg-primary">
-                <button
-                    type="button"
-                    className="flex-1 btn btn-primary flex items-center justify-center gap-1"
-                    onClick={handleApprove}
-                >
-                    <TickIcon className="w-4 h-4" />
-                    <span>Apply</span>
-                </button>
-                <button
-                    type="button"
-                    className="flex-1 btn btn-secondary flex items-center justify-center gap-1"
+            <div className="display-flex flex-row gap-2 p-3 border-top-quinary">
+                <div className="flex-1" />
+                <Button
+                    variant="outline"
+                    icon={CancelIcon}
                     onClick={handleReject}
                 >
-                    <CancelIcon className="w-4 h-4" />
-                    <span>Reject</span>
-                </button>
+                    Reject
+                </Button>
+                <Button
+                    variant="solid"
+                    icon={TickIcon}
+                    onClick={handleApprove}
+                >
+                    Apply
+                </Button>
             </div>
         </div>
     );
@@ -71,7 +71,7 @@ const ApprovalPreview: React.FC<{ approval: PendingApproval }> = ({ approval }) 
     return (
         <div className="text-sm font-color-secondary">
             <div className="font-medium mb-1">Action: {approval.actionType}</div>
-            <pre className="text-xs overflow-auto max-h-32 bg-primary p-2 rounded">
+            <pre className="text-xs overflow-auto max-h-32 p-2 rounded">
                 {JSON.stringify(approval.actionData, null, 2)}
             </pre>
         </div>
