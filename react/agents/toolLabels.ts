@@ -261,8 +261,10 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             // Show library name only when no collection/tag filter and library is specified
             if (parts.length === 0 && libraryParam) {
                 const library = getLibraryByIdOrName(libraryParam);
-                if (library) {
-                    parts.push(`"${library.name}"`);
+                if (library.library && library.library.name) {
+                    parts.push(`"${library.library.name}"`);
+                } else {
+                    parts.push(`"${libraryParam}"`);
                 }
             }
             
@@ -392,8 +394,10 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             // Show library name when listing top-level collections
             if (libraryParam) {
                 const library = getLibraryByIdOrName(libraryParam);
-                if (library) {
-                    return `${baseLabel}: "${library.name}"`;
+                if (library.library && library.library.name) {
+                    return `${baseLabel}: "${library.library.name}"`;
+                } else {
+                    return `${baseLabel}: "${libraryParam}"`;
                 }
             }
             return `${baseLabel}`;
@@ -417,8 +421,10 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             // Show library name when listing all tags in a library
             if (libraryParam) {
                 const library = getLibraryByIdOrName(libraryParam);
-                if (library) {
-                    return `${baseLabel}: "${library.name}"`;
+                if (library.library && library.library.name) {
+                    return `${baseLabel}: "${library.library.name}"`;
+                } else {
+                    return `${baseLabel}: "${libraryParam}"`;
                 }
             }
             return `${baseLabel}`;
