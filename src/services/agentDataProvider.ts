@@ -2122,45 +2122,47 @@ export async function handleListItemsRequest(
         const itemIds = await search.search();
         const totalCount = itemIds.length;
         
-        // Get full items for sorting
-        const itemsWithData: { id: number; item: any; sortValue: any }[] = [];
-        for (const itemId of itemIds) {
-            try {
-                const item = await Zotero.Items.getAsync(itemId);
-                if (!item) continue;
-                
-                let sortValue: any;
-                switch (request.sort_by) {
-                    case 'dateAdded':
-                        sortValue = item.dateAdded || '';
-                        break;
-                    case 'dateModified':
-                        sortValue = item.dateModified || '';
-                        break;
-                    case 'title':
-                        sortValue = (item.getField ? item.getField('title') : '') || '';
-                        break;
-                    case 'creator': {
-                        const creators = item.getCreators ? item.getCreators() : [];
-                        sortValue = creators.length > 0 ? (creators[0].lastName || '') : '';
-                        break;
-                    }
-                    case 'year': {
-                        const date = item.getField ? (item.getField('date') as string) : '';
-                        sortValue = extractYear(date) || 0;
-                        break;
-                    }
-                    case 'itemType':
-                        sortValue = item.itemType || '';
-                        break;
-                    default:
-                        sortValue = item.dateModified || '';
+        // Batch fetch all items at once
+        const allItems = await Zotero.Items.getAsync(itemIds);
+        const validItems = allItems.filter((item): item is Zotero.Item => item !== null);
+        
+        // Load item data in bulk for efficiency
+        if (validItems.length > 0) {
+            await Zotero.Items.loadDataTypes(validItems, ['primaryData', 'creators', 'itemData']);
+        }
+        
+        // Build items with sort values
+        const itemsWithData: { id: number; item: Zotero.Item; sortValue: any }[] = [];
+        for (const item of validItems) {
+            let sortValue: any;
+            switch (request.sort_by) {
+                case 'dateAdded':
+                    sortValue = item.dateAdded || '';
+                    break;
+                case 'dateModified':
+                    sortValue = item.dateModified || '';
+                    break;
+                case 'title':
+                    sortValue = (item.getField('title') as string) || '';
+                    break;
+                case 'creator': {
+                    const creators = item.getCreators();
+                    sortValue = creators.length > 0 ? (creators[0].lastName || '') : '';
+                    break;
                 }
-                
-                itemsWithData.push({ id: itemId, item, sortValue });
-            } catch {
-                // Skip failed items
+                case 'year': {
+                    const date = item.getField('date') as string;
+                    sortValue = extractYear(date) || 0;
+                    break;
+                }
+                case 'itemType':
+                    sortValue = item.itemType || '';
+                    break;
+                default:
+                    sortValue = item.dateModified || '';
             }
+            
+            itemsWithData.push({ id: item.id, item, sortValue });
         }
         
         // Sort
@@ -2176,13 +2178,13 @@ export async function handleListItemsRequest(
         // Build result items
         const items: ListItemsResultItem[] = [];
         for (const { item } of paginatedItems) {
-            const creators = item.getCreators ? item.getCreators() : undefined;
-            const date = item.getField ? (item.getField('date') as string) : undefined;
+            const creators = item.getCreators();
+            const date = item.getField('date') as string;
             
             const resultItem: ListItemsResultItem = {
                 item_id: `${library.libraryID}-${item.key}`,
                 item_type: item.itemType,
-                title: item.getField ? (item.getField('title') as string) : undefined,
+                title: item.getField('title') as string,
                 creators: formatCreatorsString(creators),
                 year: extractYear(date),
                 date_added: item.dateAdded,
