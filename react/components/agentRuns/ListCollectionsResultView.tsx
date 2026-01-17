@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { CollectionInfo } from '../../agents/toolResultTypes';
+import { CollectionReference } from '../../agents/toolResultTypes';
 import { CSSIcon } from '../icons/icons';
 import { selectCollection } from '../../../src/utils/selectItem';
 
 interface ListCollectionsResultViewProps {
-    collections: CollectionInfo[];
+    collections: CollectionReference[];
     totalCount: number;
     libraryId?: number | null;
 }
