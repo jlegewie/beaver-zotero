@@ -33,7 +33,6 @@ import { FulltextSearchResultView } from './FulltextSearchResultView';
 import { ReadPagesResultView } from './ReadPagesResultView';
 import { ViewPageImagesResultView } from './ViewPageImagesResultView';
 import { ExternalSearchResultView } from './ExternalSearchResultView';
-import { ZoteroSearchResultView } from './ZoteroSearchResultView';
 import { ListCollectionsResultView } from './ListCollectionsResultView';
 import { ListTagsResultView } from './ListTagsResultView';
 
@@ -115,28 +114,23 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
 
     // Zotero search results (zotero_search)
     if (isZoteroSearchResult(toolName, content, metadata)) {
-        const data = extractZoteroSearchData(content);
+        const data = extractZoteroSearchData(content, metadata);
         if (data) {
-            return <ZoteroSearchResultView items={data.items} totalCount={data.totalCount} />;
+            return <ItemSearchResultView items={data.items} />;
         }
     }
 
     // List items results (list_items)
     if (isListItemsResult(toolName, content, metadata)) {
-        const data = extractListItemsData(content);
+        const data = extractListItemsData(content, metadata);
         if (data) {
-            return (
-                <ZoteroSearchResultView
-                    items={data.items}
-                    totalCount={data.totalCount}
-                />
-            );
+            return <ItemSearchResultView items={data.items} />;
         }
     }
 
     // List collections results (list_collections)
     if (isListCollectionsResult(toolName, content, metadata)) {
-        const data = extractListCollectionsData(content);
+        const data = extractListCollectionsData(content, metadata);
         if (data) {
             return (
                 <ListCollectionsResultView
@@ -150,7 +144,7 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
 
     // List tags results (list_tags)
     if (isListTagsResult(toolName, content, metadata)) {
-        const data = extractListTagsData(content);
+        const data = extractListTagsData(content, metadata);
         if (data) {
             return (
                 <ListTagsResultView
@@ -164,22 +158,9 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
 
     // Get metadata results (get_metadata)
     if (isGetMetadataResult(toolName, content, metadata)) {
-        const data = extractGetMetadataData(content);
+        const data = extractGetMetadataData(content, metadata);
         if (data && data.items.length > 0) {
-            // Convert item_ids to ZoteroItemReference format
-            const itemRefs = data.items
-                .map(item => {
-                    const [libraryIdStr, zoteroKey] = item.item_id.split('-');
-                    if (!libraryIdStr || !zoteroKey) return null;
-                    const libraryId = parseInt(libraryIdStr, 10);
-                    if (isNaN(libraryId)) return null;
-                    return { library_id: libraryId, zotero_key: zoteroKey };
-                })
-                .filter((ref): ref is { library_id: number; zotero_key: string } => ref !== null);
-            
-            if (itemRefs.length > 0) {
-                return <ItemSearchResultView items={itemRefs} />;
-            }
+            return <ItemSearchResultView items={data.items} />;
         }
     }
 
