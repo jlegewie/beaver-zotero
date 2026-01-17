@@ -1922,3 +1922,38 @@
     -moz-context-properties: fill, fill-opacity;
     fill: currentColor;
 }
+
+/* Diff view styles for metadata editing */
+[id^="beaver-pane-"] .diff-container {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.875rem;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+[id^="beaver-pane-"] .diff-line {
+    display: flex;
+    align-items: flex-start;
+    padding: 4px 8px;
+    border-left: 3px solid;
+}
+
+[id^="beaver-pane-"] .diff-deletion {
+    background-color: rgba(248, 81, 73, 0.15);
+    border-left-color: #f85149;
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .diff-addition {
+    background-color: rgba(63, 185, 80, 0.15);
+    border-left-color: #3fb950;
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .diff-content {
+    word-break: break-word;
+    white-space: pre-wrap;
+}

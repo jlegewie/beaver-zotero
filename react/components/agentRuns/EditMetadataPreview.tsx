@@ -14,7 +14,7 @@ interface EditMetadataPreviewProps {
 
 /**
  * Preview component for edit_metadata actions.
- * Shows a before/after comparison for each field being edited.
+ * Shows a diff-style before/after comparison for each field being edited.
  */
 export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({ edits, currentValues }) => {
     return (
@@ -25,34 +25,26 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({ edits,
             <div className="flex flex-col gap-3">
                 {edits.map((edit, index) => {
                     const currentValue = currentValues[edit.field];
-                    const hasChange = currentValue !== edit.new_value;
 
                     return (
                         <div
                             key={`${edit.field}-${index}`}
-                            className="flex flex-col gap-1 border-popup rounded-md p-2 bg-primary"
+                            className="flex flex-col gap-1"
                         >
-                            <div className="text-xs font-color-secondary font-medium">
+                            <div className="text-xs font-color-secondary font-medium mb-1">
                                 {formatFieldName(edit.field)}
                             </div>
-                            <div className="flex flex-col gap-1 text-sm">
-                                {currentValue ? (
-                                    <div className="flex flex-row items-start gap-2">
-                                        <span className="text-xs font-color-tertiary min-w-[40px]">From:</span>
-                                        <span className={`font-color-secondary ${!hasChange ? 'opacity-50' : ''}`}>
-                                            {truncateValue(currentValue)}
-                                        </span>
-                                    </div>
-                                ) : (
-                                    <div className="flex flex-row items-start gap-2">
-                                        <span className="text-xs font-color-tertiary min-w-[40px]">From:</span>
-                                        <span className="font-color-tertiary italic">(empty)</span>
-                                    </div>
-                                )}
-                                <div className="flex flex-row items-start gap-2">
-                                    <span className="text-xs font-color-tertiary min-w-[40px]">To:</span>
-                                    <span className="font-color-primary font-medium">
-                                        {edit.new_value ? truncateValue(edit.new_value) : <span className="font-color-tertiary italic">(empty)</span>}
+                            <div className="diff-container">
+                                {/* Old value - deletion style */}
+                                <div className="diff-line diff-deletion">
+                                    <span className="diff-content">
+                                        {currentValue ? truncateValue(currentValue) : <span className="italic opacity-60">(empty)</span>}
+                                    </span>
+                                </div>
+                                {/* New value - addition style */}
+                                <div className="diff-line diff-addition">
+                                    <span className="diff-content">
+                                        {edit.new_value ? truncateValue(edit.new_value) : <span className="italic opacity-60">(empty)</span>}
                                     </span>
                                 </div>
                             </div>
