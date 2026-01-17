@@ -1763,6 +1763,24 @@ function extractYear(dateStr: string | undefined): number | null {
 }
 
 /**
+ * Brief library info for error responses.
+ */
+export interface AvailableLibraryInfo {
+    library_id: number;
+    name: string;
+}
+
+/**
+ * Get a list of available libraries for error responses.
+ */
+function getAvailableLibraries(): AvailableLibraryInfo[] {
+    return Zotero.Libraries.getAll().map((lib: any) => ({
+        library_id: lib.libraryID,
+        name: lib.name,
+    }));
+}
+
+/**
  * Result of library lookup with validation information.
  */
 export interface LibraryLookupResult {
@@ -1917,6 +1935,7 @@ export async function handleZoteroSearchRequest(
                 total_count: 0,
                 error: `Library not found: "${libraryResult.searchInput}"`,
                 error_code: 'library_not_found',
+                available_libraries: getAvailableLibraries(),
             };
         }
         const library = libraryResult.library!;
@@ -2115,6 +2134,7 @@ export async function handleListItemsRequest(
                 total_count: 0,
                 error: `Library not found: "${libraryResult.searchInput}"`,
                 error_code: 'library_not_found',
+                available_libraries: getAvailableLibraries(),
             };
         }
         const library = libraryResult.library!;
@@ -2476,6 +2496,7 @@ export async function handleListCollectionsRequest(
                 total_count: 0,
                 error: `Library not found: "${libraryResult.searchInput}"`,
                 error_code: 'library_not_found',
+                available_libraries: getAvailableLibraries(),
             };
         }
         const library = libraryResult.library!;
@@ -2665,6 +2686,7 @@ export async function handleListTagsRequest(
                 total_count: 0,
                 error: `Library not found: "${libraryResult.searchInput}"`,
                 error_code: 'library_not_found',
+                available_libraries: getAvailableLibraries(),
             };
         }
         const library = libraryResult.library!;

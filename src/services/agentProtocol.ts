@@ -533,6 +533,12 @@ export interface ZoteroSearchResultItem {
     extra_fields?: Record<string, any> | null;
 }
 
+/** Brief library info for error responses */
+export interface AvailableLibraryInfo {
+    library_id: number;
+    name: string;
+}
+
 /** Response to zotero_search request */
 export interface WSZoteroSearchResponse {
     type: 'zotero_search';
@@ -541,6 +547,8 @@ export interface WSZoteroSearchResponse {
     total_count: number;
     error?: string | null;
     error_code?: string | null;
+    /** Available libraries (only included when error_code is 'library_not_found') */
+    available_libraries?: AvailableLibraryInfo[] | null;
 }
 
 /** Request from backend for list_items */
@@ -579,6 +587,8 @@ export interface WSListItemsResponse {
     collection_name?: string | null;
     error?: string | null;
     error_code?: string | null;
+    /** Available libraries (only included when error_code is 'library_not_found') */
+    available_libraries?: AvailableLibraryInfo[] | null;
 }
 
 /** Request from backend for get_metadata */
@@ -640,6 +650,8 @@ export interface WSListCollectionsResponse {
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;
+    /** Available libraries (only included when error_code is 'library_not_found') */
+    available_libraries?: AvailableLibraryInfo[] | null;
 }
 
 // =============================================================================
@@ -674,6 +686,8 @@ export interface WSListTagsResponse {
     library_name?: string | null;
     error?: string | null;
     error_code?: string | null;
+    /** Available libraries (only included when error_code is 'library_not_found') */
+    available_libraries?: AvailableLibraryInfo[] | null;
 }
 
 // =============================================================================
