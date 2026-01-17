@@ -50,27 +50,27 @@ export const ListTagsResultView: React.FC<ListTagsResultViewProps> = ({
     };
 
     return (
-        <div className="display-flex flex-col">
-            <div className="display-flex flex-row flex-wrap gap-1 p-15">
+        <div className="display-flex flex-col min-w-0">
+            <div className="display-flex flex-row flex-wrap gap-1 p-15 min-w-0">
                 {tags.map((tag) => {
                     const isHovered = hoveredTag === tag.name;
                     
                     return (
                         <div
                             key={tag.name}
-                            className={`display-flex flex-row items-center gap-1 px-2 py-05 rounded-md cursor-pointer transition-colors duration-150 ${
+                            className={`display-flex flex-row items-center min-w-0 px-2 py-05 rounded-md transition-colors duration-150 whitespace-nowrap ${
                                 isHovered ? 'bg-quinary' : 'bg-quaternary'
                             }`}
                             title={`${tag.item_count} item${tag.item_count !== 1 ? 's' : ''} - Click to filter by tag`}
-                            onClick={() => handleTagClick(tag.name)}
-                            onMouseEnter={() => setHoveredTag(tag.name)}
-                            onMouseLeave={() => setHoveredTag(null)}
+                            // onClick={() => handleTagClick(tag.name)}
+                            // onMouseEnter={() => setHoveredTag(tag.name)}
+                            // onMouseLeave={() => setHoveredTag(null)}
                         >
-                            <span className="text-sm font-color-primary">
+                            <span className="text-sm font-color-primary truncate min-w-0">
                                 {tag.name}
-                            </span>
-                            <span className="text-xs font-color-tertiary">
-                                ({tag.item_count})
+                                <span className="text-xs font-color-tertiary ml-1">
+                                    ({tag.item_count})
+                                </span>
                             </span>
                         </div>
                     );
