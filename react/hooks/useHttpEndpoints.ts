@@ -25,6 +25,8 @@ import {
     handleListItemsRequest,
     handleGetMetadataRequest,
     handleListLibrariesRequest,
+    handleListCollectionsRequest,
+    handleListTagsRequest,
 } from '../../src/services/agentDataProvider';
 import type {
     WSZoteroDataRequest,
@@ -39,6 +41,8 @@ import type {
     WSListItemsRequest,
     WSGetMetadataRequest,
     WSListLibrariesRequest,
+    WSListCollectionsRequest,
+    WSListTagsRequest,
 } from '../../src/services/agentProtocol';
 
 
@@ -74,6 +78,8 @@ const ENDPOINT_PATHS = [
     '/beaver/library/list',
     '/beaver/library/metadata',
     '/beaver/library/libraries',
+    '/beaver/library/collections',
+    '/beaver/library/tags',
 ] as const;
 
 /**
@@ -361,6 +367,52 @@ async function handleListLibrariesHttpRequest(_request: any) {
     };
 }
 
+async function handleListCollectionsHttpRequest(request: any) {
+    const wsRequest: WSListCollectionsRequest = {
+        event: 'list_collections_request',
+        request_id: generateRequestId(),
+        library_id: request.library_id,
+        parent_collection_key: request.parent_collection_key,
+        include_item_counts: request.include_item_counts ?? false,
+        limit: request.limit ?? 50,
+        offset: request.offset ?? 0,
+    };
+
+    const response = await handleListCollectionsRequest(wsRequest);
+
+    return {
+        collections: response.collections,
+        total_count: response.total_count,
+        library_id: response.library_id,
+        library_name: response.library_name,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
+async function handleListTagsHttpRequest(request: any) {
+    const wsRequest: WSListTagsRequest = {
+        event: 'list_tags_request',
+        request_id: generateRequestId(),
+        library_id: request.library_id,
+        collection_key: request.collection_key,
+        min_item_count: request.min_item_count ?? 0,
+        limit: request.limit ?? 50,
+        offset: request.offset ?? 0,
+    };
+
+    const response = await handleListTagsRequest(wsRequest);
+
+    return {
+        tags: response.tags,
+        total_count: response.total_count,
+        library_id: response.library_id,
+        library_name: response.library_name,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
 
 // =============================================================================
 // Registration Functions
@@ -405,6 +457,12 @@ function registerEndpoints(): boolean {
 
     Zotero.Server.Endpoints['/beaver/library/libraries'] =
         createEndpoint(handleListLibrariesHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/library/collections'] =
+        createEndpoint(handleListCollectionsHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/library/tags'] =
+        createEndpoint(handleListTagsHttpRequest);
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
     return true;
