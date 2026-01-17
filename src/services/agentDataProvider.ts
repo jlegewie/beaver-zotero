@@ -1763,41 +1763,71 @@ function extractYear(dateStr: string | undefined): number | null {
 }
 
 /**
- * Get library by ID or name, or return the user's default library.
+ * Result of library lookup with validation information.
+ */
+export interface LibraryLookupResult {
+    /** The found library, or null if not found */
+    library: _ZoteroTypes.Library.LibraryLike | null;
+    /** Whether a library was explicitly requested (vs defaulting to user library) */
+    wasExplicitlyRequested: boolean;
+    /** The input that was used to search (for error messages) */
+    searchInput: string | null;
+}
+
+/**
+ * Get library by ID or name, with proper validation.
  * 
  * Supports:
  * - Number: Looks up by library ID
  * - String: First tries to parse as ID, then looks up by name
  * - null/undefined: Returns user's default library
+ * 
+ * IMPORTANT: Does NOT fall back to user library when an explicit library is requested
+ * but not found. Returns null in that case so callers can return proper error responses.
  */
-export function getLibraryByIdOrName(libraryIdOrName: number | string | null | undefined): _ZoteroTypes.Library.LibraryLike {
+export function getLibraryByIdOrName(libraryIdOrName: number | string | null | undefined): LibraryLookupResult {
     if (libraryIdOrName == null) {
-        // Default to user's library
-        return Zotero.Libraries.userLibrary;
+        // Default to user's library - no explicit request
+        return {
+            library: Zotero.Libraries.userLibrary,
+            wasExplicitlyRequested: false,
+            searchInput: null,
+        };
     }
     
     // If it's a number, look up by ID
     if (typeof libraryIdOrName === 'number') {
         const lib = Zotero.Libraries.get(libraryIdOrName);
-        if (lib) return lib;
-        // Fall back to user library if not found
-        return Zotero.Libraries.userLibrary;
+        return {
+            library: lib || null,
+            wasExplicitlyRequested: true,
+            searchInput: String(libraryIdOrName),
+        };
     }
     
     // It's a string - try to parse as ID first
     const parsedId = parseInt(libraryIdOrName, 10);
     if (!isNaN(parsedId)) {
         const lib = Zotero.Libraries.get(parsedId);
-        if (lib) return lib;
+        if (lib) {
+            return {
+                library: lib,
+                wasExplicitlyRequested: true,
+                searchInput: libraryIdOrName,
+            };
+        }
     }
     
-    // Look up by name
+    // Look up by name (case-insensitive)
     const allLibraries = Zotero.Libraries.getAll();
-    const libByName = allLibraries.find((l: any) => l.name === libraryIdOrName);
-    if (libByName) return libByName;
+    const searchLower = libraryIdOrName.toLowerCase();
+    const libByName = allLibraries.find((l: any) => l.name.toLowerCase() === searchLower);
     
-    // Fall back to user library if not found
-    return Zotero.Libraries.userLibrary;
+    return {
+        library: libByName || null,
+        wasExplicitlyRequested: true,
+        searchInput: libraryIdOrName,
+    };
 }
 
 /**
@@ -1877,7 +1907,19 @@ export async function handleZoteroSearchRequest(
     logger(`handleZoteroSearchRequest: Processing ${request.conditions.length} conditions`, 1);
     
     try {
-        const library = getLibraryByIdOrName(request.library_id);
+        // Validate library
+        const libraryResult = getLibraryByIdOrName(request.library_id);
+        if (libraryResult.wasExplicitlyRequested && !libraryResult.library) {
+            return {
+                type: 'zotero_search',
+                request_id: request.request_id,
+                items: [],
+                total_count: 0,
+                error: `Library not found: "${libraryResult.searchInput}"`,
+                error_code: 'library_not_found',
+            };
+        }
+        const library = libraryResult.library!;
         
         // Create search object
         const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
@@ -2063,7 +2105,19 @@ export async function handleListItemsRequest(
     logger(`handleListItemsRequest: collection=${request.collection_key}, tag=${request.tag}`, 1);
     
     try {
-        const library = getLibraryByIdOrName(request.library_id);
+        // Validate library
+        const libraryResult = getLibraryByIdOrName(request.library_id);
+        if (libraryResult.wasExplicitlyRequested && !libraryResult.library) {
+            return {
+                type: 'list_items',
+                request_id: request.request_id,
+                items: [],
+                total_count: 0,
+                error: `Library not found: "${libraryResult.searchInput}"`,
+                error_code: 'library_not_found',
+            };
+        }
+        const library = libraryResult.library!;
         const libraryName = library.name;
         let collectionName: string | null = null;
         
@@ -2094,8 +2148,25 @@ export async function handleListItemsRequest(
             }
         }
         
-        // Add tag filter if specified
+        // Validate and add tag filter if specified
         if (request.tag) {
+            // Check if the tag exists in the library
+            const allTags = await Zotero.Tags.getAll(library.libraryID);
+            const tagExists = (allTags as { tag: string }[]).some(
+                (t) => t.tag.toLowerCase() === request.tag!.toLowerCase()
+            );
+            
+            if (!tagExists) {
+                return {
+                    type: 'list_items',
+                    request_id: request.request_id,
+                    items: [],
+                    total_count: 0,
+                    error: `Tag not found: "${request.tag}" in library "${library.name}"`,
+                    error_code: 'tag_not_found',
+                };
+            }
+            
             search.addCondition('tag', 'is', request.tag);
         }
         
@@ -2395,7 +2466,19 @@ export async function handleListCollectionsRequest(
     logger(`handleListCollectionsRequest: library=${request.library_id}, parent=${request.parent_collection_key}`, 1);
     
     try {
-        const library = getLibraryByIdOrName(request.library_id);
+        // Validate library
+        const libraryResult = getLibraryByIdOrName(request.library_id);
+        if (libraryResult.wasExplicitlyRequested && !libraryResult.library) {
+            return {
+                type: 'list_collections',
+                request_id: request.request_id,
+                collections: [],
+                total_count: 0,
+                error: `Library not found: "${libraryResult.searchInput}"`,
+                error_code: 'library_not_found',
+            };
+        }
+        const library = libraryResult.library!;
         const libraryName = library.name;
         
         // Get all collections from the library (excluding deleted)
@@ -2572,7 +2655,19 @@ export async function handleListTagsRequest(
     logger(`handleListTagsRequest: library=${request.library_id}, collection=${request.collection_key}`, 1);
     
     try {
-        const library = getLibraryByIdOrName(request.library_id);
+        // Validate library
+        const libraryResult = getLibraryByIdOrName(request.library_id);
+        if (libraryResult.wasExplicitlyRequested && !libraryResult.library) {
+            return {
+                type: 'list_tags',
+                request_id: request.request_id,
+                tags: [],
+                total_count: 0,
+                error: `Library not found: "${libraryResult.searchInput}"`,
+                error_code: 'library_not_found',
+            };
+        }
+        const library = libraryResult.library!;
         const libraryName = library.name;
         
         // Get tag colors (this is a sync operation from cache)
