@@ -61,6 +61,7 @@ import { userIdAtom } from './auth';
 import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom } from './citations';
 import {
     addAgentActionsAtom,
+    upsertAgentActionsAtom,
     toAgentAction,
     clearAgentActionsAtom,
     threadAgentActionsAtom,
@@ -794,7 +795,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 actionsCount: event.actions.length,
             }, 1);
             const actions = event.actions.map(toAgentAction);
-            set(addAgentActionsAtom, actions);
+            set(upsertAgentActionsAtom, actions);
             // Load item data for agent actions (fire and forget)
             loadItemDataForAgentActions(actions).catch(err => 
                 logger(`WS onAgentActions: Failed to load item data for agent actions: ${err}`, 1)
