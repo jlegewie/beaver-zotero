@@ -21,6 +21,7 @@ import {
     RepeatIcon,
     ArrowDownIcon,
     ArrowRightIcon,
+    PropertyEditIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
@@ -175,6 +176,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     // Determine what icon to show in header
     const getHeaderIcon = () => {
+        if (isAwaitingApproval) return PropertyEditIcon;
         if (isExpanded) return ArrowDownIcon;
         if (isHovered) return ArrowRightIcon;
         return config.icon;
@@ -193,10 +195,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             >
                 <button
                     type="button"
-                    className="variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left cursor-pointer"
+                    className={`
+                        variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left
+                        ${isAwaitingApproval ? 'opacity-80' : ''}
+                    `}
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={isExpanded}
-                    onClick={toggleExpanded}
+                    onClick={isAwaitingApproval ? () => {} : toggleExpanded}
+                    disabled={isAwaitingApproval}
                 >
                     <div className="display-flex flex-row px-3 gap-2">
                         <div className={`flex-1 display-flex mt-010 font-color-primary`}>
