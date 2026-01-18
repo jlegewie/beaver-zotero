@@ -23,6 +23,8 @@ import {
     ArrowRightIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
+import IconButton from '../ui/IconButton';
+import Tooltip from '../ui/Tooltip';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
@@ -182,7 +184,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
             {/* Header */}
             <div
-                className={`display-flex flex-row py-15 border-bottom-quinary bg-senary`}
+                className={`
+                    display-flex flex-row py-15 bg-senary
+                    ${isExpanded ? 'border-bottom-quinary' : ''}
+                `}
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
             >
@@ -206,6 +211,33 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 <div className="display-flex flex-row items-center px-3 gap-2">
                     <ItemRef status={status} config={config} />
                 </div>
+
+                <div className="flex-1"/>
+                {!isExpanded && (isAwaitingApproval || status === 'pending') && (
+                    <div className="display-flex flex-row items-center gap-3 mr-3">
+                        {/* <Tooltip content={attachmentTitle} showArrow singleLine>
+                            <div className="text-sm truncate font-color-tertiary" style={{ maxWidth: '135px' }}>
+                                {attachmentTitle}
+                            </div>
+                        </Tooltip> */}
+                        <Tooltip content="Reject all" showArrow singleLine>
+                            <IconButton
+                                icon={CancelIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-red"
+                                onClick={() => {}}
+                            />
+                        </Tooltip>
+                        <Tooltip content="Add annotations" showArrow singleLine>
+                            <IconButton
+                                icon={TickIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-green scale-14"
+                                onClick={() => {}}
+                            />
+                        </Tooltip>
+                    </div>
+                )}
             </div>
 
             {/* Expanded content */}
