@@ -6,9 +6,14 @@ import {
     getAgentActionsByToolcallAtom,
     clearPendingApprovalAtom,
     undoAgentActionAtom,
+    ackAgentActionsAtom,
+    rejectAgentActionAtom,
+    setAgentActionsToErrorAtom,
 } from '../../agents/agentActions';
 import { sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { EditMetadataPreview } from './EditMetadataPreview';
+import { executeEditMetadataAction, undoEditMetadataAction } from '../../utils/editMetadataActions';
+import { logger } from '../../../src/utils/logger';
 import {
     TickIcon,
     CancelIcon,
@@ -36,10 +41,6 @@ interface AgentActionViewProps {
     runId: string;
     /** Pending approval request if awaiting user decision */
     pendingApproval: PendingApproval | null;
-    /** Called when applying a pending action (not awaiting approval) */
-    onApplyPending?: (action: AgentAction) => void;
-    /** Called when retrying a failed action */
-    onRetry?: (action: AgentAction) => void;
 }
 
 interface StatusConfig {
@@ -115,14 +116,15 @@ const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
 export const AgentActionView: React.FC<AgentActionViewProps> = ({
     toolcallId,
     toolName,
+    runId,
     pendingApproval,
-    onApplyPending,
-    onRetry,
 }) => {
     const [isExpanded, setIsExpanded] = useState(true);
     const [isHovered, setIsHovered] = useState(false);
     // Track when we're waiting for approval response from backend
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
+    // Track when we're processing a post-run action (apply/undo/retry)
+    const [isProcessingAction, setIsProcessingAction] = useState(false);
     // Track the action ID we're processing to detect status changes
     const processingActionIdRef = useRef<string | null>(null);
 
@@ -131,9 +133,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const actions = getAgentActionsByToolcall(toolcallId);
     const action = actions.length > 0 ? actions[0] : null;
 
+    // Atoms for state management
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const clearPendingApproval = useSetAtom(clearPendingApprovalAtom);
-    const undoAction = useSetAtom(undoAgentActionAtom);
+    const ackAgentActions = useSetAtom(ackAgentActionsAtom);
+    const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
+    const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
+    const undoAgentAction = useSetAtom(undoAgentActionAtom);
 
     // Clear processing state when action status changes from 'pending' to a final state
     useEffect(() => {
@@ -147,13 +153,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [isProcessingApproval, action?.status, action?.id]);
 
     const isAwaitingApproval = pendingApproval !== null;
-    // Show 'awaiting' if we have a pending approval OR if we're processing an approval response
-    const status: ActionStatus | 'awaiting' = (isAwaitingApproval || isProcessingApproval)
+    const isProcessing = isProcessingApproval || isProcessingAction;
+    // Show 'awaiting' if we have a pending approval OR if we're processing
+    const status: ActionStatus | 'awaiting' = (isAwaitingApproval || isProcessing)
         ? 'awaiting' 
         : (action?.status ?? 'pending');
     const config = STATUS_CONFIGS[status];
 
-    // Handlers for awaiting approval
+    // Handlers for awaiting approval (during agent run)
     const handleApprove = useCallback(() => {
         if (pendingApproval) {
             // Start processing state before sending response
@@ -174,24 +181,59 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
     }, [pendingApproval, sendApprovalResponse, clearPendingApproval]);
 
-    // Handlers for non-awaiting states
-    const handleApplyPending = useCallback(() => {
-        if (action && onApplyPending) {
-            onApplyPending(action);
+    // Handlers for post-run actions (after agent run is complete)
+    const handleApplyPending = useCallback(async () => {
+        if (!action || isProcessing) return;
+        
+        setIsProcessingAction(true);
+        try {
+            if (toolName === 'edit_metadata') {
+                const result = await executeEditMetadataAction(action);
+                // Acknowledge the action as applied with result data
+                await ackAgentActions(runId, [{
+                    action_id: action.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied edit_metadata action ${action.id}`, 1);
+            }
+        } catch (error: any) {
+            const errorMessage = error?.message || 'Failed to apply action';
+            logger(`AgentActionView: Failed to apply ${action.id}: ${errorMessage}`, 1);
+            setAgentActionsToError([action.id], errorMessage);
+        } finally {
+            setIsProcessingAction(false);
         }
-    }, [action, onApplyPending]);
+    }, [action, isProcessing, toolName, runId, ackAgentActions, setAgentActionsToError]);
 
-    const handleUndo = useCallback(() => {
-        if (action) {
-            undoAction(action.id);
-        }
-    }, [action, undoAction]);
+    const handleRejectPending = useCallback(() => {
+        if (!action || isProcessing) return;
+        rejectAgentAction(action.id);
+    }, [action, isProcessing, rejectAgentAction]);
 
-    const handleRetry = useCallback(() => {
-        if (action && onRetry) {
-            onRetry(action);
+    const handleUndo = useCallback(async () => {
+        if (!action || isProcessing) return;
+        
+        setIsProcessingAction(true);
+        try {
+            if (toolName === 'edit_metadata') {
+                await undoEditMetadataAction(action);
+                // Update action status to 'undone'
+                undoAgentAction(action.id);
+                logger(`AgentActionView: Undone edit_metadata action ${action.id}`, 1);
+            }
+        } catch (error: any) {
+            const errorMessage = error?.message || 'Failed to undo action';
+            logger(`AgentActionView: Failed to undo ${action.id}: ${errorMessage}`, 1);
+            setAgentActionsToError([action.id], errorMessage);
+        } finally {
+            setIsProcessingAction(false);
         }
-    }, [action, onRetry]);
+    }, [action, isProcessing, toolName, undoAgentAction, setAgentActionsToError]);
+
+    const handleRetry = useCallback(async () => {
+        // Retry is the same as apply for pending/error/undone/rejected actions
+        await handleApplyPending();
+    }, [handleApplyPending]);
 
     const toggleExpanded = () => setIsExpanded(!isExpanded);
 
@@ -222,12 +264,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     type="button"
                     className={`
                         variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left
-                        ${(isAwaitingApproval || isProcessingApproval) ? 'opacity-80' : ''}
+                        ${isProcessing ? 'opacity-80' : ''}
                     `}
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={isExpanded}
-                    onClick={(isAwaitingApproval || isProcessingApproval) ? () => {} : toggleExpanded}
-                    disabled={isAwaitingApproval || isProcessingApproval}
+                    onClick={isProcessing ? () => {} : toggleExpanded}
+                    disabled={isProcessing}
                 >
                     <div className="display-flex flex-row px-3 gap-2">
                         <div className={`flex-1 display-flex mt-010 font-color-primary`}>
@@ -247,27 +289,22 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 </div>
 
                 <div className="flex-1"/>
-                {!isExpanded && (isAwaitingApproval || status === 'pending') && !isProcessingApproval && (
+                {!isExpanded && (isAwaitingApproval || status === 'pending') && !isProcessing && (
                     <div className="display-flex flex-row items-center gap-3 mr-3">
-                        {/* <Tooltip content={attachmentTitle} showArrow singleLine>
-                            <div className="text-sm truncate font-color-tertiary" style={{ maxWidth: '135px' }}>
-                                {attachmentTitle}
-                            </div>
-                        </Tooltip> */}
-                        <Tooltip content="Reject all" showArrow singleLine>
+                        <Tooltip content="Reject" showArrow singleLine>
                             <IconButton
                                 icon={CancelIcon}
                                 variant="ghost-secondary"
                                 iconClassName="font-color-red"
-                                onClick={() => {}}
+                                onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                             />
                         </Tooltip>
-                        <Tooltip content="Add annotations" showArrow singleLine>
+                        <Tooltip content="Apply" showArrow singleLine>
                             <IconButton
                                 icon={TickIcon}
                                 variant="ghost-secondary"
                                 iconClassName="font-color-green scale-14"
-                                onClick={() => {}}
+                                onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                             />
                         </Tooltip>
                     </div>
@@ -293,7 +330,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     {/* </div> */}
 
                     {/* Action buttons */}
-                    <div className="display-flex flex-row gap-2 px-3 py-2 mt-1">
+                    <div className="display-flex flex-row gap-1 px-25 py-2 mt-1">
                         <div className="flex-1" />
                         
                         {/* Processing indicator - shown while waiting for backend response */}
@@ -305,17 +342,17 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )}
 
                         {/* Reject button - for awaiting and pending (not while processing) */}
-                        {config.showReject && !isProcessingApproval && (
+                        {config.showReject && !isProcessing && (
                             <Button
                                 variant="ghost-secondary"
-                                onClick={isAwaitingApproval ? handleReject : undefined}
+                                onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                             >
                                 Reject
                             </Button>
                         )}
 
                         {/* Undo button - for applied */}
-                        {config.showUndo && (
+                        {config.showUndo && !isProcessing && (
                             <Button
                                 variant="ghost-secondary"
                                 onClick={handleUndo}
@@ -325,23 +362,21 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )}
 
                         {/* Retry button - for error */}
-                        {config.showRetry && (
+                        {config.showRetry && !isProcessing && (
                             <Button
                                 variant="outline"
                                 icon={RepeatIcon}
                                 onClick={handleRetry}
-                                disabled={!onRetry}
                             >
                                 Try Again
                             </Button>
                         )}
 
                         {/* Apply button - for awaiting, pending, rejected, undone (not while processing) */}
-                        {config.showApply && !isProcessingApproval && (
+                        {config.showApply && !isProcessing && (
                             <Button
                                 variant="solid"
                                 onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                disabled={(!isAwaitingApproval && status !== 'pending') && !onApplyPending}
                             >
                                 <span>Apply<span className="opacity-50 ml-1">⏎</span></span>
                             </Button>
@@ -349,8 +384,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
                         {/* Applied badge - for applied state */}
                         {status === 'applied' && (
-                            <div className="display-flex items-center px-3 py-1 rounded bg-success-subtle color-success text-sm font-medium">
-                                <Icon icon={TickIcon} className="mr-1" />
+                            <div className="display-flex items-center px-3 py-1 rounded bg-success-subtle color-success text-sm">
+                                <Icon icon={TickIcon} className="mr-1 scale-12" />
                                 Success
                             </div>
                         )}

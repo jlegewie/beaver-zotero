@@ -18,8 +18,9 @@ interface MetadataEdit {
 
 /**
  * Execute an edit_metadata agent action by applying edits to the Zotero item.
+ * Captures current values BEFORE applying so undo can reliably restore them.
  * @param action The agent action to execute
- * @returns Result data including applied and failed edits
+ * @returns Result data including applied edits with old values for undo
  */
 export async function executeEditMetadataAction(
     action: AgentAction
@@ -39,13 +40,25 @@ export async function executeEditMetadataAction(
     const appliedEdits: AppliedMetadataEdit[] = [];
     const failedEdits: FailedMetadataEdit[] = [];
 
-    // Apply each edit
+    // Apply each edit, capturing current value BEFORE applying for reliable undo
     for (const edit of edits) {
         try {
+            // Capture current value before applying (for undo)
+            let oldValue: string | null = null;
+            try {
+                const currentValue = item.getField(edit.field);
+                oldValue = currentValue ? String(currentValue) : null;
+            } catch {
+                // Field might not exist, treat as null
+                oldValue = null;
+            }
+
+            // Apply the new value
             item.setField(edit.field, edit.new_value);
             appliedEdits.push({
                 field: edit.field,
                 applied_value: edit.new_value,
+                old_value: oldValue, // Store for undo
             });
         } catch (error) {
             failedEdits.push({
@@ -80,13 +93,14 @@ export async function executeEditMetadataAction(
 
 /**
  * Undo an edit_metadata agent action by reverting edits to the original values.
+ * Uses old values from result_data.applied_edits (captured at apply-time) for reliability.
+ * Falls back to proposed_data.edits if result_data is not available.
  * @param action The agent action to undo (must have been applied)
  */
 export async function undoEditMetadataAction(action: AgentAction): Promise<void> {
-    const { library_id, zotero_key, edits } = action.proposed_data as {
+    const { library_id, zotero_key } = action.proposed_data as {
         library_id: number;
         zotero_key: string;
-        edits: MetadataEdit[];
     };
 
     // Get the item
@@ -95,21 +109,40 @@ export async function undoEditMetadataAction(action: AgentAction): Promise<void>
         throw new Error(`Item not found: ${library_id}-${zotero_key}`);
     }
 
-    // Revert each edit to the old value
-    for (const edit of edits) {
-        try {
-            // old_value can be null (meaning field was empty), so use empty string
-            item.setField(edit.field, edit.old_value ?? '');
-        } catch (error) {
-            logger(`undoEditMetadataAction: Failed to revert ${edit.field}: ${error}`, 1);
-            // Continue with other fields
+    // Prefer result_data.applied_edits (has old_value captured at apply-time)
+    // Fall back to proposed_data.edits if result_data is not available
+    const appliedEdits = action.result_data?.applied_edits as AppliedMetadataEdit[] | undefined;
+    const proposedEdits = (action.proposed_data as { edits?: MetadataEdit[] }).edits;
+
+    if (appliedEdits && appliedEdits.length > 0) {
+        // Use old values from result_data (most reliable)
+        for (const edit of appliedEdits) {
+            try {
+                // old_value can be null (meaning field was empty), so use empty string
+                item.setField(edit.field, edit.old_value ?? '');
+            } catch (error) {
+                logger(`undoEditMetadataAction: Failed to revert ${edit.field}: ${error}`, 1);
+                // Continue with other fields
+            }
         }
+        logger(`undoEditMetadataAction: Reverted ${appliedEdits.length} edits using result_data on ${library_id}-${zotero_key}`, 1);
+    } else if (proposedEdits && proposedEdits.length > 0) {
+        // Fallback: use old values from proposed_data (less reliable)
+        logger(`undoEditMetadataAction: Falling back to proposed_data for ${library_id}-${zotero_key}`, 1);
+        for (const edit of proposedEdits) {
+            try {
+                item.setField(edit.field, edit.old_value ?? '');
+            } catch (error) {
+                logger(`undoEditMetadataAction: Failed to revert ${edit.field}: ${error}`, 1);
+            }
+        }
+    } else {
+        throw new Error('No edit data available for undo');
     }
 
     // Save the item
     try {
         await item.saveTx();
-        logger(`undoEditMetadataAction: Reverted ${edits.length} edits on ${library_id}-${zotero_key}`, 1);
     } catch (error) {
         throw new Error(`Failed to save item after undo: ${error}`);
     }
