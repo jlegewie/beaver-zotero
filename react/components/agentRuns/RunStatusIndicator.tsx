@@ -31,9 +31,7 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, 
     const text = isRetrying
         // ? `Retrying (${retryState.attempt}/${retryState.maxAttempts}): ${retryState.reason}`
         ? `Retrying...`
-        : status === 'awaiting_deferred'
-            ? 'Processing'
-            : 'Generating';
+        : 'Generating';
 
     // Structure matches ThinkingPartView for smooth visual transition
     return (
