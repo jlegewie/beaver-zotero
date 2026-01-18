@@ -12,7 +12,7 @@ import {
 } from '../../agents/agentActions';
 import { sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { EditMetadataPreview } from './EditMetadataPreview';
-import { executeEditMetadataAction, undoEditMetadataAction } from '../../utils/editMetadataActions';
+import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
 import { logger } from '../../../src/utils/logger';
 import {
     TickIcon,
@@ -33,6 +33,29 @@ import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
+
+/**
+ * Prompt user to confirm overwriting manually modified fields during undo.
+ * Returns true if user confirms, false otherwise.
+ */
+function confirmOverwriteManualChanges(modifiedFields: string[]): boolean {
+    const fieldList = modifiedFields.join(', ');
+    const title = 'Overwrite manual changes?';
+    const message = modifiedFields.length === 1
+        ? `The field "${fieldList}" has been manually modified since the edit was applied. Do you want to overwrite your changes and revert to the original value?`
+        : `The following fields have been manually modified since the edit was applied: ${fieldList}. Do you want to overwrite your changes and revert to the original values?`;
+
+    const buttonIndex = Zotero.Prompt.confirm({
+        window: Zotero.getMainWindow(),
+        title,
+        text: message,
+        button0: Zotero.Prompt.BUTTON_TITLE_YES,
+        button1: Zotero.Prompt.BUTTON_TITLE_NO,
+        defaultButton: 1,
+    });
+
+    return buttonIndex === 0;
+}
 
 interface AgentActionViewProps {
     toolcallId: string;
@@ -216,18 +239,31 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         setIsProcessingAction(true);
         try {
             if (toolName === 'edit_metadata') {
-                const result = await undoEditMetadataAction(action);
+                // First pass: check what needs to be reverted without forcing
+                let result: UndoResult = await undoEditMetadataAction(action, false);
                 
-                // Log warnings for edge cases
+                // If some fields were manually modified, ask for confirmation
+                if (result.needsConfirmation && result.manuallyModified.length > 0) {
+                    const shouldOverwrite = confirmOverwriteManualChanges(result.manuallyModified);
+                    
+                    if (shouldOverwrite) {
+                        // User confirmed: force revert all fields
+                        result = await undoEditMetadataAction(action, true);
+                        logger(`AgentActionView: Force-reverted ${result.fieldsReverted} fields after user confirmation`, 1);
+                    } else {
+                        // User declined: the first pass already reverted non-modified fields
+                        logger(`AgentActionView: User declined to overwrite ${result.manuallyModified.length} manually modified fields`, 1);
+                    }
+                }
+                
+                // Log edge cases
                 if (result.alreadyReverted.length > 0) {
-                    logger(`AgentActionView: Fields already reverted: ${result.alreadyReverted.join(', ')}`, 1);
-                }
-                if (result.manuallyModified.length > 0) {
-                    logger(`AgentActionView: Fields manually modified (preserved): ${result.manuallyModified.join(', ')}`, 1);
+                    logger(`AgentActionView: Fields already at original value: ${result.alreadyReverted.join(', ')}`, 1);
                 }
                 
-                // Update action status to 'undone' (even if some fields were skipped)
-                // The action is considered undone from the AI's perspective
+                // Update action status to 'undone'
+                // Even if some fields were manually modified and user declined,
+                // we consider the AI's changes undone (user has taken control)
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone edit_metadata action ${action.id} (${result.fieldsReverted} fields reverted)`, 1);
             }
