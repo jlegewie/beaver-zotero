@@ -12,6 +12,7 @@ export { default as LinkForwardIcon } from './LinkForwardIcon';
 export { default as LinkBackwardIcon } from './LinkBackwardIcon';
 export { default as PropertyEditIcon } from './propertyEditIcon';
 export { default as PdfIcon } from './PdfIcon';
+export { default as TagIcon } from './TagIcon';
 export { default as HighlighterIcon } from './HighlighterIcon';
 export { default as PinIcon } from './PinIcon';
 export { default as DollarCircleIcon } from './DollarCircleIcon';
