@@ -646,6 +646,7 @@
 [id^="beaver-pane-"] .opacity-90 { opacity: 0.9; }
 [id^="beaver-pane-"] .opacity-100 { opacity: 1; }
 [id^="beaver-pane-"] .cursor-pointer { cursor: pointer; }
+[id^="beaver-pane-"] .cursor-default { cursor: default; }
 [id^="beaver-pane-"] .cursor-not-allowed { cursor: not-allowed; }
 /* Scaling */
 
