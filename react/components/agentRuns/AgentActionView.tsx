@@ -216,10 +216,20 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         setIsProcessingAction(true);
         try {
             if (toolName === 'edit_metadata') {
-                await undoEditMetadataAction(action);
-                // Update action status to 'undone'
+                const result = await undoEditMetadataAction(action);
+                
+                // Log warnings for edge cases
+                if (result.alreadyReverted.length > 0) {
+                    logger(`AgentActionView: Fields already reverted: ${result.alreadyReverted.join(', ')}`, 1);
+                }
+                if (result.manuallyModified.length > 0) {
+                    logger(`AgentActionView: Fields manually modified (preserved): ${result.manuallyModified.join(', ')}`, 1);
+                }
+                
+                // Update action status to 'undone' (even if some fields were skipped)
+                // The action is considered undone from the AI's perspective
                 undoAgentAction(action.id);
-                logger(`AgentActionView: Undone edit_metadata action ${action.id}`, 1);
+                logger(`AgentActionView: Undone edit_metadata action ${action.id} (${result.fieldsReverted} fields reverted)`, 1);
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to undo action';

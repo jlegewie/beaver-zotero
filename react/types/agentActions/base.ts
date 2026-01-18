@@ -26,7 +26,7 @@ export interface AppliedMetadataEdit {
     /** The value that was applied */
     applied_value: any;
     /** The original value before the edit (for undo) */
-    old_value?: string | null;
+    old_value?: any;
 }
 
 /**

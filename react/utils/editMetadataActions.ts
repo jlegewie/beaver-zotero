@@ -12,8 +12,38 @@ import { logger } from '../../src/utils/logger';
  */
 interface MetadataEdit {
     field: string;
-    old_value: string | null;
-    new_value: string;
+    old_value: any;
+    new_value: any;
+}
+
+/**
+ * Result of an undo operation
+ */
+export interface UndoResult {
+    /** Whether any fields were actually reverted */
+    fieldsReverted: number;
+    /** Fields that were already at old_value (no change needed) */
+    alreadyReverted: string[];
+    /** Fields that were manually modified by the user (not reverted to preserve user changes) */
+    manuallyModified: string[];
+    /** Whether user confirmation is needed (some fields were manually modified) */
+    needsConfirmation: boolean;
+}
+
+/**
+ * Normalize a field value for comparison.
+ * Handles null, undefined, empty strings, and type coercion.
+ */
+function normalizeValue(value: any): string {
+    if (value === null || value === undefined) return '';
+    return String(value);
+}
+
+/**
+ * Compare two field values for equality.
+ */
+function valuesEqual(a: any, b: any): boolean {
+    return normalizeValue(a) === normalizeValue(b);
 }
 
 /**
@@ -44,10 +74,10 @@ export async function executeEditMetadataAction(
     for (const edit of edits) {
         try {
             // Capture current value before applying (for undo)
-            let oldValue: string | null = null;
+            let oldValue: any = null;
             try {
                 const currentValue = item.getField(edit.field);
-                oldValue = currentValue ? String(currentValue) : null;
+                oldValue = currentValue ?? null;
             } catch {
                 // Field might not exist, treat as null
                 oldValue = null;
@@ -95,9 +125,20 @@ export async function executeEditMetadataAction(
  * Undo an edit_metadata agent action by reverting edits to the original values.
  * Uses old values from result_data.applied_edits (captured at apply-time) for reliability.
  * Falls back to proposed_data.edits if result_data is not available.
+ * 
+ * Handles three scenarios for each field:
+ * 1. current_value == applied_value: Normal undo - revert to old_value
+ * 2. current_value == old_value: Already reverted - no change needed
+ * 3. current_value differs from both: User manually edited - preserve user's change
+ * 
  * @param action The agent action to undo (must have been applied)
+ * @param forceRevert If true, revert all fields even if manually modified (skip confirmation)
+ * @returns Information about what was reverted and what needs confirmation
  */
-export async function undoEditMetadataAction(action: AgentAction): Promise<void> {
+export async function undoEditMetadataAction(
+    action: AgentAction,
+    forceRevert: boolean = false
+): Promise<UndoResult> {
     const { library_id, zotero_key } = action.proposed_data as {
         library_id: number;
         zotero_key: string;
@@ -113,37 +154,82 @@ export async function undoEditMetadataAction(action: AgentAction): Promise<void>
     // Fall back to proposed_data.edits if result_data is not available
     const appliedEdits = action.result_data?.applied_edits as AppliedMetadataEdit[] | undefined;
     const proposedEdits = (action.proposed_data as { edits?: MetadataEdit[] }).edits;
-
-    if (appliedEdits && appliedEdits.length > 0) {
-        // Use old values from result_data (most reliable)
-        for (const edit of appliedEdits) {
-            try {
-                // old_value can be null (meaning field was empty), so use empty string
-                item.setField(edit.field, edit.old_value ?? '');
-            } catch (error) {
-                logger(`undoEditMetadataAction: Failed to revert ${edit.field}: ${error}`, 1);
-                // Continue with other fields
-            }
-        }
-        logger(`undoEditMetadataAction: Reverted ${appliedEdits.length} edits using result_data on ${library_id}-${zotero_key}`, 1);
-    } else if (proposedEdits && proposedEdits.length > 0) {
-        // Fallback: use old values from proposed_data (less reliable)
-        logger(`undoEditMetadataAction: Falling back to proposed_data for ${library_id}-${zotero_key}`, 1);
-        for (const edit of proposedEdits) {
-            try {
-                item.setField(edit.field, edit.old_value ?? '');
-            } catch (error) {
-                logger(`undoEditMetadataAction: Failed to revert ${edit.field}: ${error}`, 1);
-            }
-        }
-    } else {
+    
+    const editsToProcess = appliedEdits ?? proposedEdits;
+    
+    if (!editsToProcess || editsToProcess.length === 0) {
         throw new Error('No edit data available for undo');
     }
 
-    // Save the item
-    try {
-        await item.saveTx();
-    } catch (error) {
-        throw new Error(`Failed to save item after undo: ${error}`);
+    const result: UndoResult = {
+        fieldsReverted: 0,
+        alreadyReverted: [],
+        manuallyModified: [],
+        needsConfirmation: false,
+    };
+
+    let needsSave = false;
+
+    for (const edit of editsToProcess) {
+        const field = edit.field;
+        const oldValue = 'old_value' in edit ? edit.old_value : null;
+        const appliedValue = 'applied_value' in edit ? edit.applied_value : (edit as MetadataEdit).new_value;
+        
+        // Get current value in Zotero
+        let currentValue: any = null;
+        try {
+            currentValue = item.getField(field);
+        } catch {
+            currentValue = null;
+        }
+
+        // Determine scenario
+        if (valuesEqual(currentValue, oldValue)) {
+            // Scenario 2: Already reverted - no change needed
+            result.alreadyReverted.push(field);
+            logger(`undoEditMetadataAction: Field '${field}' already at old value, skipping`, 1);
+        } else if (valuesEqual(currentValue, appliedValue)) {
+            // Scenario 1: Normal undo - revert to old_value
+            try {
+                item.setField(field, oldValue ?? '');
+                result.fieldsReverted++;
+                needsSave = true;
+                logger(`undoEditMetadataAction: Reverted '${field}' to old value`, 1);
+            } catch (error) {
+                logger(`undoEditMetadataAction: Failed to revert ${field}: ${error}`, 1);
+            }
+        } else {
+            // Scenario 3: User manually edited the field
+            if (forceRevert) {
+                // Force revert even if manually modified
+                try {
+                    item.setField(field, oldValue ?? '');
+                    result.fieldsReverted++;
+                    needsSave = true;
+                    logger(`undoEditMetadataAction: Force-reverted manually modified '${field}'`, 1);
+                } catch (error) {
+                    logger(`undoEditMetadataAction: Failed to revert ${field}: ${error}`, 1);
+                }
+            } else {
+                // Don't overwrite user's manual changes
+                result.manuallyModified.push(field);
+                logger(`undoEditMetadataAction: Field '${field}' was manually modified, preserving user's change`, 1);
+            }
+        }
     }
+
+    // Save the item if any fields were reverted
+    if (needsSave) {
+        try {
+            await item.saveTx();
+            logger(`undoEditMetadataAction: Saved ${result.fieldsReverted} reverted fields on ${library_id}-${zotero_key}`, 1);
+        } catch (error) {
+            throw new Error(`Failed to save item after undo: ${error}`);
+        }
+    }
+
+    // Set flag if confirmation is needed for manually modified fields
+    result.needsConfirmation = result.manuallyModified.length > 0 && !forceRevert;
+
+    return result;
 }
