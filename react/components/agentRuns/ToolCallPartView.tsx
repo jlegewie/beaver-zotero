@@ -164,6 +164,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             <AgentActionView
                 toolcallId={part.tool_call_id}
                 toolName={part.tool_name}
+                runId={runId}
                 pendingApproval={pendingApproval}
             />
         );

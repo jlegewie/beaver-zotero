@@ -32,6 +32,8 @@ type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 interface AgentActionViewProps {
     toolcallId: string;
     toolName: string;
+    /** Run ID for persisting action state to backend */
+    runId: string;
     /** Pending approval request if awaiting user decision */
     pendingApproval: PendingApproval | null;
     /** Called when applying a pending action (not awaiting approval) */
