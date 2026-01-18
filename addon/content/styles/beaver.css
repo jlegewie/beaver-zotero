@@ -1942,15 +1942,15 @@
 }
 
 [id^="beaver-pane-"] .diff-deletion {
-    background-color: rgba(248, 81, 73, 0.15);
-    border-left-color: #f85149;
+    background-color: rgba(186, 42, 41, 0.15);
+    border-left-color: #b82A29;
     color: var(--fill-primary);
     opacity: 0.85;
 }
 
 [id^="beaver-pane-"] .diff-addition {
-    background-color: rgba(63, 185, 80, 0.15);
-    border-left-color: #3fb950;
+    background-color: rgba(20, 135, 85, 0.15);
+    border-left-color: #148D55;
     color: var(--fill-primary);
     opacity: 0.85;
 }
