@@ -66,11 +66,13 @@ import {
     clearAgentActionsAtom,
     threadAgentActionsAtom,
     isAnnotationAgentAction,
+    isEditMetadataAgentAction,
     hasAppliedZoteroItem,
     AgentAction,
     setPendingApprovalAtom,
     buildPendingApprovalFromAction,
 } from '../agents/agentActions';
+import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
@@ -316,15 +318,61 @@ async function deleteAppliedZoteroItems(actions: AgentAction[]): Promise<number>
 }
 
 /**
- * Prompt user to confirm deletion of applied agent actions.
- * Returns true if user confirms deletion, false otherwise.
+ * Undo applied metadata edits from agent actions.
+ * Reverts fields to their original values, but preserves user's manual changes.
+ * Returns the number of actions processed (regardless of whether fields were actually reverted).
  */
-function confirmDeleteAppliedActions(actions: AgentAction[]): boolean {
-    const allAreAnnotations = actions.every(isAnnotationAgentAction);
-    const title = allAreAnnotations ? 'Delete annotations?' : 'Undo changes?';
-    const message = allAreAnnotations
-        ? 'Do you want to delete the annotations created by the assistant messages that will be regenerated?'
-        : 'Do you want to undo the changes created by the assistant messages that will be regenerated?';
+async function undoAppliedMetadataEdits(actions: AgentAction[]): Promise<number> {
+    let processedCount = 0;
+    for (const action of actions) {
+        if (action.status === 'applied' && isEditMetadataAgentAction(action)) {
+            try {
+                // Don't force revert - skip fields that user manually modified
+                const result = await undoEditMetadataAction(action, false);
+                processedCount++;
+                
+                // Log summary for debugging
+                if (result.manuallyModified.length > 0) {
+                    logger(`undoAppliedMetadataEdits: Preserved ${result.manuallyModified.length} manually modified field(s) for action ${action.id}`, 1);
+                }
+            } catch (error) {
+                logger(`undoAppliedMetadataEdits: Failed to undo action ${action.id}: ${error}`, 1);
+            }
+        }
+    }
+    return processedCount;
+}
+
+/**
+ * Actions to undo when regenerating a run.
+ */
+interface ActionsToUndo {
+    annotations: AgentAction[];
+    metadataEdits: AgentAction[];
+}
+
+/**
+ * Prompt user to confirm undoing applied agent actions during regeneration.
+ * Shows a combined dialog listing all types of changes that will be undone.
+ * Returns true if user confirms, false otherwise.
+ */
+function confirmUndoAppliedActions(actions: ActionsToUndo): boolean {
+    const { annotations, metadataEdits } = actions;
+    const totalActions = annotations.length + metadataEdits.length;
+    
+    if (totalActions === 0) return true;
+    
+    // Build a list of changes
+    const changeLines: string[] = [];
+    if (annotations.length > 0) {
+        changeLines.push(`• ${annotations.length} PDF annotation${annotations.length === 1 ? '' : 's'}`);
+    }
+    if (metadataEdits.length > 0) {
+        changeLines.push(`• ${metadataEdits.length} metadata edit${metadataEdits.length === 1 ? '' : 's'}`);
+    }
+    
+    const title = 'Undo changes?';
+    const message = `The following changes will be undone when regenerating:\n\n${changeLines.join('\n')}\n\nDo you want to undo these changes?`;
 
     const buttonIndex = Zotero.Prompt.confirm({
         window: Zotero.getMainWindow(),
@@ -337,6 +385,7 @@ function confirmDeleteAppliedActions(actions: AgentAction[]): boolean {
 
     return buttonIndex === 0;
 }
+
 
 // =============================================================================
 // Missing Zotero Data Handling
@@ -1140,18 +1189,34 @@ export const regenerateFromRunAtom = atom(
             // Collect run IDs that will be removed (target run and all subsequent)
             const runIdsToRemove = threadRuns.slice(runIndex).map(r => r.id);
 
-            // Find applied annotation actions for runs being removed
+            // Find applied actions for runs being removed
             const allAgentActions = get(threadAgentActionsAtom);
-            const actionsToDelete = allAgentActions
-                .filter(a => runIdsToRemove.includes(a.run_id))
+            const actionsInRemovedRuns = allAgentActions.filter(a => runIdsToRemove.includes(a.run_id));
+            
+            // Categorize by type
+            const annotationsToDelete = actionsInRemovedRuns
                 .filter(isAnnotationAgentAction)
                 .filter(hasAppliedZoteroItem);
+            const metadataEditsToUndo = actionsInRemovedRuns
+                .filter(isEditMetadataAgentAction)
+                .filter(a => a.status === 'applied');
 
-            // Prompt user to confirm deletion of applied actions
-            if (actionsToDelete.length > 0) {
-                const shouldDelete = confirmDeleteAppliedActions(actionsToDelete);
-                if (shouldDelete) {
-                    await deleteAppliedZoteroItems(actionsToDelete);
+            // Prompt user to confirm undoing applied actions
+            const hasActionsToUndo = annotationsToDelete.length > 0 || metadataEditsToUndo.length > 0;
+            if (hasActionsToUndo) {
+                const shouldUndo = confirmUndoAppliedActions({
+                    annotations: annotationsToDelete,
+                    metadataEdits: metadataEditsToUndo,
+                });
+                if (shouldUndo) {
+                    // Undo annotations (delete Zotero items)
+                    if (annotationsToDelete.length > 0) {
+                        await deleteAppliedZoteroItems(annotationsToDelete);
+                    }
+                    // Undo metadata edits (revert to original values)
+                    if (metadataEditsToUndo.length > 0) {
+                        await undoAppliedMetadataEdits(metadataEditsToUndo);
+                    }
                 }
             }
 
@@ -1265,18 +1330,34 @@ export const regenerateWithEditedPromptAtom = atom(
             // Collect run IDs that will be removed (target run and all subsequent)
             const runIdsToRemove = threadRuns.slice(runIndex).map(r => r.id);
 
-            // Find applied annotation actions for runs being removed
+            // Find applied actions for runs being removed
             const allAgentActions = get(threadAgentActionsAtom);
-            const actionsToDelete = allAgentActions
-                .filter(a => runIdsToRemove.includes(a.run_id))
+            const actionsInRemovedRuns = allAgentActions.filter(a => runIdsToRemove.includes(a.run_id));
+            
+            // Categorize by type
+            const annotationsToDelete = actionsInRemovedRuns
                 .filter(isAnnotationAgentAction)
                 .filter(hasAppliedZoteroItem);
+            const metadataEditsToUndo = actionsInRemovedRuns
+                .filter(isEditMetadataAgentAction)
+                .filter(a => a.status === 'applied');
 
-            // Prompt user to confirm deletion of applied actions
-            if (actionsToDelete.length > 0) {
-                const shouldDelete = confirmDeleteAppliedActions(actionsToDelete);
-                if (shouldDelete) {
-                    await deleteAppliedZoteroItems(actionsToDelete);
+            // Prompt user to confirm undoing applied actions
+            const hasActionsToUndo = annotationsToDelete.length > 0 || metadataEditsToUndo.length > 0;
+            if (hasActionsToUndo) {
+                const shouldUndo = confirmUndoAppliedActions({
+                    annotations: annotationsToDelete,
+                    metadataEdits: metadataEditsToUndo,
+                });
+                if (shouldUndo) {
+                    // Undo annotations (delete Zotero items)
+                    if (annotationsToDelete.length > 0) {
+                        await deleteAppliedZoteroItems(annotationsToDelete);
+                    }
+                    // Undo metadata edits (revert to original values)
+                    if (metadataEditsToUndo.length > 0) {
+                        await undoAppliedMetadataEdits(metadataEditsToUndo);
+                    }
                 }
             }
 
