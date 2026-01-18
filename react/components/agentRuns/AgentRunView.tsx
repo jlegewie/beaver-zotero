@@ -4,7 +4,7 @@ import { AgentRun, ModelResponse } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
-import { AgentActionsDisplay } from './AgentActionsDisplay';
+import { AgentActionsReview } from './AgentActionsReview';
 import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
@@ -116,7 +116,7 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
             )}
 
             {/* Agent actions (e.g., create item from citations) */}
-            {run.status === 'completed' && <AgentActionsDisplay run={run} />}
+            {run.status === 'completed' && <AgentActionsReview run={run} />}
 
             {/* Resuming failed request display */}
             {wasResumed && <RunResumeDisplay runId={run.id} />}
