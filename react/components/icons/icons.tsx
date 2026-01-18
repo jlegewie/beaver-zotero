@@ -10,6 +10,7 @@ export { default as SettingsIcon } from './SettingsIcon';
 export { default as SettingsSolidIcon } from './SettingsSolidIcon';
 export { default as LinkForwardIcon } from './LinkForwardIcon';
 export { default as LinkBackwardIcon } from './LinkBackwardIcon';
+export { default as PropertyEditIcon } from './propertyEditIcon';
 export { default as PdfIcon } from './PdfIcon';
 export { default as HighlighterIcon } from './HighlighterIcon';
 export { default as PinIcon } from './PinIcon';
