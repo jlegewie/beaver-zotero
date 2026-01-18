@@ -41,7 +41,7 @@ interface AgentActionViewProps {
 }
 
 interface StatusConfig {
-    icon: React.FC<React.SVGProps<SVGSVGElement>>;
+    icon: React.FC<React.SVGProps<SVGSVGElement>> | null;
     label: string;
     iconClassName?: string;
     showApply: boolean;
@@ -60,7 +60,7 @@ const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
         showRetry: false,
     },
     pending: {
-        icon: ClockIcon,
+        icon: null,
         label: 'Pending',
         iconClassName: 'font-color-secondary',
         showApply: true,
@@ -176,9 +176,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     // Determine what icon to show in header
     const getHeaderIcon = () => {
-        if (isAwaitingApproval) return PropertyEditIcon;
+        if (isAwaitingApproval) return toolName === 'edit_metadata' ? PropertyEditIcon : ClockIcon;
         if (isExpanded) return ArrowDownIcon;
         if (isHovered) return ArrowRightIcon;
+        if (config.icon === null) return toolName === 'edit_metadata' ? PropertyEditIcon : ClockIcon;
         return config.icon;
     };
 
@@ -210,6 +211,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         </div>
                         <div className="display-flex font-color-primary">
                             {getActionLabel(toolName)}
+                        </div>
+                        <div className="font-color-tertiary">
+                            {status}
                         </div>
                     </div>
                 </button>
@@ -307,7 +311,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             <Button
                                 variant="solid"
                                 onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                disabled={!isAwaitingApproval && !onApplyPending}
+                                disabled={(!isAwaitingApproval && status !== 'pending') && !onApplyPending}
                             >
                                 <span>Apply<span className="opacity-50 ml-1">⏎</span></span>
                             </Button>
