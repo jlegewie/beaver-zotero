@@ -13,6 +13,47 @@ import type {
  */
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
+// =============================================================================
+// Edit Metadata Types
+// =============================================================================
+
+/**
+ * A single applied metadata field edit.
+ */
+export interface AppliedMetadataEdit {
+    /** The field that was edited */
+    field: string;
+    /** The value that was applied */
+    applied_value: any;
+}
+
+/**
+ * A single failed metadata field edit.
+ */
+export interface FailedMetadataEdit {
+    /** The field that failed to be edited */
+    field: string;
+    /** The error message explaining why the edit failed */
+    error: string;
+}
+
+/**
+ * Result data after applying an edit metadata action.
+ * Extends ZoteroItemReference (library_id + zotero_key).
+ */
+export interface EditMetadataResultData {
+    /** Library ID of the edited item */
+    library_id: number;
+    /** Zotero key of the edited item */
+    zotero_key: string;
+    /** List of field edits that were successfully applied */
+    applied_edits: AppliedMetadataEdit[];
+    /** List of field names that were rejected by the user */
+    rejected_edits: string[];
+    /** List of field edits that failed with errors */
+    failed_edits: FailedMetadataEdit[];
+}
+
 /**
  * Types of actions that can be proposed by the AI
  */
