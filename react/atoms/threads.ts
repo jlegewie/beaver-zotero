@@ -12,7 +12,16 @@ import { resetMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
 import { ExternalReference } from "../types/externalReferences";
 import { threadRunsAtom, activeRunAtom } from "../agents/atoms";
-import { threadAgentActionsAtom, isCreateItemAgentAction, AgentAction, validateAppliedAgentAction, undoAgentActionAtom } from "../agents/agentActions";
+import { 
+    threadAgentActionsAtom, 
+    isCreateItemAgentAction, 
+    AgentAction, 
+    validateAppliedAgentAction, 
+    undoAgentActionAtom,
+    setPendingApprovalAtom,
+    buildPendingApprovalFromAction,
+} from "../agents/agentActions";
+import { WSDeferredApprovalRequest } from "../../src/services/agentProtocol";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
 import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
@@ -266,6 +275,34 @@ export const loadThreadAtom = atom(
                         .filter(Boolean) as ExternalReference[];
                     set(addExternalReferencesToMappingAtom, references);
                     set(checkExternalReferencesAtom, references);
+                }
+                
+                // Check for runs with awaiting_deferred status and set up pending approval
+                const awaitingDeferredRun = runs.find(run => run.status === 'awaiting_deferred');
+                if (awaitingDeferredRun && agent_actions) {
+                    // Find the pending action for this run (status === 'pending')
+                    const pendingAction = agent_actions.find(
+                        (action: AgentAction) => 
+                            action.run_id === awaitingDeferredRun.id && 
+                            action.status === 'pending'
+                    );
+                    
+                    if (pendingAction) {
+                        logger(`loadThreadAtom: Found pending action ${pendingAction.id} for awaiting_deferred run ${awaitingDeferredRun.id}`, 1);
+                        // Build and set the pending approval
+                        const approval = await buildPendingApprovalFromAction(pendingAction);
+                        if (approval) {
+                            set(setPendingApprovalAtom, {
+                                action_id: approval.actionId,
+                                toolcall_id: approval.toolcallId,
+                                action_type: approval.actionType,
+                                action_data: approval.actionData,
+                                current_value: approval.currentValue,
+                            } as WSDeferredApprovalRequest);
+                        }
+                    } else {
+                        logger(`loadThreadAtom: No pending action found for awaiting_deferred run ${awaitingDeferredRun.id}`, 1);
+                    }
                 }
             } else {
                 // No runs found, clear state

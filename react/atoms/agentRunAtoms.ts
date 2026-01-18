@@ -68,6 +68,7 @@ import {
     hasAppliedZoteroItem,
     AgentAction,
     setPendingApprovalAtom,
+    buildPendingApprovalFromAction,
 } from '../agents/agentActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
@@ -679,6 +680,67 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
         onError: (event: WSErrorEvent) => {
             logger('WS onError:', event, 1);
+            
+            // Special handling for awaiting_deferred - this is not an error, it's a pause
+            // The run should be marked as awaiting_deferred and moved to completed runs
+            if (event.type === 'awaiting_deferred') {
+                logger('WS onError: Handling awaiting_deferred event', 1);
+                
+                // Extract action_id from event details
+                let actionId: string | null = null;
+                if (event.details) {
+                    try {
+                        const details = JSON.parse(event.details);
+                        actionId = details.action_id;
+                    } catch (e) {
+                        logger(`WS onError: Failed to parse awaiting_deferred details: ${e}`, 1);
+                    }
+                }
+                
+                // Update run status to awaiting_deferred and move to threadRuns
+                // (since onDone won't be called for this case)
+                set(activeRunAtom, (prev) => {
+                    if (prev) {
+                        const finalRun: AgentRun = {
+                            ...prev,
+                            status: 'awaiting_deferred',
+                        };
+                        set(threadRunsAtom, (runs) => [...runs, finalRun]);
+                    }
+                    return null;
+                });
+                
+                // If we have an action_id, set up the pending approval from the agent action
+                // This allows the UI to show the approval dialog
+                if (actionId) {
+                    const agentActions = store.get(threadAgentActionsAtom);
+                    const action = agentActions.find((a: AgentAction) => a.id === actionId);
+                    if (action) {
+                        buildPendingApprovalFromAction(action).then(approval => {
+                            if (approval) {
+                                set(setPendingApprovalAtom, {
+                                    action_id: approval.actionId,
+                                    toolcall_id: approval.toolcallId,
+                                    action_type: approval.actionType,
+                                    action_data: approval.actionData,
+                                    current_value: approval.currentValue,
+                                } as WSDeferredApprovalRequest);
+                            }
+                        }).catch(err => {
+                            logger(`WS onError: Failed to build pending approval: ${err}`, 1);
+                        });
+                    } else {
+                        logger(`WS onError: Agent action ${actionId} not found for pending approval`, 1);
+                    }
+                }
+                
+                set(isWSChatPendingAtom, false);
+                set(wsRetryAtom, null);
+                agentService.close();
+                return;
+            }
+            
+            // Normal error handling
             set(wsErrorAtom, event);
             set(activeRunAtom, (prev) => prev ? {
                 ...prev,

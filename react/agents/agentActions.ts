@@ -656,3 +656,49 @@ export const getPendingApprovalForToolcallAtom = atom(
     }
 );
 
+/**
+ * Build a PendingApproval from an AgentAction.
+ * Fetches current field values for edit_metadata actions.
+ */
+export async function buildPendingApprovalFromAction(action: AgentAction): Promise<PendingApproval | null> {
+    if (!action.toolcall_id) {
+        return null;
+    }
+
+    const actionType = action.action_type as AgentActionType;
+    const actionData = action.proposed_data ?? {};
+    let currentValue: Record<string, string | null> | undefined;
+
+    if (actionType === 'edit_metadata') {
+        const libraryId = typeof actionData.library_id === 'number'
+            ? actionData.library_id
+            : Number(actionData.library_id ?? 0);
+        const zoteroKey = typeof actionData.zotero_key === 'string'
+            ? actionData.zotero_key
+            : '';
+        const edits = Array.isArray(actionData.edits) ? actionData.edits : [];
+
+        if (libraryId && zoteroKey && edits.length > 0) {
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+            if (item) {
+                const values: Record<string, string | null> = {};
+                for (const edit of edits) {
+                    const field = typeof edit?.field === 'string' ? edit.field : null;
+                    if (!field) continue;
+                    const value = item.getField(field);
+                    values[field] = value ? String(value) : null;
+                }
+                currentValue = values;
+            }
+        }
+    }
+
+    return {
+        actionId: action.id,
+        toolcallId: action.toolcall_id,
+        actionType,
+        actionData,
+        currentValue,
+    };
+}
+
