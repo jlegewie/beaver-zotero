@@ -424,6 +424,33 @@ export const addAgentActionsAtom = atom(
 );
 
 /**
+ * Upsert agent actions - updates existing actions (by id) or adds new ones.
+ * Used when receiving agent_actions events which may contain updates to existing actions.
+ */
+export const upsertAgentActionsAtom = atom(
+    null,
+    (_, set, newActions: AgentAction[]) => {
+        set(threadAgentActionsAtom, (prev: AgentAction[]) => {
+            const newActionsById = new Map(newActions.map(a => [a.id, a]));
+            
+            // Update existing actions if they match
+            const updated = prev.map(existing => {
+                const update = newActionsById.get(existing.id);
+                if (update) {
+                    newActionsById.delete(existing.id); // Mark as processed
+                    return { ...existing, ...update };
+                }
+                return existing;
+            });
+            
+            // Add remaining new actions (those not already in the list)
+            const additions = Array.from(newActionsById.values());
+            return [...updated, ...additions];
+        });
+    }
+);
+
+/**
  * Delete agent actions by IDs
  */
 export const deleteAgentActionsAtom = atom(
