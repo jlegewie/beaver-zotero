@@ -21,6 +21,7 @@ import {
     LibraryIcon,
     BookmarkIcon,
     DatabaseIcon,
+    TagIcon,
 } from '../icons/icons';
 import { searchToolVisibilityAtom, toggleSearchToolVisibilityAtom } from '../../atoms/messageUIState';
 
@@ -41,7 +42,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     // List tools - library management
     list_items: TextAlignLeftIcon,
     list_collections: LibraryIcon,
-    list_tags: BookmarkIcon,
+    list_tags: TagIcon,
     list_libraries: DatabaseIcon,
 
     // Metadata tools
