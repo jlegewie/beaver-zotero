@@ -20,5 +20,6 @@ export { AgentActionsReview } from './AgentActionsReview';
 export { default as CreateItemAgentActionDisplay } from './CreateItemAgentActionDisplay';
 export { default as AgentActionItemButtons } from './AgentActionItemButtons';
 export { ApprovalView } from './ApprovalView';
+export { AgentActionView } from './AgentActionView';
 export { EditMetadataPreview } from './EditMetadataPreview';
 
