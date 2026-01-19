@@ -16,6 +16,7 @@ export class KeyboardManager {
     private _addonID = "beaver@jlegewie.com";
     private _intervalId: ReturnType<typeof setInterval> | null = null;
     private _readerListenerRegistered = false;
+    private _readerListenerActive = false;
     private _readerEventCallback: ((event: { reader: any }) => void) | null = null;
 
     constructor() {
@@ -104,7 +105,13 @@ export class KeyboardManager {
             // Only register once to avoid duplicate registrations
             if (!this._readerListenerRegistered) {
                 // Store callback reference for later unregistration
-                this._readerEventCallback = (event) => this.addReaderKeyboardCallback(event);
+                this._readerListenerActive = true;
+                this._readerEventCallback = (event) => {
+                    if (!this._readerListenerActive) {
+                        return;
+                    }
+                    this.addReaderKeyboardCallback(event);
+                };
                 Zotero.Reader.registerEventListener(
                     "renderToolbar", 
                     this._readerEventCallback, 
@@ -197,7 +204,14 @@ export class KeyboardManager {
         // CRITICAL: Unregister reader event listener to prevent SIGSEGV during shutdown
         if (this._readerListenerRegistered && this._readerEventCallback && Zotero?.Reader) {
             try {
-                Zotero.Reader.unregisterEventListener("renderToolbar", this._readerEventCallback);
+                this._readerListenerActive = false;
+                const removed = this.removeReaderListenerSafely(
+                    "renderToolbar",
+                    this._readerEventCallback
+                );
+                if (!removed) {
+                    ztoolkit.log("KeyboardManager: Unable to remove reader listener safely; skipping unregisterEventListener.");
+                }
                 this._readerListenerRegistered = false;
                 this._readerEventCallback = null;
             } catch (e) {
@@ -221,6 +235,22 @@ export class KeyboardManager {
         } catch (e) {
             this._initializedWindows.delete(win);
         }
+    }
+
+    private removeReaderListenerSafely(
+        type: string,
+        handler: (event: { reader: any }) => void
+    ): boolean {
+        const reader = Zotero?.Reader as any;
+        const listeners = reader?._registeredListeners;
+        if (!Array.isArray(listeners)) {
+            return false;
+        }
+        reader._registeredListeners = listeners.filter(
+            (listener: { type?: string; handler?: unknown }) =>
+                !(listener?.type === type && listener?.handler === handler)
+        );
+        return true;
     }
 
     private triggerKeydown = (e: KeyboardEvent) => {
