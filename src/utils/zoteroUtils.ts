@@ -983,3 +983,29 @@ export function deduplicateItems(
     
     return result;
 }
+
+/**
+ * Checks if a field name or ID is valid for a given item.
+ * accounts for primary fields and type-specific mappings.
+ */
+export function isFieldValid(item: Zotero.Item, field: string): boolean {
+    // 1. Check if it's a primary field (e.g., id, libraryID, key, dateAdded)
+    // Primary fields are valid for all items but some cannot be modified via setField.
+    if (Zotero.Items.isPrimaryField(field) || field === 'id') {
+        return true; 
+    }
+
+    const itemTypeID = item.itemTypeID;
+    
+    // 2. Resolve the field ID (handles name -> ID conversion)
+    let fieldID = Zotero.ItemFields.getID(field);
+    if (!fieldID) return false;
+
+    // 3. Resolve base field mappings
+    // This handles the case where you check 'publisher' for an Audio Recording.
+    // Zotero internally maps 'publisher' to 'label' for that type.
+    fieldID = Zotero.ItemFields.getFieldIDFromTypeAndBase(itemTypeID, fieldID) || fieldID;
+
+    // 4. Check the schema for validity
+    return Zotero.ItemFields.isValidForType(fieldID, itemTypeID);
+}
