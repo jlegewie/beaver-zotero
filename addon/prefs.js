@@ -24,6 +24,11 @@ pref("maxPageCount", 300);
 pref("autoApplyAnnotations", true);
 pref("autoImportItems", false);
 
+// Deferred tool preferences: maps tool group to preference (always_ask, always_apply, continue_without_applying)
+// toolToGroup maps tool names to group names (allows renaming tools while preserving preference)
+// groupPreferences maps group names to the actual preference value
+pref("deferredToolPreferences", '{"toolToGroup":{"edit_metadata":"metadata_edits"},"groupPreferences":{"metadata_edits":"always_ask"}}');
+
 // AI settings
 pref("customInstructions", "");
 pref("googleGenerativeAiApiKey", "");
