@@ -37,6 +37,7 @@ import { revealSource } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
+import DeferredToolPreferenceButton from '../ui/buttons/DeferredToolPreferenceButton';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
@@ -121,7 +122,7 @@ const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
     undone: {
         icon: CancelCircleIcon,
         label: 'Undone',
-        iconClassName: 'font-color-secondary',
+        iconClassName: 'font-color-red scale-11',
         showApply: true,
         showReject: false,
         showUndo: false,
@@ -420,7 +421,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     {/* </div> */}
 
                     {/* Action buttons */}
-                    <div className="display-flex flex-row gap-1 px-1 py-1 mt-1">
+                    <div className="display-flex flex-row gap-1 px-2 py-2 mt-1">
+                        {/* Preference for applying agent actions */}
+                        <DeferredToolPreferenceButton toolName={toolName} />
                         <div className="flex-1" />
                         
                         {/* Processing indicator - shown while waiting for backend response */}
@@ -463,22 +466,25 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )}
 
                         {/* Apply button - for awaiting, pending, rejected, undone (not while processing) */}
-                        {config.showApply && !isProcessing && (
+                        {config.showApply && (
                             <Button
-                                variant="solid"
+                                variant={isAwaitingApproval ? 'solid' : 'outline'}
+                                // style={{ border: '1px solid transparent' }}
                                 onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                             >
-                                <span>Apply<span className="opacity-50 ml-1">⏎</span></span>
+                                <span>Apply
+                                    {isAwaitingApproval && <span className="opacity-50 ml-1">⏎</span>}
+                                </span>
                             </Button>
                         )}
 
                         {/* Applied badge - for applied state */}
-                        {status === 'applied' && (
+                        {/* {status === 'applied' && (
                             <div className="display-flex items-center px-3 py-1 rounded bg-success-subtle color-success text-sm">
                                 <Icon icon={TickIcon} className="mr-1 scale-12" />
                                 Success
                             </div>
-                        )}
+                        )} */}
                     </div>
                 </div>
             )}

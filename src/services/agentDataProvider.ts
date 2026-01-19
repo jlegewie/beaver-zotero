@@ -2965,6 +2965,35 @@ export async function handleListLibrariesRequest(
 // =============================================================================
 
 /**
+ * Get the user's preference for a deferred tool.
+ * Reads from Zotero prefs with a two-level structure:
+ * - toolToGroup: Maps tool names to group names
+ * - groupPreferences: Maps group names to preference values
+ */
+function getDeferredToolPreference(toolName: string): DeferredToolPreference {
+    try {
+        const prefString = getPref('deferredToolPreferences');
+        if (prefString && typeof prefString === 'string') {
+            const data = JSON.parse(prefString);
+            const toolToGroup = data.toolToGroup || {};
+            const groupPreferences = data.groupPreferences || {};
+            
+            // Get the group for this tool (fallback to tool name itself)
+            const group = toolToGroup[toolName] ?? toolName;
+            
+            // Get the preference for this group (fallback to 'always_ask')
+            const preference = groupPreferences[group];
+            if (preference === 'always_ask' || preference === 'always_apply' || preference === 'continue_without_applying') {
+                return preference;
+            }
+        }
+    } catch (error) {
+        logger(`getDeferredToolPreference: Failed to read preference for ${toolName}: ${error}`, 1);
+    }
+    return 'always_ask';
+}
+
+/**
  * Handle agent_action_validate request from backend.
  * Validates that an action can be performed and returns the current value
  * for before/after tracking, plus the user's preference.
@@ -3052,9 +3081,8 @@ async function validateEditMetadataAction(
         }
     }
 
-    // TODO: Get user preference from settings
-    // For now, always use 'always_ask' as per initial implementation plan
-    const preference: DeferredToolPreference = 'always_ask';
+    // Get user preference from settings
+    const preference = getDeferredToolPreference('edit_metadata');
 
     return {
         type: 'agent_action_validate_response',
