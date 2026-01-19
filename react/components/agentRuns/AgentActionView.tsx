@@ -149,7 +149,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     runId,
     pendingApproval,
 }) => {
-    const [isExpanded, setIsExpanded] = useState(true);
+    const isAwaitingApproval = pendingApproval !== null;
+    const [isExpanded, setIsExpanded] = useState(isAwaitingApproval);
     const [isHovered, setIsHovered] = useState(false);
     // Track when we're waiting for approval response from backend
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
@@ -208,7 +209,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
     }, [isProcessingApproval, action?.status, action?.id]);
 
-    const isAwaitingApproval = pendingApproval !== null;
     const isProcessing = isProcessingApproval || isProcessingAction;
     // Show 'awaiting' if we have a pending approval OR if we're processing
     const status: ActionStatus | 'awaiting' = (isAwaitingApproval || isProcessing)
@@ -336,8 +336,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     display-flex flex-row py-15 bg-senary
                     ${isExpanded ? 'border-bottom-quinary' : ''}
                 `}
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
             >
                 <button
                     type="button"
@@ -349,39 +347,41 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     aria-expanded={isExpanded}
                     onClick={isProcessing ? () => {} : toggleExpanded}
                     disabled={isProcessing}
+                    onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
                 >
-                    <div className="display-flex flex-row px-3 gap-2">
+                    <div className="display-flex flex-row ml-3 gap-2">
                         <div className={`flex-1 display-flex mt-010 font-color-primary`}>
                             <Icon icon={getHeaderIcon()} className={!isExpanded && !isHovered ? config.iconClassName : undefined} />
                         </div>
                         <div className="display-flex font-color-primary">
                             {getActionLabel(toolName)}
                         </div>
-                        <div className="font-color-tertiary">
+                        {/* <div className="font-color-tertiary">
                             {status}
-                        </div>
+                        </div> */}
                     </div>
                 </button>
                 
-                <div className="flex-1" />
                 {/* Item title */}
                 {/* <Tooltip content={itemTitle} showArrow singleLine> */}
                 {itemTitle && (
                         <Button
                             variant="ghost-secondary"
-                            style={{ maxWidth: '155px' }}
+                            style={{ maxWidth: '155px', fontSize: '0.95rem' }}
                             className="mr-2 truncate"
                             onClick={() => revealSource({ library_id: action?.proposed_data?.library_id, zotero_key: action?.proposed_data?.zotero_key })}
                         >
                             {itemTitle}
                         </Button>
                 )}
+                <div className="flex-1" />
                 {/* <div className="truncate font-color-tertiary mr-3" style={{ maxWidth: '155px' }}>
                     {itemTitle}
                 </div> 
             </Tooltip> */}
                 {!isExpanded && (isAwaitingApproval || status === 'pending') && !isProcessing && (
-                    <div className="display-flex flex-row items-center gap-3 mr-3">
+                    <div className="display-flex flex-row items-center gap-3 mr-3 mt-015">
                         <Tooltip content="Reject" showArrow singleLine>
                             <IconButton
                                 icon={CancelIcon}
