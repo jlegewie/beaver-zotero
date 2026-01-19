@@ -325,10 +325,18 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Determine what icon to show in header
     const getHeaderIcon = () => {
         if (isAwaitingApproval) return toolName === 'edit_metadata' ? PropertyEditIcon : ClockIcon;
-        if (isExpanded) return ArrowDownIcon;
-        if (isHovered) return ArrowRightIcon;
+        if (isHovered && isExpanded) return ArrowDownIcon;
+        if (isHovered && !isExpanded) return ArrowRightIcon;
         if (config.icon === null) return toolName === 'edit_metadata' ? PropertyEditIcon : ClockIcon;
         return config.icon;
+    };
+    
+    // Determine whether to show status icon styling
+    const shouldShowStatusIcon = () => {
+        // Don't show status styling if we're showing arrows on hover
+        if (isHovered) return false;
+        // Show status styling if we have a status icon
+        return config.icon !== null || !isAwaitingApproval;
     };
 
     return (
@@ -355,7 +363,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 >
                     <div className="display-flex flex-row ml-3 gap-2">
                         <div className={`flex-1 display-flex mt-010 font-color-primary`}>
-                            <Icon icon={getHeaderIcon()} className={!isExpanded && !isHovered ? config.iconClassName : undefined} />
+                            <Icon icon={getHeaderIcon()} className={shouldShowStatusIcon() ? config.iconClassName : undefined} />
                         </div>
                         <div className="display-flex flex-row gap-1">
                             <div className="font-color-primary font-medium">{getActionLabel(toolName)}</div>
