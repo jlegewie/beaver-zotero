@@ -468,7 +468,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         {/* Apply button - for awaiting, pending, rejected, undone (not while processing) */}
                         {config.showApply && (
                             <Button
-                                variant={isAwaitingApproval ? 'solid' : 'outline'}
+                                variant={isAwaitingApproval ? 'solid' : 'ghost-secondary'}
                                 // style={{ border: '1px solid transparent' }}
                                 onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                             >
