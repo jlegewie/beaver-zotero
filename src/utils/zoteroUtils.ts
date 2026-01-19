@@ -984,28 +984,52 @@ export function deduplicateItems(
     return result;
 }
 
+
 /**
- * Checks if a field name or ID is valid for a given item.
- * accounts for primary fields and type-specific mappings.
+ * Checks if a field can be edited/set via item.setField() for a given item.
+ * Returns true only for fields that can actually be modified through setField().
  */
 export function isFieldValid(item: Zotero.Item, field: string): boolean {
-    // 1. Check if it's a primary field (e.g., id, libraryID, key, dateAdded)
-    // Primary fields are valid for all items but some cannot be modified via setField.
-    if (Zotero.Items.isPrimaryField(field) || field === 'id') {
-        return true; 
+    // 1. Check if it's a settable primary field
+    // Only these primary fields can be set via setField()
+    const settablePrimaryFields = [
+        'itemTypeID',
+        'dateAdded', 
+        'dateModified',
+        'version',
+        'synced',
+        'createdByUserID',
+        'lastModifiedByUserID'
+    ];
+    
+    if (settablePrimaryFields.includes(field)) {
+        return true;
+    }
+    
+    // 2. Reject all other primary fields (they're read-only or have special setters)
+    if (field === 'id' || Zotero.Items.isPrimaryField(field)) {
+        return false;
     }
 
     const itemTypeID = item.itemTypeID;
     
-    // 2. Resolve the field ID (handles name -> ID conversion)
+    // 3. Resolve the field ID (handles name -> ID conversion)
     let fieldID = Zotero.ItemFields.getID(field);
     if (!fieldID) return false;
 
-    // 3. Resolve base field mappings
+    // 4. Special handling for notes
+    // Notes only support 'title' as an itemData field (and only in loadIn mode)
+    // For regular plugin use, notes can't really have itemData fields set
+    if (item.isNote()) {
+        const fieldName = Zotero.ItemFields.getName(fieldID);
+        return fieldName === 'title';
+    }
+
+    // 5. Resolve base field mappings
     // This handles the case where you check 'publisher' for an Audio Recording.
     // Zotero internally maps 'publisher' to 'label' for that type.
     fieldID = Zotero.ItemFields.getFieldIDFromTypeAndBase(itemTypeID, fieldID) || fieldID;
 
-    // 4. Check the schema for validity
+    // 6. Check the schema for validity
     return Zotero.ItemFields.isValidForType(fieldID, itemTypeID);
 }
