@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
+import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
 import {
     AgentAction,
     PendingApproval,
@@ -32,6 +33,7 @@ import {
     ArrowDownIcon,
     ArrowRightIcon,
     PropertyEditIcon,
+    ArrowUpRightIcon,
 } from '../icons/icons';
 import { revealSource } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
@@ -354,34 +356,31 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         <div className={`flex-1 display-flex mt-010 font-color-primary`}>
                             <Icon icon={getHeaderIcon()} className={!isExpanded && !isHovered ? config.iconClassName : undefined} />
                         </div>
-                        <div className="display-flex font-color-primary">
-                            {getActionLabel(toolName)}
+                        <div className="display-flex flex-row gap-1">
+                            <div className="font-color-primary font-medium">{getActionLabel(toolName)}</div>
+                            {itemTitle && <div className="font-color-secondary">{itemTitle}</div>}
                         </div>
-                        {/* <div className="font-color-tertiary">
-                            {status}
-                        </div> */}
                     </div>
+                    
                 </button>
-                
-                {/* Item title */}
-                {/* <Tooltip content={itemTitle} showArrow singleLine> */}
-                {itemTitle && (
-                        <Button
+            
+                {/* Reveal button */}
+                {action?.proposed_data?.library_id && action?.proposed_data?.zotero_key && (
+                    <Tooltip content='Reveal in Zotero' singleLine>
+                        <IconButton
                             variant="ghost-secondary"
-                            style={{ maxWidth: '155px', fontSize: '0.95rem' }}
-                            className="mr-2 truncate"
+                            icon={ArrowUpRightIcon}
+                            className="font-color-secondary ml-2 mt-015 scale-11"
                             onClick={() => revealSource({ library_id: action?.proposed_data?.library_id, zotero_key: action?.proposed_data?.zotero_key })}
-                        >
-                            {itemTitle}
-                        </Button>
+                        />
+                    </Tooltip>
                 )}
+
                 <div className="flex-1" />
-                {/* <div className="truncate font-color-tertiary mr-3" style={{ maxWidth: '155px' }}>
-                    {itemTitle}
-                </div> 
-            </Tooltip> */}
-                {!isExpanded && (isAwaitingApproval || status === 'pending') && !isProcessing && (
-                    <div className="display-flex flex-row items-center gap-3 mr-3 mt-015">
+
+                {/* Reject and Apply buttons */}
+                {(isAwaitingApproval || status === 'pending') && !isProcessing && (
+                    <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
                         <Tooltip content="Reject" showArrow singleLine>
                             <IconButton
                                 icon={CancelIcon}
@@ -406,19 +405,17 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             {isExpanded && (
                 <div className="display-flex flex-col">
                     {/* Preview section */}
-                    {/* <div className="p-3"> */}
-                        {previewData ? (
-                            <ActionPreview
-                                toolName={toolName}
-                                previewData={previewData}
-                                status={status}
-                            />
-                        ) : (
-                            <div className="text-sm font-color-secondary">
-                                No preview available
-                            </div>
-                        )}
-                    {/* </div> */}
+                    {previewData ? (
+                        <ActionPreview
+                            toolName={toolName}
+                            previewData={previewData}
+                            status={status}
+                        />
+                    ) : (
+                        <div className="text-sm font-color-secondary">
+                            No preview available
+                        </div>
+                    )}
 
                     {/* Action buttons */}
                     <div className="display-flex flex-row gap-1 px-2 py-2 mt-1">
@@ -498,7 +495,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 function getActionLabel(toolName: string): string {
     switch (toolName) {
         case 'edit_metadata':
-            return 'Edit Metadata';
+            return 'Edit';
+        case 'create_item':
+        case 'create_collection':
+            return 'Create';
         default:
             return toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
