@@ -11,8 +11,13 @@ import {
     setAgentActionsToErrorAtom,
 } from '../../agents/agentActions';
 import { sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
+import {
+    editMetadataItemTitlesAtom,
+    setEditMetadataItemTitleAtom,
+} from '../../atoms/messageUIState';
 import { EditMetadataPreview } from './EditMetadataPreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
+import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
 import {
     TickIcon,
@@ -28,6 +33,7 @@ import {
     ArrowRightIcon,
     PropertyEditIcon,
 } from '../icons/icons';
+import { revealSource } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
@@ -97,7 +103,7 @@ const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
     applied: {
         icon: CheckmarkCircleIcon,
         label: 'Applied',
-        iconClassName: 'color-success',
+        iconClassName: 'font-color-green scale-11',
         showApply: false,
         showReject: false,
         showUndo: true,
@@ -106,7 +112,7 @@ const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
     rejected: {
         icon: CancelCircleIcon,
         label: 'Rejected',
-        iconClassName: 'color-error',
+        iconClassName: 'font-color-red scale-11',
         showApply: true,
         showReject: false,
         showUndo: false,
@@ -163,6 +169,32 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
+
+    // Item title state (shared across panes)
+    const itemTitleMap = useAtomValue(editMetadataItemTitlesAtom);
+    const itemTitle = itemTitleMap[toolcallId] ?? null;
+    const setItemTitle = useSetAtom(setEditMetadataItemTitleAtom);
+
+    // Fetch item title for edit_metadata actions
+    useEffect(() => {
+        const fetchTitle = async () => {
+            // Get item info from action or pending approval
+            const libraryId = action?.proposed_data?.library_id ?? pendingApproval?.actionData?.library_id;
+            const zoteroKey = action?.proposed_data?.zotero_key ?? pendingApproval?.actionData?.zotero_key;
+            
+            if (!libraryId || !zoteroKey) return;
+            
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+            if (item) {
+                const title = await shortItemTitle(item);
+                setItemTitle({ key: toolcallId, title });
+            }
+        };
+        
+        if (!itemTitle && toolName === 'edit_metadata') {
+            fetchTitle();
+        }
+    }, [action, pendingApproval, itemTitle, toolcallId, toolName, setItemTitle]);
 
     // Clear processing state when action status changes from 'pending' to a final state
     useEffect(() => {
@@ -309,7 +341,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 <button
                     type="button"
                     className={`
-                        variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left
+                        variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left
                         ${isProcessing ? 'opacity-80' : ''}
                     `}
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
@@ -329,12 +361,24 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         </div>
                     </div>
                 </button>
+                
+                <div className="flex-1" />
                 {/* Item title */}
-                <div className="display-flex flex-row items-center px-3 gap-2">
-                    <ItemRef status={status} config={config} />
-                </div>
-
-                <div className="flex-1"/>
+                {/* <Tooltip content={itemTitle} showArrow singleLine> */}
+                {itemTitle && (
+                        <Button
+                            variant="ghost-secondary"
+                            style={{ maxWidth: '155px' }}
+                            className="mr-2 truncate"
+                            onClick={() => revealSource({ library_id: action?.proposed_data?.library_id, zotero_key: action?.proposed_data?.zotero_key })}
+                        >
+                            {itemTitle}
+                        </Button>
+                )}
+                {/* <div className="truncate font-color-tertiary mr-3" style={{ maxWidth: '155px' }}>
+                    {itemTitle}
+                </div> 
+            </Tooltip> */}
                 {!isExpanded && (isAwaitingApproval || status === 'pending') && !isProcessing && (
                     <div className="display-flex flex-row items-center gap-3 mr-3">
                         <Tooltip content="Reject" showArrow singleLine>
@@ -440,13 +484,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             )}
         </div>
     );
-};
-
-/**
- * Status badge component
- */
-const ItemRef: React.FC<{ status: ActionStatus | 'awaiting'; config: StatusConfig }> = ({ status, config }) => {
-    return null;
 };
 
 /**

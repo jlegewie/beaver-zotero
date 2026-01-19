@@ -185,6 +185,25 @@ export const annotationBusyAtom = atom<AnnotationBusyStateMap>({});
 export const annotationAttachmentTitlesAtom = atom<AnnotationAttachmentTitleMap>({});
 
 // ---------------------------------------------------------------------------
+// Edit metadata (item titles)
+// ---------------------------------------------------------------------------
+
+type EditMetadataItemTitleMap = Record<string, string | null>;
+
+/**
+ * Caches item titles for edit_metadata actions by toolcallId
+ */
+export const editMetadataItemTitlesAtom = atom<EditMetadataItemTitleMap>({});
+
+export const setEditMetadataItemTitleAtom = atom(
+    null,
+    (get, set, { key, title }: { key: string; title: string | null }) => {
+        const current = get(editMetadataItemTitlesAtom);
+        set(editMetadataItemTitlesAtom, { ...current, [key]: title });
+    }
+);
+
+// ---------------------------------------------------------------------------
 // Note panels (button + visibility)
 // ---------------------------------------------------------------------------
 
@@ -278,6 +297,7 @@ export const resetMessageUIStateAtom = atom(
         set(annotationPanelStateAtom, {});
         set(annotationBusyAtom, {});
         set(annotationAttachmentTitlesAtom, {});
+        set(editMetadataItemTitlesAtom, {});
         set(notePanelStateAtom, {});
     }
 );
