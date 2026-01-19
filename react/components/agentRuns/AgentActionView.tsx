@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
 import {
     AgentAction,
     PendingApproval,
@@ -26,7 +25,7 @@ import {
     CheckmarkCircleIcon,
     ChevronIcon,
     CancelCircleIcon,
-    AlertCircleIcon,
+    AlertIcon,
     ClockIcon,
     Spinner,
     Icon,
@@ -132,7 +131,7 @@ const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
         showRetry: false,
     },
     error: {
-        icon: AlertCircleIcon,
+        icon: AlertIcon,
         label: 'Failed',
         iconClassName: 'color-error',
         showApply: false,
