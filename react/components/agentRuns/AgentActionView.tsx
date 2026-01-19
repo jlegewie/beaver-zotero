@@ -24,6 +24,7 @@ import {
     TickIcon,
     CancelIcon,
     CheckmarkCircleIcon,
+    ChevronIcon,
     CancelCircleIcon,
     AlertCircleIcon,
     ClockIcon,
@@ -399,6 +400,22 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         </Tooltip>
                     </div>
                 )}
+
+                {!(isAwaitingApproval || status === 'pending') && !isProcessing && (
+                    <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
+                        <Tooltip content="Expand" showArrow singleLine>
+                            <IconButton
+                                icon={ChevronIcon}
+                                variant="ghost-secondary"
+                                iconClassName="scale-12"
+                                onClick={toggleExpanded}
+                            />
+                        </Tooltip>
+                    </div>
+                )}
+
+
+
             </div>
 
             {/* Expanded content */}
