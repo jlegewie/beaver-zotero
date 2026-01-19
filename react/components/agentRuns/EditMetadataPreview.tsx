@@ -57,7 +57,7 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
                             <div className="diff-container">
                                 {/* Old value - deletion style (show crossed out for applied, normal for others) */}
                                 <div className={`diff-line ${isApplied ? 'diff-deletion' : isRejectedOrUndone ? 'diff-neutral' : 'diff-deletion'}`}>
-                                    <span className={`diff-content ${isApplied ? 'line-through opacity-60' : ''}`}>
+                                    <span className={`diff-content`}>
                                         {currentValue ? truncateValue(currentValue) : <span className="italic opacity-60">(empty)</span>}
                                     </span>
                                 </div>

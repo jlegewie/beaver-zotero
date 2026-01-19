@@ -376,7 +376,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     {/* </div> */}
 
                     {/* Action buttons */}
-                    <div className="display-flex flex-row gap-1 px-25 py-2 mt-1">
+                    <div className="display-flex flex-row gap-1 px-1 py-1 mt-1">
                         <div className="flex-1" />
                         
                         {/* Processing indicator - shown while waiting for backend response */}
