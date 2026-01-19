@@ -986,12 +986,11 @@ export function deduplicateItems(
 
 
 /**
- * Checks if a field can be edited/set via item.setField() for a given item.
+ * Checks if a field can technically be edited/set via item.setField() for a given item.
  * Returns true only for fields that can actually be modified through setField().
  */
-export function isFieldValid(item: Zotero.Item, field: string): boolean {
+export function canSetField(item: Zotero.Item, field: string): boolean {
     // 1. Check if it's a settable primary field
-    // Only these primary fields can be set via setField()
     const settablePrimaryFields = [
         'itemTypeID',
         'dateAdded', 
@@ -1018,16 +1017,12 @@ export function isFieldValid(item: Zotero.Item, field: string): boolean {
     if (!fieldID) return false;
 
     // 4. Special handling for notes
-    // Notes only support 'title' as an itemData field (and only in loadIn mode)
-    // For regular plugin use, notes can't really have itemData fields set
     if (item.isNote()) {
         const fieldName = Zotero.ItemFields.getName(fieldID);
         return fieldName === 'title';
     }
 
     // 5. Resolve base field mappings
-    // This handles the case where you check 'publisher' for an Audio Recording.
-    // Zotero internally maps 'publisher' to 'label' for that type.
     fieldID = Zotero.ItemFields.getFieldIDFromTypeAndBase(itemTypeID, fieldID) || fieldID;
 
     // 6. Check the schema for validity
