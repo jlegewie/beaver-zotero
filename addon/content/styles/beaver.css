@@ -1944,14 +1944,14 @@
 
 [id^="beaver-pane-"] .diff-deletion {
     background-color: rgba(186, 42, 41, 0.15);
-    border-left-color: #b82A29;
+    border-left-color: #b82A29 !important;
     color: var(--fill-primary);
     opacity: 0.85;
 }
 
-[id^="beaver-pane-"] .diff-addition {
+[id^="beaver-pane-"] .diff-addition,.diff-addition-applied {
     background-color: rgba(20, 135, 85, 0.15);
-    border-left-color: #148D55;
+    border-left-color: #148D55 !important;
     color: var(--fill-primary);
     opacity: 0.85;
 }
