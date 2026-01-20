@@ -4,7 +4,7 @@ import { isLibraryTabAtom, isPreferencePageVisibleAtom, isWebSearchEnabledAtom, 
 
 import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom } from "./citations";
 import { isExternalCitation } from "../types/citations";
-import { agentRunService } from "../../src/services/agentService";
+import { agentRunService, agentService } from "../../src/services/agentService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { logger } from "../../src/utils/logger";
@@ -12,6 +12,8 @@ import { resetMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
 import { ExternalReference } from "../types/externalReferences";
 import { threadRunsAtom, activeRunAtom } from "../agents/atoms";
+import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
+import { AgentRun } from "../agents/types";
 import { 
     threadAgentActionsAtom, 
     isCreateItemAgentAction, 
@@ -111,11 +113,47 @@ export const windowScrollPositionAtom = atom(
 export const recentThreadsAtom = atom<ThreadData[]>([]);
 
 /**
+ * Cancel any active run when switching threads.
+ * This ensures the WebSocket connection is closed and UI state is consistent.
+ */
+async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any, value?: any) => void): Promise<void> {
+    const isPending = get(isWSChatPendingAtom);
+    const activeRun = get(activeRunAtom);
+    
+    if (isPending || activeRun) {
+        logger('cancelActiveRunIfNeeded: Canceling active run before switching threads', 1);
+        
+        // Set pending to false immediately for responsive UI
+        set(isWSChatPendingAtom, false);
+        
+        // Mark active run as canceled if it exists
+        if (activeRun && activeRun.status === 'in_progress') {
+            const canceledRun: AgentRun = {
+                ...activeRun,
+                status: 'canceled',
+                completed_at: new Date().toISOString(),
+            };
+            // Move canceled run to completed runs before clearing
+            set(threadRunsAtom, (runs: AgentRun[]) => [...runs, canceledRun]);
+        }
+        set(activeRunAtom, null);
+        
+        // Cancel the WebSocket connection
+        await agentService.cancel();
+        set(isWSConnectedAtom, false);
+        set(isWSReadyAtom, false);
+    }
+}
+
+/**
  * Atom to create a new thread
  */
 export const newThreadAtom = atom(
     null,
     async (get, set) => {
+        // Cancel any active run before switching threads
+        await cancelActiveRunIfNeeded(get, set);
+        
         // Clean up any temporary annotations from previous thread
         await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
             logger(`newThreadAtom: Error cleaning up temporary annotations: ${error}`);
@@ -167,6 +205,9 @@ export const isLoadingThreadAtom = atom<boolean>(false);
 export const loadThreadAtom = atom(
     null,
     async (get, set, { user_id, threadId }: { user_id: string; threadId: string }) => {
+        // Cancel any active run before loading a different thread
+        await cancelActiveRunIfNeeded(get, set);
+        
         set(isLoadingThreadAtom, true);
         try {
             // Clean up any temporary annotations from previous thread
@@ -184,8 +225,7 @@ export const loadThreadAtom = atom(
             set(isWebSearchEnabledAtom, false);
             set(resetCitationMarkersAtom);
             
-            // Clear active run and pending approval when loading a different thread
-            set(activeRunAtom, null);
+            // Clear pending approval when loading a different thread
             set(clearPendingApprovalAtom);
             
             // Load agent runs with actions from the backend
