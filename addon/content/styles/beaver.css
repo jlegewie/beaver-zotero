@@ -1181,6 +1181,23 @@
     flex-shrink: 0;
 }
 
+/* Button: Solid Secondary variant (gray, for actions without keyboard shortcuts) */
+[id^="beaver-pane-"] .variant-solid.button-solid-secondary {
+    border: 1px solid var(--fill-tertiary) !important;
+    background-color: var(--fill-secondary) !important;
+    color: var(--accent-white);
+}
+
+[id^="beaver-pane-"] .variant-solid.button-solid-secondary:hover {
+    filter: brightness(1.15) !important;
+}
+
+[id^="beaver-pane-"] .variant-solid.button-solid-secondary:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+    filter: none;
+}
+
 /* Button: Surface variant - refined from existing CSS */
 [id^="beaver-pane-"] .variant-surface {
     cursor: pointer;
