@@ -523,11 +523,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         {config.showApply && (
                             <Button
                                 variant={isAwaitingApproval ? 'solid' : 'ghost-secondary'}
-                                // style={{ border: '1px solid transparent' }}
                                 onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                             >
                                 <span>Apply
-                                    {isAwaitingApproval && <span className="opacity-50 ml-1">⏎</span>}
+                                    {/* {isAwaitingApproval && <span className="opacity-50 ml-1">⏎</span>} */}
                                 </span>
                             </Button>
                         )}
