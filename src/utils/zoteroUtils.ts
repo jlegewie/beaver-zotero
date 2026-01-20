@@ -986,22 +986,26 @@ export function deduplicateItems(
 
 
 /**
+ * Primary fields that CAN be set via item.setField().
+ * These are system fields that Zotero allows modification of directly.
+ */
+export const SETTABLE_PRIMARY_FIELDS = [
+    'itemTypeID',
+    'dateAdded', 
+    'dateModified',
+    'version',
+    'synced',
+    'createdByUserID',
+    'lastModifiedByUserID'
+] as const;
+
+/**
  * Checks if a field can technically be edited/set via item.setField() for a given item.
  * Returns true only for fields that can actually be modified through setField().
  */
 export function canSetField(item: Zotero.Item, field: string): boolean {
     // 1. Check if it's a settable primary field
-    const settablePrimaryFields = [
-        'itemTypeID',
-        'dateAdded', 
-        'dateModified',
-        'version',
-        'synced',
-        'createdByUserID',
-        'lastModifiedByUserID'
-    ];
-    
-    if (settablePrimaryFields.includes(field)) {
+    if ((SETTABLE_PRIMARY_FIELDS as readonly string[]).includes(field)) {
         return true;
     }
     
