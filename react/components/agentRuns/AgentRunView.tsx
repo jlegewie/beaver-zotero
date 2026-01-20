@@ -38,7 +38,6 @@ const hasVisibleContent = (run: AgentRun): boolean => {
  */
 export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) => {
     const isStreaming = run.status === 'in_progress';
-    const isAwaitingDeferred = run.status === 'awaiting_deferred';
     const hasError = run.status === 'error';
     const allWarnings = useAtomValue(threadWarningsAtom);
     const runWarnings = allWarnings.filter((w) => w.run_id === run.id);
@@ -68,11 +67,9 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
     const showUserMessage = !run.user_prompt.is_resume || run.user_prompt.content.length > 0;
     
     // Only show spinner when streaming AND no visible content yet AND no tool calls in progress
-    // Also show for awaiting_deferred if it's the last run (will show "Awaiting approval" in ToolCallPartView)
     const showStatusIndicator = isLastRun && isStreaming && !hasVisibleContent(run) && !hasInprogressToolcalls;
 
     // Show agent run footer
-    // Don't show footer for awaiting_deferred runs since the run is paused
     const showAgentRunFooter = 
         run.status === 'completed' ||
         run.status === 'canceled' ||
@@ -80,7 +77,7 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
         (run.status === 'error' && !isLastRun);
 
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
-    const canEdit = !isStreaming && !isAwaitingDeferred && (run.status === 'completed' || run.status === 'error' || run.status === 'canceled');
+    const canEdit = !isStreaming && (run.status === 'completed' || run.status === 'error' || run.status === 'canceled');
 
     return (
         <div id={`run-${run.id}`} className="display-flex flex-col gap-4">

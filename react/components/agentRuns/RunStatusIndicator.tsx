@@ -22,11 +22,6 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, 
     
     // Check if retry state applies to this run
     const isRetrying = retryState && runId && retryState.runId === runId;
-
-    // Only show for in-progress or awaiting_deferred statuses
-    if (status !== 'in_progress' && status !== 'awaiting_deferred') {
-        return null;
-    }
     
     const text = isRetrying
         // ? `Retrying (${retryState.attempt}/${retryState.maxAttempts}): ${retryState.reason}`

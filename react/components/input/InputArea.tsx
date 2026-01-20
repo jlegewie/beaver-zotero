@@ -82,6 +82,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
         logger('Stopping chat completion');
         closeWSConnection();
+        clearPendingApproval();
     };
 
     const handleRejectWithInstructions = (e?: React.MouseEvent | React.FormEvent) => {
@@ -215,24 +216,27 @@ const InputArea: React.FC<InputAreaProps> = ({
                             />
                         </Tooltip>
                         <Button
-                            rightIcon={isPending && !isAwaitingApproval ? StopIcon : undefined}
+                            rightIcon={isPending && !(isAwaitingApproval && messageContent.trim().length > 0) ? StopIcon : undefined}
                             type="button"
                             variant="solid"
                             style={{ padding: '2px 5px' }}
                             onClick={
-                                isAwaitingApproval
+                                isAwaitingApproval && messageContent.trim().length > 0
                                     ? handleRejectWithInstructions
                                     : (isPending 
                                         ? (e) => handleStop(e as any) 
                                         : handleSubmit)
                             }
                             disabled={
+                                // When awaiting approval with text, never disable (Reject button)
+                                // When awaiting approval without text, never disable (Stop button)
+                                // Otherwise, disable if no content and not pending, or no model selected
                                 isAwaitingApproval 
-                                    ? messageContent.trim().length === 0  // Reject requires instructions
+                                    ? false
                                     : ((messageContent.length === 0 && !isPending) || !selectedModel)
                             }
                         >
-                            {isAwaitingApproval
+                            {isAwaitingApproval && messageContent.trim().length > 0
                                 ? 'Reject'
                                 : isPending
                                     ? 'Stop'
