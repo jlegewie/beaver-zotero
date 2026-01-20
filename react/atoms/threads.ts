@@ -151,46 +151,57 @@ async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any,
 export const newThreadAtom = atom(
     null,
     async (get, set) => {
-        // Cancel any active run before switching threads
-        await cancelActiveRunIfNeeded(get, set);
-        
-        // Clean up any temporary annotations from previous thread
-        await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
-            logger(`newThreadAtom: Error cleaning up temporary annotations: ${error}`);
-        });
-        
-        const isLibraryTab = get(isLibraryTabAtom);
-        set(currentThreadIdAtom, null);
-        
-        // Clear agent-based atoms
-        set(threadRunsAtom, []);
-        set(activeRunAtom, null);
-        set(threadAgentActionsAtom, []);
-        set(clearPendingApprovalAtom);
-        
-        set(isWebSearchEnabledAtom, false);
-        
-        set(currentMessageItemsAtom, []);
-        set(removePopupMessagesByTypeAtom, ['items_summary']);
-        set(citationMetadataAtom, []);
-        set(resetCitationMarkersAtom);
-        set(citationDataMapAtom, {});
-        set(currentMessageContentAtom, '');
-        set(resetMessageUIStateAtom);
-        set(isPreferencePageVisibleAtom, false);
-        set(clearExternalReferenceCacheAtom);
-        // Update message items from Zotero selection or reader
-        const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
-        if (isLibraryTab && addSelectedItemsOnNewThread) {
-            const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
-            set(updateMessageItemsFromZoteroSelectionAtom, maxAddAttachmentToMessage);
+        // Show loading state immediately if there's an active run to cancel
+        const hasActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
+        if (hasActiveWork) {
+            set(isLoadingThreadAtom, true);
         }
-        if (!isLibraryTab) {
-            await set(updateReaderAttachmentAtom);
+        
+        try {
+            // Cancel any active run before switching threads
+            await cancelActiveRunIfNeeded(get, set);
+            
+            // Clean up any temporary annotations from previous thread
+            await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
+                logger(`newThreadAtom: Error cleaning up temporary annotations: ${error}`);
+            });
+            
+            const isLibraryTab = get(isLibraryTabAtom);
+            set(currentThreadIdAtom, null);
+            
+            // Clear agent-based atoms
+            set(threadRunsAtom, []);
+            set(activeRunAtom, null);
+            set(threadAgentActionsAtom, []);
+            set(clearPendingApprovalAtom);
+            
+            set(isWebSearchEnabledAtom, false);
+            
+            set(currentMessageItemsAtom, []);
+            set(removePopupMessagesByTypeAtom, ['items_summary']);
+            set(citationMetadataAtom, []);
+            set(resetCitationMarkersAtom);
+            set(citationDataMapAtom, {});
+            set(currentMessageContentAtom, '');
+            set(resetMessageUIStateAtom);
+            set(isPreferencePageVisibleAtom, false);
+            set(clearExternalReferenceCacheAtom);
+            // Update message items from Zotero selection or reader
+            const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
+            if (isLibraryTab && addSelectedItemsOnNewThread) {
+                const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
+                set(updateMessageItemsFromZoteroSelectionAtom, maxAddAttachmentToMessage);
+            }
+            if (!isLibraryTab) {
+                await set(updateReaderAttachmentAtom);
+            }
+            // Reset scroll state for both sidebar and window
+            set(userScrolledAtom, false);
+            set(windowUserScrolledAtom, false);
+        } finally {
+            // Always clear loading state
+            set(isLoadingThreadAtom, false);
         }
-        // Reset scroll state for both sidebar and window
-        set(userScrolledAtom, false);
-        set(windowUserScrolledAtom, false);
     }
 );
 
@@ -205,11 +216,12 @@ export const isLoadingThreadAtom = atom<boolean>(false);
 export const loadThreadAtom = atom(
     null,
     async (get, set, { user_id, threadId }: { user_id: string; threadId: string }) => {
-        // Cancel any active run before loading a different thread
-        await cancelActiveRunIfNeeded(get, set);
-        
+        // Show loading state immediately for instant UI feedback
         set(isLoadingThreadAtom, true);
+        
         try {
+            // Cancel any active run before loading a different thread
+            await cancelActiveRunIfNeeded(get, set);
             // Clean up any temporary annotations from previous thread
             await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
                 logger(`loadThreadAtom: Error cleaning up temporary annotations: ${error}`);
