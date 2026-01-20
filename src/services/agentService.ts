@@ -717,13 +717,15 @@ export class AgentService {
      * Called by the UI when the user approves or rejects an action.
      * @param actionId The action ID from the approval request
      * @param approved Whether the user approved the action
+     * @param userInstructions Optional additional instructions from the user
      */
-    sendApprovalResponse(actionId: string, approved: boolean): void {
-        logger(`AgentService: Sending approval response for ${actionId}: ${approved}`, 1);
+    sendApprovalResponse(actionId: string, approved: boolean, userInstructions?: string | null): void {
+        logger(`AgentService: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
         this.send({
             type: 'deferred_approval_response',
             action_id: actionId,
             approved,
+            user_instructions: userInstructions,
         });
     }
 

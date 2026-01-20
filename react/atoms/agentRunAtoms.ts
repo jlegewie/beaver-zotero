@@ -1573,8 +1573,8 @@ export const clearThreadAtom = atom(null, (_get, set) => {
  */
 export const sendApprovalResponseAtom = atom(
     null,
-    (_get, _set, { actionId, approved }: { actionId: string; approved: boolean }) => {
-        logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}`, 1);
-        agentService.sendApprovalResponse(actionId, approved);
+    (_get, _set, { actionId, approved, userInstructions }: { actionId: string; approved: boolean; userInstructions?: string | null }) => {
+        logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
+        agentService.sendApprovalResponse(actionId, approved, userInstructions);
     }
 );

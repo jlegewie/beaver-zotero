@@ -796,6 +796,8 @@ export interface WSDeferredApprovalResponse {
     type: 'deferred_approval_response';
     action_id: string;
     approved: boolean;
+    /** Optional additional instructions from the user (e.g., 'Change title to X instead') */
+    user_instructions?: string | null;
 }
 
 /** Union type for all WebSocket events */
