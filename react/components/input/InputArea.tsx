@@ -218,8 +218,13 @@ const InputArea: React.FC<InputAreaProps> = ({
                         <Button
                             rightIcon={isPending && !(isAwaitingApproval && messageContent.trim().length > 0) ? StopIcon : undefined}
                             type="button"
-                            variant="solid"
-                            className={(isPending && !(isAwaitingApproval && messageContent.trim().length > 0)) || (isAwaitingApproval && messageContent.trim().length > 0) ? 'button-solid-secondary' : ''}
+                            variant={
+                                (
+                                    (isPending && !(isAwaitingApproval && messageContent.trim().length > 0)) ||
+                                    (isAwaitingApproval && messageContent.trim().length > 0)
+                                )
+                                ? 'surface' : 'solid'
+                            }
                             style={{ padding: '2px 5px' }}
                             onClick={
                                 isAwaitingApproval && messageContent.trim().length > 0
