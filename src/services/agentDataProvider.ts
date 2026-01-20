@@ -3196,7 +3196,7 @@ async function validateEditMetadataAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Notes cannot be edited with this action`,
+            error: `Editing Notes is not supported`,
             error_code: 'note_items_not_supported',
             preference: 'always_ask',
         };
@@ -3207,8 +3207,30 @@ async function validateEditMetadataAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Annotations cannot be edited with this action`,
+            error: `Editing Annotations is not supported`,
             error_code: 'annotation_items_not_supported',
+            preference: 'always_ask',
+        };
+    }
+
+    if (item.isAttachment()) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Editing Attachments is not supported`,
+            error_code: 'attachment_items_not_supported',
+            preference: 'always_ask',
+        };
+    }
+
+    if (!item.isRegularItem()) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Editing items other than regular items is not supported`,
+            error_code: 'item_type_not_supported',
             preference: 'always_ask',
         };
     }
