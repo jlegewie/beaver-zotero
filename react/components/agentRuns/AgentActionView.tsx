@@ -154,6 +154,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isAwaitingApproval = pendingApproval !== null;
     const [isExpanded, setIsExpanded] = useState(isAwaitingApproval);
     const [isHovered, setIsHovered] = useState(false);
+
+    // Sync isExpanded with isAwaitingApproval: expand when awaiting, collapse when not
+    useEffect(() => {
+        setIsExpanded(isAwaitingApproval);
+    }, [isAwaitingApproval]);
+
     // Track when we're waiting for approval response from backend
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
     // Track when we're processing a post-run action (apply/undo/retry)
