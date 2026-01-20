@@ -15,6 +15,7 @@ import {
     ViewIcon,
     Icon,
     PuzzleIcon,
+    FileViewIcon,
     GlobalSearchIcon,
     TextAlignLeftIcon,
     DocumentValidationIcon,
@@ -46,7 +47,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     list_libraries: DatabaseIcon,
 
     // Metadata tools
-    get_metadata: DocumentValidationIcon,
+    get_metadata: FileViewIcon,
     edit_metadata: DocumentValidationIcon,
 
     // Reading tools
