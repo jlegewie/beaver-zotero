@@ -414,7 +414,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     </div>
                 )}
 
-                {!(isAwaitingApproval || status === 'pending') && !isProcessing && (
+                {!(isAwaitingApproval || status === 'pending') && (
                     <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
                         <Tooltip content="Expand" showArrow singleLine>
                             <IconButton
