@@ -46,6 +46,7 @@ export { default as ChattingIcon } from './ChattingIcon';
 export { default as SyncIcon } from './SyncIcon';
 export { default as InformationCircleIcon } from './InformationCircleIcon';
 export { default as LockIcon } from './LockIcon';
+export { default as FileViewIcon } from './FileViewIcon';
 export { default as LinkIcon } from './LinkIcon';
 export { default as KeyIcon } from './KeyIcon';
 export { default as BrainIcon } from './BrainIcon';
