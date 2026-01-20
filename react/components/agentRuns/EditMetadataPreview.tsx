@@ -61,9 +61,9 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
                                         {currentValue ? truncateValue(currentValue) : <span className="italic opacity-60">(empty)</span>}
                                     </span>
                                 </div>
-                                {/* New value - addition style (highlighted for applied, crossed out for rejected) */}
-                                <div className={`diff-line ${isApplied ? 'diff-addition-applied' : isRejectedOrUndone ? 'diff-deletion' : isError ? 'diff-error' : 'diff-addition'}`}>
-                                    <span className={`diff-content ${isRejectedOrUndone ? 'line-through opacity-60' : ''}`}>
+                                {/* New value - addition style (highlighted for applied, ghosted for rejected) */}
+                                <div className={`diff-line ${isApplied ? 'diff-addition-applied' : isRejectedOrUndone ? 'diff-ghosted' : isError ? 'diff-error' : 'diff-addition'}`}>
+                                    <span className="diff-content">
                                         {displayValue ? truncateValue(displayValue) : <span className="italic opacity-60">(empty)</span>}
                                     </span>
                                 </div>
