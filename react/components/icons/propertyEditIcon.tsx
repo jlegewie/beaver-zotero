@@ -3,7 +3,7 @@ import React from "react";
 type PropertyEditIconProps = React.SVGProps<SVGSVGElement>;
 
 const PropertyEditIcon: React.FC<PropertyEditIconProps> = (props) => (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" color="currentColor" fill="none" stroke="#141B34" strokeWidth="1.5" strokeLinecap="round" {...props}>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" color="currentColor" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" {...props}>
         <path d="M21 11.5C21 7.02166 21 4.78249 19.6088 3.39124C18.2175 2 15.9783 2 11.5 2C7.02166 2 4.78249 2 3.39124 3.39124C2 4.78249 2 7.02166 2 11.5C2 15.9783 2 18.2175 3.39124 19.6088C4.72972 20.9472 6.85301 20.998 11 20.9999" />
         <path d="M2 7H21" />
         <path d="M10 16H11.5M6 16H7M10 12H16M6 12H7" />
