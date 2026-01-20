@@ -9,7 +9,7 @@
 
 import { logger } from '../utils/logger';
 import { ZoteroItemStatus, ItemDataWithStatus, FrontendFileStatus, AttachmentDataWithStatus } from '../../react/types/zotero';
-import { safeIsInTrash, deduplicateItems, safeFileExists, isLinkedUrlAttachment } from '../utils/zoteroUtils';
+import { safeIsInTrash, deduplicateItems, safeFileExists, isLinkedUrlAttachment, canSetField, SETTABLE_PRIMARY_FIELDS } from '../utils/zoteroUtils';
 import { syncingItemFilter, syncingItemFilterAsync } from '../utils/sync';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../react/atoms/profile';
 import { userIdAtom } from '../../react/atoms/auth';
@@ -3031,8 +3031,142 @@ export async function handleAgentActionValidateRequest(
 }
 
 /**
+ * Fields that Beaver should NOT modify, even though they may be technically settable.
+ * These are system fields, metadata, or fields that require special handling.
+ * 
+ * Note: This list only includes fields that CAN be set but SHOULD NOT be.
+ * Fields that can't be set at all (like 'firstCreator', 'id', etc.) are 
+ * already handled by canSetField().
+ */
+const AI_RESTRICTED_FIELDS = [
+    // System metadata - technically settable but should be immutable
+    'dateAdded',        // Creation timestamp - immutable record
+    'dateModified',     // Managed automatically by Zotero
+    
+    // Sync/versioning - critical for data integrity
+    'version',          // Used for sync conflict resolution
+    'synced',           // Sync status flag
+    
+    // Group library metadata - user/permission related
+    'createdByUserID',
+    'lastModifiedByUserID',
+    
+    // Structural changes - too risky for AI
+    'itemTypeID',       // Changing item type can lose data
+] as const;
+
+// ============================================================================
+// Field Validation Types and Functions
+// ============================================================================
+
+/** Result of validating a single field edit */
+export interface FieldValidationResult {
+    allowed: boolean;
+    error?: string;
+    error_code?: 'field_restricted' | 'field_unknown' | 'field_invalid_for_type';
+}
+
+/** Error information for a failed field validation */
+export interface FieldValidationError {
+    field: string;
+    error: string;
+    error_code: 'field_restricted' | 'field_unknown' | 'field_invalid_for_type';
+}
+
+/** Result of validating all field edits */
+export interface AllEditsValidationResult {
+    valid: boolean;
+    errors: FieldValidationError[];
+}
+
+/** Type for a field edit operation */
+export interface FieldEdit {
+    field: string;
+    new_value: string;
+}
+
+/**
+ * Validates whether a field can be edited, with detailed error information.
+ * This combines policy checks (AI restrictions) with technical checks (Zotero schema).
+ * 
+ * @param item - The Zotero item being edited
+ * @param field - The field name to validate
+ * @returns Validation result with allowed status and error details if not allowed
+ */
+export function validateFieldEdit(item: Zotero.Item, field: string): FieldValidationResult {
+    // 1. Check if field is restricted by AI safety policy
+    if ((AI_RESTRICTED_FIELDS as readonly string[]).includes(field)) {
+        return {
+            allowed: false,
+            error: `Field '${field}' is a system field that should not be modified by AI`,
+            error_code: 'field_restricted'
+        };
+    }
+    
+    // 2. Check if field exists in Zotero's schema
+    const fieldID = Zotero.ItemFields.getID(field);
+    if (!fieldID && !(SETTABLE_PRIMARY_FIELDS as readonly string[]).includes(field)) {
+        return {
+            allowed: false,
+            error: `Field '${field}' does not exist in Zotero's schema`,
+            error_code: 'field_unknown'
+        };
+    }
+    
+    // 3. Check if field is technically editable for this item type
+    if (!canSetField(item, field)) {
+        const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
+        return {
+            allowed: false,
+            error: `Field '${field}' is not valid for item type '${itemType}'`,
+            error_code: 'field_invalid_for_type'
+        };
+    }
+    
+    return { allowed: true };
+}
+
+/**
+ * Validates all field edits and returns detailed error information for each failure.
+ * This reports ALL invalid fields at once instead of failing on the first one.
+ * 
+ * @param item - The Zotero item being edited
+ * @param edits - Array of field edits to validate
+ * @returns Validation result with all errors
+ */
+export function validateAllEdits(item: Zotero.Item, edits: FieldEdit[]): AllEditsValidationResult {
+    const errors: FieldValidationError[] = [];
+    
+    for (const edit of edits) {
+        const result = validateFieldEdit(item, edit.field);
+        if (!result.allowed) {
+            errors.push({
+                field: edit.field,
+                error: result.error!,
+                error_code: result.error_code!
+            });
+        }
+    }
+    
+    return {
+        valid: errors.length === 0,
+        errors
+    };
+}
+
+/**
+ * Checks if Beaver should be allowed to edit this field.
+ * More restrictive than canSetField() - focuses on safety and best practices.
+ * 
+ * @deprecated Use validateFieldEdit() for detailed error information
+ */
+export function isFieldEditAllowed(item: Zotero.Item, field: string): boolean {
+    return validateFieldEdit(item, field).allowed;
+}
+
+/**
  * Validate an edit_metadata action.
- * Checks if the item exists and returns current field values.
+ * Checks if the item exists, validates all fields (batch), and returns current field values.
  */
 async function validateEditMetadataAction(
     request: WSAgentActionValidateRequest
@@ -3040,7 +3174,7 @@ async function validateEditMetadataAction(
     const { library_id, zotero_key, edits } = request.action_data as {
         library_id: number;
         zotero_key: string;
-        edits: Array<{ field: string; new_value: string }>;
+        edits: FieldEdit[];
     };
 
     // Validate item exists
@@ -3056,15 +3190,57 @@ async function validateEditMetadataAction(
         };
     }
 
-    // Check if library is editable
-    const library = Zotero.Libraries.get(library_id);
-    if (!library || !library.editable) {
+    // Validate item type
+    if (item.isNote()) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library ${library_id} is read only and cannot be edited`,
+            error: `Notes cannot be edited with this action`,
+            error_code: 'note_items_not_supported',
+            preference: 'always_ask',
+        };
+    }
+
+    if (item.isAnnotation()) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Annotations cannot be edited with this action`,
+            error_code: 'annotation_items_not_supported',
+            preference: 'always_ask',
+        };
+    }
+
+    // Check if library is editable (check early to avoid unnecessary field validation)
+    const library = Zotero.Libraries.get(library_id);
+    if (!library || !library.editable) {
+        const libraryName = library && typeof library !== 'boolean' ? library.name : String(library_id);
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library '${libraryName}' is read-only and cannot be edited`,
             error_code: 'library_not_editable',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate ALL fields using batch validation (reports all errors at once)
+    const validation = validateAllEdits(item, edits);
+    if (!validation.valid) {
+        const errorSummary = validation.errors
+            .map(e => `${e.field}: ${e.error}`)
+            .join('; ');
+        
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: errorSummary,
+            error_code: 'field_validation_failed',
+            errors: validation.errors,
             preference: 'always_ask',
         };
     }

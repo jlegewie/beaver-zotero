@@ -739,6 +739,13 @@ export interface WSAgentActionValidateRequest extends WSBaseEvent {
     action_data: Record<string, any>;
 }
 
+/** Error information for a failed field validation */
+export interface FieldValidationErrorInfo {
+    field: string;
+    error: string;
+    error_code: 'field_restricted' | 'field_unknown' | 'field_invalid_for_type';
+}
+
 /** Response to agent action validation request */
 export interface WSAgentActionValidateResponse {
     type: 'agent_action_validate_response';
@@ -746,6 +753,8 @@ export interface WSAgentActionValidateResponse {
     valid: boolean;
     error?: string | null;
     error_code?: string | null;
+    /** Detailed list of field validation errors (for batch validation) */
+    errors?: FieldValidationErrorInfo[];
     /** Current value for before/after tracking. Shape depends on action_type. */
     current_value?: any;
     preference: DeferredToolPreference;
