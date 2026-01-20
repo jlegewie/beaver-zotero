@@ -579,7 +579,18 @@ const ActionPreview: React.FC<{
 }> = ({ toolName, previewData, status }) => {
     if (toolName === 'edit_metadata' || previewData.actionType === 'edit_metadata') {
         const edits = previewData.actionData.edits || [];
-        const currentValues = previewData.currentValue || {};
+        
+        // Get current values from previewData.currentValue (pending approval)
+        // or extract from edits[].old_value (stored actions)
+        let currentValues = previewData.currentValue || {};
+        if (Object.keys(currentValues).length === 0 && edits.length > 0) {
+            currentValues = {};
+            for (const edit of edits) {
+                if (edit.old_value !== undefined) {
+                    currentValues[edit.field] = edit.old_value;
+                }
+            }
+        }
         
         // For applied actions, show the applied values if available
         const appliedEdits = previewData.resultData?.applied_edits;
