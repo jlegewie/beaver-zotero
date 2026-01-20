@@ -3,7 +3,8 @@ import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { newThreadAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
-import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom } from '../../atoms/agentRunAtoms';
+import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
+import { pendingApprovalAtom, clearPendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
 import { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
@@ -38,6 +39,12 @@ const InputArea: React.FC<InputAreaProps> = ({
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const closeWSConnection = useSetAtom(closeWSConnectionAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
+
+    // Pending approval state (for deferred tools)
+    const pendingApproval = useAtomValue(pendingApprovalAtom);
+    const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
+    const clearPendingApproval = useSetAtom(clearPendingApprovalAtom);
+    const isAwaitingApproval = pendingApproval !== null;
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -75,6 +82,24 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
         logger('Stopping chat completion');
         closeWSConnection();
+    };
+
+    const handleRejectWithInstructions = (e?: React.MouseEvent | React.FormEvent) => {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        if (!pendingApproval) return;
+        
+        const instructions = messageContent.trim() || null;
+        logger(`Rejecting approval ${pendingApproval.actionId} with instructions: ${instructions}`);
+        sendApprovalResponse({
+            actionId: pendingApproval.actionId,
+            approved: false,
+            userInstructions: instructions,
+        });
+        clearPendingApproval();
+        setMessageContent('');
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -155,12 +180,15 @@ const InputArea: React.FC<InputAreaProps> = ({
                             e.currentTarget.style.height = 'auto';
                             e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
                         }}
-                        placeholder={isLibraryTab ? "@ to add a source" : "@ to add a source, drag to add annotations"}
+                        placeholder={isAwaitingApproval 
+                            ? "Add instructions to reject" 
+                            : (isLibraryTab ? "@ to add a source" : "@ to add a source, drag to add annotations")}
                         className="chat-input"
                         onKeyDown={(e) => {
                             handleKeyDown(e);
                             // Submit on Enter (without Shift) - guard against pending to prevent race with button click
-                            if (e.key === 'Enter' && !e.shiftKey && !isPending) {
+                            // Don't trigger reject on Enter when awaiting approval (must click button)
+                            if (e.key === 'Enter' && !e.shiftKey && !isPending && !isAwaitingApproval) {
                                 e.preventDefault();
                                 handleSubmit(e as any);
                             }
@@ -184,16 +212,28 @@ const InputArea: React.FC<InputAreaProps> = ({
                             />
                         </Tooltip>
                         <Button
-                            rightIcon={isPending ? StopIcon : undefined}
+                            rightIcon={isPending && !isAwaitingApproval ? StopIcon : undefined}
                             type="button"
                             variant="solid"
                             style={{ padding: '2px 5px' }}
-                            onClick={isPending ? (e) => handleStop(e as any) : handleSubmit}
-                            disabled={(messageContent.length === 0 && !isPending) || !selectedModel}
+                            onClick={
+                                isAwaitingApproval
+                                    ? handleRejectWithInstructions
+                                    : (isPending 
+                                        ? (e) => handleStop(e as any) 
+                                        : handleSubmit)
+                            }
+                            disabled={
+                                isAwaitingApproval 
+                                    ? messageContent.trim().length === 0  // Reject requires instructions
+                                    : ((messageContent.length === 0 && !isPending) || !selectedModel)
+                            }
                         >
-                            {isPending
-                                ? 'Stop'
-                                : (<span>Send <span className="opacity-50">⏎</span></span>)
+                            {isAwaitingApproval
+                                ? 'Reject'
+                                : isPending
+                                    ? 'Stop'
+                                    : (<span>Send <span className="opacity-50">⏎</span></span>)
                             }
                         </Button>
                     </div>
