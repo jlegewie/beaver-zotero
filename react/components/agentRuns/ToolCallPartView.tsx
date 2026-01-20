@@ -23,7 +23,7 @@ import {
     DatabaseIcon,
     TagIcon,
 } from '../icons/icons';
-import { searchToolVisibilityAtom, toggleSearchToolVisibilityAtom } from '../../atoms/messageUIState';
+import { toolExpandedAtom, toggleToolExpandedAtom } from '../../atoms/messageUIState';
 
 type IconComponent = React.FC<React.SVGProps<SVGSVGElement>>;
 
@@ -117,11 +117,11 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             ? `${baseLabel} (${resultCount} result${resultCount === 1 ? '' : 's'})`
             : baseLabel;
 
-    // Use global Jotai atom for visibility state (persists across re-renders and syncs between panes)
-    const visibilityKey = `${runId}:${part.tool_call_id}`;
-    const searchVisibility = useAtomValue(searchToolVisibilityAtom);
-    const toggleVisibility = useSetAtom(toggleSearchToolVisibilityAtom);
-    const isExpanded = searchVisibility[visibilityKey] ?? false;
+    // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
+    const expansionKey = `${runId}:${part.tool_call_id}`;
+    const expansionState = useAtomValue(toolExpandedAtom);
+    const toggleExpanded = useSetAtom(toggleToolExpandedAtom);
+    const isExpanded = expansionState[expansionKey] ?? false;
 
     const [isHovered, setIsHovered] = useState(false);
 
@@ -139,9 +139,9 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
 
     const effectiveExpanded = isExpanded && canExpand;
 
-    const toggleExpanded = () => {
+    const handleToggleExpanded = () => {
         if (canExpand) {
-            toggleVisibility(visibilityKey);
+            toggleExpanded(expansionKey);
         }
     };
 
@@ -193,7 +193,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={effectiveExpanded}
                     aria-controls={`tool-result-${part.tool_call_id}`}
-                    onClick={toggleExpanded}
+                    onClick={handleToggleExpanded}
                     disabled={!canExpand}
                 >
                     <div className="display-flex flex-row px-3 gap-2">

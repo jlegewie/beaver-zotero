@@ -14,6 +14,8 @@ import { sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import {
     editMetadataItemTitlesAtom,
     setEditMetadataItemTitleAtom,
+    toolExpandedAtom,
+    setToolExpandedAtom,
 } from '../../atoms/messageUIState';
 import { EditMetadataPreview } from './EditMetadataPreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
@@ -152,13 +154,38 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     pendingApproval,
 }) => {
     const isAwaitingApproval = pendingApproval !== null;
-    const [isExpanded, setIsExpanded] = useState(isAwaitingApproval);
     const [isHovered, setIsHovered] = useState(false);
 
-    // Sync isExpanded with isAwaitingApproval: expand when awaiting, collapse when not
+    // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
+    const expansionKey = `${runId}:${toolcallId}`;
+    const expansionState = useAtomValue(toolExpandedAtom);
+    const setExpanded = useSetAtom(setToolExpandedAtom);
+    
+    // Check if state exists at render time (not in effect) to avoid dependency on entire expansionState
+    const hasExistingState = expansionState[expansionKey] !== undefined;
+    const isExpanded = expansionState[expansionKey] ?? isAwaitingApproval;
+
+    // Track previous values to detect actual changes vs re-mounts
+    const prevAwaitingRef = useRef(isAwaitingApproval);
+    const hasInitializedRef = useRef(false);
+
+    // Sync isExpanded with isAwaitingApproval, but avoid resetting on re-mount
     useEffect(() => {
-        setIsExpanded(isAwaitingApproval);
-    }, [isAwaitingApproval]);
+        if (!hasInitializedRef.current) {
+            hasInitializedRef.current = true;
+            // On first mount, only set if there's no existing state (preserves state from other pane)
+            if (!hasExistingState) {
+                setExpanded({ key: expansionKey, expanded: isAwaitingApproval });
+            }
+            return;
+        }
+        
+        // After first mount, sync when isAwaitingApproval actually changes
+        if (prevAwaitingRef.current !== isAwaitingApproval) {
+            setExpanded({ key: expansionKey, expanded: isAwaitingApproval });
+        }
+        prevAwaitingRef.current = isAwaitingApproval;
+    }, [isAwaitingApproval, expansionKey, hasExistingState, setExpanded]);
 
     // Track when we're waiting for approval response from backend
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
@@ -322,7 +349,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         await handleApplyPending();
     }, [handleApplyPending]);
 
-    const toggleExpanded = () => setIsExpanded(!isExpanded);
+    const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
 
     // Build preview data from either pending approval or agent action
     const previewData = buildPreviewData(toolName, pendingApproval, action);
