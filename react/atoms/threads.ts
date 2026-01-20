@@ -19,6 +19,7 @@ import {
     validateAppliedAgentAction, 
     undoAgentActionAtom,
     setPendingApprovalAtom,
+    clearPendingApprovalAtom,
     buildPendingApprovalFromAction,
 } from "../agents/agentActions";
 import { WSDeferredApprovalRequest } from "../../src/services/agentProtocol";
@@ -127,6 +128,7 @@ export const newThreadAtom = atom(
         set(threadRunsAtom, []);
         set(activeRunAtom, null);
         set(threadAgentActionsAtom, []);
+        set(clearPendingApprovalAtom);
         
         set(isWebSearchEnabledAtom, false);
         
@@ -182,8 +184,9 @@ export const loadThreadAtom = atom(
             set(isWebSearchEnabledAtom, false);
             set(resetCitationMarkersAtom);
             
-            // Clear active run when loading a different thread
+            // Clear active run and pending approval when loading a different thread
             set(activeRunAtom, null);
+            set(clearPendingApprovalAtom);
             
             // Load agent runs with actions from the backend
             const { runs, agent_actions } = await agentRunService.getThreadRuns(threadId, true);
