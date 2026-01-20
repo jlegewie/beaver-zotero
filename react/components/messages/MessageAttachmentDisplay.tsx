@@ -18,13 +18,15 @@ const MessageAttachmentDisplay = ({
     setIsAddAttachmentMenuOpen,
     menuPosition,
     setMenuPosition,
-    inputRef
+    inputRef,
+    disabled = false
 }: {
     isAddAttachmentMenuOpen: boolean;
     setIsAddAttachmentMenuOpen: (isAddAttachmentMenuOpen: boolean) => void;
     menuPosition: { x: number; y: number };
     setMenuPosition: (menuPosition: { x: number; y: number }) => void;
     inputRef: React.RefObject<HTMLTextAreaElement>;
+    disabled?: boolean;
 }) => {
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
@@ -73,6 +75,7 @@ const MessageAttachmentDisplay = ({
                 onOpen={() => setIsAddAttachmentMenuOpen(true)}
                 menuPosition={menuPosition}
                 setMenuPosition={setMenuPosition}
+                disabled={disabled}
             />
 
             {/* Selected Libraries */}
