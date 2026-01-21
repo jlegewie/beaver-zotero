@@ -20,7 +20,7 @@ import {
     TextAlignLeftIcon,
     DocumentValidationIcon,
     LibraryIcon,
-    BookmarkIcon,
+    FolderDetailIcon,
     DatabaseIcon,
     TagIcon,
 } from '../icons/icons';
@@ -42,7 +42,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // List tools - library management
     list_items: TextAlignLeftIcon,
-    list_collections: LibraryIcon,
+    list_collections: FolderDetailIcon,
     list_tags: TagIcon,
     list_libraries: DatabaseIcon,
 
