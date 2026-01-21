@@ -12,8 +12,8 @@ import {
 } from '../../agents/agentActions';
 import { sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import {
-    editMetadataItemTitlesAtom,
-    setEditMetadataItemTitleAtom,
+    agentActionItemTitlesAtom,
+    setAgentActionItemTitleAtom,
     toolExpandedAtom,
     setToolExpandedAtom,
 } from '../../atoms/messageUIState';
@@ -210,13 +210,18 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
 
-    // Item title state (shared across panes)
-    const itemTitleMap = useAtomValue(editMetadataItemTitlesAtom);
+    // Item title state (shared across panes) - only for actions that have specific items
+    const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
     const itemTitle = itemTitleMap[toolcallId] ?? null;
-    const setItemTitle = useSetAtom(setEditMetadataItemTitleAtom);
+    const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
 
-    // Fetch item title for edit_metadata actions
+    // Determine if this action type has an associated item
+    const hasAssociatedItem = toolName === 'edit_metadata';
+
+    // Fetch item title for actions that have specific items
     useEffect(() => {
+        if (!hasAssociatedItem || itemTitle) return;
+
         const fetchTitle = async () => {
             // Get item info from action or pending approval
             const libraryId = action?.proposed_data?.library_id ?? pendingApproval?.actionData?.library_id;
@@ -231,10 +236,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             }
         };
         
-        if (!itemTitle && toolName === 'edit_metadata') {
-            fetchTitle();
-        }
-    }, [action, pendingApproval, itemTitle, toolcallId, toolName, setItemTitle]);
+        fetchTitle();
+    }, [action, pendingApproval, itemTitle, toolcallId, hasAssociatedItem, setItemTitle]);
 
     // Clear processing state when action status changes from 'pending' to a final state
     useEffect(() => {
@@ -571,6 +574,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 function getActionLabel(toolName: string): string {
     switch (toolName) {
         case 'edit_metadata':
+        case 'edit_item':
             return 'Edit';
         case 'create_item':
         case 'create_collection':
