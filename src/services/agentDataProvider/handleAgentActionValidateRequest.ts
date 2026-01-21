@@ -353,12 +353,15 @@ async function validateEditMetadataAction(
 async function validateCreateCollectionAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { library_id, name, parent_key, item_ids } = request.action_data as {
-        library_id: number;
+    const { library_id: rawLibraryId, name, parent_key, item_ids } = request.action_data as {
+        library_id?: number | null;
         name: string;
         parent_key?: string | null;
         item_ids?: string[];
     };
+
+    // Default to user's main library if not specified
+    const library_id = rawLibraryId || Zotero.Libraries.userLibraryID;
 
     // Validate library exists
     const library = Zotero.Libraries.get(library_id);
@@ -460,8 +463,9 @@ async function validateCreateCollectionAction(
     // Get user preference from settings
     const preference = getDeferredToolPreference('create_collection');
 
-    // Build current value for preview (shows what will be created)
+    // Build current value for preview (includes resolved library_id)
     const currentValue = {
+        library_id: library_id,
         library_name: library.name,
         parent_key: parent_key || null,
         item_count: item_ids?.length || 0,

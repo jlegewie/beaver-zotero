@@ -15,12 +15,15 @@ import { logger } from '../../src/utils/logger';
 export async function executeCreateCollectionAction(
     action: AgentAction
 ): Promise<CreateCollectionResultData> {
-    const { library_id, name, parent_key, item_ids } = action.proposed_data as {
-        library_id: number;
+    const { library_id: rawLibraryId, name, parent_key, item_ids } = action.proposed_data as {
+        library_id?: number | null;
         name: string;
         parent_key?: string | null;
         item_ids?: string[];
     };
+
+    // Default to user's main library if not specified
+    const library_id = rawLibraryId || Zotero.Libraries.userLibraryID;
 
     // Build collection params
     const collectionParams: { name: string; libraryID: number; parentID?: number } = {
