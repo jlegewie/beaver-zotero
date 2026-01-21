@@ -3177,6 +3177,32 @@ async function validateEditMetadataAction(
         edits: FieldEdit[];
     };
 
+    // Validate library exists
+    const library = Zotero.Libraries.get(library_id);
+    if (!library) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library not found: ${library_id}`,
+            error_code: 'library_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate library is searchable
+    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    if (!searchableLibraryIds.includes(library_id)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library exists but is not synced with Beaver. The user can update this setting in Beaver Preferences. Library: ${library.name} (ID: ${library_id})`,
+            error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
+
     // Validate item exists
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
     if (!item) {
@@ -3236,7 +3262,6 @@ async function validateEditMetadataAction(
     }
 
     // Check if library is editable (check early to avoid unnecessary field validation)
-    const library = Zotero.Libraries.get(library_id);
     if (!library || !library.editable) {
         const libraryName = library && typeof library !== 'boolean' ? library.name : String(library_id);
         return {
