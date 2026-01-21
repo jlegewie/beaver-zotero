@@ -5,6 +5,8 @@ export { default as CancelIcon } from './CancelIcon';
 export { CSSItemTypeIcon, CSSIcon } from './zotero';
 export { default as Spinner } from './Spinner';
 export { default as ClockIcon } from './ClockIcon';
+export { default as FolderAddIcon } from './FolderAddIcon';
+export { default as FolderDetailIcon } from './FolderDetailIcon';
 export { default as PlusSignIcon } from './PlusSignIcon';
 export { default as SettingsIcon } from './SettingsIcon';
 export { default as SettingsSolidIcon } from './SettingsSolidIcon';
