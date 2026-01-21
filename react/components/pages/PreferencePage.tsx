@@ -26,6 +26,7 @@ import AddSelectedItemsOnNewThreadToggle from "../preferences/AddSelectedItemsOn
 import AddSelectedItemsOnOpenToggle from "../preferences/AddSelectedItemsOnOpenToggle";
 import SyncedLibraries from "../preferences/SyncedLibraries";
 import { ProcessingMode } from "../../types/profile";
+import DeferredToolPreferenceSetting from "../preferences/DeferredToolPreferenceSetting";
 
 const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <h2 className="text-xl font-semibold mt-6 mb-2 font-color-primary">
@@ -542,6 +543,19 @@ const PreferencePage: React.FC = () => {
                 <EmailToggle
                     checked={emailNotifications}
                     onChange={handleEmailNotificationsChange}
+                />
+            </div>
+
+            {/* --- Permissions Section --- */}
+            <SectionHeader>Permissions</SectionHeader>
+            <div className="text-sm font-color-secondary mb-3">
+                Control how Beaver handles actions that modify your Zotero library.
+            </div>
+            <div className="display-flex flex-col gap-3">
+                <DeferredToolPreferenceSetting
+                    toolName="edit_metadata"
+                    label="Metadata Edits"
+                    description=""
                 />
             </div>
 
