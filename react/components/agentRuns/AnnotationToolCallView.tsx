@@ -516,14 +516,16 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
                 if (isSingleApply && annotationId) {
                     const ack = successful.find((s) => s.action_id === annotationId);
                     const targetAnnotation = annotations.find((a) => a.id === annotationId);
-                    if (ack?.result_data && targetAnnotation) {
-                        await navigateToNewlyAppliedAnnotation(reader, targetAnnotation, ack.result_data);
+                    // Type guard to ensure result_data has the required shape for annotations
+                    if (ack?.result_data && 'zotero_key' in ack.result_data && targetAnnotation) {
+                        await navigateToNewlyAppliedAnnotation(reader, targetAnnotation, ack.result_data as AnnotationResultData);
                     }
                 } else {
                     const firstSuccess = successful[0];
                     const targetAnnotation = annotations.find((a) => a.id === firstSuccess.action_id);
-                    if (firstSuccess?.result_data && targetAnnotation) {
-                        await navigateToNewlyAppliedAnnotation(reader, targetAnnotation, firstSuccess.result_data);
+                    // Type guard to ensure result_data has the required shape for annotations
+                    if (firstSuccess?.result_data && 'zotero_key' in firstSuccess.result_data && targetAnnotation) {
+                        await navigateToNewlyAppliedAnnotation(reader, targetAnnotation, firstSuccess.result_data as AnnotationResultData);
                     }
                 }
             }

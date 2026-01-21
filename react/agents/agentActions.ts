@@ -90,6 +90,13 @@ export const isEditMetadataAgentAction = (action: AgentAction): boolean => {
 };
 
 /**
+ * Type guard for create collection actions
+ */
+export const isCreateCollectionAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'create_collection';
+};
+
+/**
  * Typed agent action for create_item actions
  */
 export type CreateItemAgentAction = AgentAction & {
@@ -227,6 +234,16 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
             zotero_key: proposedData.zotero_key ?? proposedData.zoteroKey ?? '',
             edits: proposedData.edits ?? [],
+        };
+    } else if (actionType === 'create_collection') {
+        // Normalize create_collection proposed data
+        proposedData = {
+            library_id: typeof proposedData.library_id === 'number' 
+                ? proposedData.library_id 
+                : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
+            name: proposedData.name ?? '',
+            parent_key: proposedData.parent_key ?? proposedData.parentKey ?? null,
+            item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
         };
     }
     
@@ -745,6 +762,19 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
                 }
                 currentValue = values;
             }
+        }
+    } else if (actionType === 'create_collection') {
+        const libraryId = typeof actionData.library_id === 'number'
+            ? actionData.library_id
+            : Number(actionData.library_id ?? 0);
+
+        if (libraryId) {
+            const library = Zotero.Libraries.get(libraryId);
+            currentValue = {
+                library_name: library ? library.name : 'Unknown Library',
+                parent_key: actionData.parent_key ?? null,
+                item_count: actionData.item_ids?.length ?? 0,
+            };
         }
     }
 

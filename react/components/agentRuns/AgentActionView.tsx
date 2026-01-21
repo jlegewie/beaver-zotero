@@ -12,13 +12,15 @@ import {
 } from '../../agents/agentActions';
 import { sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import {
-    editMetadataItemTitlesAtom,
-    setEditMetadataItemTitleAtom,
+    agentActionItemTitlesAtom,
+    setAgentActionItemTitleAtom,
     toolExpandedAtom,
     setToolExpandedAtom,
 } from '../../atoms/messageUIState';
 import { EditMetadataPreview } from './EditMetadataPreview';
+import { CreateCollectionPreview } from './CreateCollectionPreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
+import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
 import {
@@ -36,6 +38,7 @@ import {
     ArrowRightIcon,
     PropertyEditIcon,
     ArrowUpRightIcon,
+    LibraryIcon,
 } from '../icons/icons';
 import { revealSource } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
@@ -207,13 +210,18 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
 
-    // Item title state (shared across panes)
-    const itemTitleMap = useAtomValue(editMetadataItemTitlesAtom);
+    // Item title state (shared across panes) - only for actions that have specific items
+    const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
     const itemTitle = itemTitleMap[toolcallId] ?? null;
-    const setItemTitle = useSetAtom(setEditMetadataItemTitleAtom);
+    const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
 
-    // Fetch item title for edit_metadata actions
+    // Determine if this action type has an associated item
+    const hasAssociatedItem = toolName === 'edit_metadata';
+
+    // Fetch item title for actions that have specific items
     useEffect(() => {
+        if (!hasAssociatedItem || itemTitle) return;
+
         const fetchTitle = async () => {
             // Get item info from action or pending approval
             const libraryId = action?.proposed_data?.library_id ?? pendingApproval?.actionData?.library_id;
@@ -228,10 +236,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             }
         };
         
-        if (!itemTitle && toolName === 'edit_metadata') {
-            fetchTitle();
-        }
-    }, [action, pendingApproval, itemTitle, toolcallId, toolName, setItemTitle]);
+        fetchTitle();
+    }, [action, pendingApproval, itemTitle, toolcallId, hasAssociatedItem, setItemTitle]);
 
     // Clear processing state when action status changes from 'pending' to a final state
     useEffect(() => {
@@ -286,6 +292,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     result_data: result,
                 }]);
                 logger(`AgentActionView: Applied edit_metadata action ${action.id}`, 1);
+            } else if (toolName === 'create_collection') {
+                const result = await executeCreateCollectionAction(action);
+                // Acknowledge the action as applied with result data
+                await ackAgentActions(runId, [{
+                    action_id: action.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied create_collection action ${action.id}`, 1);
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to apply action';
@@ -334,6 +348,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 // we consider the AI's changes undone (user has taken control)
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone edit_metadata action ${action.id} (${result.fieldsReverted} fields reverted)`, 1);
+            } else if (toolName === 'create_collection') {
+                await undoCreateCollectionAction(action);
+                undoAgentAction(action.id);
+                logger(`AgentActionView: Undone create_collection action ${action.id}`, 1);
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to undo action';
@@ -356,10 +374,15 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     // Determine what icon to show in header
     const getHeaderIcon = () => {
-        if (isAwaitingApproval) return toolName === 'edit_metadata' ? PropertyEditIcon : ClockIcon;
+        const getToolIcon = () => {
+            if (toolName === 'edit_metadata') return PropertyEditIcon;
+            if (toolName === 'create_collection') return LibraryIcon;
+            return ClockIcon;
+        };
+        if (isAwaitingApproval) return getToolIcon();
         if (isHovered && isExpanded) return ArrowDownIcon;
         if (isHovered && !isExpanded) return ArrowRightIcon;
-        if (config.icon === null) return toolName === 'edit_metadata' ? PropertyEditIcon : ClockIcon;
+        if (config.icon === null) return getToolIcon();
         return config.icon;
     };
     
@@ -370,6 +393,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         // Show status styling if we have a status icon
         return config.icon !== null || !isAwaitingApproval;
     };
+
+    const actionTitle = getActionTitle(toolName, action?.proposed_data, itemTitle);
 
     return (
         <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
@@ -399,7 +424,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         </div>
                         <div className="display-flex flex-row gap-1">
                             <div className="font-color-primary font-medium">{getActionLabel(toolName)}</div>
-                            {itemTitle && <div className="font-color-secondary">{itemTitle}</div>}
+                            {actionTitle && <div className="font-color-secondary">{actionTitle}</div>}
                         </div>
                     </div>
                     
@@ -551,12 +576,25 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 function getActionLabel(toolName: string): string {
     switch (toolName) {
         case 'edit_metadata':
+        case 'edit_item':
             return 'Edit';
         case 'create_item':
         case 'create_collection':
             return 'Create';
         default:
             return toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+}
+
+function getActionTitle(toolName: string, actionData: Record<string, any> | undefined, itemTitle: string | null): string | null {
+    switch (toolName) {
+        case 'edit_metadata':
+        case 'edit_item':
+            return itemTitle ? itemTitle : null;
+        case 'create_collection':
+            return actionData?.name ?? actionData?.proposed_data?.name ?? null;
+        default:
+            return null;
     }
 }
 
@@ -627,6 +665,27 @@ const ActionPreview: React.FC<{
                 currentValues={currentValues}
                 appliedEdits={appliedEdits}
                 status={status}
+            />
+        );
+    }
+
+    if (toolName === 'create_collection' || previewData.actionType === 'create_collection') {
+        const name = previewData.actionData.name || '';
+        const parentKey = previewData.actionData.parent_key;
+        const itemIds = previewData.actionData.item_ids || [];
+        
+        // Get library name and item count from current_value
+        const libraryName = previewData.currentValue?.library_name;
+        const itemCount = previewData.currentValue?.item_count ?? itemIds.length;
+        
+        return (
+            <CreateCollectionPreview
+                name={name}
+                libraryName={libraryName}
+                parentKey={parentKey}
+                itemCount={itemCount}
+                status={status}
+                resultData={previewData.resultData}
             />
         );
     }
