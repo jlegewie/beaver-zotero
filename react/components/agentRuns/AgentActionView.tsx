@@ -394,6 +394,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         return config.icon !== null || !isAwaitingApproval;
     };
 
+    const actionTitle = getActionTitle(toolName, action?.proposed_data, itemTitle);
+
     return (
         <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
             {/* Header */}
@@ -422,7 +424,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         </div>
                         <div className="display-flex flex-row gap-1">
                             <div className="font-color-primary font-medium">{getActionLabel(toolName)}</div>
-                            {itemTitle && <div className="font-color-secondary">{itemTitle}</div>}
+                            {actionTitle && <div className="font-color-secondary">{actionTitle}</div>}
                         </div>
                     </div>
                     
@@ -581,6 +583,18 @@ function getActionLabel(toolName: string): string {
             return 'Create';
         default:
             return toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+}
+
+function getActionTitle(toolName: string, actionData: Record<string, any> | undefined, itemTitle: string | null): string | null {
+    switch (toolName) {
+        case 'edit_metadata':
+        case 'edit_item':
+            return itemTitle ? itemTitle : null;
+        case 'create_collection':
+            return actionData?.name ?? actionData?.proposed_data?.name ?? null;
+        default:
+            return null;
     }
 }
 
