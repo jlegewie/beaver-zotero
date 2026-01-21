@@ -1,6 +1,6 @@
 import { ToolCallStatus } from './atoms';
 import { ToolCallPart } from './types';
-import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../src/services/agentDataProvider';
+import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../src/services/agentDataProvider/utils';
 
 /**
  * Get display name from a Zotero item (Author Year format).

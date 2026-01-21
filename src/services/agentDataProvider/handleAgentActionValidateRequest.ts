@@ -1,0 +1,343 @@
+/**
+ * Agent Data Provider
+ * 
+ * This service provides WebSocket communication for agent runs,
+ * enabling bidirectional communication between the Zotero plugin and the backend.
+ * 
+ * The Beaver agent is the primary agent that handles chat completions and tool execution.
+ */
+
+import { logger } from '../../utils/logger';
+import { canSetField, SETTABLE_PRIMARY_FIELDS } from '../../utils/zoteroUtils';
+import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
+
+import { store } from '../../../react/store';
+import {
+    WSAgentActionValidateRequest,
+    WSAgentActionValidateResponse,
+} from '../agentProtocol';
+import { getDeferredToolPreference } from './utils';
+
+
+/**
+ * Handle agent_action_validate request from backend.
+ * Validates that an action can be performed and returns the current value
+ * for before/after tracking, plus the user's preference.
+ */
+export async function handleAgentActionValidateRequest(
+    request: WSAgentActionValidateRequest
+): Promise<WSAgentActionValidateResponse> {
+    logger(`handleAgentActionValidateRequest: Validating ${request.action_type}`, 1);
+
+    try {
+        if (request.action_type === 'edit_metadata') {
+            return await validateEditMetadataAction(request);
+        }
+
+        // Unsupported action type
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Unsupported action type: ${request.action_type}`,
+            error_code: 'unsupported_action_type',
+            preference: 'always_ask',
+        };
+    } catch (error) {
+        logger(`handleAgentActionValidateRequest: Error: ${error}`, 1);
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: String(error),
+            error_code: 'validation_failed',
+            preference: 'always_ask',
+        };
+    }
+}
+
+/**
+ * Fields that Beaver should NOT modify, even though they may be technically settable.
+ * These are system fields, metadata, or fields that require special handling.
+ * 
+ * Note: This list only includes fields that CAN be set but SHOULD NOT be.
+ * Fields that can't be set at all (like 'firstCreator', 'id', etc.) are 
+ * already handled by canSetField().
+ */
+const AI_RESTRICTED_FIELDS = [
+    // System metadata - technically settable but should be immutable
+    'dateAdded',        // Creation timestamp - immutable record
+    'dateModified',     // Managed automatically by Zotero
+    
+    // Sync/versioning - critical for data integrity
+    'version',          // Used for sync conflict resolution
+    'synced',           // Sync status flag
+    
+    // Group library metadata - user/permission related
+    'createdByUserID',
+    'lastModifiedByUserID',
+    
+    // Structural changes - too risky for AI
+    'itemTypeID',       // Changing item type can lose data
+] as const;
+
+// ============================================================================
+// Field Validation Types and Functions
+// ============================================================================
+
+/** Result of validating a single field edit */
+export interface FieldValidationResult {
+    allowed: boolean;
+    error?: string;
+    error_code?: 'field_restricted' | 'field_unknown' | 'field_invalid_for_type';
+}
+
+/** Error information for a failed field validation */
+export interface FieldValidationError {
+    field: string;
+    error: string;
+    error_code: 'field_restricted' | 'field_unknown' | 'field_invalid_for_type';
+}
+
+/** Result of validating all field edits */
+export interface AllEditsValidationResult {
+    valid: boolean;
+    errors: FieldValidationError[];
+}
+
+/** Type for a field edit operation */
+export interface FieldEdit {
+    field: string;
+    new_value: string;
+}
+
+/**
+ * Validates whether a field can be edited, with detailed error information.
+ * This combines policy checks (AI restrictions) with technical checks (Zotero schema).
+ * 
+ * @param item - The Zotero item being edited
+ * @param field - The field name to validate
+ * @returns Validation result with allowed status and error details if not allowed
+ */
+export function validateFieldEdit(item: Zotero.Item, field: string): FieldValidationResult {
+    // 1. Check if field is restricted by AI safety policy
+    if ((AI_RESTRICTED_FIELDS as readonly string[]).includes(field)) {
+        return {
+            allowed: false,
+            error: `Field '${field}' is a system field that should not be modified by AI`,
+            error_code: 'field_restricted'
+        };
+    }
+    
+    // 2. Check if field exists in Zotero's schema
+    const fieldID = Zotero.ItemFields.getID(field);
+    if (!fieldID && !(SETTABLE_PRIMARY_FIELDS as readonly string[]).includes(field)) {
+        return {
+            allowed: false,
+            error: `Field '${field}' does not exist in Zotero's schema`,
+            error_code: 'field_unknown'
+        };
+    }
+    
+    // 3. Check if field is technically editable for this item type
+    if (!canSetField(item, field)) {
+        const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
+        return {
+            allowed: false,
+            error: `Field '${field}' is not valid for item type '${itemType}'`,
+            error_code: 'field_invalid_for_type'
+        };
+    }
+    
+    return { allowed: true };
+}
+
+/**
+ * Validates all field edits and returns detailed error information for each failure.
+ * This reports ALL invalid fields at once instead of failing on the first one.
+ * 
+ * @param item - The Zotero item being edited
+ * @param edits - Array of field edits to validate
+ * @returns Validation result with all errors
+ */
+export function validateAllEdits(item: Zotero.Item, edits: FieldEdit[]): AllEditsValidationResult {
+    const errors: FieldValidationError[] = [];
+    
+    for (const edit of edits) {
+        const result = validateFieldEdit(item, edit.field);
+        if (!result.allowed) {
+            errors.push({
+                field: edit.field,
+                error: result.error!,
+                error_code: result.error_code!
+            });
+        }
+    }
+    
+    return {
+        valid: errors.length === 0,
+        errors
+    };
+}
+
+/**
+ * Checks if Beaver should be allowed to edit this field.
+ * More restrictive than canSetField() - focuses on safety and best practices.
+ * 
+ * @deprecated Use validateFieldEdit() for detailed error information
+ */
+export function isFieldEditAllowed(item: Zotero.Item, field: string): boolean {
+    return validateFieldEdit(item, field).allowed;
+}
+
+/**
+ * Validate an edit_metadata action.
+ * Checks if the item exists, validates all fields (batch), and returns current field values.
+ */
+async function validateEditMetadataAction(
+    request: WSAgentActionValidateRequest
+): Promise<WSAgentActionValidateResponse> {
+    const { library_id, zotero_key, edits } = request.action_data as {
+        library_id: number;
+        zotero_key: string;
+        edits: FieldEdit[];
+    };
+
+    // Validate library exists
+    const library = Zotero.Libraries.get(library_id);
+    if (!library) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library not found: ${library_id}`,
+            error_code: 'library_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate library is searchable
+    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    if (!searchableLibraryIds.includes(library_id)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library exists but is not synced with Beaver. The user can update this setting in Beaver Preferences. Library: ${library.name} (ID: ${library_id})`,
+            error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate item exists
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Item not found: ${library_id}-${zotero_key}`,
+            error_code: 'item_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate item type
+    if (item.isNote()) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Editing Notes is not supported`,
+            error_code: 'note_items_not_supported',
+            preference: 'always_ask',
+        };
+    }
+
+    if (item.isAnnotation()) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Editing Annotations is not supported`,
+            error_code: 'annotation_items_not_supported',
+            preference: 'always_ask',
+        };
+    }
+
+    if (item.isAttachment()) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Editing Attachments is not supported`,
+            error_code: 'attachment_items_not_supported',
+            preference: 'always_ask',
+        };
+    }
+
+    if (!item.isRegularItem()) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Editing items other than regular items is not supported`,
+            error_code: 'item_type_not_supported',
+            preference: 'always_ask',
+        };
+    }
+
+    // Check if library is editable (check early to avoid unnecessary field validation)
+    if (!library || !library.editable) {
+        const libraryName = library && typeof library !== 'boolean' ? library.name : String(library_id);
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library '${libraryName}' is read-only and cannot be edited`,
+            error_code: 'library_not_editable',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate ALL fields using batch validation (reports all errors at once)
+    const validation = validateAllEdits(item, edits);
+    if (!validation.valid) {
+        const errorSummary = validation.errors
+            .map(e => `${e.field}: ${e.error}`)
+            .join('; ');
+        
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: errorSummary,
+            error_code: 'field_validation_failed',
+            errors: validation.errors,
+            preference: 'always_ask',
+        };
+    }
+
+    // Get current values for all edited fields
+    const currentValue: Record<string, string | null> = {};
+    for (const edit of edits) {
+        try {
+            const value = item.getField(edit.field);
+            // getField returns empty string for missing fields, or the field value
+            currentValue[edit.field] = value ? String(value) : null;
+        } catch {
+            currentValue[edit.field] = null;
+        }
+    }
+
+    // Get user preference from settings
+    const preference = getDeferredToolPreference('edit_metadata');
+
+    return {
+        type: 'agent_action_validate_response',
+        request_id: request.request_id,
+        valid: true,
+        current_value: currentValue,
+        preference,
+    };
+}
