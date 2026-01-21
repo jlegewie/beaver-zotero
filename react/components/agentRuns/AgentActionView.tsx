@@ -4,7 +4,7 @@ import {
     AgentAction,
     PendingApproval,
     getAgentActionsByToolcallAtom,
-    clearPendingApprovalAtom,
+    removePendingApprovalAtom,
     undoAgentActionAtom,
     ackAgentActionsAtom,
     rejectAgentActionAtom,
@@ -201,7 +201,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     // Atoms for state management
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
-    const clearPendingApproval = useSetAtom(clearPendingApprovalAtom);
+    const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
@@ -258,9 +258,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             setIsProcessingApproval(true);
             processingActionIdRef.current = pendingApproval.actionId;
             sendApprovalResponse({ actionId: pendingApproval.actionId, approved: true });
-            clearPendingApproval();
+            removePendingApproval(pendingApproval.actionId);
         }
-    }, [pendingApproval, sendApprovalResponse, clearPendingApproval]);
+    }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
 
     const handleReject = useCallback(() => {
         if (pendingApproval) {
@@ -268,9 +268,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             setIsProcessingApproval(true);
             processingActionIdRef.current = pendingApproval.actionId;
             sendApprovalResponse({ actionId: pendingApproval.actionId, approved: false });
-            clearPendingApproval();
+            removePendingApproval(pendingApproval.actionId);
         }
-    }, [pendingApproval, sendApprovalResponse, clearPendingApproval]);
+    }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
 
     // Handlers for post-run actions (after agent run is complete)
     const handleApplyPending = useCallback(async () => {

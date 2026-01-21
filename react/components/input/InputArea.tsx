@@ -4,7 +4,7 @@ import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { newThreadAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
-import { pendingApprovalAtom, clearPendingApprovalAtom } from '../../agents/agentActions';
+import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
 import { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
@@ -41,10 +41,15 @@ const InputArea: React.FC<InputAreaProps> = ({
     const isPending = useAtomValue(isWSChatPendingAtom);
 
     // Pending approval state (for deferred tools)
-    const pendingApproval = useAtomValue(pendingApprovalAtom);
+    // With parallel tool calls, there can be multiple pending approvals
+    const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
-    const clearPendingApproval = useSetAtom(clearPendingApprovalAtom);
-    const isAwaitingApproval = pendingApproval !== null;
+    const removePendingApproval = useSetAtom(removePendingApprovalAtom);
+    const isAwaitingApproval = pendingApprovalsMap.size > 0;
+    // For "reject with instructions" feature, get the first pending approval (if any)
+    const firstPendingApproval = pendingApprovalsMap.size > 0 
+        ? Array.from(pendingApprovalsMap.values())[0] 
+        : null;
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -81,8 +86,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.stopPropagation();
         }
         logger('Stopping chat completion');
-        closeWSConnection();
-        clearPendingApproval();
+        closeWSConnection(); // Also clears all pending approvals
     };
 
     const handleRejectWithInstructions = (e?: React.MouseEvent | React.FormEvent) => {
@@ -90,16 +94,17 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.preventDefault();
             e.stopPropagation();
         }
-        if (!pendingApproval) return;
-        
+        if (pendingApprovalsMap.size === 0) return;
         const instructions = messageContent.trim() || null;
-        logger(`Rejecting approval ${pendingApproval.actionId} with instructions: ${instructions}`);
-        sendApprovalResponse({
-            actionId: pendingApproval.actionId,
-            approved: false,
-            userInstructions: instructions,
-        });
-        clearPendingApproval();
+        for (const pendingApproval of pendingApprovalsMap.values()) {
+            logger(`Rejecting approval ${pendingApproval.actionId} with instructions: ${instructions}`);
+            sendApprovalResponse({
+                actionId: pendingApproval.actionId,
+                approved: false,
+                userInstructions: instructions,
+            });
+            removePendingApproval(pendingApproval.actionId);
+        }
         setMessageContent('');
     };
 
@@ -243,7 +248,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             }
                         >
                             {isAwaitingApproval && messageContent.trim().length > 0
-                                ? 'Reject'
+                                ? pendingApprovalsMap.size > 1 ? 'Reject all' : 'Reject'
                                 : isPending
                                     ? 'Stop'
                                     : (<span>Send <span className="opacity-50">⏎</span></span>)

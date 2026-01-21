@@ -5,7 +5,7 @@ import { AgentRunView } from "./AgentRunView";
 import { scrollToBottom } from "../../utils/scrollToBottom";
 import { userScrolledAtom, windowUserScrolledAtom } from "../../atoms/ui";
 import { currentThreadScrollPositionAtom, windowScrollPositionAtom, currentThreadIdAtom } from "../../atoms/threads";
-import { pendingApprovalAtom } from "../../agents/agentActions";
+import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
 
@@ -34,9 +34,10 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         const currentThreadId = useAtomValue(currentThreadIdAtom);
         const prevThreadIdRef = useRef<string | null>(null);
         
-        // Track pending approval for scroll-to-bottom triggering
-        const pendingApproval = useAtomValue(pendingApprovalAtom);
-        const prevPendingApprovalIdRef = useRef<string | null>(null);
+        // Track pending approvals for scroll-to-bottom triggering
+        // With parallel tool calls, there can be multiple pending approvals
+        const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
+        const prevPendingApprovalIdsRef = useRef<Set<string>>(new Set());
         
         // Track visibility state for ResizeObserver
         const wasHiddenRef = useRef(true);
@@ -194,11 +195,21 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         // Scroll to bottom when a new pending approval appears
         // This ensures the approval buttons are visible, even if user had scrolled up
         // Uses a delay to allow the AgentActionView to fully render/expand
+        // With parallel tool calls, we track all pending approval IDs
         useEffect(() => {
-            const currentApprovalId = pendingApproval?.actionId ?? null;
+            const currentApprovalIds = new Set(pendingApprovalsMap.keys());
             
-            // Only scroll if this is a NEW pending approval (not the same one re-rendering)
-            if (currentApprovalId && currentApprovalId !== prevPendingApprovalIdRef.current) {
+            // Check if there are any NEW pending approvals (not seen before)
+            let hasNewApproval = false;
+            for (const id of currentApprovalIds) {
+                if (!prevPendingApprovalIdsRef.current.has(id)) {
+                    hasNewApproval = true;
+                    break;
+                }
+            }
+            
+            // Only scroll if there's a NEW pending approval (not the same ones re-rendering)
+            if (hasNewApproval) {
                 const timeoutId = win.setTimeout(() => {
                     if (scrollContainerRef.current) {
                         // Force scroll to bottom for pending approvals - user action is required
@@ -218,13 +229,13 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     }
                 }, PENDING_APPROVAL_SCROLL_DELAY);
                 
-                prevPendingApprovalIdRef.current = currentApprovalId;
+                prevPendingApprovalIdsRef.current = currentApprovalIds;
                 
                 return () => win.clearTimeout(timeoutId);
             }
             
-            prevPendingApprovalIdRef.current = currentApprovalId;
-        }, [pendingApproval?.actionId, scrolledAtom, win]);
+            prevPendingApprovalIdsRef.current = currentApprovalIds;
+        }, [pendingApprovalsMap, scrolledAtom, win]);
 
         if (runs.length === 0) {
             return (

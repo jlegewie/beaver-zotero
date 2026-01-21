@@ -69,9 +69,11 @@ import {
     isEditMetadataAgentAction,
     hasAppliedZoteroItem,
     AgentAction,
-    setPendingApprovalAtom,
+    addPendingApprovalAtom,
+    removePendingApprovalAtom,
+    pendingApprovalsAtom,
     buildPendingApprovalFromAction,
-    clearPendingApprovalAtom,
+    clearAllPendingApprovalsAtom,
 } from '../agents/agentActions';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
@@ -661,8 +663,19 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Update run with tool return
             set(activeRunAtom, (prev) => prev ? updateRunWithToolReturn(prev, event) : prev);
 
-            // Clear pending approval when tool return is received
-            set(clearPendingApprovalAtom);
+            // Remove pending approval for this specific tool call (if any)
+            // Note: We find approval by toolCallId since that's what we have in the event
+            if (event.part.part_kind === "tool-return") {
+                const toolCallId = event.part.tool_call_id;
+                // Get current pending approvals and find the one for this tool call
+                const pendingMap = store.get(pendingApprovalsAtom);
+                for (const [actionId, pending] of pendingMap.entries()) {
+                    if (pending.toolcallId === toolCallId) {
+                        set(removePendingApprovalAtom, actionId);
+                        break;
+                    }
+                }
+            }
         },
 
         onToolCallProgress: (event: WSToolCallProgressEvent) => {
@@ -822,8 +835,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 toolcallId: event.toolcall_id,
                 actionType: event.action_type,
             }, 1);
-            // Set the pending approval in the atom - UI will render ApprovalView
-            set(setPendingApprovalAtom, event);
+            // Add the pending approval to the map - UI will render ApprovalView for each
+            set(addPendingApprovalAtom, event);
         },
 
         onOpen: () => {
@@ -1477,6 +1490,9 @@ export const resumeFromRunAtom = atom(
 export const closeWSConnectionAtom = atom(null, async (get, set) => {
     // Set pending to false immediately for better UI responsiveness
     set(isWSChatPendingAtom, false);
+
+    // Clear any pending approvals (for parallel tool calls that were awaiting user response)
+    set(clearAllPendingApprovalsAtom);
 
     // Mark active run as canceled if it exists
     const activeRun = get(activeRunAtom);

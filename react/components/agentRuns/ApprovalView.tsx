@@ -1,6 +1,6 @@
 import React from 'react';
 import { useSetAtom } from 'jotai';
-import { PendingApproval, clearPendingApprovalAtom } from '../../agents/agentActions';
+import { PendingApproval, removePendingApprovalAtom } from '../../agents/agentActions';
 import { EditMetadataPreview } from './EditMetadataPreview';
 import { TickIcon, CancelIcon } from '../icons/icons';
 import Button from '../ui/Button';
@@ -16,16 +16,16 @@ interface ApprovalViewProps {
  * Dispatches to action-specific preview components and shows approve/reject buttons.
  */
 export const ApprovalView: React.FC<ApprovalViewProps> = ({ approval, onRespond }) => {
-    const clearPendingApproval = useSetAtom(clearPendingApprovalAtom);
+    const removePendingApproval = useSetAtom(removePendingApprovalAtom);
 
     const handleApprove = () => {
         onRespond(true);
-        clearPendingApproval();
+        removePendingApproval(approval.actionId);
     };
 
     const handleReject = () => {
         onRespond(false);
-        clearPendingApproval();
+        removePendingApproval(approval.actionId);
     };
 
     return (

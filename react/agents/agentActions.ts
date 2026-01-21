@@ -626,7 +626,7 @@ export const clearAgentActionsAtom = atom(
 /**
  * Pending approval request from the backend.
  * When set, the UI should show an approval dialog for this action.
- * Only one approval can be pending at a time since the agent run is blocked.
+ * Multiple approvals can be pending simultaneously for parallel tool calls.
  */
 export interface PendingApproval {
     actionId: string;
@@ -638,49 +638,77 @@ export interface PendingApproval {
 }
 
 /**
- * Atom storing the currently pending approval request.
- * null when no approval is pending.
+ * Atom storing all pending approval requests, keyed by actionId.
+ * Supports multiple parallel approvals for parallel tool calls.
  */
-export const pendingApprovalAtom = atom<PendingApproval | null>(null);
+export const pendingApprovalsAtom = atom<Map<string, PendingApproval>>(new Map());
 
 /**
- * Atom to set a pending approval from a WS event.
+ * Add a pending approval from a WS event.
+ * Supports multiple concurrent approvals for parallel tool calls.
  */
-export const setPendingApprovalAtom = atom(
+export const addPendingApprovalAtom = atom(
     null,
     (_, set, event: WSDeferredApprovalRequest) => {
-        set(pendingApprovalAtom, {
-            actionId: event.action_id,
-            toolcallId: event.toolcall_id,
-            actionType: event.action_type as AgentActionType,
-            actionData: event.action_data,
-            currentValue: event.current_value,
+        set(pendingApprovalsAtom, (prev) => {
+            const next = new Map(prev);
+            next.set(event.action_id, {
+                actionId: event.action_id,
+                toolcallId: event.toolcall_id,
+                actionType: event.action_type as AgentActionType,
+                actionData: event.action_data,
+                currentValue: event.current_value,
+            });
+            return next;
         });
     }
 );
 
 /**
- * Atom to clear the pending approval (after user responds).
+ * Remove a specific pending approval by actionId (after user responds).
  */
-export const clearPendingApprovalAtom = atom(
+export const removePendingApprovalAtom = atom(
+    null,
+    (_, set, actionId: string) => {
+        set(pendingApprovalsAtom, (prev) => {
+            const next = new Map(prev);
+            next.delete(actionId);
+            return next;
+        });
+    }
+);
+
+/**
+ * Clear all pending approvals (e.g., when switching threads or on run complete).
+ */
+export const clearAllPendingApprovalsAtom = atom(
     null,
     (_, set) => {
-        set(pendingApprovalAtom, null);
+        set(pendingApprovalsAtom, new Map());
     }
 );
 
 /**
  * Get pending approval for a specific toolcall_id.
- * Returns the pending approval if it matches the toolcall_id.
+ * Searches the map for an approval matching the toolcall_id.
  */
 export const getPendingApprovalForToolcallAtom = atom(
     (get) => (toolcallId: string): PendingApproval | null => {
-        const pending = get(pendingApprovalAtom);
-        if (pending && pending.toolcallId === toolcallId) {
-            return pending;
+        const pendingMap = get(pendingApprovalsAtom);
+        for (const pending of pendingMap.values()) {
+            if (pending.toolcallId === toolcallId) {
+                return pending;
+            }
         }
         return null;
     }
+);
+
+/**
+ * Check if there are any pending approvals.
+ */
+export const hasPendingApprovalsAtom = atom(
+    (get) => get(pendingApprovalsAtom).size > 0
 );
 
 /**
