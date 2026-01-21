@@ -4,6 +4,8 @@ import { AgentRunStatus, ToolCallPart } from '../../agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
 import { getToolCallLabel } from '../../agents/toolLabels';
 import { ToolResultView } from './ToolResultView';
+import { AgentActionView } from './AgentActionView';
+import { getPendingApprovalForToolcallAtom, getAgentActionsByToolcallAtom } from '../../agents/agentActions';
 import {
     Spinner,
     AlertIcon,
@@ -13,14 +15,16 @@ import {
     ViewIcon,
     Icon,
     PuzzleIcon,
+    FileViewIcon,
     GlobalSearchIcon,
     TextAlignLeftIcon,
     DocumentValidationIcon,
-    LibraryIcon,
-    BookmarkIcon,
+    FolderDetailIcon,
+    FolderAddIcon,
     DatabaseIcon,
+    TagIcon,
 } from '../icons/icons';
-import { searchToolVisibilityAtom, toggleSearchToolVisibilityAtom } from '../../atoms/messageUIState';
+import { toolExpandedAtom, toggleToolExpandedAtom } from '../../atoms/messageUIState';
 
 type IconComponent = React.FC<React.SVGProps<SVGSVGElement>>;
 
@@ -38,12 +42,12 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // List tools - library management
     list_items: TextAlignLeftIcon,
-    list_collections: LibraryIcon,
-    list_tags: BookmarkIcon,
+    list_collections: FolderDetailIcon,
+    list_tags: TagIcon,
     list_libraries: DatabaseIcon,
 
     // Metadata tools
-    get_metadata: DocumentValidationIcon,
+    get_metadata: FileViewIcon,
     edit_metadata: DocumentValidationIcon,
 
     // Reading tools
@@ -58,6 +62,9 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Create item tool
     create_zotero_item: DocumentValidationIcon,
+
+    // Create collection tool
+    create_collection: FolderAddIcon,
 
     // Read tool result
     read_file: TextAlignLeftIcon,
@@ -82,12 +89,27 @@ interface ToolCallPartViewProps {
  * Renders a tool call with its status and result.
  * Uses toolResultsMapAtom to look up the result for this tool call.
  * Visibility state is managed globally via searchToolVisibilityAtom.
+ * Shows AgentActionView for tools with agent actions (e.g., edit_metadata).
  */
 export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId, runStatus }) => {
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const result = resultsMap.get(part.tool_call_id);
     const status = getToolCallStatus(part.tool_call_id, resultsMap);
     const baseLabel = getToolCallLabel(part, status);
+    
+    // Check for pending approval for this tool call
+    const getPendingApproval = useAtomValue(getPendingApprovalForToolcallAtom);
+    const pendingApproval = getPendingApproval(part.tool_call_id);
+    const isAwaitingApproval = pendingApproval !== null;
+    
+    // Check for agent actions associated with this tool call
+    const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
+    const agentActions = getAgentActionsByToolcall(part.tool_call_id);
+    const hasAgentAction = agentActions.length > 0;
+    
+    // Determine if this tool should use AgentActionView
+    const isAgentActionTool = part.tool_name === 'edit_metadata' || part.tool_name === 'create_collection';
+    const showAgentActionView = isAgentActionTool && (isAwaitingApproval || hasAgentAction);
 
     const resultCount =
         result && result.part_kind === 'tool-return'
@@ -99,11 +121,11 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             ? `${baseLabel} (${resultCount} result${resultCount === 1 ? '' : 's'})`
             : baseLabel;
 
-    // Use global Jotai atom for visibility state (persists across re-renders and syncs between panes)
-    const visibilityKey = `${runId}:${part.tool_call_id}`;
-    const searchVisibility = useAtomValue(searchToolVisibilityAtom);
-    const toggleVisibility = useSetAtom(toggleSearchToolVisibilityAtom);
-    const isExpanded = searchVisibility[visibilityKey] ?? false;
+    // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
+    const expansionKey = `${runId}:${part.tool_call_id}`;
+    const expansionState = useAtomValue(toolExpandedAtom);
+    const toggleExpanded = useSetAtom(toggleToolExpandedAtom);
+    const isExpanded = expansionState[expansionKey] ?? false;
 
     const [isHovered, setIsHovered] = useState(false);
 
@@ -116,13 +138,14 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         result?.part_kind === 'tool-return' &&
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (resultCount === null || resultCount > 0) &&
-        part.tool_name !== 'read_file';
+        part.tool_name !== 'read_file' &&
+        !showAgentActionView; // Don't allow expand toggle for agent action tools
 
     const effectiveExpanded = isExpanded && canExpand;
 
-    const toggleExpanded = () => {
+    const handleToggleExpanded = () => {
         if (canExpand) {
-            toggleVisibility(visibilityKey);
+            toggleExpanded(expansionKey);
         }
     };
 
@@ -138,6 +161,18 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
 
     const hasExpandedResult = effectiveExpanded && canExpand;
     const isShimmering = isInProgress && !hasResult && runStatus === 'in_progress';
+
+    // For agent action tools, show the AgentActionView instead of normal tool result
+    if (showAgentActionView) {
+        return (
+            <AgentActionView
+                toolcallId={part.tool_call_id}
+                toolName={part.tool_name}
+                runId={runId}
+                pendingApproval={pendingApproval}
+            />
+        );
+    }
 
     return (
         <div
@@ -162,7 +197,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={effectiveExpanded}
                     aria-controls={`tool-result-${part.tool_call_id}`}
-                    onClick={toggleExpanded}
+                    onClick={handleToggleExpanded}
                     disabled={!canExpand}
                 >
                     <div className="display-flex flex-row px-3 gap-2">

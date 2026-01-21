@@ -5,6 +5,7 @@ import { AgentRunView } from "./AgentRunView";
 import { scrollToBottom } from "../../utils/scrollToBottom";
 import { userScrolledAtom, windowUserScrolledAtom } from "../../atoms/ui";
 import { currentThreadScrollPositionAtom, windowScrollPositionAtom, currentThreadIdAtom } from "../../atoms/threads";
+import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
 
@@ -12,6 +13,7 @@ const BOTTOM_THRESHOLD = 120; // pixels
 const RESTORE_THRESHOLD = 100; // pixels - threshold for restoring scroll position
 const RESTORE_DEBOUNCE_MS = 50; // ms - debounce delay for scroll restoration
 const ANIMATION_LOCKOUT_MS = 400; // ms - time to wait after animation before allowing restore
+const PENDING_APPROVAL_SCROLL_DELAY = 100; // ms - delay before scrolling for pending approval (allows content to render)
 
 type ThreadViewProps = {
     /** Optional className for styling */
@@ -31,6 +33,11 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         const restoredFromAtomRef = useRef(false);
         const currentThreadId = useAtomValue(currentThreadIdAtom);
         const prevThreadIdRef = useRef<string | null>(null);
+        
+        // Track pending approvals for scroll-to-bottom triggering
+        // With parallel tool calls, there can be multiple pending approvals
+        const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
+        const prevPendingApprovalIdsRef = useRef<Set<string>>(new Set());
         
         // Track visibility state for ResizeObserver
         const wasHiddenRef = useRef(true);
@@ -184,6 +191,51 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 }, ANIMATION_LOCKOUT_MS);
             }
         }, [runs, scrolledAtom, win]);
+
+        // Scroll to bottom when a new pending approval appears
+        // This ensures the approval buttons are visible, even if user had scrolled up
+        // Uses a delay to allow the AgentActionView to fully render/expand
+        // With parallel tool calls, we track all pending approval IDs
+        useEffect(() => {
+            const currentApprovalIds = new Set(pendingApprovalsMap.keys());
+            
+            // Check if there are any NEW pending approvals (not seen before)
+            let hasNewApproval = false;
+            for (const id of currentApprovalIds) {
+                if (!prevPendingApprovalIdsRef.current.has(id)) {
+                    hasNewApproval = true;
+                    break;
+                }
+            }
+            
+            // Only scroll if there's a NEW pending approval (not the same ones re-rendering)
+            if (hasNewApproval) {
+                const timeoutId = win.setTimeout(() => {
+                    if (scrollContainerRef.current) {
+                        // Force scroll to bottom for pending approvals - user action is required
+                        // Reset userScrolled to allow auto-scroll
+                        store.set(scrolledAtom, false);
+                        
+                        // Set animation flag
+                        isAnimatingRef.current = true;
+                        
+                        // Force scroll to bottom (passing false to override userScrolled)
+                        scrollToBottom(scrollContainerRef as React.RefObject<HTMLElement>, false, scrolledAtom);
+                        
+                        // Clear animation flag after animation completes
+                        win.setTimeout(() => {
+                            isAnimatingRef.current = false;
+                        }, ANIMATION_LOCKOUT_MS);
+                    }
+                }, PENDING_APPROVAL_SCROLL_DELAY);
+                
+                prevPendingApprovalIdsRef.current = currentApprovalIds;
+                
+                return () => win.clearTimeout(timeoutId);
+            }
+            
+            prevPendingApprovalIdsRef.current = currentApprovalIds;
+        }, [pendingApprovalsMap, scrolledAtom, win]);
 
         if (runs.length === 0) {
             return (

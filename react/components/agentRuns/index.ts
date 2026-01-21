@@ -16,7 +16,10 @@ export { AnnotationToolCallView } from './AnnotationToolCallView';
 export { AgentRunFooter } from './AgentRunFooter';
 export { RunStatusIndicator } from './RunStatusIndicator';
 export { TokenUsageDisplay } from './TokenUsageDisplay';
-export { AgentActionsDisplay } from './AgentActionsDisplay';
+export { AgentActionsReview } from './AgentActionsReview';
 export { default as CreateItemAgentActionDisplay } from './CreateItemAgentActionDisplay';
 export { default as AgentActionItemButtons } from './AgentActionItemButtons';
+export { ApprovalView } from './ApprovalView';
+export { AgentActionView } from './AgentActionView';
+export { EditMetadataPreview } from './EditMetadataPreview';
 

@@ -646,6 +646,7 @@
 [id^="beaver-pane-"] .opacity-90 { opacity: 0.9; }
 [id^="beaver-pane-"] .opacity-100 { opacity: 1; }
 [id^="beaver-pane-"] .cursor-pointer { cursor: pointer; }
+[id^="beaver-pane-"] .cursor-default { cursor: default; }
 [id^="beaver-pane-"] .cursor-not-allowed { cursor: not-allowed; }
 /* Scaling */
 
@@ -1178,6 +1179,23 @@
     width: 1em;
     height: 1em;
     flex-shrink: 0;
+}
+
+/* Button: Solid Secondary variant (gray, for actions without keyboard shortcuts) */
+[id^="beaver-pane-"] .variant-solid.button-solid-secondary {
+    border: 1px solid var(--fill-tertiary) !important;
+    background-color: var(--fill-secondary) !important;
+    color: var(--accent-white);
+}
+
+[id^="beaver-pane-"] .variant-solid.button-solid-secondary:hover {
+    filter: brightness(1.15) !important;
+}
+
+[id^="beaver-pane-"] .variant-solid.button-solid-secondary:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+    filter: none;
 }
 
 /* Button: Surface variant - refined from existing CSS */
@@ -1921,4 +1939,55 @@
     background: url("chrome://zotero/skin/16/universal/tag.svg") no-repeat center/contain;
     -moz-context-properties: fill, fill-opacity;
     fill: currentColor;
+}
+
+/* Diff view styles for metadata editing */
+[id^="beaver-pane-"] .diff-container {
+    display: flex;
+    flex-direction: column;
+    /* gap: 2px; */
+    font-size: 0.875rem;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    border-radius: 1px;
+    overflow: hidden;
+}
+
+[id^="beaver-pane-"] .diff-line {
+    display: flex;
+    align-items: flex-start;
+    padding: 4px 8px;
+    border-left: 2px solid;
+}
+
+[id^="beaver-pane-"] .diff-deletion {
+    background-color: rgba(186, 42, 41, 0.15);
+    border-left-color: #b82A29 !important;
+    color: var(--fill-primary);
+    opacity: 0.85;
+}
+
+[id^="beaver-pane-"] .diff-addition,.diff-addition-applied {
+    background-color: rgba(20, 135, 85, 0.15);
+    border-left-color: #148D55 !important;
+    color: var(--fill-primary);
+    opacity: 0.85;
+}
+
+[id^="beaver-pane-"] .diff-ghosted {
+    background-color: rgba(128, 128, 128, 0.08);
+    border-left-color: #d1d5db !important;
+    color: #6b7280;
+    opacity: 0.4;
+}
+
+[id^="beaver-pane-"] .diff-neutral {
+    background-color: rgba(128, 128, 128, 0.06);
+    border-left-color: #9ca3af !important;
+    color: var(--fill-primary);
+    opacity: 0.7;
+}
+
+[id^="beaver-pane-"] .diff-content {
+    word-break: break-word;
+    white-space: pre-wrap;
 }

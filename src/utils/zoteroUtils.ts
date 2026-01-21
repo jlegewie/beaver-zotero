@@ -983,3 +983,52 @@ export function deduplicateItems(
     
     return result;
 }
+
+
+/**
+ * Primary fields that CAN be set via item.setField().
+ * These are system fields that Zotero allows modification of directly.
+ */
+export const SETTABLE_PRIMARY_FIELDS = [
+    'itemTypeID',
+    'dateAdded', 
+    'dateModified',
+    'version',
+    'synced',
+    'createdByUserID',
+    'lastModifiedByUserID'
+] as const;
+
+/**
+ * Checks if a field can technically be edited/set via item.setField() for a given item.
+ * Returns true only for fields that can actually be modified through setField().
+ */
+export function canSetField(item: Zotero.Item, field: string): boolean {
+    // 1. Check if it's a settable primary field
+    if ((SETTABLE_PRIMARY_FIELDS as readonly string[]).includes(field)) {
+        return true;
+    }
+    
+    // 2. Reject all other primary fields (they're read-only or have special setters)
+    if (field === 'id' || Zotero.Items.isPrimaryField(field)) {
+        return false;
+    }
+
+    const itemTypeID = item.itemTypeID;
+    
+    // 3. Resolve the field ID (handles name -> ID conversion)
+    let fieldID = Zotero.ItemFields.getID(field);
+    if (!fieldID) return false;
+
+    // 4. Special handling for notes
+    if (item.isNote()) {
+        const fieldName = Zotero.ItemFields.getName(fieldID);
+        return fieldName === 'title';
+    }
+
+    // 5. Resolve base field mappings
+    fieldID = Zotero.ItemFields.getFieldIDFromTypeAndBase(itemTypeID, fieldID) || fieldID;
+
+    // 6. Check the schema for validity
+    return Zotero.ItemFields.isValidForType(fieldID, itemTypeID);
+}

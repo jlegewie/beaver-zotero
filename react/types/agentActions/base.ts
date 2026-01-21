@@ -13,10 +13,83 @@ import type {
  */
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
+// =============================================================================
+// Edit Metadata Types
+// =============================================================================
+
+/**
+ * A single applied metadata field edit.
+ */
+export interface AppliedMetadataEdit {
+    /** The field that was edited */
+    field: string;
+    /** The value that was applied */
+    applied_value: any;
+    /** The original value before the edit (for undo) */
+    old_value?: any;
+}
+
+/**
+ * A single failed metadata field edit.
+ */
+export interface FailedMetadataEdit {
+    /** The field that failed to be edited */
+    field: string;
+    /** The error message explaining why the edit failed */
+    error: string;
+}
+
+/**
+ * Result data after applying an edit metadata action.
+ * Extends ZoteroItemReference (library_id + zotero_key).
+ */
+export interface EditMetadataResultData {
+    /** Library ID of the edited item */
+    library_id: number;
+    /** Zotero key of the edited item */
+    zotero_key: string;
+    /** List of field edits that were successfully applied */
+    applied_edits: AppliedMetadataEdit[];
+    /** List of field names that were rejected by the user */
+    rejected_edits: string[];
+    /** List of field edits that failed with errors */
+    failed_edits: FailedMetadataEdit[];
+}
+
+// =============================================================================
+// Create Collection Types
+// =============================================================================
+
+/**
+ * Proposed data for creating a collection
+ */
+export interface CreateCollectionProposedData {
+    /** Library ID where the collection will be created */
+    library_id: number;
+    /** Name of the collection to create */
+    name: string;
+    /** Parent collection key (optional, for subcollections) */
+    parent_key?: string | null;
+    /** Item IDs to add to the collection after creation (optional) */
+    item_ids?: string[];
+}
+
+/**
+ * Result data after applying a create collection action.
+ */
+export interface CreateCollectionResultData {
+    /** Library ID of the created collection */
+    library_id: number;
+    /** Zotero key of the created collection */
+    collection_key: string;
+    /** Number of items added to the collection (if any were requested) */
+    items_added?: number;
+}
+
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection';
 
 /**
  * Union type for all proposed data types
@@ -36,12 +109,12 @@ export interface NoteResultData {
     parent_key?: string;
 }
 
-export type ProposedData = AnnotationProposedData | NoteProposedData | CreateItemProposedData;
+export type ProposedData = AnnotationProposedData | NoteProposedData | CreateItemProposedData | CreateCollectionProposedData;
 
 /**
  * Type of result data after applying an action
  */
-export type ActionResultDataType = AnnotationResultData | NoteResultData | CreateItemResultData;
+export type ActionResultDataType = AnnotationResultData | NoteResultData | CreateItemResultData | CreateCollectionResultData;
 
 /**
  * Core proposed action model matching the backend schema

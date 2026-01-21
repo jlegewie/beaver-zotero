@@ -4,7 +4,7 @@ import { AgentRun, ModelResponse } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
-import { AgentActionsDisplay } from './AgentActionsDisplay';
+import { AgentActionsReview } from './AgentActionsReview';
 import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
@@ -76,7 +76,7 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
         (wasResumed &&  run.model_messages.length > 0 && run.model_messages[run.model_messages.length - 1].parts.some(part => part.part_kind === 'text' && part.content.trim() !== '')) ||
         (run.status === 'error' && !isLastRun);
 
-    // Allow editing when run is in a terminal state (not actively streaming)
+    // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && (run.status === 'completed' || run.status === 'error' || run.status === 'canceled');
 
     return (
@@ -113,7 +113,7 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
             )}
 
             {/* Agent actions (e.g., create item from citations) */}
-            {run.status === 'completed' && <AgentActionsDisplay run={run} />}
+            {run.status === 'completed' && <AgentActionsReview run={run} />}
 
             {/* Resuming failed request display */}
             {wasResumed && <RunResumeDisplay runId={run.id} />}

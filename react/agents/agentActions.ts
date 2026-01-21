@@ -13,6 +13,7 @@ import {
     normalizeNotePosition,
 } from '../types/agentActions/annotations';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
+import type { WSDeferredApprovalRequest, AgentActionType } from '../../src/services/agentProtocol';
 
 // =============================================================================
 // Agent Action Types
@@ -79,6 +80,20 @@ export const isZoteroNoteAgentAction = (action: AgentAction): boolean => {
  */
 export const isCreateItemAgentAction = (action: AgentAction): action is CreateItemAgentAction => {
     return action.action_type === 'create_item';
+};
+
+/**
+ * Type guard for edit metadata actions
+ */
+export const isEditMetadataAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'edit_metadata';
+};
+
+/**
+ * Type guard for create collection actions
+ */
+export const isCreateCollectionAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'create_collection';
 };
 
 /**
@@ -211,6 +226,25 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             collection_keys: proposedData.collection_keys ?? proposedData.collectionKeys,
             suggested_tags: proposedData.suggested_tags ?? proposedData.suggestedTags,
         } as CreateItemProposedData;
+    } else if (actionType === 'edit_metadata') {
+        // Normalize edit_metadata proposed data
+        proposedData = {
+            library_id: typeof proposedData.library_id === 'number' 
+                ? proposedData.library_id 
+                : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
+            zotero_key: proposedData.zotero_key ?? proposedData.zoteroKey ?? '',
+            edits: proposedData.edits ?? [],
+        };
+    } else if (actionType === 'create_collection') {
+        // Normalize create_collection proposed data
+        proposedData = {
+            library_id: typeof proposedData.library_id === 'number' 
+                ? proposedData.library_id 
+                : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
+            name: proposedData.name ?? '',
+            parent_key: proposedData.parent_key ?? proposedData.parentKey ?? null,
+            item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
+        };
     }
     
     // Normalize result_data if present
@@ -407,6 +441,33 @@ export const addAgentActionsAtom = atom(
 );
 
 /**
+ * Upsert agent actions - updates existing actions (by id) or adds new ones.
+ * Used when receiving agent_actions events which may contain updates to existing actions.
+ */
+export const upsertAgentActionsAtom = atom(
+    null,
+    (_, set, newActions: AgentAction[]) => {
+        set(threadAgentActionsAtom, (prev: AgentAction[]) => {
+            const newActionsById = new Map(newActions.map(a => [a.id, a]));
+            
+            // Update existing actions if they match
+            const updated = prev.map(existing => {
+                const update = newActionsById.get(existing.id);
+                if (update) {
+                    newActionsById.delete(existing.id); // Mark as processed
+                    return { ...existing, ...update };
+                }
+                return existing;
+            });
+            
+            // Add remaining new actions (those not already in the list)
+            const additions = Array.from(newActionsById.values());
+            return [...updated, ...additions];
+        });
+    }
+);
+
+/**
  * Delete agent actions by IDs
  */
 export const deleteAgentActionsAtom = atom(
@@ -573,4 +634,156 @@ export const clearAgentActionsAtom = atom(
         set(threadAgentActionsAtom, []);
     }
 );
+
+
+// =============================================================================
+// Deferred Tool Approval State
+// =============================================================================
+
+/**
+ * Pending approval request from the backend.
+ * When set, the UI should show an approval dialog for this action.
+ * Multiple approvals can be pending simultaneously for parallel tool calls.
+ */
+export interface PendingApproval {
+    actionId: string;
+    /** Tool call ID for UI matching (always provided by backend) */
+    toolcallId: string;
+    actionType: AgentActionType;
+    actionData: Record<string, any>;
+    currentValue?: any;
+}
+
+/**
+ * Atom storing all pending approval requests, keyed by actionId.
+ * Supports multiple parallel approvals for parallel tool calls.
+ */
+export const pendingApprovalsAtom = atom<Map<string, PendingApproval>>(new Map());
+
+/**
+ * Add a pending approval from a WS event.
+ * Supports multiple concurrent approvals for parallel tool calls.
+ */
+export const addPendingApprovalAtom = atom(
+    null,
+    (_, set, event: WSDeferredApprovalRequest) => {
+        set(pendingApprovalsAtom, (prev) => {
+            const next = new Map(prev);
+            next.set(event.action_id, {
+                actionId: event.action_id,
+                toolcallId: event.toolcall_id,
+                actionType: event.action_type as AgentActionType,
+                actionData: event.action_data,
+                currentValue: event.current_value,
+            });
+            return next;
+        });
+    }
+);
+
+/**
+ * Remove a specific pending approval by actionId (after user responds).
+ */
+export const removePendingApprovalAtom = atom(
+    null,
+    (_, set, actionId: string) => {
+        set(pendingApprovalsAtom, (prev) => {
+            const next = new Map(prev);
+            next.delete(actionId);
+            return next;
+        });
+    }
+);
+
+/**
+ * Clear all pending approvals (e.g., when switching threads or on run complete).
+ */
+export const clearAllPendingApprovalsAtom = atom(
+    null,
+    (_, set) => {
+        set(pendingApprovalsAtom, new Map());
+    }
+);
+
+/**
+ * Get pending approval for a specific toolcall_id.
+ * Searches the map for an approval matching the toolcall_id.
+ */
+export const getPendingApprovalForToolcallAtom = atom(
+    (get) => (toolcallId: string): PendingApproval | null => {
+        const pendingMap = get(pendingApprovalsAtom);
+        for (const pending of pendingMap.values()) {
+            if (pending.toolcallId === toolcallId) {
+                return pending;
+            }
+        }
+        return null;
+    }
+);
+
+/**
+ * Check if there are any pending approvals.
+ */
+export const hasPendingApprovalsAtom = atom(
+    (get) => get(pendingApprovalsAtom).size > 0
+);
+
+/**
+ * Build a PendingApproval from an AgentAction.
+ * Fetches current field values for edit_metadata actions.
+ */
+export async function buildPendingApprovalFromAction(action: AgentAction): Promise<PendingApproval | null> {
+    if (!action.toolcall_id) {
+        return null;
+    }
+
+    const actionType = action.action_type as AgentActionType;
+    const actionData = action.proposed_data ?? {};
+    let currentValue: Record<string, string | null> | undefined;
+
+    if (actionType === 'edit_metadata') {
+        const libraryId = typeof actionData.library_id === 'number'
+            ? actionData.library_id
+            : Number(actionData.library_id ?? 0);
+        const zoteroKey = typeof actionData.zotero_key === 'string'
+            ? actionData.zotero_key
+            : '';
+        const edits = Array.isArray(actionData.edits) ? actionData.edits : [];
+
+        if (libraryId && zoteroKey && edits.length > 0) {
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+            if (item) {
+                const values: Record<string, string | null> = {};
+                for (const edit of edits) {
+                    const field = typeof edit?.field === 'string' ? edit.field : null;
+                    if (!field) continue;
+                    const value = item.getField(field);
+                    values[field] = value ? String(value) : null;
+                }
+                currentValue = values;
+            }
+        }
+    } else if (actionType === 'create_collection') {
+        const libraryId = typeof actionData.library_id === 'number'
+            ? actionData.library_id
+            : Number(actionData.library_id ?? 0);
+
+        if (libraryId) {
+            const library = Zotero.Libraries.get(libraryId);
+            currentValue = {
+                library_name: library ? library.name : 'Unknown Library',
+                parent_key: actionData.parent_key ?? null,
+                item_count: actionData.item_ids?.length ?? 0,
+            };
+        }
+    }
+
+    return {
+        actionId: action.id,
+        toolcallId: action.toolcall_id,
+        actionType,
+        actionData,
+        currentValue,
+    };
+}
 

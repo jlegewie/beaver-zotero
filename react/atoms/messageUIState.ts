@@ -54,31 +54,34 @@ const removeEntry = <T extends Record<string, unknown>>(map: T, keyToRemove: str
 };
 
 // ---------------------------------------------------------------------------
-// Search tool call UI
+// Tool call expansion state
 // ---------------------------------------------------------------------------
 
 /**
- * Tracks visibility of search tool results by key (messageId:toolCallId)
+ * Tracks expansion state of tool call views by key (runId:toolCallId)
  */
-export const searchToolVisibilityAtom = atom<BooleanMap>({});
+export const toolExpandedAtom = atom<BooleanMap>({});
 
 /**
- * Toggle visibility of a search tool's results
+ * Toggle expansion of a tool call view
  */
-export const toggleSearchToolVisibilityAtom = atom(
+export const toggleToolExpandedAtom = atom(
     null,
     (get, set, key: string) => {
-        const current = get(searchToolVisibilityAtom);
+        const current = get(toolExpandedAtom);
         const next = !(current[key] ?? false);
-        set(searchToolVisibilityAtom, { ...current, [key]: next });
+        set(toolExpandedAtom, { ...current, [key]: next });
     }
 );
 
-export const setSearchToolVisibilityAtom = atom(
+/**
+ * Set expansion state of a tool call view
+ */
+export const setToolExpandedAtom = atom(
     null,
-    (get, set, { key, visible }: { key: string; visible: boolean }) => {
-        const current = get(searchToolVisibilityAtom);
-        set(searchToolVisibilityAtom, { ...current, [key]: visible });
+    (get, set, { key, expanded }: { key: string; expanded: boolean }) => {
+        const current = get(toolExpandedAtom);
+        set(toolExpandedAtom, { ...current, [key]: expanded });
     }
 );
 
@@ -185,6 +188,25 @@ export const annotationBusyAtom = atom<AnnotationBusyStateMap>({});
 export const annotationAttachmentTitlesAtom = atom<AnnotationAttachmentTitleMap>({});
 
 // ---------------------------------------------------------------------------
+// Agent action item titles
+// ---------------------------------------------------------------------------
+
+type AgentActionItemTitleMap = Record<string, string | null>;
+
+/**
+ * Caches item titles for agent actions (when applicable) by toolcallId
+ */
+export const agentActionItemTitlesAtom = atom<AgentActionItemTitleMap>({});
+
+export const setAgentActionItemTitleAtom = atom(
+    null,
+    (get, set, { key, title }: { key: string; title: string | null }) => {
+        const current = get(agentActionItemTitlesAtom);
+        set(agentActionItemTitlesAtom, { ...current, [key]: title });
+    }
+);
+
+// ---------------------------------------------------------------------------
 // Note panels (button + visibility)
 // ---------------------------------------------------------------------------
 
@@ -271,13 +293,14 @@ export const toggleNotePanelVisibilityAtom = atom(
 export const resetMessageUIStateAtom = atom(
     null,
     (_get, set) => {
-        set(searchToolVisibilityAtom, {});
+        set(toolExpandedAtom, {});
         set(messageSourcesVisibilityAtom, {});
         set(thinkingVisibilityAtom, {});
         set(runErrorVisibilityAtom, {});
         set(annotationPanelStateAtom, {});
         set(annotationBusyAtom, {});
         set(annotationAttachmentTitlesAtom, {});
+        set(agentActionItemTitlesAtom, {});
         set(notePanelStateAtom, {});
     }
 );
