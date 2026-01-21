@@ -119,7 +119,7 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
                                         Added {resultData.items_added} item{resultData.items_added !== 1 ? 's' : ''}
                                     </span>
                                 )}
-                                {!isApplied && resultData?.items_added !== undefined && (
+                                {!isApplied && itemCount && itemCount > 0 && (
                                     <span className="ml-1">
                                         Adding {itemCount} item{itemCount !== 1 ? 's' : ''}
                                     </span>
