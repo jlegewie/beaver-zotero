@@ -34,6 +34,10 @@ export async function handleAgentActionValidateRequest(
             return await validateEditMetadataAction(request);
         }
 
+        if (request.action_type === 'create_collection') {
+            return await validateCreateCollectionAction(request);
+        }
+
         // Unsupported action type
         return {
             type: 'agent_action_validate_response',
@@ -332,6 +336,136 @@ async function validateEditMetadataAction(
 
     // Get user preference from settings
     const preference = getDeferredToolPreference('edit_metadata');
+
+    return {
+        type: 'agent_action_validate_response',
+        request_id: request.request_id,
+        valid: true,
+        current_value: currentValue,
+        preference,
+    };
+}
+
+/**
+ * Validate a create_collection action.
+ * Checks if the library exists and is editable.
+ */
+async function validateCreateCollectionAction(
+    request: WSAgentActionValidateRequest
+): Promise<WSAgentActionValidateResponse> {
+    const { library_id, name, parent_key, item_ids } = request.action_data as {
+        library_id: number;
+        name: string;
+        parent_key?: string | null;
+        item_ids?: string[];
+    };
+
+    // Validate library exists
+    const library = Zotero.Libraries.get(library_id);
+    if (!library) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library not found: ${library_id}`,
+            error_code: 'library_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate library is searchable
+    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    if (!searchableLibraryIds.includes(library_id)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library exists but is not synced with Beaver. The user can update this setting in Beaver Preferences. Library: ${library.name} (ID: ${library_id})`,
+            error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
+
+    // Check if library is editable
+    if (!library.editable) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library '${library.name}' is read-only and cannot be modified`,
+            error_code: 'library_not_editable',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate collection name
+    if (!name || name.trim().length === 0) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'Collection name cannot be empty',
+            error_code: 'invalid_name',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate parent collection if provided
+    if (parent_key) {
+        const parentCollection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, parent_key);
+        if (!parentCollection) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Parent collection not found: ${parent_key}`,
+                error_code: 'parent_not_found',
+                preference: 'always_ask',
+            };
+        }
+    }
+
+    // Validate item IDs if provided
+    if (item_ids && item_ids.length > 0) {
+        for (const itemId of item_ids) {
+            const [libId, key] = itemId.split('-');
+            const itemLibraryId = parseInt(libId, 10);
+            
+            // Items must be in the same library
+            if (itemLibraryId !== library_id) {
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: `Item ${itemId} is not in library ${library_id}`,
+                    error_code: 'item_library_mismatch',
+                    preference: 'always_ask',
+                };
+            }
+            
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(itemLibraryId, key);
+            if (!item) {
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: `Item not found: ${itemId}`,
+                    error_code: 'item_not_found',
+                    preference: 'always_ask',
+                };
+            }
+        }
+    }
+
+    // Get user preference from settings
+    const preference = getDeferredToolPreference('create_collection');
+
+    // Build current value for preview (shows what will be created)
+    const currentValue = {
+        library_name: library.name,
+        parent_key: parent_key || null,
+        item_count: item_ids?.length || 0,
+    };
 
     return {
         type: 'agent_action_validate_response',

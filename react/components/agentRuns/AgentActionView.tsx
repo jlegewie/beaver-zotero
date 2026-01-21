@@ -18,7 +18,9 @@ import {
     setToolExpandedAtom,
 } from '../../atoms/messageUIState';
 import { EditMetadataPreview } from './EditMetadataPreview';
+import { CreateCollectionPreview } from './CreateCollectionPreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
+import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
 import {
@@ -36,6 +38,7 @@ import {
     ArrowRightIcon,
     PropertyEditIcon,
     ArrowUpRightIcon,
+    LibraryIcon,
 } from '../icons/icons';
 import { revealSource } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
@@ -286,6 +289,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     result_data: result,
                 }]);
                 logger(`AgentActionView: Applied edit_metadata action ${action.id}`, 1);
+            } else if (toolName === 'create_collection') {
+                const result = await executeCreateCollectionAction(action);
+                // Acknowledge the action as applied with result data
+                await ackAgentActions(runId, [{
+                    action_id: action.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied create_collection action ${action.id}`, 1);
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to apply action';
@@ -334,6 +345,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 // we consider the AI's changes undone (user has taken control)
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone edit_metadata action ${action.id} (${result.fieldsReverted} fields reverted)`, 1);
+            } else if (toolName === 'create_collection') {
+                await undoCreateCollectionAction(action);
+                undoAgentAction(action.id);
+                logger(`AgentActionView: Undone create_collection action ${action.id}`, 1);
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to undo action';
@@ -356,10 +371,15 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     // Determine what icon to show in header
     const getHeaderIcon = () => {
-        if (isAwaitingApproval) return toolName === 'edit_metadata' ? PropertyEditIcon : ClockIcon;
+        const getToolIcon = () => {
+            if (toolName === 'edit_metadata') return PropertyEditIcon;
+            if (toolName === 'create_collection') return LibraryIcon;
+            return ClockIcon;
+        };
+        if (isAwaitingApproval) return getToolIcon();
         if (isHovered && isExpanded) return ArrowDownIcon;
         if (isHovered && !isExpanded) return ArrowRightIcon;
-        if (config.icon === null) return toolName === 'edit_metadata' ? PropertyEditIcon : ClockIcon;
+        if (config.icon === null) return getToolIcon();
         return config.icon;
     };
     
@@ -627,6 +647,27 @@ const ActionPreview: React.FC<{
                 currentValues={currentValues}
                 appliedEdits={appliedEdits}
                 status={status}
+            />
+        );
+    }
+
+    if (toolName === 'create_collection' || previewData.actionType === 'create_collection') {
+        const name = previewData.actionData.name || '';
+        const parentKey = previewData.actionData.parent_key;
+        const itemIds = previewData.actionData.item_ids || [];
+        
+        // Get library name and item count from current_value
+        const libraryName = previewData.currentValue?.library_name;
+        const itemCount = previewData.currentValue?.item_count ?? itemIds.length;
+        
+        return (
+            <CreateCollectionPreview
+                name={name}
+                libraryName={libraryName}
+                parentKey={parentKey}
+                itemCount={itemCount}
+                status={status}
+                resultData={previewData.resultData}
             />
         );
     }

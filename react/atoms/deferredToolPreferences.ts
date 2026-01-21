@@ -32,11 +32,13 @@ export interface DeferredToolPreferencesData {
 // Default group mappings for known tools
 const DEFAULT_TOOL_GROUPS: Record<string, string> = {
     'edit_metadata': 'metadata_edits',
+    'create_collection': 'library_modifications',
 };
 
 // Default preferences for groups
 const DEFAULT_GROUP_PREFERENCES: Record<string, DeferredToolPreference> = {
     'metadata_edits': 'always_ask',
+    'library_modifications': 'always_ask',
 };
 
 // =============================================================================

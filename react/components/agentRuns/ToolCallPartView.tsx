@@ -19,8 +19,8 @@ import {
     GlobalSearchIcon,
     TextAlignLeftIcon,
     DocumentValidationIcon,
-    LibraryIcon,
     FolderDetailIcon,
+    FolderAddIcon,
     DatabaseIcon,
     TagIcon,
 } from '../icons/icons';
@@ -62,6 +62,9 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Create item tool
     create_zotero_item: DocumentValidationIcon,
+
+    // Create collection tool
+    create_collection: FolderAddIcon,
 
     // Read tool result
     read_file: TextAlignLeftIcon,
@@ -105,7 +108,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const hasAgentAction = agentActions.length > 0;
     
     // Determine if this tool should use AgentActionView
-    const isAgentActionTool = part.tool_name === 'edit_metadata';
+    const isAgentActionTool = part.tool_name === 'edit_metadata' || part.tool_name === 'create_collection';
     const showAgentActionView = isAgentActionTool && (isAwaitingApproval || hasAgentAction);
 
     const resultCount =
