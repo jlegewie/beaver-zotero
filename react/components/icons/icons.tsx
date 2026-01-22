@@ -8,6 +8,7 @@ export { default as ClockIcon } from './ClockIcon';
 export { default as FolderAddIcon } from './FolderAddIcon';
 export { default as FolderDetailIcon } from './FolderDetailIcon';
 export { default as PlusSignIcon } from './PlusSignIcon';
+export { default as IdeaIcon } from './IdeaIcon';
 export { default as SettingsIcon } from './SettingsIcon';
 export { default as TaskDoneIcon } from './TaskDoneIcon';
 export { default as SettingsSolidIcon } from './SettingsSolidIcon';
