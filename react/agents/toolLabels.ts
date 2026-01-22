@@ -75,6 +75,14 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     external_search: 'Web search',
 };
 
+
+/**
+ * Labels for skill names.
+ */
+const SKILL_NAME_LABELS: Record<string, string> = {
+    'library-management': 'Library management',
+};
+
 /**
  * Detect the type of file being read by the read_file tool.
  * 
@@ -308,8 +316,11 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                     case 'skill_resource': {
                         // Extract skill name from path: /skills/{skill-name}/...
                         const skillMatch = path.match(/\/skills\/([^/]+)/i);
-                        const skillName = skillMatch?.[1] || 'skill';
-                        return `Reading skill: ${truncate(skillName, 30)}`;
+                        const skillKey = skillMatch?.[1];
+                        const skillName = SKILL_NAME_LABELS[skillKey as string] 
+                            || skillKey?.replace(/-/g, ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+                            || 'skill';
+                        return `Loading skill: ${truncate(skillName, 30)}`;
                     }
                     case 'documentation':
                         return 'Reading documentation';
