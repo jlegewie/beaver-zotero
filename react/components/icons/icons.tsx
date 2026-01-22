@@ -9,6 +9,7 @@ export { default as FolderAddIcon } from './FolderAddIcon';
 export { default as FolderDetailIcon } from './FolderDetailIcon';
 export { default as PlusSignIcon } from './PlusSignIcon';
 export { default as SettingsIcon } from './SettingsIcon';
+export { default as TaskDoneIcon } from './TaskDoneIcon';
 export { default as SettingsSolidIcon } from './SettingsSolidIcon';
 export { default as LinkForwardIcon } from './LinkForwardIcon';
 export { default as LinkBackwardIcon } from './LinkBackwardIcon';

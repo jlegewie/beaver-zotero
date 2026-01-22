@@ -6,6 +6,7 @@ import {
     ActionStatus,
     ActionType,
     NoteProposedData,
+    EditMetadataProposedData,
 } from '../types/agentActions/base';
 import {
     normalizePageLocations,
@@ -94,6 +95,13 @@ export const isEditMetadataAgentAction = (action: AgentAction): boolean => {
  */
 export const isCreateCollectionAgentAction = (action: AgentAction): boolean => {
     return action.action_type === 'create_collection';
+};
+
+/**
+ * Type guard for organize items actions
+ */
+export const isOrganizeItemsAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'organize_items';
 };
 
 /**
@@ -228,13 +236,18 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
         } as CreateItemProposedData;
     } else if (actionType === 'edit_metadata') {
         // Normalize edit_metadata proposed data
+        const edits = Array.isArray(proposedData.edits) ? proposedData.edits : [];
         proposedData = {
             library_id: typeof proposedData.library_id === 'number' 
                 ? proposedData.library_id 
                 : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
             zotero_key: proposedData.zotero_key ?? proposedData.zoteroKey ?? '',
-            edits: proposedData.edits ?? [],
-        };
+            edits: edits.map((edit: any) => ({
+                field: edit.field ?? '',
+                old_value: edit.old_value ?? edit.oldValue ?? null,
+                new_value: edit.new_value ?? edit.newValue ?? null,
+            })),
+        } as EditMetadataProposedData;
     } else if (actionType === 'create_collection') {
         // Normalize create_collection proposed data
         proposedData = {
@@ -244,6 +257,14 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             name: proposedData.name ?? '',
             parent_key: proposedData.parent_key ?? proposedData.parentKey ?? null,
             item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
+        };
+    } else if (actionType === 'organize_items') {
+        // Normalize organize_items proposed data
+        proposedData = {
+            item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
+            tags: proposedData.tags ?? null,
+            collections: proposedData.collections ?? null,
+            current_state: proposedData.current_state ?? proposedData.currentState ?? null,
         };
     }
     
@@ -776,6 +797,10 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
                 item_count: actionData.item_ids?.length ?? 0,
             };
         }
+    } else if (actionType === 'organize_items') {
+        // For organize_items, current_state contains the current tags/collections for each item
+        // We can use it directly from the proposed data if available
+        currentValue = actionData.current_state ?? null;
     }
 
     return {

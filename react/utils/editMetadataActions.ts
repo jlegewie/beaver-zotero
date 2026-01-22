@@ -4,17 +4,8 @@
  */
 
 import { AgentAction } from '../agents/agentActions';
-import { EditMetadataResultData, AppliedMetadataEdit, FailedMetadataEdit } from '../types/agentActions/base';
+import { EditMetadataResultData, AppliedMetadataEdit, FailedMetadataEdit, MetadataEdit } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
-
-/**
- * Metadata edit from proposed_data
- */
-interface MetadataEdit {
-    field: string;
-    old_value: any;
-    new_value: any;
-}
 
 /**
  * Result of an undo operation

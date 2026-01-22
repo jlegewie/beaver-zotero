@@ -1,15 +1,7 @@
-/**
- * Agent Data Provider
- * 
- * This service provides WebSocket communication for agent runs,
- * enabling bidirectional communication between the Zotero plugin and the backend.
- * 
- * The Beaver agent is the primary agent that handles chat completions and tool execution.
- */
-
 import { logger } from '../../utils/logger';
 import { canSetField, SETTABLE_PRIMARY_FIELDS } from '../../utils/zoteroUtils';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
+import type { MetadataEdit } from '../../../react/types/agentActions/base';
 
 import { store } from '../../../react/store';
 import {
@@ -36,6 +28,10 @@ export async function handleAgentActionValidateRequest(
 
         if (request.action_type === 'create_collection') {
             return await validateCreateCollectionAction(request);
+        }
+
+        if (request.action_type === 'organize_items') {
+            return await validateOrganizeItemsAction(request);
         }
 
         // Unsupported action type
@@ -109,12 +105,6 @@ export interface AllEditsValidationResult {
     errors: FieldValidationError[];
 }
 
-/** Type for a field edit operation */
-export interface FieldEdit {
-    field: string;
-    new_value: string;
-}
-
 /**
  * Validates whether a field can be edited, with detailed error information.
  * This combines policy checks (AI restrictions) with technical checks (Zotero schema).
@@ -164,7 +154,7 @@ export function validateFieldEdit(item: Zotero.Item, field: string): FieldValida
  * @param edits - Array of field edits to validate
  * @returns Validation result with all errors
  */
-export function validateAllEdits(item: Zotero.Item, edits: FieldEdit[]): AllEditsValidationResult {
+export function validateAllEdits(item: Zotero.Item, edits: MetadataEdit[]): AllEditsValidationResult {
     const errors: FieldValidationError[] = [];
     
     for (const edit of edits) {
@@ -204,7 +194,7 @@ async function validateEditMetadataAction(
     const { library_id, zotero_key, edits } = request.action_data as {
         library_id: number;
         zotero_key: string;
-        edits: FieldEdit[];
+        edits: MetadataEdit[];
     };
 
     // Validate library exists
@@ -476,6 +466,225 @@ async function validateCreateCollectionAction(
         request_id: request.request_id,
         valid: true,
         current_value: currentValue,
+        preference,
+    };
+}
+
+/**
+ * Validate an organize_items action.
+ * Checks if items exist and are in editable libraries.
+ * Returns current state of tags/collections for each item (for undo).
+ */
+async function validateOrganizeItemsAction(
+    request: WSAgentActionValidateRequest
+): Promise<WSAgentActionValidateResponse> {
+    const { item_ids, tags, collections } = request.action_data as {
+        item_ids: string[];
+        tags?: { add?: string[]; remove?: string[] } | null;
+        collections?: { add?: string[]; remove?: string[] } | null;
+    };
+
+    // Validate at least one item is provided
+    if (!item_ids || item_ids.length === 0) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'At least one item_id must be provided',
+            error_code: 'no_items',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate max items
+    if (item_ids.length > 100) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'Maximum 100 items can be organized at once',
+            error_code: 'too_many_items',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate at least one change is requested
+    const hasTagChanges = tags && ((tags.add && tags.add.length > 0) || (tags.remove && tags.remove.length > 0));
+    const hasCollectionChanges = collections && ((collections.add && collections.add.length > 0) || (collections.remove && collections.remove.length > 0));
+
+    if (!hasTagChanges && !hasCollectionChanges) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'At least one tag or collection change must be specified',
+            error_code: 'no_changes',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate all items exist and are in editable libraries
+    // Also collect current state for undo
+    const currentState: Record<string, { tags: string[]; collections: string[] }> = {};
+    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+
+    for (const itemId of item_ids) {
+        const parts = itemId.split('-');
+        if (parts.length < 2) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Invalid item_id format: ${itemId}. Expected 'library_id-zotero_key'`,
+                error_code: 'invalid_item_id',
+                preference: 'always_ask',
+            };
+        }
+
+        const libraryId = parseInt(parts[0], 10);
+        const zoteroKey = parts.slice(1).join('-');
+
+        // Validate library exists
+        const library = Zotero.Libraries.get(libraryId);
+        if (!library) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Library not found for item: ${itemId}`,
+                error_code: 'library_not_found',
+                preference: 'always_ask',
+            };
+        }
+
+        // Validate library is searchable
+        if (!searchableLibraryIds.includes(libraryId)) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Library '${library.name}' is not synced with Beaver`,
+                error_code: 'library_not_searchable',
+                preference: 'always_ask',
+            };
+        }
+
+        // Validate library is editable
+        if (!library.editable) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Library '${library.name}' is read-only`,
+                error_code: 'library_not_editable',
+                preference: 'always_ask',
+            };
+        }
+
+        // Validate item exists
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+        if (!item) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Item not found: ${itemId}`,
+                error_code: 'item_not_found',
+                preference: 'always_ask',
+            };
+        }
+
+        // Only regular items can be organized
+        if (!item.isRegularItem()) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Only regular items can be organized. Item ${itemId} is not a regular item.`,
+                error_code: 'item_type_not_supported',
+                preference: 'always_ask',
+            };
+        }
+
+        // Collect current state for undo
+        const itemTags: string[] = item.getTags().map((t: { tag: string }) => t.tag);
+        const itemCollections: string[] = item.getCollections().map((collectionId: number) => {
+            const collection = Zotero.Collections.get(collectionId);
+            return collection ? collection.key : null;
+        }).filter(Boolean) as string[];
+
+        currentState[itemId] = {
+            tags: itemTags,
+            collections: itemCollections,
+        };
+    }
+
+    // Validate collection operations: all items must be in the same library
+    if (hasCollectionChanges) {
+        // Check that all items are in the same library
+        const libraryIds = new Set<number>();
+        for (const itemId of item_ids) {
+            const parts = itemId.split('-');
+            libraryIds.add(parseInt(parts[0], 10));
+        }
+
+        if (libraryIds.size > 1) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: 'Collection changes require all items to be in the same library. Items span multiple libraries.',
+                error_code: 'mixed_libraries_for_collections',
+                preference: 'always_ask',
+            };
+        }
+
+        // Safe to use first value since we verified libraryIds.size >= 1 (from item_ids validation)
+        const libraryId = [...libraryIds][0];
+
+        // Validate collection keys exist (for add operations)
+        if (collections?.add && collections.add.length > 0) {
+            for (const collKey of collections.add) {
+                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                if (!collection) {
+                    return {
+                        type: 'agent_action_validate_response',
+                        request_id: request.request_id,
+                        valid: false,
+                        error: `Collection not found: ${collKey}. Use create_collection first.`,
+                        error_code: 'collection_not_found',
+                        preference: 'always_ask',
+                    };
+                }
+            }
+        }
+
+        // Validate collection keys exist (for remove operations)
+        if (collections?.remove && collections.remove.length > 0) {
+            for (const collKey of collections.remove) {
+                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                if (!collection) {
+                    return {
+                        type: 'agent_action_validate_response',
+                        request_id: request.request_id,
+                        valid: false,
+                        error: `Collection not found: ${collKey}`,
+                        error_code: 'collection_not_found',
+                        preference: 'always_ask',
+                    };
+                }
+            }
+        }
+    }
+
+    // Get user preference
+    const preference = getDeferredToolPreference('organize_items');
+
+    return {
+        type: 'agent_action_validate_response',
+        request_id: request.request_id,
+        valid: true,
+        current_value: currentState,
         preference,
     };
 }

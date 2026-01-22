@@ -19,10 +19,13 @@ import {
 } from '../../atoms/messageUIState';
 import { EditMetadataPreview } from './EditMetadataPreview';
 import { CreateCollectionPreview } from './CreateCollectionPreview';
+import { OrganizeItemsPreview } from './OrganizeItemsPreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
+import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
+import type { OrganizeItemsResultData } from '../../types/agentActions/base';
 import {
     TickIcon,
     CancelIcon,
@@ -38,7 +41,8 @@ import {
     ArrowRightIcon,
     PropertyEditIcon,
     ArrowUpRightIcon,
-    LibraryIcon,
+    FolderAddIcon,
+    TaskDoneIcon,
 } from '../icons/icons';
 import { revealSource } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
@@ -216,7 +220,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
 
     // Determine if this action type has an associated item
-    const hasAssociatedItem = toolName === 'edit_metadata';
+    const hasAssociatedItem =
+        toolName === 'edit_metadata' ||
+        toolName === 'edit_item';
 
     // Fetch item title for actions that have specific items
     useEffect(() => {
@@ -300,6 +306,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     result_data: result,
                 }]);
                 logger(`AgentActionView: Applied create_collection action ${action.id}`, 1);
+            } else if (toolName === 'organize_items') {
+                const result = await executeOrganizeItemsAction(action);
+                // Acknowledge the action as applied with result data
+                await ackAgentActions(runId, [{
+                    action_id: action.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied organize_items action ${action.id}`, 1);
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to apply action';
@@ -352,6 +366,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 await undoCreateCollectionAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone create_collection action ${action.id}`, 1);
+            } else if (toolName === 'organize_items') {
+                await undoOrganizeItemsAction(action);
+                undoAgentAction(action.id);
+                logger(`AgentActionView: Undone organize_items action ${action.id}`, 1);
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to undo action';
@@ -376,7 +394,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const getHeaderIcon = () => {
         const getToolIcon = () => {
             if (toolName === 'edit_metadata') return PropertyEditIcon;
-            if (toolName === 'create_collection') return LibraryIcon;
+            if (toolName === 'edit_item') return PropertyEditIcon;
+            if (toolName === 'create_collection') return FolderAddIcon;
+            if (toolName === 'organize_items') return TaskDoneIcon;
             return ClockIcon;
         };
         if (isAwaitingApproval) return getToolIcon();
@@ -581,6 +601,8 @@ function getActionLabel(toolName: string): string {
         case 'create_item':
         case 'create_collection':
             return 'Create';
+        case 'organize_items':
+            return 'Organize';
         default:
             return toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
@@ -593,6 +615,13 @@ function getActionTitle(toolName: string, actionData: Record<string, any> | unde
             return itemTitle ? itemTitle : null;
         case 'create_collection':
             return actionData?.name ?? actionData?.proposed_data?.name ?? null;
+        case 'organize_items': {
+            const itemCount = actionData?.item_ids?.length ?? 0;
+            if (itemCount === 0) return null;
+            return itemCount === 1 && itemTitle
+                ? itemTitle
+                : `${itemCount} item${itemCount !== 1 ? 's' : ''}`;
+        }
         default:
             return null;
     }
@@ -686,6 +715,22 @@ const ActionPreview: React.FC<{
                 itemCount={itemCount}
                 status={status}
                 resultData={previewData.resultData}
+            />
+        );
+    }
+
+    if (toolName === 'organize_items' || previewData.actionType === 'organize_items') {
+        const itemIds = previewData.actionData.item_ids || [];
+        const tags = previewData.actionData.tags;
+        const collections = previewData.actionData.collections;
+        
+        return (
+            <OrganizeItemsPreview
+                itemIds={itemIds}
+                tags={tags}
+                collections={collections}
+                status={status}
+                resultData={previewData.resultData as OrganizeItemsResultData | undefined}
             />
         );
     }

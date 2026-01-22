@@ -1,14 +1,5 @@
 import React from 'react';
-
-interface MetadataEdit {
-    field: string;
-    new_value: string;
-}
-
-interface AppliedEdit {
-    field: string;
-    applied_value: string;
-}
+import type { MetadataEdit, AppliedMetadataEdit } from '../../types/agentActions/base';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -18,7 +9,7 @@ interface EditMetadataPreviewProps {
     /** Current values from current_value (field -> value) */
     currentValues: Record<string, string | null>;
     /** Applied edits from result_data (when status is 'applied') */
-    appliedEdits?: AppliedEdit[];
+    appliedEdits?: AppliedMetadataEdit[];
     /** Current status of the action */
     status?: ActionStatus;
 }

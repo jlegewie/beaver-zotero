@@ -18,6 +18,33 @@ export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'erro
 // =============================================================================
 
 /**
+ * A single metadata field edit with before/after values.
+ * Matches backend MetadataEdit model.
+ */
+export interface MetadataEdit {
+    /** The metadata field name being edited */
+    field: string;
+    /** The original value before the edit */
+    old_value: any;
+    /** The new value after the edit */
+    new_value: any;
+}
+
+/**
+ * Proposed data for editing metadata.
+ * Matches backend EditMetadataProposedData model.
+ * Inherits library_id and zotero_key (ZoteroItemReference).
+ */
+export interface EditMetadataProposedData {
+    /** Library ID of the item to edit */
+    library_id: number;
+    /** Zotero key of the item to edit */
+    zotero_key: string;
+    /** List of field edits to apply */
+    edits: MetadataEdit[];
+}
+
+/**
  * A single applied metadata field edit.
  */
 export interface AppliedMetadataEdit {
@@ -86,10 +113,62 @@ export interface CreateCollectionResultData {
     items_added?: number;
 }
 
+// =============================================================================
+// Organize Items Types
+// =============================================================================
+
+/**
+ * Tag changes for organize_items
+ */
+export interface TagChanges {
+    add?: string[];
+    remove?: string[];
+}
+
+/**
+ * Collection changes for organize_items
+ */
+export interface CollectionChanges {
+    add?: string[];
+    remove?: string[];
+}
+
+/**
+ * Proposed data for organizing items (tags and collections)
+ */
+export interface OrganizeItemsProposedData {
+    /** List of item IDs to organize (format: "library_id-zotero_key") */
+    item_ids: string[];
+    /** Tags to add/remove */
+    tags?: TagChanges | null;
+    /** Collections to add/remove */
+    collections?: CollectionChanges | null;
+    /** Current state of items for undo (item_id -> {tags: [...], collections: [...]}) */
+    current_state?: Record<string, { tags: string[]; collections: string[] }>;
+}
+
+/**
+ * Result data after applying an organize items action
+ */
+export interface OrganizeItemsResultData {
+    /** Number of items that were successfully modified */
+    items_modified: number;
+    /** Tags that were added */
+    tags_added?: string[];
+    /** Tags that were removed */
+    tags_removed?: string[];
+    /** Collection keys that items were added to */
+    collections_added?: string[];
+    /** Collection keys that items were removed from */
+    collections_removed?: string[];
+    /** Items that failed (item_id -> error message) */
+    failed_items?: Record<string, string>;
+}
+
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items';
 
 /**
  * Union type for all proposed data types
@@ -109,12 +188,24 @@ export interface NoteResultData {
     parent_key?: string;
 }
 
-export type ProposedData = AnnotationProposedData | NoteProposedData | CreateItemProposedData | CreateCollectionProposedData;
+export type ProposedData =
+    AnnotationProposedData |
+    NoteProposedData |
+    CreateItemProposedData |
+    EditMetadataProposedData |
+    CreateCollectionProposedData |
+    OrganizeItemsProposedData;
 
 /**
  * Type of result data after applying an action
  */
-export type ActionResultDataType = AnnotationResultData | NoteResultData | CreateItemResultData | CreateCollectionResultData;
+export type ActionResultDataType =
+    AnnotationResultData |
+    NoteResultData |
+    CreateItemResultData |
+    CreateCollectionResultData |
+    OrganizeItemsResultData |
+    EditMetadataResultData;
 
 /**
  * Core proposed action model matching the backend schema

@@ -52,6 +52,10 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     get_metadata: 'Get metadata',
     edit_metadata: 'Edit metadata',
 
+    // Organization tools
+    organize_items: 'Organize items',
+    create_collection: 'Create collection',
+
     // Reading tools
     read_pages: 'Reading',
     search_in_documents: 'Search in documents',

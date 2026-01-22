@@ -1,14 +1,6 @@
-/**
- * Agent Data Provider
- * 
- * This service provides WebSocket communication for agent runs,
- * enabling bidirectional communication between the Zotero plugin and the backend.
- * 
- * The Beaver agent is the primary agent that handles chat completions and tool execution.
- */
-
 import { logger } from '../../utils/logger';
 import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '../agentProtocol';
+import type { MetadataEdit } from '../../../react/types/agentActions/base';
 
 
 /**
@@ -27,6 +19,10 @@ export async function handleAgentActionExecuteRequest(
 
         if (request.action_type === 'create_collection') {
             return await executeCreateCollectionAction(request);
+        }
+
+        if (request.action_type === 'organize_items') {
+            return await executeOrganizeItemsAction(request);
         }
 
         // Unsupported action type
@@ -59,7 +55,7 @@ async function executeEditMetadataAction(
     const { library_id, zotero_key, edits } = request.action_data as {
         library_id: number;
         zotero_key: string;
-        edits: Array<{ field: string; new_value: string }>;
+        edits: MetadataEdit[];
     };
 
     // Get the item
@@ -215,4 +211,129 @@ async function executeCreateCollectionAction(
             error_code: 'create_failed',
         };
     }
+}
+
+/**
+ * Execute an organize_items action.
+ * Adds/removes tags and collection memberships for the specified items.
+ */
+async function executeOrganizeItemsAction(
+    request: WSAgentActionExecuteRequest
+): Promise<WSAgentActionExecuteResponse> {
+    const { item_ids, tags, collections } = request.action_data as {
+        item_ids: string[];
+        tags?: { add?: string[]; remove?: string[] } | null;
+        collections?: { add?: string[]; remove?: string[] } | null;
+    };
+
+    let itemsModified = 0;
+    const failedItems: Record<string, string> = {};
+    // Track actual changes (not just requested changes) for safe undo
+    const actualTagsAdded = new Set<string>();
+    const actualTagsRemoved = new Set<string>();
+    const actualCollectionsAdded = new Set<string>();
+    const actualCollectionsRemoved = new Set<string>();
+
+    // Process each item
+    for (const itemId of item_ids) {
+        try {
+            const parts = itemId.split('-');
+            const libraryId = parseInt(parts[0], 10);
+            const zoteroKey = parts.slice(1).join('-');
+
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+            if (!item) {
+                failedItems[itemId] = 'Item not found';
+                continue;
+            }
+
+            let modified = false;
+
+            // Get current state before modifications
+            const existingTags = new Set(item.getTags().map((t: { tag: string }) => t.tag));
+            const existingCollections = new Set(item.getCollections().map((collectionId: number) => {
+                const collection = Zotero.Collections.get(collectionId);
+                return collection ? collection.key : null;
+            }).filter(Boolean) as string[]);
+
+            // Add tags (only if not already present)
+            if (tags?.add && tags.add.length > 0) {
+                for (const tagName of tags.add) {
+                    if (!existingTags.has(tagName)) {
+                        item.addTag(tagName);
+                        actualTagsAdded.add(tagName);
+                        modified = true;
+                    }
+                }
+            }
+
+            // Remove tags (only if present)
+            if (tags?.remove && tags.remove.length > 0) {
+                for (const tagName of tags.remove) {
+                    if (existingTags.has(tagName) && item.removeTag(tagName)) {
+                        actualTagsRemoved.add(tagName);
+                        modified = true;
+                    }
+                }
+            }
+
+            // Add to collections (only if not already member)
+            if (collections?.add && collections.add.length > 0) {
+                for (const collKey of collections.add) {
+                    if (!existingCollections.has(collKey)) {
+                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                        if (collection) {
+                            item.addToCollection(collection.id);
+                            actualCollectionsAdded.add(collKey);
+                            modified = true;
+                        }
+                    }
+                }
+            }
+
+            // Remove from collections (only if member)
+            if (collections?.remove && collections.remove.length > 0) {
+                for (const collKey of collections.remove) {
+                    if (existingCollections.has(collKey)) {
+                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                        if (collection) {
+                            item.removeFromCollection(collection.id);
+                            actualCollectionsRemoved.add(collKey);
+                            modified = true;
+                        }
+                    }
+                }
+            }
+
+            // Save if modified
+            if (modified) {
+                await item.saveTx();
+                itemsModified++;
+            }
+        } catch (error) {
+            failedItems[itemId] = String(error);
+        }
+    }
+
+    const hasFailures = Object.keys(failedItems).length > 0;
+    // Success if no failures occurred (including no-op when items already have the requested state)
+    const success = !hasFailures || Object.keys(failedItems).length < item_ids.length;
+
+    logger(`executeOrganizeItemsAction: Modified ${itemsModified} items, ${Object.keys(failedItems).length} failures`, 1);
+
+    return {
+        type: 'agent_action_execute_response',
+        request_id: request.request_id,
+        success,
+        error: hasFailures ? `Some items failed: ${Object.keys(failedItems).join(', ')}` : undefined,
+        result_data: {
+            items_modified: itemsModified,
+            // Store actual changes (not requested changes) for safe undo
+            tags_added: actualTagsAdded.size > 0 ? [...actualTagsAdded] : undefined,
+            tags_removed: actualTagsRemoved.size > 0 ? [...actualTagsRemoved] : undefined,
+            collections_added: actualCollectionsAdded.size > 0 ? [...actualCollectionsAdded] : undefined,
+            collections_removed: actualCollectionsRemoved.size > 0 ? [...actualCollectionsRemoved] : undefined,
+            failed_items: hasFailures ? failedItems : undefined,
+        },
+    };
 }
