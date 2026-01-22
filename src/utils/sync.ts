@@ -8,7 +8,7 @@ import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroItemReference, 
 import { isLibrarySynced, getClientDateModifiedAsISOString, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
-import { syncWithZoteroAtom } from '../../react/atoms/profile';
+import { syncWithZoteroAtom, isDatabaseSyncSupportedAtom } from '../../react/atoms/profile';
 import { SyncMethod } from '../../react/atoms/sync';
 import { SyncLogsRecord } from '../services/database';
 import { isAttachmentOnServer } from './webAPI';
@@ -1245,6 +1245,13 @@ export async function ensureItemsSynced(
     const { serializeItemWithAttachments } = await import('./zoteroSerializers');
     
     if (zoteroKeys.length === 0) {
+        return { synced_items: 0, synced_attachments: 0, synced_collections: 0, pending_uploads: 0 };
+    }
+    
+    // Only sync if database sync is supported
+    const isDatabaseSyncSupported = store.get(isDatabaseSyncSupportedAtom);
+    if (!isDatabaseSyncSupported) {
+        logger(`ensureItemsSynced: Skipping sync for ${zoteroKeys.length} items - database sync not supported`, 3);
         return { synced_items: 0, synced_attachments: 0, synced_collections: 0, pending_uploads: 0 };
     }
     
