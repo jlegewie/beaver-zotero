@@ -620,9 +620,6 @@ async function validateOrganizeItemsAction(
     }
 
     // Validate collection operations: all items must be in the same library
-    const hasCollectionChanges = (collections?.add && collections.add.length > 0) ||
-        (collections?.remove && collections.remove.length > 0);
-
     if (hasCollectionChanges) {
         // Check that all items are in the same library
         const libraryIds = new Set<number>();
@@ -642,7 +639,8 @@ async function validateOrganizeItemsAction(
             };
         }
 
-        const libraryId = libraryIds.values().next().value;
+        // Safe to use first value since we verified libraryIds.size >= 1 (from item_ids validation)
+        const libraryId = [...libraryIds][0];
 
         // Validate collection keys exist (for add operations)
         if (collections?.add && collections.add.length > 0) {
