@@ -14,7 +14,7 @@ import {
     WSZoteroSearchResponse,
     ZoteroSearchResultItem,
 } from '../agentProtocol';
-import { getLibraryByIdOrName, getAvailableLibraries, extractYear } from './utils';
+import { validateLibraryAccess, extractYear } from './utils';
 
 
 /**
@@ -27,20 +27,20 @@ export async function handleZoteroSearchRequest(
     logger(`handleZoteroSearchRequest: Processing ${request.conditions.length} conditions`, 1);
     
     try {
-        // Validate library
-        const libraryResult = getLibraryByIdOrName(request.library_id);
-        if (libraryResult.wasExplicitlyRequested && !libraryResult.library) {
+        // Validate library (checks both existence and searchability)
+        const validation = validateLibraryAccess(request.library_id);
+        if (!validation.valid) {
             return {
                 type: 'zotero_search',
                 request_id: request.request_id,
                 items: [],
                 total_count: 0,
-                error: `Library not found: "${libraryResult.searchInput}"`,
-                error_code: 'library_not_found',
-                available_libraries: getAvailableLibraries(),
+                error: validation.error,
+                error_code: validation.error_code,
+                available_libraries: validation.available_libraries,
             };
         }
-        const library = libraryResult.library!;
+        const library = validation.library!;
         
         // Create search object
         const search = new Zotero.Search() as unknown as ZoteroSearchWritable;

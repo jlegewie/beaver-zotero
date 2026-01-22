@@ -13,21 +13,25 @@ import {
     WSListLibrariesResponse,
     LibraryInfo,
 } from '../agentProtocol';
+import { getSearchableLibraryIds } from './utils';
 
 
 /**
  * Handle list_libraries request from backend.
- * Lists all available libraries in the user's Zotero.
- *
- * Primarily for testing purposes.
+ * Lists searchable libraries in the user's Zotero.
+ * For Pro users, only synced libraries are returned.
+ * For Free users, all local libraries are returned.
  */
 export async function handleListLibrariesRequest(
     request: WSListLibrariesRequest
 ): Promise<WSListLibrariesResponse> {
-    logger(`handleListLibrariesRequest: Listing all libraries`, 1);
+    logger(`handleListLibrariesRequest: Listing searchable libraries`, 1);
 
     try {
-        const allLibraries = Zotero.Libraries.getAll();
+        // Get only searchable libraries (Pro: synced, Free: all local)
+        const searchableLibraryIds = getSearchableLibraryIds();
+        const allLibraries = Zotero.Libraries.getAll()
+            .filter((lib: any) => searchableLibraryIds.includes(lib.libraryID));
         const libraries: LibraryInfo[] = [];
 
         for (const library of allLibraries) {

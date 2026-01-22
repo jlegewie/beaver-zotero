@@ -56,24 +56,33 @@ export async function handleItemSearchByMetadataRequest(
         };
     }
 
-    // Apply libraries_filter if provided
+    // Get searchable library IDs (Pro: synced only, Free: all local)
+    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    
+    // Apply libraries_filter if provided, but always intersect with searchable libraries
     const libraryIds: number[] = [];
     if (request.libraries_filter && request.libraries_filter.length > 0) {
         // Convert library names/IDs to library IDs
         for (const libraryFilter of request.libraries_filter) {
             if (typeof libraryFilter === 'number') {
-                libraryIds.push(libraryFilter);
+                // Only include if searchable
+                if (searchableLibraryIds.includes(libraryFilter)) {
+                    libraryIds.push(libraryFilter);
+                }
             } else if (typeof libraryFilter === 'string') {
                 // Could be a library ID as string or a library name
                 const libraryIdNum = parseInt(libraryFilter, 10);
                 if (!isNaN(libraryIdNum)) {
-                    // It's a number as string
-                    libraryIds.push(libraryIdNum);
+                    // It's a number as string - only include if searchable
+                    if (searchableLibraryIds.includes(libraryIdNum)) {
+                        libraryIds.push(libraryIdNum);
+                    }
                 } else {
-                    // It's a library name - find matching libraries
+                    // It's a library name - find matching searchable libraries
                     const allLibraries = Zotero.Libraries.getAll();
                     for (const lib of allLibraries) {
-                        if (lib.name.toLowerCase().includes(libraryFilter.toLowerCase())) {
+                        if (lib.name.toLowerCase().includes(libraryFilter.toLowerCase()) &&
+                            searchableLibraryIds.includes(lib.libraryID)) {
                             libraryIds.push(lib.libraryID);
                         }
                     }
@@ -81,7 +90,6 @@ export async function handleItemSearchByMetadataRequest(
             }
         }
     } else {
-        const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
         libraryIds.push(...searchableLibraryIds);
     }
 
@@ -177,7 +185,6 @@ export async function handleItemSearchByMetadataRequest(
     const limitedItems = request.limit > 0 ? items.slice(0, request.limit) : items;
 
     // Get sync configuration from store for status computation
-    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
     const syncWithZotero = store.get(syncWithZoteroAtom);
     const userId = store.get(userIdAtom);
 

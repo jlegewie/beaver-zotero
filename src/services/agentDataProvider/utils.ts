@@ -8,6 +8,8 @@ import { isAttachmentOnServer } from '../../utils/webAPI';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
 import { DeferredToolPreference } from '../agentProtocol';
+import { store } from '../../../react/store';
+import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 
 /**
  * Get file status information for an attachment.
@@ -382,7 +384,37 @@ export interface AvailableLibraryInfo {
 }
 
 /**
+ * Get searchable library IDs from the store.
+ * Pro users: synced libraries only. Free users: all local libraries.
+ */
+export function getSearchableLibraryIds(): number[] {
+    return store.get(searchableLibraryIdsAtom);
+}
+
+/**
+ * Check if a library ID is searchable.
+ */
+export function isLibrarySearchable(libraryId: number): boolean {
+    return getSearchableLibraryIds().includes(libraryId);
+}
+
+/**
+ * Get a list of searchable libraries for error responses.
+ * Only returns libraries that are in searchableLibraryIdsAtom.
+ */
+export function getSearchableLibraries(): AvailableLibraryInfo[] {
+    const searchableIds = getSearchableLibraryIds();
+    return Zotero.Libraries.getAll()
+        .filter((lib: any) => searchableIds.includes(lib.libraryID))
+        .map((lib: any) => ({
+            library_id: lib.libraryID,
+            name: lib.name,
+        }));
+}
+
+/**
  * Get a list of available libraries for error responses.
+ * @deprecated Use getSearchableLibraries() for agent handlers to enforce library restrictions.
  */
 export function getAvailableLibraries(): AvailableLibraryInfo[] {
     return Zotero.Libraries.getAll().map((lib: any) => ({
@@ -401,6 +433,65 @@ export interface LibraryLookupResult {
     wasExplicitlyRequested: boolean;
     /** The input that was used to search (for error messages) */
     searchInput: string | null;
+}
+
+/**
+ * Error codes for library validation failures.
+ */
+export type LibraryValidationErrorCode = 'library_not_found' | 'library_not_searchable';
+
+/**
+ * Result of library validation with searchability check.
+ */
+export interface LibraryValidationResult {
+    /** Whether the library is valid and searchable */
+    valid: boolean;
+    /** The validated library (only set if valid) */
+    library?: _ZoteroTypes.Library.LibraryLike;
+    /** Error message (only set if invalid) */
+    error?: string;
+    /** Error code (only set if invalid) */
+    error_code?: LibraryValidationErrorCode;
+    /** List of searchable libraries for error response (only set if invalid) */
+    available_libraries?: AvailableLibraryInfo[];
+}
+
+/**
+ * Validate library access for agent handlers.
+ * Checks both that the library exists AND that it's in searchableLibraryIdsAtom.
+ * 
+ * @param libraryIdOrName - Library ID or name (null/undefined defaults to user library)
+ * @returns Validation result with library or error details
+ */
+export function validateLibraryAccess(libraryIdOrName: number | string | null | undefined): LibraryValidationResult {
+    const lookupResult = getLibraryByIdOrName(libraryIdOrName);
+    
+    // Check if library was found
+    if (lookupResult.wasExplicitlyRequested && !lookupResult.library) {
+        return {
+            valid: false,
+            error: `Library not found: "${lookupResult.searchInput}"`,
+            error_code: 'library_not_found',
+            available_libraries: getSearchableLibraries(),
+        };
+    }
+    
+    const library = lookupResult.library!;
+    
+    // Check if library is searchable
+    if (!isLibrarySearchable(library.libraryID)) {
+        return {
+            valid: false,
+            error: `Library '${library.name}' (ID: ${library.libraryID}) is not synced with Beaver. Access is limited to synced libraries.`,
+            error_code: 'library_not_searchable',
+            available_libraries: getSearchableLibraries(),
+        };
+    }
+    
+    return {
+        valid: true,
+        library,
+    };
 }
 
 /**

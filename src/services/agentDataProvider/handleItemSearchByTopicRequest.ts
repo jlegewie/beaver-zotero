@@ -50,21 +50,31 @@ export async function handleItemSearchByTopicRequest(
         };
     }
 
-    // Resolve library IDs from filter
+    // Get searchable library IDs
+    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    
+    // Resolve library IDs from filter, but always intersect with searchable libraries
     const libraryIds: number[] = [];
     if (request.libraries_filter && request.libraries_filter.length > 0) {
         for (const libraryFilter of request.libraries_filter) {
             if (typeof libraryFilter === 'number') {
-                libraryIds.push(libraryFilter);
+                // Only include if searchable
+                if (searchableLibraryIds.includes(libraryFilter)) {
+                    libraryIds.push(libraryFilter);
+                }
             } else if (typeof libraryFilter === 'string') {
                 const libraryIdNum = parseInt(libraryFilter, 10);
                 if (!isNaN(libraryIdNum)) {
-                    libraryIds.push(libraryIdNum);
+                    // Only include if searchable
+                    if (searchableLibraryIds.includes(libraryIdNum)) {
+                        libraryIds.push(libraryIdNum);
+                    }
                 } else {
-                    // Library name lookup
+                    // Library name lookup - only include searchable libraries
                     const allLibraries = Zotero.Libraries.getAll();
                     for (const lib of allLibraries) {
-                        if (lib.name.toLowerCase().includes(libraryFilter.toLowerCase())) {
+                        if (lib.name.toLowerCase().includes(libraryFilter.toLowerCase()) &&
+                            searchableLibraryIds.includes(lib.libraryID)) {
                             libraryIds.push(lib.libraryID);
                         }
                     }
@@ -73,7 +83,6 @@ export async function handleItemSearchByTopicRequest(
         }
     } else {
         // Default to searchable libraries if no filter provided
-        const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
         libraryIds.push(...searchableLibraryIds);
     }
 
@@ -179,7 +188,6 @@ export async function handleItemSearchByTopicRequest(
     }
 
     // Get sync configuration from store for status computation
-    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
     const syncWithZotero = store.get(syncWithZoteroAtom);
     const userId = store.get(userIdAtom);
 
