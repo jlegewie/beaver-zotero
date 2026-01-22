@@ -93,6 +93,17 @@ export async function handleItemSearchByMetadataRequest(
         libraryIds.push(...searchableLibraryIds);
     }
 
+    // Guard: if libraries_filter was provided but resolved to no searchable libraries,
+    // return empty results instead of potentially widening scope
+    if (request.libraries_filter && request.libraries_filter.length > 0 && libraryIds.length === 0) {
+        logger('handleItemSearchByMetadataRequest: libraries_filter resolved to no searchable libraries', 1);
+        return {
+            type: 'item_search_by_metadata',
+            request_id: request.request_id,
+            items: [],
+        };
+    }
+
     // Convert collections_filter names to keys if needed (scoped to libraryIds)
     const collectionKeysSet = new Set<string>();
     if (request.collections_filter && request.collections_filter.length > 0) {
