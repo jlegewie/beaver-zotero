@@ -228,10 +228,11 @@ async function executeOrganizeItemsAction(
 
     let itemsModified = 0;
     const failedItems: Record<string, string> = {};
-    const tagsAdded: string[] = tags?.add || [];
-    const tagsRemoved: string[] = tags?.remove || [];
-    const collectionsAdded: string[] = collections?.add || [];
-    const collectionsRemoved: string[] = collections?.remove || [];
+    // Track actual changes (not just requested changes) for safe undo
+    const actualTagsAdded = new Set<string>();
+    const actualTagsRemoved = new Set<string>();
+    const actualCollectionsAdded = new Set<string>();
+    const actualCollectionsRemoved = new Set<string>();
 
     // Process each item
     for (const itemId of item_ids) {
@@ -248,41 +249,58 @@ async function executeOrganizeItemsAction(
 
             let modified = false;
 
-            // Add tags
+            // Get current state before modifications
+            const existingTags = new Set(item.getTags().map((t: { tag: string }) => t.tag));
+            const existingCollections = new Set(item.getCollections().map((collectionId: number) => {
+                const collection = Zotero.Collections.get(collectionId);
+                return collection ? collection.key : null;
+            }).filter(Boolean) as string[]);
+
+            // Add tags (only if not already present)
             if (tags?.add && tags.add.length > 0) {
                 for (const tagName of tags.add) {
-                    item.addTag(tagName);
-                    modified = true;
+                    if (!existingTags.has(tagName)) {
+                        item.addTag(tagName);
+                        actualTagsAdded.add(tagName);
+                        modified = true;
+                    }
                 }
             }
 
-            // Remove tags
+            // Remove tags (only if present)
             if (tags?.remove && tags.remove.length > 0) {
                 for (const tagName of tags.remove) {
-                    if (item.removeTag(tagName)) {
+                    if (existingTags.has(tagName) && item.removeTag(tagName)) {
+                        actualTagsRemoved.add(tagName);
                         modified = true;
                     }
                 }
             }
 
-            // Add to collections
+            // Add to collections (only if not already member)
             if (collections?.add && collections.add.length > 0) {
                 for (const collKey of collections.add) {
-                    const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
-                    if (collection) {
-                        item.addToCollection(collection.id);
-                        modified = true;
+                    if (!existingCollections.has(collKey)) {
+                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                        if (collection) {
+                            item.addToCollection(collection.id);
+                            actualCollectionsAdded.add(collKey);
+                            modified = true;
+                        }
                     }
                 }
             }
 
-            // Remove from collections
+            // Remove from collections (only if member)
             if (collections?.remove && collections.remove.length > 0) {
                 for (const collKey of collections.remove) {
-                    const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
-                    if (collection) {
-                        item.removeFromCollection(collection.id);
-                        modified = true;
+                    if (existingCollections.has(collKey)) {
+                        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                        if (collection) {
+                            item.removeFromCollection(collection.id);
+                            actualCollectionsRemoved.add(collKey);
+                            modified = true;
+                        }
                     }
                 }
             }
@@ -298,7 +316,8 @@ async function executeOrganizeItemsAction(
     }
 
     const hasFailures = Object.keys(failedItems).length > 0;
-    const success = itemsModified > 0 && Object.keys(failedItems).length < item_ids.length;
+    // Success if no failures occurred (including no-op when items already have the requested state)
+    const success = !hasFailures || Object.keys(failedItems).length < item_ids.length;
 
     logger(`executeOrganizeItemsAction: Modified ${itemsModified} items, ${Object.keys(failedItems).length} failures`, 1);
 
@@ -309,10 +328,11 @@ async function executeOrganizeItemsAction(
         error: hasFailures ? `Some items failed: ${Object.keys(failedItems).join(', ')}` : undefined,
         result_data: {
             items_modified: itemsModified,
-            tags_added: tagsAdded.length > 0 ? tagsAdded : undefined,
-            tags_removed: tagsRemoved.length > 0 ? tagsRemoved : undefined,
-            collections_added: collectionsAdded.length > 0 ? collectionsAdded : undefined,
-            collections_removed: collectionsRemoved.length > 0 ? collectionsRemoved : undefined,
+            // Store actual changes (not requested changes) for safe undo
+            tags_added: actualTagsAdded.size > 0 ? [...actualTagsAdded] : undefined,
+            tags_removed: actualTagsRemoved.size > 0 ? [...actualTagsRemoved] : undefined,
+            collections_added: actualCollectionsAdded.size > 0 ? [...actualCollectionsAdded] : undefined,
+            collections_removed: actualCollectionsRemoved.size > 0 ? [...actualCollectionsRemoved] : undefined,
             failed_items: hasFailures ? failedItems : undefined,
         },
     };

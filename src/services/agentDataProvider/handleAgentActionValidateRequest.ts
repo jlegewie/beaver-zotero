@@ -619,23 +619,62 @@ async function validateOrganizeItemsAction(
         };
     }
 
-    // Validate collection keys exist (for add operations)
-    if (collections?.add && collections.add.length > 0) {
-        // Get the library ID from the first item (all items should be in same library for collection operations)
-        const firstItemParts = item_ids[0].split('-');
-        const libraryId = parseInt(firstItemParts[0], 10);
+    // Validate collection operations: all items must be in the same library
+    const hasCollectionChanges = (collections?.add && collections.add.length > 0) ||
+        (collections?.remove && collections.remove.length > 0);
 
-        for (const collKey of collections.add) {
-            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
-            if (!collection) {
-                return {
-                    type: 'agent_action_validate_response',
-                    request_id: request.request_id,
-                    valid: false,
-                    error: `Collection not found: ${collKey}. Use create_collection first.`,
-                    error_code: 'collection_not_found',
-                    preference: 'always_ask',
-                };
+    if (hasCollectionChanges) {
+        // Check that all items are in the same library
+        const libraryIds = new Set<number>();
+        for (const itemId of item_ids) {
+            const parts = itemId.split('-');
+            libraryIds.add(parseInt(parts[0], 10));
+        }
+
+        if (libraryIds.size > 1) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: 'Collection changes require all items to be in the same library. Items span multiple libraries.',
+                error_code: 'mixed_libraries_for_collections',
+                preference: 'always_ask',
+            };
+        }
+
+        const libraryId = libraryIds.values().next().value;
+
+        // Validate collection keys exist (for add operations)
+        if (collections?.add && collections.add.length > 0) {
+            for (const collKey of collections.add) {
+                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                if (!collection) {
+                    return {
+                        type: 'agent_action_validate_response',
+                        request_id: request.request_id,
+                        valid: false,
+                        error: `Collection not found: ${collKey}. Use create_collection first.`,
+                        error_code: 'collection_not_found',
+                        preference: 'always_ask',
+                    };
+                }
+            }
+        }
+
+        // Validate collection keys exist (for remove operations)
+        if (collections?.remove && collections.remove.length > 0) {
+            for (const collKey of collections.remove) {
+                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                if (!collection) {
+                    return {
+                        type: 'agent_action_validate_response',
+                        request_id: request.request_id,
+                        valid: false,
+                        error: `Collection not found: ${collKey}`,
+                        error_code: 'collection_not_found',
+                        preference: 'always_ask',
+                    };
+                }
             }
         }
     }
