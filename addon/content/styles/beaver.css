@@ -571,6 +571,7 @@
 
 
 /* Typography */
+[id^="beaver-pane-"] .uppercase { text-transform: uppercase; }
 [id^="beaver-pane-"] .text-xs { font-size: 0.75rem; }
 [id^="beaver-pane-"] .text-sm { font-size: 0.875rem; }
 [id^="beaver-pane-"] .text-base { font-size: 1rem; }
