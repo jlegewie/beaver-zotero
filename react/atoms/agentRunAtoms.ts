@@ -23,6 +23,8 @@ import {
     WSToolCallProgressEvent,
     WSMissingZoteroDataEvent,
     WSDeferredApprovalRequest,
+    CurrentLibrary,
+    CurrentCollection,
 } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
@@ -1015,22 +1017,48 @@ export const sendWSMessageAtom = atom(
             : undefined;
 
         // Get current library and collection context
-        let currentLibraryId: number | undefined = undefined;
-        let currentCollectionKey: string | undefined = undefined;
+        let currentLibrary: CurrentLibrary | undefined = undefined;
+        let currentCollection: CurrentCollection | undefined = undefined;
         
+        const searchableLibraryIds = get(searchableLibraryIdsAtom);
         const currentView: 'library' | 'file_reader' = get(isLibraryTabAtom) ? 'library' : 'file_reader';
         
         if (currentView === 'file_reader' && readerState) {
             // In reader view, use the library from the reader attachment
-            currentLibraryId = readerState.library_id;
+            const library = Zotero.Libraries.get(readerState.library_id);
+            if (library) {
+                currentLibrary = {
+                    library_id: library.libraryID,
+                    name: library.name,
+                    is_group: library.isGroup,
+                    read_only: !library.editable,
+                    is_synced: searchableLibraryIds.includes(library.libraryID),
+                };
+            }
         } else if (currentView === 'library') {
             // In library view, get from ZoteroPane
             const zp = Zotero.getActiveZoteroPane();
             if (zp) {
-                currentLibraryId = zp.getSelectedLibraryID();
+                const libraryId = zp.getSelectedLibraryID();
+                const library = Zotero.Libraries.get(libraryId);
+                if (library) {
+                    currentLibrary = {
+                        library_id: library.libraryID,
+                        name: library.name,
+                        is_group: library.isGroup,
+                        read_only: !library.editable,
+                        is_synced: searchableLibraryIds.includes(library.libraryID),
+                    };
+                }
+                
                 const collection = zp.getSelectedCollection();
                 if (collection) {
-                    currentCollectionKey = collection.key;
+                    currentCollection = {
+                        collection_key: collection.key,
+                        name: collection.name,
+                        library_id: collection.libraryID,
+                        parent_key: collection.parentKey || null,
+                    };
                 }
             }
         }
@@ -1039,8 +1067,8 @@ export const sendWSMessageAtom = atom(
         const applicationState = {
             current_view: currentView,
             ...(readerState ? { reader_state: readerState } : {}),
-            ...(currentLibraryId !== undefined ? { library_id: currentLibraryId } : {}),
-            ...(currentCollectionKey !== undefined ? { collection_key: currentCollectionKey } : {})
+            ...(currentLibrary ? { current_library: currentLibrary } : {}),
+            ...(currentCollection ? { current_collection: currentCollection } : {}),
         };
 
         // Build the message

@@ -851,20 +851,46 @@ export interface WSAuthMessage {
     frontend_version?: string;
 }
 
+/** Current library context for application state */
+export interface CurrentLibrary {
+    /** Library ID */
+    library_id: number;
+    /** Library name (e.g., "My Library" or group name) */
+    name: string;
+    /** Whether this is a group library */
+    is_group: boolean;
+    /** Whether the library data is read-only (not editable) */
+    read_only: boolean;
+    /** Whether the library is synced with Beaver (Pro feature) */
+    is_synced: boolean;
+}
+
+/** Current collection context for application state */
+export interface CurrentCollection {
+    /** Collection key */
+    collection_key: string;
+    /** Collection name */
+    name: string;
+    /** Library ID this collection belongs to */
+    library_id: number;
+    /** Parent collection key, if this is a subcollection */
+    parent_key?: string | null;
+}
+
 /**
  * Application state sent with messages.
  * Contains current view state and reader state if in reader view.
  */
 export interface ApplicationStateInput {
-    /** Current application view ('library' or 'reader') */
+    /** Current application view ('library' or 'file_reader') */
     current_view: 'library' | 'file_reader';
     /** Reader state when in reader view */
     reader_state?: ReaderState;
-    /** Current library */
-    library_id?: number;
-    /** Current collection */
-    collection_key?: string;
-    /** Currently selected library ID (optional) */
+    /** Current library context */
+    current_library?: CurrentLibrary;
+    /** Current collection context */
+    current_collection?: CurrentCollection;
+    /** Currently selected library items (optional) */
     library_selection?: ZoteroItemReference[];
 }
 
