@@ -1,8 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { CSSIcon, Icon, TagIcon } from '../icons/icons';
+import { CSSIcon } from '../icons/icons';
 import type { TagChanges, CollectionChanges, OrganizeItemsResultData } from '../../types/agentActions/base';
+import { MessageItemButton } from '../input/MessageItemButton';
+import { usePreviewHover } from '../../hooks/usePreviewHover';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
+
+const MAX_ITEMS_DISPLAY = 2;
 
 interface OrganizeItemsPreviewProps {
     /** List of item IDs being organized */
@@ -29,6 +33,32 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
     resultData,
 }) => {
     const [collectionNames, setCollectionNames] = useState<Record<string, string>>({});
+    const [resolvedItems, setResolvedItems] = useState<Zotero.Item[]>([]);
+
+    // Resolve items from item IDs
+    useEffect(() => {
+        const fetchItems = async () => {
+            if (typeof Zotero === 'undefined' || itemIds.length === 0) return;
+
+            const items: Zotero.Item[] = [];
+            for (const itemId of itemIds) {
+                try {
+                    const parts = itemId.split('-');
+                    const libraryId = parseInt(parts[0], 10);
+                    const zoteroKey = parts.slice(1).join('-');
+                    const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+                    if (item) {
+                        items.push(item);
+                    }
+                } catch (e) {
+                    console.warn(`Failed to resolve item ${itemId}:`, e);
+                }
+            }
+            setResolvedItems(items);
+        };
+
+        fetchItems();
+    }, [itemIds]);
 
     // Resolve collection names
     useEffect(() => {
@@ -63,6 +93,17 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
         fetchCollectionNames();
     }, [collections, itemIds]);
 
+    // Items to display and overflow
+    const displayedItems = resolvedItems.slice(0, MAX_ITEMS_DISPLAY);
+    const overflowItems = resolvedItems.slice(MAX_ITEMS_DISPLAY);
+    const overflowCount = overflowItems.length;
+
+    // Hover preview for overflow items
+    const { hoverEventHandlers: overflowHoverHandlers } = usePreviewHover(
+        overflowCount > 0 ? { type: 'itemsSummary', content: overflowItems } : null,
+        { isEnabled: overflowCount > 0 }
+    );
+
     const isApplied = status === 'applied';
     const isRejectedOrUndone = status === 'rejected' || status === 'undone';
 
@@ -80,14 +121,37 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
         <div className={`organize-items-preview overflow-hidden ${isRejectedOrUndone ? 'opacity-60' : ''}`}>
             <div className="display-flex flex-col px-3 py-1 gap-5">
                 
-                {/* Item count summary */}
-                <div className="text-sm font-color-secondary">
-                    {isApplied && resultData?.items_modified !== undefined ? (
+                {/* Item display */}
+                {isApplied && resultData?.items_modified !== undefined ? (
+                    <div className="text-sm font-color-secondary">
                         <span>Modified {resultData.items_modified} item{resultData.items_modified !== 1 ? 's' : ''}</span>
-                    ) : (
-                        <span>Organizing {itemCount} item{itemCount !== 1 ? 's' : ''}</span>
-                    )}
-                </div>
+                    </div>
+                ) : (
+                    <div className="display-flex flex-wrap gap-col-3 gap-row-2 mt-1">
+                        {displayedItems.map((item) => (
+                            <MessageItemButton
+                                key={item.key}
+                                item={item}
+                                disabled={false}
+                                canEdit={false}
+                            />
+                        ))}
+                        {overflowCount > 0 && (
+                            <button
+                                type="button"
+                                className="variant-outline source-button"
+                                style={{ height: '22px' }}
+                                title={`${overflowCount} more item${overflowCount === 1 ? '' : 's'}`}
+                                {...overflowHoverHandlers}
+                            >
+                                +{overflowCount}
+                            </button>
+                        )}
+                        {resolvedItems.length === 0 && itemCount > 0 && (
+                            <span className="text-sm font-color-secondary">Loading {itemCount} item{itemCount !== 1 ? 's' : ''}...</span>
+                        )}
+                    </div>
+                )}
 
                 {/* Tag changes */}
                 {hasTagChanges && tagsToAdd.length > 0 && (
