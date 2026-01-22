@@ -22,6 +22,7 @@ import {
     FolderDetailIcon,
     FolderAddIcon,
     DatabaseIcon,
+    TaskDoneIcon,
     TagIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, toggleToolExpandedAtom } from '../../atoms/messageUIState';
@@ -67,7 +68,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     create_collection: FolderAddIcon,
 
     // Organize items tool
-    organize_items: TagIcon,
+    organize_items: TaskDoneIcon,
 
     // Read tool result
     read_file: TextAlignLeftIcon,
