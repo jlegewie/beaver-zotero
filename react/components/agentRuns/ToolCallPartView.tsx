@@ -66,6 +66,9 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     // Create collection tool
     create_collection: FolderAddIcon,
 
+    // Organize items tool
+    organize_items: TagIcon,
+
     // Read tool result
     read_file: TextAlignLeftIcon,
 };
@@ -108,7 +111,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const hasAgentAction = agentActions.length > 0;
     
     // Determine if this tool should use AgentActionView
-    const isAgentActionTool = part.tool_name === 'edit_metadata' || part.tool_name === 'create_collection';
+    const isAgentActionTool = part.tool_name === 'edit_metadata' || part.tool_name === 'create_collection' || part.tool_name === 'organize_items';
     const showAgentActionView = isAgentActionTool && (isAwaitingApproval || hasAgentAction);
 
     const resultCount =

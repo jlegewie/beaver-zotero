@@ -97,6 +97,13 @@ export const isCreateCollectionAgentAction = (action: AgentAction): boolean => {
 };
 
 /**
+ * Type guard for organize items actions
+ */
+export const isOrganizeItemsAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'organize_items';
+};
+
+/**
  * Typed agent action for create_item actions
  */
 export type CreateItemAgentAction = AgentAction & {
@@ -244,6 +251,14 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             name: proposedData.name ?? '',
             parent_key: proposedData.parent_key ?? proposedData.parentKey ?? null,
             item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
+        };
+    } else if (actionType === 'organize_items') {
+        // Normalize organize_items proposed data
+        proposedData = {
+            item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
+            tags: proposedData.tags ?? null,
+            collections: proposedData.collections ?? null,
+            current_state: proposedData.current_state ?? proposedData.currentState ?? null,
         };
     }
     
@@ -776,6 +791,10 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
                 item_count: actionData.item_ids?.length ?? 0,
             };
         }
+    } else if (actionType === 'organize_items') {
+        // For organize_items, current_state contains the current tags/collections for each item
+        // We can use it directly from the proposed data if available
+        currentValue = actionData.current_state ?? null;
     }
 
     return {
