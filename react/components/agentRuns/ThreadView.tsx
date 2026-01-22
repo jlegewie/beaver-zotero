@@ -43,6 +43,8 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         
         // Track visibility state for ResizeObserver
         const wasHiddenRef = useRef(true);
+        // Track previous container height for resize detection
+        const prevContainerHeightRef = useRef(0);
         // Track if we're currently animating scroll
         const isAnimatingRef = useRef(false);
         // Debounce timer for restore
@@ -127,7 +129,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             prevThreadIdRef.current = currentThreadId;
         }, [restoreScrollPosition, currentThreadId]);
 
-        // Watch for visibility transitions only (not all resize events)
+        // Watch for visibility transitions and container resizes
         useEffect(() => {
             const container = scrollContainerRef.current;
             if (!container) return;
@@ -136,8 +138,10 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 const entry = entries[0];
                 if (!entry) return;
                 
-                const isVisible = entry.contentRect.height > 0;
+                const currentHeight = entry.contentRect.height;
+                const isVisible = currentHeight > 0;
                 const wasHidden = wasHiddenRef.current;
+                const prevHeight = prevContainerHeightRef.current;
                 
                 // Only restore scroll position when transitioning from hidden to visible
                 // This prevents interference during normal content growth or layout shifts
@@ -151,8 +155,17 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                         restoreScrollPosition();
                     }, RESTORE_DEBOUNCE_MS);
                 }
+                // Re-evaluate scroll state when container height changes (window resize)
+                // Only trigger if already visible (not on visibility transition)
+                else if (!wasHidden && isVisible && prevHeight > 0 && currentHeight !== prevHeight) {
+                    const { scrollHeight, scrollTop } = container;
+                    const distanceFromBottom = scrollHeight - scrollTop - currentHeight;
+                    const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
+                    store.set(scrolledAtom, !isNearBottom);
+                }
                 
                 wasHiddenRef.current = !isVisible;
+                prevContainerHeightRef.current = currentHeight;
             });
             
             observer.observe(container);
@@ -162,7 +175,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     win.clearTimeout(restoreDebounceRef.current);
                 }
             };
-        }, [restoreScrollPosition, win]);
+        }, [restoreScrollPosition, scrolledAtom, win]);
 
         // Scroll to bottom when runs change
         useEffect(() => {
