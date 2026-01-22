@@ -121,37 +121,31 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
         <div className={`organize-items-preview overflow-hidden ${isRejectedOrUndone ? 'opacity-60' : ''}`}>
             <div className="display-flex flex-col px-3 py-1 gap-5">
                 
-                {/* Item display */}
-                {isApplied && resultData?.items_modified !== undefined ? (
-                    <div className="text-sm font-color-secondary">
-                        <span>Modified {resultData.items_modified} item{resultData.items_modified !== 1 ? 's' : ''}</span>
-                    </div>
-                ) : (
-                    <div className="display-flex flex-wrap gap-col-3 gap-row-2 mt-1">
-                        {displayedItems.map((item) => (
-                            <MessageItemButton
-                                key={item.key}
-                                item={item}
-                                disabled={false}
-                                canEdit={false}
-                            />
-                        ))}
-                        {overflowCount > 0 && (
-                            <button
-                                type="button"
-                                className="variant-outline source-button"
-                                style={{ height: '22px' }}
-                                title={`${overflowCount} more item${overflowCount === 1 ? '' : 's'}`}
-                                {...overflowHoverHandlers}
-                            >
-                                +{overflowCount}
-                            </button>
-                        )}
-                        {resolvedItems.length === 0 && itemCount > 0 && (
-                            <span className="text-sm font-color-secondary">Loading {itemCount} item{itemCount !== 1 ? 's' : ''}...</span>
-                        )}
-                    </div>
-                )}
+                {/* Item display - always shown regardless of status */}
+                <div className="display-flex flex-wrap gap-col-3 gap-row-2 mt-1">
+                    {displayedItems.map((item) => (
+                        <MessageItemButton
+                            key={item.key}
+                            item={item}
+                            disabled={false}
+                            canEdit={false}
+                        />
+                    ))}
+                    {overflowCount > 0 && (
+                        <button
+                            type="button"
+                            className="variant-outline source-button"
+                            style={{ height: '22px' }}
+                            title={`${overflowCount} more item${overflowCount === 1 ? '' : 's'}`}
+                            {...overflowHoverHandlers}
+                        >
+                            +{overflowCount}
+                        </button>
+                    )}
+                    {resolvedItems.length === 0 && itemCount > 0 && (
+                        <span className="text-sm font-color-secondary">Loading {itemCount} item{itemCount !== 1 ? 's' : ''}...</span>
+                    )}
+                </div>
 
                 {/* Tag changes */}
                 {hasTagChanges && tagsToAdd.length > 0 && (
