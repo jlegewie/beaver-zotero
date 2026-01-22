@@ -220,7 +220,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
 
     // Determine if this action type has an associated item
-    const hasAssociatedItem = toolName === 'edit_metadata';
+    const hasAssociatedItem =
+        toolName === 'edit_metadata' ||
+        toolName === 'edit_item';
 
     // Fetch item title for actions that have specific items
     useEffect(() => {
@@ -615,7 +617,10 @@ function getActionTitle(toolName: string, actionData: Record<string, any> | unde
             return actionData?.name ?? actionData?.proposed_data?.name ?? null;
         case 'organize_items': {
             const itemCount = actionData?.item_ids?.length ?? 0;
-            return itemCount > 0 ? `${itemCount} item${itemCount !== 1 ? 's' : ''}` : null;
+            if (itemCount === 0) return null;
+            return itemCount === 1 && itemTitle
+                ? itemTitle
+                : `${itemCount} item${itemCount !== 1 ? 's' : ''}`;
         }
         default:
             return null;

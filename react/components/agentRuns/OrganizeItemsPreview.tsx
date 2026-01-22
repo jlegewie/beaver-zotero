@@ -78,7 +78,7 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
 
     return (
         <div className={`organize-items-preview overflow-hidden ${isRejectedOrUndone ? 'opacity-60' : ''}`}>
-            <div className="flex flex-col px-3 py-1 gap-3">
+            <div className="display-flex flex-col px-3 py-1 gap-3">
                 
                 {/* Item count summary */}
                 <div className="text-sm font-color-secondary">
@@ -90,62 +90,65 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
                 </div>
 
                 {/* Tag changes */}
-                {hasTagChanges && (
-                    <div className="flex flex-col gap-1.5">
-                        <div className="text-sm font-color-primary font-medium flex items-center gap-1.5">
+                {hasTagChanges && tagsToAdd.length > 0 && (
+                    <div className="display-flex flex-col gap-2">
+                        <div className="text-sm font-color-primary font-medium display-flex flex-row items-center gap-1">
                             <Icon icon={TagIcon} className="scale-90" />
-                            <span>Tags</span>
+                            <div>Adding Tags</div>
                         </div>
                         
                         {/* Tags to add */}
-                        {tagsToAdd.length > 0 && (
-                            <div className="flex flex-row flex-wrap gap-1 ml-5">
-                                {tagsToAdd.map((tag, index) => (
-                                    <span
-                                        key={`add-${index}`}
-                                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-green-500/10 text-green-700 border border-green-500/20"
-                                    >
-                                        <Icon icon={PlusSignIcon} className="scale-75" />
-                                        {tag}
-                                    </span>
-                                ))}
-                            </div>
-                        )}
+                        <div className="display-flex flex-row flex-wrap gap-1">
+                            {tagsToAdd.map((tag, index) => (
+                                <span
+                                    key={`add-${index}`}
+                                    className="inline-flex items-center gap-1 text-xs px-2 py-05 rounded-md bg-quaternary font-color-secondary border-quinary"
+                                >
+                                    {tag}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
+                {hasTagChanges && tagsToRemove.length > 0 && (
+                    <div className="display-flex flex-col gap-2">
+                        <div className="text-sm font-color-primary font-medium display-flex flex-row items-center gap-1">
+                            <Icon icon={TagIcon} className="scale-90" />
+                            <div>Removing Tags</div>
+                        </div>
+                        
                         {/* Tags to remove */}
-                        {tagsToRemove.length > 0 && (
-                            <div className="flex flex-row flex-wrap gap-1 ml-5">
-                                {tagsToRemove.map((tag, index) => (
-                                    <span
-                                        key={`remove-${index}`}
-                                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-red-500/10 text-red-700 border border-red-500/20"
-                                    >
-                                        <Icon icon={CancelIcon} className="scale-75" />
-                                        {tag}
-                                    </span>
-                                ))}
-                            </div>
-                        )}
+                        <div className="display-flex flex-row flex-wrap gap-1">
+                            {tagsToRemove.map((tag, index) => (
+                                <span
+                                    key={`remove-${index}`}
+                                    className="inline-flex items-center gap-1 text-xs px-2 py-05 rounded-md bg-quaternary font-color-secondary border-quinary"
+                                >
+                                    {tag}
+                                </span>
+                            ))}
+                        </div>
                     </div>
                 )}
 
                 {/* Collection changes */}
                 {hasCollectionChanges && (
-                    <div className="flex flex-col gap-1.5">
-                        <div className="text-sm font-color-primary font-medium flex items-center gap-1.5">
-                            <span className="scale-75 display-flex">
+                    <div className="display-flex flex-col gap-2">
+                        <div className="text-sm font-color-primary font-medium display-flex flex-row items-center gap-1">
+                            <div className="scale-75 display-flex">
                                 <CSSIcon name="collection" className="icon-16" />
-                            </span>
-                            <span>Collections</span>
+                            </div>
+                            <div>Collections</div>
                         </div>
 
                         {/* Collections to add */}
                         {collectionsToAdd.length > 0 && (
-                            <div className="flex flex-col gap-0.5 ml-5">
+                            <div className="display-flex flex-col gap-0.5 ml-5">
                                 {collectionsToAdd.map((collKey, index) => (
                                     <div
                                         key={`add-coll-${index}`}
-                                        className="inline-flex items-center gap-1.5 text-sm font-color-primary"
+                                        className="inline-flex items-center gap-1 text-sm font-color-primary"
                                     >
                                         <span className="text-green-600">
                                             <Icon icon={PlusSignIcon} className="scale-75" />
@@ -161,11 +164,11 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
 
                         {/* Collections to remove */}
                         {collectionsToRemove.length > 0 && (
-                            <div className="flex flex-col gap-0.5 ml-5">
+                            <div className="display-flex flex-col gap-0.5 ml-5">
                                 {collectionsToRemove.map((collKey, index) => (
                                     <div
                                         key={`remove-coll-${index}`}
-                                        className="inline-flex items-center gap-1.5 text-sm font-color-primary"
+                                        className="inline-flex items-center gap-1 text-sm font-color-primary"
                                     >
                                         <span className="text-red-600">
                                             <Icon icon={CancelIcon} className="scale-75" />
