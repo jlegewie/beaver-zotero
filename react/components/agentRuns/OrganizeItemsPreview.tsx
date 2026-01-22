@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CSSIcon, Icon, TagIcon, PlusSignIcon, CancelIcon } from '../icons/icons';
+import { CSSIcon, Icon, TagIcon } from '../icons/icons';
 import type { TagChanges, CollectionChanges, OrganizeItemsResultData } from '../../types/agentActions/base';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
@@ -133,54 +133,55 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
                 )}
 
                 {/* Collection changes */}
-                {hasCollectionChanges && (
+                {hasCollectionChanges && collectionsToAdd.length > 0 && (
                     <div className="display-flex flex-col gap-2">
                         <div className="text-sm font-color-primary font-medium display-flex flex-row items-center gap-1">
                             <div className="scale-75 display-flex">
                                 <CSSIcon name="collection" className="icon-16" />
                             </div>
-                            <div>Collections</div>
+                            <div>Adding to Collections</div>
                         </div>
 
                         {/* Collections to add */}
-                        {collectionsToAdd.length > 0 && (
-                            <div className="display-flex flex-col gap-0.5 ml-5">
-                                {collectionsToAdd.map((collKey, index) => (
-                                    <div
-                                        key={`add-coll-${index}`}
-                                        className="inline-flex items-center gap-1 text-sm font-color-primary"
-                                    >
-                                        <span className="text-green-600">
-                                            <Icon icon={PlusSignIcon} className="scale-75" />
-                                        </span>
-                                        <span className="scale-75 display-flex">
-                                            <CSSIcon name="collection" className="icon-16" />
-                                        </span>
-                                        <span>{collectionNames[collKey] || collKey}</span>
-                                    </div>
-                                ))}
+                        <div className="display-flex flex-col gap-0.5 ml-5">
+                            {collectionsToAdd.map((collKey, index) => (
+                                <div
+                                    key={`add-coll-${index}`}
+                                    className="inline-flex items-center gap-1 text-sm font-color-primary"
+                                >
+                                    <span className="scale-75 display-flex">
+                                        <CSSIcon name="collection" className="icon-16" />
+                                    </span>
+                                    <span>{collectionNames[collKey] || collKey}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {hasCollectionChanges && collectionsToRemove.length > 0 && (
+                    <div className="display-flex flex-col gap-2">
+                        <div className="text-sm font-color-primary font-medium display-flex flex-row items-center gap-1">
+                            <div className="scale-75 display-flex">
+                                <CSSIcon name="collection" className="icon-16" />
                             </div>
-                        )}
+                            <div>Removing from Collections</div>
+                        </div>
 
                         {/* Collections to remove */}
-                        {collectionsToRemove.length > 0 && (
-                            <div className="display-flex flex-col gap-0.5 ml-5">
-                                {collectionsToRemove.map((collKey, index) => (
-                                    <div
-                                        key={`remove-coll-${index}`}
-                                        className="inline-flex items-center gap-1 text-sm font-color-primary"
-                                    >
-                                        <span className="text-red-600">
-                                            <Icon icon={CancelIcon} className="scale-75" />
-                                        </span>
-                                        <span className="scale-75 display-flex">
-                                            <CSSIcon name="collection" className="icon-16" />
-                                        </span>
-                                        <span>{collectionNames[collKey] || collKey}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
+                        <div className="display-flex flex-col gap-0.5 ml-5">
+                            {collectionsToRemove.map((collKey, index) => (
+                                <div
+                                    key={`remove-coll-${index}`}
+                                    className="inline-flex items-center gap-1 text-sm font-color-primary"
+                                >
+                                    <span className="scale-75 display-flex">
+                                        <CSSIcon name="collection" className="icon-16" />
+                                    </span>
+                                    <span>{collectionNames[collKey] || collKey}</span>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 )}
 
