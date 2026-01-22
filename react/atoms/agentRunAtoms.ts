@@ -1014,11 +1014,33 @@ export const sendWSMessageAtom = atom(
             ? [{ function: "search_external_references", parameters: {} } as ToolRequest]
             : undefined;
 
-        // Application state
+        // Get current library and collection context
+        let currentLibraryId: number | undefined = undefined;
+        let currentCollectionKey: string | undefined = undefined;
+        
         const currentView: 'library' | 'file_reader' = get(isLibraryTabAtom) ? 'library' : 'file_reader';
+        
+        if (currentView === 'file_reader' && readerState) {
+            // In reader view, use the library from the reader attachment
+            currentLibraryId = readerState.library_id;
+        } else if (currentView === 'library') {
+            // In library view, get from ZoteroPane
+            const zp = Zotero.getActiveZoteroPane();
+            if (zp) {
+                currentLibraryId = zp.getSelectedLibraryID();
+                const collection = zp.getSelectedCollection();
+                if (collection) {
+                    currentCollectionKey = collection.key;
+                }
+            }
+        }
+
+        // Application state
         const applicationState = {
             current_view: currentView,
-            ...(readerState ? { reader_state: readerState } : {})
+            ...(readerState ? { reader_state: readerState } : {}),
+            ...(currentLibraryId !== undefined ? { library_id: currentLibraryId } : {}),
+            ...(currentCollectionKey !== undefined ? { collection_key: currentCollectionKey } : {})
         };
 
         // Build the message

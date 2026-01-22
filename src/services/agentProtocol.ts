@@ -860,6 +860,10 @@ export interface ApplicationStateInput {
     current_view: 'library' | 'file_reader';
     /** Reader state when in reader view */
     reader_state?: ReaderState;
+    /** Current library */
+    library_id?: number;
+    /** Current collection */
+    collection_key?: string;
     /** Currently selected library ID (optional) */
     library_selection?: ZoteroItemReference[];
 }
