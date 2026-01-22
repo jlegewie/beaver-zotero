@@ -24,6 +24,7 @@ import {
     DatabaseIcon,
     TaskDoneIcon,
     TagIcon,
+    PropertyEditIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, toggleToolExpandedAtom } from '../../atoms/messageUIState';
 
@@ -49,7 +50,8 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Metadata tools
     get_metadata: FileViewIcon,
-    edit_metadata: DocumentValidationIcon,
+    edit_metadata: PropertyEditIcon,
+    edit_item: PropertyEditIcon,
 
     // Reading tools
     search_in_documents: TextAlignLeftIcon,

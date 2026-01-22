@@ -41,8 +41,8 @@ import {
     ArrowRightIcon,
     PropertyEditIcon,
     ArrowUpRightIcon,
-    LibraryIcon,
-    TagIcon,
+    FolderAddIcon,
+    TaskDoneIcon,
 } from '../icons/icons';
 import { revealSource } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
@@ -392,8 +392,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const getHeaderIcon = () => {
         const getToolIcon = () => {
             if (toolName === 'edit_metadata') return PropertyEditIcon;
-            if (toolName === 'create_collection') return LibraryIcon;
-            if (toolName === 'organize_items') return TagIcon;
+            if (toolName === 'edit_item') return PropertyEditIcon;
+            if (toolName === 'create_collection') return FolderAddIcon;
+            if (toolName === 'organize_items') return TaskDoneIcon;
             return ClockIcon;
         };
         if (isAwaitingApproval) return getToolIcon();
