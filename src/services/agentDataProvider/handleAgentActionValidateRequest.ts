@@ -1,15 +1,7 @@
-/**
- * Agent Data Provider
- * 
- * This service provides WebSocket communication for agent runs,
- * enabling bidirectional communication between the Zotero plugin and the backend.
- * 
- * The Beaver agent is the primary agent that handles chat completions and tool execution.
- */
-
 import { logger } from '../../utils/logger';
 import { canSetField, SETTABLE_PRIMARY_FIELDS } from '../../utils/zoteroUtils';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
+import type { MetadataEdit } from '../../../react/types/agentActions/base';
 
 import { store } from '../../../react/store';
 import {
@@ -113,12 +105,6 @@ export interface AllEditsValidationResult {
     errors: FieldValidationError[];
 }
 
-/** Type for a field edit operation */
-export interface FieldEdit {
-    field: string;
-    new_value: string;
-}
-
 /**
  * Validates whether a field can be edited, with detailed error information.
  * This combines policy checks (AI restrictions) with technical checks (Zotero schema).
@@ -168,7 +154,7 @@ export function validateFieldEdit(item: Zotero.Item, field: string): FieldValida
  * @param edits - Array of field edits to validate
  * @returns Validation result with all errors
  */
-export function validateAllEdits(item: Zotero.Item, edits: FieldEdit[]): AllEditsValidationResult {
+export function validateAllEdits(item: Zotero.Item, edits: MetadataEdit[]): AllEditsValidationResult {
     const errors: FieldValidationError[] = [];
     
     for (const edit of edits) {
@@ -208,7 +194,7 @@ async function validateEditMetadataAction(
     const { library_id, zotero_key, edits } = request.action_data as {
         library_id: number;
         zotero_key: string;
-        edits: FieldEdit[];
+        edits: MetadataEdit[];
     };
 
     // Validate library exists

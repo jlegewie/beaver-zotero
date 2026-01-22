@@ -18,6 +18,33 @@ export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'erro
 // =============================================================================
 
 /**
+ * A single metadata field edit with before/after values.
+ * Matches backend MetadataEdit model.
+ */
+export interface MetadataEdit {
+    /** The metadata field name being edited */
+    field: string;
+    /** The original value before the edit */
+    old_value: any;
+    /** The new value after the edit */
+    new_value: any;
+}
+
+/**
+ * Proposed data for editing metadata.
+ * Matches backend EditMetadataProposedData model.
+ * Inherits library_id and zotero_key (ZoteroItemReference).
+ */
+export interface EditMetadataProposedData {
+    /** Library ID of the item to edit */
+    library_id: number;
+    /** Zotero key of the item to edit */
+    zotero_key: string;
+    /** List of field edits to apply */
+    edits: MetadataEdit[];
+}
+
+/**
  * A single applied metadata field edit.
  */
 export interface AppliedMetadataEdit {
@@ -165,6 +192,7 @@ export type ProposedData =
     AnnotationProposedData |
     NoteProposedData |
     CreateItemProposedData |
+    EditMetadataProposedData |
     CreateCollectionProposedData |
     OrganizeItemsProposedData;
 

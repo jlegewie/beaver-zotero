@@ -1,14 +1,6 @@
-/**
- * Agent Data Provider
- * 
- * This service provides WebSocket communication for agent runs,
- * enabling bidirectional communication between the Zotero plugin and the backend.
- * 
- * The Beaver agent is the primary agent that handles chat completions and tool execution.
- */
-
 import { logger } from '../../utils/logger';
 import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '../agentProtocol';
+import type { MetadataEdit } from '../../../react/types/agentActions/base';
 
 
 /**
@@ -63,7 +55,7 @@ async function executeEditMetadataAction(
     const { library_id, zotero_key, edits } = request.action_data as {
         library_id: number;
         zotero_key: string;
-        edits: Array<{ field: string; new_value: string }>;
+        edits: MetadataEdit[];
     };
 
     // Get the item
