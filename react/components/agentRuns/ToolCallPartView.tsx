@@ -22,6 +22,7 @@ import {
     FolderDetailIcon,
     FolderAddIcon,
     DatabaseIcon,
+    IdeaIcon,
     TaskDoneIcon,
     TagIcon,
     PropertyEditIcon,
@@ -77,9 +78,62 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 };
 
 /**
- * Get the icon for a tool based on its name
+ * Detect the type of file being read by the read_file tool.
+ * Simplified version of detectReadFileType from toolLabels.ts
  */
-function getToolIcon(toolName: string): IconComponent {
+function detectReadFileType(path: string): 'tool_result' | 'skill' | 'skill_resource' | 'documentation' | 'unknown' {
+    const pathLower = path.toLowerCase();
+    
+    if (pathLower.endsWith('.json.gz')) {
+        return 'tool_result';
+    }
+    
+    if (pathLower.includes('/skills/')) {
+        const fileName = path.split('/').pop()?.toUpperCase();
+        if (fileName === 'SKILL.MD') {
+            return 'skill';
+        }
+        
+        const parts = pathLower.split('/skills/');
+        if (parts.length > 1) {
+            const skillPath = parts[1];
+            const pathSegments = skillPath.split('/');
+            if (pathSegments.length > 1 && ['scripts', 'references', 'assets'].includes(pathSegments[1])) {
+                return 'skill_resource';
+            }
+        }
+        
+        return 'skill';
+    }
+    
+    if (pathLower.includes('/docs/')) {
+        return 'documentation';
+    }
+    
+    return 'unknown';
+}
+
+/**
+ * Get the icon for a tool based on its name and arguments
+ */
+function getToolIcon(part: ToolCallPart): IconComponent {
+    const toolName = part.tool_name;
+    
+    // Special handling for read_file - check file type
+    if (toolName === 'read_file') {
+        const args = typeof part.args === 'string' 
+            ? JSON.parse(part.args) 
+            : (part.args as Record<string, unknown>);
+        const path = args?.path as string | undefined;
+        
+        if (path) {
+            const fileType = detectReadFileType(path);
+            if (fileType === 'skill' || fileType === 'skill_resource') {
+                return IdeaIcon;
+            }
+        }
+    }
+    
     return TOOL_ICONS[toolName] ?? PuzzleIcon;
 }
 
@@ -162,7 +216,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         if (effectiveExpanded) return ArrowDownIcon;
         if (isHovered && canExpand) return ArrowRightIcon;
         
-        return getToolIcon(part.tool_name);
+        return getToolIcon(part);
     };
 
     const hasExpandedResult = effectiveExpanded && canExpand;
