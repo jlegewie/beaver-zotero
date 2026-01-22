@@ -76,9 +76,6 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
             <div className="flex flex-col px-3 py-1 gap-2">
                 
                 <div className="flex flex-col gap-0.5">
-                    <div className="text-sm font-color-primary font-medium py-1">
-                        New Collection
-                    </div>
                     {/* Parent Collection (if exists) */}
                     {parentKey && (
                         <div className="display-flex flex-row items-center gap-2 py-1 opacity-60">
