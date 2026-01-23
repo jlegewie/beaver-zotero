@@ -183,7 +183,7 @@ export function renderToMarkdown(
     }).replace('  (', ' (');
 
     // Format the bibliography
-    let bibliography = Zotero.Beaver.citationService.formatBibliography(citedItems).replace(/\n/g, '\n\n');
+    let bibliography = (Zotero.Beaver?.citationService?.formatBibliography(citedItems) ?? '').replace(/\n/g, '\n\n');
     if (externalReferences.length > 0) {
         bibliography += externalReferences.map(reference => `${formatExternalCitation(reference)} (external reference)`).join('\n\n');
     }
