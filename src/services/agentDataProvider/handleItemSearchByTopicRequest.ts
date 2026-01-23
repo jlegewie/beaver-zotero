@@ -295,22 +295,22 @@ export async function handleItemSearchByTopicRequest(
                 attachments,
                 similarity: searchResult.similarity,
             });
-
-            // Check limit
-            if (request.limit > 0 && resultItems.length >= request.limit) {
-                break;
-            }
         } catch (error) {
             logger(`handleItemSearchByTopicRequest: Failed to serialize item ${item.key}: ${error}`, 1);
         }
     }
 
-    logger(`handleItemSearchByTopicRequest: Returning ${resultItems.length} items`, 1);
+    // Apply offset and limit (offset defaults to 0 for backward compatibility)
+    const offset = request.offset ?? 0;
+    const offsetItems = offset > 0 ? resultItems.slice(offset) : resultItems;
+    const limitedItems = request.limit > 0 ? offsetItems.slice(0, request.limit) : offsetItems;
+
+    logger(`handleItemSearchByTopicRequest: Returning ${limitedItems.length} items (offset=${offset})`, 1);
 
     const response: WSItemSearchByTopicResponse = {
         type: 'item_search_by_topic',
         request_id: request.request_id,
-        items: resultItems,
+        items: limitedItems,
     };
 
     return response;

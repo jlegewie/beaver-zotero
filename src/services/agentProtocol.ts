@@ -281,6 +281,8 @@ export interface WSItemSearchByMetadataRequest extends WSBaseEvent {
 
     // Options
     limit: number;
+    /** Number of results to skip for pagination. Default: 0. Optional for backward compatibility. */
+    offset?: number;
 }
 
 /** Error codes for item search failures */
@@ -326,6 +328,8 @@ export interface WSItemSearchByTopicRequest extends WSBaseEvent {
 
     // Options
     limit: number;
+    /** Number of results to skip for pagination. Default: 0. Optional for backward compatibility. */
+    offset?: number;
 }
 
 /** Response to item topic search request */

@@ -192,8 +192,10 @@ export async function handleItemSearchByMetadataRequest(
         items: items.length,
     }, 1);
 
-    // Apply limit
-    const limitedItems = request.limit > 0 ? items.slice(0, request.limit) : items;
+    // Apply offset and limit (offset defaults to 0 for backward compatibility)
+    const offset = request.offset ?? 0;
+    const offsetItems = offset > 0 ? items.slice(offset) : items;
+    const limitedItems = request.limit > 0 ? offsetItems.slice(0, request.limit) : offsetItems;
 
     // Get sync configuration from store for status computation
     const syncWithZotero = store.get(syncWithZoteroAtom);
