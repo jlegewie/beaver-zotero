@@ -15,6 +15,8 @@ import {
     extractSearchInAttachmentData,
     isExternalSearchResult,
     extractExternalSearchData,
+    isLookupWorkResult,
+    extractLookupWorkData,
     isReadPagesFrontendResult,
     extractReadPagesFrontendData,
     isZoteroSearchResult,
@@ -109,6 +111,24 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         const data = extractExternalSearchData(content, metadata);
         if (data) {
             return <ExternalSearchResultView references={data.references} />;
+        }
+    }
+
+    // Lookup work results (lookup_work)
+    if (isLookupWorkResult(toolName, content, metadata)) {
+        const data = extractLookupWorkData(content, metadata);
+        if (data) {
+            if (data.found && data.reference) {
+                return <ExternalSearchResultView references={[data.reference]} />;
+            }
+            // Not found case - show message
+            return (
+                <div className="tool-result-view p-3 text-sm">
+                    <div className="font-color-secondary">
+                        {data.message || 'Work not found'}
+                    </div>
+                </div>
+            );
         }
     }
 

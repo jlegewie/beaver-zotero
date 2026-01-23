@@ -73,6 +73,7 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     search_external_references: 'Web search',
     create_zotero_item: 'Add item',
     external_search: 'Web search',
+    lookup_work: 'Lookup work',
 };
 
 
@@ -373,6 +374,14 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             const label = searchLabel || (query ? truncate(query, 40) : null);
             if (label) {
                 return `${baseLabel}: ${label}`;
+            }
+            return baseLabel;
+        }
+
+        case 'lookup_work': {
+            const label = (args.identifier || args.title) as string | undefined;
+            if (label) {
+                return `${baseLabel}: ${truncate(label, 40)}`;
             }
             return baseLabel;
         }

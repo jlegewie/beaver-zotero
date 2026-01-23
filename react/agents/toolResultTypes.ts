@@ -458,6 +458,11 @@ export function isSearchInAttachmentResult(
     );
 }
 
+/** Valid tool names for lookup work results */
+const LOOKUP_WORK_TOOL_NAMES: readonly string[] = [
+    'lookup_work',
+] as const;
+
 /**
  * Type guard for external search results.
  * Checks content has references array with external_id, and optionally
@@ -489,6 +494,33 @@ export function isExternalSearchResult(
         })) return false;
     }
 
+    return true;
+}
+
+/**
+ * Type guard for lookup_work results.
+ * Checks content has found bool and optionally a single reference.
+ */
+export function isLookupWorkResult(
+    toolName: string,
+    content: unknown,
+    _metadata?: Record<string, unknown>
+): boolean {
+    if (!LOOKUP_WORK_TOOL_NAMES.includes(toolName)) return false;
+    
+    if (!content || typeof content !== 'object') return false;
+    const contentObj = content as Record<string, unknown>;
+    
+    // Must have found boolean
+    if (typeof contentObj.found !== 'boolean') return false;
+    
+    // If found is true, must have reference with external_id
+    if (contentObj.found === true) {
+        if (!contentObj.reference || typeof contentObj.reference !== 'object') return false;
+        const ref = contentObj.reference as Record<string, unknown>;
+        if (typeof ref.external_id !== 'string') return false;
+    }
+    
     return true;
 }
 
@@ -743,6 +775,76 @@ export function extractExternalSearchData(
     });
 
     return { references };
+}
+
+/**
+ * Normalized lookup work data ready for rendering.
+ */
+export interface LookupWorkViewData {
+    found: boolean;
+    reference?: ExternalReference;
+    message?: string;
+}
+
+/**
+ * Extract and merge lookup work data from content and metadata.supplemental_data.
+ * Combines ExternalReferenceResultContent with ExternalReferenceResultSupplement.
+ */
+export function extractLookupWorkData(
+    content: unknown,
+    metadata?: Record<string, unknown>
+): LookupWorkViewData | null {
+    const contentObj = content as { 
+        found?: boolean;
+        reference?: ExternalReferenceResultContent;
+        message?: string;
+    } | undefined;
+    
+    if (!contentObj || typeof contentObj.found !== 'boolean') return null;
+    
+    // Not found case
+    if (!contentObj.found) {
+        return {
+            found: false,
+            message: contentObj.message,
+        };
+    }
+    
+    // Found case - need to merge reference with supplement
+    if (!contentObj.reference) return null;
+    
+    const ref = contentObj.reference;
+    const supp = metadata?.supplemental_data as ExternalReferenceResultSupplement | undefined;
+    
+    const externalRef: ExternalReference = {
+        // From content
+        source_id: ref.external_id,
+        title: ref.title,
+        authors: supp?.authors ?? ref.authors,
+        year: ref.year,
+        venue: ref.venue,
+        abstract: ref.abstract,
+        fields_of_study: ref.fields_of_study,
+        citation_count: ref.citation_count,
+        
+        // From supplement (or defaults)
+        source: supp?.source ?? "openalex",
+        id: supp?.external_id,
+        publication_date: supp?.publication_date,
+        publication_url: supp?.publication_url,
+        url: supp?.url,
+        identifiers: supp?.identifiers,
+        is_open_access: supp?.is_open_access,
+        open_access_url: supp?.open_access_url,
+        reference_count: supp?.reference_count,
+        journal: supp?.journal ?? (ref.journal ? { name: ref.journal } : undefined),
+        library_items: supp?.library_items ?? [],
+    };
+    
+    return {
+        found: true,
+        reference: externalRef,
+    };
 }
 
 // ============================================================================

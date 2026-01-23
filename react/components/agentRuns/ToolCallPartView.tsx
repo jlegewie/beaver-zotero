@@ -63,6 +63,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // External search tools
     external_search: GlobalSearchIcon,
+    lookup_work: GlobalSearchIcon,
 
     // Create item tool
     create_zotero_item: DocumentValidationIcon,
