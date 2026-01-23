@@ -182,6 +182,7 @@ async function handleMetadataSearchHttpRequest(request: any) {
         tags_filter: request.tags_filter,
         collections_filter: request.collections_filter,
         limit: request.limit,
+        offset: request.offset,
     };
     
     const response = await handleItemSearchByMetadataRequest(wsRequest);
@@ -203,6 +204,7 @@ async function handleTopicSearchHttpRequest(request: any) {
         tags_filter: request.tags_filter,
         collections_filter: request.collections_filter,
         limit: request.limit,
+        offset: request.offset,
     };
     
     const response = await handleItemSearchByTopicRequest(wsRequest);

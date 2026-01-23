@@ -134,6 +134,9 @@ export async function handleItemSearchByMetadataRequest(
     }
     const collectionKeys = Array.from(collectionKeysSet);
 
+    // Calculate offset for pagination (default 0, guard against negative values)
+    const offset = Math.max(0, request.offset ?? 0);
+
     logger('handleItemSearchByMetadataRequest: Metadata search', {
         libraryIds,
         title_query: request.title_query,
@@ -174,8 +177,8 @@ export async function handleItemSearchByMetadataRequest(
             logger(`handleItemSearchByMetadataRequest: Error searching library ${libraryId}: ${error}`, 1);
         }
 
-        // Early exit if we have enough results (fetch extra to account for cross-library duplicates)
-        const preDedupBuffer = request.limit * 2;
+        // Early exit if we have enough results (fetch extra to account for cross-library duplicates and pagination offset)
+        const preDedupBuffer = (offset + request.limit) * 2;
         if (request.limit > 0 && uniqueItems.size >= preDedupBuffer) {
             break;
         }
@@ -192,8 +195,7 @@ export async function handleItemSearchByMetadataRequest(
         items: items.length,
     }, 1);
 
-    // Apply offset and limit (offset defaults to 0 for backward compatibility)
-    const offset = request.offset ?? 0;
+    // Apply offset and limit (offset calculated earlier with guard against negative values)
     const offsetItems = offset > 0 ? items.slice(offset) : items;
     const limitedItems = request.limit > 0 ? offsetItems.slice(0, request.limit) : offsetItems;
 

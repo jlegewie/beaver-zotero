@@ -136,11 +136,14 @@ export async function handleItemSearchByTopicRequest(
 
     // Create search service and run semantic search
     const searchService = new semanticSearchService(db, 512);
-    
+
+    // Calculate offset for pagination (default 0, guard against negative values)
+    const offset = Math.max(0, request.offset ?? 0);
+
     let searchResults: SearchResult[];
     try {
         searchResults = await searchService.search(request.topic_query, {
-            topK: request.limit * 4, // Fetch extra to account for filtering
+            topK: (offset + request.limit) * 4, // Fetch extra to account for filtering and pagination offset
             minSimilarity: 0.3,
             libraryIds: libraryIds.length > 0 ? libraryIds : undefined,
         });
@@ -300,8 +303,7 @@ export async function handleItemSearchByTopicRequest(
         }
     }
 
-    // Apply offset and limit (offset defaults to 0 for backward compatibility)
-    const offset = request.offset ?? 0;
+    // Apply offset and limit (offset calculated earlier with guard against negative values)
     const offsetItems = offset > 0 ? resultItems.slice(offset) : resultItems;
     const limitedItems = request.limit > 0 ? offsetItems.slice(0, request.limit) : offsetItems;
 
