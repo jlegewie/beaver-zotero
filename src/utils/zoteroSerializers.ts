@@ -223,7 +223,7 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
         url: item.getField('url'),
         identifiers: getIdentifiersFromItem(item),
         language: item.getField('language'),
-        formatted_citation: Zotero.Beaver.citationService.formatBibliography(item) ?? '',
+        formatted_citation: Zotero.Beaver?.citationService?.formatBibliography(item) ?? '',
         deleted: (() => {
             const trashState = safeIsInTrash(item);
             if (trashState === null) {

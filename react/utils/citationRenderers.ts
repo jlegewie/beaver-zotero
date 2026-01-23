@@ -170,7 +170,7 @@ export function renderToMarkdown(
                 citationObject.locator = attrs.page || attrs.pages;
                 citationObject.label = 'p.';
             }
-            citation = Zotero.Beaver.citationService.formatCitation([citationObject]);
+            citation = Zotero.Beaver?.citationService?.formatCitation([citationObject]) ?? '';
         } else if (itemToCite.isNote()) {
             citation = '(Note)';
         } else if (itemToCite.isAttachment()) {
