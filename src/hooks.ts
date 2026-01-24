@@ -11,6 +11,39 @@ import { addPendingVersionNotification } from "./utils/versionNotificationPrefs"
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
 import { disposeMuPDF } from "./utils/mupdf";
 
+let isAppQuitting = false;
+let quitObserverRegistered = false;
+const quitObserver = {
+    observe(subject: any, topic: string) {
+        if (topic === "quit-application" || topic === "quit-application-granted") {
+            isAppQuitting = true;
+        }
+    },
+};
+
+function registerQuitObserver(): void {
+    if (quitObserverRegistered) return;
+    try {
+        Services.obs.addObserver(quitObserver, "quit-application-granted");
+        Services.obs.addObserver(quitObserver, "quit-application");
+        quitObserverRegistered = true;
+    } catch (error) {
+        ztoolkit.log(`registerQuitObserver: Failed to register quit observer: ${error}`);
+    }
+}
+
+function unregisterQuitObserver(): void {
+    if (!quitObserverRegistered) return;
+    try {
+        Services.obs.removeObserver(quitObserver, "quit-application-granted");
+        Services.obs.removeObserver(quitObserver, "quit-application");
+    } catch (error) {
+        ztoolkit.log(`unregisterQuitObserver: Failed to unregister quit observer: ${error}`);
+    } finally {
+        quitObserverRegistered = false;
+    }
+}
+
 /**
  * Compares two semantic version strings.
  * @param v1 Version string 1
@@ -78,6 +111,7 @@ async function onStartup() {
         Zotero.uiReadyPromise,
     ]);
     
+    registerQuitObserver();
     initLocale();
     ztoolkit.log("Startup");
 
@@ -183,9 +217,16 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // Only run global cleanup if no other main windows remain
         const remainingWindows = Zotero.getMainWindows().filter(w => w !== win && !w.closed);
         const isLastWindow = remainingWindows.length === 0;
+        const isAppShuttingDown = Services?.startup?.shuttingDown ?? false;
+        const shouldRunGlobalCleanup = isLastWindow && (isAppQuitting || isAppShuttingDown);
         
         if (!isLastWindow) {
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
+            return;
+        }
+        
+        if (!shouldRunGlobalCleanup) {
+            ztoolkit.log("onMainWindowUnload: Last window closed but app still running, skipping global cleanup");
             return;
         }
 
@@ -227,7 +268,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 8. Close separate Beaver window if open
         BeaverUIFactory.closeBeaverWindow();
 
-        // 9. Mark addon as not alive to prevent any further callbacks
+        // 9. Unregister quit observer
+        unregisterQuitObserver();
+
+        // 10. Mark addon as not alive to prevent any further callbacks
         addon.data.alive = false;
 
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
@@ -327,6 +371,8 @@ async function onShutdown(): Promise<void> {
         unloadKatexStylesheet();
         unloadStylesheet();
         
+        unregisterQuitObserver();
+
         ztoolkit.unregisterAll();
         addon.data.dialog?.window?.close();
         addon.data.alive = false;

@@ -170,7 +170,7 @@ export function renderToMarkdown(
                 citationObject.locator = attrs.page || attrs.pages;
                 citationObject.label = 'p.';
             }
-            citation = Zotero.Beaver.citationService.formatCitation([citationObject]);
+            citation = Zotero.Beaver?.citationService?.formatCitation([citationObject]) ?? '';
         } else if (itemToCite.isNote()) {
             citation = '(Note)';
         } else if (itemToCite.isAttachment()) {
@@ -183,7 +183,7 @@ export function renderToMarkdown(
     }).replace('  (', ' (');
 
     // Format the bibliography
-    let bibliography = Zotero.Beaver.citationService.formatBibliography(citedItems).replace(/\n/g, '\n\n');
+    let bibliography = (Zotero.Beaver?.citationService?.formatBibliography(citedItems) ?? '').replace(/\n/g, '\n\n');
     if (externalReferences.length > 0) {
         bibliography += externalReferences.map(reference => `${formatExternalCitation(reference)} (external reference)`).join('\n\n');
     }
