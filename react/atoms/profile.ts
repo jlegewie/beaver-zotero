@@ -143,7 +143,7 @@ export const profileBalanceAtom = atom<ProfileBalance>((get) => {
     const pagesRemaining = profile ? profile.standard_page_balance + profile.purchased_standard_page_balance : 0;
 
     // Chat credits remaining
-    const subscriptionChatCreditsRemaining = profile ? (profile.plan.monthly_chat_credits - profile.chat_credits_used) : 0;
+    const subscriptionChatCreditsRemaining = profile ? Math.max(0, profile.plan.monthly_chat_credits - profile.chat_credits_used) : 0;
     const purchasedChatCreditsRemaining = profile && profile.purchased_chat_credits ? profile.purchased_chat_credits : 0;
     const chatCreditsRemaining = subscriptionChatCreditsRemaining + purchasedChatCreditsRemaining;
 
