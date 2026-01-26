@@ -413,6 +413,10 @@ const PreferencePage: React.FC = () => {
                             <div className="font-color-primary">{profileBalance.pagesRemaining.toLocaleString() || 'Unknown'}</div>
                         </div>
                     }
+                    <div className="display-flex flex-row items-center gap-2">
+                        <div className="font-color-secondary">Remaining Chat Credits:</div>
+                        <div className="font-color-primary">{profileBalance.chatCreditsRemaining.toLocaleString() || 'Unknown'}</div>
+                    </div>
                     <div className="display-flex flex-row items-center gap-3 mt-2">
                         <Button
                             variant="outline"
