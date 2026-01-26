@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { truncateText } from '../../utils/stringUtils';
 import { CSSItemTypeIcon } from '../icons/icons';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { ItemMetadataAttachment, SourceAttachment } from '../../types/attachments/apiTypes';
@@ -102,7 +103,7 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                                          <>
                                             <div className="flex-1" />
                                             <div className="text-sm display-flex min-w-0 font-color-tertiary mr-1">
-                                                {label}
+                                                {truncateText(label, 15)}
                                             </div>
                                         </>
                                     }
