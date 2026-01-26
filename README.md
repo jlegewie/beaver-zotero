@@ -7,7 +7,7 @@
 [![zotero target version](https://img.shields.io/badge/Zotero-8-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
-Welcome to Beaver, a research agent with native Zotero integration. Beaver combines two parts:
+Welcome to Beaver, an academic research assistant with native Zotero integration. Beaver combines two parts:
 
 1. **Advanced Research Agent**: An agentic system for scientific literature retrieval and synthesis from your library. It selects and composes strategies ranging from metadata queries to semantic and full‑text analysis, iteratively refining its approach. It reasons over your query, the paper you're reading, your broader library and searches the web to generate answers with sentence‑level citations.
 
@@ -15,29 +15,29 @@ Welcome to Beaver, a research agent with native Zotero integration. Beaver combi
 
 ### Preview release
 
-Beaver is in beta and available for free for a limited number of users during the beta. Sign up for the preview [here](https://www.beaverapp.ai). Key capabilities are still in progress, but current performance is strong and improving. We plan to offer a free version and a paid tier to cover ongoing development and operating costs.
+Beaver is in beta and available for free. Sign up for the preview [here](https://www.beaverapp.ai). Key capabilities are still in progress, but current performance is strong and improving.
 
-We welcome feedback on GitHub. Access to the preview release may be limited based on server capacity.
+We welcome feedback on GitHub.
 
 ## Key Features
 
-1. **Chat with your Entire Library**: Ask questions about your research and get answers drawn from your entire library. Beaver searches across metadata, topics, and the full content of your PDFs to give grounded answers. [Learn more]https://www.beaverapp.ai/docs/searching)
+- **Chat with your Entire Library**: Ask questions about your research and get answers drawn from your entire library. Beaver searches across metadata, topics, and the full content of your PDFs to give grounded answers. [Learn more]https://www.beaverapp.ai/docs/searching)
 
-2. **Discover New Research**: Search over 250 million scholarly works outside your Zotero library. Understand citation patterns and find papers to expand your collection. [Learn more](https://www.beaverapp.ai/docs/web-search)
+- **Reading Assistant**: Beaver is integrated inside your PDF reader. Select complex equations or highlight text to get explanations. Need more context? Ask how a claim compares to the rest of your library without ever leaving the page. [Learn more]https://www.beaverapp.ai/docs/zotero-reader)
 
-3. **Seamless Zotero integration**: Lives directly in Zotero as a side panel. Ask questions about the paper you're reading, and Beaver knows exactly which page you're on.
+- **Discover New Research**: Search over 240 million scholarly works outside your Zotero library. Understand citation patterns and find papers to expand your collection. [Learn more](https://www.beaverapp.ai/docs/web-search)
 
-4. **Your Library as Knowledge Base**: Beaver prioritizes your curated Zotero library and sources you trust, not generic web results.
+- **Seamless Zotero integration**: Lives directly in Zotero as a side panel. Ask questions about the paper you're reading, and Beaver knows exactly which page you're on.
 
-5. **Precise, Sentence-Level Citations**: Answers include direct sentence-level citations that link back to your source PDFs, ensuring transparency and verifiability.
+- **Your Library as Knowledge Base**: Beaver prioritizes your curated Zotero library and sources you trust, not generic web results.
 
-6. **Annotate Your PDFs**: Beaver can highlight and add notes to your PDFs when you ask. [Learn more](https://www.beaverapp.ai/docs/annotations)
+- **Precise Citations**: Answers include page or sentence-level citations that link back to your source PDFs, ensuring transparency and verifiability.
 
-7. **Privacy**: We don't train models on your data without explicit opt-in. Local storage options for prompts and responses are under development to give you more control.
+- **Annotate Your PDFs** (beta/pro version only): Beaver can highlight and add notes to your PDFs when you ask. [Learn more](https://www.beaverapp.ai/docs/annotations)
 
-8. **Free Version**: During beta, the preview is free with unlimited metadata and related‑item search, plus free full‑document search for up to 125,000 pages (~4,000 articles). The beta also includes limited chat credits and the option to use your own API key for unlimited access to frontier models (OpenAI, Anthropic, Google). We will continue to offer a free version after the beta period and try to squeeze as much into it as we can reasonably support.
+- **Privacy**: Your data stays yours. We don't train models on your data without explicit opt-in, and we're building local storage options.
 
-Under the hood, Beaver is an AI agent with agentic search and other tools to help you in the research process. It combines metadata, semantic, and full-document search (keyword + semantic), adapting its strategy to your task to locate specific passages across thousands of papers and synthesize findings.
+- **Free Version**: Beaver offers a fully-featured free version that supports local file processing with metadata and semantic search over titles and abstracts. [Learn more](https://www.beaverapp.ai/pricing)
 
 ## Evaluations
 
@@ -57,10 +57,6 @@ This is only one dimension of evaluation (and not the hardest). We also track ot
 4. Open Beaver using the magic wand icon in the top‑right corner or press Cmd (macOS) / Ctrl (Windows) + L.
 
 More details are available in the [documentation](https://www.beaverapp.ai/docs/getting-started).
-
-## How does Beaver work?
-
-Beaver is a research agent with native Zotero integration that autonomously selects and combines search strategies to find relevant information. It syncs your library to our servers, prepares metadata and related item search, and processes your files for full‑text search. See our [privacy policy](https://www.beaverapp.ai/privacy-policy). We're also building features to keep more data local. Prefer a local‑only approach? Consider Zotero plugins like [A.R.I.A.](https://github.com/lifan0127/ai-research-assistant) or [Zotero MCP](https://github.com/54yyyu/zotero-mcp).
 
 ## How does library and web search work?
 
@@ -88,12 +84,6 @@ Examples of useful prompts:
 - "Has research examined interactions between socioeconomic status and educational outcomes?"
 - (In the Zotero PDF reader) "Why do they control for income here? Do other studies in this area do the same?"
 - (In the Zotero PDF reader) "This measure of wealth is unclear. How do other studies measure wealth?"
-
-### Do you store and use my data?
-
-Beaver syncs your data, uploads attachments, and processes files in the cloud to provide functionality. See our detailed [privacy policy](https://www.beaverapp.ai/privacy-policy). We do not sell your data or train models on it unless you explicitly opt in. We're also working on features to store chats locally (Zotero data will still sync).
-
-Prefer local‑only solutions? Consider [A.R.I.A.](https://github.com/lifan0127/ai-research-assistant) or [Zotero MCP](https://github.com/54yyyu/zotero-mcp).
 
 ### Which models do you recommand?
 
