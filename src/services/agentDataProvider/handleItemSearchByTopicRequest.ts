@@ -52,6 +52,11 @@ export async function handleItemSearchByTopicRequest(
             type: 'item_search_by_topic',
             request_id: request.request_id,
             items: [],
+            timing: {
+                total_ms: Date.now() - startTime,
+                item_count: 0,
+                attachment_count: 0,
+            },
         };
     }
 
@@ -99,6 +104,11 @@ export async function handleItemSearchByTopicRequest(
             type: 'item_search_by_topic',
             request_id: request.request_id,
             items: [],
+            timing: {
+                total_ms: Date.now() - startTime,
+                item_count: 0,
+                attachment_count: 0,
+            },
         };
     }
 
@@ -191,6 +201,12 @@ export async function handleItemSearchByTopicRequest(
             type: 'item_search_by_topic',
             request_id: request.request_id,
             items: [],
+            timing: {
+                total_ms: Date.now() - startTime,
+                search_ms: searchEndTime - startTime,
+                item_count: 0,
+                attachment_count: 0,
+            },
         };
     }
 

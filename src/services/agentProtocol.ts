@@ -263,8 +263,6 @@ export interface FrontendTimingMetadata {
     search_ms?: number;
     /** Time spent serializing items */
     serialization_ms?: number;
-    /** Time spent computing attachment statuses */
-    attachment_status_ms?: number;
     /** Number of items processed */
     item_count?: number;
     /** Number of attachments processed */
