@@ -252,6 +252,25 @@ export interface ItemSearchFrontendResultItem {
     similarity?: number;
 }
 
+/**
+ * Optional timing breakdown from frontend operations.
+ * Used for backend diagnostics to understand where time is spent during search operations.
+ */
+export interface FrontendTimingMetadata {
+    /** Total operation time in milliseconds */
+    total_ms?: number;
+    /** Time spent in search/query phase */
+    search_ms?: number;
+    /** Time spent serializing items */
+    serialization_ms?: number;
+    /** Time spent computing attachment statuses */
+    attachment_status_ms?: number;
+    /** Number of items processed */
+    item_count?: number;
+    /** Number of attachments processed */
+    attachment_count?: number;
+}
+
 /** Request from backend to search Zotero library by metadata */
 export interface WSItemSearchByMetadataRequest extends WSBaseEvent {
     event: 'item_search_by_metadata_request';
@@ -301,6 +320,8 @@ export interface WSItemSearchByMetadataResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: ItemSearchErrorCode | null;
+    /** Optional timing breakdown for diagnostics */
+    timing?: FrontendTimingMetadata;
 }
 
 /** Request from backend to search Zotero library by topic using semantic search */
@@ -341,6 +362,8 @@ export interface WSItemSearchByTopicResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: ItemSearchErrorCode | null;
+    /** Optional timing breakdown for diagnostics */
+    timing?: FrontendTimingMetadata;
 }
 
 /** Request from backend to fetch Zotero item/attachment data */

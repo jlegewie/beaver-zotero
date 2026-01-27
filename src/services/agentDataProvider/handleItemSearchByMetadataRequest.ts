@@ -19,6 +19,7 @@ import {
     WSItemSearchByMetadataRequest,
     WSItemSearchByMetadataResponse,
     ItemSearchFrontendResultItem,
+    FrontendTimingMetadata,
 } from '../agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../react/utils/searchTools';
 import { getCollectionByIdOrName, processAttachmentsParallel } from './utils';
@@ -40,6 +41,11 @@ import { getCollectionByIdOrName, processAttachmentsParallel } from './utils';
 export async function handleItemSearchByMetadataRequest(
     request: WSItemSearchByMetadataRequest
 ): Promise<WSItemSearchByMetadataResponse> {
+    // Start timing
+    const startTime = Date.now();
+    let searchEndTime = 0;
+    let serializationEndTime = 0;
+    
     // Validate: at least one query parameter must be provided
     const hasQuery = !!request.title_query ||
                      !!request.author_query ||
@@ -188,6 +194,9 @@ export async function handleItemSearchByMetadataRequest(
     // Deduplicate items, prioritizing items from user's main library (library ID 1)
     items = deduplicateItems(items, 1);
     
+    // Record search completion time
+    searchEndTime = Date.now();
+    
     logger('handleItemSearchByMetadataRequest: Final items', {
         libraryIds,
         items: items.length,
@@ -234,11 +243,29 @@ export async function handleItemSearchByMetadataRequest(
             logger(`handleItemSearchByMetadataRequest: Failed to serialize item ${item.key}: ${error}`, 1);
         }
     }
+    
+    // Record serialization completion time
+    serializationEndTime = Date.now();
+    
+    // Calculate total attachment count
+    const totalAttachments = resultItems.reduce((sum, item) => sum + item.attachments.length, 0);
+    
+    // Build timing metadata
+    const timing: FrontendTimingMetadata = {
+        total_ms: Date.now() - startTime,
+        search_ms: searchEndTime - startTime,
+        serialization_ms: serializationEndTime - searchEndTime,
+        item_count: resultItems.length,
+        attachment_count: totalAttachments,
+    };
+
+    logger(`handleItemSearchByMetadataRequest: Returning ${resultItems.length} items, timing: ${JSON.stringify(timing)}`, 1);
 
     const response: WSItemSearchByMetadataResponse = {
         type: 'item_search_by_metadata',
         request_id: request.request_id,
         items: resultItems,
+        timing,
     };
 
     return response;

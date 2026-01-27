@@ -19,6 +19,7 @@ import {
     WSItemSearchByTopicRequest,
     WSItemSearchByTopicResponse,
     ItemSearchFrontendResultItem,
+    FrontendTimingMetadata,
 } from '../agentProtocol';
 import { semanticSearchService, SearchResult } from '../semanticSearchService';
 import { BeaverDB } from '../database';
@@ -38,6 +39,11 @@ import { getCollectionByIdOrName, processAttachmentsParallel } from '../agentDat
 export async function handleItemSearchByTopicRequest(
     request: WSItemSearchByTopicRequest
 ): Promise<WSItemSearchByTopicResponse> {
+    // Start timing
+    const startTime = Date.now();
+    let searchEndTime = 0;
+    let serializationEndTime = 0;
+    
     // Get database instance from global addon
     const db = Zotero.Beaver?.db as BeaverDB | null;
     if (!db) {
@@ -154,14 +160,24 @@ export async function handleItemSearchByTopicRequest(
             items: [],
         };
     }
+    
+    // Record search completion time
+    searchEndTime = Date.now();
 
     logger(`handleItemSearchByTopicRequest: Semantic search returned ${searchResults.length} results`, 1);
 
     if (searchResults.length === 0) {
+        const timing: FrontendTimingMetadata = {
+            total_ms: Date.now() - startTime,
+            search_ms: searchEndTime - startTime,
+            item_count: 0,
+            attachment_count: 0,
+        };
         return {
             type: 'item_search_by_topic',
             request_id: request.request_id,
             items: [],
+            timing,
         };
     }
 
@@ -283,16 +299,32 @@ export async function handleItemSearchByTopicRequest(
         }
     }
 
+    // Record serialization completion time
+    serializationEndTime = Date.now();
+    
     // Apply offset and limit (offset calculated earlier with guard against negative values)
     const offsetItems = offset > 0 ? resultItems.slice(offset) : resultItems;
     const limitedItems = request.limit > 0 ? offsetItems.slice(0, request.limit) : offsetItems;
 
-    logger(`handleItemSearchByTopicRequest: Returning ${limitedItems.length} items (offset=${offset})`, 1);
+    // Calculate total attachment count
+    const totalAttachments = resultItems.reduce((sum, item) => sum + item.attachments.length, 0);
+    
+    // Build timing metadata
+    const timing: FrontendTimingMetadata = {
+        total_ms: Date.now() - startTime,
+        search_ms: searchEndTime - startTime,
+        serialization_ms: serializationEndTime - searchEndTime,
+        item_count: resultItems.length,
+        attachment_count: totalAttachments,
+    };
+
+    logger(`handleItemSearchByTopicRequest: Returning ${limitedItems.length} items (offset=${offset}), timing: ${JSON.stringify(timing)}`, 1);
 
     const response: WSItemSearchByTopicResponse = {
         type: 'item_search_by_topic',
         request_id: request.request_id,
         items: limitedItems,
+        timing,
     };
 
     return response;
