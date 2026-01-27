@@ -1,7 +1,7 @@
 import { logger } from '../../utils/logger';
-import { ZoteroItemStatus, FrontendFileStatus } from '../../../react/types/zotero';
+import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus } from '../../../react/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
-import { syncingItemFilterAsync } from '../../utils/sync';
+import { syncingItemFilter, syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
 
 import { isAttachmentOnServer } from '../../utils/webAPI';
@@ -10,6 +10,7 @@ import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
 import { DeferredToolPreference } from '../agentProtocol';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
+import { serializeAttachment } from '../../utils/zoteroSerializers';
 
 /**
  * Get file status information for an attachment.
@@ -218,6 +219,75 @@ export async function computeItemStatus(
         passes_sync_filters: passesSyncFilters,
         is_pending_sync: isPendingSync
     };
+}
+
+/**
+ * Context for processing attachments (sync configuration)
+ */
+export interface AttachmentProcessingContext {
+    searchableLibraryIds: number[];
+    syncWithZotero: any;
+    userId: string | null;
+}
+
+/**
+ * Process attachments for an item in parallel.
+ * Fetches, validates, and serializes all attachments concurrently.
+ * 
+ * @param item - Parent Zotero item
+ * @param context - Sync configuration context
+ * @returns Array of processed attachments with status
+ */
+export async function processAttachmentsParallel(
+    item: Zotero.Item,
+    context: AttachmentProcessingContext
+): Promise<AttachmentDataWithStatus[]> {
+    const attachmentIds = item.getAttachments();
+    if (attachmentIds.length === 0) {
+        return [];
+    }
+
+    // Fetch attachment items and primary attachment in parallel
+    const [attachmentItems, primaryAttachment] = await Promise.all([
+        Zotero.Items.getAsync(attachmentIds),
+        item.getBestAttachment()
+    ]);
+
+    // Load data types for all attachments
+    await Zotero.Items.loadDataTypes(attachmentItems, ["primaryData", "itemData"]);
+
+    // Process all attachments in parallel
+    const attachmentPromises = attachmentItems.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
+        // Validate attachment
+        const isValidAttachment = syncingItemFilter(attachment);
+        if (!isValidAttachment) {
+            return null;
+        }
+
+        // Serialize attachment
+        const attachmentData = await serializeAttachment(attachment, undefined, { skipSyncingFilter: true });
+        if (!attachmentData) {
+            return null;
+        }
+
+        // Compute status and file status in parallel
+        const isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
+        const [status, fileStatus] = await Promise.all([
+            computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId),
+            getAttachmentFileStatus(attachment, isPrimary)
+        ]);
+
+        return {
+            attachment: attachmentData,
+            status,
+            file_status: fileStatus,
+        };
+    });
+
+    const results = await Promise.all(attachmentPromises);
+    
+    // Filter out null results (invalid attachments)
+    return results.filter((result): result is AttachmentDataWithStatus => result !== null);
 }
 
 /**

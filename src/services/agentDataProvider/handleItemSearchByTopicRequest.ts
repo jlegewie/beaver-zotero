@@ -8,14 +8,13 @@
  */
 
 import { logger } from '../../utils/logger';
-import { AttachmentDataWithStatus } from '../../../react/types/zotero';
 import { deduplicateItems } from '../../utils/zoteroUtils';
 import { syncingItemFilter } from '../../utils/sync';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
 
 import { store } from '../../../react/store';
-import { serializeAttachment, serializeItem } from '../../utils/zoteroSerializers';
+import { serializeItem } from '../../utils/zoteroSerializers';
 import {
     WSItemSearchByTopicRequest,
     WSItemSearchByTopicResponse,
@@ -23,7 +22,7 @@ import {
 } from '../agentProtocol';
 import { semanticSearchService, SearchResult } from '../semanticSearchService';
 import { BeaverDB } from '../database';
-import { computeItemStatus, getAttachmentFileStatus, getCollectionByIdOrName } from '../agentDataProvider/utils';
+import { getCollectionByIdOrName, processAttachmentsParallel } from '../agentDataProvider/utils';
 
 
 /**
@@ -204,6 +203,11 @@ export async function handleItemSearchByTopicRequest(
     // Get sync configuration from store for status computation
     const syncWithZotero = store.get(syncWithZoteroAtom);
     const userId = store.get(userIdAtom);
+    const attachmentContext = {
+        searchableLibraryIds,
+        syncWithZotero,
+        userId,
+    };
 
     // Serialize items with attachments and similarity
     const resultItems: ItemSearchFrontendResultItem[] = [];
@@ -263,35 +267,11 @@ export async function handleItemSearchByTopicRequest(
         if (!isValidItem) continue;
 
         try {
-            const itemData = await serializeItem(item, undefined);
-
-            // Get and serialize attachments
-            const attachmentIds = item.getAttachments();
-            const attachments: AttachmentDataWithStatus[] = [];
-
-            if (attachmentIds.length > 0) {
-                const attachmentItems = await Zotero.Items.getAsync(attachmentIds);
-                const primaryAttachment = await item.getBestAttachment();
-                await Zotero.Items.loadDataTypes(attachmentItems, ["primaryData", "itemData"]);
-
-                for (const attachment of attachmentItems) {
-                    const isValidAttachment = syncingItemFilter(attachment);
-                    if (isValidAttachment) {
-                        const attachmentData = await serializeAttachment(attachment, undefined, { skipSyncingFilter: true });
-                        if (attachmentData) {
-                            const status = await computeItemStatus(attachment, searchableLibraryIds, syncWithZotero, userId);
-                            const isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
-                            const fileStatus = await getAttachmentFileStatus(attachment, isPrimary);
-                            
-                            attachments.push({
-                                attachment: attachmentData,
-                                status,
-                                file_status: fileStatus,
-                            });
-                        }
-                    }
-                }
-            }
+            // Serialize item and process attachments in parallel
+            const [itemData, attachments] = await Promise.all([
+                serializeItem(item, undefined),
+                processAttachmentsParallel(item, attachmentContext)
+            ]);
 
             resultItems.push({
                 item: itemData,
