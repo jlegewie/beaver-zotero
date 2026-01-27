@@ -11,27 +11,41 @@ import { DeferredToolPreference } from '../agentProtocol';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import { serializeAttachment } from '../../utils/zoteroSerializers';
+import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from '../../../react/utils/pdfUtils';
 
 /**
- * Get file status information for an attachment.
- * Determines page count and availability of fulltext/page images.
+ * Result of attachment availability check.
+ * Either an early-exit status (if unavailable) or file info to continue processing.
+ */
+type AttachmentAvailabilityResult = 
+    | { available: false; status: FrontendFileStatus }
+    | { available: true; filePath: string; contentType: string };
+
+/**
+ * Check attachment availability before PDF processing.
+ * Validates: PDF type, file path, file existence, and size limits.
  * 
  * @param attachment - Zotero attachment item
  * @param isPrimary - Whether this is the primary attachment for the parent item
- * @returns File status information
+ * @returns Either early-exit status or file info to continue processing
  */
-export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boolean): Promise<FrontendFileStatus> {
-    // Get the attachment mime type
+async function checkAttachmentAvailability(
+    attachment: Zotero.Item,
+    isPrimary: boolean
+): Promise<AttachmentAvailabilityResult> {
     const contentType = attachment.attachmentContentType;
 
     // Non-PDF attachments are not currently supported for content extraction
     if (!attachment.isPDFAttachment()) {
         return {
-            is_primary: isPrimary,
-            mime_type: contentType,
-            page_count: null,
-            status: "unavailable",
-            status_reason: `File type "${contentType || 'unknown'}" is not supported`,
+            available: false,
+            status: {
+                is_primary: isPrimary,
+                mime_type: contentType,
+                page_count: null,
+                status: "unavailable",
+                status_reason: `File type "${contentType || 'unknown'}" is not supported`,
+            }
         };
     }
 
@@ -43,26 +57,32 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
             ? 'File not available locally. It may be in remote storage, which cannot be accessed by Beaver.'
             : 'File is not available locally';
         return {
-            is_primary: isPrimary,
-            mime_type: contentType,
-            page_count: null,
-            status: "unavailable",
-            status_reason: status_message,
+            available: false,
+            status: {
+                is_primary: isPrimary,
+                mime_type: contentType,
+                page_count: null,
+                status: "unavailable",
+                status_reason: status_message,
+            }
         };
     }
     
     const fileExists = await attachment.fileExists();
     if (!fileExists) {
         return {
-            is_primary: isPrimary,
-            mime_type: contentType,
-            page_count: null,
-            status: "unavailable",
-            status_reason: 'File is not available',
+            available: false,
+            status: {
+                is_primary: isPrimary,
+                mime_type: contentType,
+                page_count: null,
+                status: "unavailable",
+                status_reason: 'File is not available',
+            }
         };
     }
     
-    // Early size check before expensive reads/parsing
+    // Check file size limit
     const maxFileSizeMB = getPref('maxFileSizeMB');
     const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
     
@@ -71,14 +91,38 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
         
         if (fileSizeInMB > maxFileSizeMB) {
             return {
-                is_primary: isPrimary,
-                mime_type: contentType,
-                page_count: null,
-                status: "unavailable",
-                status_reason: `File size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
+                available: false,
+                status: {
+                    is_primary: isPrimary,
+                    mime_type: contentType,
+                    page_count: null,
+                    status: "unavailable",
+                    status_reason: `File size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
+                }
             };
         }
     }
+    
+    return { available: true, filePath, contentType };
+}
+
+/**
+ * Get file status information for an attachment.
+ * Determines page count and availability of fulltext/page images.
+ * Performs full PDF analysis including OCR detection.
+ * 
+ * @param attachment - Zotero attachment item
+ * @param isPrimary - Whether this is the primary attachment for the parent item
+ * @returns File status information
+ */
+export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boolean): Promise<FrontendFileStatus> {
+    // Check basic availability (PDF type, file exists, size limits)
+    const availabilityCheck = await checkAttachmentAvailability(attachment, isPrimary);
+    if (!availabilityCheck.available) {
+        return availabilityCheck.status;
+    }
+    
+    const { filePath, contentType } = availabilityCheck;
     
     // Try to analyze the PDF
     try {
@@ -160,6 +204,72 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
 }
 
 /**
+ * Lightweight file status check for search results.
+ * Skips expensive OCR analysis and uses efficient page count methods.
+ * 
+ * Uses Zotero's fulltext index for page count (instant database query),
+ * falling back to PDFWorker only if needed. Does NOT read the full PDF file.
+ * 
+ * @param attachment - Zotero attachment item
+ * @param isPrimary - Whether this is the primary attachment for the parent item
+ * @returns File status information (without OCR analysis)
+ */
+export async function getAttachmentFileStatusLightweight(
+    attachment: Zotero.Item,
+    isPrimary: boolean
+): Promise<FrontendFileStatus> {
+    // Check basic availability (PDF type, file exists, size limits)
+    const availabilityCheck = await checkAttachmentAvailability(attachment, isPrimary);
+    if (!availabilityCheck.available) {
+        return availabilityCheck.status;
+    }
+    
+    const { contentType } = availabilityCheck;
+    
+    // Get page count using efficient methods (no full file read)
+    // First try fulltext index (instant database query)
+    let pageCount = await getPDFPageCountFromFulltext(attachment);
+    
+    // Fallback to PDFWorker if not indexed (reads minimal data)
+    if (pageCount === null) {
+        pageCount = await getPDFPageCountFromWorker(attachment);
+    }
+    
+    // If both page count methods failed, the PDF is likely problematic
+    // (encrypted, corrupted, or unparseable)
+    if (pageCount === null) {
+        return {
+            is_primary: isPrimary,
+            mime_type: contentType,
+            page_count: null,
+            status: "unavailable",
+            status_reason: 'Unable to read PDF - file may be encrypted, corrupted, or invalid',
+        };
+    }
+    
+    // Check page count limit
+    const maxPageCount = getPref('maxPageCount');
+    
+    if (pageCount > maxPageCount) {
+        return {
+            is_primary: isPrimary,
+            mime_type: contentType,
+            page_count: pageCount,
+            status: "unavailable",
+            status_reason: `PDF has ${pageCount} pages, which exceeds the ${maxPageCount}-page limit`,
+        };
+    }
+    
+    // All checks passed - file is available
+    return {
+        is_primary: isPrimary,
+        mime_type: contentType,
+        page_count: pageCount,
+        status: "available",
+    };
+}
+
+/**
  * Compute sync status information for a Zotero item.
  * Determines why an item might not be available in the backend.
  * 
@@ -234,6 +344,9 @@ export interface AttachmentProcessingContext {
  * Process attachments for an item in parallel.
  * Fetches, validates, and serializes all attachments concurrently.
  * 
+ * Uses lightweight file status check (no full PDF read, no OCR analysis)
+ * to avoid timeouts when processing many attachments.
+ * 
  * @param item - Parent Zotero item
  * @param context - Sync configuration context
  * @returns Array of processed attachments with status
@@ -271,10 +384,11 @@ export async function processAttachmentsParallel(
         }
 
         // Compute status and file status in parallel
+        // Use lightweight file status to avoid reading full PDFs
         const isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
         const [status, fileStatus] = await Promise.all([
             computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId),
-            getAttachmentFileStatus(attachment, isPrimary)
+            getAttachmentFileStatusLightweight(attachment, isPrimary)
         ]);
 
         return {
