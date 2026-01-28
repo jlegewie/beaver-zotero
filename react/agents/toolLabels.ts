@@ -379,10 +379,30 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
         }
 
         case 'lookup_work': {
-            const label = (args.identifier || args.title) as string | undefined;
-            if (label) {
-                return `${baseLabel}: ${truncate(label, 40)}`;
+            // Handle both old (singular) and new (list) parameter formats
+            const identifiers = args.identifiers as string[] | undefined;
+            const titles = args.titles as string[] | undefined;
+            const identifier = args.identifier as string | undefined;
+            const title = args.title as string | undefined;
+            
+            // Count total queries
+            const idCount = identifiers?.length ?? (identifier ? 1 : 0);
+            const titleCount = titles?.length ?? (title ? 1 : 0);
+            const totalCount = idCount + titleCount;
+            
+            // Single item lookup: show the identifier or title
+            if (totalCount === 1) {
+                const singleLabel = identifier || title || identifiers?.[0] || titles?.[0];
+                if (singleLabel) {
+                    return `${baseLabel}: ${truncate(singleLabel, 40)}`;
+                }
             }
+            
+            // Multiple items: show count
+            if (totalCount > 1) {
+                return `${baseLabel}: ${totalCount} works`;
+            }
+            
             return baseLabel;
         }
 
