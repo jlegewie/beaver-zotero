@@ -36,7 +36,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
         prompt: CustomPrompt
     ) => {
         if (isPending || isStreaming || prompt.text.length === 0) return;
-        if (prompt.requiresAttachment && currentMessageItems.length === 0) return;
+        if (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment) return;
 
         // Send message via WebSocket
         await sendWSMessage(prompt.text);
