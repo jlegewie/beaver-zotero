@@ -388,13 +388,45 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
 
         // === Library management tools ===
         case 'zotero_search': {
-            const conditions = args.conditions as Array<{ field?: string; value?: string }> | undefined;
+            const conditions = args.conditions as Array<{ 
+                field?: string; 
+                value?: string | null; 
+                operator?: string 
+            }> | undefined;
+            
             if (conditions && conditions.length > 0) {
                 // Show first condition as summary
                 const firstCond = conditions[0];
-                if (firstCond.value) {
-                    const field = firstCond.field || 'any';
-                    return `${baseLabel}: ${field} = "${truncate(firstCond.value, 30)}"`;
+                const field = firstCond.field || 'any';
+                const operator = firstCond.operator || 'is';
+                const value = firstCond.value ?? '';
+                
+                // Map operators to readable symbols/text
+                const operatorLabels: Record<string, string> = {
+                    'is': '=',
+                    'isNot': '≠',
+                    'contains': 'contains',
+                    'doesNotContain': 'does not contain',
+                    'beginsWith': 'begins with',
+                    'isLessThan': '<',
+                    'isGreaterThan': '>',
+                    'isBefore': 'before',
+                    'isAfter': 'after',
+                    'isInTheLast': 'in the last',
+                };
+                
+                const operatorLabel = operatorLabels[operator] || operator;
+                
+                // Format the condition based on operator type
+                if (value === '' && (operator === 'doesNotContain' || operator === 'is')) {
+                    // Special case: empty field search
+                    return `${baseLabel}: ${field} is empty`;
+                } else if (['<', '>', '=', '≠'].includes(operatorLabel)) {
+                    // Symbolic operators
+                    return `${baseLabel}: ${field} ${operatorLabel} "${truncate(value, 25)}"`;
+                } else {
+                    // Text operators
+                    return `${baseLabel}: "${field}" ${operatorLabel} "${truncate(value, 20)}"`;
                 }
             }
             return baseLabel;
