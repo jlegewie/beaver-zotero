@@ -1993,3 +1993,46 @@
     word-break: break-word;
     white-space: pre-wrap;
 }
+
+/* Feature Tour Styles */
+[id^="beaver-pane-"] .feature-tour-content {
+    max-width: 100%;
+}
+
+/* Compact prompt bubble - subtle and less dominant */
+[id^="beaver-pane-"] .prompt-bubble-compact {
+    background-color: var(--fill-senary);
+    border: 1px solid var(--fill-quinary);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    color: var(--fill-secondary);
+    line-height: 1.35;
+    position: relative;
+}
+
+[id^="beaver-pane-"] .prompt-highlight {
+    color: var(--tag-orange);
+    font-weight: 500;
+    opacity: 0.7;
+}
+
+/* Step indicator dots */
+[id^="beaver-pane-"] .step-indicator-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--fill-quarternary);
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+
+[id^="beaver-pane-"] .step-indicator-dot:hover {
+    background-color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .step-indicator-dot.active {
+    background-color: var(--accent-blue);
+}

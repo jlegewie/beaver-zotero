@@ -201,6 +201,8 @@ export const useUpgradeHandler = () => {
                 learnMoreUrl: config.learnMoreUrl,
                 learnMoreLabel: config.learnMoreLabel,
                 footer: config.footer,
+                steps: config.steps,
+                subtitle: config.subtitle,
                 expire: false,
             });
 

@@ -89,7 +89,8 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
             case 'indexing_complete':
                 return <Icon icon={PuzzleIcon} className="scale-12 mt-020 font-color-secondary" />;
             case 'version_update':
-                return <Icon icon={AiMagicIcon} className="scale-12 mt-020 font-color-secondary" />;
+                // return <Icon icon={AiMagicIcon} className="scale-12 mt-020 font-color-secondary" />;
+                return null;
             case 'embedding_indexing':
                 return <Icon icon={SearchIcon} className="scale-12 mt-020 font-color-secondary" />;
             case 'info':
@@ -182,7 +183,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
                 )}
 
                 {message.type === 'version_update' && (
-                    <VersionUpdateMessageContent message={message} />
+                    <VersionUpdateMessageContent message={message} onDismiss={handleDismiss} />
                 )}
 
                 {message.type === 'embedding_indexing' && (

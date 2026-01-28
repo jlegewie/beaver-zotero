@@ -4,23 +4,29 @@ import Icon from '../../icons/Icon';
 import { PopupMessage } from '../../../types/popupMessage';
 import Button from "../Button";
 import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinksAndNewlines';
+import FeatureTourContent from './FeatureTourContent';
+import { FeatureStep } from '../../../constants/versionUpdateMessages';
 
 interface VersionUpdateMessageContentProps {
     message: PopupMessage;
+    onDismiss?: () => void;
 }
 
-const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = ({ message }) => {
-    const { text, featureList, learnMoreUrl, learnMoreLabel, footer } = message;
-
+/**
+ * Legacy list-based content for older version messages
+ */
+const LegacyVersionContent: React.FC<{
+    text?: string;
+    featureList?: { title: string; description?: string }[];
+    learnMoreUrl?: string;
+    learnMoreLabel?: string;
+    footer?: string;
+}> = ({ text, featureList, learnMoreUrl, learnMoreLabel, footer }) => {
     const handleLearnMore = () => {
         if (learnMoreUrl) {
             Zotero.launchURL(learnMoreUrl);
         }
     };
-
-    if (!text && (!featureList || featureList.length === 0) && !learnMoreUrl) {
-        return null;
-    }
 
     return (
         <div className="display-flex flex-col gap-5 w-full">
@@ -66,6 +72,44 @@ const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = 
                 </div>
             )}
         </div>
+    );
+};
+
+const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = ({ message, onDismiss }) => {
+    const { text, featureList, learnMoreUrl, learnMoreLabel, footer, steps, subtitle } = message;
+    
+    // Check if this message uses the new step-based format
+    const usesStepFormat = steps && steps.length > 0;
+    
+    if (usesStepFormat) {
+        return (
+            <div className="display-flex flex-col gap-4 w-full">
+                {subtitle && (
+                    <p className="font-color-secondary text-base m-0">
+                        {parseTextWithLinksAndNewlines(subtitle)}
+                    </p>
+                )}
+                <FeatureTourContent 
+                    steps={steps as FeatureStep[]} 
+                    onComplete={onDismiss || (() => {})} 
+                />
+            </div>
+        );
+    }
+
+    // Legacy format
+    if (!text && (!featureList || featureList.length === 0) && !learnMoreUrl) {
+        return null;
+    }
+
+    return (
+        <LegacyVersionContent
+            text={text}
+            featureList={featureList}
+            learnMoreUrl={learnMoreUrl}
+            learnMoreLabel={learnMoreLabel}
+            footer={footer}
+        />
     );
 };
 
