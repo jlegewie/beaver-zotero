@@ -172,6 +172,25 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
         ]
     },
+    {
+        version: "0.11.0",
+        title: "Beaver Version 0.11",
+        text: "Organize your library, edit metadata, and more efficient AI usage.",
+        featureList: [
+            {
+                title: "Organize your Zotero library",
+                description: "Beaver can now create collections, add tags, and help you organize items in bulk. <a href='https://www.beaverapp.ai/docs/library-management'>Learn more</a>",
+            },
+            {
+                title: "Edit item metadata",
+                description: "Fix missing DOIs, correct titles, and update bibliographic fields through natural conversation. <a href='https://www.beaverapp.ai/docs/editing-metadata'>Learn more</a>",
+            },
+            {
+                title: "Reduced AI usage costs",
+                description: "Improved efficiency means lower AI usage costs.",
+            },
+        ]
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));
