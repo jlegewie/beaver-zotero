@@ -229,7 +229,12 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
             await context.collectionToAddTo.addItem(newNote.id);
         }
         
-        selectItem(newNote);
+        // Only navigate to the item in library view, not in reader
+        const win = Zotero.getMainWindow();
+        const isInReader = win.Zotero_Tabs?.selectedType === 'reader';
+        if (!isInReader) {
+            selectItem(newNote);
+        }
     };
 
     /** Save as child note attached to selected/current item */
@@ -248,7 +253,13 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         newNote.parentKey = context.parentReference.zotero_key;
         newNote.setNote(formattedContent);
         await newNote.saveTx();
-        selectItem(newNote);
+        
+        // Only navigate to the item in library view, not in reader
+        const win = Zotero.getMainWindow();
+        const isInReader = win.Zotero_Tabs?.selectedType === 'reader';
+        if (!isInReader) {
+            selectItem(newNote);
+        }
     };
 
     const copyRunId = async () => {
