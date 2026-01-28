@@ -58,11 +58,12 @@
 
 /* Separate window: sizing and constraints.
  * Set font-size on the root window element so rem units match the sidebar.
- * XUL windows default to 16px; Zotero sidepanes use ~13px. */
+ * XUL windows default to 16px; Zotero sidepanes use ~13px.
+ * Use !important to override Zotero.UIProperties.registerRoot() font scaling. */
 #beaver-window {
     min-width: 400px;
     min-height: 600px;
-    font-size: 13px;
+    font-size: 13px !important;
 }
 
 /* Toolbar Button */
