@@ -371,7 +371,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
         case 'external_search': {
             const searchLabel = args.search_label as string | undefined;
             const query = args.query as string | undefined;
-            const label = searchLabel || (query ? truncate(query, 40) : null);
+            const label = searchLabel || (query ? truncate(query, 60) : null);
             if (label) {
                 return `${baseLabel}: ${label}`;
             }
