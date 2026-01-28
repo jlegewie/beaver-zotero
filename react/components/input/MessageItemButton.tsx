@@ -33,6 +33,7 @@ interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
     disabled?: boolean;
     onRemove?: (item: Zotero.Item) => void;
     isReaderAttachment?: boolean;
+    showInvalid?: boolean;
 }
 
 /**
@@ -49,6 +50,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             canEdit = true,
             onRemove,
             isReaderAttachment = false,
+            showInvalid = true,
             ...rest
         } = props;
 
@@ -153,7 +155,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             const baseClasses = `variant-outline source-button ${className || ''} ${disabled ? 'disabled-but-styled' : ''}`;
             
             // Invalid state
-            if (validation && !validation.isValid && !validation.isValidating) {
+            if (showInvalid && validation && !validation.isValid && !validation.isValidating) {
                 return `${baseClasses} border-red`;
             }
             
@@ -190,7 +192,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 {getIconElement()}
                 <span className={`truncate ${validation && !validation.isValid ? 'font-color-red' : ''}`}>
                     {isReaderAttachment
-                        ? (validation && !validation.isValid) ? 'Invalid File' : 'Current File'
+                        ? (validation && !validation.isValid && showInvalid) ? 'Invalid File' : 'Current File'
                         : displayName || '...'}
                 </span>
                 
@@ -200,7 +202,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 )}
                 
                 {/* Validation status indicator */}
-                {validation?.backendChecked && (
+                {validation?.backendChecked && showInvalid && (
                     <span className="validation-indicator">
                         {validation.isValid ? (
                             <CSSIcon name="checkmark" className="icon-12 text-green" />

@@ -129,6 +129,7 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
                             item={item}
                             disabled={false}
                             canEdit={false}
+                            showInvalid={false}
                         />
                     ))}
                     {overflowCount > 0 && (
