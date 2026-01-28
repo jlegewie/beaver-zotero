@@ -16,6 +16,7 @@ import { selectedModelAtom } from '../../atoms/models';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import { isDatabaseSyncSupportedAtom, processingModeAtom } from '../../atoms/profile';
+import PendingActionsBar from './PendingActionsBar';
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -154,6 +155,9 @@ const InputArea: React.FC<InputAreaProps> = ({
             onClick={handleContainerClick}
             style={{ minHeight: 'fit-content' }}
         >
+            {/* Pending actions bar - shown when awaiting approval */}
+            <PendingActionsBar />
+
             {/* Message attachments */}
             <MessageAttachmentDisplay
                 isAddAttachmentMenuOpen={isAddAttachmentMenuOpen}

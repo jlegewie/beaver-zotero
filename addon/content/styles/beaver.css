@@ -190,6 +190,12 @@
     position: relative;
 }
 
+/* Pending Actions Bar - shows when agent actions await approval */
+[id^="beaver-pane-"] .pending-actions-bar {
+    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
+    border-radius: 5px 5px 0 0;
+}
+
 /* UserRequestView - Clickable user message display */
 [id^="beaver-pane-"] .user-request-view {
     cursor: pointer;
