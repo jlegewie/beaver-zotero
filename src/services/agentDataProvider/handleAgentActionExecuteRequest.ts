@@ -1,6 +1,9 @@
 import { logger } from '../../utils/logger';
 import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '../agentProtocol';
 import type { MetadataEdit } from '../../../react/types/agentActions/base';
+import type { ExternalReference } from '../../../react/types/externalReferences';
+import type { CreateItemProposedData, CreateItemResultData } from '../../../react/types/agentActions/items';
+import { applyCreateItemData } from '../../../react/utils/addItemActions';
 
 
 /**
@@ -23,6 +26,10 @@ export async function handleAgentActionExecuteRequest(
 
         if (request.action_type === 'organize_items') {
             return await executeOrganizeItemsAction(request);
+        }
+
+        if (request.action_type === 'create_item') {
+            return await executeCreateItemAction(request);
         }
 
         // Unsupported action type
@@ -336,4 +343,55 @@ async function executeOrganizeItemsAction(
             failed_items: hasFailures ? failedItems : undefined,
         },
     };
+}
+
+/**
+ * Execute a create_item action.
+ * Creates the item in Zotero from the proposed data.
+ * 
+ * Note: This handler is called once PER ITEM from the backend.
+ * The action_data contains a single item's proposed_data.
+ */
+async function executeCreateItemAction(
+    request: WSAgentActionExecuteRequest
+): Promise<WSAgentActionExecuteResponse> {
+    // The action_data is the proposed_data for a single create_item action
+    const proposedData = request.action_data as CreateItemProposedData;
+
+    // Validate we have item data
+    if (!proposedData || !proposedData.item) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: 'No item data provided',
+            error_code: 'missing_item_data',
+        };
+    }
+
+    try {
+        logger(`executeCreateItemAction: Creating item "${proposedData.item.title}"`, 1);
+
+        // Create the item using the existing utility function
+        // This handles library/collection resolution, PDF downloads, etc.
+        const result: CreateItemResultData = await applyCreateItemData(proposedData);
+
+        logger(`executeCreateItemAction: Successfully created item ${result.library_id}-${result.zotero_key}`, 1);
+
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: true,
+            result_data: result,
+        };
+    } catch (error: any) {
+        logger(`executeCreateItemAction: Failed to create item: ${error?.message || error}`, 1);
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: error?.message || 'Failed to create item',
+            error_code: 'create_failed',
+        };
+    }
 }

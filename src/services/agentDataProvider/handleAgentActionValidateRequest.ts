@@ -2,6 +2,7 @@ import { logger } from '../../utils/logger';
 import { canSetField, SETTABLE_PRIMARY_FIELDS } from '../../utils/zoteroUtils';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import type { MetadataEdit } from '../../../react/types/agentActions/base';
+import { batchFindExistingReferences, BatchReferenceCheckItem } from '../../../react/utils/batchFindExistingReferences';
 
 import { store } from '../../../react/store';
 import {
@@ -32,6 +33,10 @@ export async function handleAgentActionValidateRequest(
 
         if (request.action_type === 'organize_items') {
             return await validateOrganizeItemsAction(request);
+        }
+
+        if (request.action_type === 'create_item') {
+            return await validateCreateItemAction(request);
         }
 
         // Unsupported action type
@@ -685,6 +690,138 @@ async function validateOrganizeItemsAction(
         request_id: request.request_id,
         valid: true,
         current_value: currentState,
+        preference,
+    };
+}
+
+/**
+ * Item data sent from backend for validation
+ */
+interface CreateItemValidationItem {
+    source_id: string;
+    title?: string;
+    authors?: string[];
+    year?: number;
+    doi?: string;
+    isbn?: string;
+}
+
+/**
+ * Validate a create_item action.
+ * Checks which items already exist in the library using batch reference checking.
+ * Returns validation result with existing items info for partial processing.
+ */
+async function validateCreateItemAction(
+    request: WSAgentActionValidateRequest
+): Promise<WSAgentActionValidateResponse> {
+    const { items, collections, tags } = request.action_data as {
+        items: CreateItemValidationItem[];
+        collections?: string[];
+        tags?: string[];
+    };
+
+    // Validate at least one item is provided
+    if (!items || items.length === 0) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'At least one item must be provided',
+            error_code: 'no_items',
+            preference: 'always_ask',
+        };
+    }
+
+    // Get searchable library IDs - these are the libraries we can check for duplicates
+    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    if (searchableLibraryIds.length === 0) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'No libraries are synced with Beaver',
+            error_code: 'no_searchable_libraries',
+            preference: 'always_ask',
+        };
+    }
+
+    // Get the target library (user's main library by default)
+    const targetLibraryId = Zotero.Libraries.userLibraryID;
+    const targetLibrary = Zotero.Libraries.get(targetLibraryId);
+    
+    if (!targetLibrary || !targetLibrary.editable) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'Target library is not editable',
+            error_code: 'library_not_editable',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate collections exist (if specified)
+    const resolvedCollections: Array<{ key: string; name: string }> = [];
+    if (collections && collections.length > 0) {
+        for (const collectionKey of collections) {
+            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(targetLibraryId, collectionKey);
+            if (!collection) {
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: `Collection not found: ${collectionKey}`,
+                    error_code: 'collection_not_found',
+                    preference: 'always_ask',
+                };
+            }
+            resolvedCollections.push({
+                key: collectionKey,
+                name: collection.name,
+            });
+        }
+    }
+
+    // Check which items already exist in the library using batch reference checking
+    const batchItems: BatchReferenceCheckItem[] = items.map(item => ({
+        id: item.source_id,
+        data: {
+            title: item.title,
+            date: item.year?.toString(),
+            DOI: item.doi,
+            ISBN: item.isbn,
+            creators: item.authors,
+        }
+    }));
+
+    let existingItems: string[] = [];
+    try {
+        const batchResults = await batchFindExistingReferences(batchItems, searchableLibraryIds);
+        existingItems = batchResults
+            .filter(result => result.item !== null)
+            .map(result => result.id);
+        
+        logger(`validateCreateItemAction: Found ${existingItems.length}/${items.length} items already in library`, 1);
+    } catch (error) {
+        logger(`validateCreateItemAction: Batch reference check failed: ${error}`, 1);
+        // Continue with empty existing items - let the frontend handle per-item checks
+    }
+    
+    // Get user preference
+    const preference = getDeferredToolPreference('create_item');
+
+    return {
+        type: 'agent_action_validate_response',
+        request_id: request.request_id,
+        valid: true,
+        current_value: {
+            library_id: targetLibraryId,
+            library_name: targetLibrary.name,
+            items_count: items.length,
+            existing_items: existingItems,
+            resolved_collections: resolvedCollections,
+            tags: tags || [],
+        },
         preference,
     };
 }

@@ -475,8 +475,7 @@ export async function deleteAddedItem(action: CreateItemProposedAction): Promise
     );
 
     if (item) {
-        await Zotero.DB.executeTransaction(async () => {
-            await item.eraseTx();
-        });
+        // Erase the item
+        await item.eraseTx();
     }
 }

@@ -20,9 +20,12 @@ import {
 import { EditMetadataPreview } from './EditMetadataPreview';
 import { CreateCollectionPreview } from './CreateCollectionPreview';
 import { OrganizeItemsPreview } from './OrganizeItemsPreview';
+import { CreateItemPreview } from './CreateItemPreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
+import { executeCreateItemAction, undoCreateItemAction } from '../../utils/createItemActions';
+import type { CreateItemProposedData, CreateItemResultData } from '../../types/agentActions/items';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
 import type { OrganizeItemsResultData } from '../../types/agentActions/base';
@@ -43,12 +46,14 @@ import {
     ArrowUpRightIcon,
     FolderAddIcon,
     TaskDoneIcon,
+    DocumentValidationIcon,
 } from '../icons/icons';
 import { revealSource } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import DeferredToolPreferenceButton from '../ui/buttons/DeferredToolPreferenceButton';
+import { truncateText } from '../../utils/stringUtils';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
@@ -314,6 +319,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     result_data: result,
                 }]);
                 logger(`AgentActionView: Applied organize_items action ${action.id}`, 1);
+            } else if (toolName === 'create_items' || toolName === 'create_item') {
+                const result = await executeCreateItemAction(action);
+                // Acknowledge the action as applied with result data
+                await ackAgentActions(runId, [{
+                    action_id: action.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied create_item action ${action.id}`, 1);
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to apply action';
@@ -370,6 +383,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 await undoOrganizeItemsAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone organize_items action ${action.id}`, 1);
+            } else if (toolName === 'create_items' || toolName === 'create_item') {
+                await undoCreateItemAction(action);
+                undoAgentAction(action.id);
+                logger(`AgentActionView: Undone create_item action ${action.id}`, 1);
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to undo action';
@@ -397,6 +414,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             if (toolName === 'edit_item') return PropertyEditIcon;
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
+            if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
             return ClockIcon;
         };
         if (isAwaitingApproval) return getToolIcon();
@@ -414,7 +432,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         return config.icon !== null || !isAwaitingApproval;
     };
 
-    const actionTitle = getActionTitle(toolName, action?.proposed_data, itemTitle);
+    const actionTitle = getActionTitle(toolName, action?.proposed_data, itemTitle, actions);
 
     return (
         <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
@@ -599,6 +617,8 @@ function getActionLabel(toolName: string): string {
         case 'edit_item':
             return 'Edit';
         case 'create_item':
+        case 'create_items':
+            return 'Import';
         case 'create_collection':
             return 'Create';
         case 'organize_items':
@@ -608,7 +628,12 @@ function getActionLabel(toolName: string): string {
     }
 }
 
-function getActionTitle(toolName: string, actionData: Record<string, any> | undefined, itemTitle: string | null): string | null {
+function getActionTitle(
+    toolName: string,
+    actionData: Record<string, any> | undefined,
+    itemTitle: string | null,
+    actions: AgentAction[] | undefined
+): string | null {
     switch (toolName) {
         case 'edit_metadata':
         case 'edit_item':
@@ -621,6 +646,17 @@ function getActionTitle(toolName: string, actionData: Record<string, any> | unde
             return itemCount === 1 && itemTitle
                 ? itemTitle
                 : `${itemCount} item${itemCount !== 1 ? 's' : ''}`;
+        }
+        case 'create_item':
+        case 'create_items': {
+            // For create_item, get title from the item data
+            if (actions && actions.length == 0) {
+                const item = actions[0].proposed_data?.item ?? actionData?.item;
+                if (item?.title) {
+                    return truncateText(item.title, 70);
+                }
+            }
+            return `${actions && actions.length > 1 ? `${actions.length} ` : ''}Item${actions && actions.length > 1 ? `s` : ''}`;
         }
         default:
             return null;
@@ -731,6 +767,19 @@ const ActionPreview: React.FC<{
                 collections={collections}
                 status={status}
                 resultData={previewData.resultData as OrganizeItemsResultData | undefined}
+            />
+        );
+    }
+
+    if (toolName === 'create_items' || toolName === 'create_item' || previewData.actionType === 'create_item') {
+        const proposedData = previewData.actionData as CreateItemProposedData;
+        const resultData = previewData.resultData as CreateItemResultData | undefined;
+        
+        return (
+            <CreateItemPreview
+                proposedData={proposedData}
+                resultData={resultData}
+                status={status}
             />
         );
     }

@@ -67,6 +67,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Create item tool
     create_zotero_item: DocumentValidationIcon,
+    create_items: DocumentValidationIcon,
 
     // Create collection tool
     create_collection: FolderAddIcon,
@@ -169,7 +170,11 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const hasAgentAction = agentActions.length > 0;
     
     // Determine if this tool should use AgentActionView
-    const isAgentActionTool = part.tool_name === 'edit_metadata' || part.tool_name === 'create_collection' || part.tool_name === 'organize_items';
+    const isAgentActionTool =
+        part.tool_name === 'edit_metadata' ||
+        part.tool_name === 'create_collection' ||
+        part.tool_name === 'organize_items' ||
+        part.tool_name === 'create_items';
     const showAgentActionView = isAgentActionTool && (isAwaitingApproval || hasAgentAction);
 
     const resultCount =
