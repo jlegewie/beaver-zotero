@@ -231,6 +231,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
     // Track when we're processing a post-run action (apply/undo/retry)
     const [isProcessingAction, setIsProcessingAction] = useState(false);
+    // Track which specific button was clicked ('approve' | 'reject' | null)
+    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | null>(null);
     // Track the action ID we're processing to detect status changes
     const processingActionIdRef = useRef<string | null>(null);
 
@@ -289,6 +291,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             // If action status is no longer 'pending', the backend has processed the approval
             if (action.status !== 'pending') {
                 setIsProcessingApproval(false);
+                setClickedButton(null);
                 processingActionIdRef.current = null;
             }
         }
@@ -309,6 +312,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         if (pendingApproval) {
             // Start processing state before sending response
             setIsProcessingApproval(true);
+            setClickedButton('approve');
             processingActionIdRef.current = pendingApproval.actionId;
             sendApprovalResponse({ actionId: pendingApproval.actionId, approved: true });
             removePendingApproval(pendingApproval.actionId);
@@ -319,6 +323,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         if (pendingApproval) {
             // Start processing state before sending response
             setIsProcessingApproval(true);
+            setClickedButton('reject');
             processingActionIdRef.current = pendingApproval.actionId;
             sendApprovalResponse({ actionId: pendingApproval.actionId, approved: false });
             removePendingApproval(pendingApproval.actionId);
@@ -330,6 +335,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         if (actions.length === 0 || isProcessing) return;
         
         setIsProcessingAction(true);
+        setClickedButton('approve');
         try {
             if (toolName === 'edit_metadata') {
                 const result = await executeEditMetadataAction(action!);
@@ -387,12 +393,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             setAgentActionsToError(actionIds, errorMessage);
         } finally {
             setIsProcessingAction(false);
+            setClickedButton(null);
         }
     }, [action, actions, isProcessing, toolName, runId, ackAgentActions, setAgentActionsToError]);
 
     const handleRejectPending = useCallback(() => {
         if (actions.length === 0 || isProcessing) return;
         
+        setClickedButton('reject');
         // For multi-action, reject all actions
         if (isMultiAction) {
             for (const act of actions) {
@@ -402,6 +410,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         } else {
             rejectAgentAction(action!.id);
         }
+        // Reset clicked button state after a short delay (rejection is synchronous)
+        setTimeout(() => setClickedButton(null), 100);
     }, [action, actions, isProcessing, isMultiAction, rejectAgentAction]);
 
     const handleUndo = useCallback(async () => {
@@ -576,24 +586,34 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 <div className="flex-1" />
 
                 {/* Reject and Apply buttons */}
-                {(isAwaitingApproval || status === 'pending') && !isProcessing && (
+                {(isAwaitingApproval || status === 'pending') && (
                     <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
-                        <Tooltip content="Reject" showArrow singleLine>
-                            <IconButton
-                                icon={CancelIcon}
-                                variant="ghost-secondary"
-                                iconClassName="font-color-red"
-                                onClick={isAwaitingApproval ? handleReject : handleRejectPending}
-                            />
-                        </Tooltip>
-                        <Tooltip content="Apply" showArrow singleLine>
-                            <IconButton
-                                icon={TickIcon}
-                                variant="ghost-secondary"
-                                iconClassName="font-color-green scale-14"
-                                onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                            />
-                        </Tooltip>
+                        {/* Show Reject button only if not processing or if Reject was clicked */}
+                        {(!isProcessing || clickedButton === 'reject') && (
+                            <Tooltip content="Reject" showArrow singleLine>
+                                <IconButton
+                                    icon={CancelIcon}
+                                    variant="ghost-secondary"
+                                    iconClassName="font-color-red"
+                                    onClick={isAwaitingApproval ? handleReject : handleRejectPending}
+                                    disabled={isProcessing}
+                                    loading={isProcessing && clickedButton === 'reject'}
+                                />
+                            </Tooltip>
+                        )}
+                        {/* Show Apply button only if not processing or if Apply was clicked */}
+                        {(!isProcessing || clickedButton === 'approve') && (
+                            <Tooltip content="Apply" showArrow singleLine>
+                                <IconButton
+                                    icon={TickIcon}
+                                    variant="ghost-secondary"
+                                    iconClassName="font-color-green scale-14"
+                                    onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
+                                    disabled={isProcessing}
+                                    loading={isProcessing && clickedButton === 'approve'}
+                                />
+                            </Tooltip>
+                        )}
                     </div>
                 )}
 
@@ -646,11 +666,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )} */}
 
                         {/* Reject button - for awaiting and pending */}
-                        {config.showReject && (
+                        {config.showReject && (!isProcessing || clickedButton === 'reject') && (
                             <Button
                                 variant="ghost-secondary"
                                 onClick={isAwaitingApproval ? handleReject : handleRejectPending}
-                                loading={isProcessing}
+                                loading={isProcessing && clickedButton === 'reject'}
+                                disabled={isProcessing}
                             >
                                 Reject
                             </Button>
@@ -680,11 +701,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )}
 
                         {/* Apply button - for awaiting, pending, rejected, undone (not while processing) */}
-                        {config.showApply && (
+                        {config.showApply && (!isProcessing || clickedButton === 'approve') && (
                             <Button
                                 variant={isAwaitingApproval ? 'solid' : 'ghost-secondary'}
                                 onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                loading={isProcessing}
+                                loading={isProcessing && clickedButton === 'approve'}
+                                disabled={isProcessing}
                             >
                                 <span>Apply
                                     {/* {isAwaitingApproval && <span className="opacity-50 ml-1">⏎</span>} */}
