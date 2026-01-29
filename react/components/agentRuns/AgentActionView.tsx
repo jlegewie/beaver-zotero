@@ -629,39 +629,42 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         <div className="flex-1" />
                         
                         {/* Processing indicator - shown while waiting for backend response */}
-                        {isProcessingApproval && (
+                        {/* {isProcessingApproval && (
                             <div className="display-flex items-center px-3 py-1 text-sm font-color-secondary">
                                 <Icon icon={Spinner} className="mr-2" />
                                 Processing...
                             </div>
-                        )}
+                        )} */}
 
-                        {/* Reject button - for awaiting and pending (not while processing) */}
-                        {config.showReject && !isProcessing && (
+                        {/* Reject button - for awaiting and pending */}
+                        {config.showReject && (
                             <Button
                                 variant="ghost-secondary"
                                 onClick={isAwaitingApproval ? handleReject : handleRejectPending}
+                                loading={isProcessing}
                             >
                                 Reject
                             </Button>
                         )}
 
                         {/* Undo button - for applied */}
-                        {config.showUndo && !isProcessing && (
+                        {config.showUndo && (
                             <Button
                                 variant="ghost-secondary"
                                 onClick={handleUndo}
+                                loading={isProcessing}
                             >
                                 Undo
                             </Button>
                         )}
 
                         {/* Retry button - for error */}
-                        {config.showRetry && !isProcessing && (
+                        {config.showRetry && (
                             <Button
                                 variant="outline"
                                 icon={RepeatIcon}
                                 onClick={handleRetry}
+                                loading={isProcessing}
                             >
                                 Try Again
                             </Button>
@@ -672,6 +675,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             <Button
                                 variant={isAwaitingApproval ? 'solid' : 'ghost-secondary'}
                                 onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
+                                loading={isProcessing}
                             >
                                 <span>Apply
                                     {/* {isAwaitingApproval && <span className="opacity-50 ml-1">⏎</span>} */}
