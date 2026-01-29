@@ -44,7 +44,7 @@ const ModelMenuItemContent: React.FC<{
  * Button component for selecting the AI model to use for chat completions.
  * Displays available models based on configured API keys.
  */
-const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaElement>}> = ({ inputRef }) => {
+const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaElement>, disabled?: boolean}> = ({ inputRef, disabled = false }) => {
     const selectedModel = useAtomValue(selectedModelAtom);
     const availableModels = useAtomValue(availableModelsAtom);
 
@@ -198,7 +198,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             ariaLabel="Select AI Model"
             tooltipContent={availableModels.length === 0 ? 'No models available' : 'Choose AI model'}
             showArrow={false}
-            disabled={availableModels.length === 0}
+            disabled={disabled || availableModels.length === 0}
             onAfterClose={handleAfterClose}
         />
     );

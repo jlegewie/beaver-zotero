@@ -1,10 +1,42 @@
 import { PopupMessageFeature } from '../types/popupMessage';
 
+/**
+ * Example prompt shown as a chat bubble in the feature tour
+ */
+export interface ExamplePrompt {
+    /** The full text of the example prompt */
+    text: string;
+    /** Part of the text to highlight with accent color (must be substring of text) */
+    highlight?: string;
+    /** Position of the bubble - alternating creates a chat-like feel */
+    position?: 'left' | 'right' | 'center';
+}
+
+/**
+ * A single step/slide in the feature tour
+ */
+export interface FeatureStep {
+    /** Title of this feature */
+    title: string;
+    /** Description text (supports HTML links) */
+    description?: string;
+    /** Example prompts shown as chat bubbles */
+    examplePrompts?: ExamplePrompt[];
+    /** URL to learn more about this feature */
+    learnMoreUrl?: string;
+}
+
 export interface VersionUpdateMessageConfig {
     version: string;
     title: string;
+    /** Subtitle/intro text shown on the first screen */
+    subtitle?: string;
+    /** @deprecated Use steps instead for new versions */
     text?: string;
-    featureList: PopupMessageFeature[];
+    /** @deprecated Use steps instead for new versions */
+    featureList?: PopupMessageFeature[];
+    /** Feature steps for the guided tour (new format) */
+    steps?: FeatureStep[];
     learnMoreUrl?: string;
     learnMoreLabel?: string;
     footer?: string;
@@ -172,6 +204,59 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
         ]
     },
+    {
+        version: "0.11.0",
+        title: "New in Beaver 0.11",
+        // subtitle: "Organize your library, edit metadata, and enjoy more efficient AI usage.",
+        steps: [
+            {
+                title: "Organize Your Library",
+                description: "Beaver can now create collections, add tags, and help you organize items in bulk. <a href='https://www.beaverapp.ai/docs/library-management'>Learn more →</a>",
+                examplePrompts: [
+                    {
+                        text: "I added several papers this week. Organize them into appropriate collections based on their topics.",
+                        highlight: "Organize them into appropriate collections",
+                        position: "left"
+                    },
+                    {
+                        text: "Find all unfiled papers and suggest which collections they belong in.",
+                        highlight: "unfiled papers",
+                        position: "right"
+                    },
+                    {
+                        text: "I'm starting a literature review on ____. Create a collection and add all relevant papers from my library.",
+                        highlight: "add all relevant papers",
+                        position: "left"
+                    }
+                ],
+            },
+            {
+                title: "Edit Item Metadata",
+                description: "Fix incomplete metadata, add custom content like summaries to the extra field, and update bibliographic fields through natural conversation. <a href='https://www.beaverapp.ai/docs/editing-metadata'>Learn more →</a>",
+                examplePrompts: [
+                    {
+                        text: "Review and fix metadata for all items I added today. Look up the correct information and fix any issues.",
+                        highlight: "Review and fix metadata",
+                        position: "left"
+                    },
+                    {
+                        text: "Add the citation count to the extra field for all items that don't have it.",
+                        highlight: "Add the citation count",
+                        position: "right"
+                    },
+                    {
+                        text: "Find all items with missing abstracts and create an abstract for them.",
+                        highlight: "items with missing abstracts",
+                        position: "left"
+                    }
+                ],
+            },
+            {
+                title: "Tip: Use Custom Prompts for Common Tasks",
+                description: "Save time by creating reusable prompts in Beaver settings for common library management tasks.\n\nRead about all changes in the <a href='https://github.com/jlegewie/beaver-zotero/releases/tag/v0.11.0'>change log</a>.",
+            }
+        ]
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));
@@ -187,4 +272,11 @@ export const getVersionUpdateMessageConfig = (version: string): VersionUpdateMes
 
 export const getAllVersionUpdateMessageVersions = (): string[] => {
     return versionUpdateMessageList.map((config) => config.version);
+};
+
+/**
+ * Check if a version config uses the new step-based tour format
+ */
+export const usesStepFormat = (config: VersionUpdateMessageConfig): boolean => {
+    return !!(config.steps && config.steps.length > 0);
 };

@@ -20,6 +20,16 @@ import {
     handleZoteroAttachmentSearchRequest,
     handleItemSearchByMetadataRequest,
     handleItemSearchByTopicRequest,
+    // Library management tools
+    handleZoteroSearchRequest,
+    handleListItemsRequest,
+    handleGetMetadataRequest,
+    handleListLibrariesRequest,
+    handleListCollectionsRequest,
+    handleListTagsRequest,
+    // Deferred tools
+    handleAgentActionValidateRequest,
+    handleAgentActionExecuteRequest,
 } from '../../src/services/agentDataProvider';
 import type {
     WSZoteroDataRequest,
@@ -29,6 +39,16 @@ import type {
     WSZoteroAttachmentSearchRequest,
     WSItemSearchByMetadataRequest,
     WSItemSearchByTopicRequest,
+    // Library management tools
+    WSZoteroSearchRequest,
+    WSListItemsRequest,
+    WSGetMetadataRequest,
+    WSListLibrariesRequest,
+    WSListCollectionsRequest,
+    WSListTagsRequest,
+    // Deferred tools
+    WSAgentActionValidateRequest,
+    WSAgentActionExecuteRequest,
 } from '../../src/services/agentProtocol';
 
 
@@ -59,6 +79,16 @@ const ENDPOINT_PATHS = [
     '/beaver/attachment/pages',
     '/beaver/attachment/page-images',
     '/beaver/attachment/search',
+    // Library management tools
+    '/beaver/library/search',
+    '/beaver/library/list',
+    '/beaver/library/metadata',
+    '/beaver/library/libraries',
+    '/beaver/library/collections',
+    '/beaver/library/tags',
+    // Deferred tools
+    '/beaver/agent-action/validate',
+    '/beaver/agent-action/execute',
 ] as const;
 
 /**
@@ -152,6 +182,7 @@ async function handleMetadataSearchHttpRequest(request: any) {
         tags_filter: request.tags_filter,
         collections_filter: request.collections_filter,
         limit: request.limit,
+        offset: request.offset,
     };
     
     const response = await handleItemSearchByMetadataRequest(wsRequest);
@@ -173,6 +204,7 @@ async function handleTopicSearchHttpRequest(request: any) {
         tags_filter: request.tags_filter,
         collections_filter: request.collections_filter,
         limit: request.limit,
+        offset: request.offset,
     };
     
     const response = await handleItemSearchByTopicRequest(wsRequest);
@@ -253,6 +285,184 @@ async function handleAttachmentSearchHttpRequest(request: any) {
 
 
 // =============================================================================
+// Library Management HTTP Handlers
+// =============================================================================
+
+async function handleLibrarySearchHttpRequest(request: any) {
+    const wsRequest: WSZoteroSearchRequest = {
+        event: 'zotero_search_request',
+        request_id: generateRequestId(),
+        conditions: request.conditions || [],
+        join_mode: request.join_mode || 'all',
+        library_id: request.library_id,
+        include_children: request.include_children ?? false,
+        item_category: request.item_category ?? 'regular',
+        recursive: request.recursive ?? true,
+        limit: request.limit ?? 10,
+        offset: request.offset ?? 0,
+        fields: request.fields,
+    };
+    
+    const response = await handleZoteroSearchRequest(wsRequest);
+    
+    return {
+        items: response.items,
+        total_count: response.total_count,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
+async function handleLibraryListHttpRequest(request: any) {
+    const wsRequest: WSListItemsRequest = {
+        event: 'list_items_request',
+        request_id: generateRequestId(),
+        library_id: request.library_id,
+        collection_key: request.collection_key,
+        tag: request.tag,
+        item_category: request.item_category ?? 'regular',
+        recursive: request.recursive ?? true,
+        sort_by: request.sort_by || 'dateModified',
+        sort_order: request.sort_order || 'desc',
+        limit: request.limit ?? 20,
+        offset: request.offset ?? 0,
+    };
+    
+    const response = await handleListItemsRequest(wsRequest);
+    
+    return {
+        items: response.items,
+        total_count: response.total_count,
+        library_name: response.library_name,
+        collection_name: response.collection_name,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
+async function handleLibraryMetadataHttpRequest(request: any) {
+    const wsRequest: WSGetMetadataRequest = {
+        event: 'get_metadata_request',
+        request_id: generateRequestId(),
+        item_ids: request.item_ids || [],
+        fields: request.fields,
+        include_attachments: request.include_attachments ?? false,
+        include_notes: request.include_notes ?? false,
+        include_tags: request.include_tags ?? true,
+        include_collections: request.include_collections ?? false,
+    };
+
+    const response = await handleGetMetadataRequest(wsRequest);
+
+    return {
+        items: response.items,
+        not_found: response.not_found,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
+async function handleListLibrariesHttpRequest(_request: any) {
+    const wsRequest: WSListLibrariesRequest = {
+        event: 'list_libraries_request',
+        request_id: generateRequestId(),
+    };
+
+    const response = await handleListLibrariesRequest(wsRequest);
+
+    return {
+        libraries: response.libraries,
+        total_count: response.total_count,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
+async function handleListCollectionsHttpRequest(request: any) {
+    const wsRequest: WSListCollectionsRequest = {
+        event: 'list_collections_request',
+        request_id: generateRequestId(),
+        library_id: request.library_id,
+        parent_collection_key: request.parent_collection_key,
+        include_item_counts: request.include_item_counts ?? false,
+        limit: request.limit ?? 50,
+        offset: request.offset ?? 0,
+    };
+
+    const response = await handleListCollectionsRequest(wsRequest);
+
+    return {
+        collections: response.collections,
+        total_count: response.total_count,
+        library_id: response.library_id,
+        library_name: response.library_name,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
+async function handleListTagsHttpRequest(request: any) {
+    const wsRequest: WSListTagsRequest = {
+        event: 'list_tags_request',
+        request_id: generateRequestId(),
+        library_id: request.library_id,
+        collection_key: request.collection_key,
+        min_item_count: request.min_item_count ?? 0,
+        limit: request.limit ?? 50,
+        offset: request.offset ?? 0,
+    };
+
+    const response = await handleListTagsRequest(wsRequest);
+
+    return {
+        tags: response.tags,
+        total_count: response.total_count,
+        library_id: response.library_id,
+        library_name: response.library_name,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
+async function handleAgentActionValidateHttpRequest(request: any) {
+    const wsRequest: WSAgentActionValidateRequest = {
+        event: 'agent_action_validate',
+        request_id: generateRequestId(),
+        action_type: request.action_type,
+        action_data: request.action_data,
+    };
+
+    const response = await handleAgentActionValidateRequest(wsRequest);
+
+    return {
+        valid: response.valid,
+        error: response.error,
+        error_code: response.error_code,
+        current_value: response.current_value,
+        preference: response.preference,
+    };
+}
+
+async function handleAgentActionExecuteHttpRequest(request: any) {
+    const wsRequest: WSAgentActionExecuteRequest = {
+        event: 'agent_action_execute',
+        request_id: generateRequestId(),
+        action_type: request.action_type,
+        action_data: request.action_data,
+    };
+
+    const response = await handleAgentActionExecuteRequest(wsRequest);
+
+    return {
+        success: response.success,
+        error: response.error,
+        error_code: response.error_code,
+        result_data: response.result_data,
+    };
+}
+
+
+// =============================================================================
 // Registration Functions
 // =============================================================================
 
@@ -283,6 +493,32 @@ function registerEndpoints(): boolean {
     Zotero.Server.Endpoints['/beaver/attachment/search'] = 
         createEndpoint(handleAttachmentSearchHttpRequest);
     
+    // Library management endpoints
+    Zotero.Server.Endpoints['/beaver/library/search'] = 
+        createEndpoint(handleLibrarySearchHttpRequest);
+    
+    Zotero.Server.Endpoints['/beaver/library/list'] = 
+        createEndpoint(handleLibraryListHttpRequest);
+    
+    Zotero.Server.Endpoints['/beaver/library/metadata'] =
+        createEndpoint(handleLibraryMetadataHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/library/libraries'] =
+        createEndpoint(handleListLibrariesHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/library/collections'] =
+        createEndpoint(handleListCollectionsHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/library/tags'] =
+        createEndpoint(handleListTagsHttpRequest);
+
+    // Deferred tool endpoints
+    Zotero.Server.Endpoints['/beaver/agent-action/validate'] =
+        createEndpoint(handleAgentActionValidateHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/agent-action/execute'] =
+        createEndpoint(handleAgentActionExecuteHttpRequest);
+
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
     return true;
 }

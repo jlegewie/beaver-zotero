@@ -15,14 +15,28 @@ import {
     extractSearchInAttachmentData,
     isExternalSearchResult,
     extractExternalSearchData,
+    isLookupWorkResult,
+    extractLookupWorkData,
     isReadPagesFrontendResult,
     extractReadPagesFrontendData,
+    isZoteroSearchResult,
+    extractZoteroSearchData,
+    isListItemsResult,
+    extractListItemsData,
+    isListCollectionsResult,
+    extractListCollectionsData,
+    isListTagsResult,
+    extractListTagsData,
+    isGetMetadataResult,
+    extractGetMetadataData,
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
 import { ReadPagesResultView } from './ReadPagesResultView';
 import { ViewPageImagesResultView } from './ViewPageImagesResultView';
 import { ExternalSearchResultView } from './ExternalSearchResultView';
+import { ListCollectionsResultView } from './ListCollectionsResultView';
+import { ListTagsResultView } from './ListTagsResultView';
 
 interface ToolResultViewProps {
     toolcall: ToolCallPart;
@@ -97,6 +111,76 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         const data = extractExternalSearchData(content, metadata);
         if (data) {
             return <ExternalSearchResultView references={data.references} />;
+        }
+    }
+
+    // Lookup work results (lookup_work)
+    if (isLookupWorkResult(toolName, content, metadata)) {
+        const data = extractLookupWorkData(content, metadata);
+        if (data) {
+            if (data.found && data.reference) {
+                return <ExternalSearchResultView references={[data.reference]} />;
+            }
+            // Not found case - show message
+            return (
+                <div className="tool-result-view p-3 text-sm">
+                    <div className="font-color-secondary">
+                        {data.message || 'Work not found'}
+                    </div>
+                </div>
+            );
+        }
+    }
+
+    // Zotero search results (zotero_search)
+    if (isZoteroSearchResult(toolName, content, metadata)) {
+        const data = extractZoteroSearchData(content, metadata);
+        if (data) {
+            return <ItemSearchResultView items={data.items} />;
+        }
+    }
+
+    // List items results (list_items)
+    if (isListItemsResult(toolName, content, metadata)) {
+        const data = extractListItemsData(content, metadata);
+        if (data) {
+            return <ItemSearchResultView items={data.items} />;
+        }
+    }
+
+    // List collections results (list_collections)
+    if (isListCollectionsResult(toolName, content, metadata)) {
+        const data = extractListCollectionsData(content, metadata);
+        if (data) {
+            return (
+                <ListCollectionsResultView
+                    collections={data.collections}
+                    totalCount={data.totalCount}
+                    libraryId={data.libraryId}
+                />
+            );
+        }
+    }
+
+    // List tags results (list_tags)
+    if (isListTagsResult(toolName, content, metadata)) {
+        const data = extractListTagsData(content, metadata);
+        if (data) {
+            return (
+                <ListTagsResultView
+                    tags={data.tags}
+                    totalCount={data.totalCount}
+                    libraryId={data.libraryId}
+                />
+            );
+        }
+    }
+
+    // Get metadata results (get_metadata)
+    if (isGetMetadataResult(toolName, content, metadata)) {
+        const data = extractGetMetadataData(content, metadata);
+        if (data && data.items.length > 0) {
+            return <ItemSearchResultView items={data.items} />;
         }
     }
 

@@ -13,14 +13,22 @@ import { logger } from '../utils/logger';
 import { AgentRun } from '../../react/agents/types';
 import { AgentAction, toAgentAction } from '../../react/agents/agentActions';
 import { ApiService } from './apiService';
-import { 
-    handleZoteroDataRequest, 
+import {
+    handleZoteroDataRequest,
     handleExternalReferenceCheckRequest,
     handleZoteroAttachmentPagesRequest,
     handleZoteroAttachmentPageImagesRequest,
     handleZoteroAttachmentSearchRequest,
     handleItemSearchByMetadataRequest,
     handleItemSearchByTopicRequest,
+    handleZoteroSearchRequest,
+    handleListItemsRequest,
+    handleListCollectionsRequest,
+    handleListTagsRequest,
+    handleListLibrariesRequest,
+    handleGetMetadataRequest,
+    handleAgentActionValidateRequest,
+    handleAgentActionExecuteRequest,
 } from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
 import {
@@ -60,11 +68,13 @@ export class AgentService {
      * Get auth token from Supabase session
      */
     private async getAuthToken(): Promise<string> {
-        const { data, error } = await supabase.auth.getSession();
+        // Force refresh to ensure maximum token lifetime for the WS connection
+        // const { data, error } = await supabase.auth.getSession();
+        const { data, error } = await supabase.auth.refreshSession();
 
         if (error) {
-            logger(`AgentService: Error getting session: ${error.message}`, 2);
-            throw new Error('Error retrieving user session');
+            logger(`AgentService: Error refreshing session: ${error.message}`, 2);
+            throw new Error('Error refreshing user session');
         }
 
         if (!data.session?.access_token) {
@@ -489,6 +499,156 @@ export class AgentService {
                         });
                     break;
 
+                case 'zotero_search_request':
+                    logger("AgentService: Received zotero_search_request", event, 1);
+                    handleZoteroSearchRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: zotero_search_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'zotero_search',
+                                request_id: event.request_id,
+                                items: [],
+                                total_count: 0,
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'list_items_request':
+                    logger("AgentService: Received list_items_request", event, 1);
+                    handleListItemsRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: list_items_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'list_items',
+                                request_id: event.request_id,
+                                items: [],
+                                total_count: 0,
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'get_metadata_request':
+                    logger("AgentService: Received get_metadata_request", event, 1);
+                    handleGetMetadataRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: get_metadata_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'get_metadata',
+                                request_id: event.request_id,
+                                items: [],
+                                not_found: event.item_ids,
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'list_collections_request':
+                    logger("AgentService: Received list_collections_request", event, 1);
+                    handleListCollectionsRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: list_collections_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'list_collections',
+                                request_id: event.request_id,
+                                collections: [],
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'list_tags_request':
+                    logger("AgentService: Received list_tags_request", event, 1);
+                    handleListTagsRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: list_tags_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'list_tags',
+                                request_id: event.request_id,
+                                tags: [],
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'list_libraries_request':
+                    logger("AgentService: Received list_libraries_request", event, 1);
+                    handleListLibrariesRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: list_libraries_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'list_libraries',
+                                request_id: event.request_id,
+                                libraries: [],
+                                total_count: 0,
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                // Deferred tool events
+                case 'agent_action_validate':
+                    logger("AgentService: Received agent_action_validate", event, 1);
+                    handleAgentActionValidateRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: agent_action_validate failed: ${err}`, 1);
+                            this.send({
+                                type: 'agent_action_validate_response',
+                                request_id: event.request_id,
+                                valid: false,
+                                error: String(err),
+                                error_code: 'internal_error',
+                                preference: 'always_ask',
+                            });
+                        });
+                    break;
+
+                case 'agent_action_execute':
+                    logger("AgentService: Received agent_action_execute", event, 1);
+                    handleAgentActionExecuteRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: agent_action_execute failed: ${err}`, 1);
+                            this.send({
+                                type: 'agent_action_execute_response',
+                                request_id: event.request_id,
+                                success: false,
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'deferred_approval_request':
+                    logger("AgentService: Received deferred_approval_request", event, 1);
+                    // This event is handled by the UI via callback
+                    if (this.callbacks?.onDeferredApprovalRequest) {
+                        this.callbacks.onDeferredApprovalRequest(event);
+                    } else {
+                        // No handler - auto-reject to avoid blocking the agent
+                        logger("AgentService: No deferred approval handler, auto-rejecting", 1);
+                        this.send({
+                            type: 'deferred_approval_response',
+                            action_id: event.action_id,
+                            approved: false,
+                        });
+                    }
+                    break;
+
                 default:
                     logger(`AgentService: Unknown event type: ${(event as any).event}`, 1);
             }
@@ -552,6 +712,23 @@ export class AgentService {
 
         // Close the connection
         this.close(1000, 'User cancelled');
+    }
+
+    /**
+     * Send a response to a deferred approval request.
+     * Called by the UI when the user approves or rejects an action.
+     * @param actionId The action ID from the approval request
+     * @param approved Whether the user approved the action
+     * @param userInstructions Optional additional instructions from the user
+     */
+    sendApprovalResponse(actionId: string, approved: boolean, userInstructions?: string | null): void {
+        logger(`AgentService: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
+        this.send({
+            type: 'deferred_approval_response',
+            action_id: actionId,
+            approved,
+            user_instructions: userInstructions,
+        });
     }
 
 }

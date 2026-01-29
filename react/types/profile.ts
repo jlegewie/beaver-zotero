@@ -36,7 +36,9 @@ export interface PlanFeatures {
 
 export interface ProfileBalance {
     pagesRemaining: number;
-    chatMessagesRemaining: number;
+    subscriptionChatCreditsRemaining: number;
+    purchasedChatCreditsRemaining: number;
+    chatCreditsRemaining: number;
 }
 
 /**
@@ -111,6 +113,7 @@ export interface SafeProfileModel {
 
     // Chat credits
     chat_credits_used: number;
+    purchased_chat_credits: number;
 
     // Usage-based billing settings
     usage_based_billing_enabled: boolean;

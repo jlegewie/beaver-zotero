@@ -27,6 +27,10 @@ declare const ZOTERO_CONFIG: {
     API_VERSION: string;
 };
 
+interface ZoteroSearchWritable extends Zotero.Search {
+    libraryID: number;  // Override to make it writable
+}
+
 declare namespace Zotero {
     /** Shared Jotai store for Beaver plugin across all windows */
     let __beaverJotaiStore: any;

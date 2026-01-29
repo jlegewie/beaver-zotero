@@ -22,6 +22,9 @@ import {
     WSAgentActionsEvent,
     WSToolCallProgressEvent,
     WSMissingZoteroDataEvent,
+    WSDeferredApprovalRequest,
+    CurrentLibrary,
+    CurrentCollection,
 } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
@@ -60,13 +63,21 @@ import { userIdAtom } from './auth';
 import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom } from './citations';
 import {
     addAgentActionsAtom,
+    upsertAgentActionsAtom,
     toAgentAction,
     clearAgentActionsAtom,
     threadAgentActionsAtom,
     isAnnotationAgentAction,
+    isEditMetadataAgentAction,
     hasAppliedZoteroItem,
     AgentAction,
+    addPendingApprovalAtom,
+    removePendingApprovalAtom,
+    pendingApprovalsAtom,
+    buildPendingApprovalFromAction,
+    clearAllPendingApprovalsAtom,
 } from '../agents/agentActions';
+import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
@@ -312,15 +323,61 @@ async function deleteAppliedZoteroItems(actions: AgentAction[]): Promise<number>
 }
 
 /**
- * Prompt user to confirm deletion of applied agent actions.
- * Returns true if user confirms deletion, false otherwise.
+ * Undo applied metadata edits from agent actions.
+ * Reverts fields to their original values, but preserves user's manual changes.
+ * Returns the number of actions processed (regardless of whether fields were actually reverted).
  */
-function confirmDeleteAppliedActions(actions: AgentAction[]): boolean {
-    const allAreAnnotations = actions.every(isAnnotationAgentAction);
-    const title = allAreAnnotations ? 'Delete annotations?' : 'Undo changes?';
-    const message = allAreAnnotations
-        ? 'Do you want to delete the annotations created by the assistant messages that will be regenerated?'
-        : 'Do you want to undo the changes created by the assistant messages that will be regenerated?';
+async function undoAppliedMetadataEdits(actions: AgentAction[]): Promise<number> {
+    let processedCount = 0;
+    for (const action of actions) {
+        if (action.status === 'applied' && isEditMetadataAgentAction(action)) {
+            try {
+                // Don't force revert - skip fields that user manually modified
+                const result = await undoEditMetadataAction(action, false);
+                processedCount++;
+                
+                // Log summary for debugging
+                if (result.manuallyModified.length > 0) {
+                    logger(`undoAppliedMetadataEdits: Preserved ${result.manuallyModified.length} manually modified field(s) for action ${action.id}`, 1);
+                }
+            } catch (error) {
+                logger(`undoAppliedMetadataEdits: Failed to undo action ${action.id}: ${error}`, 1);
+            }
+        }
+    }
+    return processedCount;
+}
+
+/**
+ * Actions to undo when regenerating a run.
+ */
+interface ActionsToUndo {
+    annotations: AgentAction[];
+    metadataEdits: AgentAction[];
+}
+
+/**
+ * Prompt user to confirm undoing applied agent actions during regeneration.
+ * Shows a combined dialog listing all types of changes that will be undone.
+ * Returns true if user confirms, false otherwise.
+ */
+function confirmUndoAppliedActions(actions: ActionsToUndo): boolean {
+    const { annotations, metadataEdits } = actions;
+    const totalActions = annotations.length + metadataEdits.length;
+    
+    if (totalActions === 0) return true;
+    
+    // Build a list of changes
+    const changeLines: string[] = [];
+    if (annotations.length > 0) {
+        changeLines.push(`• ${annotations.length} PDF annotation${annotations.length === 1 ? '' : 's'}`);
+    }
+    if (metadataEdits.length > 0) {
+        changeLines.push(`• ${metadataEdits.length} metadata edit${metadataEdits.length === 1 ? '' : 's'}`);
+    }
+    
+    const title = 'Undo changes?';
+    const message = `The following changes will be undone when regenerating:\n\n${changeLines.join('\n')}\n\nDo you want to undo these changes?`;
 
     const buttonIndex = Zotero.Prompt.confirm({
         window: Zotero.getMainWindow(),
@@ -333,6 +390,7 @@ function confirmDeleteAppliedActions(actions: AgentAction[]): boolean {
 
     return buttonIndex === 0;
 }
+
 
 // =============================================================================
 // Missing Zotero Data Handling
@@ -606,6 +664,20 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
             // Update run with tool return
             set(activeRunAtom, (prev) => prev ? updateRunWithToolReturn(prev, event) : prev);
+
+            // Remove pending approval for this specific tool call (if any)
+            // Note: We find approval by toolCallId since that's what we have in the event
+            if (event.part.part_kind === "tool-return") {
+                const toolCallId = event.part.tool_call_id;
+                // Get current pending approvals and find the one for this tool call
+                const pendingMap = store.get(pendingApprovalsAtom);
+                for (const [actionId, pending] of pendingMap.entries()) {
+                    if (pending.toolcallId === toolCallId) {
+                        set(removePendingApprovalAtom, actionId);
+                        break;
+                    }
+                }
+            }
         },
 
         onToolCallProgress: (event: WSToolCallProgressEvent) => {
@@ -677,6 +749,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
         onError: (event: WSErrorEvent) => {
             logger('WS onError:', event, 1);
+    
+            // Normal error handling
             set(wsErrorAtom, event);
             set(activeRunAtom, (prev) => prev ? {
                 ...prev,
@@ -730,7 +804,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 actionsCount: event.actions.length,
             }, 1);
             const actions = event.actions.map(toAgentAction);
-            set(addAgentActionsAtom, actions);
+            set(upsertAgentActionsAtom, actions);
             // Load item data for agent actions (fire and forget)
             loadItemDataForAgentActions(actions).catch(err => 
                 logger(`WS onAgentActions: Failed to load item data for agent actions: ${err}`, 1)
@@ -755,6 +829,16 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             ).catch(err => 
                 logger(`WS onMissingZoteroData: Failed to handle missing data: ${err}`, 1)
             );
+        },
+
+        onDeferredApprovalRequest: (event: WSDeferredApprovalRequest) => {
+            logger('WS onDeferredApprovalRequest:', {
+                actionId: event.action_id,
+                toolcallId: event.toolcall_id,
+                actionType: event.action_type,
+            }, 1);
+            // Add the pending approval to the map - UI will render ApprovalView for each
+            set(addPendingApprovalAtom, event);
         },
 
         onOpen: () => {
@@ -932,11 +1016,59 @@ export const sendWSMessageAtom = atom(
             ? [{ function: "search_external_references", parameters: {} } as ToolRequest]
             : undefined;
 
-        // Application state
+        // Get current library and collection context
+        let currentLibrary: CurrentLibrary | undefined = undefined;
+        let currentCollection: CurrentCollection | undefined = undefined;
+        
+        const searchableLibraryIds = get(searchableLibraryIdsAtom);
         const currentView: 'library' | 'file_reader' = get(isLibraryTabAtom) ? 'library' : 'file_reader';
+        
+        if (currentView === 'file_reader' && readerState) {
+            // In reader view, use the library from the reader attachment
+            const library = Zotero.Libraries.get(readerState.library_id);
+            if (library) {
+                currentLibrary = {
+                    library_id: library.libraryID,
+                    name: library.name,
+                    is_group: library.isGroup,
+                    read_only: !library.editable,
+                    is_synced: searchableLibraryIds.includes(library.libraryID),
+                };
+            }
+        } else if (currentView === 'library') {
+            // In library view, get from ZoteroPane
+            const zp = Zotero.getActiveZoteroPane();
+            if (zp) {
+                const libraryId = zp.getSelectedLibraryID();
+                const library = Zotero.Libraries.get(libraryId);
+                if (library) {
+                    currentLibrary = {
+                        library_id: library.libraryID,
+                        name: library.name,
+                        is_group: library.isGroup,
+                        read_only: !library.editable,
+                        is_synced: searchableLibraryIds.includes(library.libraryID),
+                    };
+                }
+                
+                const collection = zp.getSelectedCollection();
+                if (collection) {
+                    currentCollection = {
+                        collection_key: collection.key,
+                        name: collection.name,
+                        library_id: collection.libraryID,
+                        parent_key: collection.parentKey || null,
+                    };
+                }
+            }
+        }
+
+        // Application state
         const applicationState = {
             current_view: currentView,
-            ...(readerState ? { reader_state: readerState } : {})
+            ...(readerState ? { reader_state: readerState } : {}),
+            ...(currentLibrary ? { current_library: currentLibrary } : {}),
+            ...(currentCollection ? { current_collection: currentCollection } : {}),
         };
 
         // Build the message
@@ -1065,18 +1197,34 @@ export const regenerateFromRunAtom = atom(
             // Collect run IDs that will be removed (target run and all subsequent)
             const runIdsToRemove = threadRuns.slice(runIndex).map(r => r.id);
 
-            // Find applied annotation actions for runs being removed
+            // Find applied actions for runs being removed
             const allAgentActions = get(threadAgentActionsAtom);
-            const actionsToDelete = allAgentActions
-                .filter(a => runIdsToRemove.includes(a.run_id))
+            const actionsInRemovedRuns = allAgentActions.filter(a => runIdsToRemove.includes(a.run_id));
+            
+            // Categorize by type
+            const annotationsToDelete = actionsInRemovedRuns
                 .filter(isAnnotationAgentAction)
                 .filter(hasAppliedZoteroItem);
+            const metadataEditsToUndo = actionsInRemovedRuns
+                .filter(isEditMetadataAgentAction)
+                .filter(a => a.status === 'applied');
 
-            // Prompt user to confirm deletion of applied actions
-            if (actionsToDelete.length > 0) {
-                const shouldDelete = confirmDeleteAppliedActions(actionsToDelete);
-                if (shouldDelete) {
-                    await deleteAppliedZoteroItems(actionsToDelete);
+            // Prompt user to confirm undoing applied actions
+            const hasActionsToUndo = annotationsToDelete.length > 0 || metadataEditsToUndo.length > 0;
+            if (hasActionsToUndo) {
+                const shouldUndo = confirmUndoAppliedActions({
+                    annotations: annotationsToDelete,
+                    metadataEdits: metadataEditsToUndo,
+                });
+                if (shouldUndo) {
+                    // Undo annotations (delete Zotero items)
+                    if (annotationsToDelete.length > 0) {
+                        await deleteAppliedZoteroItems(annotationsToDelete);
+                    }
+                    // Undo metadata edits (revert to original values)
+                    if (metadataEditsToUndo.length > 0) {
+                        await undoAppliedMetadataEdits(metadataEditsToUndo);
+                    }
                 }
             }
 
@@ -1190,18 +1338,34 @@ export const regenerateWithEditedPromptAtom = atom(
             // Collect run IDs that will be removed (target run and all subsequent)
             const runIdsToRemove = threadRuns.slice(runIndex).map(r => r.id);
 
-            // Find applied annotation actions for runs being removed
+            // Find applied actions for runs being removed
             const allAgentActions = get(threadAgentActionsAtom);
-            const actionsToDelete = allAgentActions
-                .filter(a => runIdsToRemove.includes(a.run_id))
+            const actionsInRemovedRuns = allAgentActions.filter(a => runIdsToRemove.includes(a.run_id));
+            
+            // Categorize by type
+            const annotationsToDelete = actionsInRemovedRuns
                 .filter(isAnnotationAgentAction)
                 .filter(hasAppliedZoteroItem);
+            const metadataEditsToUndo = actionsInRemovedRuns
+                .filter(isEditMetadataAgentAction)
+                .filter(a => a.status === 'applied');
 
-            // Prompt user to confirm deletion of applied actions
-            if (actionsToDelete.length > 0) {
-                const shouldDelete = confirmDeleteAppliedActions(actionsToDelete);
-                if (shouldDelete) {
-                    await deleteAppliedZoteroItems(actionsToDelete);
+            // Prompt user to confirm undoing applied actions
+            const hasActionsToUndo = annotationsToDelete.length > 0 || metadataEditsToUndo.length > 0;
+            if (hasActionsToUndo) {
+                const shouldUndo = confirmUndoAppliedActions({
+                    annotations: annotationsToDelete,
+                    metadataEdits: metadataEditsToUndo,
+                });
+                if (shouldUndo) {
+                    // Undo annotations (delete Zotero items)
+                    if (annotationsToDelete.length > 0) {
+                        await deleteAppliedZoteroItems(annotationsToDelete);
+                    }
+                    // Undo metadata edits (revert to original values)
+                    if (metadataEditsToUndo.length > 0) {
+                        await undoAppliedMetadataEdits(metadataEditsToUndo);
+                    }
                 }
             }
 
@@ -1377,6 +1541,9 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     // Set pending to false immediately for better UI responsiveness
     set(isWSChatPendingAtom, false);
 
+    // Clear any pending approvals (for parallel tool calls that were awaiting user response)
+    set(clearAllPendingApprovalsAtom);
+
     // Mark active run as canceled if it exists
     const activeRun = get(activeRunAtom);
     if (activeRun && activeRun.status === 'in_progress') {
@@ -1410,3 +1577,15 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
     set(clearWarningsAtom);
 });
+
+/**
+ * Send approval response for a deferred action.
+ * Called by the UI when user approves/rejects an action.
+ */
+export const sendApprovalResponseAtom = atom(
+    null,
+    (_get, _set, { actionId, approved, userInstructions }: { actionId: string; approved: boolean; userInstructions?: string | null }) => {
+        logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
+        agentService.sendApprovalResponse(actionId, approved, userInstructions);
+    }
+);

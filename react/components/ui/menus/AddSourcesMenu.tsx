@@ -84,8 +84,9 @@ const AddSourcesMenu: React.FC<{
     onOpen: () => void,
     isMenuOpen: boolean,
     menuPosition: MenuPosition,
-    setMenuPosition: (position: MenuPosition) => void
-}> = ({ showText, onClose, onOpen, isMenuOpen, menuPosition, setMenuPosition }) => {
+    setMenuPosition: (position: MenuPosition) => void,
+    disabled?: boolean
+}> = ({ showText, onClose, onOpen, isMenuOpen, menuPosition, setMenuPosition, disabled = false }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
@@ -398,6 +399,7 @@ const AddSourcesMenu: React.FC<{
                 aria-label="Add Sources"
                 aria-haspopup="menu"
                 aria-expanded={isMenuOpen}
+                disabled={disabled}
             >
                 <Icon icon={PlusSignIcon} className="scale-12" />
                 {showText && <span>Add Sources</span>}

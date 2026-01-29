@@ -458,6 +458,11 @@ export function isSearchInAttachmentResult(
     );
 }
 
+/** Valid tool names for lookup work results */
+const LOOKUP_WORK_TOOL_NAMES: readonly string[] = [
+    'lookup_work',
+] as const;
+
 /**
  * Type guard for external search results.
  * Checks content has references array with external_id, and optionally
@@ -489,6 +494,33 @@ export function isExternalSearchResult(
         })) return false;
     }
 
+    return true;
+}
+
+/**
+ * Type guard for lookup_work results.
+ * Checks content has found bool and optionally a single reference.
+ */
+export function isLookupWorkResult(
+    toolName: string,
+    content: unknown,
+    _metadata?: Record<string, unknown>
+): boolean {
+    if (!LOOKUP_WORK_TOOL_NAMES.includes(toolName)) return false;
+    
+    if (!content || typeof content !== 'object') return false;
+    const contentObj = content as Record<string, unknown>;
+    
+    // Must have found boolean
+    if (typeof contentObj.found !== 'boolean') return false;
+    
+    // If found is true, must have reference with external_id
+    if (contentObj.found === true) {
+        if (!contentObj.reference || typeof contentObj.reference !== 'object') return false;
+        const ref = contentObj.reference as Record<string, unknown>;
+        if (typeof ref.external_id !== 'string') return false;
+    }
+    
     return true;
 }
 
@@ -745,6 +777,76 @@ export function extractExternalSearchData(
     return { references };
 }
 
+/**
+ * Normalized lookup work data ready for rendering.
+ */
+export interface LookupWorkViewData {
+    found: boolean;
+    reference?: ExternalReference;
+    message?: string;
+}
+
+/**
+ * Extract and merge lookup work data from content and metadata.supplemental_data.
+ * Combines ExternalReferenceResultContent with ExternalReferenceResultSupplement.
+ */
+export function extractLookupWorkData(
+    content: unknown,
+    metadata?: Record<string, unknown>
+): LookupWorkViewData | null {
+    const contentObj = content as { 
+        found?: boolean;
+        reference?: ExternalReferenceResultContent;
+        message?: string;
+    } | undefined;
+    
+    if (!contentObj || typeof contentObj.found !== 'boolean') return null;
+    
+    // Not found case
+    if (!contentObj.found) {
+        return {
+            found: false,
+            message: contentObj.message,
+        };
+    }
+    
+    // Found case - need to merge reference with supplement
+    if (!contentObj.reference) return null;
+    
+    const ref = contentObj.reference;
+    const supp = metadata?.supplemental_data as ExternalReferenceResultSupplement | undefined;
+    
+    const externalRef: ExternalReference = {
+        // From content
+        source_id: ref.external_id,
+        title: ref.title,
+        authors: supp?.authors ?? ref.authors,
+        year: ref.year,
+        venue: ref.venue,
+        abstract: ref.abstract,
+        fields_of_study: ref.fields_of_study,
+        citation_count: ref.citation_count,
+        
+        // From supplement (or defaults)
+        source: supp?.source ?? "openalex",
+        id: supp?.external_id,
+        publication_date: supp?.publication_date,
+        publication_url: supp?.publication_url,
+        url: supp?.url,
+        identifiers: supp?.identifiers,
+        is_open_access: supp?.is_open_access,
+        open_access_url: supp?.open_access_url,
+        reference_count: supp?.reference_count,
+        journal: supp?.journal ?? (ref.journal ? { name: ref.journal } : undefined),
+        library_items: supp?.library_items ?? [],
+    };
+    
+    return {
+        found: true,
+        reference: externalRef,
+    };
+}
+
 // ============================================================================
 // Unified Extraction
 // ============================================================================
@@ -801,6 +903,689 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
     }
 
     return [];
+}
+
+// ============================================================================
+// Library Management Tool Results
+// ============================================================================
+
+/** Valid tool names for zotero search results */
+const ZOTERO_SEARCH_TOOL_NAMES: readonly string[] = [
+    'zotero_search',
+] as const;
+
+/** Valid tool names for list items results */
+const LIST_ITEMS_TOOL_NAMES: readonly string[] = [
+    'list_items',
+] as const;
+
+/** Valid tool names for list collections results */
+const LIST_COLLECTIONS_TOOL_NAMES: readonly string[] = [
+    'list_collections',
+] as const;
+
+/** Valid tool names for list tags results */
+const LIST_TAGS_TOOL_NAMES: readonly string[] = [
+    'list_tags',
+] as const;
+
+/** Valid tool names for get metadata results */
+const GET_METADATA_TOOL_NAMES: readonly string[] = [
+    'get_metadata',
+] as const;
+
+// ============================================================================
+// Library Management Summary Types (from backend)
+// ============================================================================
+
+/**
+ * Collection reference for UI display.
+ * Matches CollectionReference from backend.
+ */
+export interface CollectionReference {
+    collection_key: string;
+    name: string;
+}
+
+/**
+ * Tag reference for UI display.
+ * Matches TagReference from backend.
+ */
+export interface TagReference {
+    name: string;
+    item_count: number;
+}
+
+/**
+ * Zotero search result summary.
+ * Matches ZoteroSearchResultSummary from backend.
+ */
+export interface ZoteroSearchResultSummary {
+    tool_name: string;
+    result_count: number;
+    total_count: number;
+    has_more: boolean;
+    items: ZoteroItemReference[];
+}
+
+/**
+ * List items result summary.
+ * Matches ListItemsResultSummary from backend.
+ */
+export interface ListItemsResultSummary {
+    tool_name: string;
+    result_count: number;
+    total_count: number;
+    has_more: boolean;
+    library_name?: string | null;
+    collection_name?: string | null;
+    tag?: string | null;
+    items: ZoteroItemReference[];
+}
+
+/**
+ * List collections result summary.
+ * Matches ListCollectionsResultSummary from backend.
+ */
+export interface ListCollectionsResultSummary {
+    tool_name: string;
+    collection_count: number;
+    total_count: number;
+    has_more: boolean;
+    library_id?: number | null;
+    library_name?: string | null;
+    collections: CollectionReference[];
+}
+
+/**
+ * List tags result summary.
+ * Matches ListTagsResultSummary from backend.
+ */
+export interface ListTagsResultSummary {
+    tool_name: string;
+    tag_count: number;
+    total_count: number;
+    has_more: boolean;
+    library_id?: number | null;
+    library_name?: string | null;
+    tags: TagReference[];
+}
+
+/**
+ * Get metadata result summary.
+ * Matches GetMetadataResultSummary from backend.
+ */
+export interface GetMetadataResultSummary {
+    tool_name: string;
+    items_found: number;
+    items_not_found: number;
+    items: ZoteroItemReference[];
+}
+
+/**
+ * Result item from zotero_search.
+ * Matches ZoteroSearchResultItem from backend.
+ */
+export interface ZoteroSearchResultItem {
+    item_id: string;
+    item_type: string;
+    title?: string | null;
+    creators?: string | null;
+    year?: number | null;
+    extra_fields?: Record<string, unknown> | null;
+}
+
+/**
+ * Result item from list_items.
+ * Matches ListItemsResultItem from backend.
+ */
+export interface ListItemsResultItem {
+    item_id: string;
+    item_type: string;
+    title?: string | null;
+    creators?: string | null;
+    year?: number | null;
+    date_added?: string | null;
+    date_modified?: string | null;
+}
+
+/**
+ * Collection info from list_collections.
+ * Matches CollectionInfo from backend.
+ */
+export interface CollectionInfo {
+    collection_key: string;
+    name: string;
+    parent_key?: string | null;
+    parent_name?: string | null;
+    item_count: number;
+    subcollection_count: number;
+}
+
+/**
+ * Tag info from list_tags.
+ * Matches TagInfo from backend.
+ */
+export interface TagInfo {
+    name: string;
+    item_count: number;
+    color?: string | null;
+}
+
+/**
+ * Metadata item from get_metadata.
+ * Contains item_id and metadata fields.
+ */
+export interface MetadataResultItem {
+    item_id: string;
+    [key: string]: unknown;
+}
+
+/**
+ * Content structure for get_metadata results.
+ */
+export interface GetMetadataResultContent {
+    items: MetadataResultItem[];
+    not_found: string[];
+}
+
+/**
+ * Content structure for zotero_search results.
+ */
+export interface ZoteroSearchResultContent {
+    items: ZoteroSearchResultItem[];
+    total_count: number;
+}
+
+/**
+ * Content structure for list_items results.
+ */
+export interface ListItemsResultContent {
+    items: ListItemsResultItem[];
+    total_count: number;
+    library_name?: string | null;
+    collection_name?: string | null;
+}
+
+/**
+ * Content structure for list_collections results.
+ */
+export interface ListCollectionsResultContent {
+    collections: CollectionInfo[];
+    total_count: number;
+    library_id?: number | null;
+    library_name?: string | null;
+}
+
+/**
+ * Content structure for list_tags results.
+ */
+export interface ListTagsResultContent {
+    tags: TagInfo[];
+    total_count: number;
+    library_id?: number | null;
+    library_name?: string | null;
+}
+
+/**
+ * Type guard for zotero_search results.
+ * Checks both content and metadata.summary for compatibility with dehydrated results.
+ */
+export function isZoteroSearchResult(
+    toolName: string,
+    content: unknown,
+    metadata?: Record<string, unknown>
+): boolean {
+    if (!ZOTERO_SEARCH_TOOL_NAMES.includes(toolName)) return false;
+    
+    // Check content (non-dehydrated)
+    if (content && typeof content === 'object') {
+        const obj = content as Record<string, unknown>;
+        if (Array.isArray(obj.items) && typeof obj.total_count === 'number') {
+            return true;
+        }
+    }
+    
+    // Check metadata.summary (dehydrated)
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as Record<string, unknown>;
+        if (
+            summary.tool_name === 'zotero_search' &&
+            Array.isArray(summary.items) &&
+            typeof summary.total_count === 'number'
+        ) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Type guard for list_items results.
+ * Checks both content and metadata.summary for compatibility with dehydrated results.
+ */
+export function isListItemsResult(
+    toolName: string,
+    content: unknown,
+    metadata?: Record<string, unknown>
+): boolean {
+    if (!LIST_ITEMS_TOOL_NAMES.includes(toolName)) return false;
+    
+    // Check content (non-dehydrated)
+    if (content && typeof content === 'object') {
+        const obj = content as Record<string, unknown>;
+        if (Array.isArray(obj.items) && typeof obj.total_count === 'number') {
+            return true;
+        }
+    }
+    
+    // Check metadata.summary (dehydrated)
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as Record<string, unknown>;
+        if (
+            summary.tool_name === 'list_items' &&
+            Array.isArray(summary.items) &&
+            typeof summary.total_count === 'number'
+        ) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Type guard for list_collections results.
+ * Checks both content and metadata.summary for compatibility with dehydrated results.
+ */
+export function isListCollectionsResult(
+    toolName: string,
+    content: unknown,
+    metadata?: Record<string, unknown>
+): boolean {
+    if (!LIST_COLLECTIONS_TOOL_NAMES.includes(toolName)) return false;
+    
+    // Check content (non-dehydrated)
+    if (content && typeof content === 'object') {
+        const obj = content as Record<string, unknown>;
+        if (Array.isArray(obj.collections) && typeof obj.total_count === 'number') {
+            return true;
+        }
+    }
+    
+    // Check metadata.summary (dehydrated)
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as Record<string, unknown>;
+        if (
+            summary.tool_name === 'list_collections' &&
+            Array.isArray(summary.collections) &&
+            typeof summary.total_count === 'number'
+        ) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Type guard for list_tags results.
+ * Checks both content and metadata.summary for compatibility with dehydrated results.
+ */
+export function isListTagsResult(
+    toolName: string,
+    content: unknown,
+    metadata?: Record<string, unknown>
+): boolean {
+    if (!LIST_TAGS_TOOL_NAMES.includes(toolName)) return false;
+    
+    // Check content (non-dehydrated)
+    if (content && typeof content === 'object') {
+        const obj = content as Record<string, unknown>;
+        if (Array.isArray(obj.tags) && typeof obj.total_count === 'number') {
+            return true;
+        }
+    }
+    
+    // Check metadata.summary (dehydrated)
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as Record<string, unknown>;
+        if (
+            summary.tool_name === 'list_tags' &&
+            Array.isArray(summary.tags) &&
+            typeof summary.total_count === 'number'
+        ) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Type guard for get_metadata results.
+ * Checks both content and metadata.summary for compatibility with dehydrated results.
+ */
+export function isGetMetadataResult(
+    toolName: string,
+    content: unknown,
+    metadata?: Record<string, unknown>
+): boolean {
+    if (!GET_METADATA_TOOL_NAMES.includes(toolName)) return false;
+    
+    // Check content (non-dehydrated)
+    if (content && typeof content === 'object') {
+        const obj = content as Record<string, unknown>;
+        if (Array.isArray(obj.items)) {
+            return true;
+        }
+    }
+    
+    // Check metadata.summary (dehydrated)
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as Record<string, unknown>;
+        if (
+            summary.tool_name === 'get_metadata' &&
+            Array.isArray(summary.items)
+        ) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Normalized zotero search view data.
+ */
+export interface ZoteroSearchViewData {
+    items: ZoteroItemReference[];
+    totalCount: number;
+}
+
+/**
+ * Extract zotero search data from content or metadata.summary.
+ * Uses metadata.summary (which contains ZoteroItemReference[]) for dehydrated results.
+ */
+export function extractZoteroSearchData(
+    content: unknown,
+    metadata?: Record<string, unknown>
+): ZoteroSearchViewData | null {
+    // Try content first (non-dehydrated)
+    if (content && typeof content === 'object') {
+        const obj = content as ZoteroSearchResultContent;
+        if (Array.isArray(obj.items) && obj.items.length > 0) {
+            // Convert item_ids to ZoteroItemReference
+            const items: ZoteroItemReference[] = obj.items
+                .map(item => {
+                    const parts = item.item_id.split('-');
+                    if (parts.length < 2) return null;
+                    const libraryId = parseInt(parts[0], 10);
+                    const zoteroKey = parts.slice(1).join('-');
+                    if (isNaN(libraryId) || !zoteroKey) return null;
+                    return { library_id: libraryId, zotero_key: zoteroKey };
+                })
+                .filter((ref): ref is ZoteroItemReference => ref !== null);
+            
+            if (items.length > 0) {
+                return { items, totalCount: obj.total_count };
+            }
+        }
+    }
+    
+    // Fall back to metadata.summary (dehydrated)
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as ZoteroSearchResultSummary;
+        if (Array.isArray(summary.items)) {
+            return { 
+                items: summary.items.map(item => ({
+                    library_id: item.library_id,
+                    zotero_key: item.zotero_key,
+                })),
+                totalCount: summary.total_count 
+            };
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Normalized list items view data.
+ */
+export interface ListItemsViewData {
+    items: ZoteroItemReference[];
+    totalCount: number;
+    libraryName?: string | null;
+    collectionName?: string | null;
+}
+
+/**
+ * Extract list items data from content or metadata.summary.
+ * Uses metadata.summary (which contains ZoteroItemReference[]) for dehydrated results.
+ */
+export function extractListItemsData(
+    content: unknown,
+    metadata?: Record<string, unknown>
+): ListItemsViewData | null {
+    // Try content first (non-dehydrated)
+    if (content && typeof content === 'object') {
+        const obj = content as ListItemsResultContent;
+        if (Array.isArray(obj.items) && obj.items.length > 0) {
+            // Convert item_ids to ZoteroItemReference
+            const items: ZoteroItemReference[] = obj.items
+                .map(item => {
+                    const parts = item.item_id.split('-');
+                    if (parts.length < 2) return null;
+                    const libraryId = parseInt(parts[0], 10);
+                    const zoteroKey = parts.slice(1).join('-');
+                    if (isNaN(libraryId) || !zoteroKey) return null;
+                    return { library_id: libraryId, zotero_key: zoteroKey };
+                })
+                .filter((ref): ref is ZoteroItemReference => ref !== null);
+            
+            if (items.length > 0) {
+                return {
+                    items,
+                    totalCount: obj.total_count,
+                    libraryName: obj.library_name,
+                    collectionName: obj.collection_name,
+                };
+            }
+        }
+    }
+    
+    // Fall back to metadata.summary (dehydrated)
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as ListItemsResultSummary;
+        if (Array.isArray(summary.items)) {
+            return { 
+                items: summary.items.map(item => ({
+                    library_id: item.library_id,
+                    zotero_key: item.zotero_key,
+                })),
+                totalCount: summary.total_count,
+                libraryName: summary.library_name,
+                collectionName: summary.collection_name,
+            };
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Normalized list collections view data.
+ * Uses CollectionReference (collection_key, name) which is available in both content and summary.
+ */
+export interface ListCollectionsViewData {
+    collections: CollectionReference[];
+    totalCount: number;
+    libraryId?: number | null;
+    libraryName?: string | null;
+}
+
+/**
+ * Extract list collections data from content or metadata.summary.
+ * Uses metadata.summary (which contains CollectionReference[]) for dehydrated results.
+ */
+export function extractListCollectionsData(
+    content: unknown,
+    metadata?: Record<string, unknown>
+): ListCollectionsViewData | null {
+    // Try content first (non-dehydrated)
+    if (content && typeof content === 'object') {
+        const obj = content as ListCollectionsResultContent;
+        if (Array.isArray(obj.collections) && obj.collections.length > 0) {
+            // Convert CollectionInfo to CollectionReference (keep key and name)
+            const collections: CollectionReference[] = obj.collections.map(coll => ({
+                collection_key: coll.collection_key,
+                name: coll.name,
+            }));
+            
+            return {
+                collections,
+                totalCount: obj.total_count,
+                libraryId: obj.library_id,
+                libraryName: obj.library_name,
+            };
+        }
+    }
+    
+    // Fall back to metadata.summary (dehydrated)
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as ListCollectionsResultSummary;
+        if (Array.isArray(summary.collections)) {
+            return { 
+                collections: summary.collections.map(coll => ({
+                    collection_key: coll.collection_key,
+                    name: coll.name,
+                })),
+                totalCount: summary.total_count,
+                libraryId: summary.library_id,
+                libraryName: summary.library_name,
+            };
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Normalized list tags view data.
+ * Uses TagReference (name, item_count) which is available in both content and summary.
+ */
+export interface ListTagsViewData {
+    tags: TagReference[];
+    totalCount: number;
+    libraryId?: number | null;
+    libraryName?: string | null;
+}
+
+/**
+ * Extract list tags data from content or metadata.summary.
+ * Uses metadata.summary (which contains TagReference[]) for dehydrated results.
+ */
+export function extractListTagsData(
+    content: unknown,
+    metadata?: Record<string, unknown>
+): ListTagsViewData | null {
+    // Try content first (non-dehydrated)
+    if (content && typeof content === 'object') {
+        const obj = content as ListTagsResultContent;
+        if (Array.isArray(obj.tags) && obj.tags.length > 0) {
+            // Convert TagInfo to TagReference (keep name and item_count)
+            const tags: TagReference[] = obj.tags.map(tag => ({
+                name: tag.name,
+                item_count: tag.item_count,
+            }));
+            
+            return {
+                tags,
+                totalCount: obj.total_count,
+                libraryId: obj.library_id,
+                libraryName: obj.library_name,
+            };
+        }
+    }
+    
+    // Fall back to metadata.summary (dehydrated)
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as ListTagsResultSummary;
+        if (Array.isArray(summary.tags)) {
+            return { 
+                tags: summary.tags.map(tag => ({
+                    name: tag.name,
+                    item_count: tag.item_count,
+                })),
+                totalCount: summary.total_count,
+                libraryId: summary.library_id,
+                libraryName: summary.library_name,
+            };
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Normalized get metadata view data.
+ * Uses ZoteroItemReference[] which is available in both content (via item_id) and summary.
+ */
+export interface GetMetadataViewData {
+    items: ZoteroItemReference[];
+    notFound: string[];
+}
+
+/**
+ * Extract get metadata data from content or metadata.summary.
+ * Uses metadata.summary (which contains ZoteroItemReference[]) for dehydrated results.
+ */
+export function extractGetMetadataData(
+    content: unknown,
+    metadata?: Record<string, unknown>
+): GetMetadataViewData | null {
+    // Try content first (non-dehydrated)
+    if (content && typeof content === 'object') {
+        const obj = content as GetMetadataResultContent;
+        if (Array.isArray(obj.items) && obj.items.length > 0) {
+            // Convert item_ids to ZoteroItemReference
+            const items: ZoteroItemReference[] = obj.items
+                .map(item => {
+                    const parts = item.item_id.split('-');
+                    if (parts.length < 2) return null;
+                    const libraryId = parseInt(parts[0], 10);
+                    const zoteroKey = parts.slice(1).join('-');
+                    if (isNaN(libraryId) || !zoteroKey) return null;
+                    return { library_id: libraryId, zotero_key: zoteroKey };
+                })
+                .filter((ref): ref is ZoteroItemReference => ref !== null);
+            
+            if (items.length > 0) {
+                return {
+                    items,
+                    notFound: obj.not_found ?? [],
+                };
+            }
+        }
+    }
+    
+    // Fall back to metadata.summary (dehydrated)
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as GetMetadataResultSummary;
+        if (Array.isArray(summary.items)) {
+            return { 
+                items: summary.items.map(item => ({
+                    library_id: item.library_id,
+                    zotero_key: item.zotero_key,
+                })),
+                notFound: [], // not_found list is not in summary
+            };
+        }
+    }
+    
+    return null;
 }
 
 // ============================================================================

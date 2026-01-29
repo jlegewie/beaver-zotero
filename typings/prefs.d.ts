@@ -23,6 +23,7 @@ declare namespace _ZoteroTypes {
       "maxPageCount": number;
       "autoApplyAnnotations": boolean;
       "autoImportItems": boolean;
+      "deferredToolPreferences": string;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;
       "openAiApiKey": string;

@@ -26,6 +26,7 @@ import AddSelectedItemsOnNewThreadToggle from "../preferences/AddSelectedItemsOn
 import AddSelectedItemsOnOpenToggle from "../preferences/AddSelectedItemsOnOpenToggle";
 import SyncedLibraries from "../preferences/SyncedLibraries";
 import { ProcessingMode } from "../../types/profile";
+import DeferredToolPreferenceSetting from "../preferences/DeferredToolPreferenceSetting";
 
 const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <h2 className="text-xl font-semibold mt-6 mb-2 font-color-primary">
@@ -412,6 +413,10 @@ const PreferencePage: React.FC = () => {
                             <div className="font-color-primary">{profileBalance.pagesRemaining.toLocaleString() || 'Unknown'}</div>
                         </div>
                     }
+                    <div className="display-flex flex-row items-center gap-2">
+                        <div className="font-color-secondary">Remaining Chat Credits:</div>
+                        <div className="font-color-primary">{profileBalance.chatCreditsRemaining.toLocaleString() || 'Unknown'}</div>
+                    </div>
                     <div className="display-flex flex-row items-center gap-3 mt-2">
                         <Button
                             variant="outline"
@@ -542,6 +547,29 @@ const PreferencePage: React.FC = () => {
                 <EmailToggle
                     checked={emailNotifications}
                     onChange={handleEmailNotificationsChange}
+                />
+            </div>
+
+            {/* --- Permissions Section --- */}
+            <SectionHeader>Permissions</SectionHeader>
+            <div className="text-sm font-color-secondary mb-3">
+                Control how Beaver handles actions that modify your Zotero library.
+            </div>
+            <div className="display-flex flex-col gap-3">
+                <DeferredToolPreferenceSetting
+                    toolName="edit_metadata"
+                    label="Metadata Edits"
+                    description="Changes to item titles, authors, abstracts, and other metadata"
+                />
+                <DeferredToolPreferenceSetting
+                    toolName="create_items"
+                    label="Item Imports"
+                    description="Importing new items from external sources"
+                />
+                <DeferredToolPreferenceSetting
+                    toolName="create_collection"
+                    label="Library Organization"
+                    description="Creating collections and organizing items into collections and by tags"
                 />
             </div>
 

@@ -1,5 +1,6 @@
 import { ToolCallStatus } from './atoms';
 import { ToolCallPart } from './types';
+import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../src/services/agentDataProvider/utils';
 
 /**
  * Get display name from a Zotero item (Author Year format).
@@ -40,6 +41,21 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     fulltext_search: 'Fulltext search',
     fulltext_search_keywords: 'Keyword search',
 
+    // List tools
+    list_items: 'List items',
+    list_collections: 'List collections',
+    list_tags: 'List tags',
+    list_libraries: 'List libraries',
+    zotero_search: 'Zotero search',
+
+    // Metadata tools
+    get_metadata: 'Get metadata',
+    edit_metadata: 'Edit metadata',
+
+    // Organization tools
+    organize_items: 'Organize items',
+    create_collection: 'Create collection',
+
     // Reading tools
     read_pages: 'Reading',
     search_in_documents: 'Search in documents',
@@ -57,6 +73,15 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     search_external_references: 'Web search',
     create_zotero_item: 'Add item',
     external_search: 'Web search',
+    lookup_work: 'Lookup work',
+};
+
+
+/**
+ * Labels for skill names.
+ */
+const SKILL_NAME_LABELS: Record<string, string> = {
+    'library-management': 'Library management',
 };
 
 /**
@@ -221,6 +246,47 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
         }
 
+        // === List tools ===
+        case 'list_items': {
+            const parts: string[] = [];
+            
+            // Handle library parameter
+            const libraryParam = args.library as string | number | undefined;
+            const libraryId = typeof libraryParam === 'number' 
+                ? libraryParam 
+                : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
+            
+            // Handle collection parameter
+            const collectionParam = args.collection_key as string | undefined;
+            if (collectionParam) {
+                const collection = getCollectionByIdOrName(collectionParam, libraryId);
+                if (collection) {
+                    parts.push(`"${collection.name}"`);
+                }
+            }
+            
+            // Handle tag parameter
+            const tag = args.tag as string | undefined;
+            if (tag) {
+                parts.push(`tag "${truncate(tag, 20)}"`);
+            }
+            
+            // Show library name only when no collection/tag filter and library is specified
+            if (parts.length === 0 && libraryParam) {
+                const library = getLibraryByIdOrName(libraryParam);
+                if (library.library && library.library.name) {
+                    parts.push(`"${library.library.name}"`);
+                } else {
+                    parts.push(`"${libraryParam}"`);
+                }
+            }
+            
+            if (parts.length > 0) {
+                return `${baseLabel}: ${truncate(parts.join(' '), 50)}`;
+            }
+            return `${baseLabel}`;
+        }
+
         // === Reading tools ===
         case 'search_in_documents': {
             const description = args.description as string | undefined;
@@ -251,8 +317,11 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                     case 'skill_resource': {
                         // Extract skill name from path: /skills/{skill-name}/...
                         const skillMatch = path.match(/\/skills\/([^/]+)/i);
-                        const skillName = skillMatch?.[1] || 'skill';
-                        return `Reading skill: ${truncate(skillName, 30)}`;
+                        const skillKey = skillMatch?.[1];
+                        const skillName = SKILL_NAME_LABELS[skillKey as string] 
+                            || skillKey?.replace(/-/g, ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+                            || 'skill';
+                        return `Loading skill: ${truncate(skillName, 30)}`;
                     }
                     case 'documentation':
                         return 'Reading documentation';
@@ -302,11 +371,139 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
         case 'external_search': {
             const searchLabel = args.search_label as string | undefined;
             const query = args.query as string | undefined;
-            const label = searchLabel || (query ? truncate(query, 40) : null);
+            const label = searchLabel || (query ? truncate(query, 60) : null);
             if (label) {
                 return `${baseLabel}: ${label}`;
             }
             return baseLabel;
+        }
+
+        case 'lookup_work': {
+            // Handle both old (singular) and new (list) parameter formats
+            const identifiers = args.identifiers as string[] | undefined;
+            const titles = args.titles as string[] | undefined;
+            const identifier = args.identifier as string | undefined;
+            const title = args.title as string | undefined;
+            
+            // Count total queries
+            const idCount = identifiers?.length ?? (identifier ? 1 : 0);
+            const titleCount = titles?.length ?? (title ? 1 : 0);
+            const totalCount = idCount + titleCount;
+            
+            // Single item lookup: show the identifier or title
+            if (totalCount === 1) {
+                const singleLabel = identifier || title || identifiers?.[0] || titles?.[0];
+                if (singleLabel) {
+                    return `${baseLabel}: ${truncate(singleLabel, 40)}`;
+                }
+            }
+            
+            // Multiple items: show count
+            if (totalCount > 1) {
+                return `${baseLabel}: ${totalCount} works`;
+            }
+            
+            return baseLabel;
+        }
+
+        // === Library management tools ===
+        case 'zotero_search': {
+            const conditions = args.conditions as Array<{ 
+                field?: string; 
+                value?: string | null; 
+                operator?: string 
+            }> | undefined;
+            
+            if (conditions && conditions.length > 0) {
+                // Show first condition as summary
+                const firstCond = conditions[0];
+                const field = firstCond.field || 'any';
+                const operator = firstCond.operator || 'is';
+                const value = firstCond.value ?? '';
+                
+                // Map operators to readable symbols/text
+                const operatorLabels: Record<string, string> = {
+                    'is': '=',
+                    'isNot': '≠',
+                    'contains': 'contains',
+                    'doesNotContain': 'does not contain',
+                    'beginsWith': 'begins with',
+                    'isLessThan': '<',
+                    'isGreaterThan': '>',
+                    'isBefore': 'before',
+                    'isAfter': 'after',
+                    'isInTheLast': 'in the last',
+                };
+                
+                const operatorLabel = operatorLabels[operator] || operator;
+                
+                // Format the condition based on operator type
+                if (value === '' && (operator === 'doesNotContain' || operator === 'is')) {
+                    // Special case: empty field search
+                    return `${baseLabel}: ${field} is empty`;
+                } else if (['<', '>', '=', '≠'].includes(operatorLabel)) {
+                    // Symbolic operators
+                    return `${baseLabel}: ${field} ${operatorLabel} "${truncate(value, 25)}"`;
+                } else {
+                    // Text operators
+                    return `${baseLabel}: "${field}" ${operatorLabel} "${truncate(value, 20)}"`;
+                }
+            }
+            return baseLabel;
+        }
+
+        case 'list_collections': {
+            const libraryParam = args.library as string | number | undefined;
+            const libraryId = typeof libraryParam === 'number' 
+                ? libraryParam 
+                : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
+            
+            const parentKey = args.parent_collection as string | undefined;
+            if (parentKey) {
+                const collection = getCollectionByIdOrName(parentKey, libraryId);
+                if (collection) {
+                    return `${baseLabel} in "${collection.name}"`;
+                }
+                return `${baseLabel}: subcollections`;
+            }
+            
+            // Show library name when listing top-level collections
+            if (libraryParam) {
+                const library = getLibraryByIdOrName(libraryParam);
+                if (library.library && library.library.name) {
+                    return `${baseLabel}: "${library.library.name}"`;
+                } else {
+                    return `${baseLabel}: "${libraryParam}"`;
+                }
+            }
+            return `${baseLabel}`;
+        }
+
+        case 'list_tags': {
+            const libraryParam = args.library as string | number | undefined;
+            const libraryId = typeof libraryParam === 'number' 
+                ? libraryParam 
+                : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
+            
+            const collectionKey = args.collection_key as string | undefined;
+            if (collectionKey) {
+                const collection = getCollectionByIdOrName(collectionKey, libraryId);
+                if (collection) {
+                    return `${baseLabel} in "${collection.name}"`;
+                }
+                return `${baseLabel} in collection`;
+            }
+            
+            // Show library name when listing all tags in a library
+            if (libraryParam) {
+                const library = getLibraryByIdOrName(libraryParam);
+                if (library.library && library.library.name) {
+                    return `${baseLabel}: "${library.library.name}"`;
+                } else {
+                    return `${baseLabel}: "${libraryParam}"`;
+                }
+            }
+            return `${baseLabel}`;
         }
 
         // === Tools without dynamic labels ===
@@ -314,6 +511,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
         case 'add_highlight_annotations':
         case 'add_note_annotations':
         case 'create_zotero_item':
+        case 'list_libraries':
         default:
             return baseLabel;
     }

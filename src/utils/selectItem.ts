@@ -2,11 +2,12 @@ import { logger } from "./logger";
 
 /**
  * Enhanced item selection that ensures the item is visible before selecting it
- * @param {number} itemId - The ID of the item to select
- * @param {boolean} changeView - Whether to change the view to the library root
- * @returns {Promise<boolean>} - True if item was successfully selected, false otherwise
+ * @param itemId - The ID of the item to select
+ * @param changeView - Whether to change the view to the library root
+ * @param collectionId - Optional collection ID to navigate to instead of library root
+ * @returns True if item was successfully selected, false otherwise
  */
-export async function selectItemById(itemId: number, changeView: boolean = true) {
+export async function selectItemById(itemId: number, changeView: boolean = true, collectionId?: number) {
     if (!itemId) return false;
 
     // Get the item to check its properties
@@ -19,9 +20,22 @@ export async function selectItemById(itemId: number, changeView: boolean = true)
     // Check if item is in the currently visible collection/library
     const isItemVisible = await checkItemVisibility(itemId);
     
-    if (!isItemVisible && changeView) {        
-        // Switch to the item's library root
-        const success = await switchToLibraryRoot(item.libraryID);
+    if (!isItemVisible && changeView) {
+        let success = false;
+        
+        // If a collection ID is provided, try to navigate to that collection first
+        if (collectionId) {
+            const collection = Zotero.Collections.get(collectionId);
+            if (collection) {
+                success = await switchToCollection(collection.id);
+            }
+        }
+        
+        // Fall back to library root if collection navigation failed or wasn't requested
+        if (!success) {
+            success = await switchToLibraryRoot(item.libraryID);
+        }
+        
         if (!success) {
             logger(`Failed to switch to library ${item.libraryID}`, 2);
             return false;
@@ -91,9 +105,30 @@ async function checkItemVisibility(itemId: number) {
 }
 
 /**
+ * Switch to a specific collection
+ * @param collectionId - The ID of the collection to switch to
+ * @returns True if successfully switched, false otherwise
+ */
+async function switchToCollection(collectionId: number): Promise<boolean> {
+    const zoteroPane = Zotero.getActiveZoteroPane();
+    if (!zoteroPane.collectionsView || !zoteroPane.itemsView) return false;
+
+    try {
+        const success = await zoteroPane.collectionsView.selectCollection(collectionId);
+        if (success) {
+            await zoteroPane.itemsView.waitForLoad();
+        }
+        return success;
+    } catch (error) {
+        logger(`Error switching to collection ${collectionId}: ${error}`, 2);
+        return false;
+    }
+}
+
+/**
  * Switch to the library root for a given library
- * @param {number} libraryId - The ID of the library to switch to
- * @returns {Promise<boolean>} - True if successfully switched, false otherwise
+ * @param libraryId - The ID of the library to switch to
+ * @returns True if successfully switched, false otherwise
  */
 async function switchToLibraryRoot(libraryId: number) {
     const zoteroPane = Zotero.getActiveZoteroPane();

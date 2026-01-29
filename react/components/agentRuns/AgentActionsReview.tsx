@@ -8,7 +8,7 @@ import {
 } from '../../agents/agentActions';
 import CreateItemAgentActionDisplay from './CreateItemAgentActionDisplay';
 
-interface AgentActionsDisplayProps {
+interface AgentActionsReviewProps {
     run: AgentRun;
 }
 
@@ -16,7 +16,7 @@ interface AgentActionsDisplayProps {
  * Displays agent actions for a completed run.
  * Currently supports create_item actions from citations.
  */
-export const AgentActionsDisplay: React.FC<AgentActionsDisplayProps> = ({ run }) => {
+export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) => {
     const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
 
     // Get create item actions with toolcall_id 'citations' (from citation extraction)
@@ -57,5 +57,5 @@ export const AgentActionsDisplay: React.FC<AgentActionsDisplayProps> = ({ run })
     );
 };
 
-export default AgentActionsDisplay;
+export default AgentActionsReview;
 

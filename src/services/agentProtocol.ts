@@ -252,6 +252,23 @@ export interface ItemSearchFrontendResultItem {
     similarity?: number;
 }
 
+/**
+ * Optional timing breakdown from frontend operations.
+ * Used for backend diagnostics to understand where time is spent during search operations.
+ */
+export interface FrontendTimingMetadata {
+    /** Total operation time in milliseconds */
+    total_ms?: number;
+    /** Time spent in search/query phase */
+    search_ms?: number;
+    /** Time spent serializing items */
+    serialization_ms?: number;
+    /** Number of items processed */
+    item_count?: number;
+    /** Number of attachments processed */
+    attachment_count?: number;
+}
+
 /** Request from backend to search Zotero library by metadata */
 export interface WSItemSearchByMetadataRequest extends WSBaseEvent {
     event: 'item_search_by_metadata_request';
@@ -281,6 +298,8 @@ export interface WSItemSearchByMetadataRequest extends WSBaseEvent {
 
     // Options
     limit: number;
+    /** Number of results to skip for pagination. Default: 0. Optional for backward compatibility. */
+    offset?: number;
 }
 
 /** Error codes for item search failures */
@@ -299,6 +318,8 @@ export interface WSItemSearchByMetadataResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: ItemSearchErrorCode | null;
+    /** Optional timing breakdown for diagnostics */
+    timing?: FrontendTimingMetadata;
 }
 
 /** Request from backend to search Zotero library by topic using semantic search */
@@ -326,6 +347,8 @@ export interface WSItemSearchByTopicRequest extends WSBaseEvent {
 
     // Options
     limit: number;
+    /** Number of results to skip for pagination. Default: 0. Optional for backward compatibility. */
+    offset?: number;
 }
 
 /** Response to item topic search request */
@@ -337,6 +360,8 @@ export interface WSItemSearchByTopicResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: ItemSearchErrorCode | null;
+    /** Optional timing breakdown for diagnostics */
+    timing?: FrontendTimingMetadata;
 }
 
 /** Request from backend to fetch Zotero item/attachment data */
@@ -491,6 +516,315 @@ export interface WSZoteroAttachmentSearchResponse {
     error_code?: AttachmentSearchErrorCode | null;
 }
 
+// =============================================================================
+// Library Management Tools (Request/Response)
+// =============================================================================
+
+/** Search condition for zotero_search */
+export interface ZoteroSearchCondition {
+    /** Zotero field to search */
+    field: string;
+    /** Comparison operator */
+    operator: string;
+    /** Value to compare against */
+    value?: string | null;
+}
+
+/** Zotero item category */
+export type ZoteroItemCategory = 'regular' | 'attachment' | 'note' | 'annotation' | 'all';
+
+/** Request from backend for zotero_search */
+export interface WSZoteroSearchRequest extends WSBaseEvent {
+    event: 'zotero_search_request';
+    request_id: string;
+    conditions: ZoteroSearchCondition[];
+    join_mode: 'all' | 'any';
+    library_id?: number | string | null;
+    item_category?: ZoteroItemCategory | null;
+    include_children: boolean;
+    recursive: boolean;
+    limit: number;
+    offset: number;
+    fields?: string[] | null;
+}
+
+/** Result item from zotero_search */
+export interface ZoteroSearchResultItem {
+    item_id: string;
+    item_type: string;
+    title?: string | null;
+    creators?: string | null;
+    year?: number | null;
+    extra_fields?: Record<string, any> | null;
+}
+
+/** Brief library info for error responses */
+export interface AvailableLibraryInfo {
+    library_id: number;
+    name: string;
+}
+
+/** Response to zotero_search request */
+export interface WSZoteroSearchResponse {
+    type: 'zotero_search';
+    request_id: string;
+    items: ZoteroSearchResultItem[];
+    total_count: number;
+    error?: string | null;
+    error_code?: string | null;
+    /** Available libraries (only included when error_code is 'library_not_found') */
+    available_libraries?: AvailableLibraryInfo[] | null;
+}
+
+/** Request from backend for list_items */
+export interface WSListItemsRequest extends WSBaseEvent {
+    event: 'list_items_request';
+    request_id: string;
+    library_id?: number | string | null;
+    collection_key?: string | null;
+    tag?: string | null;
+    item_category: ZoteroItemCategory;
+    recursive: boolean;
+    sort_by: string;
+    sort_order: string;
+    limit: number;
+    offset: number;
+}
+
+/** Result item from list_items */
+export interface ListItemsResultItem {
+    item_id: string;
+    item_type: string;
+    title?: string | null;
+    creators?: string | null;
+    year?: number | null;
+    date_added?: string | null;
+    date_modified?: string | null;
+}
+
+/** Response to list_items request */
+export interface WSListItemsResponse {
+    type: 'list_items';
+    request_id: string;
+    items: ListItemsResultItem[];
+    total_count: number;
+    library_name?: string | null;
+    collection_name?: string | null;
+    error?: string | null;
+    error_code?: string | null;
+    /** Available libraries (only included when error_code is 'library_not_found') */
+    available_libraries?: AvailableLibraryInfo[] | null;
+}
+
+/** Request from backend for get_metadata */
+export interface WSGetMetadataRequest extends WSBaseEvent {
+    event: 'get_metadata_request';
+    request_id: string;
+    item_ids: string[];
+    /** Specific field names to include. null = all fields. */
+    fields?: string[] | null;
+    include_attachments: boolean;
+    /** Not supported yet - always false from backend */
+    include_notes: boolean;
+    include_tags: boolean;
+    include_collections: boolean;
+}
+
+/** Response to get_metadata request */
+export interface WSGetMetadataResponse {
+    type: 'get_metadata';
+    request_id: string;
+    items: Record<string, any>[];
+    not_found: string[];
+    error?: string | null;
+    error_code?: string | null;
+}
+
+// =============================================================================
+// Library Management: List Collections
+// =============================================================================
+
+/** Request to list collections in a library */
+export interface WSListCollectionsRequest extends WSBaseEvent {
+    event: 'list_collections_request';
+    request_id: string;
+    library_id?: number | string | null;
+    parent_collection_key?: string | null;
+    include_item_counts: boolean;
+    limit: number;
+    offset: number;
+}
+
+/** Collection information */
+export interface CollectionInfo {
+    collection_key: string;
+    name: string;
+    parent_key?: string | null;
+    parent_name?: string | null;
+    item_count: number;
+    subcollection_count: number;
+}
+
+/** Response to list_collections request */
+export interface WSListCollectionsResponse {
+    type: 'list_collections';
+    request_id: string;
+    collections: CollectionInfo[];
+    total_count: number;
+    library_id?: number | null;
+    library_name?: string | null;
+    error?: string | null;
+    error_code?: string | null;
+    /** Available libraries (only included when error_code is 'library_not_found') */
+    available_libraries?: AvailableLibraryInfo[] | null;
+}
+
+// =============================================================================
+// Library Management: List Tags
+// =============================================================================
+
+/** Request to list tags in a library */
+export interface WSListTagsRequest extends WSBaseEvent {
+    event: 'list_tags_request';
+    request_id: string;
+    library_id?: number | string | null;
+    collection_key?: string | null;
+    min_item_count: number;
+    limit: number;
+    offset: number;
+}
+
+/** Tag information */
+export interface TagInfo {
+    name: string;
+    item_count: number;
+    color?: string | null;
+}
+
+/** Response to list_tags request */
+export interface WSListTagsResponse {
+    type: 'list_tags';
+    request_id: string;
+    tags: TagInfo[];
+    total_count: number;
+    library_id?: number | null;
+    library_name?: string | null;
+    error?: string | null;
+    error_code?: string | null;
+    /** Available libraries (only included when error_code is 'library_not_found') */
+    available_libraries?: AvailableLibraryInfo[] | null;
+}
+
+// =============================================================================
+// Library Management: List Libraries
+// =============================================================================
+
+/** Request to list all available libraries */
+export interface WSListLibrariesRequest extends WSBaseEvent {
+    event: 'list_libraries_request';
+    request_id: string;
+}
+
+/** Library information */
+export interface LibraryInfo {
+    library_id: number;
+    name: string;
+    is_group: boolean;
+    read_only: boolean;
+    item_count: number;
+    collection_count: number;
+    tag_count: number;
+}
+
+/** Response to list_libraries request */
+export interface WSListLibrariesResponse {
+    type: 'list_libraries';
+    request_id: string;
+    libraries: LibraryInfo[];
+    total_count: number;
+    error?: string | null;
+    error_code?: string | null;
+}
+
+// =============================================================================
+// Deferred Tool Events (Agent Action Approval Workflow)
+// =============================================================================
+
+/** User preference for how deferred tools should behave */
+export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
+
+/** Agent action type for deferred tools */
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items';
+
+/** Request from backend to validate an agent action */
+export interface WSAgentActionValidateRequest extends WSBaseEvent {
+    event: 'agent_action_validate';
+    request_id: string;
+    action_type: AgentActionType;
+    action_data: Record<string, any>;
+}
+
+/** Error information for a failed field validation */
+export interface FieldValidationErrorInfo {
+    field: string;
+    error: string;
+    error_code: 'field_restricted' | 'field_unknown' | 'field_invalid_for_type';
+}
+
+/** Response to agent action validation request */
+export interface WSAgentActionValidateResponse {
+    type: 'agent_action_validate_response';
+    request_id: string;
+    valid: boolean;
+    error?: string | null;
+    error_code?: string | null;
+    /** Detailed list of field validation errors (for batch validation) */
+    errors?: FieldValidationErrorInfo[];
+    /** Current value for before/after tracking. Shape depends on action_type. */
+    current_value?: any;
+    preference: DeferredToolPreference;
+}
+
+/** Request from backend to execute an agent action */
+export interface WSAgentActionExecuteRequest extends WSBaseEvent {
+    event: 'agent_action_execute';
+    request_id: string;
+    action_type: AgentActionType;
+    action_data: Record<string, any>;
+}
+
+/** Response to agent action execution request */
+export interface WSAgentActionExecuteResponse {
+    type: 'agent_action_execute_response';
+    request_id: string;
+    success: boolean;
+    error?: string | null;
+    error_code?: string | null;
+    result_data?: Record<string, any>;
+}
+
+/** Request from backend for user approval of a deferred action */
+export interface WSDeferredApprovalRequest extends WSBaseEvent {
+    event: 'deferred_approval_request';
+    /** The AgentAction ID awaiting approval */
+    action_id: string;
+    /** The tool call ID this action belongs to (for UI matching) */
+    toolcall_id: string;
+    action_type: AgentActionType;
+    action_data: Record<string, any>;
+    /** Current value before the change. Shape depends on action_type. */
+    current_value?: any;
+}
+
+/** Response to deferred approval request (user's decision) */
+export interface WSDeferredApprovalResponse {
+    type: 'deferred_approval_response';
+    action_id: string;
+    approved: boolean;
+    /** Optional additional instructions from the user (e.g., 'Change title to X instead') */
+    user_instructions?: string | null;
+}
+
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
@@ -512,7 +846,18 @@ export type WSEvent =
     | WSExternalReferenceCheckRequest
     | WSZoteroDataRequest
     | WSItemSearchByMetadataRequest
-    | WSItemSearchByTopicRequest;
+    | WSItemSearchByTopicRequest
+    // Library management tools
+    | WSZoteroSearchRequest
+    | WSListItemsRequest
+    | WSListCollectionsRequest
+    | WSListTagsRequest
+    | WSGetMetadataRequest
+    | WSListLibrariesRequest
+    // Deferred tool events
+    | WSAgentActionValidateRequest
+    | WSAgentActionExecuteRequest
+    | WSDeferredApprovalRequest;
 
 
 // =============================================================================
@@ -531,16 +876,46 @@ export interface WSAuthMessage {
     frontend_version?: string;
 }
 
+/** Current library context for application state */
+export interface CurrentLibrary {
+    /** Library ID */
+    library_id: number;
+    /** Library name (e.g., "My Library" or group name) */
+    name: string;
+    /** Whether this is a group library */
+    is_group: boolean;
+    /** Whether the library data is read-only (not editable) */
+    read_only: boolean;
+    /** Whether the library is synced with Beaver (Pro feature) */
+    is_synced: boolean;
+}
+
+/** Current collection context for application state */
+export interface CurrentCollection {
+    /** Collection key */
+    collection_key: string;
+    /** Collection name */
+    name: string;
+    /** Library ID this collection belongs to */
+    library_id: number;
+    /** Parent collection key, if this is a subcollection */
+    parent_key?: string | null;
+}
+
 /**
  * Application state sent with messages.
  * Contains current view state and reader state if in reader view.
  */
 export interface ApplicationStateInput {
-    /** Current application view ('library' or 'reader') */
+    /** Current application view ('library' or 'file_reader') */
     current_view: 'library' | 'file_reader';
     /** Reader state when in reader view */
     reader_state?: ReaderState;
-    /** Currently selected library ID (optional) */
+    /** Current library context */
+    current_library?: CurrentLibrary;
+    /** Current collection context */
+    current_collection?: CurrentCollection;
+    /** Currently selected library items (optional) */
     library_selection?: ZoteroItemReference[];
 }
 
@@ -670,6 +1045,13 @@ export interface WSCallbacks {
      * @param event The missing zotero data event with item references
      */
     onMissingZoteroData?: (event: WSMissingZoteroDataEvent) => void;
+
+    /**
+     * Called when the backend requests user approval for a deferred action.
+     * The frontend should show an approval UI and call the provided callback.
+     * @param event The deferred approval request with action details
+     */
+    onDeferredApprovalRequest?: (event: WSDeferredApprovalRequest) => void;
 
     /**
      * Called when the WebSocket connection is established

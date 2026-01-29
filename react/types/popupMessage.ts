@@ -1,4 +1,5 @@
 import { FileStatusSummary } from "./fileStatus";
+import { FeatureStep } from "../constants/versionUpdateMessages";
 
 export const POPUP_MESSAGE_DURATION = 4000; // 4 seconds
 
@@ -28,8 +29,13 @@ export interface PopupMessage {
     duration?: number; // Duration in milliseconds, defaults to POPUP_MESSAGE_DURATION
     showGoToFileStatusButton?: boolean;
     showSettingsButton?: boolean;
+    /** @deprecated Use steps for new version messages */
     featureList?: PopupMessageFeature[];
     learnMoreUrl?: string;
     learnMoreLabel?: string;
     footer?: string;
+    /** Feature steps for guided tour (new format for version updates) */
+    steps?: FeatureStep[];
+    /** Subtitle shown below the title in step-based tours */
+    subtitle?: string;
 }

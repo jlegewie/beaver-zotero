@@ -26,9 +26,11 @@ const PopupMessageHeader: React.FC<PopupMessageHeaderProps> = ({
 
     return (
         <div className="display-flex flex-row items-start w-full gap-3">
-            <div className="flex-shrink-0">
-                {icon}
-            </div>
+            {icon &&
+                <div className="flex-shrink-0">
+                    {icon}
+                </div>
+            }
             <div className={`flex-1 text-base font-medium ${fontColor}`}>
                 {`${title} ${count ? `(${count})` : ''}`}
             </div>

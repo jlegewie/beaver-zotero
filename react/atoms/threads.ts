@@ -4,7 +4,7 @@ import { isLibraryTabAtom, isPreferencePageVisibleAtom, isWebSearchEnabledAtom, 
 
 import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom } from "./citations";
 import { isExternalCitation } from "../types/citations";
-import { agentRunService } from "../../src/services/agentService";
+import { agentRunService, agentService } from "../../src/services/agentService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { logger } from "../../src/utils/logger";
@@ -12,7 +12,16 @@ import { resetMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
 import { ExternalReference } from "../types/externalReferences";
 import { threadRunsAtom, activeRunAtom } from "../agents/atoms";
-import { threadAgentActionsAtom, isCreateItemAgentAction, AgentAction, validateAppliedAgentAction, undoAgentActionAtom } from "../agents/agentActions";
+import { isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
+import { AgentRun } from "../agents/types";
+import { 
+    threadAgentActionsAtom, 
+    isCreateItemAgentAction, 
+    AgentAction, 
+    validateAppliedAgentAction, 
+    undoAgentActionAtom,
+    clearAllPendingApprovalsAtom,
+} from "../agents/agentActions";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
 import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
@@ -101,47 +110,95 @@ export const windowScrollPositionAtom = atom(
 export const recentThreadsAtom = atom<ThreadData[]>([]);
 
 /**
+ * Cancel any active run when switching threads.
+ * This ensures the WebSocket connection is closed and UI state is consistent.
+ */
+async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any, value?: any) => void): Promise<void> {
+    const isPending = get(isWSChatPendingAtom);
+    const activeRun = get(activeRunAtom);
+    
+    if (isPending || activeRun) {
+        logger('cancelActiveRunIfNeeded: Canceling active run before switching threads', 1);
+        
+        // Set pending to false immediately for responsive UI
+        set(isWSChatPendingAtom, false);
+        
+        // Mark active run as canceled if it exists
+        if (activeRun && activeRun.status === 'in_progress') {
+            const canceledRun: AgentRun = {
+                ...activeRun,
+                status: 'canceled',
+                completed_at: new Date().toISOString(),
+            };
+            // Move canceled run to completed runs before clearing
+            set(threadRunsAtom, (runs: AgentRun[]) => [...runs, canceledRun]);
+        }
+        set(activeRunAtom, null);
+        
+        // Cancel the WebSocket connection
+        await agentService.cancel();
+        set(isWSConnectedAtom, false);
+        set(isWSReadyAtom, false);
+    }
+}
+
+/**
  * Atom to create a new thread
  */
 export const newThreadAtom = atom(
     null,
     async (get, set) => {
-        // Clean up any temporary annotations from previous thread
-        await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
-            logger(`newThreadAtom: Error cleaning up temporary annotations: ${error}`);
-        });
-        
-        const isLibraryTab = get(isLibraryTabAtom);
-        set(currentThreadIdAtom, null);
-        
-        // Clear agent-based atoms
-        set(threadRunsAtom, []);
-        set(activeRunAtom, null);
-        set(threadAgentActionsAtom, []);
-        
-        set(isWebSearchEnabledAtom, false);
-        
-        set(currentMessageItemsAtom, []);
-        set(removePopupMessagesByTypeAtom, ['items_summary']);
-        set(citationMetadataAtom, []);
-        set(resetCitationMarkersAtom);
-        set(citationDataMapAtom, {});
-        set(currentMessageContentAtom, '');
-        set(resetMessageUIStateAtom);
-        set(isPreferencePageVisibleAtom, false);
-        set(clearExternalReferenceCacheAtom);
-        // Update message items from Zotero selection or reader
-        const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
-        if (isLibraryTab && addSelectedItemsOnNewThread) {
-            const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
-            set(updateMessageItemsFromZoteroSelectionAtom, maxAddAttachmentToMessage);
+        // Show loading state immediately if there's an active run to cancel
+        const hasActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
+        if (hasActiveWork) {
+            set(isLoadingThreadAtom, true);
         }
-        if (!isLibraryTab) {
-            await set(updateReaderAttachmentAtom);
+        
+        try {
+            // Cancel any active run before switching threads
+            await cancelActiveRunIfNeeded(get, set);
+            
+            // Clean up any temporary annotations from previous thread
+            await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
+                logger(`newThreadAtom: Error cleaning up temporary annotations: ${error}`);
+            });
+            
+            const isLibraryTab = get(isLibraryTabAtom);
+            set(currentThreadIdAtom, null);
+            
+            // Clear agent-based atoms
+            set(threadRunsAtom, []);
+            set(activeRunAtom, null);
+            set(threadAgentActionsAtom, []);
+            set(clearAllPendingApprovalsAtom);
+            
+            set(isWebSearchEnabledAtom, false);
+            
+            set(currentMessageItemsAtom, []);
+            set(removePopupMessagesByTypeAtom, ['items_summary']);
+            set(citationMetadataAtom, []);
+            set(resetCitationMarkersAtom);
+            set(citationDataMapAtom, {});
+            set(currentMessageContentAtom, '');
+            set(resetMessageUIStateAtom);
+            set(isPreferencePageVisibleAtom, false);
+            set(clearExternalReferenceCacheAtom);
+            // Update message items from Zotero selection or reader
+            const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
+            if (isLibraryTab && addSelectedItemsOnNewThread) {
+                const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
+                set(updateMessageItemsFromZoteroSelectionAtom, maxAddAttachmentToMessage);
+            }
+            if (!isLibraryTab) {
+                await set(updateReaderAttachmentAtom);
+            }
+            // Reset scroll state for both sidebar and window
+            set(userScrolledAtom, false);
+            set(windowUserScrolledAtom, false);
+        } finally {
+            // Always clear loading state
+            set(isLoadingThreadAtom, false);
         }
-        // Reset scroll state for both sidebar and window
-        set(userScrolledAtom, false);
-        set(windowUserScrolledAtom, false);
     }
 );
 
@@ -156,8 +213,12 @@ export const isLoadingThreadAtom = atom<boolean>(false);
 export const loadThreadAtom = atom(
     null,
     async (get, set, { user_id, threadId }: { user_id: string; threadId: string }) => {
+        // Show loading state immediately for instant UI feedback
         set(isLoadingThreadAtom, true);
+        
         try {
+            // Cancel any active run before loading a different thread
+            await cancelActiveRunIfNeeded(get, set);
             // Clean up any temporary annotations from previous thread
             await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
                 logger(`loadThreadAtom: Error cleaning up temporary annotations: ${error}`);
@@ -173,8 +234,8 @@ export const loadThreadAtom = atom(
             set(isWebSearchEnabledAtom, false);
             set(resetCitationMarkersAtom);
             
-            // Clear active run when loading a different thread
-            set(activeRunAtom, null);
+            // Clear all pending approvals when loading a different thread
+            set(clearAllPendingApprovalsAtom);
             
             // Load agent runs with actions from the backend
             const { runs, agent_actions } = await agentRunService.getThreadRuns(threadId, true);

@@ -249,11 +249,24 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
     return {valid: false, error: "Invalid item type"};
 }
 
-export function revealSource(source: ZoteroItemReference | SourceAttachment | CitationData) {
+/**
+ * Reveal source item in Zotero, optionally in a specific collection
+ * @param source - The source item to reveal
+ * @param collectionKey - Optional collection key to navigate to before revealing
+ */
+export function revealSource(source: ZoteroItemReference | SourceAttachment | CitationData, collectionKey?: string) {
     if (!source.library_id || !source.zotero_key) return;
     const itemID = Zotero.Items.getIDFromLibraryAndKey(source.library_id, source.zotero_key);
     if (itemID && Zotero.getActiveZoteroPane()) {
-        selectItemById(itemID);
+        // Convert collection key to collection ID if provided
+        let collectionId: number | undefined;
+        if (collectionKey) {
+            const id = Zotero.Collections.getIDFromLibraryAndKey(source.library_id, collectionKey);
+            if (id !== false) {
+                collectionId = id;
+            }
+        }
+        selectItemById(itemID, true, collectionId);
     }
 }
 

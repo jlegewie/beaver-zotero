@@ -5,13 +5,17 @@ import { AgentRunView } from "./AgentRunView";
 import { scrollToBottom } from "../../utils/scrollToBottom";
 import { userScrolledAtom, windowUserScrolledAtom } from "../../atoms/ui";
 import { currentThreadScrollPositionAtom, windowScrollPositionAtom, currentThreadIdAtom } from "../../atoms/threads";
+import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
+import { toolExpandedAtom } from "../../atoms/messageUIState";
 
 const BOTTOM_THRESHOLD = 120; // pixels
 const RESTORE_THRESHOLD = 100; // pixels - threshold for restoring scroll position
 const RESTORE_DEBOUNCE_MS = 50; // ms - debounce delay for scroll restoration
 const ANIMATION_LOCKOUT_MS = 400; // ms - time to wait after animation before allowing restore
+const PENDING_APPROVAL_SCROLL_DELAY = 100; // ms - delay before scrolling for pending approval (allows content to render)
+const EXPANSION_SCROLL_EVAL_DELAY = 50; // ms - delay before re-evaluating scroll state after expansion toggle
 
 type ThreadViewProps = {
     /** Optional className for styling */
@@ -32,8 +36,15 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         const currentThreadId = useAtomValue(currentThreadIdAtom);
         const prevThreadIdRef = useRef<string | null>(null);
         
+        // Track pending approvals for scroll-to-bottom triggering
+        // With parallel tool calls, there can be multiple pending approvals
+        const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
+        const prevPendingApprovalIdsRef = useRef<Set<string>>(new Set());
+        
         // Track visibility state for ResizeObserver
         const wasHiddenRef = useRef(true);
+        // Track previous container height for resize detection
+        const prevContainerHeightRef = useRef(0);
         // Track if we're currently animating scroll
         const isAnimatingRef = useRef(false);
         // Debounce timer for restore
@@ -43,6 +54,10 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         const scrollPositionAtom = isWindow ? windowScrollPositionAtom : currentThreadScrollPositionAtom;
         const scrolledAtom = isWindow ? windowUserScrolledAtom : userScrolledAtom;
         const storedScrollTop = useAtomValue(scrollPositionAtom);
+        
+        // Watch expansion state to re-evaluate scroll button visibility after expand/collapse
+        const toolExpansionState = useAtomValue(toolExpandedAtom);
+        const prevExpansionStateRef = useRef(toolExpansionState);
         
         // Use the auto-scroll hook with window-aware state
         const { scrollContainerRef, setScrollContainerRef, handleScroll } = useAutoScroll(ref, {
@@ -114,7 +129,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             prevThreadIdRef.current = currentThreadId;
         }, [restoreScrollPosition, currentThreadId]);
 
-        // Watch for visibility transitions only (not all resize events)
+        // Watch for visibility transitions and container resizes
         useEffect(() => {
             const container = scrollContainerRef.current;
             if (!container) return;
@@ -123,8 +138,10 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 const entry = entries[0];
                 if (!entry) return;
                 
-                const isVisible = entry.contentRect.height > 0;
+                const currentHeight = entry.contentRect.height;
+                const isVisible = currentHeight > 0;
                 const wasHidden = wasHiddenRef.current;
+                const prevHeight = prevContainerHeightRef.current;
                 
                 // Only restore scroll position when transitioning from hidden to visible
                 // This prevents interference during normal content growth or layout shifts
@@ -138,8 +155,17 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                         restoreScrollPosition();
                     }, RESTORE_DEBOUNCE_MS);
                 }
+                // Re-evaluate scroll state when container height changes (window resize)
+                // Only trigger if already visible (not on visibility transition)
+                else if (!wasHidden && isVisible && prevHeight > 0 && currentHeight !== prevHeight) {
+                    const { scrollHeight, scrollTop } = container;
+                    const distanceFromBottom = scrollHeight - scrollTop - currentHeight;
+                    const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
+                    store.set(scrolledAtom, !isNearBottom);
+                }
                 
                 wasHiddenRef.current = !isVisible;
+                prevContainerHeightRef.current = currentHeight;
             });
             
             observer.observe(container);
@@ -149,7 +175,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     win.clearTimeout(restoreDebounceRef.current);
                 }
             };
-        }, [restoreScrollPosition, win]);
+        }, [restoreScrollPosition, scrolledAtom, win]);
 
         // Scroll to bottom when runs change
         useEffect(() => {
@@ -184,6 +210,74 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 }, ANIMATION_LOCKOUT_MS);
             }
         }, [runs, scrolledAtom, win]);
+
+        // Scroll to bottom when a new pending approval appears
+        // This ensures the approval buttons are visible, even if user had scrolled up
+        // Uses a delay to allow the AgentActionView to fully render/expand
+        // With parallel tool calls, we track all pending approval IDs
+        useEffect(() => {
+            const currentApprovalIds = new Set(pendingApprovalsMap.keys());
+            
+            // Check if there are any NEW pending approvals (not seen before)
+            let hasNewApproval = false;
+            for (const id of currentApprovalIds) {
+                if (!prevPendingApprovalIdsRef.current.has(id)) {
+                    hasNewApproval = true;
+                    break;
+                }
+            }
+            
+            // Only scroll if there's a NEW pending approval (not the same ones re-rendering)
+            if (hasNewApproval) {
+                const timeoutId = win.setTimeout(() => {
+                    if (scrollContainerRef.current) {
+                        // Force scroll to bottom for pending approvals - user action is required
+                        // Reset userScrolled to allow auto-scroll
+                        store.set(scrolledAtom, false);
+                        
+                        // Set animation flag
+                        isAnimatingRef.current = true;
+                        
+                        // Force scroll to bottom (passing false to override userScrolled)
+                        scrollToBottom(scrollContainerRef as React.RefObject<HTMLElement>, false, scrolledAtom);
+                        
+                        // Clear animation flag after animation completes
+                        win.setTimeout(() => {
+                            isAnimatingRef.current = false;
+                        }, ANIMATION_LOCKOUT_MS);
+                    }
+                }, PENDING_APPROVAL_SCROLL_DELAY);
+                
+                prevPendingApprovalIdsRef.current = currentApprovalIds;
+                
+                return () => win.clearTimeout(timeoutId);
+            }
+            
+            prevPendingApprovalIdsRef.current = currentApprovalIds;
+        }, [pendingApprovalsMap, scrolledAtom, win]);
+
+        // Re-evaluate scroll state when content expands/collapses
+        // This ensures the ScrollDownButton visibility is updated when user toggles tool results
+        useEffect(() => {
+            // Skip on initial mount (no change yet)
+            if (prevExpansionStateRef.current === toolExpansionState) return;
+            prevExpansionStateRef.current = toolExpansionState;
+            
+            // Wait briefly for DOM to update after expansion toggle
+            const timeoutId = win.setTimeout(() => {
+                const container = scrollContainerRef.current;
+                if (!container || container.clientHeight === 0) return;
+                
+                const { scrollHeight, clientHeight, scrollTop } = container;
+                const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+                const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
+                
+                // Update scrolled state based on current position
+                store.set(scrolledAtom, !isNearBottom);
+            }, EXPANSION_SCROLL_EVAL_DELAY);
+            
+            return () => win.clearTimeout(timeoutId);
+        }, [toolExpansionState, scrolledAtom, win]);
 
         if (runs.length === 0) {
             return (
