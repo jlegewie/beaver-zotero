@@ -561,6 +561,16 @@ const PreferencePage: React.FC = () => {
                     label="Metadata Edits"
                     description=""
                 />
+                <DeferredToolPreferenceSetting
+                    toolName="create_items"
+                    label="Item Imports"
+                    description=""
+                />
+                <DeferredToolPreferenceSetting
+                    toolName="create_collection"
+                    label="Library Organization"
+                    description=""
+                />
             </div>
 
             {/* --- API Keys Section --- */}
