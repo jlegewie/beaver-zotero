@@ -794,14 +794,17 @@ async function validateCreateItemAction(
         }
     }));
 
-    let existingItems: string[] = [];
+    // Map from source_id to Zotero item_id (format: "library_id-zotero_key")
+    const existingItems: Record<string, string> = {};
     try {
         const batchResults = await batchFindExistingReferences(batchItems, searchableLibraryIds);
-        existingItems = batchResults
-            .filter(result => result.item !== null)
-            .map(result => result.id);
+        for (const result of batchResults) {
+            if (result.item !== null) {
+                existingItems[result.id] = `${result.item.libraryID}-${result.item.key}`;
+            }
+        }
         
-        logger(`validateCreateItemAction: Found ${existingItems.length}/${items.length} items already in library`, 1);
+        logger(`validateCreateItemAction: Found ${Object.keys(existingItems).length}/${items.length} items already in library`, 1);
     } catch (error) {
         logger(`validateCreateItemAction: Batch reference check failed: ${error}`, 1);
         // Continue with empty existing items - let the frontend handle per-item checks
