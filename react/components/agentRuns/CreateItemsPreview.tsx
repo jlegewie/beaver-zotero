@@ -15,6 +15,8 @@ interface CreateItemsPreviewProps {
     actions: AgentAction[];
     /** Current status of the actions (batch status) */
     status?: ActionStatus;
+    /** Whether to show status icons for individual items (defaults to true for multiple items, false for single item) */
+    showStatusIcons?: boolean;
 }
 
 /**
@@ -57,17 +59,22 @@ function getStatusIndicator(status: ActionStatus): { icon: React.FC<React.SVGPro
 }
 
 /**
- * Preview component for multiple create_item actions in the deferred tool workflow.
- * Shows a list of items that will be created.
+ * Preview component for create_item actions in the deferred tool workflow.
+ * Shows a list of items that will be created. For single items, status icons
+ * are hidden by default to provide a cleaner UI.
  */
 export const CreateItemsPreview: React.FC<CreateItemsPreviewProps> = ({
     actions,
     status: propStatus,
+    showStatusIcons,
 }) => {
     // Compute overall status from actions if not provided
     const overallStatus = propStatus ?? getOverallStatus(actions);
     const isRejectedOrUndone = overallStatus === 'rejected' || overallStatus === 'undone';
     const isError = overallStatus === 'error';
+
+    // Default behavior: hide status icons for single item, show for multiple
+    const shouldShowStatusIcons = showStatusIcons ?? actions.length > 1;
 
     // Determine text styling based on overall status
     const getTextClasses = (defaultClass: string = 'font-color-primary') => {
@@ -99,12 +106,14 @@ export const CreateItemsPreview: React.FC<CreateItemsPreviewProps> = ({
                             key={action.id} 
                             className="display-flex flex-row items-start gap-2 py-1 border-bottom-quinary last:border-b-0"
                         >
-                            {/* Status indicator */}
-                            <div className="mt-015 flex-shrink-0 w-4">
-                                {statusIndicator.icon && (
-                                    <Icon icon={statusIndicator.icon} className={statusIndicator.className} />
-                                )}
-                            </div>
+                            {/* Status indicator - only show if enabled */}
+                            {shouldShowStatusIcons && (
+                                <div className="mt-015 flex-shrink-0 w-4">
+                                    {statusIndicator.icon && (
+                                        <Icon icon={statusIndicator.icon} className={statusIndicator.className} />
+                                    )}
+                                </div>
+                            )}
 
                             {/* Item metadata */}
                             <div className="flex-1 min-w-0">

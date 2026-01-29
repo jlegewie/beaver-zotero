@@ -20,7 +20,6 @@ import {
 import { EditMetadataPreview } from './EditMetadataPreview';
 import { CreateCollectionPreview } from './CreateCollectionPreview';
 import { OrganizeItemsPreview } from './OrganizeItemsPreview';
-import { CreateItemPreview } from './CreateItemPreview';
 import { CreateItemsPreview } from './CreateItemsPreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
@@ -523,7 +522,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             {/* Header */}
             <div
                 className={`
-                    display-flex flex-row py-15 bg-senary
+                    display-flex flex-row py-15 bg-senary items-start
                     ${isExpanded ? 'border-bottom-quinary' : ''}
                 `}
             >
@@ -747,7 +746,7 @@ function getActionTitle(
                 }
             } else if ((!actions || actions.length === 0) && actionData?.item?.title) {
                 // Pending approval case: actions not yet stored, but we have item data
-                return truncateText(actionData.item.title, 70);
+                return truncateText(actionData.item.title, 60);
             }
             return `${actions && actions.length > 1 ? `${actions.length} ` : ''}Item${actions && actions.length > 1 ? 's' : ''}`;
         }
@@ -867,24 +866,18 @@ const ActionPreview: React.FC<{
     }
 
     if (toolName === 'create_items' || toolName === 'create_item' || previewData.actionType === 'create_item') {
-        // Use multi-item preview if there are multiple actions
-        if (actions && actions.length > 1) {
+        // If no actions array provided, return fallback
+        if (!actions || actions.length === 0) {
             return (
-                <CreateItemsPreview
-                    actions={actions}
-                    status={status}
-                />
+                <div className="text-sm font-color-secondary px-3 py-2">
+                    No item data available
+                </div>
             );
         }
         
-        // Single item preview
-        const proposedData = previewData.actionData as CreateItemProposedData;
-        const resultData = previewData.resultData as CreateItemResultData | undefined;
-        
         return (
-            <CreateItemPreview
-                proposedData={proposedData}
-                resultData={resultData}
+            <CreateItemsPreview
+                actions={actions}
                 status={status}
             />
         );
