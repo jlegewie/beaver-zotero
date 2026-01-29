@@ -370,11 +370,13 @@ async function executeCreateItemAction(
     }
 
     try {
-        logger(`executeCreateItemAction: Creating item "${proposedData.item.title}"`, 1);
+        logger(`executeCreateItemAction: Creating item "${proposedData.item.title}" in library ${proposedData.library_id || 'default'}`, 1);
 
         // Create the item using the existing utility function
-        // This handles library/collection resolution, PDF downloads, etc.
-        const result: CreateItemResultData = await applyCreateItemData(proposedData);
+        // Pass library_id from proposed_data to target the correct library
+        const result: CreateItemResultData = await applyCreateItemData(proposedData, {
+            libraryId: proposedData.library_id,
+        });
 
         logger(`executeCreateItemAction: Successfully created item ${result.library_id}-${result.zotero_key}`, 1);
 

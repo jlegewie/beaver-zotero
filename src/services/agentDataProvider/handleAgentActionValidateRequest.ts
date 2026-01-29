@@ -714,7 +714,9 @@ interface CreateItemValidationItem {
 async function validateCreateItemAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { items, collections, tags } = request.action_data as {
+    const { library_id: rawLibraryId, library_name, items, collections, tags } = request.action_data as {
+        library_id?: number | null;
+        library_name?: string | null;
         items: CreateItemValidationItem[];
         collections?: string[];
         tags?: string[];
@@ -745,16 +747,67 @@ async function validateCreateItemAction(
         };
     }
 
-    // Get the target library (user's main library by default)
-    const targetLibraryId = Zotero.Libraries.userLibraryID;
-    const targetLibrary = Zotero.Libraries.get(targetLibraryId);
+    // Resolve target library: use provided ID, resolve name, or default to user's main library
+    let targetLibraryId: number;
     
-    if (!targetLibrary || !targetLibrary.editable) {
+    if (rawLibraryId !== undefined && rawLibraryId !== null) {
+        // Use provided library ID
+        targetLibraryId = rawLibraryId;
+    } else if (library_name) {
+        // Resolve library by name
+        const allLibraries = Zotero.Libraries.getAll();
+        const matchedLibrary = allLibraries.find(
+            (lib) => lib.name.toLowerCase() === library_name.toLowerCase()
+        );
+        if (!matchedLibrary) {
+            const availableNames = allLibraries.map((lib) => lib.name).join(', ');
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Library not found: "${library_name}". Available libraries: ${availableNames}`,
+                error_code: 'library_not_found',
+                preference: 'always_ask',
+            };
+        }
+        targetLibraryId = matchedLibrary.id;
+    } else {
+        // Default to user's main library
+        targetLibraryId = Zotero.Libraries.userLibraryID;
+    }
+
+    // Validate library exists
+    const targetLibrary = Zotero.Libraries.get(targetLibraryId);
+    if (!targetLibrary) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: 'Target library is not editable',
+            error: `Library not found: ${targetLibraryId}`,
+            error_code: 'library_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    // Validate library is searchable (synced with Beaver)
+    if (!searchableLibraryIds.includes(targetLibraryId)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library "${targetLibrary.name}" is not synced with Beaver. Update this in Beaver Preferences.`,
+            error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
+    
+    // Validate library is editable
+    if (!targetLibrary.editable) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library "${targetLibrary.name}" is read-only and cannot be modified`,
             error_code: 'library_not_editable',
             preference: 'always_ask',
         };

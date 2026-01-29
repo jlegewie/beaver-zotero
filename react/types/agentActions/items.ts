@@ -2,6 +2,9 @@ import type { ProposedAction } from "./base";
 import type { ExternalReference } from "../externalReferences";
 
 export interface CreateItemProposedData {
+    // Target library (undefined = user's main library)
+    library_id?: number;
+
     // Core item data
     item: ExternalReference;
     reason?: string;  // LLM-generated explanation of relevance
