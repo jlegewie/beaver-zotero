@@ -51,7 +51,7 @@ const DeferredToolPreferenceSetting: React.FC<DeferredToolPreferenceSettingProps
             label: DEFERRED_TOOL_PREFERENCE_LABELS[pref],
             onClick: () => handleSelect(pref),
             customContent: (
-                <div className="display-flex flex-col gap-05 min-w-0 py-05">
+                <div className="display-flex flex-col gap-05 min-w-0 py-05 items-start">
                     <div className="display-flex flex-row items-center gap-2">
                         <div className={`text-sm ${currentPreference === pref ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
                             {DEFERRED_TOOL_PREFERENCE_LABELS[pref]}
@@ -71,7 +71,7 @@ const DeferredToolPreferenceSetting: React.FC<DeferredToolPreferenceSettingProps
     const buttonLabel = DEFERRED_TOOL_PREFERENCE_LABELS[currentPreference];
 
     return (
-        <div className="display-flex flex-row items-center justify-between gap-4">
+        <div className="display-flex flex-row items-start justify-between gap-4">
             <div className="display-flex flex-col gap-05 flex-1 min-w-0">
                 <div className="display-flex flex-row items-center gap-2">
                     <div className="font-color-primary text-base">

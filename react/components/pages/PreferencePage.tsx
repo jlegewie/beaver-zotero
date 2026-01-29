@@ -559,17 +559,17 @@ const PreferencePage: React.FC = () => {
                 <DeferredToolPreferenceSetting
                     toolName="edit_metadata"
                     label="Metadata Edits"
-                    description=""
+                    description="Changes to item titles, authors, abstracts, and other metadata"
                 />
                 <DeferredToolPreferenceSetting
                     toolName="create_items"
                     label="Item Imports"
-                    description=""
+                    description="Importing new items from external sources"
                 />
                 <DeferredToolPreferenceSetting
                     toolName="create_collection"
                     label="Library Organization"
-                    description=""
+                    description="Creating collections and organizing items into collections and by tags"
                 />
             </div>
 
