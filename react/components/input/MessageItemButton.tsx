@@ -9,6 +9,7 @@ import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { navigateToAnnotation } from '../../utils/readerUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { toAnnotation } from '../../types/attachments/converters';
+import { selectItemById } from '../../../src/utils/selectItem';
 
 const MAX_ITEM_TEXT_LENGTH = 30;
 
@@ -34,6 +35,8 @@ interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
     onRemove?: (item: Zotero.Item) => void;
     isReaderAttachment?: boolean;
     showInvalid?: boolean;
+    /** Optional collection key to reveal the item within when clicked */
+    revealInCollectionKey?: string;
 }
 
 /**
@@ -51,6 +54,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             onRemove,
             isReaderAttachment = false,
             showInvalid = true,
+            revealInCollectionKey,
             ...rest
         } = props;
 
@@ -101,9 +105,15 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             
             // For regular items, select in Zotero
             try {
-                const win = Zotero.getMainWindow();
-                if (win && win.ZoteroPane) {
-                    win.ZoteroPane.selectItem(item.id);
+                // If a collection key is provided, reveal in that collection
+                if (revealInCollectionKey) {
+                    const collectionId = Zotero.Collections.getIDFromLibraryAndKey(item.libraryID, revealInCollectionKey);
+                    selectItemById(item.id, true, collectionId !== false ? collectionId : undefined);
+                } else {
+                    const win = Zotero.getMainWindow();
+                    if (win && win.ZoteroPane) {
+                        win.ZoteroPane.selectItem(item.id);
+                    }
                 }
             } catch (error) {
                 console.error('Failed to select item:', error);

@@ -130,6 +130,7 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
                             disabled={false}
                             canEdit={false}
                             showInvalid={false}
+                            revealInCollectionKey={collectionsToAdd[0]}
                         />
                     ))}
                     {overflowCount > 0 && (
