@@ -31,7 +31,7 @@ const ReferenceMetadataDisplay: React.FC<ReferenceMetadataDisplayProps> = ({
     const formattedAuthors = formatAuthors(authors);
 
     return (
-        <div className="display-flex flex-col gap-1">
+        <div className="display-flex flex-col gap-1 min-w-0">
             <div className={getTextClasses()}>
                 {title || 'Untitled Item'}
             </div>
@@ -41,7 +41,7 @@ const ReferenceMetadataDisplay: React.FC<ReferenceMetadataDisplayProps> = ({
                 </div>
             )}
             {(publicationTitle || year) && (
-                <div className={getTextClasses('font-color-secondary')}>
+                <div className={`${getTextClasses('font-color-secondary')} truncate`}>
                     {publicationTitle && <i>{publicationTitle}</i>}
                     {publicationTitle && year && ', '}
                     {year}
