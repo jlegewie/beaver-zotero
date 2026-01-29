@@ -7,6 +7,7 @@ import { revealSource } from '../../utils/sourceUtils';
 import IconButton from '../ui/IconButton';
 import { ArrowUpRightIcon } from '../icons/icons';
 import Tooltip from '../ui/Tooltip';
+// import ActionButtons from '../externalReferences/actionButtons';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -115,8 +116,8 @@ export const CreateItemsPreview: React.FC<CreateItemsPreviewProps> = ({
                                 </div>
                             )}
 
-                            {/* Item metadata */}
-                            <div className="flex-1 min-w-0">
+                            <div className="display-flex flex-col gap-2 flex-1 min-w-0">
+                                {/* Item metadata */}
                                 <ReferenceMetadataDisplay
                                     title={item.title}
                                     authors={item.authors}
@@ -124,7 +125,18 @@ export const CreateItemsPreview: React.FC<CreateItemsPreviewProps> = ({
                                     year={item.year}
                                     getTextClasses={getTextClasses}
                                 />
+
+                                {/* Action buttons */}
+                                {/* <ActionButtons
+                                    item={item}
+                                    detailsButtonMode="icon-only"
+                                    webButtonMode="icon-only"
+                                    pdfButtonMode="icon-only"
+                                    revealButtonMode="full"
+                                    importButtonMode='none'
+                                /> */}
                             </div>
+
 
                             {/* Reveal button (only for applied items) */}
                             {actionStatus === 'applied' && resultData?.library_id && resultData?.zotero_key && (
