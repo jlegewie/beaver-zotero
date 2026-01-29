@@ -25,7 +25,10 @@ export async function executeCreateItemAction(action: AgentAction): Promise<Crea
     logger(`executeCreateItemAction: Creating item "${proposedData.item.title}"`, 1);
 
     // Create the item using the existing utility function
-    const result = await applyCreateItemData(proposedData);
+    // Pass target library when provided to avoid defaulting to context library
+    const result = await applyCreateItemData(proposedData, {
+        libraryId: proposedData.library_id,
+    });
 
     // Sync the newly created item to backend
     try {
