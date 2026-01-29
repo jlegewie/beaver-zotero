@@ -21,10 +21,11 @@ import { EditMetadataPreview } from './EditMetadataPreview';
 import { CreateCollectionPreview } from './CreateCollectionPreview';
 import { OrganizeItemsPreview } from './OrganizeItemsPreview';
 import { CreateItemPreview } from './CreateItemPreview';
+import { CreateItemsPreview } from './CreateItemsPreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
-import { executeCreateItemAction, undoCreateItemAction } from '../../utils/createItemActions';
+import { executeCreateItemActions, undoCreateItemActions } from '../../utils/createItemActions';
 import type { CreateItemProposedData, CreateItemResultData } from '../../types/agentActions/items';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
@@ -156,6 +157,34 @@ const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
 };
 
 /**
+ * Compute the overall status for a group of actions.
+ * Used for batch operations where we need a single status to display.
+ * Priority: pending > applied (even partial) > error (only if none applied) > rejected/undone
+ * 
+ * Note: We prioritize 'applied' over 'error' when there are mixed results,
+ * so users can still undo successfully applied items even if some failed.
+ */
+function getOverallStatus(actions: AgentAction[]): ActionStatus {
+    if (actions.length === 0) return 'pending';
+    
+    const statuses = actions.map(a => a.status);
+    const hasApplied = statuses.some(s => s === 'applied');
+    const hasPending = statuses.some(s => s === 'pending');
+    const hasError = statuses.some(s => s === 'error');
+    
+    // If any is pending, show pending (still waiting)
+    if (hasPending) return 'pending';
+    // If any are applied, show applied (enables Undo for partial success)
+    if (hasApplied) return 'applied';
+    // If all have errors (none applied), show error
+    if (hasError) return 'error';
+    // If all are rejected or undone
+    if (statuses.every(s => s === 'rejected' || s === 'undone')) return 'rejected';
+    
+    return 'pending';
+}
+
+/**
  * Unified component for displaying agent action states.
  * Handles all states: awaiting approval, applied, rejected, undone, error, and pending.
  */
@@ -206,9 +235,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Track the action ID we're processing to detect status changes
     const processingActionIdRef = useRef<string | null>(null);
 
-    // Get agent action for this tool call
+    // Get agent actions for this tool call
     const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
     const actions = getAgentActionsByToolcall(toolcallId);
+    
+    // Determine if this is a multi-action tool call (create_items with multiple items)
+    const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
+    
+    // Primary action for backward compatibility (used for single-action tools)
     const action = actions.length > 0 ? actions[0] : null;
 
     // Atoms for state management
@@ -263,9 +297,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const isProcessing = isProcessingApproval || isProcessingAction;
     // Show 'awaiting' if we have a pending approval OR if we're processing
+    // For multi-action, compute overall status from all actions
     const status: ActionStatus | 'awaiting' = (isAwaitingApproval || isProcessing)
         ? 'awaiting' 
-        : (action?.status ?? 'pending');
+        : isMultiAction 
+            ? getOverallStatus(actions)
+            : (action?.status ?? 'pending');
     const config = STATUS_CONFIGS[status];
 
     // Handlers for awaiting approval (during agent run)
@@ -291,56 +328,82 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     // Handlers for post-run actions (after agent run is complete)
     const handleApplyPending = useCallback(async () => {
-        if (!action || isProcessing) return;
+        if (actions.length === 0 || isProcessing) return;
         
         setIsProcessingAction(true);
         try {
             if (toolName === 'edit_metadata') {
-                const result = await executeEditMetadataAction(action);
+                const result = await executeEditMetadataAction(action!);
                 // Acknowledge the action as applied with result data
                 await ackAgentActions(runId, [{
-                    action_id: action.id,
+                    action_id: action!.id,
                     result_data: result,
                 }]);
-                logger(`AgentActionView: Applied edit_metadata action ${action.id}`, 1);
+                logger(`AgentActionView: Applied edit_metadata action ${action!.id}`, 1);
             } else if (toolName === 'create_collection') {
-                const result = await executeCreateCollectionAction(action);
+                const result = await executeCreateCollectionAction(action!);
                 // Acknowledge the action as applied with result data
                 await ackAgentActions(runId, [{
-                    action_id: action.id,
+                    action_id: action!.id,
                     result_data: result,
                 }]);
-                logger(`AgentActionView: Applied create_collection action ${action.id}`, 1);
+                logger(`AgentActionView: Applied create_collection action ${action!.id}`, 1);
             } else if (toolName === 'organize_items') {
-                const result = await executeOrganizeItemsAction(action);
+                const result = await executeOrganizeItemsAction(action!);
                 // Acknowledge the action as applied with result data
                 await ackAgentActions(runId, [{
-                    action_id: action.id,
+                    action_id: action!.id,
                     result_data: result,
                 }]);
-                logger(`AgentActionView: Applied organize_items action ${action.id}`, 1);
+                logger(`AgentActionView: Applied organize_items action ${action!.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
-                const result = await executeCreateItemAction(action);
-                // Acknowledge the action as applied with result data
-                await ackAgentActions(runId, [{
-                    action_id: action.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied create_item action ${action.id}`, 1);
+                // Handle batch operations for multiple items
+                const actionsToApply = actions.filter(a => a.status !== 'applied');
+                if (actionsToApply.length === 0) return;
+                
+                const batchResult = await executeCreateItemActions(actionsToApply);
+                
+                // Acknowledge successful actions
+                if (batchResult.successes.length > 0) {
+                    await ackAgentActions(runId, batchResult.successes.map(s => ({
+                        action_id: s.action.id,
+                        result_data: s.result,
+                    })));
+                    logger(`AgentActionView: Applied ${batchResult.successes.length} create_item actions`, 1);
+                }
+                
+                // Set error status for failed actions
+                if (batchResult.failures.length > 0) {
+                    for (const failure of batchResult.failures) {
+                        setAgentActionsToError([failure.action.id], failure.error);
+                    }
+                    logger(`AgentActionView: Failed to apply ${batchResult.failures.length} create_item actions`, 1);
+                }
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to apply action';
-            logger(`AgentActionView: Failed to apply ${action.id}: ${errorMessage}`, 1);
-            setAgentActionsToError([action.id], errorMessage);
+            logger(`AgentActionView: Failed to apply actions: ${errorMessage}`, 1);
+            // Set error on all actions
+            const actionIds = actions.map(a => a.id);
+            setAgentActionsToError(actionIds, errorMessage);
         } finally {
             setIsProcessingAction(false);
         }
-    }, [action, isProcessing, toolName, runId, ackAgentActions, setAgentActionsToError]);
+    }, [action, actions, isProcessing, toolName, runId, ackAgentActions, setAgentActionsToError]);
 
     const handleRejectPending = useCallback(() => {
-        if (!action || isProcessing) return;
-        rejectAgentAction(action.id);
-    }, [action, isProcessing, rejectAgentAction]);
+        if (actions.length === 0 || isProcessing) return;
+        
+        // For multi-action, reject all actions
+        if (isMultiAction) {
+            for (const act of actions) {
+                rejectAgentAction(act.id);
+            }
+            logger(`AgentActionView: Rejected ${actions.length} create_item actions`, 1);
+        } else {
+            rejectAgentAction(action!.id);
+        }
+    }, [action, actions, isProcessing, isMultiAction, rejectAgentAction]);
 
     const handleUndo = useCallback(async () => {
         if (!action || isProcessing) return;
@@ -384,18 +447,39 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone organize_items action ${action.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
-                await undoCreateItemAction(action);
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone create_item action ${action.id}`, 1);
+                // Handle batch undo for multiple items
+                const actionsToUndo = actions.filter(a => a.status === 'applied');
+                if (actionsToUndo.length === 0) return;
+                
+                const batchResult = await undoCreateItemActions(actionsToUndo);
+                
+                // Mark successfully undone actions
+                for (const actionId of batchResult.successes) {
+                    undoAgentAction(actionId);
+                }
+                
+                // Set error status for failed actions
+                for (const failure of batchResult.failures) {
+                    setAgentActionsToError([failure.actionId], failure.error);
+                }
+                
+                logger(`AgentActionView: Undone ${batchResult.successes.length} create_item actions`, 1);
+                if (batchResult.failures.length > 0) {
+                    logger(`AgentActionView: Failed to undo ${batchResult.failures.length} create_item actions`, 1);
+                }
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to undo action';
-            logger(`AgentActionView: Failed to undo ${action.id}: ${errorMessage}`, 1);
-            setAgentActionsToError([action.id], errorMessage);
+            logger(`AgentActionView: Failed to undo actions: ${errorMessage}`, 1);
+            // Set error on all applied actions
+            const appliedActionIds = actions.filter(a => a.status === 'applied').map(a => a.id);
+            if (appliedActionIds.length > 0) {
+                setAgentActionsToError(appliedActionIds, errorMessage);
+            }
         } finally {
             setIsProcessingAction(false);
         }
-    }, [action, isProcessing, toolName, undoAgentAction, setAgentActionsToError]);
+    }, [action, actions, isProcessing, toolName, undoAgentAction, setAgentActionsToError]);
 
     const handleRetry = useCallback(async () => {
         // Retry is the same as apply for pending/error/undone/rejected actions
@@ -530,6 +614,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             toolName={toolName}
                             previewData={previewData}
                             status={status}
+                            actions={actions}
                         />
                     ) : (
                         <div className="text-sm font-color-secondary">
@@ -650,13 +735,17 @@ function getActionTitle(
         case 'create_item':
         case 'create_items': {
             // For create_item, get title from the item data
-            if (actions && actions.length == 0) {
+            // Check actions first, then fall back to actionData (for pending approvals where actions may be empty)
+            if (actions && actions.length === 1) {
                 const item = actions[0].proposed_data?.item ?? actionData?.item;
                 if (item?.title) {
                     return truncateText(item.title, 70);
                 }
+            } else if ((!actions || actions.length === 0) && actionData?.item?.title) {
+                // Pending approval case: actions not yet stored, but we have item data
+                return truncateText(actionData.item.title, 70);
             }
-            return `${actions && actions.length > 1 ? `${actions.length} ` : ''}Item${actions && actions.length > 1 ? `s` : ''}`;
+            return `${actions && actions.length > 1 ? `${actions.length} ` : ''}Item${actions && actions.length > 1 ? 's' : ''}`;
         }
         default:
             return null;
@@ -705,7 +794,9 @@ const ActionPreview: React.FC<{
     toolName: string;
     previewData: PreviewData;
     status: ActionStatus | 'awaiting';
-}> = ({ toolName, previewData, status }) => {
+    /** All actions for the tool call (for multi-item create_items) */
+    actions?: AgentAction[];
+}> = ({ toolName, previewData, status, actions }) => {
     if (toolName === 'edit_metadata' || previewData.actionType === 'edit_metadata') {
         const edits = previewData.actionData.edits || [];
         
@@ -772,6 +863,17 @@ const ActionPreview: React.FC<{
     }
 
     if (toolName === 'create_items' || toolName === 'create_item' || previewData.actionType === 'create_item') {
+        // Use multi-item preview if there are multiple actions
+        if (actions && actions.length > 1) {
+            return (
+                <CreateItemsPreview
+                    actions={actions}
+                    status={status}
+                />
+            );
+        }
+        
+        // Single item preview
         const proposedData = previewData.actionData as CreateItemProposedData;
         const resultData = previewData.resultData as CreateItemResultData | undefined;
         

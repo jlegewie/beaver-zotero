@@ -69,3 +69,73 @@ export async function undoCreateItemAction(action: AgentAction): Promise<void> {
 
     logger(`undoCreateItemAction: Successfully deleted item ${resultData.library_id}-${resultData.zotero_key}`, 1);
 }
+
+/**
+ * Result of a batch execute operation
+ */
+export interface BatchExecuteResult {
+    /** Successfully executed actions with their results */
+    successes: Array<{ action: AgentAction; result: CreateItemResultData }>;
+    /** Failed actions with their errors */
+    failures: Array<{ action: AgentAction; error: string }>;
+}
+
+/**
+ * Execute multiple create_item agent actions in batch.
+ * Returns results for all actions, tracking successes and failures separately.
+ */
+export async function executeCreateItemActions(actions: AgentAction[]): Promise<BatchExecuteResult> {
+    const result: BatchExecuteResult = {
+        successes: [],
+        failures: [],
+    };
+
+    for (const action of actions) {
+        try {
+            const itemResult = await executeCreateItemAction(action);
+            result.successes.push({ action, result: itemResult });
+        } catch (error: any) {
+            const errorMessage = error?.message || 'Failed to create item';
+            logger(`executeCreateItemActions: Failed to execute action ${action.id}: ${errorMessage}`, 2);
+            result.failures.push({ action, error: errorMessage });
+        }
+    }
+
+    logger(`executeCreateItemActions: Completed batch - ${result.successes.length} succeeded, ${result.failures.length} failed`, 1);
+    return result;
+}
+
+/**
+ * Result of a batch undo operation
+ */
+export interface BatchUndoResult {
+    /** Successfully undone action IDs */
+    successes: string[];
+    /** Failed action IDs with their errors */
+    failures: Array<{ actionId: string; error: string }>;
+}
+
+/**
+ * Undo multiple create_item agent actions in batch.
+ * Returns results for all actions, tracking successes and failures separately.
+ */
+export async function undoCreateItemActions(actions: AgentAction[]): Promise<BatchUndoResult> {
+    const result: BatchUndoResult = {
+        successes: [],
+        failures: [],
+    };
+
+    for (const action of actions) {
+        try {
+            await undoCreateItemAction(action);
+            result.successes.push(action.id);
+        } catch (error: any) {
+            const errorMessage = error?.message || 'Failed to undo item creation';
+            logger(`undoCreateItemActions: Failed to undo action ${action.id}: ${errorMessage}`, 2);
+            result.failures.push({ actionId: action.id, error: errorMessage });
+        }
+    }
+
+    logger(`undoCreateItemActions: Completed batch - ${result.successes.length} succeeded, ${result.failures.length} failed`, 1);
+    return result;
+}
