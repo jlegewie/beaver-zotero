@@ -68,11 +68,13 @@ export class AgentService {
      * Get auth token from Supabase session
      */
     private async getAuthToken(): Promise<string> {
-        const { data, error } = await supabase.auth.getSession();
+        // Force refresh to ensure maximum token lifetime for the WS connection
+        // const { data, error } = await supabase.auth.getSession();
+        const { data, error } = await supabase.auth.refreshSession();
 
         if (error) {
-            logger(`AgentService: Error getting session: ${error.message}`, 2);
-            throw new Error('Error retrieving user session');
+            logger(`AgentService: Error refreshing session: ${error.message}`, 2);
+            throw new Error('Error refreshing user session');
         }
 
         if (!data.session?.access_token) {
