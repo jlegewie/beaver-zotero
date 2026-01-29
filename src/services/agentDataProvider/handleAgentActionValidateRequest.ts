@@ -765,7 +765,7 @@ async function validateCreateItemAction(
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: `Library not found: "${library_name}". Available libraries: ${availableNames}`,
+                error: `Library not found: "${library_name}". Omit the library parameter to use the default library. Available libraries: ${availableNames}`,
                 error_code: 'library_not_found',
                 preference: 'always_ask',
             };
@@ -783,7 +783,7 @@ async function validateCreateItemAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library not found: ${targetLibraryId}`,
+            error: `Library not found: ${targetLibraryId}. Omit the library parameter to use the default library.`,
             error_code: 'library_not_found',
             preference: 'always_ask',
         };
@@ -795,7 +795,7 @@ async function validateCreateItemAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library "${targetLibrary.name}" is not synced with Beaver. Update this in Beaver Preferences.`,
+            error: `Library "${targetLibrary.name}" is not synced with Beaver.`,
             error_code: 'library_not_searchable',
             preference: 'always_ask',
         };
@@ -807,7 +807,7 @@ async function validateCreateItemAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Library "${targetLibrary.name}" is read-only and cannot be modified`,
+            error: `Library "${targetLibrary.name}" is read-only and cannot be modified. Omit the library parameter to use the default library.`,
             error_code: 'library_not_editable',
             preference: 'always_ask',
         };
