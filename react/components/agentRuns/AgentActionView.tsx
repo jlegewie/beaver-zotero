@@ -543,7 +543,17 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         <div className={`flex-1 display-flex mt-010 font-color-primary`}>
                             <Icon icon={getHeaderIcon()} className={shouldShowStatusIcon() ? config.iconClassName : undefined} />
                         </div>
-                        <div className="flex-wrap">
+                        <div 
+                            className="flex-wrap"
+                            style={{
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                wordBreak: 'break-word'
+                            }}
+                        >
                             <span className="font-color-primary font-medium">{getActionLabel(toolName)}</span>
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
                         </div>
