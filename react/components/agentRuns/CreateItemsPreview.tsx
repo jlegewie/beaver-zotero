@@ -145,10 +145,13 @@ export const CreateItemsPreview: React.FC<CreateItemsPreviewProps> = ({
                                         variant="ghost-secondary"
                                         icon={ArrowUpRightIcon}
                                         className="font-color-secondary scale-11 flex-shrink-0"
-                                        onClick={() => revealSource({ 
-                                            library_id: resultData.library_id, 
-                                            zotero_key: resultData.zotero_key 
-                                        })}
+                                        onClick={() => revealSource(
+                                            { 
+                                                library_id: resultData.library_id, 
+                                                zotero_key: resultData.zotero_key 
+                                            },
+                                            proposedData.collection_keys?.[0]
+                                        )}
                                     />
                                 </Tooltip>
                             )}
