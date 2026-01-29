@@ -1,7 +1,6 @@
 import { logger } from '../../utils/logger';
 import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '../agentProtocol';
 import type { MetadataEdit } from '../../../react/types/agentActions/base';
-import type { ExternalReference } from '../../../react/types/externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../../../react/types/agentActions/items';
 import { applyCreateItemData } from '../../../react/utils/addItemActions';
 
