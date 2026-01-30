@@ -25,7 +25,7 @@ import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '.
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
 import { executeCreateItemActions, undoCreateItemActions } from '../../utils/createItemActions';
-import type { CreateItemProposedData, CreateItemResultData } from '../../types/agentActions/items';
+import type { CreateItemProposedData } from '../../types/agentActions/items';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
 import type { OrganizeItemsResultData } from '../../types/agentActions/base';
@@ -232,10 +232,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
     // Track when we're processing a post-run action (apply/undo/retry)
     const [isProcessingAction, setIsProcessingAction] = useState(false);
+    // Track when approval was removed externally (e.g., via PendingActionsBar "Apply All")
+    const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
     // Track which specific button was clicked ('approve' | 'reject' | null)
     const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | null>(null);
     // Track the action ID we're processing to detect status changes
     const processingActionIdRef = useRef<string | null>(null);
+    // Track previous pending approval to detect external removals
+    const prevPendingApprovalRef = useRef<PendingApproval | null>(pendingApproval);
 
     // Get agent actions for this tool call
     const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
@@ -288,19 +292,36 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         fetchTitle();
     }, [action, pendingApproval, itemTitle, toolcallId, hasAssociatedItem, setItemTitle]);
 
+    // Detect when pending approval is removed externally (e.g., via PendingActionsBar "Apply All")
+    useEffect(() => {
+        const wasAwaiting = prevPendingApprovalRef.current !== null;
+        const isNoLongerAwaiting = pendingApproval === null;
+        
+        // If approval was just removed externally (not by our local handleApprove/handleReject)
+        if (wasAwaiting && isNoLongerAwaiting && !isProcessingApproval) {
+            setIsExternallyProcessing(true);
+            // Set clickedButton to 'approve' to show the loading state on the right button
+            // We assume external removal is approval (reject would also work but approve is more common)
+            setClickedButton('approve');
+        }
+        
+        prevPendingApprovalRef.current = pendingApproval;
+    }, [pendingApproval, isProcessingApproval]);
+
     // Clear processing state when action status changes from 'pending' to a final state
     useEffect(() => {
-        if (isProcessingApproval && action && processingActionIdRef.current === action.id) {
+        if ((isProcessingApproval || isExternallyProcessing) && action) {
             // If action status is no longer 'pending', the backend has processed the approval
             if (action.status !== 'pending') {
                 setIsProcessingApproval(false);
+                setIsExternallyProcessing(false);
                 setClickedButton(null);
                 processingActionIdRef.current = null;
             }
         }
-    }, [isProcessingApproval, action?.status, action?.id]);
+    }, [isProcessingApproval, isExternallyProcessing, action?.status, action?.id]);
 
-    const isProcessing = isProcessingApproval || isProcessingAction;
+    const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing;
     // Show 'awaiting' if we have a pending approval OR if we're processing
     // For multi-action, compute overall status from all actions
     const status: ActionStatus | 'awaiting' = (isAwaitingApproval || isProcessing)
@@ -606,8 +627,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
                 <div className="flex-1" />
 
-                {/* Reject and Apply buttons */}
-                {(isAwaitingApproval || status === 'pending') && (
+                {/* Reject and Apply buttons - show during awaiting, pending, or processing */}
+                {((isAwaitingApproval || status === 'pending') && !isProcessing) && (
                     <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
                         {/* Show Reject button only if not processing or if Reject was clicked */}
                         {(!isProcessing || clickedButton === 'reject') && (
@@ -638,7 +659,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     </div>
                 )}
 
-                {!(isAwaitingApproval || status === 'pending') && (
+                {!(isAwaitingApproval || status === 'pending' || isProcessing) && (
                     <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
                         <Tooltip content="Expand" showArrow singleLine>
                             <IconButton
