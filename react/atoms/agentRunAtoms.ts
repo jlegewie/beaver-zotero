@@ -81,6 +81,8 @@ import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
+import { extractZoteroReferencesFromToolCall } from '../agents/toolLabels';
+import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { store } from '../store';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
 import { syncingItemFilterAsync } from '../../src/utils/sync';
@@ -641,13 +643,30 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(wsRequestAckDataAtom, data);
         },
 
-        onPart: (event: WSPartEvent) => {
+        onPart: async (event: WSPartEvent) => {
             logger('WS onPart:', {
                 runId: event.run_id,
                 messageIndex: event.message_index,
                 partIndex: event.part_index,
                 partKind: event.part.part_kind,
             });
+            // Load item data for tool call
+            if (event.part.part_kind === "tool-call") {
+                const itemReferences = extractZoteroReferencesFromToolCall(event.part);
+                if (itemReferences.length > 0) {
+                    logger(`WS onPart: Loading ${itemReferences.length} item data for tool call`, 1);
+                    const itemPromises = itemReferences.map(ref => 
+                        Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key)
+                    );
+                    const items = (await Promise.all(itemPromises)).filter(Boolean) as Zotero.Item[];
+                    if (items.length > 0) {
+                        await loadFullItemDataWithAllTypes(items).catch(err => 
+                            logger(`WS onPart: Failed to load item data for tool call: ${err}`, 1)
+                        );
+                    }
+                }
+            }
+            // Update run with part
             set(activeRunAtom, (prev) => prev ? updateRunWithPart(prev, event) : prev);
         },
 
@@ -685,7 +704,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(activeRunAtom, (prev) => prev ? updateRunWithToolCallProgress(prev, event) : prev);
         },
 
-        onRunComplete: (event: WSRunCompleteEvent) => {
+        onRunComplete: async (event: WSRunCompleteEvent) => {
             logger('WS onRunComplete:', {
                 runId: event.run_id,
                 usage: event.usage,
@@ -712,8 +731,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 logger(`WS onRunComplete: Processing ${event.agent_actions.length} agent actions`, 1);
                 const actions = event.agent_actions.map(toAgentAction);
                 set(addAgentActionsAtom, actions);
-                // Load item data for agent actions (fire and forget)
-                loadItemDataForAgentActions(actions).catch(err => 
+                // Load item data for agent actions
+                await loadItemDataForAgentActions(actions).catch(err => 
                     logger(`WS onRunComplete: Failed to load item data for agent actions: ${err}`, 1)
                 );
                 // Auto-apply annotations if enabled
@@ -798,15 +817,15 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             }
         },
 
-        onAgentActions: (event: WSAgentActionsEvent) => {
+        onAgentActions: async (event: WSAgentActionsEvent) => {
             logger('WS onAgentActions:', {
                 runId: event.run_id,
                 actionsCount: event.actions.length,
             }, 1);
             const actions = event.actions.map(toAgentAction);
             set(upsertAgentActionsAtom, actions);
-            // Load item data for agent actions (fire and forget)
-            loadItemDataForAgentActions(actions).catch(err => 
+            // Load item data for agent actions
+            await loadItemDataForAgentActions(actions).catch(err => 
                 logger(`WS onAgentActions: Failed to load item data for agent actions: ${err}`, 1)
             );
             // Auto-apply annotations if enabled

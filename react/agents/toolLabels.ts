@@ -1,6 +1,7 @@
 import { ToolCallStatus } from './atoms';
 import { ToolCallPart } from './types';
 import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../src/services/agentDataProvider/utils';
+import { ZoteroItemReference } from '../types/zotero';
 
 /**
  * Get display name from a Zotero item (Author Year format).
@@ -33,6 +34,51 @@ function getItemFromAttachmentId(attachmentId: string): Zotero.Item | null {
         // Item not yet loaded - return null to gracefully degrade the label
         return null;
     }
+}
+
+/**
+ * Extract Zotero item references from a tool call part.
+ * Looks for attachment_id parameters in tool call arguments.
+ * Returns an array of ZoteroItemReference, or empty array if none found.
+ */
+export function extractZoteroReferencesFromToolCall(part: ToolCallPart): ZoteroItemReference[] {
+    const args = parseArgs(part);
+    const references: ZoteroItemReference[] = [];
+
+    // Extract attachment_id if present (used by read_pages, add_highlight_annotations, 
+    // add_note_annotations, search_in_attachment, view_pages, view_page_images, etc.)
+    const attachmentId = args.attachment_id as string | undefined;
+    if (attachmentId) {
+        const [libraryIdStr, zoteroKey] = attachmentId.split('-');
+        if (libraryIdStr && zoteroKey) {
+            const libraryId = parseInt(libraryIdStr, 10);
+            if (!isNaN(libraryId)) {
+                references.push({
+                    library_id: libraryId,
+                    zotero_key: zoteroKey,
+                });
+            }
+        }
+    }
+
+    // Extract attachment_ids array if present (for tools that accept multiple attachments)
+    const attachmentIds = args.attachment_ids as string[] | undefined;
+    if (Array.isArray(attachmentIds)) {
+        for (const id of attachmentIds) {
+            const [libraryIdStr, zoteroKey] = id.split('-');
+            if (libraryIdStr && zoteroKey) {
+                const libraryId = parseInt(libraryIdStr, 10);
+                if (!isNaN(libraryId)) {
+                    references.push({
+                        library_id: libraryId,
+                        zotero_key: zoteroKey,
+                    });
+                }
+            }
+        }
+    }
+
+    return references;
 }
 
 /**
