@@ -66,15 +66,15 @@ export class AgentService {
 
     /**
      * Get auth token from Supabase session
+     * Uses getSession() which automatically refreshes if the token is expired.
+     * Avoids explicit refreshSession() calls which can contribute to race conditions.
      */
     private async getAuthToken(): Promise<string> {
-        // Force refresh to ensure maximum token lifetime for the WS connection
-        // const { data, error } = await supabase.auth.getSession();
-        const { data, error } = await supabase.auth.refreshSession();
+        const { data, error } = await supabase.auth.getSession();
 
         if (error) {
-            logger(`AgentService: Error refreshing session: ${error.message}`, 2);
-            throw new Error('Error refreshing user session');
+            logger(`AgentService: Error getting session: ${error.message}`, 2);
+            throw new Error('Error getting user session');
         }
 
         if (!data.session?.access_token) {
