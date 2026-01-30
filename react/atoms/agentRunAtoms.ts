@@ -89,6 +89,8 @@ import { syncingItemFilterAsync } from '../../src/utils/sync';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { ZoteroItemReference } from '../types/zotero';
+import { markExternalReferenceImportedAtom } from './externalReferences';
+import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
 
 // =============================================================================
 // Helper Functions
@@ -824,6 +826,28 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             }, 1);
             const actions = event.actions.map(toAgentAction);
             set(upsertAgentActionsAtom, actions);
+            
+            // Mark external references as imported for applied create_items actions
+            // This handles cases where actions are applied via PendingActionsBar
+            for (const action of actions) {
+                if (
+                    action.action_type === 'create_item' &&
+                    action.status === 'applied' &&
+                    action.result_data
+                ) {
+                    const proposedData = action.proposed_data as CreateItemProposedData;
+                    const resultData = action.result_data as CreateItemResultData;
+                    
+                    if (proposedData?.item?.source_id && resultData.library_id && resultData.zotero_key) {
+                        set(markExternalReferenceImportedAtom, proposedData.item.source_id, {
+                            library_id: resultData.library_id,
+                            zotero_key: resultData.zotero_key
+                        });
+                        logger(`WS onAgentActions: Marked external reference ${proposedData.item.source_id} as imported`, 1);
+                    }
+                }
+            }
+            
             // Load item data for agent actions
             await loadItemDataForAgentActions(actions).catch(err => 
                 logger(`WS onAgentActions: Failed to load item data for agent actions: ${err}`, 1)
