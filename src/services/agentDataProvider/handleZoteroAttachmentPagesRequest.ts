@@ -44,6 +44,8 @@ export async function handleZoteroAttachmentPagesRequest(
         error_code,
     });
 
+    const unique_key = `${attachment.library_id}-${attachment.zotero_key}`;
+
     try {
         // 1. Get the attachment item from Zotero
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -53,15 +55,43 @@ export async function handleZoteroAttachmentPagesRequest(
         
         if (!zoteroItem) {
             return errorResponse(
-                `Attachment not found: ${attachment.library_id}-${attachment.zotero_key}`,
+                `Attachment does not exist in user's library: ${unique_key}`,
                 'not_found'
             );
         }
 
         // 2. Verify it's a PDF attachment
         if (!zoteroItem.isAttachment()) {
+
+            // Item is a regular item
+            if(zoteroItem.isRegularItem()) {
+                await Zotero.Items.loadDataTypes([zoteroItem], ["childItems"]);
+                const attachmentIDs = zoteroItem.getAttachments();
+                const attachmentKeys = attachmentIDs.map(id => {
+                    const ref = Zotero.Items.getLibraryAndKeyFromID(id);
+                    if(ref) {
+                        return `${ref.libraryID}-${ref.key}`;
+                    }
+                    return null;
+                });
+                const combinedAttachmentKeys = attachmentKeys.filter(key => key !== null).join(', ');
+                return errorResponse(
+                    `The id '${unique_key}' is a regular item, not an attachment. The item has ${attachmentKeys.length} attachments: ${combinedAttachmentKeys}`,
+                    'not_attachment'
+                );
+            }
+
+            // Item is a note or annotation
+            if(zoteroItem.isNote() || zoteroItem.isAnnotation()) {
+                return errorResponse(
+                    `The id '${unique_key}' is a note or annotation, not an attachment.`,
+                    'not_attachment'
+                );
+            }
+
+            // Return generic error response for non-regular items
             return errorResponse(
-                'Item is not an attachment',
+                `attachment_id '${unique_key}' is not an attachment.`,
                 'not_attachment'
             );
         }
@@ -79,8 +109,8 @@ export async function handleZoteroAttachmentPagesRequest(
         if (!filePath) {
             const isFileAvailableOnServer = isAttachmentOnServer(zoteroItem);
             const errorMessage = isFileAvailableOnServer
-                ? 'PDF file is not available locally. It may be in remote storage, which cannot be accessed by Beaver.'
-                : 'PDF file is not available locally';
+                ? `The PDF file for ${unique_key} is not available locally. It may be in remote storage, which cannot be accessed by Beaver.`
+                : `The PDF file for ${unique_key} is not available locally.`;
             return errorResponse(
                 errorMessage,
                 'file_missing'
@@ -91,7 +121,7 @@ export async function handleZoteroAttachmentPagesRequest(
         const fileExists = await zoteroItem.fileExists();
         if (!fileExists) {
             return errorResponse(
-                'PDF file does not exist at expected location',
+                `The PDF file for ${unique_key} does not exist at expected location.`,
                 'file_missing'
             );
         }
@@ -106,7 +136,7 @@ export async function handleZoteroAttachmentPagesRequest(
                 
                 if (fileSizeInMB > maxFileSizeMB) {
                     return errorResponse(
-                        `PDF file size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
+                        `The PDF file for ${unique_key} has a file size of ${fileSizeInMB.toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit`,
                         'file_too_large'
                     );
                 }
@@ -126,12 +156,12 @@ export async function handleZoteroAttachmentPagesRequest(
             if (error instanceof ExtractionError) {
                 if (error.code === ExtractionErrorCode.ENCRYPTED) {
                     return errorResponse(
-                        'PDF is password-protected',
+                        `The PDF file for ${unique_key} is password-protected`,
                         'encrypted'
                     );
                 } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
                     return errorResponse(
-                        'PDF file is invalid or corrupted',
+                        `The PDF file for ${unique_key} is invalid or corrupted.`,
                         'invalid_pdf'
                     );
                 }
@@ -145,7 +175,7 @@ export async function handleZoteroAttachmentPagesRequest(
             
             if (totalPages > maxPageCount) {
                 return errorResponse(
-                    `PDF has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
+                    `The PDF file for ${unique_key} has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
                     'too_many_pages'
                 );
             }
@@ -204,16 +234,16 @@ export async function handleZoteroAttachmentPagesRequest(
         if (error instanceof ExtractionError) {
             switch (error.code) {
                 case ExtractionErrorCode.ENCRYPTED:
-                    return errorResponse('PDF is password-protected', 'encrypted');
+                    return errorResponse(`The PDF file for ${unique_key} is password-protected`, 'encrypted');
                 case ExtractionErrorCode.NO_TEXT_LAYER:
-                    return errorResponse('PDF requires OCR (no text layer)', 'no_text_layer');
+                    return errorResponse(`The PDF file for ${unique_key} requires OCR (no text layer)`, 'no_text_layer');
                 case ExtractionErrorCode.INVALID_PDF:
-                    return errorResponse('PDF file is invalid or corrupted', 'invalid_pdf');
+                    return errorResponse(`The PDF file for ${unique_key} is invalid or corrupted`, 'invalid_pdf');
                 case ExtractionErrorCode.PAGE_OUT_OF_RANGE:
-                    return errorResponse('Requested pages are out of range', 'page_out_of_range');
+                    return errorResponse(`The requested pages for ${unique_key} are out of range`, 'page_out_of_range');
                 default:
                     return errorResponse(
-                        `Extraction failed: ${error.message}`,
+                        `Failed to extract PDF content for ${unique_key}: ${error.message}`,
                         'extraction_failed'
                     );
             }
@@ -221,7 +251,7 @@ export async function handleZoteroAttachmentPagesRequest(
 
         // Unknown error
         return errorResponse(
-            `Failed to extract PDF content: ${error instanceof Error ? error.message : String(error)}`,
+            `Failed to extract PDF content for ${unique_key}: ${error instanceof Error ? error.message : String(error)}`,
             'extraction_failed'
         );
     }
