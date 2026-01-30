@@ -50,6 +50,10 @@ export class AgentService {
     private ws: WebSocket | null = null;
     private callbacks: WSCallbacks | null = null;
     private connecting: boolean = false;
+    /** Queue to serialize async message processing */
+    private messageQueue: Promise<void> = Promise.resolve();
+    /** Monotonic counter incremented on close to invalidate stale queued messages */
+    private connectionId: number = 0;
 
     constructor(baseUrl: string) {
         this.baseUrl = baseUrl;
@@ -197,8 +201,17 @@ export class AgentService {
                     // Note: Don't resolve here - wait for ready event
                 };
 
+                const connId = this.connectionId;
                 this.ws.onmessage = (event) => {
-                    this.handleMessage(event.data);
+                    // Chain onto the queue so async callbacks are processed in order.
+                    // connId check prevents stale messages from a previous connection
+                    // from being processed after a reconnect.
+                    this.messageQueue = this.messageQueue.then(() => {
+                        if (this.connectionId !== connId) return;
+                        return this.handleMessage(event.data);
+                    }).catch(err => {
+                        logger(`AgentService: Unhandled error in message queue: ${err}`, 1);
+                    });
                 };
 
                 this.ws.onerror = (event) => {
@@ -261,9 +274,11 @@ export class AgentService {
     }
 
     /**
-     * Handle incoming WebSocket message
+     * Handle incoming WebSocket message.
+     * Async to support callbacks that load item data before updating state.
+     * Messages are serialized via messageQueue to preserve processing order.
      */
-    private handleMessage(rawData: string): void {
+    private async handleMessage(rawData: string): Promise<void> {
         if (!this.callbacks) return;
 
         // Guard against invalid data during close handshake
@@ -314,11 +329,11 @@ export class AgentService {
                 }
 
                 case 'part':
-                    this.callbacks.onPart(event);
+                    await this.callbacks.onPart(event);
                     break;
 
                 case 'tool_return':
-                    this.callbacks.onToolReturn(event);
+                    await this.callbacks.onToolReturn(event);
                     break;
                 
                 case 'tool_call_progress':
@@ -326,7 +341,7 @@ export class AgentService {
                     break;
 
                 case 'run_complete':
-                    this.callbacks.onRunComplete(event);
+                    await this.callbacks.onRunComplete(event);
                     break;
 
                 case 'done':
@@ -358,7 +373,7 @@ export class AgentService {
                     break;
 
                 case 'agent_actions':
-                    this.callbacks.onAgentActions?.(event);
+                    await this.callbacks.onAgentActions?.(event);
                     break;
 
                 case 'retry':
@@ -689,6 +704,8 @@ export class AgentService {
             this.ws = null;
         }
         this.callbacks = null;
+        this.connectionId++;
+        this.messageQueue = Promise.resolve();
     }
 
     /**

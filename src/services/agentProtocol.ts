@@ -993,16 +993,18 @@ export interface WSCallbacks {
     onRequestAck?: (data: WSRequestAckData) => void;
 
     /**
-     * Called when a part event is received (text, thinking, or tool_call)
+     * Called when a part event is received (text, thinking, or tool_call).
+     * May be async to pre-load item data before updating state.
      * @param event The part event with run_id, message_index, part_index, and part data
      */
-    onPart: (event: WSPartEvent) => void;
+    onPart: (event: WSPartEvent) => void | Promise<void>;
 
     /**
-     * Called when a tool return event is received
+     * Called when a tool return event is received.
+     * May be async to process tool return results.
      * @param event The tool return event with run_id, message_index, and part data
      */
-    onToolReturn: (event: WSToolReturnEvent) => void;
+    onToolReturn: (event: WSToolReturnEvent) => void | Promise<void>;
 
     /**
      * Called when a tool call progress event is received
@@ -1011,10 +1013,11 @@ export interface WSCallbacks {
     onToolCallProgress: (event: WSToolCallProgressEvent) => void;
 
     /**
-     * Called when the agent run completes
+     * Called when the agent run completes.
+     * May be async to load item data for agent actions.
      * @param event The run complete event with usage and cost info
      */
-    onRunComplete: (event: WSRunCompleteEvent) => void;
+    onRunComplete: (event: WSRunCompleteEvent) => void | Promise<void>;
 
     /**
      * Called when the full request is done (after persistence, usage logging, etc.)
@@ -1041,10 +1044,11 @@ export interface WSCallbacks {
     onWarning: (event: WSWarningEvent) => void;
 
     /**
-     * Called when an agent action is detected during streaming
+     * Called when an agent action is detected during streaming.
+     * May be async to load item data for agent actions.
      * @param event The agent action event with run_id and action data
      */
-    onAgentActions?: (event: WSAgentActionsEvent) => void;
+    onAgentActions?: (event: WSAgentActionsEvent) => void | Promise<void>;
 
     /**
      * Called when the backend is retrying a failed request
