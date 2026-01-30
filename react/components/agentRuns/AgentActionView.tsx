@@ -581,7 +581,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 <button
                     type="button"
                     className={`
-                        variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left
+                        variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left mt-015
                         ${isProcessing ? 'opacity-80' : ''}
                     `}
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
@@ -659,20 +659,19 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     </div>
                 )}
 
-                {!(isAwaitingApproval || status === 'pending' || isProcessing) && (
-                    <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
-                        <Tooltip content="Expand" showArrow singleLine>
-                            <IconButton
-                                icon={ChevronIcon}
-                                variant="ghost-secondary"
-                                iconClassName="scale-12"
-                                onClick={toggleExpanded}
-                            />
-                        </Tooltip>
-                    </div>
-                )}
-
-
+                <div 
+                    className="display-flex flex-row items-center gap-25 mr-2 mt-015"
+                    style={{ visibility: !(isAwaitingApproval || status === 'pending' || isProcessing) ? 'visible' : 'hidden' }}
+                >
+                    <Tooltip content="Expand" showArrow singleLine>
+                        <IconButton
+                            icon={ChevronIcon}
+                            variant="ghost-secondary"
+                            iconClassName="scale-12"
+                            onClick={toggleExpanded}
+                        />
+                    </Tooltip>
+                </div>
 
             </div>
 
