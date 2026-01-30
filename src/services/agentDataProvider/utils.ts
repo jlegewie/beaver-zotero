@@ -8,6 +8,7 @@ import { isAttachmentOnServer } from '../../utils/webAPI';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
 import { DeferredToolPreference } from '../agentProtocol';
+import { isSupportedItem } from '../../utils/sync';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import { serializeAttachment } from '../../utils/zoteroSerializers';
@@ -705,4 +706,38 @@ export function getDeferredToolPreference(toolName: string): DeferredToolPrefere
         logger(`getDeferredToolPreference: Failed to read preference for ${toolName}: ${error}`, 1);
     }
     return 'always_ask';
+}
+
+
+export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: number, text: string, bestAttachmentKey: string | null }> {
+    if (!item.isRegularItem()) {
+        return {
+            count: 0,
+            text: '',
+            bestAttachmentKey: null,
+        };
+    }
+
+    await Zotero.Items.loadDataTypes([item], ["childItems"]);
+    const attachmentIDs = item.getAttachments();
+    const bestAttachment = await item.getBestAttachment();
+    const bestAttachmentKey = bestAttachment ? `${bestAttachment.libraryID}-${bestAttachment.key}` : null;
+
+    const pdfAttachmentKeys = attachmentIDs
+        .map(id => Zotero.Items.get(id))
+        .filter(attachment => attachment && isSupportedItem(attachment))
+        .map(attachment => {
+            const key = `${attachment.libraryID}-${attachment.key}`;
+            const isPrimary = bestAttachmentKey && key === bestAttachmentKey;
+            // return isPrimary ? `${key} (primary)` : key;
+            return isPrimary
+                ? `${attachment.attachmentFilename} (${key}, primary)`
+                : `${attachment.attachmentFilename} (${key})`;
+        });
+
+    return {
+        count: pdfAttachmentKeys.length,
+        text: pdfAttachmentKeys.join(', '),
+        bestAttachmentKey: bestAttachmentKey,
+    }
 }

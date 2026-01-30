@@ -18,6 +18,7 @@ import {
     WSPageContent,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { getAttachmentInfo } from './utils';
 
 
 /**
@@ -60,23 +61,17 @@ export async function handleZoteroAttachmentPagesRequest(
             );
         }
 
+        // Load all data for the item
+        await zoteroItem.loadAllData();
+
         // 2. Verify it's a PDF attachment
         if (!zoteroItem.isAttachment()) {
 
             // Item is a regular item
             if(zoteroItem.isRegularItem()) {
-                await Zotero.Items.loadDataTypes([zoteroItem], ["childItems"]);
-                const attachmentIDs = zoteroItem.getAttachments();
-                const attachmentKeys = attachmentIDs.map(id => {
-                    const ref = Zotero.Items.getLibraryAndKeyFromID(id);
-                    if(ref) {
-                        return `${ref.libraryID}-${ref.key}`;
-                    }
-                    return null;
-                });
-                const combinedAttachmentKeys = attachmentKeys.filter(key => key !== null).join(', ');
+                const info = await getAttachmentInfo(zoteroItem);
                 return errorResponse(
-                    `The id '${unique_key}' is a regular item, not an attachment. The item has ${attachmentKeys.length} attachments: ${combinedAttachmentKeys}`,
+                    `The id '${unique_key}' is a regular item, not an attachment. The item has ${info.count} attachments: ${info.text}`,
                     'not_attachment'
                 );
             }
