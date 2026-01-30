@@ -240,9 +240,22 @@ export const loadThreadAtom = atom(
             // Load agent runs with actions from the backend
             const { runs, agent_actions } = await agentRunService.getThreadRuns(threadId, true);
             
-            if (runs.length > 0) {
+            // Mark any in_progress runs as canceled since they're no longer active
+            const processedRuns = runs.map(run => {
+                if (run.status === 'in_progress') {
+                    logger(`loadThreadAtom: Marking in_progress run ${run.id} as canceled`, 1);
+                    return {
+                        ...run,
+                        status: 'canceled' as const,
+                        completed_at: run.completed_at || new Date().toISOString(),
+                    };
+                }
+                return run;
+            });
+            
+            if (processedRuns.length > 0) {
                 // Extract citations from runs
-                const citationMetadata = runs.flatMap(run => 
+                const citationMetadata = processedRuns.flatMap(run => 
                     (run.metadata?.citations || []).map(citation => ({
                         ...citation,
                         run_id: run.id
@@ -251,7 +264,7 @@ export const loadThreadAtom = atom(
                 
                 // Process tool return results
                 const externalReferences: ExternalReference[] = [];
-                for (const run of runs) {
+                for (const run of processedRuns) {
                     for (const message of run.model_messages) {
                         if (message.kind === 'request') {
                             for (const part of message.parts) {
@@ -271,7 +284,7 @@ export const loadThreadAtom = atom(
                     .forEach(c => allItemReferences.add(`${c.library_id}-${c.zotero_key}`));
                 
                 // From user attachments in runs
-                for (const run of runs) {
+                for (const run of processedRuns) {
                     const attachments = run.user_prompt.attachments || [];
                     attachments
                         .filter(att => att.library_id && att.zotero_key)
@@ -296,7 +309,7 @@ export const loadThreadAtom = atom(
                 await set(updateCitationDataAtom);
 
                 // Set agent runs
-                set(threadRunsAtom, runs);
+                set(threadRunsAtom, processedRuns);
                 
                 // Set agent actions
                 set(threadAgentActionsAtom, agent_actions || []);
