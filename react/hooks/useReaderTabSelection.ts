@@ -232,17 +232,22 @@ export function useReaderTabSelection() {
                 if (type === 'item') {
                     // Add events
                     if (event === 'add') {
-                        const item = Zotero.Items.get(ids[0]);
-                        if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
-                        // Check if this annotation was created by an agent action
-                        const agentActions = store.get(threadAgentActionsAtom);
-                        const isFromAgentAction = agentActions.some((action: AgentAction) => {
-                            const ref = getZoteroItemReferenceFromAgentAction(action);
-                            return ref?.zotero_key === item.key && ref?.library_id === item.libraryID;
-                        });
-                        if (isFromAgentAction) return;
-                        if(item.annotationText === BEAVER_ANNOTATION_TEXT) return;
-                        await addItemToCurrentMessageItems(item);
+                        try {
+                            const item = Zotero.Items.get(ids[0]);
+                            if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
+                            // Check if this annotation was created by an agent action
+                            const agentActions = store.get(threadAgentActionsAtom);
+                            const isFromAgentAction = agentActions.some((action: AgentAction) => {
+                                const ref = getZoteroItemReferenceFromAgentAction(action);
+                                return ref?.zotero_key === item.key && ref?.library_id === item.libraryID;
+                            });
+                            if (isFromAgentAction) return;
+                            if(item.annotationText === BEAVER_ANNOTATION_TEXT) return;
+                            await addItemToCurrentMessageItems(item);
+                        } catch (e) {
+                            logger(`useReaderTabSelection: Item not loaded for ID ${ids[0]}: ${e}`);
+                            return;
+                        }
                     }
                     // Delete events
                     if (event === 'delete') {

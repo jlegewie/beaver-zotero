@@ -149,37 +149,42 @@ export function renderToMarkdown(
         const { libraryID, itemKey } = itemRef;
 
         // Get the Zotero item
-        const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
-        if (!item) {
-            logger(`renderToMarkdown: No Zotero item found for libraryID: ${libraryID}, itemKey: ${itemKey}`);
-            return '';
-        }
-        
-        // Item to cite
-        const parent = item.parentItem;
-        const itemToCite = item.isNote() ? item : (parent || item);
-
-        // Add the item to the array of cited items
-        citedItems.push(itemToCite);
-
-        // Get the citation data
-        let citation = '';
-        if (itemToCite.isRegularItem()) {
-            const citationObject: Citation = {id: itemToCite.id};
-            if (attrs.page || attrs.pages) {
-                citationObject.locator = attrs.page || attrs.pages;
-                citationObject.label = 'p.';
+        try {
+            const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
+            if (!item) {
+                logger(`renderToMarkdown: No Zotero item found for libraryID: ${libraryID}, itemKey: ${itemKey}`);
+                return '';
             }
-            citation = Zotero.Beaver?.citationService?.formatCitation([citationObject]) ?? '';
-        } else if (itemToCite.isNote()) {
-            citation = '(Note)';
-        } else if (itemToCite.isAttachment()) {
-            citation = '(File)';
-        }
-  
-        // Format the citation with page locator if provided
-        // return attrs.pages ? `${citation}, p. ${attrs.pages}` : citation; 
-        return ' ' + citation; 
+            
+            // Item to cite
+            const parent = item.parentItem;
+            const itemToCite = item.isNote() ? item : (parent || item);
+
+            // Add the item to the array of cited items
+            citedItems.push(itemToCite);
+
+            // Get the citation data
+            let citation = '';
+            if (itemToCite.isRegularItem()) {
+                const citationObject: Citation = {id: itemToCite.id};
+                if (attrs.page || attrs.pages) {
+                    citationObject.locator = attrs.page || attrs.pages;
+                    citationObject.label = 'p.';
+                }
+                citation = Zotero.Beaver?.citationService?.formatCitation([citationObject]) ?? '';
+            } else if (itemToCite.isNote()) {
+                citation = '(Note)';
+            } else if (itemToCite.isAttachment()) {
+                citation = '(File)';
+            }
+      
+            // Format the citation with page locator if provided
+            // return attrs.pages ? `${citation}, p. ${attrs.pages}` : citation; 
+            return ' ' + citation;
+        } catch (e) {
+            logger(`renderToMarkdown: Item not loaded for libraryID: ${libraryID}, itemKey: ${itemKey}`);
+            return '';
+        } 
     }).replace('  (', ' (');
 
     // Format the bibliography

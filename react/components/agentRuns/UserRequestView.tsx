@@ -13,6 +13,7 @@ import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '../../agents/atoms';
+import { logger } from '../../../src/utils/logger';
 
 interface UserRequestViewProps {
     userPrompt: BeaverAgentPrompt;
@@ -71,8 +72,13 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         if (!userPrompt.attachments) return [];
         return userPrompt.attachments
             .map((att) => {
-                const item = Zotero.Items.getByLibraryAndKey(att.library_id, att.zotero_key);
-                return item ? { attachment: att, item } : null;
+                try {
+                    const item = Zotero.Items.getByLibraryAndKey(att.library_id, att.zotero_key);
+                    return item ? { attachment: att, item } : null;
+                } catch (e) {
+                    logger(`UserRequestView: Item not loaded for ${att.library_id}/${att.zotero_key}: ${e}`);
+                    return null;
+                }
             })
             .filter((a): a is { attachment: typeof userPrompt.attachments[0]; item: Zotero.Item } => a !== null);
     }, [userPrompt.attachments]);

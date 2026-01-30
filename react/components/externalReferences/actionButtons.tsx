@@ -181,11 +181,15 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         
         // Check for best attachment if item exists
         if (cachedRef !== null) {
-            const zoteroItem = Zotero.Items.getByLibraryAndKey(cachedRef.library_id, cachedRef.zotero_key);
-            if (zoteroItem && zoteroItem.isRegularItem()) {
-                zoteroItem.getBestAttachment().then(attachment => {
-                    setBestAttachment(attachment || null);
-                });
+            try {
+                const zoteroItem = Zotero.Items.getByLibraryAndKey(cachedRef.library_id, cachedRef.zotero_key);
+                if (zoteroItem && zoteroItem.isRegularItem()) {
+                    zoteroItem.getBestAttachment().then(attachment => {
+                        setBestAttachment(attachment || null);
+                    });
+                }
+            } catch (e) {
+                logger(`ActionButtons: Item not loaded for ${cachedRef.library_id}/${cachedRef.zotero_key}: ${e}`);
             }
         } else {
             // Item was deleted, clear attachment
@@ -211,11 +215,15 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                 
                 // Check for best attachment if item exists
                 if (result !== null) {
-                    const zoteroItem = Zotero.Items.getByLibraryAndKey(result.library_id, result.zotero_key);
-                    if (zoteroItem && zoteroItem.isRegularItem()) {
-                        zoteroItem.getBestAttachment().then(attachment => {
-                            setBestAttachment(attachment || null);
-                        });
+                    try {
+                        const zoteroItem = Zotero.Items.getByLibraryAndKey(result.library_id, result.zotero_key);
+                        if (zoteroItem && zoteroItem.isRegularItem()) {
+                            zoteroItem.getBestAttachment().then(attachment => {
+                                setBestAttachment(attachment || null);
+                            });
+                        }
+                    } catch (e) {
+                        logger(`ActionButtons: Item not loaded for ${result.library_id}/${result.zotero_key}: ${e}`);
                     }
                 }
                 setIsLoading(false);

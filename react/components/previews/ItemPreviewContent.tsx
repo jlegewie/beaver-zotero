@@ -10,6 +10,7 @@ import PopupMessageHeader from '../ui/popup/PopupMessageHeader';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { useMessageItemSummary } from '../../hooks/useMessageItemSummary';
 import { truncateText } from '../../utils/stringUtils';
+import { logger } from '../../../src/utils/logger';
 
 interface ItemPreviewContentProps {
     item: Zotero.Item;
@@ -48,10 +49,25 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
     };
 
     // Determine if the item can be opened
-    const canOpen =
-        item.isPDFAttachment() ||
-        (item.isRegularItem() && item.getAttachments().some(att => Zotero.Items.get(att).isPDFAttachment())) ||
-        item.isNote();
+    const canOpen = (() => {
+        try {
+            return (
+                item.isPDFAttachment() ||
+                (item.isRegularItem() && item.getAttachments().some(att => {
+                    try {
+                        return Zotero.Items.get(att).isPDFAttachment();
+                    } catch (e) {
+                        logger(`ItemPreviewContent: Attachment not loaded for ID ${att}: ${e}`);
+                        return false;
+                    }
+                })) ||
+                item.isNote()
+            );
+        } catch (e) {
+            logger(`ItemPreviewContent: Item not loaded: ${e}`);
+            return false;
+        }
+    })();
 
     // Render validation icon for an item
     const renderValidationIcon = (childItem: Zotero.Item) => {

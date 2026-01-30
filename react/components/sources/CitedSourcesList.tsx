@@ -12,6 +12,7 @@ import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatE
 import ActionButtons from '../externalReferences/actionButtons';
 import { ExternalReference } from '../../types/externalReferences';
 import { ZoteroItemReference } from '../../types/zotero';
+import { logger } from '../../../src/utils/logger';
 
 interface CitedSourcesListProps {
     citations: CitationData[];
@@ -37,12 +38,16 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
             for (const citation of citations) {
                 if (cancelled) return;
                 if (citation.type === "item" && citation.library_id && citation.zotero_key) {
-                    const item = Zotero.Items.getByLibraryAndKey(citation.library_id, citation.zotero_key);
-                    if (item && item.isRegularItem()) {
-                        const bestAttachment = await item.getBestAttachment();
-                        if (bestAttachment) {
-                            newSet.add(getCitationKey(citation));
+                    try {
+                        const item = Zotero.Items.getByLibraryAndKey(citation.library_id, citation.zotero_key);
+                        if (item && item.isRegularItem()) {
+                            const bestAttachment = await item.getBestAttachment();
+                            if (bestAttachment) {
+                                newSet.add(getCitationKey(citation));
+                            }
                         }
+                    } catch (e) {
+                        logger(`CitedSourcesList: Item not loaded for ${citation.library_id}/${citation.zotero_key}: ${e}`);
                     }
                 }
             }
@@ -97,8 +102,13 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                     // Get item type icon for mapped external citations
                     const getMappedItemType = (): string | undefined => {
                         if (!mappedZoteroItem) return undefined;
-                        const item = Zotero.Items.getByLibraryAndKey(mappedZoteroItem.library_id, mappedZoteroItem.zotero_key);
-                        return item ? item.itemType : undefined;
+                        try {
+                            const item = Zotero.Items.getByLibraryAndKey(mappedZoteroItem.library_id, mappedZoteroItem.zotero_key);
+                            return item ? item.itemType : undefined;
+                        } catch (e) {
+                            logger(`CitedSourcesList: Item not loaded for ${mappedZoteroItem.library_id}/${mappedZoteroItem.zotero_key}: ${e}`);
+                            return undefined;
+                        }
                     };
                     const mappedItemType = isExternal && mappedZoteroItem ? getMappedItemType() : undefined;
                     
@@ -169,33 +179,38 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                         icon={PdfIcon}
                                                         variant="ghost-secondary"
                                                         onClick={async () => {
-                                                            if (mappedZoteroItem) {
-                                                                // Handle mapped external citation
-                                                                const item = Zotero.Items.getByLibraryAndKey(
-                                                                    mappedZoteroItem.library_id,
-                                                                    mappedZoteroItem.zotero_key
-                                                                );
-                                                                if (item && item.isRegularItem()) {
-                                                                    const bestAttachment = await item.getBestAttachment();
-                                                                    if (bestAttachment) {
-                                                                        Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                                                            try {
+                                                                if (mappedZoteroItem) {
+                                                                    // Handle mapped external citation
+                                                                    const item = Zotero.Items.getByLibraryAndKey(
+                                                                        mappedZoteroItem.library_id,
+                                                                        mappedZoteroItem.zotero_key
+                                                                    );
+                                                                    if (item && item.isRegularItem()) {
+                                                                        const bestAttachment = await item.getBestAttachment();
+                                                                        if (bestAttachment) {
+                                                                            Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                                                                        }
+                                                                    } else if (item && item.isAttachment()) {
+                                                                        Zotero.getActiveZoteroPane().viewAttachment(item.id);
                                                                     }
-                                                                } else if (item && item.isAttachment()) {
-                                                                    Zotero.getActiveZoteroPane().viewAttachment(item.id);
-                                                                }
-                                                            } else if (citation.type === "item" && citation.library_id && citation.zotero_key) {
-                                                                // Handle item citation - get best attachment
-                                                                const item = Zotero.Items.getByLibraryAndKey(
-                                                                    citation.library_id,
-                                                                    citation.zotero_key
-                                                                );
-                                                                if (item && item.isRegularItem()) {
-                                                                    const bestAttachment = await item.getBestAttachment();
-                                                                    if (bestAttachment) {
-                                                                        Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                                                                } else if (citation.type === "item" && citation.library_id && citation.zotero_key) {
+                                                                    // Handle item citation - get best attachment
+                                                                    const item = Zotero.Items.getByLibraryAndKey(
+                                                                        citation.library_id,
+                                                                        citation.zotero_key
+                                                                    );
+                                                                    if (item && item.isRegularItem()) {
+                                                                        const bestAttachment = await item.getBestAttachment();
+                                                                        if (bestAttachment) {
+                                                                            Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                                                                        }
                                                                     }
+                                                                } else {
+                                                                    openSource(citation);
                                                                 }
-                                                            } else {
+                                                            } catch (e) {
+                                                                logger(`CitedSourcesList: Item not loaded, falling back to openSource: ${e}`);
                                                                 openSource(citation);
                                                             }
                                                         }}

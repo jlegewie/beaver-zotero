@@ -227,9 +227,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             
             // If mapped to Zotero item, try to get URL
             if (mappedZoteroItem) {
-                const item = Zotero.Items.getByLibraryAndKey(mappedZoteroItem.library_id, mappedZoteroItem.zotero_key);
-                if (item) {
-                    url = createZoteroURI(item);
+                try {
+                    const item = Zotero.Items.getByLibraryAndKey(mappedZoteroItem.library_id, mappedZoteroItem.zotero_key);
+                    if (item) {
+                        url = createZoteroURI(item);
+                    }
+                } catch (e) {
+                    logger(`ZoteroCitation: Item not loaded for ${mappedZoteroItem.library_id}/${mappedZoteroItem.zotero_key}: ${e}`);
                 }
             }
         } else if (isZoteroCitation(citationMetadata)) {
@@ -438,29 +442,34 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         
         // For Zotero citations, use proper CSL format
         if (!effectiveLibraryID || !effectiveItemKey) return null;
-        const item = Zotero.Items.getByLibraryAndKey(effectiveLibraryID, effectiveItemKey);
-        if (!item) return null;
-        const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
-        const startPage = Array.isArray(pages) ? pages[0] : pages; 
-        const navLocator = startPage ? String(startPage) : undefined;
-        const citationObj = {
-            citationItems: [{
-                uris: [Zotero.URI.getItemURI(item.parentItem || item)],
-                itemData: itemData,
-                locator: navLocator,
-                // label: 'p.'
-            }],
-            properties: {}
-        };
-        const formatted = Zotero.EditorInstanceUtilities.formatCitation(citationObj);
-        return (
-            <span
-                className="citation" 
-                data-citation={encodeURIComponent(JSON.stringify(citationObj))}
-            >
-                {formatted}
-            </span>
-        );
+        try {
+            const item = Zotero.Items.getByLibraryAndKey(effectiveLibraryID, effectiveItemKey);
+            if (!item) return null;
+            const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
+            const startPage = Array.isArray(pages) ? pages[0] : pages; 
+            const navLocator = startPage ? String(startPage) : undefined;
+            const citationObj = {
+                citationItems: [{
+                    uris: [Zotero.URI.getItemURI(item.parentItem || item)],
+                    itemData: itemData,
+                    locator: navLocator,
+                    // label: 'p.'
+                }],
+                properties: {}
+            };
+            const formatted = Zotero.EditorInstanceUtilities.formatCitation(citationObj);
+            return (
+                <span
+                    className="citation" 
+                    data-citation={encodeURIComponent(JSON.stringify(citationObj))}
+                >
+                    {formatted}
+                </span>
+            );
+        } catch (e) {
+            logger(`ZoteroCitation: Item not loaded for ${effectiveLibraryID}/${effectiveItemKey}: ${e}`);
+            return null;
+        }
     }
 
     // Determine the CSS class based on citation type and state
