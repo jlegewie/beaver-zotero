@@ -18,6 +18,7 @@ function getItemDisplayName(item: Zotero.Item): string {
 
 /**
  * Parse attachment_id format '<library_id>-<zotero_key>' and get the Zotero item.
+ * Returns null if the item isn't loaded yet (gracefully degrades the label).
  */
 function getItemFromAttachmentId(attachmentId: string): Zotero.Item | null {
     const [libraryIdStr, zoteroKey] = attachmentId.split('-');
@@ -26,7 +27,12 @@ function getItemFromAttachmentId(attachmentId: string): Zotero.Item | null {
     const libraryId = parseInt(libraryIdStr, 10);
     if (isNaN(libraryId)) return null;
     
-    return Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey) || null;
+    try {
+        return Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey) || null;
+    } catch (e) {
+        // Item not yet loaded - return null to gracefully degrade the label
+        return null;
+    }
 }
 
 /**
