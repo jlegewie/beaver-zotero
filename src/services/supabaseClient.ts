@@ -75,22 +75,17 @@ interface AuthLockState {
     queue: LockQueueEntry[];
     lockName: string | null;
     lockToken: number | null;  // Unique token to verify lock ownership
-    lockAcquiredAt: number | null;
 }
 
 const authLock: AuthLockState = {
     locked: false,
     queue: [],
     lockName: null,
-    lockToken: null,
-    lockAcquiredAt: null
+    lockToken: null
 };
 
 // Counter for generating unique lock tokens
 let lockTokenCounter = 0;
-
-// Maximum time a lock can be held before being considered stale (30 seconds)
-const MAX_LOCK_HOLD_TIME = 30000;
 
 /**
  * Error thrown when lock acquisition times out
@@ -115,15 +110,6 @@ async function acquireAuthLock<T>(
     fn: () => Promise<T>
 ): Promise<T> {
     const startTime = Date.now();
-
-    // Check for stale lock (lock held too long, possibly due to error)
-    if (authLock.locked && authLock.lockAcquiredAt) {
-        const lockHeldTime = Date.now() - authLock.lockAcquiredAt;
-        if (lockHeldTime > MAX_LOCK_HOLD_TIME) {
-            logger(`Auth lock: Releasing stale lock held for ${lockHeldTime}ms by "${authLock.lockName}"`, 2);
-            forceReleaseLock();
-        }
-    }
 
     // Try to acquire the lock - returns a unique token if successful, null if not
     const lockToken = await tryAcquireLock(name, acquireTimeout);
@@ -167,7 +153,6 @@ function tryAcquireLock(name: string, acquireTimeout: number): Promise<number | 
         authLock.locked = true;
         authLock.lockName = name;
         authLock.lockToken = token;
-        authLock.lockAcquiredAt = Date.now();
         return Promise.resolve(token);
     }
 
@@ -184,7 +169,6 @@ function tryAcquireLock(name: string, acquireTimeout: number): Promise<number | 
             resolve: (token: number) => {
                 authLock.lockName = name;
                 authLock.lockToken = token;
-                authLock.lockAcquiredAt = Date.now();
                 resolve(token);
             },
             timeoutId: null
@@ -231,38 +215,6 @@ function releaseLock(token: number): void {
         authLock.locked = false;
         authLock.lockName = null;
         authLock.lockToken = null;
-        authLock.lockAcquiredAt = null;
-    }
-}
-
-/**
- * Force release the lock (used for stale lock recovery)
- * Grants lock to the first waiter with a new token, invalidating the old holder's token.
- * Remaining waiters stay in queue and will be resolved when lock is released normally.
- */
-function forceReleaseLock(): void {
-    // Clear timeout only for the first waiter (who will get the lock)
-    // Other waiters keep their timeouts active
-
-    // If there are waiters, grant lock to the first one with a new token
-    if (authLock.queue.length > 0) {
-        const firstWaiter = authLock.queue.shift()!;
-        if (firstWaiter.timeoutId) {
-            clearTimeout(firstWaiter.timeoutId);
-        }
-        // Generate new token - this invalidates the old holder's token
-        const newToken = ++lockTokenCounter;
-        authLock.lockToken = newToken;
-        authLock.lockAcquiredAt = Date.now();
-        // Resolve the first waiter (they get the lock with the new token)
-        firstWaiter.resolve(newToken);
-        // Remaining waiters stay in queue and will be resolved when lock is released normally
-    } else {
-        // No waiters - fully release lock
-        authLock.locked = false;
-        authLock.lockName = null;
-        authLock.lockToken = null;
-        authLock.lockAcquiredAt = null;
     }
 }
 
