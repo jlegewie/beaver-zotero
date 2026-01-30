@@ -54,6 +54,7 @@ import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import DeferredToolPreferenceButton from '../ui/buttons/DeferredToolPreferenceButton';
 import { truncateText } from '../../utils/stringUtils';
+import { markExternalReferenceImportedAtom } from '../../atoms/externalReferences';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
@@ -253,6 +254,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
+    const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
 
     // Item title state (shared across panes) - only for actions that have specific items
     const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
@@ -375,6 +377,17 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         result_data: s.result,
                     })));
                     logger(`AgentActionView: Applied ${batchResult.successes.length} create_item actions`, 1);
+                    
+                    // Update external reference mapping for imported items
+                    for (const success of batchResult.successes) {
+                        const proposedData = success.action.proposed_data as CreateItemProposedData;
+                        if (proposedData?.item?.source_id) {
+                            markExternalReferenceImported(proposedData.item.source_id, {
+                                library_id: success.result.library_id,
+                                zotero_key: success.result.zotero_key
+                            });
+                        }
+                    }
                 }
                 
                 // Set error status for failed actions
@@ -395,7 +408,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             setIsProcessingAction(false);
             setClickedButton(null);
         }
-    }, [action, actions, isProcessing, toolName, runId, ackAgentActions, setAgentActionsToError]);
+    }, [action, actions, isProcessing, toolName, runId, ackAgentActions, setAgentActionsToError, markExternalReferenceImported]);
 
     const handleRejectPending = useCallback(() => {
         if (actions.length === 0 || isProcessing) return;
