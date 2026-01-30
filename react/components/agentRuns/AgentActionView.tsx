@@ -54,7 +54,7 @@ import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import DeferredToolPreferenceButton from '../ui/buttons/DeferredToolPreferenceButton';
 import { truncateText } from '../../utils/stringUtils';
-import { markExternalReferenceImportedAtom } from '../../atoms/externalReferences';
+import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
@@ -255,6 +255,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
+    const markExternalReferenceDeleted = useSetAtom(markExternalReferenceDeletedAtom);
 
     // Item title state (shared across panes) - only for actions that have specific items
     const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
@@ -475,9 +476,16 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 
                 const batchResult = await undoCreateItemActions(actionsToUndo);
                 
-                // Mark successfully undone actions
+                // Mark successfully undone actions and clear external reference mapping
                 for (const actionId of batchResult.successes) {
                     undoAgentAction(actionId);
+                    const undoneAction = actionsToUndo.find(a => a.id === actionId);
+                    if (undoneAction) {
+                        const proposedData = undoneAction.proposed_data as CreateItemProposedData;
+                        if (proposedData?.item?.source_id) {
+                            markExternalReferenceDeleted(proposedData.item.source_id);
+                        }
+                    }
                 }
                 
                 // Set error status for failed actions
@@ -501,7 +509,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         } finally {
             setIsProcessingAction(false);
         }
-    }, [action, actions, isProcessing, toolName, undoAgentAction, setAgentActionsToError]);
+    }, [action, actions, isProcessing, toolName, undoAgentAction, setAgentActionsToError, markExternalReferenceDeleted]);
 
     const handleRetry = useCallback(async () => {
         // Retry is the same as apply for pending/error/undone/rejected actions
