@@ -13,7 +13,7 @@ import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/ato
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
 import { serializeAttachment, serializeItem } from '../../utils/zoteroSerializers';
-import { computeItemStatus, getAttachmentFileStatus } from './utils';
+import { computeItemStatus, getAttachmentFileStatus, getAttachmentFileStatusLightweight } from './utils';
 import {
     WSZoteroDataRequest,
     WSZoteroDataResponse,
@@ -240,6 +240,9 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
     }
 
     // Phase 6: Serialize all items and attachments with status
+    // Determine file status level from request (default to 'lightweight' for backward compatibility)
+    const fileStatusLevel = request.file_status_level ?? 'lightweight';
+    
     const [itemResults, attachmentResults] = await Promise.all([
         Promise.all(itemsToSerialize.map(async (item): Promise<ItemDataWithStatus | null> => {
             const serialized = await serializeItem(item, undefined);
@@ -265,8 +268,17 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
                 isPrimary = primaryAttachment !== false && primaryAttachment !== undefined && attachment.id === primaryAttachment.id;
             }
             
-            // Get file status (optional but recommended)
-            const fileStatus = await getAttachmentFileStatus(attachment, isPrimary);
+            // Get file status based on requested level
+            // - 'none': skip file status entirely (fastest, for metadata-only lookups)
+            // - 'lightweight': fast checks without reading full PDF (default)
+            // - 'full': full analysis including OCR detection (slowest)
+            let fileStatus = undefined;
+            if (fileStatusLevel === 'full') {
+                fileStatus = await getAttachmentFileStatus(attachment, isPrimary);
+            } else if (fileStatusLevel === 'lightweight') {
+                fileStatus = await getAttachmentFileStatusLightweight(attachment, isPrimary);
+            }
+            // else: fileStatusLevel === 'none', skip file status
             
             return { attachment: serialized, status, file_status: fileStatus };
         }))

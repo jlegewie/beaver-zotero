@@ -364,6 +364,9 @@ export interface WSItemSearchByTopicResponse {
     timing?: FrontendTimingMetadata;
 }
 
+/** Level of file status analysis to perform for attachments */
+export type FileStatusLevel = 'none' | 'lightweight' | 'full';
+
 /** Request from backend to fetch Zotero item/attachment data */
 export interface WSZoteroDataRequest extends WSBaseEvent {
     event: 'zotero_data_request';
@@ -374,6 +377,13 @@ export interface WSZoteroDataRequest extends WSBaseEvent {
     include_parents: boolean;
     /** References to fetch data for */
     items: ZoteroItemReference[];
+    /**
+     * Level of file status analysis for attachments:
+     * - 'none': Skip file_status entirely (fastest, for metadata-only lookups)
+     * - 'lightweight': Fast checks without reading full PDF (default)
+     * - 'full': Full analysis including OCR detection (slowest, reads full PDF)
+     */
+    file_status_level?: FileStatusLevel;
 }
 
 /** Response to zotero data request */

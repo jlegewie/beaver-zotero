@@ -142,6 +142,7 @@ async function handleZoteroDataHttpRequest(request: any) {
         items: request.items,
         include_attachments: request.include_attachments,
         include_parents: request.include_parents,
+        file_status_level: request.file_status_level,
     };
     
     const response = await handleZoteroDataRequest(wsRequest);
