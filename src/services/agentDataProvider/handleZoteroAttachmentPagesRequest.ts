@@ -62,7 +62,7 @@ export async function handleZoteroAttachmentPagesRequest(
         if (!zoteroItem.isAttachment()) {
             return errorResponse(
                 'Item is not an attachment',
-                'not_pdf'
+                'not_attachment'
             );
         }
 

@@ -391,6 +391,7 @@ export interface WSZoteroDataResponse {
 /** Error codes for attachment page extraction failures */
 export type AttachmentPagesErrorCode =
     | 'not_found'           // Attachment not found in Zotero
+    | 'not_attachment'      // Item is not an attachment
     | 'not_pdf'             // Attachment is not a PDF
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
@@ -419,6 +420,7 @@ export interface WSZoteroAttachmentPagesResponse {
 /** Error codes for attachment page image rendering failures */
 export type AttachmentPageImagesErrorCode =
     | 'not_found'           // Attachment not found in Zotero
+    | 'not_attachment'      // Item is not an attachment
     | 'not_pdf'             // Attachment is not a PDF
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
@@ -446,6 +448,7 @@ export interface WSZoteroAttachmentPageImagesResponse {
 /** Error codes for attachment search failures */
 export type AttachmentSearchErrorCode =
     | 'not_found'           // Attachment not found in Zotero
+    | 'not_attachment'      // Item is not an attachment
     | 'not_pdf'             // Attachment is not a PDF
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
