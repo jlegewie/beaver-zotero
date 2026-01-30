@@ -69,6 +69,10 @@ import {
     threadAgentActionsAtom,
     isAnnotationAgentAction,
     isEditMetadataAgentAction,
+    isZoteroNoteAgentAction,
+    isCreateItemAgentAction,
+    isCreateCollectionAgentAction,
+    isOrganizeItemsAgentAction,
     hasAppliedZoteroItem,
     AgentAction,
     addPendingApprovalAtom,
@@ -78,6 +82,9 @@ import {
     clearAllPendingApprovalsAtom,
 } from '../agents/agentActions';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
+import { undoCreateItemActions } from '../utils/createItemActions';
+import { undoCreateCollectionAction } from '../utils/createCollectionActions';
+import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
@@ -357,7 +364,11 @@ async function undoAppliedMetadataEdits(actions: AgentAction[]): Promise<number>
  */
 interface ActionsToUndo {
     annotations: AgentAction[];
+    zoteroNotes: AgentAction[];
     metadataEdits: AgentAction[];
+    createItems: AgentAction[];
+    createCollections: AgentAction[];
+    organizeItems: AgentAction[];
 }
 
 /**
@@ -366,8 +377,9 @@ interface ActionsToUndo {
  * Returns true if user confirms, false otherwise.
  */
 function confirmUndoAppliedActions(actions: ActionsToUndo): boolean {
-    const { annotations, metadataEdits } = actions;
-    const totalActions = annotations.length + metadataEdits.length;
+    const { annotations, zoteroNotes, metadataEdits, createItems, createCollections, organizeItems } = actions;
+    const totalActions = annotations.length + zoteroNotes.length + metadataEdits.length + 
+                         createItems.length + createCollections.length + organizeItems.length;
     
     if (totalActions === 0) return true;
     
@@ -376,8 +388,20 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): boolean {
     if (annotations.length > 0) {
         changeLines.push(`• ${annotations.length} PDF annotation${annotations.length === 1 ? '' : 's'}`);
     }
+    if (zoteroNotes.length > 0) {
+        changeLines.push(`• ${zoteroNotes.length} Zotero note${zoteroNotes.length === 1 ? '' : 's'}`);
+    }
     if (metadataEdits.length > 0) {
         changeLines.push(`• ${metadataEdits.length} metadata edit${metadataEdits.length === 1 ? '' : 's'}`);
+    }
+    if (createItems.length > 0) {
+        changeLines.push(`• ${createItems.length} created item${createItems.length === 1 ? '' : 's'}`);
+    }
+    if (createCollections.length > 0) {
+        changeLines.push(`• ${createCollections.length} created collection${createCollections.length === 1 ? '' : 's'}`);
+    }
+    if (organizeItems.length > 0) {
+        changeLines.push(`• ${organizeItems.length} organize action${organizeItems.length === 1 ? '' : 's'}`);
     }
     
     const title = 'Undo changes?';
@@ -1244,29 +1268,63 @@ export const regenerateFromRunAtom = atom(
             const allAgentActions = get(threadAgentActionsAtom);
             const actionsInRemovedRuns = allAgentActions.filter(a => runIdsToRemove.includes(a.run_id));
             
-            // Categorize by type
+            // Categorize by type - only include applied actions
             const annotationsToDelete = actionsInRemovedRuns
                 .filter(isAnnotationAgentAction)
+                .filter(hasAppliedZoteroItem);
+            const zoteroNotesToDelete = actionsInRemovedRuns
+                .filter(isZoteroNoteAgentAction)
                 .filter(hasAppliedZoteroItem);
             const metadataEditsToUndo = actionsInRemovedRuns
                 .filter(isEditMetadataAgentAction)
                 .filter(a => a.status === 'applied');
+            const createItemsToUndo = actionsInRemovedRuns
+                .filter(isCreateItemAgentAction)
+                .filter(a => a.status === 'applied');
+            const createCollectionsToUndo = actionsInRemovedRuns
+                .filter(isCreateCollectionAgentAction)
+                .filter(a => a.status === 'applied');
+            const organizeItemsToUndo = actionsInRemovedRuns
+                .filter(isOrganizeItemsAgentAction)
+                .filter(a => a.status === 'applied');
 
             // Prompt user to confirm undoing applied actions
-            const hasActionsToUndo = annotationsToDelete.length > 0 || metadataEditsToUndo.length > 0;
+            const hasActionsToUndo = annotationsToDelete.length > 0 || zoteroNotesToDelete.length > 0 ||
+                                     metadataEditsToUndo.length > 0 || createItemsToUndo.length > 0 ||
+                                     createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0;
             if (hasActionsToUndo) {
                 const shouldUndo = confirmUndoAppliedActions({
                     annotations: annotationsToDelete,
+                    zoteroNotes: zoteroNotesToDelete,
                     metadataEdits: metadataEditsToUndo,
+                    createItems: createItemsToUndo,
+                    createCollections: createCollectionsToUndo,
+                    organizeItems: organizeItemsToUndo,
                 });
                 if (shouldUndo) {
                     // Undo annotations (delete Zotero items)
                     if (annotationsToDelete.length > 0) {
                         await deleteAppliedZoteroItems(annotationsToDelete);
                     }
+                    // Undo Zotero notes (delete Zotero items)
+                    if (zoteroNotesToDelete.length > 0) {
+                        await deleteAppliedZoteroItems(zoteroNotesToDelete);
+                    }
                     // Undo metadata edits (revert to original values)
                     if (metadataEditsToUndo.length > 0) {
                         await undoAppliedMetadataEdits(metadataEditsToUndo);
+                    }
+                    // Undo created items (delete from Zotero)
+                    if (createItemsToUndo.length > 0) {
+                        await undoCreateItemActions(createItemsToUndo);
+                    }
+                    // Undo created collections (delete from Zotero)
+                    for (const action of createCollectionsToUndo) {
+                        await undoCreateCollectionAction(action);
+                    }
+                    // Undo organize items (restore original tags/collections)
+                    for (const action of organizeItemsToUndo) {
+                        await undoOrganizeItemsAction(action);
                     }
                 }
             }
@@ -1385,29 +1443,63 @@ export const regenerateWithEditedPromptAtom = atom(
             const allAgentActions = get(threadAgentActionsAtom);
             const actionsInRemovedRuns = allAgentActions.filter(a => runIdsToRemove.includes(a.run_id));
             
-            // Categorize by type
+            // Categorize by type - only include applied actions
             const annotationsToDelete = actionsInRemovedRuns
                 .filter(isAnnotationAgentAction)
+                .filter(hasAppliedZoteroItem);
+            const zoteroNotesToDelete = actionsInRemovedRuns
+                .filter(isZoteroNoteAgentAction)
                 .filter(hasAppliedZoteroItem);
             const metadataEditsToUndo = actionsInRemovedRuns
                 .filter(isEditMetadataAgentAction)
                 .filter(a => a.status === 'applied');
+            const createItemsToUndo = actionsInRemovedRuns
+                .filter(isCreateItemAgentAction)
+                .filter(a => a.status === 'applied');
+            const createCollectionsToUndo = actionsInRemovedRuns
+                .filter(isCreateCollectionAgentAction)
+                .filter(a => a.status === 'applied');
+            const organizeItemsToUndo = actionsInRemovedRuns
+                .filter(isOrganizeItemsAgentAction)
+                .filter(a => a.status === 'applied');
 
             // Prompt user to confirm undoing applied actions
-            const hasActionsToUndo = annotationsToDelete.length > 0 || metadataEditsToUndo.length > 0;
+            const hasActionsToUndo = annotationsToDelete.length > 0 || zoteroNotesToDelete.length > 0 ||
+                                     metadataEditsToUndo.length > 0 || createItemsToUndo.length > 0 ||
+                                     createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0;
             if (hasActionsToUndo) {
                 const shouldUndo = confirmUndoAppliedActions({
                     annotations: annotationsToDelete,
+                    zoteroNotes: zoteroNotesToDelete,
                     metadataEdits: metadataEditsToUndo,
+                    createItems: createItemsToUndo,
+                    createCollections: createCollectionsToUndo,
+                    organizeItems: organizeItemsToUndo,
                 });
                 if (shouldUndo) {
                     // Undo annotations (delete Zotero items)
                     if (annotationsToDelete.length > 0) {
                         await deleteAppliedZoteroItems(annotationsToDelete);
                     }
+                    // Undo Zotero notes (delete Zotero items)
+                    if (zoteroNotesToDelete.length > 0) {
+                        await deleteAppliedZoteroItems(zoteroNotesToDelete);
+                    }
                     // Undo metadata edits (revert to original values)
                     if (metadataEditsToUndo.length > 0) {
                         await undoAppliedMetadataEdits(metadataEditsToUndo);
+                    }
+                    // Undo created items (delete from Zotero)
+                    if (createItemsToUndo.length > 0) {
+                        await undoCreateItemActions(createItemsToUndo);
+                    }
+                    // Undo created collections (delete from Zotero)
+                    for (const action of createCollectionsToUndo) {
+                        await undoCreateCollectionAction(action);
+                    }
+                    // Undo organize items (restore original tags/collections)
+                    for (const action of organizeItemsToUndo) {
+                        await undoOrganizeItemsAction(action);
                     }
                 }
             }
