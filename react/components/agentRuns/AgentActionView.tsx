@@ -627,6 +627,20 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
                 <div className="flex-1" />
 
+                <div 
+                    className="display-flex flex-row items-center gap-25 mr-2 mt-015"
+                    style={{ visibility: !(isAwaitingApproval || status === 'pending' || isProcessing) ? 'visible' : 'hidden' }}
+                >
+                    <Tooltip content="Expand" showArrow singleLine>
+                        <IconButton
+                            icon={ChevronIcon}
+                            variant="ghost-secondary"
+                            iconClassName="scale-12"
+                            onClick={toggleExpanded}
+                        />
+                    </Tooltip>
+                </div>
+
                 {/* Reject and Apply buttons - show during awaiting, pending, or processing */}
                 {((isAwaitingApproval || status === 'pending') && !isProcessing) && (
                     <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
@@ -658,20 +672,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )}
                     </div>
                 )}
-
-                <div 
-                    className="display-flex flex-row items-center gap-25 mr-2 mt-015"
-                    style={{ visibility: !(isAwaitingApproval || status === 'pending' || isProcessing) ? 'visible' : 'hidden' }}
-                >
-                    <Tooltip content="Expand" showArrow singleLine>
-                        <IconButton
-                            icon={ChevronIcon}
-                            variant="ghost-secondary"
-                            iconClassName="scale-12"
-                            onClick={toggleExpanded}
-                        />
-                    </Tooltip>
-                </div>
 
             </div>
 
