@@ -397,12 +397,17 @@ async function executeCreateItemAction(
             result_data: result,
         };
     } catch (error: any) {
-        logger(`executeCreateItemAction: Failed to create item: ${error?.message || error}`, 1);
+        const errorMsg = error?.message || String(error) || 'Failed to create item';
+        const errorStack = error?.stack || '';
+        logger(`executeCreateItemAction: Failed to create item: ${errorMsg}`, 1);
+        if (errorStack) {
+            logger(`executeCreateItemAction: Stack: ${errorStack}`, 1);
+        }
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
-            error: error?.message || 'Failed to create item',
+            error: errorMsg,
             error_code: 'create_failed',
         };
     }

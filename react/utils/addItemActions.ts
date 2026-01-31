@@ -241,10 +241,8 @@ async function createItemManually(itemData: ExternalReference, libraryId: number
         item.setCreators(creators);
     }
 
-    // 5. Save the Item (Transaction)
-    await Zotero.DB.executeTransaction(async () => {
-        await item.saveTx();
-    });
+    // 5. Save the Item
+    await item.saveTx();
 
     // 6. Manual Attachment Handling
     // If we created the item manually, we need to attach the PDF manually if provided
