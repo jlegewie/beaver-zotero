@@ -69,8 +69,11 @@ export async function handleZoteroAttachmentPageImagesRequest(
             // Item is a regular item
             if(zoteroItem.isRegularItem()) {
                 const info = await getAttachmentInfo(zoteroItem);
+                const message = info.count > 0
+                    ? `The id '${unique_key}' is a regular item, not an attachment. The item has ${info.count} attachments: ${info.text}`
+                    : `The id '${unique_key}' is a regular item, not an attachment. The item has no attachments.`;
                 return errorResponse(
-                    `The id '${unique_key}' is a regular item, not an attachment. The item has ${info.count} attachments: ${info.text}`,
+                    message,
                     'not_attachment'
                 );
             }

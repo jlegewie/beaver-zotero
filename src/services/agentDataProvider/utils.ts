@@ -731,8 +731,8 @@ export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: num
             const isPrimary = bestAttachmentKey && key === bestAttachmentKey;
             // return isPrimary ? `${key} (primary)` : key;
             return isPrimary
-                ? `${attachment.attachmentFilename} (${key}, primary)`
-                : `${attachment.attachmentFilename} (${key})`;
+                ? `'${attachment.attachmentFilename}' (${key}, primary)`
+                : `'${attachment.attachmentFilename}' (${key})`;
         });
 
     return {
