@@ -614,6 +614,17 @@ const PreferencePage: React.FC = () => {
                 />
             </div>
 
+            <div className={`display-flex flex-col items-start gap-1 mt-2 mb-1`}>
+                <div className="display-flex flex-row items-start gap-1 flex-1 w-full">
+                    <label htmlFor="custom-models" className="text-sm font-semibold font-color-primary">Additional Model Providers</label>
+                </div>
+                <div className="text-sm font-color-secondary mb-3">
+                    Additional model providers and custom endpoints are supported via advanced settings. Learn more about custom models
+                    <a onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/custom-models')} target="_blank" rel="noopener noreferrer" className="text-link"> here</a>.
+                </div>
+            </div>
+
+
             {/* --- Custom Instructions Section --- */}
             <SectionHeader>Custom Instructions</SectionHeader>
             <div className="text-sm font-color-secondary mb-2">
