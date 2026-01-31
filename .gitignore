@@ -15,6 +15,7 @@ build
 logs
 .cursorrules
 .cursor/*
+CLAUDE.local.md
 archive
 
 # compiled files
