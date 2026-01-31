@@ -30,6 +30,8 @@ import {
     // Deferred tools
     handleAgentActionValidateRequest,
     handleAgentActionExecuteRequest,
+    // Utility
+    handleDeleteItemsRequest,
 } from '../../src/services/agentDataProvider';
 import type {
     WSZoteroDataRequest,
@@ -89,6 +91,8 @@ const ENDPOINT_PATHS = [
     // Deferred tools
     '/beaver/agent-action/validate',
     '/beaver/agent-action/execute',
+    // Utility
+    '/beaver/delete-items',
 ] as const;
 
 /**
@@ -462,6 +466,12 @@ async function handleAgentActionExecuteHttpRequest(request: any) {
     };
 }
 
+async function handleDeleteItemsHttpRequest(request: any) {
+    return await handleDeleteItemsRequest({
+        item_ids: request.item_ids || [],
+    });
+}
+
 
 // =============================================================================
 // Registration Functions
@@ -519,6 +529,10 @@ function registerEndpoints(): boolean {
 
     Zotero.Server.Endpoints['/beaver/agent-action/execute'] =
         createEndpoint(handleAgentActionExecuteHttpRequest);
+
+    // Utility endpoints
+    Zotero.Server.Endpoints['/beaver/delete-items'] =
+        createEndpoint(handleDeleteItemsHttpRequest);
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
     return true;

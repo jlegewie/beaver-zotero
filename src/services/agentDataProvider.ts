@@ -23,3 +23,4 @@ export { handleListTagsRequest } from './agentDataProvider/handleListTagsRequest
 export { handleListLibrariesRequest } from './agentDataProvider/handleListLibrariesRequest';
 export { handleAgentActionValidateRequest } from './agentDataProvider/handleAgentActionValidateRequest';
 export { handleAgentActionExecuteRequest } from './agentDataProvider/handleAgentActionExecuteRequest';
+export { handleDeleteItemsRequest } from './agentDataProvider/handleDeleteItemsRequest';
