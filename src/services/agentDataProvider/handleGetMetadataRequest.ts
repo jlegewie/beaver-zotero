@@ -50,6 +50,11 @@ export async function handleGetMetadataRequest(
                 continue;
             }
             
+            // Load necessary data types before accessing item data
+            // Always load itemData and creators for basic fields
+            const dataTypesToLoad: string[] = ['itemData', 'creators', 'relations', 'tags', 'collections', 'childItems'];
+            await Zotero.Items.loadDataTypes([item], dataTypesToLoad);
+            
             // Get full item data via toJSON() - this is the canonical Zotero method
             const itemData: Record<string, any> = item.toJSON();
             itemData.item_id = itemId;
@@ -100,7 +105,7 @@ export async function handleGetMetadataRequest(
                     const attachmentItems = await Zotero.Items.getAsync(attachmentIds);
                     
                     // Ensure attachment data is loaded
-                    await Zotero.Items.loadDataTypes(attachmentItems, ['primaryData', 'itemData']);
+                    await Zotero.Items.loadDataTypes(attachmentItems, ['primaryData', 'itemData', 'tags', 'collections', 'childItems']);
                     
                     const attachments: any[] = [];
                     
@@ -135,7 +140,7 @@ export async function handleGetMetadataRequest(
                     const noteItems = await Zotero.Items.getAsync(noteIds);
                     
                     // Ensure note data is loaded
-                    await Zotero.Items.loadDataTypes(noteItems, ['primaryData', 'itemData', 'note']);
+                    await Zotero.Items.loadDataTypes(noteItems, ['primaryData', 'itemData', 'note', 'tags', 'collections', 'childItems']);
                     
                     const notes: any[] = [];
                     
