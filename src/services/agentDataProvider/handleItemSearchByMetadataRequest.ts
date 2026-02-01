@@ -203,7 +203,12 @@ export async function handleItemSearchByMetadataRequest(
 
     // Deduplicate items, prioritizing items from user's main library (library ID 1)
     items = deduplicateItems(items, 1);
-    
+
+    // Load item data needed for serialization (searchItemsByMetadata only loads itemData/creators/childItems)
+    if (items.length > 0) {
+        await Zotero.Items.loadDataTypes(items, ["primaryData", "tags", "collections", "relations", "childItems"]);
+    }
+
     // Record search completion time
     searchEndTime = Date.now();
     
