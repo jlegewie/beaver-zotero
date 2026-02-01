@@ -303,6 +303,8 @@ async function handleLibrarySearchHttpRequest(request: any) {
         include_children: request.include_children ?? false,
         item_category: request.item_category ?? 'regular',
         recursive: request.recursive ?? true,
+        sort_by: request.sort_by ?? null,
+        sort_order: request.sort_order ?? null,
         limit: request.limit ?? 10,
         offset: request.offset ?? 0,
         fields: request.fields,
