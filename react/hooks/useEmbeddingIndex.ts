@@ -154,11 +154,13 @@ export function useEmbeddingIndex() {
             // Check for upgrade-triggered full diff (clears stored index state so shouldRunFullDiff returns true)
             const needsUpgradeDiff = getPref('runEmbeddingFullDiff');
             if (needsUpgradeDiff) {
-                logger("useEmbeddingIndex: Upgrade-triggered embedding full diff - clearing index state", 3);
+                logger("useEmbeddingIndex: Upgrade-triggered embedding full diff - clearing index state for all libraries", 3);
                 const dbInstance = getDB();
                 if (dbInstance) {
-                    for (const libId of libraryIds) {
-                        await dbInstance.deleteEmbeddingIndexState(libId);
+                    // Clear index state for all libraries
+                    const allLibraries = Zotero.Libraries.getAll();
+                    for (const lib of allLibraries) {
+                        await dbInstance.deleteEmbeddingIndexState(lib.libraryID);
                     }
                 }
                 setPref('runEmbeddingFullDiff', false);
