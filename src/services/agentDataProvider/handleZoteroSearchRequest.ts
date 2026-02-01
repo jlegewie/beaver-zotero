@@ -122,76 +122,97 @@ export async function handleZoteroSearchRequest(
         const itemIds = await search.search();
         const totalCount = itemIds.length;
 
-        // Batch fetch all items (needed for sorting)
-        const allItems = await Zotero.Items.getAsync(itemIds);
-        const validItems = allItems.filter((item): item is Zotero.Item => item !== null);
-
-        // Ensure item data is loaded (Zotero uses lazy loading)
-        if (validItems.length > 0) {
-            await Zotero.Items.loadDataTypes(validItems, ['primaryData', 'creators', 'itemData']);
-        }
-
-        // Build items with sort values
-        const sortBy = request.sort_by || 'dateModified';
-        const sortOrder = request.sort_order || 'desc';
-
-        const itemsWithData: { item: Zotero.Item; sortValue: any }[] = [];
-        for (const item of validItems) {
-            let sortValue: any;
-            switch (sortBy) {
-                case 'dateAdded':
-                    sortValue = item.dateAdded || '';
-                    break;
-                case 'dateModified':
-                    sortValue = item.dateModified || '';
-                    break;
-                case 'title':
-                    try {
-                        sortValue = (item.getField('title') as string) || '';
-                    } catch {
-                        sortValue = item.getDisplayTitle?.() || '';
-                    }
-                    break;
-                case 'creator': {
-                    const creators = item.getCreators();
-                    sortValue = creators.length > 0 ? (creators[0].lastName || '') : '';
-                    break;
-                }
-                case 'year': {
-                    try {
-                        const date = item.getField('date') as string;
-                        sortValue = extractYear(date) || 0;
-                    } catch {
-                        sortValue = 0;
-                    }
-                    break;
-                }
-                case 'itemType':
-                    sortValue = item.itemType || '';
-                    break;
-                default:
-                    sortValue = item.dateModified || '';
-            }
-
-            itemsWithData.push({ item, sortValue });
-        }
-
-        // Sort
-        itemsWithData.sort((a, b) => {
-            if (a.sortValue < b.sortValue) return sortOrder === 'asc' ? -1 : 1;
-            if (a.sortValue > b.sortValue) return sortOrder === 'asc' ? 1 : -1;
-            return 0;
-        });
-
         // Apply pagination
         const offset = request.offset || 0;
         const limit = request.limit || 50;
-        const paginatedItems = itemsWithData.slice(offset, offset + limit);
+        const sortRequested = request.sort_by != null;
+
+        // When sorting is requested, we need to fetch all items to sort them
+        // before paginating. When not sorting, paginate on IDs first (faster).
+        let paginatedZoteroItems: Zotero.Item[];
+
+        if (sortRequested) {
+            // Fetch all items for sorting
+            const allItems = await Zotero.Items.getAsync(itemIds);
+            const validItems = allItems.filter((item): item is Zotero.Item => item !== null);
+
+            if (validItems.length > 0) {
+                await Zotero.Items.loadDataTypes(validItems, ['primaryData', 'creators', 'itemData']);
+            }
+
+            const sortBy = request.sort_by!;
+            const sortOrder = request.sort_order || 'desc';
+
+            // Compute sort values
+            const itemsWithSortKey: { item: Zotero.Item; sortValue: any }[] = [];
+            for (const item of validItems) {
+                let sortValue: any;
+                switch (sortBy) {
+                    case 'dateAdded':
+                        sortValue = item.dateAdded || '';
+                        break;
+                    case 'dateModified':
+                        sortValue = item.dateModified || '';
+                        break;
+                    case 'title':
+                        try {
+                            sortValue = ((item.getField('title') as string) || '').toLowerCase();
+                        } catch {
+                            sortValue = (item.getDisplayTitle?.() || '').toLowerCase();
+                        }
+                        break;
+                    case 'creator': {
+                        const creators = item.getCreators();
+                        // lastName covers both personal authors and corporate/institutional
+                        // names (fieldMode=1 stores the full name in lastName)
+                        sortValue = creators.length > 0
+                            ? (creators[0].lastName || '').toLowerCase()
+                            : '';
+                        break;
+                    }
+                    case 'year': {
+                        try {
+                            const date = item.getField('date') as string;
+                            sortValue = extractYear(date) || 0;
+                        } catch {
+                            sortValue = 0;
+                        }
+                        break;
+                    }
+                    case 'itemType':
+                        sortValue = item.itemType || '';
+                        break;
+                    default:
+                        sortValue = item.dateModified || '';
+                }
+                itemsWithSortKey.push({ item, sortValue });
+            }
+
+            // Sort
+            itemsWithSortKey.sort((a, b) => {
+                if (a.sortValue < b.sortValue) return sortOrder === 'asc' ? -1 : 1;
+                if (a.sortValue > b.sortValue) return sortOrder === 'asc' ? 1 : -1;
+                return 0;
+            });
+
+            paginatedZoteroItems = itemsWithSortKey
+                .slice(offset, offset + limit)
+                .map(({ item }) => item);
+        } else {
+            // No sorting — paginate on IDs first, then fetch only the page
+            const paginatedIds = itemIds.slice(offset, offset + limit);
+            const fetchedItems = await Zotero.Items.getAsync(paginatedIds);
+            paginatedZoteroItems = fetchedItems.filter((item): item is Zotero.Item => item !== null);
+
+            if (paginatedZoteroItems.length > 0) {
+                await Zotero.Items.loadDataTypes(paginatedZoteroItems, ['primaryData', 'creators', 'itemData']);
+            }
+        }
 
         // Build results
         const items: ZoteroSearchResultItem[] = [];
 
-        for (const { item } of paginatedItems) {
+        for (const item of paginatedZoteroItems) {
             // Get creators
             const creators = item.getCreators();
 
@@ -244,7 +265,7 @@ export async function handleZoteroSearchRequest(
             items.push(resultItem);
         }
 
-        logger(`handleZoteroSearchRequest: Returning ${items.length}/${totalCount} items (sorted by ${sortBy} ${sortOrder})`, 1);
+        logger(`handleZoteroSearchRequest: Returning ${items.length}/${totalCount} items${sortRequested ? ` (sorted by ${request.sort_by} ${request.sort_order || 'desc'})` : ''}`, 1);
         
         return {
             type: 'zotero_search',
