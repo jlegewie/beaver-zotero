@@ -5,49 +5,127 @@ import type { CreateItemProposedData, CreateItemResultData } from '../../../reac
 import { applyCreateItemData } from '../../../react/utils/addItemActions';
 
 
+/** Default timeout in seconds if not specified by backend */
+const DEFAULT_TIMEOUT_SECONDS = 25;
+
+/** Timeout error for cooperative cancellation */
+class TimeoutError extends Error {
+    constructor(
+        public readonly timeoutSeconds: number,
+        public readonly elapsedMs: number,
+        public readonly phase: string,
+    ) {
+        super(`Operation timed out after ${timeoutSeconds} seconds`);
+        this.name = 'TimeoutError';
+    }
+}
+
+/** Context passed to executors for cooperative timeout checking */
+interface TimeoutContext {
+    signal: AbortSignal;
+    timeoutSeconds: number;
+    startTime: number;
+}
+
+/**
+ * Check if the operation has been aborted and throw TimeoutError if so.
+ * Called at checkpoints before irreversible operations (saves, transactions).
+ */
+function checkAborted(ctx: TimeoutContext, phase: string): void {
+    const elapsed = Date.now() - ctx.startTime;
+    if (ctx.signal.aborted || elapsed >= ctx.timeoutSeconds * 1000) {
+        throw new TimeoutError(ctx.timeoutSeconds, elapsed, phase);
+    }
+}
+
 /**
  * Handle agent_action_execute request from backend.
  * Executes the action and returns the result.
+ *
+ * Timeout handling:
+ * - Uses timeout_seconds from request (default: 25s)
+ * - Uses cooperative cancellation via AbortController so executors
+ *   check the signal before irreversible operations (saves, transactions)
+ * - Returns detailed diagnostics on timeout
  */
 export async function handleAgentActionExecuteRequest(
     request: WSAgentActionExecuteRequest
 ): Promise<WSAgentActionExecuteResponse> {
-    logger(`handleAgentActionExecuteRequest: Executing ${request.action_type}`, 1);
+    const rawTimeout = request.timeout_seconds;
+    const timeoutSeconds = (typeof rawTimeout === 'number' && rawTimeout > 0)
+        ? rawTimeout
+        : DEFAULT_TIMEOUT_SECONDS;
+    const startTime = Date.now();
+
+    logger(`handleAgentActionExecuteRequest: Executing ${request.action_type} with timeout ${timeoutSeconds}s`, 1);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
 
     try {
-        if (request.action_type === 'edit_metadata') {
-            return await executeEditMetadataAction(request);
-        }
-
-        if (request.action_type === 'create_collection') {
-            return await executeCreateCollectionAction(request);
-        }
-
-        if (request.action_type === 'organize_items') {
-            return await executeOrganizeItemsAction(request);
-        }
-
-        if (request.action_type === 'create_item') {
-            return await executeCreateItemAction(request);
-        }
-
-        // Unsupported action type
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: `Unsupported action type: ${request.action_type}`,
-            error_code: 'unsupported_action_type',
+        const ctx: TimeoutContext = {
+            signal: controller.signal,
+            timeoutSeconds,
+            startTime,
         };
+
+        let result: WSAgentActionExecuteResponse;
+
+        if (request.action_type === 'edit_metadata') {
+            result = await executeEditMetadataAction(request, ctx);
+        } else if (request.action_type === 'create_collection') {
+            result = await executeCreateCollectionAction(request, ctx);
+        } else if (request.action_type === 'organize_items') {
+            result = await executeOrganizeItemsAction(request, ctx);
+        } else if (request.action_type === 'create_item') {
+            result = await executeCreateItemAction(request, ctx);
+        } else {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: `Unsupported action type: ${request.action_type}`,
+                error_code: 'unsupported_action_type',
+            };
+        }
+
+        return result;
     } catch (error) {
-        logger(`handleAgentActionExecuteRequest: Error: ${error}`, 1);
+        const elapsedMs = Date.now() - startTime;
+
+        if (error instanceof TimeoutError) {
+            logger(`handleAgentActionExecuteRequest: Timeout after ${error.elapsedMs}ms in phase '${error.phase}'`, 1);
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: `Operation timed out after ${error.timeoutSeconds} seconds`,
+                error_code: 'timeout',
+                result_data: {
+                    started_at: startTime,
+                    elapsed_ms: error.elapsedMs,
+                    phase: error.phase,
+                    action_type: request.action_type,
+                    timeout_seconds: error.timeoutSeconds,
+                },
+            };
+        }
+
+        logger(`handleAgentActionExecuteRequest: Error after ${elapsedMs}ms: ${error}`, 1);
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
             error: String(error),
             error_code: 'execution_failed',
+            result_data: {
+                started_at: startTime,
+                elapsed_ms: elapsedMs,
+                action_type: request.action_type,
+            },
         };
+    } finally {
+        clearTimeout(timer);
     }
 }
 
@@ -56,7 +134,8 @@ export async function handleAgentActionExecuteRequest(
  * Applies the field edits to the Zotero item.
  */
 async function executeEditMetadataAction(
-    request: WSAgentActionExecuteRequest
+    request: WSAgentActionExecuteRequest,
+    ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const { library_id, zotero_key, edits } = request.action_data as {
         library_id: number;
@@ -79,7 +158,7 @@ async function executeEditMetadataAction(
     const appliedEdits: Array<{ field: string; old_value: string | null; new_value: string }> = [];
     const failedEdits: Array<{ field: string; error: string }> = [];
 
-    // Apply each edit
+    // Apply each edit (in-memory only, not persisted until saveTx)
     for (const edit of edits) {
         try {
             const oldValue = item.getField(edit.field);
@@ -90,6 +169,8 @@ async function executeEditMetadataAction(
                 new_value: edit.new_value,
             });
         } catch (error) {
+            // Re-throw TimeoutError so it propagates to the main handler
+            if (error instanceof TimeoutError) throw error;
             failedEdits.push({
                 field: edit.field,
                 error: String(error),
@@ -99,10 +180,14 @@ async function executeEditMetadataAction(
 
     // Save the item if any edits were applied
     if (appliedEdits.length > 0) {
+        // Checkpoint: abort before persisting if timeout has fired
+        checkAborted(ctx, 'edit_metadata:before_save');
         try {
             await item.saveTx();
             logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits to ${library_id}-${zotero_key}`, 1);
         } catch (error) {
+            // Re-throw TimeoutError so it propagates to the main handler
+            if (error instanceof TimeoutError) throw error;
             return {
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
@@ -132,7 +217,8 @@ async function executeEditMetadataAction(
  * Creates a new Zotero collection with the specified properties.
  */
 async function executeCreateCollectionAction(
-    request: WSAgentActionExecuteRequest
+    request: WSAgentActionExecuteRequest,
+    ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const { library_id: rawLibraryId, name, parent_key, item_ids } = request.action_data as {
         library_id?: number | null;
@@ -170,6 +256,9 @@ async function executeCreateCollectionAction(
         // Create the collection
         const collection = new Zotero.Collection(collectionParams);
 
+        // Checkpoint: abort before persisting collection
+        checkAborted(ctx, 'create_collection:before_save');
+
         // Save the collection
         const collectionID = await collection.saveTx();
         logger(`executeCreateCollectionAction: Created collection "${name}" with ID ${collectionID}`, 1);
@@ -178,9 +267,12 @@ async function executeCreateCollectionAction(
 
         // Add items to the collection if specified
         if (item_ids && item_ids.length > 0) {
+            // Checkpoint: abort before item-adding transaction
+            checkAborted(ctx, 'create_collection:before_add_items');
+
             await Zotero.DB.executeTransaction(async () => {
                 const itemIdsToAdd: number[] = [];
-                
+
                 for (const itemIdStr of item_ids) {
                     const [libId, key] = itemIdStr.split('-');
                     const item = await Zotero.Items.getByLibraryAndKeyAsync(parseInt(libId, 10), key);
@@ -208,6 +300,8 @@ async function executeCreateCollectionAction(
             },
         };
     } catch (error) {
+        // Re-throw TimeoutError so it propagates to the main handler
+        if (error instanceof TimeoutError) throw error;
         logger(`executeCreateCollectionAction: Failed to create collection: ${error}`, 1);
         return {
             type: 'agent_action_execute_response',
@@ -228,7 +322,8 @@ async function executeCreateCollectionAction(
  * transaction rolls back. Items that don't exist are skipped (not an error).
  */
 async function executeOrganizeItemsAction(
-    request: WSAgentActionExecuteRequest
+    request: WSAgentActionExecuteRequest,
+    ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const { item_ids, tags, collections } = request.action_data as {
         item_ids: string[];
@@ -245,8 +340,11 @@ async function executeOrganizeItemsAction(
     const actualCollectionsRemoved = new Set<string>();
 
     try {
+        // Checkpoint: abort before starting the transaction
+        checkAborted(ctx, 'organize_items:before_transaction');
+
         // Batch all modifications in a single transaction for performance.
-        // If any save fails, the entire transaction rolls back.
+        // If any save fails (including TimeoutError), the entire transaction rolls back.
         await Zotero.DB.executeTransaction(async () => {
             for (const itemId of item_ids) {
                 const parts = itemId.split('-');
@@ -318,14 +416,18 @@ async function executeOrganizeItemsAction(
                     }
                 }
 
-                // Save within the transaction. Errors propagate and roll back the transaction.
+                // Checkpoint: abort before each item save — throws inside
+                // executeTransaction triggers full rollback
                 if (modified) {
+                    checkAborted(ctx, 'organize_items:before_item_save');
                     await item.save();
                     itemsModified++;
                 }
             }
         });
     } catch (error) {
+        // Re-throw TimeoutError so it propagates to the main handler
+        if (error instanceof TimeoutError) throw error;
         // Transaction failed and rolled back - no items were modified
         logger(`executeOrganizeItemsAction: Transaction failed: ${error}`, 1);
         return {
@@ -363,7 +465,8 @@ async function executeOrganizeItemsAction(
  * The action_data contains a single item's proposed_data.
  */
 async function executeCreateItemAction(
-    request: WSAgentActionExecuteRequest
+    request: WSAgentActionExecuteRequest,
+    ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     // The action_data is the proposed_data for a single create_item action
     const proposedData = request.action_data as CreateItemProposedData;
@@ -382,6 +485,9 @@ async function executeCreateItemAction(
     try {
         logger(`executeCreateItemAction: Creating item "${proposedData.item.title}" in library ${proposedData.library_id || 'default'}`, 1);
 
+        // Checkpoint: abort before starting item creation
+        checkAborted(ctx, 'create_item:before_apply');
+
         // Create the item using the existing utility function
         // Pass library_id from proposed_data to target the correct library
         const result: CreateItemResultData = await applyCreateItemData(proposedData, {
@@ -397,6 +503,8 @@ async function executeCreateItemAction(
             result_data: result,
         };
     } catch (error: any) {
+        // Re-throw TimeoutError so it propagates to the main handler
+        if (error instanceof TimeoutError) throw error;
         const errorMsg = error?.message || String(error) || 'Failed to create item';
         const errorStack = error?.stack || '';
         logger(`executeCreateItemAction: Failed to create item: ${errorMsg}`, 1);

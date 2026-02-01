@@ -456,6 +456,7 @@ async function handleAgentActionExecuteHttpRequest(request: any) {
         request_id: generateRequestId(),
         action_type: request.action_type,
         action_data: request.action_data,
+        timeout_seconds: request.timeout_seconds,
     };
 
     const response = await handleAgentActionExecuteRequest(wsRequest);

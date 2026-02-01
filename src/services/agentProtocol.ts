@@ -806,6 +806,8 @@ export interface WSAgentActionExecuteRequest extends WSBaseEvent {
     request_id: string;
     action_type: AgentActionType;
     action_data: Record<string, any>;
+    /** Timeout in seconds for the frontend to complete execution (default: 25 seconds) */
+    timeout_seconds?: number;
 }
 
 /** Response to agent action execution request */
