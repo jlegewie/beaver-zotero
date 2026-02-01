@@ -10,10 +10,15 @@ import { CreateItemProposedData, CreateItemResultData } from '../types/agentActi
 import { applyCreateItemData } from './addItemActions';
 import { logger } from '../../src/utils/logger';
 import { ensureItemSynced } from '../../src/utils/sync';
+import { scheduleBackgroundTask, generateTaskId, cancelTasksForItem, deduplicatedSync } from '../../src/utils/backgroundTasks';
+
+/** Maximum concurrent item creations in batch operations */
+const BATCH_CONCURRENCY_LIMIT = 3;
 
 /**
  * Execute a create_item agent action.
  * Creates the item in Zotero and returns the result data.
+ * Sync is scheduled as a background task (non-blocking).
  */
 export async function executeCreateItemAction(action: AgentAction): Promise<CreateItemResultData> {
     const proposedData = action.proposed_data as CreateItemProposedData;
@@ -30,16 +35,39 @@ export async function executeCreateItemAction(action: AgentAction): Promise<Crea
         libraryId: proposedData.library_id,
     });
 
-    // Sync the newly created item to backend
-    try {
-        await ensureItemSynced(result.library_id, result.zotero_key);
-    } catch (error) {
-        logger(`executeCreateItemAction: Failed to sync item: ${error}`, 2);
-    }
-
     logger(`executeCreateItemAction: Successfully created item ${result.library_id}-${result.zotero_key}`, 1);
 
+    // Schedule sync as background task (non-blocking)
+    scheduleSyncTask(result.library_id, result.zotero_key);
+
     return result;
+}
+
+/**
+ * Schedule a background task to sync an item to the backend.
+ */
+function scheduleSyncTask(libraryId: number, itemKey: string): void {
+    const taskId = generateTaskId('sync', libraryId, itemKey);
+
+    scheduleBackgroundTask(
+        taskId,
+        'sync',
+        async (signal: AbortSignal) => {
+            if (signal.aborted) return;
+            try {
+                await deduplicatedSync(libraryId, itemKey, async () => { await ensureItemSynced(libraryId, itemKey); });
+                logger(`scheduleSyncTask: Synced item ${libraryId}-${itemKey}`, 2);
+            } catch (error) {
+                logger(`scheduleSyncTask: Failed to sync item ${libraryId}-${itemKey}: ${error}`, 1);
+                throw error; // Re-throw to mark task as failed
+            }
+        },
+        {
+            itemKey,
+            libraryId,
+            progressMessage: 'Syncing to Beaver...',
+        }
+    );
 }
 
 /**
@@ -54,6 +82,9 @@ export async function undoCreateItemAction(action: AgentAction): Promise<void> {
     }
 
     logger(`undoCreateItemAction: Deleting item ${resultData.library_id}-${resultData.zotero_key}`, 1);
+
+    // Cancel any background tasks (PDF fetch, sync) for this item before deletion
+    cancelTasksForItem(resultData.library_id, resultData.zotero_key);
 
     // Get the item
     const item = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -84,8 +115,11 @@ export interface BatchExecuteResult {
 }
 
 /**
- * Execute multiple create_item agent actions in batch.
+ * Execute multiple create_item agent actions in batch with concurrency limiting.
  * Returns results for all actions, tracking successes and failures separately.
+ * 
+ * Uses a concurrency limit to avoid overwhelming Zotero's database
+ * while still being faster than sequential execution.
  */
 export async function executeCreateItemActions(actions: AgentAction[]): Promise<BatchExecuteResult> {
     const result: BatchExecuteResult = {
@@ -93,19 +127,68 @@ export async function executeCreateItemActions(actions: AgentAction[]): Promise<
         failures: [],
     };
 
-    for (const action of actions) {
-        try {
-            const itemResult = await executeCreateItemAction(action);
-            result.successes.push({ action, result: itemResult });
-        } catch (error: any) {
-            const errorMessage = error?.message || 'Failed to create item';
-            logger(`executeCreateItemActions: Failed to execute action ${action.id}: ${errorMessage}`, 2);
-            result.failures.push({ action, error: errorMessage });
+    if (actions.length === 0) {
+        return result;
+    }
+
+    logger(`executeCreateItemActions: Starting batch of ${actions.length} items with concurrency ${BATCH_CONCURRENCY_LIMIT}`, 1);
+
+    // Process actions with concurrency limiting
+    const results = await runWithConcurrency(
+        actions,
+        async (action) => {
+            try {
+                const itemResult = await executeCreateItemAction(action);
+                return { success: true as const, action, result: itemResult };
+            } catch (error: any) {
+                const errorMessage = error?.message || 'Failed to create item';
+                logger(`executeCreateItemActions: Failed to execute action ${action.id}: ${errorMessage}`, 2);
+                return { success: false as const, action, error: errorMessage };
+            }
+        },
+        BATCH_CONCURRENCY_LIMIT
+    );
+
+    // Separate successes and failures
+    for (const res of results) {
+        if (res.success) {
+            result.successes.push({ action: res.action, result: res.result });
+        } else {
+            result.failures.push({ action: res.action, error: res.error });
         }
     }
 
     logger(`executeCreateItemActions: Completed batch - ${result.successes.length} succeeded, ${result.failures.length} failed`, 1);
     return result;
+}
+
+/**
+ * Run async functions with a concurrency limit.
+ * Like Promise.all but limits how many run simultaneously.
+ */
+async function runWithConcurrency<T, R>(
+    items: T[],
+    fn: (item: T) => Promise<R>,
+    concurrency: number
+): Promise<R[]> {
+    const results: R[] = new Array(items.length);
+    let currentIndex = 0;
+
+    async function worker(): Promise<void> {
+        while (currentIndex < items.length) {
+            const index = currentIndex++;
+            results[index] = await fn(items[index]);
+        }
+    }
+
+    // Start workers up to concurrency limit
+    const workers: Promise<void>[] = [];
+    for (let i = 0; i < Math.min(concurrency, items.length); i++) {
+        workers.push(worker());
+    }
+
+    await Promise.all(workers);
+    return results;
 }
 
 /**
@@ -119,7 +202,7 @@ export interface BatchUndoResult {
 }
 
 /**
- * Undo multiple create_item agent actions in batch.
+ * Undo multiple create_item agent actions in batch with concurrency limiting.
  * Returns results for all actions, tracking successes and failures separately.
  */
 export async function undoCreateItemActions(actions: AgentAction[]): Promise<BatchUndoResult> {
@@ -128,14 +211,34 @@ export async function undoCreateItemActions(actions: AgentAction[]): Promise<Bat
         failures: [],
     };
 
-    for (const action of actions) {
-        try {
-            await undoCreateItemAction(action);
-            result.successes.push(action.id);
-        } catch (error: any) {
-            const errorMessage = error?.message || 'Failed to undo item creation';
-            logger(`undoCreateItemActions: Failed to undo action ${action.id}: ${errorMessage}`, 2);
-            result.failures.push({ actionId: action.id, error: errorMessage });
+    if (actions.length === 0) {
+        return result;
+    }
+
+    logger(`undoCreateItemActions: Starting batch undo of ${actions.length} items`, 1);
+
+    // Process actions with concurrency limiting
+    const results = await runWithConcurrency(
+        actions,
+        async (action) => {
+            try {
+                await undoCreateItemAction(action);
+                return { success: true as const, actionId: action.id };
+            } catch (error: any) {
+                const errorMessage = error?.message || 'Failed to undo item creation';
+                logger(`undoCreateItemActions: Failed to undo action ${action.id}: ${errorMessage}`, 2);
+                return { success: false as const, actionId: action.id, error: errorMessage };
+            }
+        },
+        BATCH_CONCURRENCY_LIMIT
+    );
+
+    // Separate successes and failures
+    for (const res of results) {
+        if (res.success) {
+            result.successes.push(res.actionId);
+        } else {
+            result.failures.push({ actionId: res.actionId, error: res.error });
         }
     }
 
