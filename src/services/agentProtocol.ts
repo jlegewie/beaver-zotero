@@ -556,6 +556,8 @@ export interface WSZoteroSearchRequest extends WSBaseEvent {
     item_category?: ZoteroItemCategory | null;
     include_children: boolean;
     recursive: boolean;
+    sort_by?: string | null;
+    sort_order?: string | null;
     limit: number;
     offset: number;
     fields?: string[] | null;
