@@ -15,6 +15,7 @@ import { EmbeddingIndexer, MIN_CONTENT_LENGTH, INDEX_BATCH_SIZE } from "../../sr
 import { BeaverDB } from "../../src/services/database";
 import { embeddingsService } from "../../src/services/embeddingsService";
 import { logger } from "../../src/utils/logger";
+import { getPref, setPref } from "../../src/utils/prefs";
 import { store } from "../store";
 
 
@@ -148,6 +149,19 @@ export function useEmbeddingIndex() {
                 updateFailedCount(failedStats.permanentlyFailed);
                 setIndexStatus({ status: 'idle', phase: 'initial' });
                 return;
+            }
+
+            // Check for upgrade-triggered full diff (clears stored index state so shouldRunFullDiff returns true)
+            const needsUpgradeDiff = getPref('runEmbeddingFullDiff');
+            if (needsUpgradeDiff) {
+                logger("useEmbeddingIndex: Upgrade-triggered embedding full diff - clearing index state", 3);
+                const dbInstance = getDB();
+                if (dbInstance) {
+                    for (const libId of libraryIds) {
+                        await dbInstance.deleteEmbeddingIndexState(libId);
+                    }
+                }
+                setPref('runEmbeddingFullDiff', false);
             }
 
             if (forceFullDiff) {

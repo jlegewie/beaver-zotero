@@ -102,6 +102,13 @@ async function handleUpgrade(lastVersion: string, currentVersion: string) {
         setPref('runWebDAVSync', true);
         ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flag set for WebDAV sync.`);
     }
+
+    // Upgrade to 0.11.2 or newer: re-sync items with corrected title/date field mappings
+    if (compareVersions(lastVersion, '0.11.2') < 0 && compareVersions(currentVersion, '0.11.2') >= 0) {
+        setPref('runConsistencyCheck', true);
+        setPref('runEmbeddingFullDiff', true);
+        ztoolkit.log(`handleUpgrade: Upgrade detected to ${currentVersion}. Flags set for consistency check and embedding full diff.`);
+    }
 }
 
 async function onStartup() {

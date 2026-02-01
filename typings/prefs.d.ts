@@ -40,6 +40,7 @@ declare namespace _ZoteroTypes {
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;
       "runWebDAVSync": boolean;
+      "runEmbeddingFullDiff": boolean;
       "pendingVersionNotifications": string;
     };
   }

@@ -58,4 +58,5 @@ pref("skippedItems", "[]")
 pref("runConsistencyCheck", false);
 pref("runCollectionSync", false);
 pref("runWebDAVSync", false);
+pref("runEmbeddingFullDiff", false);
 pref("pendingVersionNotifications", "[]");
