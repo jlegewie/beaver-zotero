@@ -39,6 +39,41 @@ function checkAborted(ctx: TimeoutContext, phase: string): void {
 }
 
 /**
+ * Restore in-memory field values on an item after a failed save or timeout.
+ * Prevents dirty in-memory state from leaking into future saves.
+ */
+function restoreFieldSnapshots(
+    item: any,
+    snapshots: Array<{ field: string; originalValue: any }>,
+): void {
+    for (const snap of snapshots) {
+        try {
+            item.setField(snap.field, snap.originalValue ?? '');
+        } catch (_) {
+            // Best-effort restoration — field may not be settable
+        }
+    }
+}
+
+/**
+ * Restore in-memory tags and collections on items after a transaction rollback.
+ * The DB transaction rolls back automatically, but in-memory item objects still
+ * carry the modifications — this restores them to prevent leaking into future saves.
+ */
+function restoreItemSnapshots(
+    snapshots: Map<string, { item: any; tags: Array<{ tag: string; type?: number }>; collections: number[] }>,
+): void {
+    for (const [, snap] of snapshots) {
+        try {
+            snap.item.setTags(snap.tags);
+            snap.item.setCollections(snap.collections);
+        } catch (_) {
+            // Best-effort restoration
+        }
+    }
+}
+
+/**
  * Handle agent_action_execute request from backend.
  * Executes the action and returns the result.
  *
@@ -157,59 +192,69 @@ async function executeEditMetadataAction(
 
     const appliedEdits: Array<{ field: string; old_value: string | null; new_value: string }> = [];
     const failedEdits: Array<{ field: string; error: string }> = [];
+    // Snapshot original field values for in-memory rollback on failure
+    const fieldSnapshots: Array<{ field: string; originalValue: any }> = [];
 
-    // Apply each edit (in-memory only, not persisted until saveTx)
-    for (const edit of edits) {
-        try {
-            const oldValue = item.getField(edit.field);
-            item.setField(edit.field, edit.new_value);
-            appliedEdits.push({
-                field: edit.field,
-                old_value: oldValue ? String(oldValue) : null,
-                new_value: edit.new_value,
-            });
-        } catch (error) {
-            // Re-throw TimeoutError so it propagates to the main handler
-            if (error instanceof TimeoutError) throw error;
-            failedEdits.push({
-                field: edit.field,
-                error: String(error),
-            });
+    try {
+        // Apply each edit (in-memory only, not persisted until saveTx)
+        for (const edit of edits) {
+            try {
+                const oldValue = item.getField(edit.field);
+                fieldSnapshots.push({ field: edit.field, originalValue: oldValue });
+                item.setField(edit.field, edit.new_value);
+                appliedEdits.push({
+                    field: edit.field,
+                    old_value: oldValue ? String(oldValue) : null,
+                    new_value: edit.new_value,
+                });
+            } catch (error) {
+                // Re-throw TimeoutError so it propagates to the outer catch
+                if (error instanceof TimeoutError) throw error;
+                failedEdits.push({
+                    field: edit.field,
+                    error: String(error),
+                });
+            }
         }
-    }
 
-    // Save the item if any edits were applied
-    if (appliedEdits.length > 0) {
-        // Checkpoint: abort before persisting if timeout has fired
-        checkAborted(ctx, 'edit_metadata:before_save');
-        try {
-            await item.saveTx();
-            logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits to ${library_id}-${zotero_key}`, 1);
-        } catch (error) {
-            // Re-throw TimeoutError so it propagates to the main handler
-            if (error instanceof TimeoutError) throw error;
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: `Failed to save item: ${error}`,
-                error_code: 'save_failed',
-            };
+        // Save the item if any edits were applied
+        if (appliedEdits.length > 0) {
+            // Checkpoint: abort before persisting if timeout has fired
+            checkAborted(ctx, 'edit_metadata:before_save');
+            try {
+                await item.saveTx();
+                logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits to ${library_id}-${zotero_key}`, 1);
+            } catch (error) {
+                if (error instanceof TimeoutError) throw error;
+                // Save failed — restore in-memory state so dirty fields don't leak
+                restoreFieldSnapshots(item, fieldSnapshots);
+                return {
+                    type: 'agent_action_execute_response',
+                    request_id: request.request_id,
+                    success: false,
+                    error: `Failed to save item: ${error}`,
+                    error_code: 'save_failed',
+                };
+            }
         }
+
+        const allSucceeded = failedEdits.length === 0;
+
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: allSucceeded,
+            error: allSucceeded ? undefined : `Some edits failed: ${failedEdits.map(e => e.field).join(', ')}`,
+            result_data: {
+                applied_edits: appliedEdits,
+                failed_edits: failedEdits,
+            },
+        };
+    } catch (error) {
+        // Restore in-memory state on any unhandled error (including TimeoutError)
+        restoreFieldSnapshots(item, fieldSnapshots);
+        throw error;
     }
-
-    const allSucceeded = failedEdits.length === 0;
-
-    return {
-        type: 'agent_action_execute_response',
-        request_id: request.request_id,
-        success: allSucceeded,
-        error: allSucceeded ? undefined : `Some edits failed: ${failedEdits.map(e => e.field).join(', ')}`,
-        result_data: {
-            applied_edits: appliedEdits,
-            failed_edits: failedEdits,
-        },
-    };
 }
 
 /**
@@ -252,16 +297,20 @@ async function executeCreateCollectionAction(
         }
     }
 
+    let collection: any = null;
+    let collectionSaved = false;
+
     try {
         // Create the collection
-        const collection = new Zotero.Collection(collectionParams);
+        collection = new Zotero.Collection(collectionParams);
 
         // Checkpoint: abort before persisting collection
         checkAborted(ctx, 'create_collection:before_save');
 
         // Save the collection
-        const collectionID = await collection.saveTx();
-        logger(`executeCreateCollectionAction: Created collection "${name}" with ID ${collectionID}`, 1);
+        await collection.saveTx();
+        collectionSaved = true;
+        logger(`executeCreateCollectionAction: Created collection "${name}" with key ${collection.key}`, 1);
 
         let itemsAdded = 0;
 
@@ -300,6 +349,18 @@ async function executeCreateCollectionAction(
             },
         };
     } catch (error) {
+        // Compensating action: delete collection if it was persisted but
+        // subsequent operations (item addition) failed or timed out.
+        // This prevents orphaned empty collections from accumulating.
+        if (collectionSaved) {
+            try {
+                await collection.eraseTx();
+                logger(`executeCreateCollectionAction: Rolled back collection "${name}"`, 1);
+            } catch (eraseError) {
+                logger(`executeCreateCollectionAction: Failed to roll back collection: ${eraseError}`, 1);
+            }
+        }
+
         // Re-throw TimeoutError so it propagates to the main handler
         if (error instanceof TimeoutError) throw error;
         logger(`executeCreateCollectionAction: Failed to create collection: ${error}`, 1);
@@ -339,6 +400,15 @@ async function executeOrganizeItemsAction(
     const actualCollectionsAdded = new Set<string>();
     const actualCollectionsRemoved = new Set<string>();
 
+    // Snapshot in-memory state for rollback after transaction failure.
+    // The DB transaction rolls back automatically, but in-memory item objects
+    // still carry the modifications — we must restore them explicitly.
+    const itemSnapshots = new Map<string, {
+        item: any;
+        tags: Array<{ tag: string; type?: number }>;
+        collections: number[];
+    }>();
+
     try {
         // Checkpoint: abort before starting the transaction
         checkAborted(ctx, 'organize_items:before_transaction');
@@ -360,9 +430,14 @@ async function executeOrganizeItemsAction(
 
                 let modified = false;
 
-                // Get current state before modifications
-                const existingTags = new Set(item.getTags().map((t: { tag: string }) => t.tag));
-                const existingCollections = new Set(item.getCollections().map((collectionId: number) => {
+                // Snapshot in-memory state before modifications for rollback
+                const originalTags = item.getTags();
+                const originalCollections = item.getCollections();
+                itemSnapshots.set(itemId, { item, tags: originalTags, collections: originalCollections });
+
+                // Get current state for change detection
+                const existingTags = new Set(originalTags.map((t: { tag: string }) => t.tag));
+                const existingCollections = new Set(originalCollections.map((collectionId: number) => {
                     const collection = Zotero.Collections.get(collectionId);
                     return collection ? collection.key : null;
                 }).filter(Boolean) as string[]);
@@ -426,6 +501,11 @@ async function executeOrganizeItemsAction(
             }
         });
     } catch (error) {
+        // Restore in-memory state for all snapshotted items.
+        // The DB transaction rolled back, but in-memory item objects still
+        // carry the modifications — restore them to prevent leaking into future saves.
+        restoreItemSnapshots(itemSnapshots);
+
         // Re-throw TimeoutError so it propagates to the main handler
         if (error instanceof TimeoutError) throw error;
         // Transaction failed and rolled back - no items were modified
