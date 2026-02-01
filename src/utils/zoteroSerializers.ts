@@ -218,7 +218,7 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
         creators: getCreatorsFromItem(item),
         date: item.getField('date'),
         year: getYearFromItem(item),
-        publication_title: item.getField('publicationTitle'),
+        publication_title: item.getField('publicationTitle', false, true),
         abstract: item.getField('abstractNote'),
         url: item.getField('url'),
         identifiers: getIdentifiersFromItem(item),

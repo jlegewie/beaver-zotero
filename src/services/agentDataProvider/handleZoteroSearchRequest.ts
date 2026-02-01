@@ -249,7 +249,8 @@ export async function handleZoteroSearchRequest(
                 const extraFields: Record<string, any> = {};
                 for (const field of request.fields) {
                     try {
-                        const value = item.getField(field);
+                        // includeBaseMapped=true so base fields resolve to type-specific fields
+                        const value = item.getField(field, false, true);
                         if (value !== undefined && value !== '') {
                             extraFields[field] = value;
                         }

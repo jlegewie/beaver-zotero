@@ -199,7 +199,9 @@ async function executeEditMetadataAction(
         // Apply each edit (in-memory only, not persisted until saveTx)
         for (const edit of edits) {
             try {
-                const oldValue = item.getField(edit.field);
+                // includeBaseMapped=true so base fields (e.g. 'publicationTitle')
+                // resolve to the type-specific field (e.g. 'bookTitle' on bookSection)
+                const oldValue = item.getField(edit.field, false, true);
                 fieldSnapshots.push({ field: edit.field, originalValue: oldValue });
                 item.setField(edit.field, edit.new_value);
                 appliedEdits.push({

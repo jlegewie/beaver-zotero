@@ -334,8 +334,8 @@ async function validateEditMetadataAction(
     const currentValue: Record<string, string | null> = {};
     for (const edit of edits) {
         try {
-            const value = item.getField(edit.field);
-            // getField returns empty string for missing fields, or the field value
+            // includeBaseMapped=true so base fields resolve to type-specific fields
+            const value = item.getField(edit.field, false, true);
             currentValue[edit.field] = value ? String(value) : null;
         } catch {
             currentValue[edit.field] = null;
