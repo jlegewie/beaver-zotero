@@ -212,10 +212,6 @@ export async function handleItemSearchByMetadataRequest(
         items: items.length,
     }, 1);
 
-    // Apply offset and limit (offset calculated earlier with guard against negative values)
-    const offsetItems = offset > 0 ? items.slice(offset) : items;
-    const limitedItems = request.limit > 0 ? offsetItems.slice(0, request.limit) : offsetItems;
-
     // Get sync configuration from store for status computation
     const syncWithZotero = store.get(syncWithZoteroAtom);
     const userId = store.get(userIdAtom);
@@ -225,15 +221,13 @@ export async function handleItemSearchByMetadataRequest(
         userId,
     };
 
-    // Step 3: Serialize items with attachments (using unified format)
+    // Serialize items with backfill on failures to ensure limit is reached
     const resultItems: ItemSearchFrontendResultItem[] = [];
-    
-    // Load all item data in bulk for efficiency
-    if (limitedItems.length > 0) {
-        await Zotero.Items.loadDataTypes(limitedItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]);
-    }
+    const targetLimit = request.limit > 0 ? request.limit : items.length;
 
-    for (const item of limitedItems) {
+    for (let i = offset; i < items.length && resultItems.length < targetLimit; i++) {
+        const item = items[i];
+
         try {
             const isValidItem = syncingItemFilter(item);
             if (!isValidItem) {
@@ -251,6 +245,7 @@ export async function handleItemSearchByMetadataRequest(
             });
         } catch (error) {
             logger(`handleItemSearchByMetadataRequest: Failed to serialize item ${item.key}: ${error}`, 1);
+            // Continue to next item to backfill
         }
     }
     

@@ -304,14 +304,13 @@ export async function handleItemSearchByTopicRequest(
         });
     }
 
-    // Apply offset and limit BEFORE serialization (offset calculated earlier with guard against negative values)
-    const offsetItems = offset > 0 ? filteredItems.slice(offset) : filteredItems;
-    const limitedItems = request.limit > 0 ? offsetItems.slice(0, request.limit) : offsetItems;
-
-    // Serialize only the items we'll return
+    // Serialize items with backfill on failures to ensure limit is reached
     const resultItems: ItemSearchFrontendResultItem[] = [];
+    const targetLimit = request.limit > 0 ? request.limit : filteredItems.length;
 
-    for (const { item, similarity } of limitedItems) {
+    for (let i = offset; i < filteredItems.length && resultItems.length < targetLimit; i++) {
+        const { item, similarity } = filteredItems[i];
+
         try {
             // Serialize item and process attachments in parallel
             const [itemData, attachments] = await Promise.all([
@@ -326,6 +325,7 @@ export async function handleItemSearchByTopicRequest(
             });
         } catch (error) {
             logger(`handleItemSearchByTopicRequest: Failed to serialize item ${item.key}: ${error}`, 1);
+            // Continue to next item to backfill
         }
     }
 
