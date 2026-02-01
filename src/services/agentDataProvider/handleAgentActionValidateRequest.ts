@@ -141,6 +141,19 @@ export function validateFieldEdit(item: Zotero.Item, field: string): FieldValida
     // 3. Check if field is technically editable for this item type
     if (!canSetField(item, field)) {
         const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
+        const itemTypeID = item.itemTypeID;
+
+        // If the field is a base field, list valid fields for this item type
+        if (fieldID && Zotero.ItemFields.isBaseField(fieldID)) {
+            const typeFields = Zotero.ItemFields.getItemTypeFields(itemTypeID);
+            const typeFieldNames = typeFields.map((fid: number) => Zotero.ItemFields.getName(fid));
+            return {
+                allowed: false,
+                error: `Field '${field}' is not valid for item type '${itemType}'. Valid fields: ${typeFieldNames.join(', ')}`,
+                error_code: 'field_invalid_for_type'
+            };
+        }
+
         return {
             allowed: false,
             error: `Field '${field}' is not valid for item type '${itemType}'`,
