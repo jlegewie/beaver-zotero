@@ -323,7 +323,8 @@ async function batchFindTitleCandidates(
     }
 
     // Determine global year range if we have any years
-    const hasYearFilter = yearRanges.length > 0;
+    // Only apply year filtering when ALL items have years to avoid false negatives
+    const hasYearFilter = yearRanges.length > 0 && yearRanges.length === needsMatching.length;
     const globalMinYear = hasYearFilter ? Math.min(...yearRanges.map(r => r.min)) : null;
     const globalMaxYear = hasYearFilter ? Math.max(...yearRanges.map(r => r.max)) : null;
 
