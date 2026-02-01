@@ -156,7 +156,7 @@ export async function handleZoteroSearchRequest(
                         break;
                     case 'title':
                         try {
-                            sortValue = ((item.getField('title') as string) || '').toLowerCase();
+                            sortValue = ((item.getField('title', false, true) as string) || '').toLowerCase();
                         } catch {
                             sortValue = (item.getDisplayTitle?.() || '').toLowerCase();
                         }
@@ -172,7 +172,7 @@ export async function handleZoteroSearchRequest(
                     }
                     case 'year': {
                         try {
-                            const date = item.getField('date') as string;
+                            const date = item.getField('date', false, true) as string;
                             sortValue = extractYear(date) || 0;
                         } catch {
                             sortValue = 0;
@@ -219,7 +219,7 @@ export async function handleZoteroSearchRequest(
             // Get date and extract year
             let year: number | null = null;
             try {
-                const dateStr = item.getField('date') as string;
+                const dateStr = item.getField('date', false, true) as string;
                 if (dateStr) {
                     year = extractYear(dateStr);
                 }
@@ -230,7 +230,7 @@ export async function handleZoteroSearchRequest(
             // Get title safely
             let title = '';
             try {
-                title = (item.getField('title') as string) || '';
+                title = (item.getField('title', false, true) as string) || '';
             } catch {
                 // Some item types (like annotations) may not have title field
                 title = item.getDisplayTitle?.() || '';

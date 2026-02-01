@@ -136,7 +136,7 @@ export async function handleListItemsRequest(
                     sortValue = item.dateModified || '';
                     break;
                 case 'title':
-                    sortValue = (item.getField('title') as string) || '';
+                    sortValue = (item.getField('title', false, true) as string) || '';
                     break;
                 case 'creator': {
                     const creators = item.getCreators();
@@ -144,7 +144,7 @@ export async function handleListItemsRequest(
                     break;
                 }
                 case 'year': {
-                    const date = item.getField('date') as string;
+                    const date = item.getField('date', false, true) as string;
                     sortValue = extractYear(date) || 0;
                     break;
                 }
@@ -172,12 +172,12 @@ export async function handleListItemsRequest(
         const items: ListItemsResultItem[] = [];
         for (const { item } of paginatedItems) {
             const creators = item.getCreators();
-            const date = item.getField('date') as string;
-            
+            const date = item.getField('date', false, true) as string;
+
             const resultItem: ListItemsResultItem = {
                 item_id: `${library.libraryID}-${item.key}`,
                 item_type: item.itemType,
-                title: item.getField('title') as string,
+                title: item.getField('title', false, true) as string,
                 creators: formatCreatorsString(creators),
                 year: extractYear(date),
                 date_added: item.dateAdded,

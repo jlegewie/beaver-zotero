@@ -119,7 +119,7 @@ export class EmbeddingIndexer {
             return null;
         }
 
-        const title = item.getField('title') as string || '';
+        const title = item.getField('title', false, true) as string || '';
         const abstract = item.getField('abstractNote') as string || '';
 
         // Skip items with insufficient content
@@ -149,7 +149,7 @@ export class EmbeddingIndexer {
             return false;
         }
 
-        const title = item.getField('title') as string || '';
+        const title = item.getField('title', false, true) as string || '';
         const abstract = item.getField('abstractNote') as string || '';
         const combinedLength = (title.trim() + abstract.trim()).length;
 
@@ -261,7 +261,7 @@ export class EmbeddingIndexer {
             for (const item of items) {
                 if (!item || !item.isRegularItem()) continue;
                 
-                const title = item.getField('title') as string || '';
+                const title = item.getField('title', false, true) as string || '';
                 const abstract = item.getField('abstractNote') as string || '';
                 const combinedLength = (title.trim() + abstract.trim()).length;
 
@@ -346,7 +346,7 @@ export class EmbeddingIndexer {
                         continue;
                     }
 
-                    const title = item.getField('title') as string || '';
+                    const title = item.getField('title', false, true) as string || '';
                     const abstract = item.getField('abstractNote') as string || '';
                     const combinedLength = (title.trim() + abstract.trim()).length;
 

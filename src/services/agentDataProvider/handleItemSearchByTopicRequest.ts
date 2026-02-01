@@ -251,7 +251,7 @@ export async function handleItemSearchByTopicRequest(
         // Apply filters
         // Year filter
         if (request.year_min || request.year_max) {
-            const yearStr = item.getField('date');
+            const yearStr = item.getField('date', false, true);
             const yearMatch = yearStr ? String(yearStr).match(/\d{4}/) : null;
             const year = yearMatch ? parseInt(yearMatch[0], 10) : null;
 
