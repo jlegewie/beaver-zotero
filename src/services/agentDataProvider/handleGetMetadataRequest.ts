@@ -55,8 +55,8 @@ export async function handleGetMetadataRequest(
             const dataTypesToLoad: string[] = ['itemData', 'creators', 'relations', 'tags', 'collections', 'childItems'];
             await Zotero.Items.loadDataTypes([item], dataTypesToLoad);
             
-            // Get full item data via toJSON() - this is the canonical Zotero method
-            const itemData: Record<string, any> = item.toJSON();
+            // Get full item data via toJSON({ mode: 'full' }) - includes all fields
+            const itemData: Record<string, any> = item.toJSON({ mode: 'full' });
             itemData.item_id = itemId;
             
             // Return all fields (including tags and collections)
