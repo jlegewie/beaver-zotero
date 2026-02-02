@@ -426,7 +426,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to apply action';
-            logger(`AgentActionView: Failed to apply actions: ${errorMessage}`, 1);
+            const stackTrace = error?.stack || '';
+            logger(`AgentActionView: Failed to apply actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
             // Set error on all actions
             const actionIds = actions.map(a => a.id);
             setAgentActionsToError(actionIds, errorMessage);
@@ -525,7 +526,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to undo action';
-            logger(`AgentActionView: Failed to undo actions: ${errorMessage}`, 1);
+            const stackTrace = error?.stack || '';
+            logger(`AgentActionView: Failed to undo actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
             // Set error on all applied actions
             const appliedActionIds = actions.filter(a => a.status === 'applied').map(a => a.id);
             if (appliedActionIds.length > 0) {
