@@ -621,10 +621,15 @@ export const undoAgentActionAtom = atom(
     (_, set, actionId: string) => {
         // Frontend: Update UI state
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {
-            return prev.map((action) => action.id === actionId
-                ? { ...action, status: 'undone' as ActionStatus, result_data: undefined, error_message: undefined }
-                : action
-            );
+            return prev.map((action) => {
+                if (action.id !== actionId) return action;
+                // Preserve old_creators from result_data into proposed_data before clearing,
+                // so the preview can show the before/after diff in the "undone" state.
+                const proposed_data = (action.result_data?.old_creators && !action.proposed_data?.old_creators)
+                    ? { ...action.proposed_data, old_creators: action.result_data.old_creators }
+                    : action.proposed_data;
+                return { ...action, proposed_data, status: 'undone' as ActionStatus, result_data: undefined, error_message: undefined };
+            });
         });
         // Backend: Update action state
         agentActionsService.updateAction(actionId, {

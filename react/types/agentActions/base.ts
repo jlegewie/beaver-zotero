@@ -61,6 +61,8 @@ export interface EditMetadataProposedData {
     edits: MetadataEdit[];
     /** New creators list (replaces all existing creators when provided) */
     creators?: CreatorJSON[] | null;
+    /** Original creators before the edit (for undo display) */
+    old_creators?: CreatorJSON[] | null;
 }
 
 /**

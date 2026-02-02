@@ -903,8 +903,9 @@ const ActionPreview: React.FC<{
         // For applied actions, show the applied values if available
         const appliedEdits = previewData.resultData?.applied_edits;
 
-        // Creator data: old from currentValue or resultData, new from actionData or resultData
+        // Creator data: old from resultData, proposed_data, or currentValue
         const oldCreators = previewData.resultData?.old_creators
+            ?? previewData.actionData.old_creators
             ?? previewData.currentValue?.current_creators
             ?? null;
         const newCreators = previewData.resultData?.new_creators
