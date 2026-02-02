@@ -1,5 +1,6 @@
 import { getDisplayNameFromItem } from "../../react/utils/sourceUtils";
 import { ZoteroItemReference } from "../../react/types/zotero";
+import type { CreatorJSON } from "../../react/types/agentActions/base";
 import { logger } from "./logger";
 
 /**
@@ -984,6 +985,28 @@ export function deduplicateItems(
     return result;
 }
 
+
+/**
+ * Sanitize creator objects for Zotero's setCreators().
+ * Zotero rejects creators that have both 'name' and 'firstName'/'lastName'
+ * properties, even if one side is null. LLM output often includes name: null
+ * on person creators.
+ */
+export function sanitizeCreators(creators: CreatorJSON[]): CreatorJSON[] {
+    return creators.map(c => {
+        const hasPersonFields = (c.firstName != null && c.firstName !== '') ||
+                                (c.lastName != null && c.lastName !== '');
+        if (hasPersonFields) {
+            const { name, ...rest } = c as any;
+            return rest as CreatorJSON;
+        }
+        if (c.name != null && c.name !== '') {
+            const { firstName, lastName, ...rest } = c as any;
+            return rest as CreatorJSON;
+        }
+        return c;
+    });
+}
 
 /**
  * Primary fields that CAN be set via item.setField().
