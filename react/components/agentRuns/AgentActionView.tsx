@@ -601,13 +601,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     onClick={isProcessing ? () => {} : toggleExpanded}
                     disabled={isProcessing}
                     onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
+                    onMouseLeave={() => setIsHovered(false)}
                 >
                     <div className="display-flex flex-row ml-3 gap-2">
                         <div className={`flex-1 display-flex mt-010 font-color-primary`}>
                             <Icon icon={getHeaderIcon()} className={shouldShowStatusIcon() ? config.iconClassName : undefined} />
                         </div>
-                        <div 
+                        <div
                             className="flex-wrap"
                             style={{
                                 display: '-webkit-box',
