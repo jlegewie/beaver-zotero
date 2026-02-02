@@ -8,7 +8,7 @@ import { currentThreadScrollPositionAtom, windowScrollPositionAtom, currentThrea
 import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
-import { toolExpandedAtom } from "../../atoms/messageUIState";
+import { toolExpandedAtom, messageSourcesVisibilityAtom, annotationPanelStateAtom } from "../../atoms/messageUIState";
 
 const BOTTOM_THRESHOLD = 120; // pixels
 const RESTORE_THRESHOLD = 100; // pixels - threshold for restoring scroll position
@@ -56,8 +56,13 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         const storedScrollTop = useAtomValue(scrollPositionAtom);
         
         // Watch expansion state to re-evaluate scroll button visibility after expand/collapse
+        // Track multiple expansion states: tool calls, sources, and agent actions
         const toolExpansionState = useAtomValue(toolExpandedAtom);
+        const sourcesVisibilityState = useAtomValue(messageSourcesVisibilityAtom);
+        const annotationPanelState = useAtomValue(annotationPanelStateAtom);
         const prevExpansionStateRef = useRef(toolExpansionState);
+        const prevSourcesVisibilityRef = useRef(sourcesVisibilityState);
+        const prevAnnotationPanelRef = useRef(annotationPanelState);
         
         // Use the auto-scroll hook with window-aware state
         const { scrollContainerRef, setScrollContainerRef, handleScroll } = useAutoScroll(ref, {
@@ -257,11 +262,23 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         }, [pendingApprovalsMap, scrolledAtom, win]);
 
         // Re-evaluate scroll state when content expands/collapses
-        // This ensures the ScrollDownButton visibility is updated when user toggles tool results
+        // This ensures the ScrollDownButton visibility is updated when user toggles:
+        // - Tool call results (toolExpandedAtom)
+        // - Sources sections (messageSourcesVisibilityAtom)
+        // - Agent action panels (annotationPanelStateAtom)
         useEffect(() => {
-            // Skip on initial mount (no change yet)
-            if (prevExpansionStateRef.current === toolExpansionState) return;
+            // Check if any expansion state changed
+            const toolChanged = prevExpansionStateRef.current !== toolExpansionState;
+            const sourcesChanged = prevSourcesVisibilityRef.current !== sourcesVisibilityState;
+            const annotationChanged = prevAnnotationPanelRef.current !== annotationPanelState;
+            
+            // Skip if nothing changed (initial mount or no state change)
+            if (!toolChanged && !sourcesChanged && !annotationChanged) return;
+            
+            // Update refs
             prevExpansionStateRef.current = toolExpansionState;
+            prevSourcesVisibilityRef.current = sourcesVisibilityState;
+            prevAnnotationPanelRef.current = annotationPanelState;
             
             // Wait briefly for DOM to update after expansion toggle
             const timeoutId = win.setTimeout(() => {
@@ -277,7 +294,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             }, EXPANSION_SCROLL_EVAL_DELAY);
             
             return () => win.clearTimeout(timeoutId);
-        }, [toolExpansionState, scrolledAtom, win]);
+        }, [toolExpansionState, sourcesVisibilityState, annotationPanelState, scrolledAtom, win]);
 
         if (runs.length === 0) {
             return (

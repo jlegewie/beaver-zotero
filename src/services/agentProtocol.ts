@@ -242,6 +242,8 @@ export interface WSExternalReferenceCheckResponse {
     type: 'external_reference_check';
     request_id: string;
     results: ExternalReferenceCheckResult[];
+    /** Optional timing breakdown for diagnostics */
+    timing?: FrontendTimingMetadata;
 }
 
 /** Item search result with attachments (unified format) */
@@ -267,6 +269,20 @@ export interface FrontendTimingMetadata {
     item_count?: number;
     /** Number of attachments processed */
     attachment_count?: number;
+
+    // Reference check specific timings
+    /** Time spent in phase 1: identifier (DOI/ISBN) lookup */
+    phase1_identifier_lookup_ms?: number;
+    /** Time spent in phase 2: fetching title candidates */
+    phase2_title_candidates_ms?: number;
+    /** Time spent in phase 3: fuzzy matching */
+    phase3_fuzzy_matching_ms?: number;
+    /** Number of title candidates fetched from database */
+    candidates_fetched?: number;
+    /** Number of matches found by identifiers */
+    matches_by_identifier?: number;
+    /** Number of matches found by fuzzy matching */
+    matches_by_fuzzy?: number;
 }
 
 /** Request from backend to search Zotero library by metadata */
@@ -556,6 +572,8 @@ export interface WSZoteroSearchRequest extends WSBaseEvent {
     item_category?: ZoteroItemCategory | null;
     include_children: boolean;
     recursive: boolean;
+    sort_by?: string | null;
+    sort_order?: string | null;
     limit: number;
     offset: number;
     fields?: string[] | null;
@@ -634,13 +652,9 @@ export interface WSGetMetadataRequest extends WSBaseEvent {
     event: 'get_metadata_request';
     request_id: string;
     item_ids: string[];
-    /** Specific field names to include. null = all fields. */
-    fields?: string[] | null;
     include_attachments: boolean;
     /** Not supported yet - always false from backend */
     include_notes: boolean;
-    include_tags: boolean;
-    include_collections: boolean;
 }
 
 /** Response to get_metadata request */
@@ -804,6 +818,8 @@ export interface WSAgentActionExecuteRequest extends WSBaseEvent {
     request_id: string;
     action_type: AgentActionType;
     action_data: Record<string, any>;
+    /** Timeout in seconds for the frontend to complete execution (default: 25 seconds) */
+    timeout_seconds?: number;
 }
 
 /** Response to agent action execution request */

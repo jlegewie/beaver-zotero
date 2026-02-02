@@ -10,7 +10,7 @@ import {
     rejectAgentActionAtom,
     setAgentActionsToErrorAtom,
 } from '../../agents/agentActions';
-import { sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
+import { sendApprovalResponseAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import {
     agentActionItemTitlesAtom,
     setAgentActionItemTitleAtom,
@@ -245,6 +245,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
     const actions = getAgentActionsByToolcall(toolcallId);
     
+    // Track if the run is still pending (needed to detect cancel vs external approval)
+    const isRunPending = useAtomValue(isWSChatPendingAtom);
+    
     // Determine if this is a multi-action tool call (create_items with multiple items)
     const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
     
@@ -298,7 +301,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         const isNoLongerAwaiting = pendingApproval === null;
         
         // If approval was just removed externally (not by our local handleApprove/handleReject)
-        if (wasAwaiting && isNoLongerAwaiting && !isProcessingApproval) {
+        // AND the run is still pending (not canceled via Stop button)
+        if (wasAwaiting && isNoLongerAwaiting && !isProcessingApproval && isRunPending) {
             setIsExternallyProcessing(true);
             // Set clickedButton to 'approve' to show the loading state on the right button
             // We assume external removal is approval (reject would also work but approve is more common)
@@ -306,7 +310,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
         
         prevPendingApprovalRef.current = pendingApproval;
-    }, [pendingApproval, isProcessingApproval]);
+    }, [pendingApproval, isProcessingApproval, isRunPending]);
 
     // Clear processing state when action status changes from 'pending' to a final state
     useEffect(() => {

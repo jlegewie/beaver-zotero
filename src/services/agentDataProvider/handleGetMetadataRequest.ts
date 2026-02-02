@@ -50,46 +50,33 @@ export async function handleGetMetadataRequest(
                 continue;
             }
             
-            // Get full item data via toJSON() - this is the canonical Zotero method
-            const itemData: Record<string, any> = item.toJSON();
+            // Load necessary data types before accessing item data
+            // Always load itemData and creators for basic fields
+            const dataTypesToLoad: string[] = ['itemData', 'creators', 'relations', 'tags', 'collections', 'childItems'];
+            await Zotero.Items.loadDataTypes([item], dataTypesToLoad);
+            
+            // Get full item data via toJSON({ mode: 'full' }) - includes all fields
+            const itemData: Record<string, any> = item.toJSON({ mode: 'full' });
             itemData.item_id = itemId;
             
-            // Handle field filtering
-            let result: Record<string, any>;
-            if (request.fields && request.fields.length > 0) {
-                // Core fields are always included
-                result = {
-                    item_id: itemId,
-                    itemType: itemData.itemType,
-                    key: itemData.key,
-                    title: itemData.title,
-                    creators: itemData.creators,
-                    date: itemData.date,
-                };
-                // Add requested fields
-                for (const field of request.fields) {
-                    if (field in itemData) {
-                        result[field] = itemData[field];
+            // Return all fields (including tags and collections)
+            const result: Record<string, any> = { ...itemData };
+
+            // Enrich collection keys with names for agent readability
+            // toJSON() returns collections as plain key strings: ["ABCD1234", ...]
+            // We convert to [{collection_key, name}, ...] so the agent sees meaningful names
+            if (Array.isArray(result.collections)) {
+                result.collections = result.collections.map((collKey: string) => {
+                    try {
+                        const coll = Zotero.Collections.getByLibraryAndKey(libraryId, collKey);
+                        return {
+                            collection_key: collKey,
+                            name: coll ? coll.name : collKey,
+                        };
+                    } catch {
+                        return { collection_key: collKey, name: collKey };
                     }
-                }
-                // Include tags if requested
-                if (request.include_tags && 'tags' in itemData) {
-                    result.tags = itemData.tags;
-                }
-                // Include collections if requested
-                if (request.include_collections && 'collections' in itemData) {
-                    result.collections = itemData.collections;
-                }
-            } else {
-                // Return all fields, but optionally exclude some
-                result = { ...itemData };
-                
-                if (!request.include_tags) {
-                    delete result.tags;
-                }
-                if (!request.include_collections) {
-                    delete result.collections;
-                }
+                });
             }
             
             // Handle attachments if requested
@@ -100,7 +87,7 @@ export async function handleGetMetadataRequest(
                     const attachmentItems = await Zotero.Items.getAsync(attachmentIds);
                     
                     // Ensure attachment data is loaded
-                    await Zotero.Items.loadDataTypes(attachmentItems, ['primaryData', 'itemData']);
+                    await Zotero.Items.loadDataTypes(attachmentItems, ['primaryData', 'itemData', 'tags', 'collections', 'childItems']);
                     
                     const attachments: any[] = [];
                     
@@ -135,7 +122,7 @@ export async function handleGetMetadataRequest(
                     const noteItems = await Zotero.Items.getAsync(noteIds);
                     
                     // Ensure note data is loaded
-                    await Zotero.Items.loadDataTypes(noteItems, ['primaryData', 'itemData', 'note']);
+                    await Zotero.Items.loadDataTypes(noteItems, ['primaryData', 'itemData', 'note', 'tags', 'collections', 'childItems']);
                     
                     const notes: any[] = [];
                     

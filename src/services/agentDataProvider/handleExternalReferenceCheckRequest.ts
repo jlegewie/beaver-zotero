@@ -20,17 +20,19 @@ import {
 
 /**
  * Handle external_reference_check_request event.
- * 
+ *
  * Uses batch lookups for optimal performance:
  * - Phase 1: Batch DOI/ISBN lookup across all libraries in 2 queries
- * - Phase 2: Batch title candidate collection in 1 query
+ * - Phase 2: Batch title candidate collection in 1 query (with optional date filtering)
  * - Phase 3: Single batch load of all candidate item data
  * - Phase 4: In-memory fuzzy matching
- * 
+ *
  * If library_ids is provided, only search those libraries.
  * If library_ids is not provided or empty, search all accessible libraries.
  */
 export async function handleExternalReferenceCheckRequest(request: WSExternalReferenceCheckRequest): Promise<WSExternalReferenceCheckResponse> {
+    const startTime = Date.now();
+
     // Determine which libraries to search
     const libraryIds: number[] = request.library_ids && request.library_ids.length > 0
         ? request.library_ids
@@ -50,12 +52,24 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
 
     // Use batch lookup for all items at once
     let batchResults;
+    let timing;
     try {
-        batchResults = await batchFindExistingReferences(batchItems, libraryIds);
+        const batchOutput = await batchFindExistingReferences(batchItems, libraryIds);
+        batchResults = batchOutput.results;
+        timing = batchOutput.timing;
     } catch (error) {
         logger(`AgentService: Batch reference check failed: ${error}`, 1);
         // Return all as not found on error
         batchResults = batchItems.map(item => ({ id: item.id, item: null }));
+        timing = {
+            total_ms: Date.now() - startTime,
+            phase1_identifier_lookup_ms: 0,
+            phase2_title_candidates_ms: 0,
+            phase3_fuzzy_matching_ms: 0,
+            candidates_fetched: 0,
+            matches_by_identifier: 0,
+            matches_by_fuzzy: 0,
+        };
     }
 
     // Convert batch results to response format
@@ -80,7 +94,17 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
     const response: WSExternalReferenceCheckResponse = {
         type: 'external_reference_check',
         request_id: request.request_id,
-        results
+        results,
+        timing: {
+            total_ms: timing.total_ms,
+            item_count: request.items.length,
+            phase1_identifier_lookup_ms: timing.phase1_identifier_lookup_ms,
+            phase2_title_candidates_ms: timing.phase2_title_candidates_ms,
+            phase3_fuzzy_matching_ms: timing.phase3_fuzzy_matching_ms,
+            candidates_fetched: timing.candidates_fetched,
+            matches_by_identifier: timing.matches_by_identifier,
+            matches_by_fuzzy: timing.matches_by_fuzzy,
+        }
     };
 
     return response;

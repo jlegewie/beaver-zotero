@@ -241,8 +241,8 @@ export async function handleItemSearchByTopicRequest(
         userId,
     };
 
-    // Serialize items with attachments and similarity
-    const resultItems: ItemSearchFrontendResultItem[] = [];
+    // Apply filters first (before serialization)
+    const filteredItems: { item: Zotero.Item; similarity: number }[] = [];
 
     for (const searchResult of searchResults) {
         const item = itemById.get(searchResult.itemId);
@@ -251,10 +251,10 @@ export async function handleItemSearchByTopicRequest(
         // Apply filters
         // Year filter
         if (request.year_min || request.year_max) {
-            const yearStr = item.getField('date');
+            const yearStr = item.getField('date', false, true);
             const yearMatch = yearStr ? String(yearStr).match(/\d{4}/) : null;
             const year = yearMatch ? parseInt(yearMatch[0], 10) : null;
-            
+
             if (year) {
                 if (request.year_min && year < request.year_min) continue;
                 if (request.year_max && year > request.year_max) continue;
@@ -265,7 +265,7 @@ export async function handleItemSearchByTopicRequest(
         if (request.author_filter && request.author_filter.length > 0) {
             const creators = item.getCreators();
             const creatorLastNames = creators.map(c => (c.lastName || '').toLowerCase());
-            const matchesAuthor = request.author_filter.some(authorName => 
+            const matchesAuthor = request.author_filter.some(authorName =>
                 creatorLastNames.some(lastName => lastName.includes(authorName.toLowerCase()))
             );
             if (!matchesAuthor) continue;
@@ -274,7 +274,7 @@ export async function handleItemSearchByTopicRequest(
         // Tags filter
         if (request.tags_filter && request.tags_filter.length > 0) {
             const itemTags = item.getTags().map(t => t.tag.toLowerCase());
-            const matchesTag = request.tags_filter.some(tag => 
+            const matchesTag = request.tags_filter.some(tag =>
                 itemTags.includes(tag.toLowerCase())
             );
             if (!matchesTag) continue;
@@ -287,8 +287,8 @@ export async function handleItemSearchByTopicRequest(
                 const collection = Zotero.Collections.get(collectionId);
                 return collection ? collection.key : null;
             }).filter((key): key is string => key !== null);
-            
-            const matchesCollection = collectionKeys.some(key => 
+
+            const matchesCollection = collectionKeys.some(key =>
                 itemCollectionKeys.includes(key)
             );
             if (!matchesCollection) continue;
@@ -297,6 +297,19 @@ export async function handleItemSearchByTopicRequest(
         // Validate item is regular item and not in trash
         const isValidItem = syncingItemFilter(item);
         if (!isValidItem) continue;
+
+        filteredItems.push({
+            item,
+            similarity: searchResult.similarity,
+        });
+    }
+
+    // Serialize items with backfill on failures to ensure limit is reached
+    const resultItems: ItemSearchFrontendResultItem[] = [];
+    const targetLimit = request.limit > 0 ? request.limit : filteredItems.length;
+
+    for (let i = offset; i < filteredItems.length && resultItems.length < targetLimit; i++) {
+        const { item, similarity } = filteredItems[i];
 
         try {
             // Serialize item and process attachments in parallel
@@ -308,19 +321,16 @@ export async function handleItemSearchByTopicRequest(
             resultItems.push({
                 item: itemData,
                 attachments,
-                similarity: searchResult.similarity,
+                similarity,
             });
         } catch (error) {
             logger(`handleItemSearchByTopicRequest: Failed to serialize item ${item.key}: ${error}`, 1);
+            // Continue to next item to backfill
         }
     }
 
     // Record serialization completion time
     serializationEndTime = Date.now();
-    
-    // Apply offset and limit (offset calculated earlier with guard against negative values)
-    const offsetItems = offset > 0 ? resultItems.slice(offset) : resultItems;
-    const limitedItems = request.limit > 0 ? offsetItems.slice(0, request.limit) : offsetItems;
 
     // Calculate total attachment count
     const totalAttachments = resultItems.reduce((sum, item) => sum + item.attachments.length, 0);
@@ -334,12 +344,12 @@ export async function handleItemSearchByTopicRequest(
         attachment_count: totalAttachments,
     };
 
-    logger(`handleItemSearchByTopicRequest: Returning ${limitedItems.length} items (offset=${offset}), timing: ${JSON.stringify(timing)}`, 1);
+    logger(`handleItemSearchByTopicRequest: Returning ${resultItems.length} items (offset=${offset}, filtered=${filteredItems.length}), timing: ${JSON.stringify(timing)}`, 1);
 
     const response: WSItemSearchByTopicResponse = {
         type: 'item_search_by_topic',
         request_id: request.request_id,
-        items: limitedItems,
+        items: resultItems,
         timing,
     };
 

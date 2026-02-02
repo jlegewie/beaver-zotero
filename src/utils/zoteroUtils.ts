@@ -495,7 +495,7 @@ export async function shortItemTitle(item: Zotero.Item): Promise<string> {
     }
 
     if (parentItem && parentItem.isAttachment()) {
-        return parentItem.getField('title') || '';
+        return parentItem.getField('title', false, true) || '';
     }
 
     return '';
@@ -893,8 +893,8 @@ export function areItemsDuplicates(item1: Zotero.Item, item2: Zotero.Item): bool
     }
     
     // Title normalization and comparison
-    const title1Raw = item1.getField('title') as string;
-    const title2Raw = item2.getField('title') as string;
+    const title1Raw = item1.getField('title', false, true) as string;
+    const title2Raw = item2.getField('title', false, true) as string;
     
     if (!title1Raw || !title2Raw) return false;
     
@@ -911,8 +911,8 @@ export function areItemsDuplicates(item1: Zotero.Item, item2: Zotero.Item): bool
     if (title1 !== title2 || !title1) return false;
     
     // Year match (within 1 year)
-    const year1 = parseInt(item1.getField('date') as string);
-    const year2 = parseInt(item2.getField('date') as string);
+    const year1 = parseInt(item1.getField('date', false, true) as string);
+    const year2 = parseInt(item2.getField('date', false, true) as string);
     if (!isNaN(year1) && !isNaN(year2) && Math.abs(year1 - year2) <= 1) {
         return true;
     }

@@ -25,7 +25,7 @@ export function itemSearchResultFromZoteroItem(item: Zotero.Item): ItemSearchRes
         item_type: item.itemType,
         // @ts-ignore - Add proper types later
         deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
-        title: item.getField('title'),
+        title: item.getField('title', false, true),
         year: getYearFromItem(item),
         rank: 0,
         similarity: 0,

@@ -4,7 +4,7 @@
  */
 
 import { AgentAction } from '../agents/agentActions';
-import { EditMetadataResultData, AppliedMetadataEdit, FailedMetadataEdit, MetadataEdit } from '../types/agentActions/base';
+import { EditMetadataResultData, AppliedMetadataEdit, FailedMetadataEdit, MetadataEdit, CreatorJSON } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
 
 /**
@@ -38,6 +38,21 @@ function valuesEqual(a: any, b: any): boolean {
 }
 
 /**
+ * Compare two CreatorJSON arrays for equality.
+ * Order-sensitive: creators at the same index must match.
+ */
+function creatorsEqual(a: CreatorJSON[], b: CreatorJSON[]): boolean {
+    if (a.length !== b.length) return false;
+    return a.every((creator, i) => {
+        const other = b[i];
+        return creator.creatorType === other.creatorType
+            && (creator.firstName ?? '') === (other.firstName ?? '')
+            && (creator.lastName ?? '') === (other.lastName ?? '')
+            && (creator.name ?? '') === (other.name ?? '');
+    });
+}
+
+/**
  * Execute an edit_metadata agent action by applying edits to the Zotero item.
  * Captures current values BEFORE applying so undo can reliably restore them.
  * @param action The agent action to execute
@@ -46,10 +61,11 @@ function valuesEqual(a: any, b: any): boolean {
 export async function executeEditMetadataAction(
     action: AgentAction
 ): Promise<EditMetadataResultData> {
-    const { library_id, zotero_key, edits } = action.proposed_data as {
+    const { library_id, zotero_key, edits, creators } = action.proposed_data as {
         library_id: number;
         zotero_key: string;
         edits: MetadataEdit[];
+        creators?: CreatorJSON[] | null;
     };
 
     // Get the item
@@ -60,8 +76,11 @@ export async function executeEditMetadataAction(
 
     const appliedEdits: AppliedMetadataEdit[] = [];
     const failedEdits: FailedMetadataEdit[] = [];
+    let oldCreatorsJSON: CreatorJSON[] | null = null;
+    let newCreatorsJSON: CreatorJSON[] | null = null;
+    let creatorsApplied = false;
 
-    // Apply each edit, capturing current value BEFORE applying for reliable undo
+    // Apply each field edit, capturing current value BEFORE applying for reliable undo
     for (const edit of edits) {
         try {
             // Capture current value before applying (for undo)
@@ -89,14 +108,32 @@ export async function executeEditMetadataAction(
         }
     }
 
-    // Save the item if any edits were applied
-    if (appliedEdits.length > 0) {
+    // Apply creators if provided (non-empty array)
+    if (creators && creators.length > 0) {
+        try {
+            oldCreatorsJSON = item.getCreatorsJSON();
+            item.setCreators(creators as any[]);
+            creatorsApplied = true;
+        } catch (error) {
+            failedEdits.push({
+                field: 'creators',
+                error: String(error),
+            });
+        }
+    }
+
+    // Save the item if any changes were applied
+    if (appliedEdits.length > 0 || creatorsApplied) {
         try {
             await item.saveTx();
-            logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits to ${library_id}-${zotero_key}`, 1);
+            logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits${creatorsApplied ? ' + creators' : ''} to ${library_id}-${zotero_key}`, 1);
         } catch (error) {
             throw new Error(`Failed to save item: ${error}`);
         }
+    }
+
+    if (creatorsApplied) {
+        newCreatorsJSON = item.getCreatorsJSON();
     }
 
     if (failedEdits.length > 0) {
@@ -109,6 +146,8 @@ export async function executeEditMetadataAction(
         applied_edits: appliedEdits,
         rejected_edits: [],
         failed_edits: failedEdits,
+        old_creators: oldCreatorsJSON,
+        new_creators: newCreatorsJSON,
     };
 }
 
@@ -145,10 +184,14 @@ export async function undoEditMetadataAction(
     // Fall back to proposed_data.edits if result_data is not available
     const appliedEdits = action.result_data?.applied_edits as AppliedMetadataEdit[] | undefined;
     const proposedEdits = (action.proposed_data as { edits?: MetadataEdit[] }).edits;
-    
-    const editsToProcess = appliedEdits ?? proposedEdits;
-    
-    if (!editsToProcess || editsToProcess.length === 0) {
+    const editsToProcess = appliedEdits ?? proposedEdits ?? [];
+
+    // Check if creators were changed (old_creators in result_data means they were applied)
+    const oldCreators = action.result_data?.old_creators as CreatorJSON[] | null | undefined;
+    const newCreators = action.result_data?.new_creators as CreatorJSON[] | null | undefined;
+    const hasCreatorUndo = oldCreators != null;
+
+    if (editsToProcess.length === 0 && !hasCreatorUndo) {
         throw new Error('No edit data available for undo');
     }
 
@@ -165,7 +208,7 @@ export async function undoEditMetadataAction(
         const field = edit.field;
         const oldValue = 'old_value' in edit ? edit.old_value : null;
         const appliedValue = 'applied_value' in edit ? edit.applied_value : (edit as MetadataEdit).new_value;
-        
+
         // Get current value in Zotero
         let currentValue: any = null;
         try {
@@ -205,6 +248,42 @@ export async function undoEditMetadataAction(
                 // Don't overwrite user's manual changes
                 result.manuallyModified.push(field);
                 logger(`undoEditMetadataAction: Field '${field}' was manually modified, preserving user's change`, 1);
+            }
+        }
+    }
+
+    // Restore creators if they were changed (same 3-way logic as field edits)
+    if (hasCreatorUndo) {
+        const currentCreators = item.getCreatorsJSON() as CreatorJSON[];
+
+        if (creatorsEqual(currentCreators, oldCreators!)) {
+            // Already at old value — no change needed
+            result.alreadyReverted.push('creators');
+            logger(`undoEditMetadataAction: Creators already at original values, skipping`, 1);
+        } else if (newCreators && creatorsEqual(currentCreators, newCreators)) {
+            // Current matches what we applied — normal undo
+            try {
+                item.setCreators(oldCreators as any[]);
+                result.fieldsReverted++;
+                needsSave = true;
+                logger(`undoEditMetadataAction: Reverted creators to original values`, 1);
+            } catch (error) {
+                logger(`undoEditMetadataAction: Failed to revert creators: ${error}`, 1);
+            }
+        } else {
+            // User manually modified creators since the apply
+            if (forceRevert) {
+                try {
+                    item.setCreators(oldCreators as any[]);
+                    result.fieldsReverted++;
+                    needsSave = true;
+                    logger(`undoEditMetadataAction: Force-reverted manually modified creators`, 1);
+                } catch (error) {
+                    logger(`undoEditMetadataAction: Failed to revert creators: ${error}`, 1);
+                }
+            } else {
+                result.manuallyModified.push('creators');
+                logger(`undoEditMetadataAction: Creators were manually modified, preserving user's change`, 1);
             }
         }
     }

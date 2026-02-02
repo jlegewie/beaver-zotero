@@ -31,6 +31,26 @@ export interface BatchReferenceCheckResult {
 }
 
 /**
+ * Timing breakdown for batch reference checking
+ */
+export interface BatchReferenceCheckTiming {
+    /** Total operation time in milliseconds */
+    total_ms: number;
+    /** Time spent in phase 1: identifier (DOI/ISBN) lookup */
+    phase1_identifier_lookup_ms: number;
+    /** Time spent in phase 2: fetching title candidates */
+    phase2_title_candidates_ms: number;
+    /** Time spent in phase 3: fuzzy matching */
+    phase3_fuzzy_matching_ms: number;
+    /** Number of title candidates fetched from database */
+    candidates_fetched: number;
+    /** Number of matches found by identifiers */
+    matches_by_identifier: number;
+    /** Number of matches found by fuzzy matching */
+    matches_by_fuzzy: number;
+}
+
+/**
  * Normalize a string for comparison using Zotero's duplicate detection logic
  */
 function normalizeString(str: string | undefined | null): string {
@@ -247,6 +267,7 @@ async function batchFindByIdentifiers(
 /**
  * Phase 2: Batch title candidate collection
  * Finds all potential title matches across libraries
+ * Optimized with date/year filtering when available
  */
 async function batchFindTitleCandidates(
     items: BatchReferenceCheckItem[],
@@ -254,20 +275,24 @@ async function batchFindTitleCandidates(
     alreadyFound: Set<string>
 ): Promise<Map<number, { item: Zotero.Item; normalizedTitle: string }>> {
     // Filter to items that still need matching and have titles
-    const needsMatching = items.filter(item => 
+    const needsMatching = items.filter(item =>
         !alreadyFound.has(item.id) && item.data.title
     );
-    
+
     if (needsMatching.length === 0 || libraryIds.length === 0) {
         return new Map();
     }
-    
-    // Get title field ID
+
+    // Get all title field IDs (base + mapped fields like caseName, subject, nameOfAct)
+    // Zotero item types like case, email, statute store titles in mapped fields.
+    // See Zotero's duplicates.js for the same pattern.
     const titleFieldID = Zotero.ItemFields.getID('title');
     if (!titleFieldID) {
         return new Map();
     }
-    
+    const mappedTitleFieldIDs = Zotero.ItemFields.getTypeFieldsFromBase('title');
+    const allTitleFieldIDs = [titleFieldID, ...(mappedTitleFieldIDs || [])];
+
     // Build LIKE conditions for each title
     // Use normalized titles for matching
     const normalizedInputTitles = new Map<string, BatchReferenceCheckItem[]>();
@@ -279,40 +304,97 @@ async function batchFindTitleCandidates(
             normalizedInputTitles.set(normalized, existing);
         }
     }
-    
+
     if (normalizedInputTitles.size === 0) {
         return new Map();
     }
-    
+
     // Log sample of what we're looking for
     const sampleTitles = Array.from(normalizedInputTitles.keys()).slice(0, 3);
     logger(`batchFindTitleCandidates: Looking for normalized titles like: ${JSON.stringify(sampleTitles)}`, 1);
-    
+
+    // Extract year ranges from input items for date filtering
+    const yearRanges: { min: number; max: number }[] = [];
+    for (const item of needsMatching) {
+        if (item.data.date) {
+            const parsedDate = Zotero.Date.strToDate(item.data.date);
+            const year = parseYear(parsedDate.year);
+            if (year) {
+                // Use ±1 year tolerance to match fuzzy matching logic
+                yearRanges.push({ min: year - 1, max: year + 1 });
+            }
+        }
+    }
+
+    // Determine global year range if we have any years
+    // Only apply year filtering when ALL items have years to avoid false negatives
+    const hasYearFilter = yearRanges.length > 0 && yearRanges.length === needsMatching.length;
+    const globalMinYear = hasYearFilter ? Math.min(...yearRanges.map(r => r.min)) : null;
+    const globalMaxYear = hasYearFilter ? Math.max(...yearRanges.map(r => r.max)) : null;
+
     // Build library placeholders
     const libraryPlaceholders = libraryIds.map(() => '?').join(', ');
-    
-    // For SQL LIKE matching, we'll use a broader search and filter in-memory
-    // This is more efficient than many OR conditions
-    const sql = `
-        SELECT DISTINCT itemID, value as title
-        FROM items 
-        JOIN itemData USING (itemID) 
-        JOIN itemDataValues USING (valueID)
-        WHERE libraryID IN (${libraryPlaceholders}) 
-        AND fieldID = ?
-        AND itemID NOT IN (SELECT itemID FROM deletedItems)
+
+    // Get all date field IDs (base + mapped fields like dateDecided, issueDate, dateEnacted)
+    const dateFieldID = Zotero.ItemFields.getID('date');
+    const mappedDateFieldIDs = Zotero.ItemFields.getTypeFieldsFromBase('date');
+    const allDateFieldIDs = dateFieldID ? [dateFieldID, ...(mappedDateFieldIDs || [])] : [];
+
+    // Build SQL query with optional date filtering
+    const titlePlaceholders = allTitleFieldIDs.map(() => '?').join(', ');
+    let sql = `
+        SELECT DISTINCT i.itemID, title_val.value as title
     `;
-    
+
+    // Add date value to SELECT if filtering by year (for debugging)
+    const hasDateFields = allDateFieldIDs.length > 0;
+    if (hasYearFilter && hasDateFields && globalMinYear && globalMaxYear) {
+        sql += `, date_val.value as date_value`;
+    }
+
+    sql += `
+        FROM items i
+        JOIN itemData title_data ON i.itemID = title_data.itemID AND title_data.fieldID IN (${titlePlaceholders})
+        JOIN itemDataValues title_val ON title_data.valueID = title_val.valueID
+    `;
+
+    // Add date JOINs if we have year constraints
+    if (hasYearFilter && hasDateFields && globalMinYear && globalMaxYear) {
+        const datePlaceholders = allDateFieldIDs.map(() => '?').join(', ');
+        sql += `
+        LEFT JOIN itemData date_data ON i.itemID = date_data.itemID AND date_data.fieldID IN (${datePlaceholders})
+        LEFT JOIN itemDataValues date_val ON date_data.valueID = date_val.valueID
+        `;
+    }
+
+    sql += `
+        WHERE i.libraryID IN (${libraryPlaceholders})
+        AND i.itemID NOT IN (SELECT itemID FROM deletedItems)
+    `;
+
+    // Add year filter if applicable
+    if (hasYearFilter && hasDateFields && globalMinYear && globalMaxYear) {
+        sql += `
+        AND (date_val.value IS NULL OR
+             CAST(SUBSTR(date_val.value, 1, 4) AS INTEGER) BETWEEN ? AND ?)
+        `;
+    }
+
     const candidateItems = new Map<number, { item: Zotero.Item; normalizedTitle: string }>();
-    
+
     try {
-        const params = [...libraryIds, titleFieldID];
-        
+        // Build params array based on whether we have year filtering
+        const params = hasYearFilter && hasDateFields && globalMinYear && globalMaxYear
+            ? [...allTitleFieldIDs, ...allDateFieldIDs, ...libraryIds, globalMinYear, globalMaxYear]
+            : [...allTitleFieldIDs, ...libraryIds];
+
+        logger(`batchFindTitleCandidates: Using year filter: ${hasYearFilter ? `${globalMinYear}-${globalMaxYear}` : 'none'}`, 1);
+
         // Use onRow callback to avoid Proxy issues with Zotero.DB.queryAsync
         // Filter candidates by normalized title match during iteration
         const matchingRows: { itemID: number; title: string; normalizedTitle: string }[] = [];
         let totalRows = 0;
-        
+
         await Zotero.DB.queryAsync(sql, params, {
             onRow: (row: any) => {
                 totalRows++;
@@ -324,19 +406,19 @@ async function batchFindTitleCandidates(
                 }
             }
         });
-        
+
         logger(`batchFindTitleCandidates: SQL returned ${totalRows} rows, found ${matchingRows.length} matching normalized titles`, 1);
-        
+
         if (matchingRows.length > 0) {
             // Load all matching items in batch
             const itemIds = matchingRows.map(row => row.itemID);
             const zoteroItems = await Zotero.Items.getAsync(itemIds);
-            
+
             // Phase 3: Single batch load of all item data
             if (zoteroItems.length > 0) {
                 await Zotero.Items.loadDataTypes(zoteroItems, ["itemData", "creators", "childItems"]);
             }
-            
+
             // Build the candidate map
             for (let i = 0; i < matchingRows.length; i++) {
                 const zoteroItem = zoteroItems[i];
@@ -351,7 +433,7 @@ async function batchFindTitleCandidates(
     } catch (error) {
         logger(`batchFindTitleCandidates: Title batch query failed: ${error}`, 1);
     }
-    
+
     return candidateItems;
 }
 
@@ -452,81 +534,123 @@ function findMatchInCandidates(
 
 /**
  * Batch find existing references across multiple libraries.
- * 
+ *
  * This is an optimized version of findExistingReference that:
  * 1. Batches all DOI lookups into a single query
  * 2. Batches all ISBN lookups into a single query
- * 3. Batches all title candidate lookups into a single query
+ * 3. Batches all title candidate lookups into a single query (with optional date filtering)
  * 4. Loads all candidate item data in a single batch
  * 5. Performs fuzzy matching in-memory
- * 
+ *
  * @param items - Array of items to check
  * @param libraryIds - Library IDs to search in
- * @returns Array of results with found items
+ * @returns Object with results array and timing breakdown
  */
 export async function batchFindExistingReferences(
     items: BatchReferenceCheckItem[],
     libraryIds: number[]
-): Promise<BatchReferenceCheckResult[]> {
-    if (items.length === 0) {
-        return [];
-    }
-    
-    if (libraryIds.length === 0) {
-        return items.map(item => ({ id: item.id, item: null }));
-    }
-    
-    logger(`batchFindExistingReferences: Checking ${items.length} items across ${libraryIds.length} libraries`, 1);
+): Promise<{ results: BatchReferenceCheckResult[]; timing: BatchReferenceCheckTiming }> {
     const startTime = Date.now();
-    
-    
+
+    if (items.length === 0) {
+        return {
+            results: [],
+            timing: {
+                total_ms: 0,
+                phase1_identifier_lookup_ms: 0,
+                phase2_title_candidates_ms: 0,
+                phase3_fuzzy_matching_ms: 0,
+                candidates_fetched: 0,
+                matches_by_identifier: 0,
+                matches_by_fuzzy: 0,
+            }
+        };
+    }
+
+    if (libraryIds.length === 0) {
+        return {
+            results: items.map(item => ({ id: item.id, item: null })),
+            timing: {
+                total_ms: Date.now() - startTime,
+                phase1_identifier_lookup_ms: 0,
+                phase2_title_candidates_ms: 0,
+                phase3_fuzzy_matching_ms: 0,
+                candidates_fetched: 0,
+                matches_by_identifier: 0,
+                matches_by_fuzzy: 0,
+            }
+        };
+    }
+
+    logger(`batchFindExistingReferences: Checking ${items.length} items across ${libraryIds.length} libraries`, 1);
+
     // Initialize results map
     const results = new Map<string, Zotero.Item | null>();
     for (const item of items) {
         results.set(item.id, null);
     }
-    
+
     // Phase 1: Batch identifier matching (DOI and ISBN)
+    const phase1Start = Date.now();
     const identifierMatches = await batchFindByIdentifiers(items, libraryIds);
-    
+    const phase1Time = Date.now() - phase1Start;
+
     // Record found items
     for (const [itemId, zoteroItem] of identifierMatches) {
         results.set(itemId, zoteroItem);
     }
-    
+
     const foundByIdentifier = identifierMatches.size;
-    logger(`batchFindExistingReferences: Found ${foundByIdentifier} items by identifier`, 1);
-    
-    // Phase 2 & 3: Batch title candidate collection and data loading
+    logger(`batchFindExistingReferences: Found ${foundByIdentifier} items by identifier in ${phase1Time}ms`, 1);
+
+    // Phase 2: Batch title candidate collection and data loading
+    const phase2Start = Date.now();
     const alreadyFound = new Set(identifierMatches.keys());
     const titleCandidates = await batchFindTitleCandidates(items, libraryIds, alreadyFound);
-    
-    logger(`batchFindExistingReferences: Found ${titleCandidates.size} title candidates for fuzzy matching`, 1);
-    
-    // Phase 4: In-memory fuzzy matching
+    const phase2Time = Date.now() - phase2Start;
+
+    logger(`batchFindExistingReferences: Found ${titleCandidates.size} title candidates in ${phase2Time}ms`, 1);
+
+    // Phase 3: In-memory fuzzy matching
+    const phase3Start = Date.now();
     let fuzzyMatches = 0;
     for (const item of items) {
         if (results.get(item.id) !== null) {
             continue; // Already found by identifier
         }
-        
+
         if (!item.data.title) {
             continue; // No title to match
         }
-        
+
         const match = findMatchInCandidates(item, titleCandidates);
         if (match) {
             results.set(item.id, match);
             fuzzyMatches++;
         }
     }
-    
-    const elapsed = Date.now() - startTime;
-    logger(`batchFindExistingReferences: Completed in ${elapsed}ms. Found ${foundByIdentifier} by identifier, ${fuzzyMatches} by fuzzy match`, 1);
-    
+    const phase3Time = Date.now() - phase3Start;
+
+    const totalTime = Date.now() - startTime;
+
+    logger(`batchFindExistingReferences: Completed in ${totalTime}ms. Found ${foundByIdentifier} by identifier, ${fuzzyMatches} by fuzzy match`, 1);
+
+    // Build timing breakdown
+    const timing: BatchReferenceCheckTiming = {
+        total_ms: totalTime,
+        phase1_identifier_lookup_ms: phase1Time,
+        phase2_title_candidates_ms: phase2Time,
+        phase3_fuzzy_matching_ms: phase3Time,
+        candidates_fetched: titleCandidates.size,
+        matches_by_identifier: foundByIdentifier,
+        matches_by_fuzzy: fuzzyMatches,
+    };
+
     // Convert to result array
-    return items.map(item => ({
+    const resultArray = items.map(item => ({
         id: item.id,
         item: results.get(item.id) || null
     }));
+
+    return { results: resultArray, timing };
 }

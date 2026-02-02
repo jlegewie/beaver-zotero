@@ -108,7 +108,7 @@ function getIdentifiersFromItem(item: Zotero.Item): BibliographicIdentifier | nu
  * @returns Extracted year or undefined
  */
 export function getYearFromItem(item: Zotero.Item): number | undefined {
-    const date = item.getField('date');
+    const date = item.getField('date', false, true);
     if (!date) return undefined;
     
     // Try to extract a 4-digit year from the date string
@@ -214,11 +214,11 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
         zotero_key: item.key,
         library_id: item.libraryID,
         item_type: item.itemType,
-        title: item.getField('title'),
+        title: item.getField('title', false, true),
         creators: getCreatorsFromItem(item),
-        date: item.getField('date'),
+        date: item.getField('date', false, true),
         year: getYearFromItem(item),
-        publication_title: item.getField('publicationTitle'),
+        publication_title: item.getField('publicationTitle', false, true),
         abstract: item.getField('abstractNote'),
         url: item.getField('url'),
         identifiers: getIdentifiersFromItem(item),
@@ -351,7 +351,7 @@ export async function serializeAttachment(
             }
             return trashState;
         })(),
-        title: item.getField('title'),
+        title: item.getField('title', false, true),
         filename: item.attachmentFilename,
     };
 

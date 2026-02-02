@@ -30,6 +30,8 @@ import {
     // Deferred tools
     handleAgentActionValidateRequest,
     handleAgentActionExecuteRequest,
+    // Utility
+    handleDeleteItemsRequest,
 } from '../../src/services/agentDataProvider';
 import type {
     WSZoteroDataRequest,
@@ -89,6 +91,8 @@ const ENDPOINT_PATHS = [
     // Deferred tools
     '/beaver/agent-action/validate',
     '/beaver/agent-action/execute',
+    // Utility
+    '/beaver/delete-items',
 ] as const;
 
 /**
@@ -299,6 +303,8 @@ async function handleLibrarySearchHttpRequest(request: any) {
         include_children: request.include_children ?? false,
         item_category: request.item_category ?? 'regular',
         recursive: request.recursive ?? true,
+        sort_by: request.sort_by ?? null,
+        sort_order: request.sort_order ?? null,
         limit: request.limit ?? 10,
         offset: request.offset ?? 0,
         fields: request.fields,
@@ -346,11 +352,8 @@ async function handleLibraryMetadataHttpRequest(request: any) {
         event: 'get_metadata_request',
         request_id: generateRequestId(),
         item_ids: request.item_ids || [],
-        fields: request.fields,
         include_attachments: request.include_attachments ?? false,
         include_notes: request.include_notes ?? false,
-        include_tags: request.include_tags ?? true,
-        include_collections: request.include_collections ?? false,
     };
 
     const response = await handleGetMetadataRequest(wsRequest);
@@ -450,6 +453,7 @@ async function handleAgentActionExecuteHttpRequest(request: any) {
         request_id: generateRequestId(),
         action_type: request.action_type,
         action_data: request.action_data,
+        timeout_seconds: request.timeout_seconds,
     };
 
     const response = await handleAgentActionExecuteRequest(wsRequest);
@@ -460,6 +464,12 @@ async function handleAgentActionExecuteHttpRequest(request: any) {
         error_code: response.error_code,
         result_data: response.result_data,
     };
+}
+
+async function handleDeleteItemsHttpRequest(request: any) {
+    return await handleDeleteItemsRequest({
+        item_ids: request.item_ids || [],
+    });
 }
 
 
@@ -519,6 +529,10 @@ function registerEndpoints(): boolean {
 
     Zotero.Server.Endpoints['/beaver/agent-action/execute'] =
         createEndpoint(handleAgentActionExecuteHttpRequest);
+
+    // Utility endpoints
+    Zotero.Server.Endpoints['/beaver/delete-items'] =
+        createEndpoint(handleDeleteItemsHttpRequest);
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
     return true;
