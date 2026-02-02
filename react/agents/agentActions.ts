@@ -565,7 +565,7 @@ export const ackAgentActionsAtom = atom(
  */
 export const setAgentActionsToErrorAtom = atom(
     null,
-    (_, set, actionIds: string[], errorMessage: string) => {
+    (_, set, actionIds: string[], errorMessage: string, errorDetails?: Record<string, any>) => {
         // Frontend: Update UI state
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {
             return prev.map((action) => 
@@ -579,6 +579,7 @@ export const setAgentActionsToErrorAtom = atom(
             agentActionsService.updateAction(actionId, {
                 status: 'error',
                 error_message: errorMessage,
+                error_details: errorDetails,
             }).catch((error) => {
                 logger(`setAgentActionsToErrorAtom: failed to persist error status for action ${actionId}: ${error}`, 1);
             });

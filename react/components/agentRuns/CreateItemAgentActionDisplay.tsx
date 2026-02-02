@@ -265,7 +265,10 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to create item';
             logger(`handleApplyItem: failed to create item ${action.id}: ${errorMessage}`, 1);
-            setAgentActionsToError([action.id], errorMessage);
+            setAgentActionsToError([action.id], errorMessage, {
+                stack_trace: error?.stack || '',
+                error_name: error?.name,
+            });
         } finally {
             setBusyState({ key: groupId, annotationId: action.id, isBusy: false });
         }
@@ -326,7 +329,10 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                         } catch (error: any) {
                             const errorMessage = error?.message || 'Failed to create item';
                             logger(`handleApplyAll: failed to create item ${action.id}: ${errorMessage}`, 1);
-                            setAgentActionsToError([action.id], errorMessage);
+                            setAgentActionsToError([action.id], errorMessage, {
+                                stack_trace: error?.stack || '',
+                                error_name: error?.name,
+                            });
                             return null;
                         } finally {
                             // Clear busy state for this item
@@ -405,7 +411,10 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to delete item';
-            setAgentActionsToError([action.id], errorMessage);
+            setAgentActionsToError([action.id], errorMessage, {
+                stack_trace: error?.stack || '',
+                error_name: error?.name,
+            });
         } finally {
             setBusyState({ key: groupId, annotationId: action.id, isBusy: false });
         }

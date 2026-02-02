@@ -366,7 +366,10 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, messageId, expor
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to save note';
-            setAgentActionsToError([noteAction.id], errorMessage);
+            setAgentActionsToError([noteAction.id], errorMessage, {
+                stack_trace: error?.stack || '',
+                error_name: error?.name,
+            });
         } finally {
             setNotePanelState({ key: panelKey, updates: { isSaving: false } });
         }

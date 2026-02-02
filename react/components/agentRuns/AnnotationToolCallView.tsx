@@ -453,7 +453,9 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
                 );
 
                 if (!attachmentItem) {
-                    setAgentActionsToError(annotations.map((a) => a.id), 'Attachment not found');
+                    setAgentActionsToError(annotations.map((a) => a.id), 'Attachment not found', {
+                        error_name: 'AttachmentNotFoundError',
+                    });
                     setAnnotationPanelState({ key: toolCallId, updates: { isApplying: false } });
                     return;
                 }
@@ -496,7 +498,10 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
                     } catch (error: any) {
                         const errorMessage = error?.message || 'Failed to apply annotation';
                         logger(`AnnotationToolCallView: failed to apply ${annotation.id}: ${errorMessage}`, 1);
-                        setAgentActionsToError([annotation.id], errorMessage);
+                        setAgentActionsToError([annotation.id], errorMessage, {
+                            stack_trace: error?.stack || '',
+                            error_name: error?.name,
+                        });
                         return null;
                     }
                 })
@@ -566,7 +571,10 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
             }
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to delete annotation';
-            setAgentActionsToError([annotation.id], errorMessage);
+            setAgentActionsToError([annotation.id], errorMessage, {
+                stack_trace: error?.stack || '',
+                error_name: error?.name,
+            });
         } finally {
             setAnnotationBusy({ key: toolCallId, annotationId: annotation.id, isBusy: false });
         }

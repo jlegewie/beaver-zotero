@@ -419,7 +419,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 // Set error status for failed actions
                 if (batchResult.failures.length > 0) {
                     for (const failure of batchResult.failures) {
-                        setAgentActionsToError([failure.action.id], failure.error);
+                        setAgentActionsToError([failure.action.id], failure.error, failure.errorDetails);
                     }
                     logger(`AgentActionView: Failed to apply ${batchResult.failures.length} create_item actions`, 1);
                 }
@@ -430,7 +430,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             logger(`AgentActionView: Failed to apply actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
             // Set error on all actions
             const actionIds = actions.map(a => a.id);
-            setAgentActionsToError(actionIds, errorMessage);
+            setAgentActionsToError(actionIds, errorMessage, {
+                stack_trace: stackTrace,
+                error_name: error?.name,
+            });
         } finally {
             setIsProcessingAction(false);
             setClickedButton(null);
@@ -516,7 +519,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 
                 // Set error status for failed actions
                 for (const failure of batchResult.failures) {
-                    setAgentActionsToError([failure.actionId], failure.error);
+                    setAgentActionsToError([failure.actionId], failure.error, failure.errorDetails);
                 }
                 
                 logger(`AgentActionView: Undone ${batchResult.successes.length} create_item actions`, 1);
@@ -531,7 +534,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             // Set error on all applied actions
             const appliedActionIds = actions.filter(a => a.status === 'applied').map(a => a.id);
             if (appliedActionIds.length > 0) {
-                setAgentActionsToError(appliedActionIds, errorMessage);
+                setAgentActionsToError(appliedActionIds, errorMessage, {
+                    stack_trace: stackTrace,
+                    error_name: error?.name,
+                });
             }
         } finally {
             setIsProcessingAction(false);

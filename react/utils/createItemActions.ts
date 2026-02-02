@@ -111,7 +111,7 @@ export interface BatchExecuteResult {
     /** Successfully executed actions with their results */
     successes: Array<{ action: AgentAction; result: CreateItemResultData }>;
     /** Failed actions with their errors */
-    failures: Array<{ action: AgentAction; error: string }>;
+    failures: Array<{ action: AgentAction; error: string; errorDetails?: Record<string, any> }>;
 }
 
 /**
@@ -142,8 +142,12 @@ export async function executeCreateItemActions(actions: AgentAction[]): Promise<
                 return { success: true as const, action, result: itemResult };
             } catch (error: any) {
                 const errorMessage = error?.message || 'Failed to create item';
+                const errorDetails = {
+                    stack_trace: error?.stack || '',
+                    error_name: error?.name,
+                };
                 logger(`executeCreateItemActions: Failed to execute action ${action.id}: ${errorMessage}`, 2);
-                return { success: false as const, action, error: errorMessage };
+                return { success: false as const, action, error: errorMessage, errorDetails };
             }
         },
         BATCH_CONCURRENCY_LIMIT
@@ -154,7 +158,7 @@ export async function executeCreateItemActions(actions: AgentAction[]): Promise<
         if (res.success) {
             result.successes.push({ action: res.action, result: res.result });
         } else {
-            result.failures.push({ action: res.action, error: res.error });
+            result.failures.push({ action: res.action, error: res.error, errorDetails: res.errorDetails });
         }
     }
 
@@ -198,7 +202,7 @@ export interface BatchUndoResult {
     /** Successfully undone action IDs */
     successes: string[];
     /** Failed action IDs with their errors */
-    failures: Array<{ actionId: string; error: string }>;
+    failures: Array<{ actionId: string; error: string; errorDetails?: Record<string, any> }>;
 }
 
 /**
@@ -226,8 +230,12 @@ export async function undoCreateItemActions(actions: AgentAction[]): Promise<Bat
                 return { success: true as const, actionId: action.id };
             } catch (error: any) {
                 const errorMessage = error?.message || 'Failed to undo item creation';
+                const errorDetails = {
+                    stack_trace: error?.stack || '',
+                    error_name: error?.name,
+                };
                 logger(`undoCreateItemActions: Failed to undo action ${action.id}: ${errorMessage}`, 2);
-                return { success: false as const, actionId: action.id, error: errorMessage };
+                return { success: false as const, actionId: action.id, error: errorMessage, errorDetails };
             }
         },
         BATCH_CONCURRENCY_LIMIT
@@ -238,7 +246,7 @@ export async function undoCreateItemActions(actions: AgentAction[]): Promise<Bat
         if (res.success) {
             result.successes.push(res.actionId);
         } else {
-            result.failures.push({ actionId: res.actionId, error: res.error });
+            result.failures.push({ actionId: res.actionId, error: res.error, errorDetails: res.errorDetails });
         }
     }
 
