@@ -110,6 +110,31 @@ export interface AllEditsValidationResult {
     errors: FieldValidationError[];
 }
 
+// ============================================================================
+// Creator Validation Types
+// ============================================================================
+
+/** A creator in Zotero's JSON API format */
+interface CreatorJSON {
+    firstName?: string;
+    lastName?: string;
+    name?: string;
+    creatorType: string;
+}
+
+/** Error information for a failed creator validation */
+interface CreatorValidationError {
+    index: number;
+    error: string;
+    error_code: 'invalid_structure' | 'invalid_creator_type';
+}
+
+/** Result of validating all creator entries */
+interface CreatorValidationResult {
+    valid: boolean;
+    errors: CreatorValidationError[];
+}
+
 /**
  * Validates whether a field can be edited, with detailed error information.
  * This combines policy checks (AI restrictions) with technical checks (Zotero schema).
@@ -193,9 +218,92 @@ export function validateAllEdits(item: Zotero.Item, edits: MetadataEdit[]): AllE
 }
 
 /**
+ * Validates an array of creators for structural correctness and type compatibility.
+ * Reports ALL errors at once (batch pattern matching validateAllEdits).
+ *
+ * Checks per creator:
+ * 1. Must have either `name` (org) or `lastName` (person), not both, not neither
+ * 2. Must have `creatorType` string
+ * 3. `creatorType` must be a known Zotero creator type
+ * 4. `creatorType` must be valid for the item's type
+ *
+ * @param item - The Zotero item whose type determines valid creator types
+ * @param creators - Array of creators in JSON API format
+ * @returns Validation result with all errors
+ */
+export function validateCreators(item: Zotero.Item, creators: CreatorJSON[]): CreatorValidationResult {
+    const errors: CreatorValidationError[] = [];
+    const itemTypeID = item.itemTypeID;
+
+    for (let i = 0; i < creators.length; i++) {
+        const creator = creators[i];
+
+        // Check structure: must have either name (org) or lastName (person), not both
+        const hasName = typeof creator.name === 'string' && creator.name.length > 0;
+        const hasLastName = typeof creator.lastName === 'string' && creator.lastName.length > 0;
+
+        if (hasName && hasLastName) {
+            errors.push({
+                index: i,
+                error: `Creator at index ${i} has both 'name' and 'lastName'. Use 'name' for organizations or 'firstName'/'lastName' for persons.`,
+                error_code: 'invalid_structure',
+            });
+            continue;
+        }
+
+        if (!hasName && !hasLastName) {
+            errors.push({
+                index: i,
+                error: `Creator at index ${i} must have either 'name' (organization) or 'lastName' (person).`,
+                error_code: 'invalid_structure',
+            });
+            continue;
+        }
+
+        // Check creatorType is provided
+        if (!creator.creatorType || typeof creator.creatorType !== 'string') {
+            errors.push({
+                index: i,
+                error: `Creator at index ${i} must have a 'creatorType' string.`,
+                error_code: 'invalid_structure',
+            });
+            continue;
+        }
+
+        // Check creatorType is known in Zotero's schema
+        const creatorTypeID = Zotero.CreatorTypes.getID(creator.creatorType);
+        if (!creatorTypeID) {
+            errors.push({
+                index: i,
+                error: `Creator at index ${i} has unknown creator type '${creator.creatorType}'.`,
+                error_code: 'invalid_creator_type',
+            });
+            continue;
+        }
+
+        // Check creatorType is valid for the item's type
+        if (!Zotero.CreatorTypes.isValidForItemType(creatorTypeID, itemTypeID)) {
+            const validTypes = Zotero.CreatorTypes.getTypesForItemType(itemTypeID);
+            const validTypeNames = validTypes.map((t: { id: number; name: string }) => t.name);
+            const itemType = Zotero.ItemTypes.getName(itemTypeID);
+            errors.push({
+                index: i,
+                error: `Creator type '${creator.creatorType}' is not valid for item type '${itemType}'. Valid creator types: ${validTypeNames.join(', ')}`,
+                error_code: 'invalid_creator_type',
+            });
+        }
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+    };
+}
+
+/**
  * Checks if Beaver should be allowed to edit this field.
  * More restrictive than canSetField() - focuses on safety and best practices.
- * 
+ *
  * @deprecated Use validateFieldEdit() for detailed error information
  */
 export function isFieldEditAllowed(item: Zotero.Item, field: string): boolean {
@@ -209,10 +317,11 @@ export function isFieldEditAllowed(item: Zotero.Item, field: string): boolean {
 async function validateEditMetadataAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { library_id, zotero_key, edits } = request.action_data as {
+    const { library_id, zotero_key, edits, creators } = request.action_data as {
         library_id: number;
         zotero_key: string;
         edits: MetadataEdit[];
+        creators?: CreatorJSON[] | null;
     };
 
     // Validate library exists
@@ -312,26 +421,62 @@ async function validateEditMetadataAction(
         };
     }
 
-    // Validate ALL fields using batch validation (reports all errors at once)
-    const validation = validateAllEdits(item, edits);
-    if (!validation.valid) {
-        const errorSummary = validation.errors
-            .map(e => `${e.field}: ${e.error}`)
-            .join('; ');
-        
+    // Check that at least one change is specified
+    const hasEdits = edits && edits.length > 0;
+    const hasCreators = creators != null && creators.length > 0;
+
+    if (!hasEdits && !hasCreators) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: errorSummary,
-            error_code: 'field_validation_failed',
-            errors: validation.errors,
+            error: 'No changes specified: at least one field edit or creators must be provided',
+            error_code: 'no_changes',
             preference: 'always_ask',
         };
     }
 
+    // Validate ALL fields using batch validation (reports all errors at once)
+    if (hasEdits) {
+        const validation = validateAllEdits(item, edits);
+        if (!validation.valid) {
+            const errorSummary = validation.errors
+                .map(e => `${e.field}: ${e.error}`)
+                .join('; ');
+
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: errorSummary,
+                error_code: 'field_validation_failed',
+                errors: validation.errors,
+                preference: 'always_ask',
+            };
+        }
+    }
+
+    // Validate creators if provided
+    if (hasCreators) {
+        const creatorValidation = validateCreators(item, creators!);
+        if (!creatorValidation.valid) {
+            const errorSummary = creatorValidation.errors
+                .map(e => `[${e.index}]: ${e.error}`)
+                .join('; ');
+
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: errorSummary,
+                error_code: 'creator_validation_failed',
+                preference: 'always_ask',
+            };
+        }
+    }
+
     // Get current values for all edited fields
-    const currentValue: Record<string, string | null> = {};
+    const currentValue: Record<string, any> = {};
     for (const edit of edits) {
         try {
             // includeBaseMapped=true so base fields resolve to type-specific fields
@@ -341,6 +486,9 @@ async function validateEditMetadataAction(
             currentValue[edit.field] = null;
         }
     }
+
+    // Include current creators for before/after tracking
+    currentValue.current_creators = item.getCreatorsJSON();
 
     // Get user preference from settings
     const preference = getDeferredToolPreference('edit_metadata');

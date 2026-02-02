@@ -56,6 +56,19 @@ function restoreFieldSnapshots(
 }
 
 /**
+ * Restore in-memory creators on an item after a failed save or timeout.
+ * Uses the internal format snapshot from item.getCreators().
+ */
+function restoreCreatorSnapshots(item: any, originalCreators: any[] | null): void {
+    if (originalCreators === null) return;
+    try {
+        item.setCreators(originalCreators);
+    } catch (_) {
+        // Best-effort restoration — setCreators may fail if item is in bad state
+    }
+}
+
+/**
  * Restore in-memory tags and collections on items after a transaction rollback.
  * The DB transaction rolls back automatically, but in-memory item objects still
  * carry the modifications — this restores them to prevent leaking into future saves.
@@ -172,10 +185,11 @@ async function executeEditMetadataAction(
     request: WSAgentActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const { library_id, zotero_key, edits } = request.action_data as {
+    const { library_id, zotero_key, edits, creators } = request.action_data as {
         library_id: number;
         zotero_key: string;
         edits: MetadataEdit[];
+        creators?: Array<{ firstName?: string; lastName?: string; name?: string; creatorType: string }> | null;
     };
 
     // Get the item
@@ -194,9 +208,13 @@ async function executeEditMetadataAction(
     const failedEdits: Array<{ field: string; error: string }> = [];
     // Snapshot original field values for in-memory rollback on failure
     const fieldSnapshots: Array<{ field: string; originalValue: any }> = [];
+    // Snapshot original creators for in-memory rollback on failure
+    let creatorSnapshot: any[] | null = null;
+    let oldCreatorsJSON: any[] | null = null;
+    let creatorsApplied = false;
 
     try {
-        // Apply each edit (in-memory only, not persisted until saveTx)
+        // Apply each field edit (in-memory only, not persisted until saveTx)
         for (const edit of edits) {
             try {
                 // includeBaseMapped=true so base fields (e.g. 'publicationTitle')
@@ -219,17 +237,35 @@ async function executeEditMetadataAction(
             }
         }
 
-        // Save the item if any edits were applied
-        if (appliedEdits.length > 0) {
+        // Apply creators (in-memory only, not persisted until saveTx)
+        if (creators) {
+            try {
+                creatorSnapshot = item.getCreators();
+                oldCreatorsJSON = item.getCreatorsJSON();
+                // Type assertion: creatorType has been validated by the validate handler
+                item.setCreators(creators as any[]);
+                creatorsApplied = true;
+            } catch (error) {
+                if (error instanceof TimeoutError) throw error;
+                failedEdits.push({
+                    field: 'creators',
+                    error: String(error),
+                });
+            }
+        }
+
+        // Save the item if any changes were applied
+        if (appliedEdits.length > 0 || creatorsApplied) {
             // Checkpoint: abort before persisting if timeout has fired
             checkAborted(ctx, 'edit_metadata:before_save');
             try {
                 await item.saveTx();
-                logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits to ${library_id}-${zotero_key}`, 1);
+                logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits${creatorsApplied ? ' + creators' : ''} to ${library_id}-${zotero_key}`, 1);
             } catch (error) {
                 if (error instanceof TimeoutError) throw error;
                 // Save failed — restore in-memory state so dirty fields don't leak
                 restoreFieldSnapshots(item, fieldSnapshots);
+                restoreCreatorSnapshots(item, creatorSnapshot);
                 return {
                     type: 'agent_action_execute_response',
                     request_id: request.request_id,
@@ -242,19 +278,29 @@ async function executeEditMetadataAction(
 
         const allSucceeded = failedEdits.length === 0;
 
+        // Build result data
+        const resultData: Record<string, any> = {
+            applied_edits: appliedEdits,
+            failed_edits: failedEdits,
+        };
+
+        // Include creator change info in result
+        if (creatorsApplied) {
+            resultData.old_creators = oldCreatorsJSON;
+            resultData.new_creators = item.getCreatorsJSON();
+        }
+
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: allSucceeded,
             error: allSucceeded ? undefined : `Some edits failed: ${failedEdits.map(e => e.field).join(', ')}`,
-            result_data: {
-                applied_edits: appliedEdits,
-                failed_edits: failedEdits,
-            },
+            result_data: resultData,
         };
     } catch (error) {
         // Restore in-memory state on any unhandled error (including TimeoutError)
         restoreFieldSnapshots(item, fieldSnapshots);
+        restoreCreatorSnapshots(item, creatorSnapshot);
         throw error;
     }
 }

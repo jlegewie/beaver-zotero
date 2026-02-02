@@ -237,9 +237,10 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
     } else if (actionType === 'edit_metadata') {
         // Normalize edit_metadata proposed data
         const edits = Array.isArray(proposedData.edits) ? proposedData.edits : [];
+        const creators = Array.isArray(proposedData.creators) ? proposedData.creators : (proposedData.creators ?? null);
         proposedData = {
-            library_id: typeof proposedData.library_id === 'number' 
-                ? proposedData.library_id 
+            library_id: typeof proposedData.library_id === 'number'
+                ? proposedData.library_id
                 : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
             zotero_key: proposedData.zotero_key ?? proposedData.zoteroKey ?? '',
             edits: edits.map((edit: any) => ({
@@ -247,6 +248,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 old_value: edit.old_value ?? edit.oldValue ?? null,
                 new_value: edit.new_value ?? edit.newValue ?? null,
             })),
+            creators,
         } as EditMetadataProposedData;
     } else if (actionType === 'create_collection') {
         // Normalize create_collection proposed data

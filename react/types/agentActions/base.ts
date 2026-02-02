@@ -31,9 +31,26 @@ export interface MetadataEdit {
 }
 
 /**
+ * A creator in Zotero's JSON API format.
+ * Person creators use firstName + lastName.
+ * Organization creators use name.
+ */
+export interface CreatorJSON {
+    /** First name (for person creators) */
+    firstName?: string;
+    /** Last name (for person creators) */
+    lastName?: string;
+    /** Full name (for organization creators) */
+    name?: string;
+    /** Creator type (e.g., 'author', 'editor') */
+    creatorType: string;
+}
+
+/**
  * Proposed data for editing metadata.
  * Matches backend EditMetadataProposedData model.
  * Inherits library_id and zotero_key (ZoteroItemReference).
+ * At least one of edits (non-empty) or creators must be provided.
  */
 export interface EditMetadataProposedData {
     /** Library ID of the item to edit */
@@ -42,6 +59,8 @@ export interface EditMetadataProposedData {
     zotero_key: string;
     /** List of field edits to apply */
     edits: MetadataEdit[];
+    /** New creators list (replaces all existing creators when provided) */
+    creators?: CreatorJSON[] | null;
 }
 
 /**
@@ -81,6 +100,10 @@ export interface EditMetadataResultData {
     rejected_edits: string[];
     /** List of field edits that failed with errors */
     failed_edits: FailedMetadataEdit[];
+    /** Original creators before the edit (for undo, present only when creators were modified) */
+    old_creators?: CreatorJSON[] | null;
+    /** New creators after the edit (present only when creators were modified) */
+    new_creators?: CreatorJSON[] | null;
 }
 
 // =============================================================================
