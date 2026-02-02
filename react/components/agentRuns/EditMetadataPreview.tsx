@@ -1,5 +1,5 @@
 import React from 'react';
-import type { MetadataEdit, AppliedMetadataEdit } from '../../types/agentActions/base';
+import type { MetadataEdit, AppliedMetadataEdit, CreatorJSON } from '../../types/agentActions/base';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -12,6 +12,10 @@ interface EditMetadataPreviewProps {
     appliedEdits?: AppliedMetadataEdit[];
     /** Current status of the action */
     status?: ActionStatus;
+    /** Old creators (before edit) */
+    oldCreators?: CreatorJSON[] | null;
+    /** New creators (proposed or applied) */
+    newCreators?: CreatorJSON[] | null;
 }
 
 /**
@@ -24,10 +28,14 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
     currentValues,
     appliedEdits,
     status = 'pending',
+    oldCreators,
+    newCreators,
 }) => {
     const isApplied = status === 'applied';
     const isRejectedOrUndone = status === 'rejected' || status === 'undone';
     const isError = status === 'error';
+
+    const hasCreatorChanges = newCreators && newCreators.length > 0;
 
     return (
         <div className="edit-metadata-preview">
@@ -62,6 +70,31 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
                         </div>
                     );
                 })}
+
+                {hasCreatorChanges && (
+                    <div className="flex flex-col gap-1">
+                        <div className="text-sm font-color-primary font-medium px-3 py-1">
+                            Creators
+                        </div>
+                        <div className="diff-container">
+                            {/* Old creators */}
+                            <div className={`diff-line ${isApplied ? 'diff-deletion' : isRejectedOrUndone ? 'diff-neutral' : 'diff-deletion'}`}>
+                                <span className="diff-content">
+                                    {oldCreators && oldCreators.length > 0
+                                        ? truncateValue(formatCreatorList(oldCreators))
+                                        : <span className="italic opacity-60">(empty)</span>
+                                    }
+                                </span>
+                            </div>
+                            {/* New creators */}
+                            <div className={`diff-line ${isApplied ? 'diff-addition-applied' : isRejectedOrUndone ? 'diff-ghosted' : isError ? 'diff-error' : 'diff-addition'}`}>
+                                <span className="diff-content">
+                                    {truncateValue(formatCreatorList(newCreators))}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -105,6 +138,26 @@ function truncateValue(value: string, maxLength: number = 150): string {
         return value;
     }
     return value.substring(0, maxLength) + '...';
+}
+
+/**
+ * Format a single creator for display.
+ * Person creators: "FirstName LastName (type)"
+ * Organization creators: "Name (type)"
+ */
+function formatCreator(creator: CreatorJSON): string {
+    const name = creator.name
+        ? creator.name
+        : [creator.firstName, creator.lastName].filter(Boolean).join(' ');
+    const type = creator.creatorType !== 'author' ? ` (${creator.creatorType})` : '';
+    return `${name}${type}`;
+}
+
+/**
+ * Format a list of creators as a semicolon-separated string.
+ */
+function formatCreatorList(creators: CreatorJSON[]): string {
+    return creators.map(formatCreator).join('; ');
 }
 
 export default EditMetadataPreview;

@@ -64,7 +64,16 @@ const ApprovalPreview: React.FC<{ approval: PendingApproval }> = ({ approval }) 
     if (approval.actionType === 'edit_metadata') {
         const edits = approval.actionData.edits || [];
         const currentValues = approval.currentValue || {};
-        return <EditMetadataPreview edits={edits} currentValues={currentValues} />;
+        const oldCreators = approval.currentValue?.current_creators ?? null;
+        const newCreators = approval.actionData.creators ?? null;
+        return (
+            <EditMetadataPreview
+                edits={edits}
+                currentValues={currentValues}
+                oldCreators={oldCreators}
+                newCreators={newCreators}
+            />
+        );
     }
 
     // Fallback for unsupported action types

@@ -894,13 +894,23 @@ const ActionPreview: React.FC<{
         
         // For applied actions, show the applied values if available
         const appliedEdits = previewData.resultData?.applied_edits;
-        
+
+        // Creator data: old from currentValue or resultData, new from actionData or resultData
+        const oldCreators = previewData.resultData?.old_creators
+            ?? previewData.currentValue?.current_creators
+            ?? null;
+        const newCreators = previewData.resultData?.new_creators
+            ?? previewData.actionData.creators
+            ?? null;
+
         return (
             <EditMetadataPreview
                 edits={edits}
                 currentValues={currentValues}
                 appliedEdits={appliedEdits}
                 status={status}
+                oldCreators={oldCreators}
+                newCreators={newCreators}
             />
         );
     }
