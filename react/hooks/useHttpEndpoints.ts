@@ -352,11 +352,8 @@ async function handleLibraryMetadataHttpRequest(request: any) {
         event: 'get_metadata_request',
         request_id: generateRequestId(),
         item_ids: request.item_ids || [],
-        fields: request.fields,
         include_attachments: request.include_attachments ?? false,
         include_notes: request.include_notes ?? false,
-        include_tags: request.include_tags ?? true,
-        include_collections: request.include_collections ?? false,
     };
 
     const response = await handleGetMetadataRequest(wsRequest);

@@ -59,43 +59,8 @@ export async function handleGetMetadataRequest(
             const itemData: Record<string, any> = item.toJSON();
             itemData.item_id = itemId;
             
-            // Handle field filtering
-            let result: Record<string, any>;
-            if (request.fields && request.fields.length > 0) {
-                // Core fields are always included
-                result = {
-                    item_id: itemId,
-                    itemType: itemData.itemType,
-                    key: itemData.key,
-                    title: itemData.title,
-                    creators: itemData.creators,
-                    date: itemData.date,
-                };
-                // Add requested fields
-                for (const field of request.fields) {
-                    if (field in itemData) {
-                        result[field] = itemData[field];
-                    }
-                }
-                // Include tags if requested
-                if (request.include_tags && 'tags' in itemData) {
-                    result.tags = itemData.tags;
-                }
-                // Include collections if requested
-                if (request.include_collections && 'collections' in itemData) {
-                    result.collections = itemData.collections;
-                }
-            } else {
-                // Return all fields, but optionally exclude some
-                result = { ...itemData };
-                
-                if (!request.include_tags) {
-                    delete result.tags;
-                }
-                if (!request.include_collections) {
-                    delete result.collections;
-                }
-            }
+            // Return all fields (including tags and collections)
+            const result: Record<string, any> = { ...itemData };
             
             // Handle attachments if requested
             if (request.include_attachments && item.isRegularItem()) {
