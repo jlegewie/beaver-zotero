@@ -283,11 +283,15 @@ async function batchFindTitleCandidates(
         return new Map();
     }
 
-    // Get title field ID
+    // Get all title field IDs (base + mapped fields like caseName, subject, nameOfAct)
+    // Zotero item types like case, email, statute store titles in mapped fields.
+    // See Zotero's duplicates.js for the same pattern.
     const titleFieldID = Zotero.ItemFields.getID('title');
     if (!titleFieldID) {
         return new Map();
     }
+    const mappedTitleFieldIDs = Zotero.ItemFields.getTypeFieldsFromBase('title');
+    const allTitleFieldIDs = [titleFieldID, ...(mappedTitleFieldIDs || [])];
 
     // Build LIKE conditions for each title
     // Use normalized titles for matching
@@ -331,29 +335,34 @@ async function batchFindTitleCandidates(
     // Build library placeholders
     const libraryPlaceholders = libraryIds.map(() => '?').join(', ');
 
-    // Get date field ID for filtering
+    // Get all date field IDs (base + mapped fields like dateDecided, issueDate, dateEnacted)
     const dateFieldID = Zotero.ItemFields.getID('date');
+    const mappedDateFieldIDs = Zotero.ItemFields.getTypeFieldsFromBase('date');
+    const allDateFieldIDs = dateFieldID ? [dateFieldID, ...(mappedDateFieldIDs || [])] : [];
 
     // Build SQL query with optional date filtering
+    const titlePlaceholders = allTitleFieldIDs.map(() => '?').join(', ');
     let sql = `
         SELECT DISTINCT i.itemID, title_val.value as title
     `;
 
     // Add date value to SELECT if filtering by year (for debugging)
-    if (hasYearFilter && dateFieldID && globalMinYear && globalMaxYear) {
+    const hasDateFields = allDateFieldIDs.length > 0;
+    if (hasYearFilter && hasDateFields && globalMinYear && globalMaxYear) {
         sql += `, date_val.value as date_value`;
     }
 
     sql += `
         FROM items i
-        JOIN itemData title_data ON i.itemID = title_data.itemID AND title_data.fieldID = ?
+        JOIN itemData title_data ON i.itemID = title_data.itemID AND title_data.fieldID IN (${titlePlaceholders})
         JOIN itemDataValues title_val ON title_data.valueID = title_val.valueID
     `;
 
     // Add date JOINs if we have year constraints
-    if (hasYearFilter && dateFieldID && globalMinYear && globalMaxYear) {
+    if (hasYearFilter && hasDateFields && globalMinYear && globalMaxYear) {
+        const datePlaceholders = allDateFieldIDs.map(() => '?').join(', ');
         sql += `
-        LEFT JOIN itemData date_data ON i.itemID = date_data.itemID AND date_data.fieldID = ?
+        LEFT JOIN itemData date_data ON i.itemID = date_data.itemID AND date_data.fieldID IN (${datePlaceholders})
         LEFT JOIN itemDataValues date_val ON date_data.valueID = date_val.valueID
         `;
     }
@@ -364,7 +373,7 @@ async function batchFindTitleCandidates(
     `;
 
     // Add year filter if applicable
-    if (hasYearFilter && dateFieldID && globalMinYear && globalMaxYear) {
+    if (hasYearFilter && hasDateFields && globalMinYear && globalMaxYear) {
         sql += `
         AND (date_val.value IS NULL OR
              CAST(SUBSTR(date_val.value, 1, 4) AS INTEGER) BETWEEN ? AND ?)
@@ -375,9 +384,9 @@ async function batchFindTitleCandidates(
 
     try {
         // Build params array based on whether we have year filtering
-        const params = hasYearFilter && dateFieldID && globalMinYear && globalMaxYear
-            ? [titleFieldID, dateFieldID, ...libraryIds, globalMinYear, globalMaxYear]
-            : [titleFieldID, ...libraryIds];
+        const params = hasYearFilter && hasDateFields && globalMinYear && globalMaxYear
+            ? [...allTitleFieldIDs, ...allDateFieldIDs, ...libraryIds, globalMinYear, globalMaxYear]
+            : [...allTitleFieldIDs, ...libraryIds];
 
         logger(`batchFindTitleCandidates: Using year filter: ${hasYearFilter ? `${globalMinYear}-${globalMaxYear}` : 'none'}`, 1);
 
