@@ -242,6 +242,9 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             : (proposedData.creators && typeof proposedData.creators === 'object')
                 ? [proposedData.creators]  // wrap single creator object in array (common LLM output error)
                 : null;
+        const oldCreators = Array.isArray(proposedData.old_creators)
+            ? proposedData.old_creators
+            : null;
         proposedData = {
             library_id: typeof proposedData.library_id === 'number'
                 ? proposedData.library_id
@@ -253,6 +256,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 new_value: edit.new_value ?? edit.newValue ?? null,
             })),
             creators,
+            old_creators: oldCreators,
         } as EditMetadataProposedData;
     } else if (actionType === 'create_collection') {
         // Normalize create_collection proposed data
