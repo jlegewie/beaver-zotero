@@ -709,6 +709,22 @@ export function getDeferredToolPreference(toolName: string): DeferredToolPrefere
 }
 
 
+/**
+ * Extract detailed error information for logging.
+ * Returns an object with message and optional details (including stack trace).
+ * 
+ * @param error - The caught error
+ * @returns Object with `message` (string) and `details` (string with stack trace, or null)
+ */
+export function extractErrorDetails(error: unknown): { message: string; details: string | null } {
+    if (error instanceof Error) {
+        const message = error.message || String(error);
+        const details = error.stack ? `${error.message}\n${error.stack}` : null;
+        return { message, details };
+    }
+    return { message: String(error), details: null };
+}
+
 export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: number, text: string, bestAttachmentKey: string | null }> {
     if (!item.isRegularItem()) {
         return {
