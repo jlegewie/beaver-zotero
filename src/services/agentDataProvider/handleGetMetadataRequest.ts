@@ -61,6 +61,23 @@ export async function handleGetMetadataRequest(
             
             // Return all fields (including tags and collections)
             const result: Record<string, any> = { ...itemData };
+
+            // Enrich collection keys with names for agent readability
+            // toJSON() returns collections as plain key strings: ["ABCD1234", ...]
+            // We convert to [{collection_key, name}, ...] so the agent sees meaningful names
+            if (Array.isArray(result.collections)) {
+                result.collections = result.collections.map((collKey: string) => {
+                    try {
+                        const coll = Zotero.Collections.getByLibraryAndKey(libraryId, collKey);
+                        return {
+                            collection_key: collKey,
+                            name: coll ? coll.name : collKey,
+                        };
+                    } catch {
+                        return { collection_key: collKey, name: collKey };
+                    }
+                });
+            }
             
             // Handle attachments if requested
             if (request.include_attachments && item.isRegularItem()) {
