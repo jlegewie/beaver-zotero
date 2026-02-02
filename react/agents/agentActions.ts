@@ -237,7 +237,11 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
     } else if (actionType === 'edit_metadata') {
         // Normalize edit_metadata proposed data
         const edits = Array.isArray(proposedData.edits) ? proposedData.edits : [];
-        const creators = Array.isArray(proposedData.creators) ? proposedData.creators : (proposedData.creators ?? null);
+        const creators = Array.isArray(proposedData.creators)
+            ? proposedData.creators
+            : (proposedData.creators && typeof proposedData.creators === 'object')
+                ? [proposedData.creators]  // wrap single creator object in array (common LLM output error)
+                : null;
         proposedData = {
             library_id: typeof proposedData.library_id === 'number'
                 ? proposedData.library_id
