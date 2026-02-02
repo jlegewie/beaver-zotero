@@ -257,6 +257,20 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             }
         ]
     },
+    {
+        version: "0.11.2",
+        title: "Beaver Version 0.11.2",
+        featureList: [
+            {
+                title: "Improved Metadata Editing",
+                description: "Support for almost all metadata fields from creators to docket number, or podcast episode.",
+            },
+            {
+                title: "Performance improvements and bug fixes",
+                description: "Improved performance so that adding tags to 100+ items should be a breeze.",
+            },
+        ],
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));
