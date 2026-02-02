@@ -238,7 +238,7 @@ async function executeEditMetadataAction(
         }
 
         // Apply creators (in-memory only, not persisted until saveTx)
-        if (creators) {
+        if (creators && creators.length > 0) {
             try {
                 creatorSnapshot = item.getCreators();
                 oldCreatorsJSON = item.getCreatorsJSON();

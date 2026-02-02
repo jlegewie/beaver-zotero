@@ -762,7 +762,7 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
 
     const actionType = action.action_type as AgentActionType;
     const actionData = action.proposed_data ?? {};
-    let currentValue: Record<string, string | null> | undefined;
+    let currentValue: Record<string, any> | undefined;
 
     if (actionType === 'edit_metadata') {
         const libraryId = typeof actionData.library_id === 'number'
@@ -772,17 +772,20 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
             ? actionData.zotero_key
             : '';
         const edits = Array.isArray(actionData.edits) ? actionData.edits : [];
+        const hasCreators = Array.isArray(actionData.creators) && actionData.creators.length > 0;
 
-        if (libraryId && zoteroKey && edits.length > 0) {
+        if (libraryId && zoteroKey && (edits.length > 0 || hasCreators)) {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
             if (item) {
-                const values: Record<string, string | null> = {};
+                const values: Record<string, any> = {};
                 for (const edit of edits) {
                     const field = typeof edit?.field === 'string' ? edit.field : null;
                     if (!field) continue;
                     const value = item.getField(field);
                     values[field] = value ? String(value) : null;
                 }
+                // Always include current creators for before/after tracking
+                values.current_creators = item.getCreatorsJSON();
                 currentValue = values;
             }
         }

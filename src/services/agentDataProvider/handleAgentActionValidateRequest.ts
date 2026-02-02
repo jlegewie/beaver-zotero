@@ -425,6 +425,18 @@ async function validateEditMetadataAction(
     const hasEdits = edits && edits.length > 0;
     const hasCreators = creators != null && creators.length > 0;
 
+    // Reject empty creators array — the agent cannot clear all creators
+    if (Array.isArray(creators) && creators.length === 0) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'Empty creators array is not allowed. Provide at least one creator or omit the creators field.',
+            error_code: 'empty_creators',
+            preference: 'always_ask',
+        };
+    }
+
     if (!hasEdits && !hasCreators) {
         return {
             type: 'agent_action_validate_response',

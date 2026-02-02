@@ -38,6 +38,21 @@ function valuesEqual(a: any, b: any): boolean {
 }
 
 /**
+ * Compare two CreatorJSON arrays for equality.
+ * Order-sensitive: creators at the same index must match.
+ */
+function creatorsEqual(a: CreatorJSON[], b: CreatorJSON[]): boolean {
+    if (a.length !== b.length) return false;
+    return a.every((creator, i) => {
+        const other = b[i];
+        return creator.creatorType === other.creatorType
+            && (creator.firstName ?? '') === (other.firstName ?? '')
+            && (creator.lastName ?? '') === (other.lastName ?? '')
+            && (creator.name ?? '') === (other.name ?? '');
+    });
+}
+
+/**
  * Execute an edit_metadata agent action by applying edits to the Zotero item.
  * Captures current values BEFORE applying so undo can reliably restore them.
  * @param action The agent action to execute
@@ -93,8 +108,8 @@ export async function executeEditMetadataAction(
         }
     }
 
-    // Apply creators if provided
-    if (creators) {
+    // Apply creators if provided (non-empty array)
+    if (creators && creators.length > 0) {
         try {
             oldCreatorsJSON = item.getCreatorsJSON();
             item.setCreators(creators as any[]);
@@ -173,6 +188,7 @@ export async function undoEditMetadataAction(
 
     // Check if creators were changed (old_creators in result_data means they were applied)
     const oldCreators = action.result_data?.old_creators as CreatorJSON[] | null | undefined;
+    const newCreators = action.result_data?.new_creators as CreatorJSON[] | null | undefined;
     const hasCreatorUndo = oldCreators != null;
 
     if (editsToProcess.length === 0 && !hasCreatorUndo) {
@@ -236,15 +252,39 @@ export async function undoEditMetadataAction(
         }
     }
 
-    // Restore creators if they were changed
+    // Restore creators if they were changed (same 3-way logic as field edits)
     if (hasCreatorUndo) {
-        try {
-            item.setCreators(oldCreators as any[]);
-            result.fieldsReverted++;
-            needsSave = true;
-            logger(`undoEditMetadataAction: Reverted creators to original values`, 1);
-        } catch (error) {
-            logger(`undoEditMetadataAction: Failed to revert creators: ${error}`, 1);
+        const currentCreators = item.getCreatorsJSON() as CreatorJSON[];
+
+        if (creatorsEqual(currentCreators, oldCreators!)) {
+            // Already at old value — no change needed
+            result.alreadyReverted.push('creators');
+            logger(`undoEditMetadataAction: Creators already at original values, skipping`, 1);
+        } else if (newCreators && creatorsEqual(currentCreators, newCreators)) {
+            // Current matches what we applied — normal undo
+            try {
+                item.setCreators(oldCreators as any[]);
+                result.fieldsReverted++;
+                needsSave = true;
+                logger(`undoEditMetadataAction: Reverted creators to original values`, 1);
+            } catch (error) {
+                logger(`undoEditMetadataAction: Failed to revert creators: ${error}`, 1);
+            }
+        } else {
+            // User manually modified creators since the apply
+            if (forceRevert) {
+                try {
+                    item.setCreators(oldCreators as any[]);
+                    result.fieldsReverted++;
+                    needsSave = true;
+                    logger(`undoEditMetadataAction: Force-reverted manually modified creators`, 1);
+                } catch (error) {
+                    logger(`undoEditMetadataAction: Failed to revert creators: ${error}`, 1);
+                }
+            } else {
+                result.manuallyModified.push('creators');
+                logger(`undoEditMetadataAction: Creators were manually modified, preserving user's change`, 1);
+            }
         }
     }
 
