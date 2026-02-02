@@ -6,6 +6,7 @@
 import { AgentAction } from '../agents/agentActions';
 import { EditMetadataResultData, AppliedMetadataEdit, FailedMetadataEdit, MetadataEdit, CreatorJSON } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
+import { sanitizeCreators } from '../../src/utils/zoteroUtils';
 
 /**
  * Result of an undo operation
@@ -112,7 +113,7 @@ export async function executeEditMetadataAction(
     if (creators && creators.length > 0) {
         try {
             oldCreatorsJSON = item.getCreatorsJSON();
-            item.setCreators(creators as any[]);
+            item.setCreators(sanitizeCreators(creators) as any[]);
             creatorsApplied = true;
         } catch (error) {
             failedEdits.push({

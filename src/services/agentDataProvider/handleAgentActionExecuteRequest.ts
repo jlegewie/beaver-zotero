@@ -1,4 +1,5 @@
 import { logger } from '../../utils/logger';
+import { sanitizeCreators } from '../../utils/zoteroUtils';
 import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '../agentProtocol';
 import type { MetadataEdit } from '../../../react/types/agentActions/base';
 import type { CreateItemProposedData, CreateItemResultData } from '../../../react/types/agentActions/items';
@@ -243,7 +244,7 @@ async function executeEditMetadataAction(
                 creatorSnapshot = item.getCreators();
                 oldCreatorsJSON = item.getCreatorsJSON();
                 // Type assertion: creatorType has been validated by the validate handler
-                item.setCreators(creators as any[]);
+                item.setCreators(sanitizeCreators(creators) as any[]);
                 creatorsApplied = true;
             } catch (error) {
                 if (error instanceof TimeoutError) throw error;
