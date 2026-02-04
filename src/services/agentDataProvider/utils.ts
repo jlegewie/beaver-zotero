@@ -378,8 +378,8 @@ export async function processAttachmentsParallel(
             return null;
         }
 
-        // Serialize attachment
-        const attachmentData = await serializeAttachment(attachment, undefined, { skipSyncingFilter: true });
+        // Serialize attachment (skip file hash — not needed for search results)
+        const attachmentData = await serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true });
         if (!attachmentData) {
             return null;
         }
