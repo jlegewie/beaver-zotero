@@ -10,7 +10,6 @@ import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
 import { disposeMuPDF } from "./utils/mupdf";
-import { disposeSupabaseClient } from "./services/supabaseClient";
 
 let isAppQuitting = false;
 let quitObserverRegistered = false;
@@ -243,8 +242,17 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // Global cleanup - only run when last window closes
 
         // 1. Stop Supabase auto-refresh timer to prevent stale timers
-        //    surviving plugin reload and causing token refresh races
-        disposeSupabaseClient();
+        //    surviving plugin reload and causing token refresh races.
+        //    The cleanup function is registered by supabaseClient.ts (webpack bundle)
+        //    on the main window, since hooks.ts (esbuild bundle) cannot import it directly.
+        try {
+            const mainWin = Zotero.getMainWindow();
+            if (mainWin?.__beaverDisposeSupabase) {
+                mainWin.__beaverDisposeSupabase();
+            }
+        } catch (e) {
+            ztoolkit.log(`disposeSupabase: ${e}`);
+        }
 
         // 2. Dispose MuPDF WASM module to release native resources
         await disposeMuPDF();
@@ -360,7 +368,12 @@ async function onShutdown(): Promise<void> {
         }
 
         // These should already be done in onMainWindowUnload, but just in case
-        disposeSupabaseClient();
+        try {
+            const mainWin = Zotero.getMainWindow();
+            if (mainWin?.__beaverDisposeSupabase) {
+                mainWin.__beaverDisposeSupabase();
+            }
+        } catch (_e) { /* may not be available during shutdown */ }
         await disposeMuPDF();
 
         if (addon.db) {

@@ -2,6 +2,18 @@ import { createClient, AuthApiError } from '@supabase/supabase-js';
 import { EncryptedStorage } from './EncryptedStorage';
 import { logger } from '../utils/logger';
 
+// Stop any previous Supabase client's auto-refresh timer that may have survived
+// a plugin reload.
+try {
+    const mainWindow = Zotero.getMainWindow();
+    if (mainWindow?.__beaverDisposeSupabase) {
+        mainWindow.__beaverDisposeSupabase();
+        logger('Stopped previous Supabase client auto-refresh timer');
+    }
+} catch (_e) {
+    // Main window may not be available during early startup — ignore
+}
+
 // Create encrypted storage instance
 const encryptedStorage = new EncryptedStorage();
 
@@ -250,12 +262,15 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     }
 });
 
-/**
- * Stop the Supabase client's auto-refresh timer.
- * Must be called during plugin shutdown/unload to prevent the old client's
- * timer from surviving a reload and racing with the new client's timer,
- * which causes "Invalid Refresh Token: Already Used" errors.
- */
-export function disposeSupabaseClient(): void {
-    supabase.auth.stopAutoRefresh();
+// Register cleanup function on the main window so both the bootstrap code (esbuild)
+// and this module (webpack) can trigger it. This survives across plugin reloads.
+try {
+    const mainWindow = Zotero.getMainWindow();
+    if (mainWindow) {
+        mainWindow.__beaverDisposeSupabase = () => {
+            supabase.auth.stopAutoRefresh();
+        };
+    }
+} catch (_e) {
+    // Main window may not be available during initial startup
 }

@@ -27,6 +27,10 @@ declare const ZOTERO_CONFIG: {
     API_VERSION: string;
 };
 
+interface Window {
+    __beaverDisposeSupabase?: () => void;
+}
+
 interface ZoteroSearchWritable extends Zotero.Search {
     libraryID: number;  // Override to make it writable
 }
