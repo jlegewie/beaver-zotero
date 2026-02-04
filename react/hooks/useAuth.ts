@@ -15,9 +15,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import {
     sessionAtom, userAtom, AuthUser,
-    authMethodAtom, loginStepAtom, loginLoadingAtom,
-    loginPasswordAtom, loginErrorAtom, otpResendCountdownAtom,
-    isWaitingForProfileAtom,
+    resetLoginFormState,
 } from '../atoms/auth';
 import { supabase } from '../../src/services/supabaseClient';
 import { logger } from '../../src/utils/logger';
@@ -123,13 +121,7 @@ export function useAuth() {
         // Reset login form state on sign out to prevent stale OTP/loading UI
         // when session expires externally (e.g., "Invalid Refresh Token: Already Used")
         if (event === 'SIGNED_OUT') {
-            store.set(authMethodAtom, 'initial');
-            store.set(loginStepAtom, 'method-selection');
-            store.set(loginLoadingAtom, false);
-            store.set(loginPasswordAtom, '');
-            store.set(loginErrorAtom, null);
-            store.set(otpResendCountdownAtom, 0);
-            store.set(isWaitingForProfileAtom, false);
+            resetLoginFormState(store.set);
         }
     }, [setSession, setUser]);
     

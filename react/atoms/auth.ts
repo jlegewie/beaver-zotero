@@ -81,16 +81,28 @@ export const otpResendCountdownAtom = atom<number>(0);
 export const isWaitingForProfileAtom = atom<boolean>(false);
 
 /**
+ * Reset all login form state to initial values and persist authMethod.
+ * Accepts any setter with the signature (atom, value) => void,
+ * so it works with both Jotai atom write `set` and `store.set`.
+ */
+export function resetLoginFormState(set: (atom: any, value: any) => void): void {
+    set(authMethodAtom, 'initial');
+    set(loginStepAtom, 'method-selection');
+    set(loginLoadingAtom, false);
+    set(loginPasswordAtom, '');
+    set(loginErrorAtom, null);
+    set(otpResendCountdownAtom, 0);
+    set(isWaitingForProfileAtom, false);
+    setPref("authMethod", "initial");
+}
+
+/**
  * Reset login form to initial state
  */
 export const resetLoginFormAtom = atom(
     null,
     (get, set) => {
-        set(authMethodAtom, 'initial');
-        set(loginStepAtom, 'method-selection');
-        set(loginErrorAtom, null);
-        set(loginPasswordAtom, '');
-        setPref("authMethod", "initial");
+        resetLoginFormState(set);
     }
 );
 
@@ -136,15 +148,8 @@ export const logoutAtom = atom(
         await supabase.auth.signOut();
         set(profileWithPlanAtom, null);
         set(isProfileLoadedAtom, false);
-        
+
         // Reset login form state (keep email for convenience)
-        set(authMethodAtom, 'initial');
-        set(loginStepAtom, 'method-selection');
-        set(loginPasswordAtom, '');
-        set(loginErrorAtom, null);
-        set(loginLoadingAtom, false);
-        set(otpResendCountdownAtom, 0);
-        set(isWaitingForProfileAtom, false);
-        setPref("authMethod", "initial");
+        resetLoginFormState(set);
     }
 );
