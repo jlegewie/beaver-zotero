@@ -82,20 +82,32 @@ export const otpResendCountdownAtom = atom<number>(0);
 export const isWaitingForProfileAtom = atom<boolean>(false);
 
 /**
- * Reset all login form state to initial values and persist authMethod.
+ * Reset all login form state to initial values.
  * Accepts any setter with the signature (atom, value) => void,
  * so it works with both Jotai atom write `set` and `store.set`.
+ *
+ * @param preserveAuthMethod - If true, keeps the stored authMethod preference
+ *   intact. Use this for automatic cleanup paths (e.g., stale session reset)
+ *   where the user's login method preference should be preserved.
  */
-export function resetLoginFormState(set: (atom: any, value: any) => void): void {
+export function resetLoginFormState(
+    set: (atom: any, value: any) => void,
+    { preserveAuthMethod = false }: { preserveAuthMethod?: boolean } = {}
+): void {
     logger('resetLoginFormState: resetting login form state');
-    set(authMethodAtom, 'initial');
+    if (preserveAuthMethod) {
+        // Restore the persisted authMethod rather than resetting to 'initial'
+        set(authMethodAtom, getInitialAuthMethod());
+    } else {
+        set(authMethodAtom, 'initial');
+        setPref("authMethod", "initial");
+    }
     set(loginStepAtom, 'method-selection');
     set(loginLoadingAtom, false);
     set(loginPasswordAtom, '');
     set(loginErrorAtom, null);
     set(otpResendCountdownAtom, 0);
     set(isWaitingForProfileAtom, false);
-    setPref("authMethod", "initial");
 }
 
 /**

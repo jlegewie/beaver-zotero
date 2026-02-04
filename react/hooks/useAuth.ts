@@ -123,8 +123,10 @@ export function useAuth() {
         // - INITIAL_SESSION with no session: window reopened after interrupted login flow
         //   (macOS window close preserves Jotai store but kills in-flight requests,
         //   leaving isLoading/step stuck in stale state)
+        // preserveAuthMethod: true — this is an automatic cleanup, not user-initiated,
+        // so keep the user's stored login method preference (e.g., 'password').
         if (event === 'SIGNED_OUT' || (event === 'INITIAL_SESSION' && !newSession)) {
-            resetLoginFormState(store.set);
+            resetLoginFormState(store.set, { preserveAuthMethod: true });
         }
     }, [setSession, setUser]);
     
