@@ -43,6 +43,14 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
 
   const PROFILE_LOAD_TIMEOUT = 10000; // 10 second timeout
 
+  // Reset stale login form state on mount.
+  useEffect(() => {
+    if (!isWaitingForProfile && (isLoading || step === 'otp')) {
+      resetLoginForm();
+      setIsLoading(false);
+    }
+  }, []); // mount only - intentionally ignoring deps to detect stale state
+
   // Handle initial focus and email prefill
   useEffect(() => {
     if (associatedEmail) {
