@@ -267,7 +267,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // Using `window` scopes the function to the window that loaded this bundle,
 // so multi-window scenarios don't interfere with each other.
 if (currentWindow) {
-    currentWindow.__beaverDisposeSupabase = () => {
-        supabase.auth.stopAutoRefresh();
+    currentWindow.__beaverDisposeSupabase = async () => {
+        await supabase.auth.stopAutoRefresh();
     };
 }
