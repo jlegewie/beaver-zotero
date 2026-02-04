@@ -11,11 +11,16 @@ import { isSidebarVisibleAtom, isPreferencePageVisibleAtom } from '../atoms/ui';
 import { serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 
 const REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
+const BACKGROUND_REFRESH_INTERVAL = 60 * 60 * 1000; // 1 hour
 
 /**
  * Hook to synchronize the user's profile and plan data (ProfileWithPlan)
  * with the backend. Provides periodic refresh when sidebar is open and
  * manual refresh capability.
+ * 
+ * Also runs a background refresh every 1 hour regardless of sidebar
+ * visibility to ensure plan changes (e.g., downgrades) are detected even
+ * when the user never opens the plugin UI.
  */
 export const useProfileSync = () => {
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
@@ -34,6 +39,7 @@ export const useProfileSync = () => {
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
     const lastRefreshRef = useRef<Date | null>(null);
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
+    const backgroundIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     const syncProfileData = useCallback(async (userId: string) => {
         logger(`useProfileSync: Fetching profile and plan for ${userId}.`);
@@ -173,6 +179,32 @@ export const useProfileSync = () => {
             refreshProfile(true); // Force refresh when settings page opens
         }
     }, [isAuthenticated, user, isPreferencePageVisible, refreshProfile]);
+
+    // Background refresh regardless of sidebar visibility
+    // This ensures plan changes (e.g., downgrades) are detected even when
+    // user has Zotero running for extended periods without opening the plugin.
+    // Critical for security: prevents syncing after plan downgrades.
+    useEffect(() => {
+        if (!isAuthenticated || !user) {
+            if (backgroundIntervalRef.current) {
+                clearInterval(backgroundIntervalRef.current);
+                backgroundIntervalRef.current = null;
+            }
+            return;
+        }
+
+        backgroundIntervalRef.current = setInterval(() => {
+            logger(`useProfileSync: Background refresh triggered for ${user.id}`);
+            syncProfileData(user.id);
+        }, BACKGROUND_REFRESH_INTERVAL);
+
+        return () => {
+            if (backgroundIntervalRef.current) {
+                clearInterval(backgroundIntervalRef.current);
+                backgroundIntervalRef.current = null;
+            }
+        };
+    }, [isAuthenticated, user, syncProfileData]);
 
     return { refreshProfile };
 };
