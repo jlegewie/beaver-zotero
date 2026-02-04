@@ -13,11 +13,15 @@
  */
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
-import { sessionAtom, userAtom, AuthUser } from '../atoms/auth';
+import {
+    sessionAtom, userAtom, AuthUser,
+    resetLoginFormState,
+} from '../atoms/auth';
 import { supabase } from '../../src/services/supabaseClient';
 import { logger } from '../../src/utils/logger';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { profileWithPlanAtom, isProfileLoadedAtom } from '../atoms/profile';
+import { store } from '../store';
 
 // Track if auth listener has been initialized globally
 let authListenerInitialized = false;
@@ -113,6 +117,16 @@ export function useAuth() {
         // else {
         //     logger(`auth: skipping user update for ${event}`);
         // }
+
+        // Reset transient login form state when there's no active session:
+        // - SIGNED_OUT: session expired externally (e.g., "Invalid Refresh Token: Already Used")
+        // - INITIAL_SESSION with no session: window reopened after interrupted login flow
+        //   (macOS window close preserves Jotai store but kills in-flight requests,
+        //   leaving isLoading/step stuck in stale state)
+        // Note: authMethod (user's login method preference) is intentionally untouched.
+        if (event === 'SIGNED_OUT' || (event === 'INITIAL_SESSION' && !newSession)) {
+            resetLoginFormState(store.set);
+        }
     }, [setSession, setUser]);
     
     useEffect(() => {
