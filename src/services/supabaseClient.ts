@@ -2,6 +2,17 @@ import { createClient, AuthApiError } from '@supabase/supabase-js';
 import { EncryptedStorage } from './EncryptedStorage';
 import { logger } from '../utils/logger';
 
+// Stop any previous Supabase client's auto-refresh timer that may have survived
+// a plugin reload.  Use `window` (the current script's window) rather than
+// Zotero.getMainWindow() so that opening a second main window doesn't
+// accidentally stop the first window's active auto-refresh timer.
+// eslint-disable-next-line no-restricted-globals -- intentionally using `window` (this script's window), not getMainWindow()
+const currentWindow: Window | undefined = typeof window !== 'undefined' ? window : undefined;
+if (currentWindow?.__beaverDisposeSupabase) {
+    currentWindow.__beaverDisposeSupabase();
+    logger('Stopped previous Supabase client auto-refresh timer');
+}
+
 // Create encrypted storage instance
 const encryptedStorage = new EncryptedStorage();
 
@@ -249,3 +260,14 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         lock: acquireAuthLock
     }
 });
+
+// Register cleanup function on the current window so that:
+// 1. Module-level reload cleanup (above) can stop this client's timer
+// 2. hooks.ts (esbuild bundle) can call win.__beaverDisposeSupabase during shutdown
+// Using `window` scopes the function to the window that loaded this bundle,
+// so multi-window scenarios don't interfere with each other.
+if (currentWindow) {
+    currentWindow.__beaverDisposeSupabase = async () => {
+        await supabase.auth.stopAutoRefresh();
+    };
+}
