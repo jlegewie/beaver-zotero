@@ -10,6 +10,7 @@ import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
 import { disposeMuPDF } from "./utils/mupdf";
+import { disposeSupabaseClient } from "./services/supabaseClient";
 
 let isAppQuitting = false;
 let quitObserverRegistered = false;
@@ -240,45 +241,49 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         ztoolkit.log("onMainWindowUnload: Last window closing, running global cleanup");
 
         // Global cleanup - only run when last window closes
-        
-        // 1. Dispose MuPDF WASM module to release native resources
+
+        // 1. Stop Supabase auto-refresh timer to prevent stale timers
+        //    surviving plugin reload and causing token refresh races
+        disposeSupabaseClient();
+
+        // 2. Dispose MuPDF WASM module to release native resources
         await disposeMuPDF();
 
-        // 2. Close database connection
+        // 3. Close database connection
         if (addon.db) {
             await addon.db.closeDatabase();
             addon.db = undefined;
         }
 
-        // 3. Dispose CitationService
+        // 4. Dispose CitationService
         if (addon.citationService) {
             addon.citationService.dispose();
             addon.citationService = undefined;
         }
 
-        // 4. Unregister keyboard shortcuts (clears interval, unregisters Zotero.Reader listeners)
+        // 5. Unregister keyboard shortcuts (clears interval, unregisters Zotero.Reader listeners)
         BeaverUIFactory.unregisterShortcuts();
 
-        // 5. Clean up UIManager (restores Zotero.Reader.onChangeSidebarWidth)
+        // 6. Clean up UIManager (restores Zotero.Reader.onChangeSidebarWidth)
         if (uiManager) {
             uiManager.cleanup();
         }
 
-        // 6. Unload stylesheets
+        // 7. Unload stylesheets
         unloadKatexStylesheet();
         unloadStylesheet();
 
-        // 7. Unregister ztoolkit
+        // 8. Unregister ztoolkit
         ztoolkit.unregisterAll();
         addon.data.dialog?.window?.close();
 
-        // 8. Close separate Beaver window if open
+        // 9. Close separate Beaver window if open
         BeaverUIFactory.closeBeaverWindow();
 
-        // 9. Unregister quit observer
+        // 10. Unregister quit observer
         unregisterQuitObserver();
 
-        // 10. Mark addon as not alive to prevent any further callbacks
+        // 11. Mark addon as not alive to prevent any further callbacks
         addon.data.alive = false;
 
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
@@ -355,6 +360,7 @@ async function onShutdown(): Promise<void> {
         }
 
         // These should already be done in onMainWindowUnload, but just in case
+        disposeSupabaseClient();
         await disposeMuPDF();
 
         if (addon.db) {

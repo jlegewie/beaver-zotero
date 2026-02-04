@@ -249,3 +249,13 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         lock: acquireAuthLock
     }
 });
+
+/**
+ * Stop the Supabase client's auto-refresh timer.
+ * Must be called during plugin shutdown/unload to prevent the old client's
+ * timer from surviving a reload and racing with the new client's timer,
+ * which causes "Invalid Refresh Token: Already Used" errors.
+ */
+export function disposeSupabaseClient(): void {
+    supabase.auth.stopAutoRefresh();
+}
