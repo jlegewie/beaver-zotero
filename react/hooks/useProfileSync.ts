@@ -1,7 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { fileUploader } from '../../src/services/FileUploader';
-import { isProfileInvalidAtom, isProfileLoadedAtom, profileWithPlanAtom, isMigratingDataAtom, requiredDataVersionAtom, localZoteroLibrariesAtom, minimumFrontendVersionAtom } from '../atoms/profile';
 import { isAuthenticatedAtom, logoutAtom, userAtom, isWaitingForProfileAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
 import { logger } from '../../src/utils/logger';
@@ -9,18 +8,26 @@ import { ZoteroInstanceMismatchError, ServerError } from '../../react/types/apiE
 import { setModelsAtom } from '../atoms/models';
 import { isSidebarVisibleAtom, isPreferencePageVisibleAtom } from '../atoms/ui';
 import { serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
+import {
+    isProfileInvalidAtom,
+    isProfileLoadedAtom,
+    profileWithPlanAtom,
+    isMigratingDataAtom,
+    requiredDataVersionAtom,
+    localZoteroLibrariesAtom,
+    minimumFrontendVersionAtom,
+    syncDeniedForPlanAtom
+} from '../atoms/profile';
 
-const REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
-const BACKGROUND_REFRESH_INTERVAL = 60 * 60 * 1000; // 1 hour
+// Adaptive refresh intervals based on sidebar visibility
+const ACTIVE_REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes when sidebar is visible
+const BACKGROUND_REFRESH_INTERVAL = 60 * 60 * 1000; // 1 hour when sidebar is closed
 
 /**
  * Hook to synchronize the user's profile and plan data (ProfileWithPlan)
- * with the backend. Provides periodic refresh when sidebar is open and
- * manual refresh capability.
- * 
- * Also runs a background refresh every 1 hour regardless of sidebar
- * visibility to ensure plan changes (e.g., downgrades) are detected even
- * when the user never opens the plugin UI.
+ * with the backend. Uses adaptive refresh intervals:
+ * - 15 minutes when sidebar is visible (user is active)
+ * - 1 hour when sidebar is closed (background check for plan changes)
  */
 export const useProfileSync = () => {
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
@@ -39,7 +46,6 @@ export const useProfileSync = () => {
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
     const lastRefreshRef = useRef<Date | null>(null);
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
-    const backgroundIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     const syncProfileData = useCallback(async (userId: string) => {
         logger(`useProfileSync: Fetching profile and plan for ${userId}.`);
@@ -127,8 +133,9 @@ export const useProfileSync = () => {
         if (!user) return;
         
         // Skip if recently refreshed and not forced
+        // Use shorter interval check since we want to be responsive when forced
         if (!force && lastRefreshRef.current && 
-            Date.now() - lastRefreshRef.current.getTime() < REFRESH_INTERVAL) {
+            Date.now() - lastRefreshRef.current.getTime() < ACTIVE_REFRESH_INTERVAL) {
             return;
         }
         
@@ -144,9 +151,12 @@ export const useProfileSync = () => {
         }
     }, [isAuthenticated, user, syncProfileData]);
 
-    // Periodic refresh when sidebar is visible
+    // Adaptive periodic refresh based on sidebar visibility
+    // - 15 minutes when sidebar is visible (user is active)
+    // - 1 hour when sidebar is closed (background check for plan changes)
+    // Critical for security: ensures plan downgrades are detected
     useEffect(() => {
-        if (!isAuthenticated || !user || !isSidebarVisible) {
+        if (!isAuthenticated || !user) {
             if (intervalRef.current) {
                 clearInterval(intervalRef.current);
                 intervalRef.current = null;
@@ -154,16 +164,20 @@ export const useProfileSync = () => {
             return;
         }
 
-        // Refresh immediately if sidebar just opened and it's been a while
-        if (lastRefreshRef.current && 
-            Date.now() - lastRefreshRef.current.getTime() >= REFRESH_INTERVAL) {
+        // Determine interval based on sidebar visibility
+        const interval = isSidebarVisible ? ACTIVE_REFRESH_INTERVAL : BACKGROUND_REFRESH_INTERVAL;
+
+        // If sidebar just became visible and it's been a while, refresh immediately
+        if (isSidebarVisible && lastRefreshRef.current && 
+            Date.now() - lastRefreshRef.current.getTime() >= ACTIVE_REFRESH_INTERVAL) {
             refreshProfile();
         }
 
-        // Set up periodic refresh
+        // Set up adaptive periodic refresh
         intervalRef.current = setInterval(() => {
-            refreshProfile();
-        }, REFRESH_INTERVAL);
+            logger(`useProfileSync: Periodic refresh triggered (sidebar ${isSidebarVisible ? 'visible' : 'hidden'})`);
+            syncProfileData(user.id);
+        }, interval);
 
         return () => {
             if (intervalRef.current) {
@@ -171,7 +185,7 @@ export const useProfileSync = () => {
                 intervalRef.current = null;
             }
         };
-    }, [isAuthenticated, user, isSidebarVisible, refreshProfile]);
+    }, [isAuthenticated, user, isSidebarVisible, refreshProfile, syncProfileData]);
 
     // Refresh when preference page opens
     useEffect(() => {
@@ -180,31 +194,19 @@ export const useProfileSync = () => {
         }
     }, [isAuthenticated, user, isPreferencePageVisible, refreshProfile]);
 
-    // Background refresh regardless of sidebar visibility
-    // This ensures plan changes (e.g., downgrades) are detected even when
-    // user has Zotero running for extended periods without opening the plugin.
-    // Critical for security: prevents syncing after plan downgrades.
+    // Listen for sync denied signal and force refresh
+    const syncDenied = useAtomValue(syncDeniedForPlanAtom);
+    const setSyncDenied = useSetAtom(syncDeniedForPlanAtom);
+    
     useEffect(() => {
-        if (!isAuthenticated || !user) {
-            if (backgroundIntervalRef.current) {
-                clearInterval(backgroundIntervalRef.current);
-                backgroundIntervalRef.current = null;
-            }
-            return;
-        }
-
-        backgroundIntervalRef.current = setInterval(() => {
-            logger(`useProfileSync: Background refresh triggered for ${user.id}`);
+        if (syncDenied && isAuthenticated && user) {
+            logger(`useProfileSync: Sync denied by backend - forcing profile refresh`);
+            // Reset the signal immediately to prevent repeated refreshes
+            setSyncDenied(false);
+            // Force a profile refresh to get updated plan data
             syncProfileData(user.id);
-        }, BACKGROUND_REFRESH_INTERVAL);
-
-        return () => {
-            if (backgroundIntervalRef.current) {
-                clearInterval(backgroundIntervalRef.current);
-                backgroundIntervalRef.current = null;
-            }
-        };
-    }, [isAuthenticated, user, syncProfileData]);
+        }
+    }, [syncDenied, isAuthenticated, user, setSyncDenied, syncProfileData]);
 
     return { refreshProfile };
 };
