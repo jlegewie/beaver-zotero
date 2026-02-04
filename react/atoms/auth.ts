@@ -82,26 +82,15 @@ export const otpResendCountdownAtom = atom<number>(0);
 export const isWaitingForProfileAtom = atom<boolean>(false);
 
 /**
- * Reset all login form state to initial values.
+ * Reset transient login form state (loading, errors, step, password, etc.).
+ * Does NOT touch authMethod — that is a user preference, not transient state,
+ * and should only change via explicit user action (setAuthMethodAtom).
+ *
  * Accepts any setter with the signature (atom, value) => void,
  * so it works with both Jotai atom write `set` and `store.set`.
- *
- * @param preserveAuthMethod - If true, keeps the stored authMethod preference
- *   intact. Use this for automatic cleanup paths (e.g., stale session reset)
- *   where the user's login method preference should be preserved.
  */
-export function resetLoginFormState(
-    set: (atom: any, value: any) => void,
-    { preserveAuthMethod = false }: { preserveAuthMethod?: boolean } = {}
-): void {
+export function resetLoginFormState(set: (atom: any, value: any) => void): void {
     logger('resetLoginFormState: resetting login form state');
-    if (preserveAuthMethod) {
-        // Restore the persisted authMethod rather than resetting to 'initial'
-        set(authMethodAtom, getInitialAuthMethod());
-    } else {
-        set(authMethodAtom, 'initial');
-        setPref("authMethod", "initial");
-    }
     set(loginStepAtom, 'method-selection');
     set(loginLoadingAtom, false);
     set(loginPasswordAtom, '');
@@ -111,12 +100,15 @@ export function resetLoginFormState(
 }
 
 /**
- * Reset login form to initial state
+ * Reset login form to initial state.
+ * Resets the authMethod atom to 'initial' for the UI (to show method selection)
+ * but does NOT persist the change — the user's stored preference is preserved.
  */
 export const resetLoginFormAtom = atom(
     null,
-    (get, set) => {
+    (_get, set) => {
         resetLoginFormState(set);
+        set(authMethodAtom, 'initial');
     }
 );
 
@@ -163,7 +155,8 @@ export const logoutAtom = atom(
         set(profileWithPlanAtom, null);
         set(isProfileLoadedAtom, false);
 
-        // Reset login form state (keep email for convenience)
+        // Reset transient form state and restore authMethod to persisted preference
         resetLoginFormState(set);
+        set(authMethodAtom, getInitialAuthMethod());
     }
 );

@@ -118,15 +118,14 @@ export function useAuth() {
         //     logger(`auth: skipping user update for ${event}`);
         // }
 
-        // Reset login form state when there's no active session:
+        // Reset transient login form state when there's no active session:
         // - SIGNED_OUT: session expired externally (e.g., "Invalid Refresh Token: Already Used")
         // - INITIAL_SESSION with no session: window reopened after interrupted login flow
         //   (macOS window close preserves Jotai store but kills in-flight requests,
         //   leaving isLoading/step stuck in stale state)
-        // preserveAuthMethod: true — this is an automatic cleanup, not user-initiated,
-        // so keep the user's stored login method preference (e.g., 'password').
+        // Note: authMethod (user's login method preference) is intentionally untouched.
         if (event === 'SIGNED_OUT' || (event === 'INITIAL_SESSION' && !newSession)) {
-            resetLoginFormState(store.set, { preserveAuthMethod: true });
+            resetLoginFormState(store.set);
         }
     }, [setSession, setUser]);
     
