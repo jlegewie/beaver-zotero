@@ -8,7 +8,8 @@ import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroItemReference, 
 import { isLibrarySynced, getClientDateModifiedAsISOString, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
-import { syncWithZoteroAtom, isDatabaseSyncSupportedAtom } from '../../react/atoms/profile';
+import { syncWithZoteroAtom, isDatabaseSyncSupportedAtom, syncDeniedForPlanAtom } from '../../react/atoms/profile';
+import { ApiError } from '../../react/types/apiErrors';
 import { SyncMethod } from '../../react/atoms/sync';
 import { SyncLogsRecord } from '../services/database';
 import { isAttachmentOnServer } from './webAPI';
@@ -531,6 +532,15 @@ export async function syncItemsToBackend(
             const errorMessage = error?.message ? String(error.message) : 'Sync failed';
             logger(`Beaver Sync '${syncSessionId}':     Error processing batch: ${errorMessage}`, 1);
             Zotero.logError(error);
+            
+            // Check if sync was denied due to plan restrictions
+            if (error instanceof ApiError && error.isSyncNotAllowed()) {
+                logger(`Beaver Sync '${syncSessionId}':     Sync denied - plan does not allow database sync. Triggering profile refresh.`, 2);
+                // Signal to useProfileSync to refresh profile data
+                // This will update isDatabaseSyncSupportedAtom and cause useZoteroSync to cleanup
+                store.set(syncDeniedForPlanAtom, true);
+            }
+            
             syncFailed = true;
             lastError = error instanceof Error ? error : new Error(errorMessage);
             onStatusChange?.(libraryID, 'failed', errorMessage);
