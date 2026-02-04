@@ -13,11 +13,17 @@
  */
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
-import { sessionAtom, userAtom, AuthUser } from '../atoms/auth';
+import {
+    sessionAtom, userAtom, AuthUser,
+    authMethodAtom, loginStepAtom, loginLoadingAtom,
+    loginPasswordAtom, loginErrorAtom, otpResendCountdownAtom,
+    isWaitingForProfileAtom,
+} from '../atoms/auth';
 import { supabase } from '../../src/services/supabaseClient';
 import { logger } from '../../src/utils/logger';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { profileWithPlanAtom, isProfileLoadedAtom } from '../atoms/profile';
+import { store } from '../store';
 
 // Track if auth listener has been initialized globally
 let authListenerInitialized = false;
@@ -113,6 +119,18 @@ export function useAuth() {
         // else {
         //     logger(`auth: skipping user update for ${event}`);
         // }
+
+        // Reset login form state on sign out to prevent stale OTP/loading UI
+        // when session expires externally (e.g., "Invalid Refresh Token: Already Used")
+        if (event === 'SIGNED_OUT') {
+            store.set(authMethodAtom, 'initial');
+            store.set(loginStepAtom, 'method-selection');
+            store.set(loginLoadingAtom, false);
+            store.set(loginPasswordAtom, '');
+            store.set(loginErrorAtom, null);
+            store.set(otpResendCountdownAtom, 0);
+            store.set(isWaitingForProfileAtom, false);
+        }
     }, [setSession, setUser]);
     
     useEffect(() => {
