@@ -3,15 +3,14 @@ import { EncryptedStorage } from './EncryptedStorage';
 import { logger } from '../utils/logger';
 
 // Stop any previous Supabase client's auto-refresh timer that may have survived
-// a plugin reload.
-try {
-    const mainWindow = Zotero.getMainWindow();
-    if (mainWindow?.__beaverDisposeSupabase) {
-        mainWindow.__beaverDisposeSupabase();
-        logger('Stopped previous Supabase client auto-refresh timer');
-    }
-} catch (_e) {
-    // Main window may not be available during early startup — ignore
+// a plugin reload.  Use `window` (the current script's window) rather than
+// Zotero.getMainWindow() so that opening a second main window doesn't
+// accidentally stop the first window's active auto-refresh timer.
+// eslint-disable-next-line no-restricted-globals -- intentionally using `window` (this script's window), not getMainWindow()
+const currentWindow: Window | undefined = typeof window !== 'undefined' ? window : undefined;
+if (currentWindow?.__beaverDisposeSupabase) {
+    currentWindow.__beaverDisposeSupabase();
+    logger('Stopped previous Supabase client auto-refresh timer');
 }
 
 // Create encrypted storage instance
@@ -262,15 +261,13 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     }
 });
 
-// Register cleanup function on the main window so both the bootstrap code (esbuild)
-// and this module (webpack) can trigger it. This survives across plugin reloads.
-try {
-    const mainWindow = Zotero.getMainWindow();
-    if (mainWindow) {
-        mainWindow.__beaverDisposeSupabase = () => {
-            supabase.auth.stopAutoRefresh();
-        };
-    }
-} catch (_e) {
-    // Main window may not be available during initial startup
+// Register cleanup function on the current window so that:
+// 1. Module-level reload cleanup (above) can stop this client's timer
+// 2. hooks.ts (esbuild bundle) can call win.__beaverDisposeSupabase during shutdown
+// Using `window` scopes the function to the window that loaded this bundle,
+// so multi-window scenarios don't interfere with each other.
+if (currentWindow) {
+    currentWindow.__beaverDisposeSupabase = () => {
+        supabase.auth.stopAutoRefresh();
+    };
 }

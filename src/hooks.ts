@@ -244,11 +244,12 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 1. Stop Supabase auto-refresh timer to prevent stale timers
         //    surviving plugin reload and causing token refresh races.
         //    The cleanup function is registered by supabaseClient.ts (webpack bundle)
-        //    on the main window, since hooks.ts (esbuild bundle) cannot import it directly.
+        //    on the window where the bundle was loaded.  Use the `win` parameter
+        //    (the window being unloaded) rather than Zotero.getMainWindow(), which
+        //    may be unreliable during unload of the last window.
         try {
-            const mainWin = Zotero.getMainWindow();
-            if (mainWin?.__beaverDisposeSupabase) {
-                mainWin.__beaverDisposeSupabase();
+            if (win?.__beaverDisposeSupabase) {
+                win.__beaverDisposeSupabase();
             }
         } catch (e) {
             ztoolkit.log(`disposeSupabase: ${e}`);
