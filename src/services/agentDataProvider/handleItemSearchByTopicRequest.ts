@@ -304,28 +304,35 @@ export async function handleItemSearchByTopicRequest(
         });
     }
 
-    // Serialize items with backfill on failures to ensure limit is reached
-    const resultItems: ItemSearchFrontendResultItem[] = [];
+    // Serialize items in parallel in bounded batches (with backfill on failures to ensure limit is reached)
     const targetLimit = request.limit > 0 ? request.limit : filteredItems.length;
+    const candidates = filteredItems.slice(offset);
+    const BATCH_SIZE = Math.min(targetLimit, 10);
 
-    for (let i = offset; i < filteredItems.length && resultItems.length < targetLimit; i++) {
-        const { item, similarity } = filteredItems[i];
+    const resultItems: ItemSearchFrontendResultItem[] = [];
+    for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
+        const batch = candidates.slice(batchStart, batchStart + BATCH_SIZE);
 
-        try {
-            // Serialize item and process attachments in parallel
-            const [itemData, attachments] = await Promise.all([
-                serializeItem(item, undefined),
-                processAttachmentsParallel(item, attachmentContext)
-            ]);
+        const serialized = await Promise.all(
+            batch.map(async ({ item, similarity }): Promise<ItemSearchFrontendResultItem | null> => {
+                try {
+                    const [itemData, attachments] = await Promise.all([
+                        serializeItem(item, undefined),
+                        processAttachmentsParallel(item, attachmentContext)
+                    ]);
+                    return { item: itemData, attachments, similarity };
+                } catch (error) {
+                    logger(`handleItemSearchByTopicRequest: Failed to serialize item ${item.key}: ${error}`, 1);
+                    return null;
+                }
+            })
+        );
 
-            resultItems.push({
-                item: itemData,
-                attachments,
-                similarity,
-            });
-        } catch (error) {
-            logger(`handleItemSearchByTopicRequest: Failed to serialize item ${item.key}: ${error}`, 1);
-            // Continue to next item to backfill
+        for (const result of serialized) {
+            if (result !== null) {
+                resultItems.push(result);
+                if (resultItems.length >= targetLimit) break;
+            }
         }
     }
 
