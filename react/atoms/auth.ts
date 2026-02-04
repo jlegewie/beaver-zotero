@@ -3,6 +3,7 @@ import { Session } from '@supabase/supabase-js';
 import { supabase } from '../../src/services/supabaseClient';
 import { isProfileLoadedAtom, profileWithPlanAtom } from './profile';
 import { getPref, setPref } from '../../src/utils/prefs';
+import { logger } from '../../src/utils/logger';
 
 /**
  * Atom representing the current authentication session
@@ -86,6 +87,7 @@ export const isWaitingForProfileAtom = atom<boolean>(false);
  * so it works with both Jotai atom write `set` and `store.set`.
  */
 export function resetLoginFormState(set: (atom: any, value: any) => void): void {
+    logger('resetLoginFormState: resetting login form state');
     set(authMethodAtom, 'initial');
     set(loginStepAtom, 'method-selection');
     set(loginLoadingAtom, false);

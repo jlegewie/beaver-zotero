@@ -118,9 +118,12 @@ export function useAuth() {
         //     logger(`auth: skipping user update for ${event}`);
         // }
 
-        // Reset login form state on sign out to prevent stale OTP/loading UI
-        // when session expires externally (e.g., "Invalid Refresh Token: Already Used")
-        if (event === 'SIGNED_OUT') {
+        // Reset login form state when there's no active session:
+        // - SIGNED_OUT: session expired externally (e.g., "Invalid Refresh Token: Already Used")
+        // - INITIAL_SESSION with no session: window reopened after interrupted login flow
+        //   (macOS window close preserves Jotai store but kills in-flight requests,
+        //   leaving isLoading/step stuck in stale state)
+        if (event === 'SIGNED_OUT' || (event === 'INITIAL_SESSION' && !newSession)) {
             resetLoginFormState(store.set);
         }
     }, [setSession, setUser]);
