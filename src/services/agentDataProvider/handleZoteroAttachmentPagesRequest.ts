@@ -99,7 +99,7 @@ export async function handleZoteroAttachmentPagesRequest(
             if (linkMode === Zotero.Attachments.LINK_MODE_LINKED_URL) {
                 return errorResponse(
                     `Attachment ${unique_key} is a linked URL, not a stored file. Beaver cannot access linked URL attachments.`,
-                    'not_pdf'
+                    'is_linked_url'
                 );
             }
             const contentType = zoteroItem.attachmentContentType || 'unknown';
