@@ -233,6 +233,61 @@ function formatYearFilter(yearFilter: unknown): string | null {
 }
 
 /**
+ * Normalize a list parameter that might be passed as a JSON string.
+ * 
+ * Handles cases where the LLM passes a JSON string instead of a proper list.
+ * This matches the backend validator behavior.
+ * 
+ * @param value Either a list, a JSON string representation of a list, or null/undefined
+ * @returns A list of strings, or null if value is invalid
+ */
+function normalizeListParam(value: unknown): string[] | null {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    
+    // If it's already a list, validate items are strings
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            if (typeof item !== 'string') {
+                return null; // Invalid: non-string item in array
+            }
+        }
+        return value;
+    }
+    
+    // If it's a string, try to parse as JSON
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            
+            // Parsed successfully - validate the result
+            if (Array.isArray(parsed)) {
+                for (const item of parsed) {
+                    if (typeof item !== 'string') {
+                        return null; // Invalid: non-string item in parsed array
+                    }
+                }
+                return parsed;
+            } else if (typeof parsed === 'string') {
+                // JSON string that decoded to a string (e.g., '"hello"')
+                return [parsed];
+            } else {
+                // Parsed to something else (dict, number, etc.) - invalid
+                return null;
+            }
+        } catch {
+            // Not valid JSON - treat as a single item
+            // This handles cases like passing "Attention Is All You Need" as a single title
+            return [value];
+        }
+    }
+    
+    // Any other type is invalid
+    return null;
+}
+
+/**
  * Generate a display label for a tool call.
  *
  * Creates human-readable labels like:
@@ -431,11 +486,20 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
         }
 
         case 'lookup_work': {
-            // Handle both old (singular) and new (list) parameter formats
-            const identifiers = args.identifiers as string[] | undefined;
-            const titles = args.titles as string[] | undefined;
+            // Normalize list parameters (handles JSON strings like "['title']")
+            const identifiers = normalizeListParam(args.identifiers);
+            const titles = normalizeListParam(args.titles);
+            
+            // Handle old singular parameter formats
             const identifier = args.identifier as string | undefined;
             const title = args.title as string | undefined;
+            
+            // Check for invalid parameters
+            const hasInvalidIdentifiers = args.identifiers !== undefined && identifiers === null;
+            const hasInvalidTitles = args.titles !== undefined && titles === null;
+            if (hasInvalidIdentifiers || hasInvalidTitles) {
+                return `${baseLabel}: Invalid query`;
+            }
             
             // Count total queries
             const idCount = identifiers?.length ?? (identifier ? 1 : 0);
