@@ -46,8 +46,16 @@ export const useProfileSync = () => {
     const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
     const lastRefreshRef = useRef<Date | null>(null);
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
+    const isRefreshingRef = useRef<boolean>(false);
 
     const syncProfileData = useCallback(async (userId: string) => {
+        // Prevent concurrent refreshes
+        if (isRefreshingRef.current) {
+            logger(`useProfileSync: Refresh already in progress, skipping.`);
+            return;
+        }
+        
+        isRefreshingRef.current = true;
         logger(`useProfileSync: Fetching profile and plan for ${userId}.`);
         try {
             const profileData = await accountService.getProfileWithPlan();
@@ -126,6 +134,8 @@ export const useProfileSync = () => {
                 setProfileWithPlan(null);
                 setIsProfileLoaded(false);
             }
+        } finally {
+            isRefreshingRef.current = false;
         }
     }, [setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid, setIsWaitingForProfile, setModels, setIsMigratingData, setRequiredDataVersion, setMinimumFrontendVersion, setLocalZoteroLibraries, logout]);
 

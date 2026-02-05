@@ -717,9 +717,11 @@ export async function syncZoteroDatabase(
     }
     
     // Sync each library
+    const processedLibraryIDs = new Set<number>();
     for (const library of librariesToSync) {
         const libraryID = library.libraryID;
         const libraryName = library.name;
+        processedLibraryIDs.add(libraryID);
 
         try {
             logger(`Beaver Sync '${syncSessionId}': Syncing library ${libraryID} (${libraryName})`, 2);
@@ -904,7 +906,22 @@ export async function syncZoteroDatabase(
             logger(`Beaver Sync '${syncSessionId}': Error syncing library ${libraryID} (${libraryName}): ${errorMessage}`, 1);
             Zotero.logError(error);
             updateSyncStatus(libraryID, { status: 'failed', error: errorMessage });
-            // Continue with next library even if one fails
+            
+            // If sync is denied due to plan restrictions, abort entire sync operation
+            if (error instanceof ApiError && error.isSyncNotAllowed()) {
+                logger(`Beaver Sync '${syncSessionId}': Aborting sync - plan does not allow database sync`, 2);
+                // Mark unprocessed libraries as failed (skip already-completed ones)
+                for (const remainingLib of librariesToSync) {
+                    if (!processedLibraryIDs.has(remainingLib.libraryID)) {
+                        updateSyncStatus(remainingLib.libraryID, {
+                            status: 'failed',
+                            error: 'Sync not available on current plan'
+                        });
+                    }
+                }
+                return;
+            }
+            // Continue with next library for other types of errors
         }
     }
         
