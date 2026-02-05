@@ -47,6 +47,7 @@ export const useProfileSync = () => {
     const lastRefreshRef = useRef<Date | null>(null);
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
     const isRefreshingRef = useRef<boolean>(false);
+    const syncDeniedPendingRef = useRef<boolean>(false);
 
     const syncProfileData = useCallback(async (userId: string) => {
         // Prevent concurrent refreshes
@@ -136,6 +137,11 @@ export const useProfileSync = () => {
             }
         } finally {
             isRefreshingRef.current = false;
+            // If a sync-denied refresh was queued while we were busy, run it now
+            if (syncDeniedPendingRef.current) {
+                syncDeniedPendingRef.current = false;
+                setTimeout(() => syncProfileData(userId), 0);
+            }
         }
     }, [setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid, setIsWaitingForProfile, setModels, setIsMigratingData, setRequiredDataVersion, setMinimumFrontendVersion, setLocalZoteroLibraries, logout]);
 
@@ -211,10 +217,14 @@ export const useProfileSync = () => {
     useEffect(() => {
         if (syncDenied && isAuthenticated && user) {
             logger(`useProfileSync: Sync denied by backend - forcing profile refresh`);
-            // Reset the signal immediately to prevent repeated refreshes
             setSyncDenied(false);
-            // Force a profile refresh to get updated plan data
-            syncProfileData(user.id);
+            if (isRefreshingRef.current) {
+                // Queue the refresh so it runs after the in-flight one completes
+                logger(`useProfileSync: Refresh in progress, queuing sync-denied refresh.`);
+                syncDeniedPendingRef.current = true;
+            } else {
+                syncProfileData(user.id);
+            }
         }
     }, [syncDenied, isAuthenticated, user, setSyncDenied, syncProfileData]);
 
