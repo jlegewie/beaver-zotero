@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { ToolCallPart } from '../../agents/types';
+import { AgentRunStatus, ToolCallPart } from '../../agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
 import {
     AgentAction,
@@ -340,6 +340,7 @@ const AnnotationListItem: React.FC<AnnotationListItemProps> = ({
 interface AnnotationToolCallViewProps {
     part: ToolCallPart;
     runId: string;
+    runStatus: AgentRunStatus;
 }
 
 /**
@@ -347,14 +348,14 @@ interface AnnotationToolCallViewProps {
  * Combines the header (like ToolCallPartView) with the annotation list,
  * mirroring the design of the old AnnotationToolDisplay component.
  */
-export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ part, runId }) => {
+export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ part, runId, runStatus }) => {
     const toolCallId = part.tool_call_id;
     const isHighlightAnnotationPart = isHighlightAnnotationToolResult(part.tool_name);
     const isNoteAnnotationPart = isNoteAnnotationToolResult(part.tool_name);
 
     // Get tool call status from results
     const resultsMap = useAtomValue(toolResultsMapAtom);
-    const status = getToolCallStatus(toolCallId, resultsMap);
+    const status = getToolCallStatus(toolCallId, resultsMap, runStatus);
     const isInProgress = status === 'in_progress';
     const isCompleted = status === 'completed';
     const isError = status === 'error';

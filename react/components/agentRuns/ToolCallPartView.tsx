@@ -156,7 +156,7 @@ interface ToolCallPartViewProps {
 export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId, runStatus }) => {
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const result = resultsMap.get(part.tool_call_id);
-    const status = getToolCallStatus(part.tool_call_id, resultsMap);
+    const status = getToolCallStatus(part.tool_call_id, resultsMap, runStatus);
     const baseLabel = getToolCallLabel(part, status);
     
     // Check for pending approval for this tool call

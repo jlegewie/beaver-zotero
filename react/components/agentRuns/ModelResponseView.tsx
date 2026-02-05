@@ -103,6 +103,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
                                     key={`tool-${part.tool_call_id}`}
                                     part={part}
                                     runId={runId}
+                                    runStatus={runStatus}
                                 />
                             );
                         }

@@ -9,6 +9,7 @@ import {
     TextPart,
     ThinkingPart,
     RetryPromptPart,
+    AgentRunStatus,
 } from "./types";
 import {
     WSPartEvent,
@@ -120,10 +121,12 @@ export type ToolCallStatus = 'in_progress' | 'completed' | 'error';
 /** Get the status of a tool call based on its result */
 export function getToolCallStatus(
     toolCallId: string,
-    resultsMap: Map<string, (ToolReturnPart | RetryPromptPart)>
+    resultsMap: Map<string, (ToolReturnPart | RetryPromptPart)>,
+    runStatus?: AgentRunStatus
 ): ToolCallStatus {
     const result = resultsMap.get(toolCallId);
-    if (!result) return 'in_progress';
+    if (!result && runStatus && runStatus === 'in_progress') return 'in_progress';
+    if (!result) return 'error';
 
     // Check if result indicates error
     if (result.part_kind === 'retry-prompt') {
