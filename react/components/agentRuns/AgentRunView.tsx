@@ -50,7 +50,7 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
             if (message.kind === 'response') {
                 for (const part of message.parts) {
                     if (part.part_kind === 'tool-call') {
-                        if (getToolCallStatus(part.tool_call_id, resultsMap) === 'in_progress') {
+                        if (getToolCallStatus(part.tool_call_id, resultsMap, run.status) === 'in_progress') {
                             return true;
                         }
                     }
