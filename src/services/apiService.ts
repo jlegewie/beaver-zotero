@@ -82,8 +82,27 @@ export class ApiService {
             try {
                 errorBody = await response.text();
                 const errorJson = JSON.parse(errorBody);
-                throw new ApiError(response.status, errorJson.message || response.statusText);
+                // Handle FastAPI HTTPException detail format (can be string or object)
+                const detail = errorJson.detail;
+                if (typeof detail === 'object' && detail !== null && !Array.isArray(detail)) {
+                    // Structured error with code and message
+                    throw new ApiError(
+                        response.status,
+                        response.statusText,
+                        detail.message || response.statusText,
+                        detail.code
+                    );
+                } else {
+                    // Simple string detail or fallback
+                    throw new ApiError(
+                        response.status,
+                        response.statusText,
+                        detail || errorJson.message || response.statusText
+                    );
+                }
             } catch (e) {
+                // Re-throw if it's already an ApiError
+                if (e instanceof ApiError) throw e;
                 throw new ApiError(response.status, response.statusText);
             }
         }

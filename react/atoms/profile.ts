@@ -207,6 +207,14 @@ export const syncWithZoteroAtom = atom<boolean>((get) => {
 });
 
 /**
+ * Atom to signal that a sync request was denied due to plan restrictions.
+ * When set to true, useProfileSync will force a profile refresh to update
+ * the local plan state, which will cause isDatabaseSyncSupportedAtom to
+ * update and useZoteroSync to unregister its observer.
+ */
+export const syncDeniedForPlanAtom = atom<boolean>(false);
+
+/**
  * Indexing progress atom - returns the current indexing progress (0-100)
  * from files_status realtime subscription, or from profile as fallback.
  */
