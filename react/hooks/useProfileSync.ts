@@ -21,13 +21,13 @@ import {
 
 // Adaptive refresh intervals based on sidebar visibility
 const ACTIVE_REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes when sidebar is visible
-const BACKGROUND_REFRESH_INTERVAL = 60 * 60 * 1000; // 1 hour when sidebar is closed
+const BACKGROUND_REFRESH_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours when sidebar is closed
 
 /**
  * Hook to synchronize the user's profile and plan data (ProfileWithPlan)
  * with the backend. Uses adaptive refresh intervals:
  * - 15 minutes when sidebar is visible (user is active)
- * - 1 hour when sidebar is closed (background check for plan changes)
+ * - 4 hours when sidebar is closed (background check for plan changes)
  */
 export const useProfileSync = () => {
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
@@ -153,7 +153,7 @@ export const useProfileSync = () => {
 
     // Adaptive periodic refresh based on sidebar visibility
     // - 15 minutes when sidebar is visible (user is active)
-    // - 1 hour when sidebar is closed (background check for plan changes)
+    // - 4 hours when sidebar is closed (background check for plan changes)
     // Critical for security: ensures plan downgrades are detected
     useEffect(() => {
         if (!isAuthenticated || !user) {
