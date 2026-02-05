@@ -95,9 +95,16 @@ export async function handleZoteroAttachmentPagesRequest(
         }
 
         if (!zoteroItem.isPDFAttachment()) {
+            const linkMode = zoteroItem.attachmentLinkMode;
+            if (linkMode === Zotero.Attachments.LINK_MODE_LINKED_URL) {
+                return errorResponse(
+                    `Attachment ${unique_key} is a linked URL, not a stored file. Beaver cannot access linked URL attachments.`,
+                    'not_pdf'
+                );
+            }
             const contentType = zoteroItem.attachmentContentType || 'unknown';
             return errorResponse(
-                `Attachment is not a PDF (type: ${contentType})`,
+                `Attachment ${unique_key} is not a PDF (type: ${contentType})`,
                 'not_pdf'
             );
         }
