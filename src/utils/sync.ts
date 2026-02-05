@@ -910,6 +910,8 @@ export async function syncZoteroDatabase(
             // If sync is denied due to plan restrictions, abort entire sync operation
             if (error instanceof ApiError && error.isSyncNotAllowed()) {
                 logger(`Beaver Sync '${syncSessionId}': Aborting sync - plan does not allow database sync`, 2);
+                // Signal to useProfileSync to refresh profile data
+                store.set(syncDeniedForPlanAtom, true);
                 // Mark unprocessed libraries as failed (skip already-completed ones)
                 for (const remainingLib of librariesToSync) {
                     if (!processedLibraryIDs.has(remainingLib.libraryID)) {
