@@ -84,7 +84,7 @@ export class ApiService {
                 const errorJson = JSON.parse(errorBody);
                 // Handle FastAPI HTTPException detail format (can be string or object)
                 const detail = errorJson.detail;
-                if (typeof detail === 'object' && detail !== null) {
+                if (typeof detail === 'object' && detail !== null && !Array.isArray(detail)) {
                     // Structured error with code and message
                     throw new ApiError(
                         response.status,
