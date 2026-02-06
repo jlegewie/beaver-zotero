@@ -1,4 +1,5 @@
 import { logger } from '../../utils/logger';
+import { ZoteroItemReference } from '../../../react/types/zotero';
 import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus } from '../../../react/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
 import { syncingItemFilter, syncingItemFilterAsync } from '../../utils/sync';
@@ -13,6 +14,27 @@ import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import { serializeAttachment } from '../../utils/zoteroSerializers';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from '../../../react/utils/pdfUtils';
+
+/**
+ * Validate that a ZoteroItemReference has correctly formatted fields.
+ * - library_id must be a finite positive integer
+ * - zotero_key must be exactly 8 alphanumeric characters
+ *
+ * @returns null if valid, or an error message string if invalid
+ */
+export function validateZoteroItemReference(ref: ZoteroItemReference): string | null {
+    const { library_id, zotero_key } = ref;
+
+    if (typeof library_id !== 'number' || !Number.isFinite(library_id) || library_id < 1 || library_id !== Math.floor(library_id)) {
+        return `Invalid library_id: '${library_id}'. Must be a positive integer.`;
+    }
+
+    if (typeof zotero_key !== 'string' || !Zotero.Utilities.isValidObjectKey(zotero_key)) {
+        return `Invalid zotero_key: '${zotero_key}'. Must be exactly 8 characters from Zotero's allowed set (e.g., '3RRUYX5J').`;
+    }
+
+    return null;
+}
 
 /**
  * Result of attachment availability check.

@@ -416,6 +416,7 @@ export interface WSZoteroDataResponse {
 
 /** Error codes for attachment page extraction failures */
 export type AttachmentPagesErrorCode =
+    | 'invalid_format'      // Invalid library_id or zotero_key format
     | 'not_found'           // Attachment not found in Zotero
     | 'not_attachment'      // Item is not an attachment
     | 'not_pdf'             // Attachment is not a PDF
@@ -446,6 +447,7 @@ export interface WSZoteroAttachmentPagesResponse {
 
 /** Error codes for attachment page image rendering failures */
 export type AttachmentPageImagesErrorCode =
+    | 'invalid_format'      // Invalid library_id or zotero_key format
     | 'not_found'           // Attachment not found in Zotero
     | 'not_attachment'      // Item is not an attachment
     | 'not_pdf'             // Attachment is not a PDF
@@ -474,6 +476,7 @@ export interface WSZoteroAttachmentPageImagesResponse {
 
 /** Error codes for attachment search failures */
 export type AttachmentSearchErrorCode =
+    | 'invalid_format'      // Invalid library_id or zotero_key format
     | 'not_found'           // Attachment not found in Zotero
     | 'not_attachment'      // Item is not an attachment
     | 'not_pdf'             // Attachment is not a PDF

@@ -19,6 +19,7 @@ import {
     WSSearchHit,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { validateZoteroItemReference } from './utils';
 
 
 /**
@@ -48,16 +49,26 @@ export async function handleZoteroAttachmentSearchRequest(
         error_code,
     });
 
+    // 0. Validate attachment reference format
+    const unique_key = `${attachment.library_id}-${attachment.zotero_key}`;
+    const formatError = validateZoteroItemReference(attachment);
+    if (formatError) {
+        return errorResponse(
+            `Invalid attachment reference '${unique_key}': ${formatError}`,
+            'invalid_format'
+        );
+    }
+
     try {
         // 1. Get the attachment item from Zotero
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
-            attachment.library_id, 
+            attachment.library_id,
             attachment.zotero_key
         );
-        
+
         if (!zoteroItem) {
             return errorResponse(
-                `Attachment not found: ${attachment.library_id}-${attachment.zotero_key}`,
+                `Attachment not found: ${unique_key}`,
                 'not_found'
             );
         }

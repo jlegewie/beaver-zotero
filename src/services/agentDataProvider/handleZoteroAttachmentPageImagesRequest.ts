@@ -18,7 +18,7 @@ import {
     WSPageImage,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { getAttachmentInfo } from './utils';
+import { getAttachmentInfo, validateZoteroItemReference } from './utils';
 
 /**
  * Handle zotero_attachment_page_images_request event.
@@ -45,6 +45,15 @@ export async function handleZoteroAttachmentPageImagesRequest(
     });
 
     const unique_key = `${attachment.library_id}-${attachment.zotero_key}`;
+
+    // 0. Validate attachment reference format
+    const formatError = validateZoteroItemReference(attachment);
+    if (formatError) {
+        return errorResponse(
+            `Invalid attachment reference '${unique_key}': ${formatError}`,
+            'invalid_format'
+        );
+    }
 
     try {
         // 1. Get the attachment item from Zotero
