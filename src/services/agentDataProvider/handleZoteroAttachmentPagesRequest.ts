@@ -18,7 +18,7 @@ import {
     WSPageContent,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { getAttachmentInfo, validateZoteroItemReference } from './utils';
+import { getAttachmentInfo, validateZoteroItemReference, getCachedPDFReadability } from './utils';
 
 
 /**
@@ -157,30 +157,44 @@ export async function handleZoteroAttachmentPagesRequest(
             }
         }
 
+        // 5b. Check cache for known-bad PDFs and page count
+        const readability = await getCachedPDFReadability(zoteroItem);
+        if (readability !== null && !readability.isReadable) {
+            return errorResponse(
+                `The PDF file for ${unique_key}: ${readability.errorReason}`,
+                (readability.errorCode as AttachmentPagesErrorCode) || 'extraction_failed'
+            );
+        }
+
         // 6. Read the PDF data
         const pdfData = await IOUtils.read(filePath);
 
         // 7. Create extractor and get page count first
         const extractor = new PDFExtractor();
         let totalPages: number;
-        
-        try {
-            totalPages = await extractor.getPageCount(pdfData);
-        } catch (error) {
-            if (error instanceof ExtractionError) {
-                if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                    return errorResponse(
-                        `The PDF file for ${unique_key} is password-protected`,
-                        'encrypted'
-                    );
-                } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                    return errorResponse(
-                        `The PDF file for ${unique_key} is invalid or corrupted.`,
-                        'invalid_pdf'
-                    );
+
+        // Use cached page count if available, otherwise compute
+        if (readability?.pageCount) {
+            totalPages = readability.pageCount;
+        } else {
+            try {
+                totalPages = await extractor.getPageCount(pdfData);
+            } catch (error) {
+                if (error instanceof ExtractionError) {
+                    if (error.code === ExtractionErrorCode.ENCRYPTED) {
+                        return errorResponse(
+                            `The PDF file for ${unique_key} is password-protected`,
+                            'encrypted'
+                        );
+                    } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
+                        return errorResponse(
+                            `The PDF file for ${unique_key} is invalid or corrupted.`,
+                            'invalid_pdf'
+                        );
+                    }
                 }
+                throw error;
             }
-            throw error;
         }
 
         // 8. Check page count limit (skip if skip_local_limits is true)

@@ -53,6 +53,25 @@ export interface FailedEmbeddingRecord {
 }
 
 /**
+ * Interface for the 'attachment_file_cache' table row
+ *
+ * Caches immutable PDF file metadata (page count, encryption, OCR needs)
+ * to avoid re-reading and re-parsing files on every request.
+ * Validated by file modification time (mtime) on every read.
+ */
+export interface AttachmentFileCacheRecord {
+    item_id: number;                     // Zotero attachment item ID (PRIMARY KEY)
+    library_id: number;                  // Zotero library ID
+    file_mtime: number;                  // attachmentModificationTime for invalidation
+    page_count: number | null;           // PDF page count
+    is_encrypted: number;                // 1 = encrypted, 0 = not (SQLite boolean)
+    is_invalid_pdf: number;              // 1 = invalid/corrupted, 0 = valid
+    needs_ocr: number | null;            // 1 = needs OCR, 0 = doesn't, null = not analyzed
+    ocr_primary_reason: string | null;   // Human-readable OCR reason
+    cached_at: string;                   // When the entry was cached
+}
+
+/**
  * Maximum number of failures before an item is considered permanently failed.
  * After this many failures, the item won't be retried automatically.
  */
@@ -284,6 +303,27 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_failed_embeddings_retry
             ON failed_embeddings(next_retry_after);
+        `);
+
+        // Table for caching PDF file metadata (page count, encryption, OCR needs)
+        // Validated by file modification time on every read
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS attachment_file_cache (
+                item_id              INTEGER PRIMARY KEY,
+                library_id           INTEGER NOT NULL,
+                file_mtime           INTEGER NOT NULL,
+                page_count           INTEGER,
+                is_encrypted         INTEGER NOT NULL DEFAULT 0,
+                is_invalid_pdf       INTEGER NOT NULL DEFAULT 0,
+                needs_ocr            INTEGER,
+                ocr_primary_reason   TEXT,
+                cached_at            TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_attachment_file_cache_library
+            ON attachment_file_cache(library_id);
         `);
     }
 
@@ -1339,6 +1379,129 @@ export class BeaverDB {
 
         const rows = await this.conn.queryAsync(sql, params);
         return rows[0]?.count || 0;
+    }
+
+    // =============================================
+    // Attachment File Cache Methods
+    // =============================================
+
+    /**
+     * Insert or replace an attachment file cache record.
+     * @param record The cache record to store
+     */
+    public async upsertAttachmentFileCache(record: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+
+        await this.conn.queryAsync(
+            `INSERT OR REPLACE INTO attachment_file_cache
+             (item_id, library_id, file_mtime, page_count, is_encrypted, is_invalid_pdf, needs_ocr, ocr_primary_reason, cached_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                record.item_id,
+                record.library_id,
+                record.file_mtime,
+                record.page_count,
+                record.is_encrypted,
+                record.is_invalid_pdf,
+                record.needs_ocr,
+                record.ocr_primary_reason,
+                now
+            ]
+        );
+    }
+
+    /**
+     * Get a single attachment file cache record by item ID.
+     * @param itemId The Zotero attachment item ID
+     * @returns The cache record or null if not found
+     */
+    public async getAttachmentFileCache(itemId: number): Promise<AttachmentFileCacheRecord | null> {
+        const rows = await this.conn.queryAsync(
+            'SELECT * FROM attachment_file_cache WHERE item_id = ?',
+            [itemId]
+        );
+
+        if (rows.length === 0) return null;
+
+        const row = rows[0];
+        return {
+            item_id: row.item_id,
+            library_id: row.library_id,
+            file_mtime: row.file_mtime,
+            page_count: row.page_count,
+            is_encrypted: row.is_encrypted,
+            is_invalid_pdf: row.is_invalid_pdf,
+            needs_ocr: row.needs_ocr,
+            ocr_primary_reason: row.ocr_primary_reason,
+            cached_at: row.cached_at,
+        };
+    }
+
+    /**
+     * Get attachment file cache records for multiple item IDs.
+     * @param itemIds Array of Zotero attachment item IDs
+     * @returns Map of item ID to cache record
+     */
+    public async getAttachmentFileCacheBatch(itemIds: number[]): Promise<Map<number, AttachmentFileCacheRecord>> {
+        if (itemIds.length === 0) return new Map();
+
+        const result = new Map<number, AttachmentFileCacheRecord>();
+        const chunkSize = 500;
+
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+
+            const rows = await this.conn.queryAsync(
+                `SELECT * FROM attachment_file_cache WHERE item_id IN (${placeholders})`,
+                chunk
+            );
+
+            for (const row of rows) {
+                result.set(row.item_id, {
+                    item_id: row.item_id,
+                    library_id: row.library_id,
+                    file_mtime: row.file_mtime,
+                    page_count: row.page_count,
+                    is_encrypted: row.is_encrypted,
+                    is_invalid_pdf: row.is_invalid_pdf,
+                    needs_ocr: row.needs_ocr,
+                    ocr_primary_reason: row.ocr_primary_reason,
+                    cached_at: row.cached_at,
+                });
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Delete attachment file cache records for given item IDs.
+     * @param itemIds Array of Zotero attachment item IDs
+     */
+    public async deleteAttachmentFileCache(itemIds: number[]): Promise<void> {
+        if (itemIds.length === 0) return;
+
+        const chunkSize = 500;
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+            await this.conn.queryAsync(
+                `DELETE FROM attachment_file_cache WHERE item_id IN (${placeholders})`,
+                chunk
+            );
+        }
+    }
+
+    /**
+     * Delete all attachment file cache records for a library.
+     * @param libraryId The Zotero library ID
+     */
+    public async deleteAttachmentFileCacheByLibrary(libraryId: number): Promise<void> {
+        await this.conn.queryAsync(
+            'DELETE FROM attachment_file_cache WHERE library_id = ?',
+            [libraryId]
+        );
     }
 
 }

@@ -14,6 +14,7 @@ import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import { serializeAttachment } from '../../utils/zoteroSerializers';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from '../../../react/utils/pdfUtils';
+import { PDFFileCacheEntry } from '../pdfFileCache';
 
 /**
  * Validate that a ZoteroItemReference has correctly formatted fields.
@@ -130,10 +131,173 @@ async function checkAttachmentAvailability(
 }
 
 /**
+ * Get the PDF file cache instance (if available).
+ */
+function getPdfFileCache() {
+    return addon.pdfFileCache ?? null;
+}
+
+/**
+ * Get the file modification time for cache key validation.
+ */
+async function getFileMtime(attachment: Zotero.Item): Promise<number | null> {
+    try {
+        const mtime = await attachment.attachmentModificationTime;
+        return (mtime && mtime > 0) ? mtime : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Try to build a FrontendFileStatus from a cached entry.
+ * Returns null if the cache doesn't have enough info for the requested level.
+ *
+ * @param entry - Cached PDF file metadata
+ * @param isPrimary - Whether this is the primary attachment
+ * @param requireOCR - If true, requires needs_ocr to be non-null
+ */
+function buildFileStatusFromCache(
+    entry: PDFFileCacheEntry,
+    isPrimary: boolean,
+    requireOCR: boolean
+): FrontendFileStatus | null {
+    const contentType = 'application/pdf';
+
+    // Encrypted PDF
+    if (entry.is_encrypted) {
+        return {
+            is_primary: isPrimary,
+            mime_type: contentType,
+            page_count: null,
+            status: "unavailable",
+            status_reason: 'PDF is password-protected',
+        };
+    }
+
+    // Invalid/corrupted PDF
+    if (entry.is_invalid_pdf) {
+        return {
+            is_primary: isPrimary,
+            mime_type: contentType,
+            page_count: null,
+            status: "unavailable",
+            status_reason: 'PDF file is invalid or corrupted',
+        };
+    }
+
+    // Check page count limit
+    if (entry.page_count !== null) {
+        const maxPageCount = getPref('maxPageCount');
+        if (entry.page_count > maxPageCount) {
+            return {
+                is_primary: isPrimary,
+                mime_type: contentType,
+                page_count: entry.page_count,
+                status: "unavailable",
+                status_reason: `PDF has ${entry.page_count} pages, which exceeds the ${maxPageCount}-page limit`,
+            };
+        }
+    }
+
+    // If OCR info is required but not available, can't build full status
+    if (requireOCR && entry.needs_ocr === null) {
+        return null;
+    }
+
+    // Check OCR needs (only when we have the data)
+    if (entry.needs_ocr === true) {
+        return {
+            is_primary: isPrimary,
+            mime_type: contentType,
+            page_count: entry.page_count,
+            status: "unavailable",
+            status_reason: `Text unavailable because the PDF requires OCR. Page images are available`,
+        };
+    }
+
+    // All checks passed
+    return {
+        is_primary: isPrimary,
+        mime_type: contentType,
+        page_count: entry.page_count,
+        status: "available",
+    };
+}
+
+/**
+ * Store computation results in the PDF file cache.
+ */
+async function cacheFileMetadata(
+    attachment: Zotero.Item,
+    result: {
+        page_count: number | null;
+        is_encrypted: boolean;
+        is_invalid_pdf: boolean;
+        needs_ocr: boolean | null;
+        ocr_primary_reason: string | null;
+    }
+): Promise<void> {
+    const cache = getPdfFileCache();
+    if (!cache) return;
+
+    const mtime = await getFileMtime(attachment);
+    if (mtime === null) return;
+
+    await cache.set({
+        item_id: attachment.id,
+        library_id: attachment.libraryID,
+        file_mtime: mtime,
+        page_count: result.page_count,
+        is_encrypted: result.is_encrypted,
+        is_invalid_pdf: result.is_invalid_pdf,
+        needs_ocr: result.needs_ocr,
+        ocr_primary_reason: result.ocr_primary_reason,
+    });
+}
+
+/**
+ * Result of cached PDF readability check.
+ * Used by pages/search/image handlers for early rejection of known-bad PDFs.
+ */
+export interface CachedPDFReadability {
+    isReadable: boolean;
+    pageCount: number | null;
+    errorReason: string | null;
+    errorCode: string | null;
+}
+
+/**
+ * Check if a PDF attachment is readable using cached metadata.
+ * Returns null on cache miss (caller should proceed with existing logic).
+ *
+ * Used by pages/search/image handlers to:
+ * 1. Instantly reject known-bad PDFs (encrypted, invalid)
+ * 2. Skip redundant getPageCount() calls when page count is cached
+ */
+export async function getCachedPDFReadability(attachment: Zotero.Item): Promise<CachedPDFReadability | null> {
+    const cache = getPdfFileCache();
+    if (!cache) return null;
+
+    const entry = await cache.get(attachment);
+    if (!entry) return null;
+
+    if (entry.is_encrypted) {
+        return { isReadable: false, pageCount: null, errorReason: 'PDF is password-protected', errorCode: 'encrypted' };
+    }
+
+    if (entry.is_invalid_pdf) {
+        return { isReadable: false, pageCount: null, errorReason: 'PDF file is invalid or corrupted', errorCode: 'invalid_pdf' };
+    }
+
+    return { isReadable: true, pageCount: entry.page_count, errorReason: null, errorCode: null };
+}
+
+/**
  * Get file status information for an attachment.
  * Determines page count and availability of fulltext/page images.
  * Performs full PDF analysis including OCR detection.
- * 
+ *
  * @param attachment - Zotero attachment item
  * @param isPrimary - Whether this is the primary attachment for the parent item
  * @returns File status information
@@ -144,14 +308,27 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
     if (!availabilityCheck.available) {
         return availabilityCheck.status;
     }
-    
+
     const { filePath, contentType } = availabilityCheck;
-    
+
+    // Check cache for full status (including OCR info)
+    const cache = getPdfFileCache();
+    if (cache) {
+        const cached = await cache.get(attachment);
+        if (cached) {
+            const cachedStatus = buildFileStatusFromCache(cached, isPrimary, true);
+            if (cachedStatus) {
+                return cachedStatus;
+            }
+            // Cache hit but no OCR data — fall through to compute OCR
+        }
+    }
+
     // Try to analyze the PDF
     try {
         const pdfData = await IOUtils.read(filePath);
         const extractor = new PDFExtractor();
-        
+
         // Get page count - this also validates the PDF and detects encryption
         let pageCount: number;
         try {
@@ -159,6 +336,10 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
         } catch (error) {
             if (error instanceof ExtractionError) {
                 if (error.code === ExtractionErrorCode.ENCRYPTED) {
+                    await cacheFileMetadata(attachment, {
+                        page_count: null, is_encrypted: true, is_invalid_pdf: false,
+                        needs_ocr: null, ocr_primary_reason: null,
+                    });
                     return {
                         is_primary: isPrimary,
                         mime_type: contentType,
@@ -167,6 +348,10 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                         status_reason: 'PDF is password-protected',
                     };
                 } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
+                    await cacheFileMetadata(attachment, {
+                        page_count: null, is_encrypted: false, is_invalid_pdf: true,
+                        needs_ocr: null, ocr_primary_reason: null,
+                    });
                     return {
                         is_primary: isPrimary,
                         mime_type: contentType,
@@ -178,11 +363,15 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
             }
             throw error;
         }
-        
+
         // Check page count limit
         const maxPageCount = getPref('maxPageCount');
-        
+
         if (pageCount > maxPageCount) {
+            await cacheFileMetadata(attachment, {
+                page_count: pageCount, is_encrypted: false, is_invalid_pdf: false,
+                needs_ocr: null, ocr_primary_reason: null,
+            });
             return {
                 is_primary: isPrimary,
                 mime_type: contentType,
@@ -191,11 +380,15 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                 status_reason: `PDF has ${pageCount} pages, which exceeds the ${maxPageCount}-page limit`,
             };
         }
-        
+
         // Check if the PDF has a text layer (needs OCR if not)
         const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
-        
+
         if (ocrAnalysis.needsOCR) {
+            await cacheFileMetadata(attachment, {
+                page_count: pageCount, is_encrypted: false, is_invalid_pdf: false,
+                needs_ocr: true, ocr_primary_reason: ocrAnalysis.primaryReason || null,
+            });
             return {
                 is_primary: isPrimary,
                 mime_type: contentType,
@@ -204,15 +397,19 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                 status_reason: `Text unavailable because the PDF requires OCR. Page images are available`,
             };
         }
-        
+
         // All checks passed - file is fully accessible
+        await cacheFileMetadata(attachment, {
+            page_count: pageCount, is_encrypted: false, is_invalid_pdf: false,
+            needs_ocr: false, ocr_primary_reason: null,
+        });
         return {
             is_primary: isPrimary,
             mime_type: contentType,
             page_count: pageCount,
             status: "available",
         };
-        
+
     } catch (error) {
         // Unexpected error during analysis
         logger(`getAttachmentFileStatus: Error analyzing PDF: ${error}`, 1);
@@ -246,18 +443,30 @@ export async function getAttachmentFileStatusLightweight(
     if (!availabilityCheck.available) {
         return availabilityCheck.status;
     }
-    
+
     const { contentType } = availabilityCheck;
-    
+
+    // Check cache (don't require OCR info for lightweight check)
+    const cache = getPdfFileCache();
+    if (cache) {
+        const cached = await cache.get(attachment);
+        if (cached) {
+            const cachedStatus = buildFileStatusFromCache(cached, isPrimary, false);
+            if (cachedStatus) {
+                return cachedStatus;
+            }
+        }
+    }
+
     // Get page count using efficient methods (no full file read)
     // First try fulltext index (instant database query)
     let pageCount = await getPDFPageCountFromFulltext(attachment);
-    
+
     // Fallback to PDFWorker if not indexed (reads minimal data)
     if (pageCount === null) {
         pageCount = await getPDFPageCountFromWorker(attachment);
     }
-    
+
     // If both page count methods failed, the PDF is likely problematic
     // (encrypted, corrupted, or unparseable)
     if (pageCount === null) {
@@ -269,10 +478,16 @@ export async function getAttachmentFileStatusLightweight(
             status_reason: 'Unable to read PDF - file may be encrypted, corrupted, or invalid',
         };
     }
-    
+
+    // Cache the lightweight result (needs_ocr = null since we didn't analyze)
+    await cacheFileMetadata(attachment, {
+        page_count: pageCount, is_encrypted: false, is_invalid_pdf: false,
+        needs_ocr: null, ocr_primary_reason: null,
+    });
+
     // Check page count limit
     const maxPageCount = getPref('maxPageCount');
-    
+
     if (pageCount > maxPageCount) {
         return {
             is_primary: isPrimary,
@@ -282,7 +497,7 @@ export async function getAttachmentFileStatusLightweight(
             status_reason: `PDF has ${pageCount} pages, which exceeds the ${maxPageCount}-page limit`,
         };
     }
-    
+
     // All checks passed - file is available
     return {
         is_primary: isPrimary,

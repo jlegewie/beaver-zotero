@@ -5,6 +5,7 @@ import { BeaverUIFactory } from "./ui/ui";
 import eventBus from "../react/eventBus";
 import { CitationService } from "./services/CitationService";
 import { BeaverDB } from "./services/database";
+import { PDFFileCache } from "./services/pdfFileCache";
 import { uiManager } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
@@ -139,6 +140,10 @@ async function onStartup() {
     const citationService = new CitationService(ztoolkit);
     addon.citationService = citationService;
     ztoolkit.log("CitationService initialized successfully");
+
+    // -------- Initialize PDF file metadata cache --------
+    addon.pdfFileCache = new PDFFileCache();
+    ztoolkit.log("PDFFileCache initialized");
     
     // -------- Register keyboard shortcuts --------
     BeaverUIFactory.registerShortcuts();
@@ -270,6 +275,11 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             addon.citationService = undefined;
         }
 
+        // 4b. Dispose PDFFileCache
+        if (addon.pdfFileCache) {
+            addon.pdfFileCache = undefined;
+        }
+
         // 5. Unregister keyboard shortcuts (clears interval, unregisters Zotero.Reader listeners)
         BeaverUIFactory.unregisterShortcuts();
 
@@ -385,6 +395,10 @@ async function onShutdown(): Promise<void> {
         if (addon.citationService) {
             addon.citationService.dispose();
             addon.citationService = undefined;
+        }
+
+        if (addon.pdfFileCache) {
+            addon.pdfFileCache = undefined;
         }
 
         BeaverUIFactory.unregisterShortcuts();
