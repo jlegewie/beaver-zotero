@@ -13,6 +13,53 @@ import EditorRefPlugin from './EditorRefPlugin';
 import { EditorHandle } from './types';
 import { logger } from '../../../../src/utils/logger';
 
+type SelectionModifyParams = {
+    alter: 'move' | 'extend';
+    direction: 'backward' | 'forward';
+    granularity: string;
+};
+
+/**
+ * Map navigation key events to Selection.modify() parameters.
+ * Returns null for non-navigation keys.
+ */
+function getNavigationParams(e: React.KeyboardEvent): SelectionModifyParams | null {
+    const alter = e.shiftKey ? 'extend' : 'move';
+    const isMac = Zotero.isMac;
+    const modKey = isMac ? e.altKey : e.ctrlKey;
+
+    switch (e.key) {
+        case 'ArrowLeft':
+        case 'ArrowRight': {
+            const direction = e.key === 'ArrowLeft' ? 'backward' : 'forward';
+            let granularity = 'character';
+            if (modKey) granularity = 'word';
+            else if (isMac && e.metaKey) granularity = 'lineboundary';
+            return { alter, direction, granularity };
+        }
+        case 'ArrowUp':
+        case 'ArrowDown': {
+            const direction = e.key === 'ArrowUp' ? 'backward' : 'forward';
+            let granularity = 'line';
+            if (isMac && e.metaKey) granularity = 'documentboundary';
+            else if (modKey) granularity = 'paragraph';
+            return { alter, direction, granularity };
+        }
+        case 'Home':
+            if ((isMac && e.metaKey) || (!isMac && e.ctrlKey)) {
+                return { alter, direction: 'backward', granularity: 'documentboundary' };
+            }
+            return { alter, direction: 'backward', granularity: 'lineboundary' };
+        case 'End':
+            if ((isMac && e.metaKey) || (!isMac && e.ctrlKey)) {
+                return { alter, direction: 'forward', granularity: 'documentboundary' };
+            }
+            return { alter, direction: 'forward', granularity: 'lineboundary' };
+        default:
+            return null;
+    }
+}
+
 interface RichTextInputProps {
     value: string;
     onChange: (value: string) => void;
@@ -54,46 +101,23 @@ const RichTextInput = forwardRef<EditorHandle, RichTextInputProps>(
         }));
 
         // Stop keyboard events from bubbling to Zotero's document-level handlers
-        // (e.g., arrow keys navigating collections instead of the editor text)
+        // and manually handle navigation keys that XUL's focus manager intercepts.
+        //
+        // In Zotero's XUL document, the browser's default action for navigation keys
+        // (arrows, Home, End) includes XUL focus navigation that moves focus between
+        // chrome elements. We call preventDefault() to block this, then manually
+        // handle cursor movement via Selection.modify().
         const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
             e.stopPropagation();
 
-            // In Zotero's XUL document, the browser's default action for arrow keys
-            // includes XUL focus navigation (moving focus between chrome elements).
-            // We must preventDefault() to stop this, then manually handle cursor
-            // movement via Selection.modify() since Lexical relies on the browser's
-            // default action for contentEditable cursor movement.
-            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+            const nav = getNavigationParams(e);
+            if (nav) {
                 e.preventDefault();
-
                 const win = (e.target as HTMLElement).ownerDocument?.defaultView;
                 const sel = win?.getSelection();
-                if (!sel) return;
-
-                const alter = e.shiftKey ? 'extend' : 'move';
-                const isHorizontal = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
-                const direction = (e.key === 'ArrowLeft' || e.key === 'ArrowUp') ? 'backward' : 'forward';
-
-                let granularity: string;
-                if (isHorizontal) {
-                    if ((Zotero.isMac && e.altKey) || (!Zotero.isMac && e.ctrlKey)) {
-                        granularity = 'word';
-                    } else if (Zotero.isMac && e.metaKey) {
-                        granularity = 'lineboundary';
-                    } else {
-                        granularity = 'character';
-                    }
-                } else {
-                    if (Zotero.isMac && e.metaKey) {
-                        granularity = 'documentboundary';
-                    } else if ((Zotero.isMac && e.altKey) || (!Zotero.isMac && e.ctrlKey)) {
-                        granularity = 'paragraph';
-                    } else {
-                        granularity = 'line';
-                    }
+                if (sel) {
+                    sel.modify(nav.alter, nav.direction, nav.granularity);
                 }
-
-                sel.modify(alter, direction, granularity);
             }
         }, []);
 
