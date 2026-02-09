@@ -24,3 +24,4 @@ export { handleListLibrariesRequest } from './agentDataProvider/handleListLibrar
 export { handleAgentActionValidateRequest } from './agentDataProvider/handleAgentActionValidateRequest';
 export { handleAgentActionExecuteRequest } from './agentDataProvider/handleAgentActionExecuteRequest';
 export { handleDeleteItemsRequest } from './agentDataProvider/handleDeleteItemsRequest';
+export { serializeLibraryAnalysisContext } from './agentDataProvider/libraryAnalysis';
