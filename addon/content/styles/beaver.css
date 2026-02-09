@@ -2042,3 +2042,58 @@
 [id^="beaver-pane-"] .step-indicator-dot.active {
     background-color: var(--accent-blue);
 }
+
+/* Lexical Editor */
+[id^="beaver-pane-"] .lexical-editor-container {
+    position: relative;
+}
+
+[id^="beaver-pane-"] .chat-input[contenteditable] {
+    height: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    outline: none;
+    overflow-y: auto;
+}
+
+[id^="beaver-pane-"] .lexical-placeholder {
+    position: absolute;
+    top: 1px;
+    left: 0;
+    pointer-events: none;
+    color: var(--fill-tertiary);
+    font-size: 13px;
+    font-family: system-ui, -apple-system, sans-serif;
+    line-height: 1.25;
+    user-select: none;
+}
+
+[id^="beaver-pane-"] .lexical-paragraph {
+    margin: 0;
+}
+
+/* Inline Zotero Chip */
+[id^="beaver-pane-"] .inline-zotero-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 0.85em;
+    line-height: 1.2;
+    background: var(--fill-quinary);
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 3px;
+    padding: 0 4px;
+    margin: 0 1px;
+    vertical-align: baseline;
+    cursor: pointer;
+    user-select: none;
+}
+
+[id^="beaver-pane-"] .inline-zotero-chip:hover {
+    background: var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .inline-zotero-chip-invalid {
+    opacity: 0.5;
+    cursor: default;
+}

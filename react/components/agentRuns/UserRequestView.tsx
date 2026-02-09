@@ -14,6 +14,9 @@ import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms
 import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '../../agents/atoms';
 import { logger } from '../../../src/utils/logger';
+import RichTextContent from '../input/RichTextContent';
+import RichTextInput from '../input/lexical/RichTextInput';
+import { EditorHandle } from '../input/lexical/types';
 
 interface UserRequestViewProps {
     userPrompt: BeaverAgentPrompt;
@@ -42,7 +45,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const contentRef = useRef<HTMLDivElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const overlayRef = useRef<HTMLDivElement | null>(null);
-    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const editorRef = useRef<EditorHandle | null>(null);
 
     // Edit mode state
     const [isEditing, setIsEditing] = useState(false);
@@ -156,31 +159,14 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
     const editMaxHeight = maxContentHeight + 50;
 
-    // Focus textarea and resize when entering edit mode
+    // Focus editor when entering edit mode
     useEffect(() => {
         if (isEditing) {
-            // Use requestAnimationFrame to ensure DOM is ready
             requestAnimationFrame(() => {
-                if (textareaRef.current) {
-                    textareaRef.current.focus();
-                    // Move cursor to end
-                    textareaRef.current.selectionStart = textareaRef.current.value.length;
-                    textareaRef.current.selectionEnd = textareaRef.current.value.length;
-                    // Resize to fit content
-                    textareaRef.current.style.height = 'auto';
-                    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, editMaxHeight)}px`;
-                }
+                editorRef.current?.focus();
             });
         }
-    }, [isEditing, editMaxHeight]);
-
-    // Auto-resize textarea on content change (max editMaxHeight, then scroll)
-    useEffect(() => {
-        if (isEditing && textareaRef.current) {
-            textareaRef.current.style.height = 'auto';
-            textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, editMaxHeight)}px`;
-        }
-    }, [editedContent, isEditing, editMaxHeight]);
+    }, [isEditing]);
 
     // Check if we have content to display in the filters/attachments section
     const hasFiltersOrAttachments = 
@@ -209,18 +195,15 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         await regenerateWithEditedPrompt({ runId, editedPrompt });
     }, [isPending, editedContent, userPrompt, runId, regenerateWithEditedPrompt]);
 
-    const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        // Submit on Enter (without Shift)
-        if (e.key === 'Enter' && !e.shiftKey && !isPending) {
-            e.preventDefault();
-            handleSubmit(e);
-        }
-        // Close on Escape
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            setIsEditing(false);
-        }
-    }, [isPending, handleSubmit]);
+    const handleEditorSubmit = useCallback(() => {
+        if (isPending || editedContent.length === 0) return;
+        const editedPrompt: BeaverAgentPrompt = {
+            ...userPrompt,
+            content: editedContent,
+        };
+        setIsEditing(false);
+        regenerateWithEditedPrompt({ runId, editedPrompt });
+    }, [isPending, editedContent, userPrompt, runId, regenerateWithEditedPrompt]);
 
     return (
         <div className="px-3 py-1 relative" ref={containerRef}>
@@ -277,18 +260,18 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                 )}
 
                 {/* Message content with max height and fade */}
-                <div 
+                <div
                     className={`-ml-1 user-select-text user-request-content border-transparent ${needsFade ? 'user-request-content-fade' : ''}`}
-                    style={{ 
-                        maxHeight: `${maxContentHeight}px`, 
-                        overflow: 'hidden', 
+                    style={{
+                        maxHeight: `${maxContentHeight}px`,
+                        overflow: 'hidden',
                         whiteSpace: 'pre-wrap',
-                        display: 'block' 
+                        display: 'block'
                     }}
-                    ref={contentRef} 
+                    ref={contentRef}
                     onContextMenu={handleContextMenu}
                 >
-                    {userPrompt.content}
+                    <RichTextContent text={userPrompt.content} />
                 </div>
 
                 {/* Edit icon (visible on hover) */}
@@ -359,28 +342,26 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                         </div>
                     )}
 
-                    {/* Textarea input */}
+                    {/* Editor input */}
                     <form onSubmit={handleSubmit} className="display-flex flex-col">
                         <div className="mb-2 -ml-1">
-                            <textarea
-                                ref={textareaRef}
+                            <RichTextInput
+                                ref={editorRef}
                                 value={editedContent}
-                                onChange={(e) => setEditedContent(e.target.value)}
-                                onInput={(e) => {
-                                    e.currentTarget.style.height = 'auto';
-                                    e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, editMaxHeight)}px`;
-                                }}
-                                style={{ maxHeight: `${editMaxHeight}px` }}
+                                onChange={setEditedContent}
+                                onSubmit={handleEditorSubmit}
+                                onNewThread={() => {}}
+                                onCustomPrompt={() => {}}
+                                onAtTrigger={() => {}}
                                 placeholder="Edit your message..."
                                 className="chat-input user-request-edit-textarea"
-                                onKeyDown={handleKeyDown}
-                                rows={1}
+                                disabled={isPending}
                             />
                         </div>
 
                         {/* Button Row */}
                         <div className="display-flex flex-row items-center pt-2">
-                            <ModelSelectionButton inputRef={textareaRef} />
+                            <ModelSelectionButton inputRef={editorRef} />
                             <div className="flex-1" />
                             <div className="display-flex flex-row items-center gap-4">
                                 <Button

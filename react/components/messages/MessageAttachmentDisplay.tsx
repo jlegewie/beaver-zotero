@@ -10,6 +10,7 @@ import { TagButton } from '../library/TagButton';
 import { MessageItemButton } from '../input/MessageItemButton';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { activePreviewAtom } from '../../atoms/ui';
+import { EditorHandle } from '../input/lexical/types';
 
 const MAX_ATTACHMENTS = 4;
 
@@ -25,7 +26,7 @@ const MessageAttachmentDisplay = ({
     setIsAddAttachmentMenuOpen: (isAddAttachmentMenuOpen: boolean) => void;
     menuPosition: { x: number; y: number };
     setMenuPosition: (menuPosition: { x: number; y: number }) => void;
-    inputRef: React.RefObject<HTMLTextAreaElement>;
+    inputRef: React.RefObject<EditorHandle | null>;
     disabled?: boolean;
 }) => {
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);

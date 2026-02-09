@@ -17,9 +17,11 @@ import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import { isDatabaseSyncSupportedAtom, processingModeAtom } from '../../atoms/profile';
 import PendingActionsBar from './PendingActionsBar';
+import RichTextInput from './lexical/RichTextInput';
+import { EditorHandle } from './lexical/types';
 
 interface InputAreaProps {
-    inputRef: React.RefObject<HTMLTextAreaElement | null>;
+    inputRef: React.RefObject<EditorHandle | null>;
 }
 
 const InputArea: React.FC<InputAreaProps> = ({
@@ -56,13 +58,6 @@ const InputArea: React.FC<InputAreaProps> = ({
         inputRef.current?.focus();
     }, []);
 
-    useEffect(() => {
-        if (inputRef.current) {
-            inputRef.current.style.height = 'auto';
-            inputRef.current.style.height = `${inputRef.current.scrollHeight}px`;
-        }
-    }, [messageContent]);
-    
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
     ) => {
@@ -109,22 +104,6 @@ const InputArea: React.FC<InputAreaProps> = ({
         setMessageContent('');
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        // Handle ⌘N (Mac) or Ctrl+N (Windows/Linux) for new thread
-        if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
-            e.preventDefault();
-            newThread();
-        }
-
-        // Handle ⌘^1 (Mac) or Ctrl+Win+1 (Windows/Linux) etc. for custom prompt
-        for (let i = 1 as 1 | 2 | 3 | 4 | 5 | 6; i <= 6; i++) {
-            if (e.key === i.toString() &&  ((Zotero.isMac && e.metaKey && e.ctrlKey) || (!Zotero.isMac && e.ctrlKey && e.metaKey))) {
-                e.preventDefault();
-                handleCustomPrompt(i);
-            }
-        }
-    };
-
     const handleCustomPrompt = (i: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9) => {
         const customPrompts = getCustomPromptsForContext({
             isDatabaseSyncSupported,
@@ -164,7 +143,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 setIsAddAttachmentMenuOpen={setIsAddAttachmentMenuOpen}
                 menuPosition={menuPosition}
                 setMenuPosition={setMenuPosition}
-                inputRef={inputRef as React.RefObject<HTMLTextAreaElement>}
+                inputRef={inputRef}
                 disabled={isAwaitingApproval}
             />
 
@@ -172,46 +151,31 @@ const InputArea: React.FC<InputAreaProps> = ({
             <form onSubmit={handleSubmit} className="display-flex flex-col">
                 {/* Message Input  */}
                 <div className="mb-2 -ml-1">
-                    <textarea
-                        ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+                    <RichTextInput
+                        ref={inputRef as React.Ref<EditorHandle>}
                         value={messageContent}
-                        onChange={(e) => {
-                            // Don't open attachment menu when awaiting approval
-                            if (e.target.value.endsWith('@') && !isAwaitingApproval) {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                setMenuPosition({ 
-                                    x: rect.left,
-                                    y: rect.top - 5
-                                })
-                                setIsAddAttachmentMenuOpen(true);
-                            } else {
-                                setMessageContent(e.target.value);
+                        onChange={setMessageContent}
+                        onSubmit={() => {
+                            if (!isPending) {
+                                sendMessage(messageContent);
                             }
                         }}
-                        onInput={(e) => {
-                            e.currentTarget.style.height = 'auto';
-                            e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
+                        onNewThread={newThread}
+                        onCustomPrompt={handleCustomPrompt}
+                        onAtTrigger={() => {
+                            setIsAddAttachmentMenuOpen(true);
                         }}
-                        placeholder={isAwaitingApproval 
-                            ? "Add instructions to reject" 
+                        placeholder={isAwaitingApproval
+                            ? "Add instructions to reject"
                             : (isLibraryTab ? "@ to add a source" : "@ to add a source, drag to add annotations")}
-                        className="chat-input"
-                        onKeyDown={(e) => {
-                            handleKeyDown(e);
-                            // Submit on Enter (without Shift) - guard against pending to prevent race with button click
-                            // Don't trigger reject on Enter when awaiting approval (must click button)
-                            if (e.key === 'Enter' && !e.shiftKey && !isPending && !isAwaitingApproval) {
-                                e.preventDefault();
-                                handleSubmit(e as any);
-                            }
-                        }}
-                        rows={1}
+                        disabled={isPending}
+                        isAwaitingApproval={isAwaitingApproval}
                     />
                 </div>
 
                 {/* Button Row */}
                 <div className="display-flex flex-row items-center pt-2">
-                    <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} disabled={isAwaitingApproval} />
+                    <ModelSelectionButton inputRef={inputRef} disabled={isAwaitingApproval} />
                     <div className="flex-1" />
                     <div className="display-flex flex-row items-center gap-4">
                         <Tooltip content={isWebSearchEnabled ? 'Disable web search' : 'Enable web search'} singleLine>

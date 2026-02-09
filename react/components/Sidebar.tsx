@@ -1,4 +1,5 @@
 import React, { useRef, useEffect } from 'react';
+import { EditorHandle } from './input/lexical/types';
 import InputArea from "./input/InputArea"
 import Header from "./Header"
 import { ThreadView } from "./agentRuns";
@@ -43,7 +44,7 @@ interface SidebarProps {
 }
 
 const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
-    const inputRef = useRef<HTMLTextAreaElement>(null);
+    const inputRef = useRef<EditorHandle>(null);
     const loginEmailRef = useRef<HTMLInputElement>(null);
     const runs = useAtomValue(allRunsAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);

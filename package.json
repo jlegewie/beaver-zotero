@@ -38,11 +38,13 @@
     },
     "dependencies": {
         "@babel/preset-typescript": "^7.26.0",
+        "@lexical/react": "^0.40.0",
         "@supabase/supabase-js": "^2.50.0",
         "date-fns": "^4.1.0",
         "date-fns-tz": "^3.2.0",
         "deepmerge": "^4.3.1",
         "jotai": "^2.12.1",
+        "lexical": "^0.40.0",
         "p-queue": "^9.0.1",
         "prop-types": "^15.8.1",
         "react": "^18.3.1",

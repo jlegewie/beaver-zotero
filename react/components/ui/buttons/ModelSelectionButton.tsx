@@ -3,12 +3,13 @@ import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import { BrainIcon, ArrowDownIcon, Icon } from '../../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { 
+import {
   selectedModelAtom,
   availableModelsAtom,
   updateSelectedModelAtom,
   validateSelectedModelAtom,
 } from '../../../atoms/models';
+import { EditorHandle } from '../../input/lexical/types';
 
 const MAX_MODEL_NAME_LENGTH = 25;
 
@@ -44,7 +45,7 @@ const ModelMenuItemContent: React.FC<{
  * Button component for selecting the AI model to use for chat completions.
  * Displays available models based on configured API keys.
  */
-const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaElement>, disabled?: boolean}> = ({ inputRef, disabled = false }) => {
+const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<EditorHandle | null>, disabled?: boolean}> = ({ inputRef, disabled = false }) => {
     const selectedModel = useAtomValue(selectedModelAtom);
     const availableModels = useAtomValue(availableModelsAtom);
 
