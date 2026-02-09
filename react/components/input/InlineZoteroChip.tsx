@@ -48,7 +48,9 @@ const InlineZoteroChip: React.FC<InlineZoteroChipProps> = ({ libraryId, zoteroKe
             onClick={handleClick}
             title={getDisplayNameFromItem(item)}
         >
-            <CSSItemTypeIcon itemType={itemType} />
+            <span className="scale-80">
+                <CSSItemTypeIcon itemType={itemType} />
+            </span>
             {displayName}
         </span>
     );

@@ -2076,21 +2076,22 @@
 [id^="beaver-pane-"] .inline-zotero-chip {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
+    gap: 6px;
     font-size: 0.85em;
     line-height: 1.2;
-    background: var(--fill-quinary);
+    background: transparent;
     border: 1px solid var(--fill-quarternary);
-    border-radius: 3px;
-    padding: 0 4px;
+    border-radius: 4px;
+    padding: 2px 6px;
     margin: 0 1px;
     vertical-align: baseline;
     cursor: pointer;
     user-select: none;
+    color: var(--fill-secondary);
 }
 
 [id^="beaver-pane-"] .inline-zotero-chip:hover {
-    background: var(--fill-quarternary);
+    background-color: var(--fill-quinary);
 }
 
 [id^="beaver-pane-"] .inline-zotero-chip-invalid {
