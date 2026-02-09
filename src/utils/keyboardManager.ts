@@ -261,7 +261,7 @@ export class KeyboardManager {
             this._activeKeyEvents.set(e.key, Date.now());
             return;
         }
-        
+
         try {
             this.dispatchCallback(e, { keyboard, type: "keydown" });
         } catch (err) {

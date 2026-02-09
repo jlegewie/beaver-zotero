@@ -57,6 +57,44 @@ const RichTextInput = forwardRef<EditorHandle, RichTextInputProps>(
         // (e.g., arrow keys navigating collections instead of the editor text)
         const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
             e.stopPropagation();
+
+            // In Zotero's XUL document, the browser's default action for arrow keys
+            // includes XUL focus navigation (moving focus between chrome elements).
+            // We must preventDefault() to stop this, then manually handle cursor
+            // movement via Selection.modify() since Lexical relies on the browser's
+            // default action for contentEditable cursor movement.
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                e.preventDefault();
+
+                const win = (e.target as HTMLElement).ownerDocument?.defaultView;
+                const sel = win?.getSelection();
+                if (!sel) return;
+
+                const alter = e.shiftKey ? 'extend' : 'move';
+                const isHorizontal = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+                const direction = (e.key === 'ArrowLeft' || e.key === 'ArrowUp') ? 'backward' : 'forward';
+
+                let granularity: string;
+                if (isHorizontal) {
+                    if ((Zotero.isMac && e.altKey) || (!Zotero.isMac && e.ctrlKey)) {
+                        granularity = 'word';
+                    } else if (Zotero.isMac && e.metaKey) {
+                        granularity = 'lineboundary';
+                    } else {
+                        granularity = 'character';
+                    }
+                } else {
+                    if (Zotero.isMac && e.metaKey) {
+                        granularity = 'documentboundary';
+                    } else if ((Zotero.isMac && e.altKey) || (!Zotero.isMac && e.ctrlKey)) {
+                        granularity = 'paragraph';
+                    } else {
+                        granularity = 'line';
+                    }
+                }
+
+                sel.modify(alter, direction, granularity);
+            }
         }, []);
 
         const initialConfig = {
