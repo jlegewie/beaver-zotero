@@ -27,12 +27,34 @@ export async function executeCreateItemAction(action: AgentAction): Promise<Crea
         throw new Error('Invalid action: missing item data');
     }
 
-    logger(`executeCreateItemAction: Creating item "${proposedData.item.title}"`, 1);
+    // Resolve target library: use provided ID, resolve name, or default to user's main library
+    let libraryId: number;
+
+    if (proposedData.library_id != null && proposedData.library_id !== 0) {
+        if (typeof proposedData.library_id === 'number' && proposedData.library_id > 0) {
+            libraryId = proposedData.library_id;
+        } else {
+            throw new Error(`Invalid library ID: ${proposedData.library_id}`);
+        }
+    } else if (proposedData.library_name) {
+        const allLibraries = Zotero.Libraries.getAll();
+        const matchedLibrary = allLibraries.find(
+            (lib: any) => lib.name.toLowerCase() === proposedData.library_name!.toLowerCase()
+        );
+        if (!matchedLibrary) {
+            throw new Error(`Library not found: "${proposedData.library_name}"`);
+        }
+        libraryId = matchedLibrary.libraryID;
+    } else {
+        libraryId = Zotero.Libraries.userLibraryID;
+    }
+
+    logger(`executeCreateItemAction: Creating item "${proposedData.item.title}" in library ${libraryId}`, 1);
 
     // Create the item using the existing utility function
-    // Pass target library when provided to avoid defaulting to context library
+    // Pass resolved library to target the correct library
     const result = await applyCreateItemData(proposedData, {
-        libraryId: proposedData.library_id,
+        libraryId,
     });
 
     logger(`executeCreateItemAction: Successfully created item ${result.library_id}-${result.zotero_key}`, 1);

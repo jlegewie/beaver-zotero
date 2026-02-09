@@ -521,15 +521,52 @@ async function validateEditMetadataAction(
 async function validateCreateCollectionAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { library_id: rawLibraryId, name, parent_key, item_ids } = request.action_data as {
+    const { library_id: rawLibraryId, library_name, name, parent_key, item_ids } = request.action_data as {
         library_id?: number | null;
+        library_name?: string | null;
         name: string;
         parent_key?: string | null;
         item_ids?: string[];
     };
 
-    // Default to user's main library if not specified
-    const library_id = rawLibraryId || Zotero.Libraries.userLibraryID;
+    // Resolve target library: use provided ID, resolve name, or default to user's main library
+    let library_id: number;
+
+    if (rawLibraryId == null || rawLibraryId === 0) {
+        // Not provided or normalized to 0 — try library_name, then default
+        if (library_name) {
+            const allLibraries = Zotero.Libraries.getAll();
+            const matchedLibrary = allLibraries.find(
+                (lib) => lib.name.toLowerCase() === library_name.toLowerCase()
+            );
+            if (!matchedLibrary) {
+                const availableNames = allLibraries.map((lib) => lib.name).join(', ');
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: `Library not found: "${library_name}". Omit the library parameter to use the default library. Available libraries: ${availableNames}`,
+                    error_code: 'library_not_found',
+                    preference: 'always_ask',
+                };
+            }
+            library_id = matchedLibrary.libraryID;
+        } else {
+            library_id = Zotero.Libraries.userLibraryID;
+        }
+    } else if (typeof rawLibraryId === 'number' && rawLibraryId > 0) {
+        library_id = rawLibraryId;
+    } else {
+        // Explicitly provided but invalid (negative, NaN, fractional, etc.)
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Invalid library ID: ${rawLibraryId}`,
+            error_code: 'library_not_found',
+            preference: 'always_ask',
+        };
+    }
 
     // Validate library exists
     const library = Zotero.Libraries.get(library_id);
@@ -922,31 +959,41 @@ async function validateCreateItemAction(
 
     // Resolve target library: use provided ID, resolve name, or default to user's main library
     let targetLibraryId: number;
-    
-    if (rawLibraryId !== undefined && rawLibraryId !== null) {
-        // Use provided library ID
-        targetLibraryId = rawLibraryId;
-    } else if (library_name) {
-        // Resolve library by name
-        const allLibraries = Zotero.Libraries.getAll();
-        const matchedLibrary = allLibraries.find(
-            (lib) => lib.name.toLowerCase() === library_name.toLowerCase()
-        );
-        if (!matchedLibrary) {
-            const availableNames = allLibraries.map((lib) => lib.name).join(', ');
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: `Library not found: "${library_name}". Omit the library parameter to use the default library. Available libraries: ${availableNames}`,
-                error_code: 'library_not_found',
-                preference: 'always_ask',
-            };
+
+    if (rawLibraryId == null || rawLibraryId === 0) {
+        // Not provided or normalized to 0 — try library_name, then default
+        if (library_name) {
+            const allLibraries = Zotero.Libraries.getAll();
+            const matchedLibrary = allLibraries.find(
+                (lib) => lib.name.toLowerCase() === library_name.toLowerCase()
+            );
+            if (!matchedLibrary) {
+                const availableNames = allLibraries.map((lib) => lib.name).join(', ');
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: `Library not found: "${library_name}". Omit the library parameter to use the default library. Available libraries: ${availableNames}`,
+                    error_code: 'library_not_found',
+                    preference: 'always_ask',
+                };
+            }
+            targetLibraryId = matchedLibrary.libraryID;
+        } else {
+            targetLibraryId = Zotero.Libraries.userLibraryID;
         }
-        targetLibraryId = matchedLibrary.id;
+    } else if (typeof rawLibraryId === 'number' && rawLibraryId > 0) {
+        targetLibraryId = rawLibraryId;
     } else {
-        // Default to user's main library
-        targetLibraryId = Zotero.Libraries.userLibraryID;
+        // Explicitly provided but invalid (negative, NaN, fractional, etc.)
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Invalid library ID: ${rawLibraryId}`,
+            error_code: 'library_not_found',
+            preference: 'always_ask',
+        };
     }
 
     // Validate library exists

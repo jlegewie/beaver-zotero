@@ -15,15 +15,41 @@ import { logger } from '../../src/utils/logger';
 export async function executeCreateCollectionAction(
     action: AgentAction
 ): Promise<CreateCollectionResultData> {
-    const { library_id: rawLibraryId, name, parent_key, item_ids } = action.proposed_data as {
+    const { library_id: rawLibraryId, library_name, name, parent_key, item_ids } = action.proposed_data as {
         library_id?: number | null;
+        library_name?: string | null;
         name: string;
         parent_key?: string | null;
         item_ids?: string[];
     };
 
-    // Default to user's main library if not specified
-    const library_id = rawLibraryId || Zotero.Libraries.userLibraryID;
+    // Resolve target library: use provided ID, resolve name, or default to user's main library
+    let library_id: number;
+
+    if (rawLibraryId == null || rawLibraryId === 0) {
+        // Not provided or normalized to 0 — try library_name, then default
+        if (library_name) {
+            const allLibraries = Zotero.Libraries.getAll();
+            const matchedLibrary = allLibraries.find(
+                (lib: any) => lib.name.toLowerCase() === library_name.toLowerCase()
+            );
+            if (!matchedLibrary) {
+                throw new Error(`Library not found: "${library_name}"`);
+            }
+            const resolvedLibraryID = matchedLibrary.libraryID;
+            if (typeof resolvedLibraryID !== 'number' || resolvedLibraryID <= 0) {
+                throw new Error(`Invalid library found for "${library_name}"`);
+            }
+            library_id = resolvedLibraryID;
+        } else {
+            library_id = Zotero.Libraries.userLibraryID;
+        }
+    } else if (typeof rawLibraryId === 'number' && rawLibraryId > 0) {
+        library_id = rawLibraryId;
+    } else {
+        // Explicitly provided but invalid (negative, NaN, fractional, etc.)
+        throw new Error(`Invalid library ID: ${rawLibraryId}`);
+    }
 
     // Build collection params
     const collectionParams: { name: string; libraryID: number; parentID?: number } = {

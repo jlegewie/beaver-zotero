@@ -314,15 +314,49 @@ async function executeCreateCollectionAction(
     request: WSAgentActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const { library_id: rawLibraryId, name, parent_key, item_ids } = request.action_data as {
+    const { library_id: rawLibraryId, library_name, name, parent_key, item_ids } = request.action_data as {
         library_id?: number | null;
+        library_name?: string | null;
         name: string;
         parent_key?: string | null;
         item_ids?: string[];
     };
 
-    // Default to user's main library if not specified
-    const library_id = rawLibraryId || Zotero.Libraries.userLibraryID;
+    // Resolve target library: use provided ID, resolve name, or default to user's main library
+    let library_id: number;
+
+    if (rawLibraryId == null || rawLibraryId === 0) {
+        // Not provided or normalized to 0 — try library_name, then default
+        if (library_name) {
+            const allLibraries = Zotero.Libraries.getAll();
+            const matchedLibrary = allLibraries.find(
+                (lib) => lib.name.toLowerCase() === library_name.toLowerCase()
+            );
+            if (!matchedLibrary) {
+                return {
+                    type: 'agent_action_execute_response',
+                    request_id: request.request_id,
+                    success: false,
+                    error: `Library not found: "${library_name}"`,
+                    error_code: 'library_not_found',
+                };
+            }
+            library_id = matchedLibrary.libraryID;
+        } else {
+            library_id = Zotero.Libraries.userLibraryID;
+        }
+    } else if (typeof rawLibraryId === 'number' && rawLibraryId > 0) {
+        library_id = rawLibraryId;
+    } else {
+        // Explicitly provided but invalid (negative, NaN, fractional, etc.)
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: `Invalid library ID: ${rawLibraryId}`,
+            error_code: 'library_not_found',
+        };
+    }
 
     // Build collection params
     const collectionParams: { name: string; libraryID: number; parentID?: number } = {
@@ -611,16 +645,50 @@ async function executeCreateItemAction(
         };
     }
 
+    // Resolve target library: use provided ID, resolve name, or default to user's main library
+    let library_id: number;
+
+    if (proposedData.library_id != null && proposedData.library_id !== 0) {
+        if (typeof proposedData.library_id === 'number' && proposedData.library_id > 0) {
+            library_id = proposedData.library_id;
+        } else {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: `Invalid library ID: ${proposedData.library_id}`,
+                error_code: 'library_not_found',
+            };
+        }
+    } else if (proposedData.library_name) {
+        const allLibraries = Zotero.Libraries.getAll();
+        const matchedLibrary = allLibraries.find(
+            (lib) => lib.name.toLowerCase() === proposedData.library_name!.toLowerCase()
+        );
+        if (!matchedLibrary) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: `Library not found: "${proposedData.library_name}"`,
+                error_code: 'library_not_found',
+            };
+        }
+        library_id = matchedLibrary.libraryID;
+    } else {
+        library_id = Zotero.Libraries.userLibraryID;
+    }
+
     try {
-        logger(`executeCreateItemAction: Creating item "${proposedData.item.title}" in library ${proposedData.library_id || 'default'}`, 1);
+        logger(`executeCreateItemAction: Creating item "${proposedData.item.title}" in library ${library_id}`, 1);
 
         // Checkpoint: abort before starting item creation
         checkAborted(ctx, 'create_item:before_apply');
 
         // Create the item using the existing utility function
-        // Pass library_id from proposed_data to target the correct library
+        // Pass library_id from resolved library to target the correct library
         const result: CreateItemResultData = await applyCreateItemData(proposedData, {
-            libraryId: proposedData.library_id,
+            libraryId: library_id,
         });
 
         logger(`executeCreateItemAction: Successfully created item ${result.library_id}-${result.zotero_key}`, 1);

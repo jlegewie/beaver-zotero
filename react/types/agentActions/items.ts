@@ -4,6 +4,7 @@ import type { ExternalReference } from "../externalReferences";
 export interface CreateItemProposedData {
     // Target library (undefined = user's main library)
     library_id?: number;
+    library_name?: string;  // Resolve library by name if library_id not provided
 
     // Core item data
     item: ExternalReference;
