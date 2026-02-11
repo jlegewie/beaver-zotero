@@ -427,14 +427,31 @@ export async function processAttachmentsParallel(
     return results.filter((result): result is AttachmentDataWithStatus => result !== null);
 }
 
-/** Placeholder status for search results (skips expensive computeItemStatus). */
-const SEARCH_PLACEHOLDER_STATUS: ZoteroItemStatus = {
-    is_synced_library: true,
-    is_in_trash: false,
-    available_locally_or_on_server: true,
-    passes_sync_filters: true,
-    is_pending_sync: null,
-};
+/**
+ * Derive a lightweight ZoteroItemStatus for a search-result attachment.
+ *
+ * Mirrors the logic of computeItemStatus() but skips the expensive
+ * wasItemAddedBeforeLastSync DB query (is_pending_sync = null).
+ *
+ * @param availableLocallyOrOnServer Whether the file exists locally or on server
+ *   (computed via safeFileExists + isAttachmentOnServer by the caller).
+ *
+ * Assumptions (validated by syncingItemFilter before this is called):
+ *   - is_synced_library: true (item is in a searchable library)
+ *   - is_in_trash: false (filtered by syncingItemFilter)
+ */
+function deriveAttachmentStatus(availableLocallyOrOnServer: boolean): ZoteroItemStatus {
+    return {
+        is_synced_library: true,
+        is_in_trash: false,
+        available_locally_or_on_server: availableLocallyOrOnServer,
+        // Same logic as computeItemStatus: passes_sync_filters requires
+        // availableLocallyOrOnServer AND syncingItemFilterAsync (the sync
+        // filter part already passed via syncingItemFilter at call site).
+        passes_sync_filters: availableLocallyOrOnServer,
+        is_pending_sync: null,
+    };
+}
 
 /**
  * Lightweight attachment processor for search results.
@@ -485,13 +502,17 @@ export async function processAttachmentsForSearch(
             zotero_synced: false,
         };
 
-        // Get lightweight file status (uses fulltext index, no full PDF read)
+        // Get lightweight file status and file availability in parallel
         const isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
-        const fileStatus = await getAttachmentFileStatusLightweight(attachment, isPrimary);
+        const [fileStatus, fileExistsLocally] = await Promise.all([
+            getAttachmentFileStatusLightweight(attachment, isPrimary),
+            safeFileExists(attachment),
+        ]);
+        const availableLocallyOrOnServer = fileExistsLocally || isAttachmentOnServer(attachment);
 
         return {
             attachment: { ...attachmentData, mime_type: attachment.attachmentContentType || 'application/octet-stream' },
-            status: SEARCH_PLACEHOLDER_STATUS,
+            status: deriveAttachmentStatus(availableLocallyOrOnServer),
             file_status: fileStatus,
         };
     });
