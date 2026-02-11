@@ -10,11 +10,10 @@
 import { logger } from '../../utils/logger';
 import { deduplicateItems } from '../../utils/zoteroUtils';
 import { syncingItemFilter } from '../../utils/sync';
-import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
-import { userIdAtom } from '../../../react/atoms/auth';
+import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 
 import { store } from '../../../react/store';
-import { serializeItem } from '../../utils/zoteroSerializers';
+import { serializeItemForSearch } from '../../utils/zoteroSerializers';
 import {
     WSItemSearchByTopicRequest,
     WSItemSearchByTopicResponse,
@@ -23,7 +22,7 @@ import {
 } from '../agentProtocol';
 import { semanticSearchService, SearchResult } from '../semanticSearchService';
 import { BeaverDB } from '../database';
-import { getCollectionByIdOrName, processAttachmentsParallel } from '../agentDataProvider/utils';
+import { getCollectionByIdOrName, processAttachmentsForSearch } from '../agentDataProvider/utils';
 
 
 /**
@@ -211,7 +210,11 @@ export async function handleItemSearchByTopicRequest(
     }
 
     // Load item data (needed for deduplication which checks title, DOI, ISBN, creators)
-    await Zotero.Items.loadDataTypes(validItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]);
+    // Only load tags/collections if those filters are active (saves data loading time)
+    const dataTypes: string[] = ["primaryData", "creators", "itemData", "childItems"];
+    if (request.tags_filter && request.tags_filter.length > 0) dataTypes.push("tags");
+    if (collectionKeys.length > 0) dataTypes.push("collections");
+    await Zotero.Items.loadDataTypes(validItems, dataTypes);
 
     // Deduplicate items, prioritizing items from user's main library (library ID 1)
     validItems = deduplicateItems(validItems, 1);
@@ -231,15 +234,6 @@ export async function handleItemSearchByTopicRequest(
     for (const result of searchResults) {
         similarityByItemId.set(result.itemId, result.similarity);
     }
-
-    // Get sync configuration from store for status computation
-    const syncWithZotero = store.get(syncWithZoteroAtom);
-    const userId = store.get(userIdAtom);
-    const attachmentContext = {
-        searchableLibraryIds,
-        syncWithZotero,
-        userId,
-    };
 
     // Apply filters first (before serialization)
     const filteredItems: { item: Zotero.Item; similarity: number }[] = [];
@@ -317,8 +311,8 @@ export async function handleItemSearchByTopicRequest(
             batch.map(async ({ item, similarity }): Promise<ItemSearchFrontendResultItem | null> => {
                 try {
                     const [itemData, attachments] = await Promise.all([
-                        serializeItem(item, undefined),
-                        processAttachmentsParallel(item, attachmentContext)
+                        Promise.resolve(serializeItemForSearch(item)),
+                        processAttachmentsForSearch(item)
                     ]);
                     return { item: itemData, attachments, similarity };
                 } catch (error) {

@@ -393,6 +393,41 @@ export async function serializeAttachment(
 }
 
 /**
+ * Lightweight item serializer for search results.
+ * Extracts only the fields consumed by the backend search path,
+ * skipping expensive operations like hashing, JSON serialization,
+ * collection fetching, and identifier extraction.
+ *
+ * @param item Zotero item (must have itemData and creators loaded)
+ * @returns ItemData with empty/placeholder values for unused fields
+ */
+export function serializeItemForSearch(item: Zotero.Item): ItemData {
+    return {
+        // ZoteroItemBase fields
+        library_id: item.libraryID,
+        zotero_key: item.key,
+        date_added: Zotero.Date.sqlToISO8601(item.dateAdded),
+        date_modified: Zotero.Date.sqlToISO8601(item.dateModified),
+
+        // Core bibliographic fields (consumed by backend)
+        item_type: item.itemType,
+        title: item.getField('title', false, true),
+        creators: getCreatorsFromItem(item),
+        date: item.getField('date', false, true),
+        year: getYearFromItem(item),
+        publication_title: item.getField('publicationTitle', false, true),
+        abstract: item.getField('abstractNote'),
+        formatted_citation: Zotero.Beaver?.citationService?.formatBibliography(item) ?? '',
+
+        // Placeholder values for fields not consumed by search
+        deleted: false,
+        item_metadata_hash: '',
+        zotero_version: 0,
+        zotero_synced: false,
+    };
+}
+
+/**
  * Serializes a Zotero library object
  * @param library Zotero library (Library, Group, or Feed)
  * @returns Serialized ZoteroLibrary object

@@ -10,11 +10,10 @@
 import { logger } from '../../utils/logger';
 import { deduplicateItems } from '../../utils/zoteroUtils';
 import { syncingItemFilter } from '../../utils/sync';
-import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
-import { userIdAtom } from '../../../react/atoms/auth';
+import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 
 import { store } from '../../../react/store';
-import { serializeItem } from '../../utils/zoteroSerializers';
+import { serializeItemForSearch } from '../../utils/zoteroSerializers';
 import {
     WSItemSearchByMetadataRequest,
     WSItemSearchByMetadataResponse,
@@ -22,7 +21,7 @@ import {
     FrontendTimingMetadata,
 } from '../agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../react/utils/searchTools';
-import { getCollectionByIdOrName, processAttachmentsParallel } from './utils';
+import { getCollectionByIdOrName, processAttachmentsForSearch } from './utils';
 
 
 /**
@@ -204,9 +203,10 @@ export async function handleItemSearchByMetadataRequest(
     // Deduplicate items, prioritizing items from user's main library (library ID 1)
     items = deduplicateItems(items, 1);
 
-    // Load item data needed for serialization (searchItemsByMetadata only loads itemData/creators/childItems)
+    // Load item data needed for serialization
+    // searchItemsByMetadata already loads itemData/creators; we just need primaryData and childItems
     if (items.length > 0) {
-        await Zotero.Items.loadDataTypes(items, ["primaryData", "tags", "collections", "relations", "childItems"]);
+        await Zotero.Items.loadDataTypes(items, ["primaryData", "childItems"]);
     }
 
     // Record search completion time
@@ -216,15 +216,6 @@ export async function handleItemSearchByMetadataRequest(
         libraryIds,
         items: items.length,
     }, 1);
-
-    // Get sync configuration from store for status computation
-    const syncWithZotero = store.get(syncWithZoteroAtom);
-    const userId = store.get(userIdAtom);
-    const attachmentContext = {
-        searchableLibraryIds,
-        syncWithZotero,
-        userId,
-    };
 
     // Serialize items in parallel in bounded batches (with backfill on failures to ensure limit is reached)
     const targetLimit = request.limit > 0 ? request.limit : items.length;
@@ -239,8 +230,8 @@ export async function handleItemSearchByMetadataRequest(
             batch.map(async (item): Promise<ItemSearchFrontendResultItem | null> => {
                 try {
                     const [itemData, attachments] = await Promise.all([
-                        serializeItem(item, undefined),
-                        processAttachmentsParallel(item, attachmentContext)
+                        Promise.resolve(serializeItemForSearch(item)),
+                        processAttachmentsForSearch(item)
                     ]);
                     return { item: itemData, attachments };
                 } catch (error) {
