@@ -420,7 +420,7 @@ export function serializeItemForSearch(item: Zotero.Item): ItemData {
         formatted_citation: Zotero.Beaver?.citationService?.formatBibliography(item) ?? '',
 
         // Placeholder values for fields not consumed by search
-        deleted: false,
+        deleted: item.deleted,
         item_metadata_hash: '',
         zotero_version: 0,
         zotero_synced: false,
