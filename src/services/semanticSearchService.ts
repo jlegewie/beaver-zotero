@@ -58,17 +58,18 @@ export class semanticSearchService {
             return [];
         }
 
-        // 1. Generate query embedding from backend API (with retry)
-        const queryEmbeddingResponse = await embeddingsService.generateQueryEmbeddingWithRetry(query);
-        const queryEmbedding = new Int8Array(queryEmbeddingResponse.embedding);
+        // 1. Start query embedding generation and DB loading in parallel.
+        const queryEmbeddingPromise = embeddingsService.generateQueryEmbeddingWithRetry(query);
+        const embeddingsPromise = (libraryIds && libraryIds.length > 0)
+            ? this.db.getEmbeddingsByLibraries(libraryIds)
+            : this.db.getAllEmbeddings();
 
-        // 2. Load embeddings from database
-        let embeddings: EmbeddingRecord[];
-        if (libraryIds && libraryIds.length > 0) {
-            embeddings = await this.db.getEmbeddingsByLibraries(libraryIds);
-        } else {
-            embeddings = await this.db.getAllEmbeddings();
-        }
+        // 2. Wait for both prerequisites needed for similarity computation.
+        const [queryEmbeddingResponse, embeddings] = await Promise.all([
+            queryEmbeddingPromise,
+            embeddingsPromise,
+        ]);
+        const queryEmbedding = new Int8Array(queryEmbeddingResponse.embedding);
 
         if (embeddings.length === 0) {
             return [];
