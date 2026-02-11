@@ -20,7 +20,8 @@ export const ExtractResultView: React.FC<ExtractResultViewProps> = ({ items }) =
     const attachments: ZoteroItemReferenceWithLabel[] = items.map(item => ({
         library_id: item.library_id,
         zotero_key: item.zotero_key,
-        label: STATUS_LABELS[item.status] ?? item.status,
+        label: "",
+        faded: item.status !== 'relevant',
     }));
 
     return (

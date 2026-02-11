@@ -8,6 +8,7 @@ import { selectItemById } from '../../../src/utils/selectItem';
 
 export interface ZoteroItemReferenceWithLabel extends ZoteroItemReference {
     label: string;
+    faded?: boolean;
 }
 
 interface ItemWithSelectionId {
@@ -15,6 +16,7 @@ interface ItemWithSelectionId {
     selectionItemId: number;
     muted?: boolean;
     label?: string;
+    faded?: boolean;
 }
 
 interface ZoteroItemsListProps {
@@ -49,7 +51,8 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                     if (item) items.push({
                         item: item.parentItem || item,
                         selectionItemId: item.id,
-                        label: 'label' in attachment ? attachment.label : undefined
+                        label: 'label' in attachment ? attachment.label : undefined,
+                        faded: 'faded' in attachment ? attachment.faded : false
                     });
                 }
                 setResolvedItems(items);
@@ -69,13 +72,13 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
     return (
         <div className="min-w-0">
             {resolvedItems.map((itemWithSelectionId: ItemWithSelectionId) => {
-                const {item, selectionItemId, label} = itemWithSelectionId;
+                const {item, selectionItemId, label, faded} = itemWithSelectionId;
                 const isHovered = hoveredItemId === selectionItemId;
                 
                 return (
                     <div
-                        key={selectionItemId} 
-                        className={`display-flex flex-row gap-1 items-start min-w-0 px-15 py-15 last:border-0 cursor-pointer transition-colors duration-150 ${isHovered ? 'bg-quinary' : ''}`}
+                        key={selectionItemId}
+                        className={`display-flex flex-row gap-1 items-start min-w-0 px-15 py-15 last:border-0 cursor-pointer transition-colors duration-150 ${isHovered ? 'bg-quinary' : ''} ${faded ? 'opacity-50' : ''}`}
                         onClick={() => handleItemClick(selectionItemId)}
                         onMouseEnter={() => setHoveredItemId(selectionItemId)}
                         onMouseLeave={() => setHoveredItemId(null)}
