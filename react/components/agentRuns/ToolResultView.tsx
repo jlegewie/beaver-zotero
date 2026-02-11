@@ -1,6 +1,6 @@
 import React from 'react';
 import { ToolCallPart, ToolReturnPart } from '../../agents/types';
-import { 
+import {
     isItemSearchResult,
     extractItemSearchData,
     isFulltextSearchResult,
@@ -29,6 +29,8 @@ import {
     extractListTagsData,
     isGetMetadataResult,
     extractGetMetadataData,
+    isExtractResult,
+    extractExtractData,
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
@@ -37,6 +39,7 @@ import { ViewPageImagesResultView } from './ViewPageImagesResultView';
 import { ExternalSearchResultView } from './ExternalSearchResultView';
 import { ListCollectionsResultView } from './ListCollectionsResultView';
 import { ListTagsResultView } from './ListTagsResultView';
+import { ExtractResultView } from './ExtractResultView';
 
 interface ToolResultViewProps {
     toolcall: ToolCallPart;
@@ -181,6 +184,14 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         const data = extractGetMetadataData(content, metadata);
         if (data && data.items.length > 0) {
             return <ItemSearchResultView items={data.items} />;
+        }
+    }
+
+    // Extract results (extract)
+    if (isExtractResult(toolName, content, metadata)) {
+        const data = extractExtractData(content, metadata);
+        if (data && data.items.length > 0) {
+            return <ExtractResultView items={data.items} />;
         }
     }
 

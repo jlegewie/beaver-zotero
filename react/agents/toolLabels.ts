@@ -117,6 +117,9 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     view_pages: 'Viewing pages',
     view_page_images: 'Viewing pages',
 
+    // Extract tool
+    extract: 'Extracting',
+
     // Annotations
     add_highlight_annotations: 'Highlight annotations',
     add_note_annotations: 'Note annotations',
@@ -470,6 +473,20 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             // Fallback: just show page range or base label
             if (pageRange) {
                 return `${baseLabel}: ${pageRange}`;
+            }
+            return baseLabel;
+        }
+
+        // === Extract tool ===
+        case 'extract': {
+            const attachmentIds = args.attachment_ids as string[] | undefined;
+            const count = Array.isArray(attachmentIds) ? attachmentIds.length : 0;
+            const label = args.label as string | undefined;
+            if (label) {
+                return `${baseLabel}: ${truncate(label, 40)}`;
+            }
+            if (count > 0) {
+                return `${baseLabel}: ${count} paper${count === 1 ? '' : 's'}`;
             }
             return baseLabel;
         }

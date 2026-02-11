@@ -848,6 +848,110 @@ export function extractLookupWorkData(
 }
 
 // ============================================================================
+// Extract Tool Results
+// ============================================================================
+
+/** Valid tool names for extract results */
+const EXTRACT_TOOL_NAMES: readonly string[] = [
+    'extract',
+] as const;
+
+/**
+ * Per-item extraction reference with status.
+ * Matches ItemExtractionReference from backend.
+ */
+export interface ItemExtractionReference {
+    library_id: number;
+    zotero_key: string;
+    status: "relevant" | "not_relevant" | "error";
+    title?: string | null;
+    authors?: string | null;
+    year?: number | null;
+}
+
+/**
+ * Extract tool result summary.
+ * Matches ExtractToolResultSummary from backend.
+ */
+export interface ExtractToolResultSummary {
+    tool_name: string;
+    total_items: number;
+    items_processed: number;
+    items_relevant: number;
+    items_failed: number;
+    total_pages_processed: number;
+    items: ItemExtractionReference[];
+}
+
+/**
+ * Type guard for extract tool results.
+ * Checks if metadata.summary is ExtractToolResultSummary.
+ */
+export function isExtractResult(
+    toolName: string,
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): metadata is { summary: ExtractToolResultSummary } {
+    if (!EXTRACT_TOOL_NAMES.includes(toolName)) {
+        // Fall back to summary.tool_name
+        if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+        const summary = metadata.summary as Record<string, unknown>;
+        if (summary.tool_name !== 'extract') return false;
+    }
+
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+
+    return (
+        typeof summary.tool_name === 'string' &&
+        typeof summary.total_items === 'number' &&
+        typeof summary.items_relevant === 'number' &&
+        Array.isArray(summary.items) &&
+        summary.items.every((item: unknown) => {
+            if (!item || typeof item !== 'object') return false;
+            const obj = item as Record<string, unknown>;
+            return (
+                typeof obj.library_id === 'number' &&
+                typeof obj.zotero_key === 'string' &&
+                typeof obj.status === 'string'
+            );
+        })
+    );
+}
+
+/**
+ * Normalized extract view data ready for rendering.
+ */
+export interface ExtractViewData {
+    items: ItemExtractionReference[];
+    totalItems: number;
+    itemsRelevant: number;
+    itemsProcessed: number;
+    itemsFailed: number;
+}
+
+/**
+ * Extract data from metadata.summary for extract tool results.
+ */
+export function extractExtractData(
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): ExtractViewData | null {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as ExtractToolResultSummary;
+
+    if (!Array.isArray(summary.items)) return null;
+
+    return {
+        items: summary.items,
+        totalItems: summary.total_items,
+        itemsRelevant: summary.items_relevant,
+        itemsProcessed: summary.items_processed,
+        itemsFailed: summary.items_failed,
+    };
+}
+
+// ============================================================================
 // Unified Extraction
 // ============================================================================
 
@@ -900,6 +1004,15 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
     if (isSearchInAttachmentResult(tool_name, content, metadata)) {
         const data = extractSearchInAttachmentData(content, metadata);
         return data?.pages ?? [];
+    }
+
+    // Extract tool results
+    if (isExtractResult(tool_name, content, metadata)) {
+        const data = extractExtractData(content, metadata);
+        return data?.items?.map(item => ({
+            library_id: item.library_id,
+            zotero_key: item.zotero_key,
+        })) ?? [];
     }
 
     return [];

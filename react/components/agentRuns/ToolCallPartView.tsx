@@ -61,6 +61,9 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     view_page_images: ViewIcon,
     view_pages: ViewIcon,
 
+    // Extract tool
+    extract: DocumentValidationIcon,
+
     // External search tools
     external_search: GlobalSearchIcon,
     lookup_work: GlobalSearchIcon,
