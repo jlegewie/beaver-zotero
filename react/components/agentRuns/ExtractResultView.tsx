@@ -7,8 +7,8 @@ interface ExtractResultViewProps {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-    relevant: 'Relevant',
-    not_relevant: 'Not relevant',
+    not_relevant: '',
+    relevant: '',
     error: 'Error',
 };
 
