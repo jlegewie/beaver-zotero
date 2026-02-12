@@ -196,6 +196,14 @@
     border-radius: 5px 5px 0 0;
 }
 
+/* High token usage warning above composer */
+[id^="beaver-pane-"] .high-token-usage-warning-bar {
+    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
+    border-radius: 5px 5px 0 0;
+    background-color: var(--tag-yellow-senary);
+    border-bottom: 1px solid var(--fill-quinary);
+}
+
 /* UserRequestView - Clickable user message display */
 [id^="beaver-pane-"] .user-request-view {
     cursor: pointer;
