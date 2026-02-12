@@ -270,6 +270,9 @@ export class BeaverUIFactory {
                 const isWindowsToggle = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && !ev.altKey && !ev.shiftKey;
                 
                 if (isMacToggle || isWindowsToggle) {
+                    const timestamp = new Date().toISOString();
+                    ztoolkit.log(`keyboardManager [${timestamp}]: Keyboard shortcut detected - key: ${ev.key}, metaKey: ${ev.metaKey}, ctrlKey: ${ev.ctrlKey}, shiftKey: ${ev.shiftKey}, altKey: ${ev.altKey}`);
+                    
                     ev.preventDefault();
                     
                     let win;
