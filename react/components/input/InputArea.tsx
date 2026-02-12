@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { newThreadAtom } from '../../atoms/threads';
+import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
@@ -17,6 +17,12 @@ import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import { isDatabaseSyncSupportedAtom, processingModeAtom } from '../../atoms/profile';
 import PendingActionsBar from './PendingActionsBar';
+import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
+import { allRunsAtom } from '../../agents/atoms';
+import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom } from '../../atoms/messageUIState';
+import { getLastRequestInputTokens } from '../../utils/runUsage';
+
+const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 1000;
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -35,6 +41,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const processingMode = useAtomValue(processingModeAtom);
+    const allRuns = useAtomValue(allRunsAtom);
+    const currentThreadId = useAtomValue(currentThreadIdAtom);
+    const dismissedWarningsByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
+    const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -51,6 +61,19 @@ const InputArea: React.FC<InputAreaProps> = ({
     const firstPendingApproval = pendingApprovalsMap.size > 0 
         ? Array.from(pendingApprovalsMap.values())[0] 
         : null;
+    const lastRun = allRuns.length > 0 ? allRuns[allRuns.length - 1] : null;
+    const lastRunUsage = lastRun?.total_usage;
+    const lastRequestInputTokens = lastRunUsage ? getLastRequestInputTokens(lastRunUsage) : null;
+    const warningThreadId = lastRun?.thread_id ?? currentThreadId;
+    const dismissedRunId = warningThreadId ? dismissedWarningsByThread[warningThreadId] : undefined;
+    const shouldShowHighTokenWarning = Boolean(
+        !isAwaitingApproval &&
+        lastRun &&
+        warningThreadId &&
+        lastRequestInputTokens !== null &&
+        lastRequestInputTokens > HIGH_INPUT_TOKEN_WARNING_THRESHOLD &&
+        dismissedRunId !== lastRun.id
+    );
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -149,6 +172,16 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
     };
 
+    const handleDismissHighTokenWarning = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!warningThreadId || !lastRun) return;
+        dismissHighTokenWarning({
+            threadId: warningThreadId,
+            runId: lastRun.id,
+        });
+    };
+
     return (
         <div
             className="user-message-display shadow-md shadow-md-top"
@@ -157,6 +190,13 @@ const InputArea: React.FC<InputAreaProps> = ({
         >
             {/* Pending actions bar - shown when awaiting approval */}
             <PendingActionsBar />
+            {shouldShowHighTokenWarning && lastRequestInputTokens !== null && (
+                <HighTokenUsageWarningBar
+                    inputTokens={lastRequestInputTokens}
+                    threshold={HIGH_INPUT_TOKEN_WARNING_THRESHOLD}
+                    onDismiss={handleDismissHighTokenWarning}
+                />
+            )}
 
             {/* Message attachments */}
             <MessageAttachmentDisplay
