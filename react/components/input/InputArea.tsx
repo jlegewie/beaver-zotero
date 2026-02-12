@@ -192,8 +192,11 @@ const InputArea: React.FC<InputAreaProps> = ({
             <PendingActionsBar />
             {shouldShowHighTokenWarning && lastRequestInputTokens !== null && (
                 <HighTokenUsageWarningBar
-                    inputTokens={lastRequestInputTokens}
-                    threshold={HIGH_INPUT_TOKEN_WARNING_THRESHOLD}
+                    onNewThread={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        newThread();
+                    }}
                     onDismiss={handleDismissHighTokenWarning}
                 />
             )}
