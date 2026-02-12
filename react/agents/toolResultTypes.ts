@@ -905,7 +905,9 @@ export function isExtractResult(
     return (
         typeof summary.tool_name === 'string' &&
         typeof summary.total_items === 'number' &&
+        typeof summary.items_processed === 'number' &&
         typeof summary.items_relevant === 'number' &&
+        typeof summary.items_failed === 'number' &&
         Array.isArray(summary.items) &&
         summary.items.every((item: unknown) => {
             if (!item || typeof item !== 'object') return false;

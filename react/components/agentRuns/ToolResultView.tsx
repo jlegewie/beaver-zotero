@@ -190,7 +190,7 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
     // Extract results (extract)
     if (isExtractResult(toolName, content, metadata)) {
         const data = extractExtractData(content, metadata);
-        if (data && data.items.length > 0) {
+        if (data) {
             return <ExtractResultView items={data.items} />;
         }
     }
