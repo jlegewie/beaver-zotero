@@ -47,11 +47,35 @@ export const validateOTPCode = (code: string): boolean => {
 }
 
 /**
+ * Check if an error indicates a service outage (e.g. Supabase returning HTML instead of JSON)
+ */
+export const isServiceUnavailableError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false
+  const msg = error.message.toLowerCase()
+  return (
+    msg.includes('json.parse') ||
+    msg.includes('unexpected character') ||
+    msg.includes('unexpected token') ||
+    msg.includes('failed to fetch') ||
+    msg.includes('networkerror') ||
+    msg.includes('fetch failed') ||
+    msg.includes('load failed')
+  )
+}
+
+export const SERVICE_UNAVAILABLE_MESSAGE =
+  'Beaver is temporarily unavailable due to a service outage. Please try again later.'
+
+/**
  * Get user-friendly error message for OTP errors
  */
 export const getOTPErrorMessage = (error: Error): string => {
+  if (isServiceUnavailableError(error)) {
+    return SERVICE_UNAVAILABLE_MESSAGE
+  }
+
   const message = error.message.toLowerCase()
-  
+
   if (message.includes('invalid')) {
     return 'Invalid code'
   } else if (message.includes('expired')) {

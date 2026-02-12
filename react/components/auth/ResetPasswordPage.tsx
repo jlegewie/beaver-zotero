@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../src/services/supabaseClient';
+import { isServiceUnavailableError, SERVICE_UNAVAILABLE_MESSAGE } from './otp';
 
 /**
  * Fully‑featured password‑reset page that mimics the look & feel of `LoginPage`.
@@ -55,7 +56,7 @@ const ResetPasswordPage: React.FC = () => {
     });
 
     if (error) {
-      setErrorMsg(error.message);
+      setErrorMsg(isServiceUnavailableError(error) ? SERVICE_UNAVAILABLE_MESSAGE : error.message);
     } else {
       setSuccessMsg('Check your inbox! Click the link in the e‑mail to continue.');
     }
@@ -80,7 +81,7 @@ const ResetPasswordPage: React.FC = () => {
     const { error } = await supabase.auth.updateUser({ password });
 
     if (error) {
-      setErrorMsg(error.message);
+      setErrorMsg(isServiceUnavailableError(error) ? SERVICE_UNAVAILABLE_MESSAGE : error.message);
     } else {
       setSuccessMsg('Password updated ✔️  You can now sign in with the new password.');
       // Optionally, redirect the user after a delay
