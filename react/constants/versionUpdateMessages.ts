@@ -271,6 +271,16 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
         ],
     },
+    {
+        version: "0.11.4",
+        title: "Beaver Version 0.11.4",
+        featureList: [
+            {
+                title: "Keyboard shortcut changed to Ctrl/⌘+B",
+                description: "The shortcut to toggle Beaver is now Ctrl+B (⌘B on Mac) to avoid conflicts with Zotero's default shortcuts. Use Ctrl/⌘+Shift+B to open Beaver in a separate window.",
+            },
+        ],
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));

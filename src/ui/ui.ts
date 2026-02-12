@@ -142,7 +142,7 @@ export class BeaverUIFactory {
         const toolbar = win.document.querySelector("#zotero-tabs-toolbar");
         if (!toolbar) return;
 
-        const key = getPref("keyboardShortcut").toUpperCase() || "L";
+        const key = getPref("keyboardShortcut").toUpperCase() || "B";
         const shortcut = Zotero.isMac ? `⌘${key}` : `Ctrl+${key}`;
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
         chatToggleBtn.setAttribute("id", "zotero-beaver-tb-chat-toggle");
@@ -261,7 +261,11 @@ export class BeaverUIFactory {
         
         ztoolkit.log("Registering keyboard shortcuts...");
 
-        const keyboardShortcut = getPref("keyboardShortcut").toLowerCase() || "l";
+        const keyboardShortcut = getPref("keyboardShortcut").toLowerCase() || "b";
+
+        // Debounce variables for toggle shortcut
+        let lastToggleTime = 0;
+        const TOGGLE_DEBOUNCE_MS = 200; // 200ms debounce to prevent rapid repeated toggles
 
         // Register keyboard shortcut for toggling chat panel
         keyboardManager.register(
@@ -270,7 +274,21 @@ export class BeaverUIFactory {
                 const isWindowsToggle = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && !ev.altKey && !ev.shiftKey;
                 
                 if (isMacToggle || isWindowsToggle) {
+                    const now = Date.now();
+                    const timeSinceLastToggle = now - lastToggleTime;
+                    
+                    const timestamp = new Date().toISOString();
+                    ztoolkit.log(`keyboardManager [${timestamp}]: Keyboard shortcut detected - key: ${ev.key}, metaKey: ${ev.metaKey}, ctrlKey: ${ev.ctrlKey}, shiftKey: ${ev.shiftKey}, altKey: ${ev.altKey}, timeSinceLastToggle: ${timeSinceLastToggle}ms`);
+                    
+                    // Debounce: ignore if called too soon after last toggle
+                    if (timeSinceLastToggle < TOGGLE_DEBOUNCE_MS) {
+                        ztoolkit.log(`keyboardManager [${timestamp}]: Toggle ignored (debounced), only ${timeSinceLastToggle}ms since last toggle`);
+                        ev.preventDefault();
+                        return;
+                    }
+                    
                     ev.preventDefault();
+                    lastToggleTime = now;
                     
                     let win;
                     if (ev.target && (ev.target as HTMLElement).ownerDocument) {

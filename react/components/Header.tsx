@@ -56,7 +56,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
     }, [isWindow]);
 
     // Get platform-specific shortcut text
-    const keyboardShortcut = getPref("keyboardShortcut").toUpperCase() || "L";
+    const keyboardShortcut = getPref("keyboardShortcut").toUpperCase() || "B";
     const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
     const closeChatShortcut = Zotero.isMac ? `⌘${keyboardShortcut}` : `Ctrl+${keyboardShortcut}`;
     const openWindowShortcut = Zotero.isMac ? `⌘⇧${keyboardShortcut}` : `Ctrl+Shift+${keyboardShortcut}`;

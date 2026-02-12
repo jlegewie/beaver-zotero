@@ -9,7 +9,7 @@ pref("showIndexingCompleteMessage", false);
 pref("authMethod", "otp");
 
 // App settings
-pref("keyboardShortcut", "l");
+pref("keyboardShortcut", "b");
 pref("statefulChat", true);
 pref("addSelectedItemsOnOpen", true);
 pref("addSelectedItemsOnNewThread", true);
