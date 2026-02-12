@@ -142,7 +142,7 @@ export class BeaverUIFactory {
         const toolbar = win.document.querySelector("#zotero-tabs-toolbar");
         if (!toolbar) return;
 
-        const key = getPref("keyboardShortcut").toUpperCase() || "B";
+        const key = getPref("keyboardShortcut").toUpperCase() || "L";
         const shortcut = Zotero.isMac ? `⌘${key}` : `Ctrl+${key}`;
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
         chatToggleBtn.setAttribute("id", "zotero-beaver-tb-chat-toggle");
@@ -261,7 +261,7 @@ export class BeaverUIFactory {
         
         ztoolkit.log("Registering keyboard shortcuts...");
 
-        const keyboardShortcut = getPref("keyboardShortcut").toLowerCase() || "b";
+        const keyboardShortcut = getPref("keyboardShortcut").toLowerCase() || "l";
 
         // Debounce variables for toggle shortcut
         let lastToggleTime = 0;
@@ -308,10 +308,11 @@ export class BeaverUIFactory {
         );
 
         // Register keyboard shortcut for opening separate window
+        // Mac: Cmd+Ctrl+L, Windows/Linux: Ctrl+Alt+L
         keyboardManager.register(
             (ev, keyOptions) => {
-                const isMacShortcut = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && ev.shiftKey && !ev.ctrlKey;
-                const isWindowsShortcut = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && ev.shiftKey && !ev.metaKey;
+                const isMacShortcut = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && ev.ctrlKey && !ev.shiftKey && !ev.altKey;
+                const isWindowsShortcut = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && ev.altKey && !ev.shiftKey && !ev.metaKey;
                 
                 if (isMacShortcut || isWindowsShortcut) {
                     ev.preventDefault();
