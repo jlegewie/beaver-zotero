@@ -483,7 +483,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             const count = Array.isArray(attachmentIds) ? attachmentIds.length : 0;
             const label = args.label as string | undefined;
             if (label) {
-                return `${baseLabel}: ${truncate(label, 40)}`;
+                return `${baseLabel}: ${truncate(label, 60)}`;
             }
             if (count > 0) {
                 return `${baseLabel}: ${count} paper${count === 1 ? '' : 's'}`;
