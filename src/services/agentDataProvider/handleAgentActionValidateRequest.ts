@@ -86,6 +86,8 @@ const AI_RESTRICTED_FIELDS = [
     'itemTypeID',       // Changing item type can lose data
 ] as const;
 
+const ATTACHMENT_EDITABLE_FIELDS = ['title', 'url'] as const;
+
 // ============================================================================
 // Field Validation Types and Functions
 // ============================================================================
@@ -144,6 +146,18 @@ interface CreatorValidationResult {
  * @returns Validation result with allowed status and error details if not allowed
  */
 export function validateFieldEdit(item: Zotero.Item, field: string): FieldValidationResult {
+    // Attachments are intentionally scoped to a small safe subset.
+    if (
+        item.isAttachment() &&
+        !(ATTACHMENT_EDITABLE_FIELDS as readonly string[]).includes(field)
+    ) {
+        return {
+            allowed: false,
+            error: `Field '${field}' is not editable for attachments. Only these fields are allowed: ${ATTACHMENT_EDITABLE_FIELDS.join(', ')}`,
+            error_code: 'field_restricted',
+        };
+    }
+
     // 1. Check if field is restricted by AI safety policy
     if ((AI_RESTRICTED_FIELDS as readonly string[]).includes(field)) {
         return {
@@ -390,8 +404,7 @@ async function validateEditMetadataAction(
                 preference: 'always_ask',
             };
         }
-        // Field validation is handled below by validateAllEdits() / canSetField(),
-        // which already correctly limits editable fields for attachments.
+        // Attachment field allowlist is enforced by validateFieldEdit()/validateAllEdits() below.
     } else if (!item.isRegularItem()) {
         return {
             type: 'agent_action_validate_response',
