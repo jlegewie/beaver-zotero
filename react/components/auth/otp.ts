@@ -64,8 +64,8 @@ export const isServiceUnavailableError = (error: unknown): boolean => {
 }
 
 export const SERVICE_UNAVAILABLE_MESSAGE =
-  'Beaver is temporarily unavailable due to a service outage. Please try again later.'
-
+    'Beaver is temporarily unable to connect. Please try again in a moment. ' +
+    'If the issue persists, check beaverapp.ai for status updates.'
 /**
  * Get user-friendly error message for OTP errors
  */
