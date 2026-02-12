@@ -63,7 +63,9 @@ const CustomPromptSettings: React.FC<CustomPromptSettingsProps> = ({
                     <label className="font-semibold text-sm font-color-primary">
                         Custom Prompt
                     </label>
-                    <label className="font-semibold text-sm font-color-secondary">⌘{index + 1}</label>
+                    <label className="font-semibold text-sm font-color-secondary">
+                        {Zotero.isMac ? `⌘^${index + 1}` : `Ctrl+Win+${index + 1}`}
+                    </label>
                 </div>
                 <IconButton
                     variant="ghost-secondary"
@@ -79,14 +81,14 @@ const CustomPromptSettings: React.FC<CustomPromptSettingsProps> = ({
                     type="text"
                     value={title}
                     onChange={handleTitleChange}
-                    placeholder={`Enter title for ⌘${index + 1}...`}
+                    placeholder={`Enter title for ${Zotero.isMac ? `⌘^${index + 1}` : `Ctrl+Win+${index + 1}`}...`}
                     className="flex-1 p-1 m-0 preference-input"
                 />
             </div>
             <textarea
                 value={text}
                 onChange={handleTextChange}
-                placeholder={`Enter prompt text for ⌘${index + 1}...`}
+                placeholder={`Enter prompt text for ${Zotero.isMac ? `⌘^${index + 1}` : `Ctrl+Win+${index + 1}`}...`}
                 rows={2}
                 className="flex-1 p-1 preference-input resize-y text-sm"
                 style={{ minHeight: '50px' }}
