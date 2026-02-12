@@ -6,6 +6,7 @@ pref("userEmail", "");
 pref("currentPlanId", "");
 pref("installedVersion", "");
 pref("showIndexingCompleteMessage", false);
+pref("showHighTokenUsageWarningMessage", true);
 pref("authMethod", "otp");
 
 // App settings

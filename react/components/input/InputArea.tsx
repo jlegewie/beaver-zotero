@@ -21,6 +21,7 @@ import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import { allRunsAtom } from '../../agents/atoms';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
+import { getPref } from '../../../src/utils/prefs';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 1000;
 
@@ -66,7 +67,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     const lastRequestInputTokens = lastRunUsage ? getLastRequestInputTokens(lastRunUsage) : null;
     const warningThreadId = lastRun?.thread_id ?? currentThreadId;
     const dismissedRunId = warningThreadId ? dismissedWarningsByThread[warningThreadId] : undefined;
+    const showHighTokenUsageWarningMessage = getPref('showHighTokenUsageWarningMessage');
     const shouldShowHighTokenWarning = Boolean(
+        showHighTokenUsageWarningMessage &&
         !isAwaitingApproval &&
         lastRun &&
         warningThreadId &&
