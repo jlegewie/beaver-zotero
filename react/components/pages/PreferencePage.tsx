@@ -643,7 +643,7 @@ const PreferencePage: React.FC = () => {
             {/* --- Custom Prompts Section --- */}
             <SectionHeader>Custom Prompts</SectionHeader>
             <div className="text-sm font-color-secondary mb-2">
-                Configure up to 9 custom prompts with keyboard shortcuts (⌘1-⌘9). Enable library search or set conditions based on attachments.
+                Configure up to 9 custom prompts with keyboard shortcuts ({Zotero.isMac ? '⌘^1-⌘^9' : 'Ctrl+Win+1-9'}). Enable library search or set conditions based on attachments.
             </div>
             <div className="display-flex flex-col gap-5">
                 {customPrompts.map((prompt: CustomPrompt, index: number) => (
