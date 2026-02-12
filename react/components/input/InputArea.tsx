@@ -23,7 +23,7 @@ import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThread
 import { getLastRequestInputTokens } from '../../utils/runUsage';
 import { getPref } from '../../../src/utils/prefs';
 
-const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 1000;
+const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
