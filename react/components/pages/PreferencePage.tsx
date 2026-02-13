@@ -5,7 +5,7 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, SearchIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom } from "../../atoms/profile";
 import { logger } from "../../../src/utils/logger";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
@@ -61,6 +61,7 @@ const PreferencePage: React.FC = () => {
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
     const profileBalance = useAtomValue(profileBalanceAtom);
+    const remainingBeaverCredits = useAtomValue(remainingBeaverCreditsAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const processingMode = useAtomValue(processingModeAtom);
 
@@ -437,7 +438,7 @@ const PreferencePage: React.FC = () => {
                     }
                     <div className="display-flex flex-row items-center gap-2">
                         <div className="font-color-secondary">Remaining Chat Credits:</div>
-                        <div className="font-color-primary">{profileBalance.chatCreditsRemaining.toLocaleString() || 'Unknown'}</div>
+                        <div className="font-color-primary">{remainingBeaverCredits.toLocaleString() || 'Unknown'}</div>
                     </div>
                     <div className="display-flex flex-row items-center gap-3 mt-2">
                         <Button
