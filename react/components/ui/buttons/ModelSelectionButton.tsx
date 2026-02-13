@@ -26,10 +26,6 @@ const ModelMenuItemContent: React.FC<{
                 <div className={`display-flex text-sm truncate ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
                     {model.name}
                 </div>
-                {model.reasoning_model
-                    ? <Icon icon={BrainIcon} className={`-ml-015 ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`} />
-                    : undefined
-                }
             </div>
             {showCreditCosts && model.credit_cost &&
                 <div className="text-xs font-color-tertiary items-center">
@@ -87,7 +83,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                 onClick: () => {
                     updateSelectedModel(modelWithAccessMode);
                 },
-                icon: model.reasoning_model ? BrainIcon : undefined,
                 customContent: (
                     <ModelMenuItemContent 
                         model={model} 
@@ -113,7 +108,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                     onClick: () => {
                         updateSelectedModel(model);
                     },
-                    icon: model.reasoning_model ? BrainIcon : undefined,
                     customContent: (
                         <ModelMenuItemContent 
                             model={model} 
@@ -141,7 +135,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                     onClick: () => {
                         updateSelectedModel(modelWithAccessMode);
                     },
-                    icon: model.reasoning_model ? BrainIcon : undefined,
                     customContent: (
                         <ModelMenuItemContent 
                             model={model} 
@@ -170,7 +163,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
 
     const agentComponent = (
         <div className="display-flex items-center gap-1">
-            {(selectedModel?.reasoning_model || false) && <Icon icon={BrainIcon} />}
+            <Icon icon={BrainIcon} />
             {getButtonLabel()}
             <Icon icon={ArrowDownIcon} className="scale-11 -ml-1" />
         </div>
@@ -189,7 +182,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             variant="ghost-secondary"
             customContent={agentComponent}
             buttonLabel={getButtonLabel()}
-            icon={selectedModel && selectedModel.reasoning_model ? BrainIcon : undefined}
             rightIcon={ArrowDownIcon}
             className="truncate"
             style={dynamicStyle}
