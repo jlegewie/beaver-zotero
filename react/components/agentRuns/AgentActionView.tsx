@@ -770,7 +770,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 disabled={isProcessing}
                             >
                                 <span>
-                                    {isConfirmExtraction ? 'Confirm Charge' : 'Apply'}
+                                    {isConfirmExtraction ? 'Confirm' : 'Apply'}
                                     {/* {isAwaitingApproval && <span className="opacity-50 ml-1">⏎</span>} */}
                                 </span>
                             </Button>
@@ -806,7 +806,7 @@ function getActionLabel(toolName: string): string {
         case 'organize_items':
             return 'Organize';
         case 'confirm_extraction':
-            return 'Confirm Extraction';
+            return 'Extract';
         default:
             return toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
@@ -832,8 +832,8 @@ function getActionTitle(
                 : `${itemCount} item${itemCount !== 1 ? 's' : ''}`;
         }
         case 'confirm_extraction': {
-            const total = actionData?.total_credits ?? 0;
-            return `Cost: ${total} request${total !== 1 ? 's' : ''}`;
+            const count = actionData?.attachment_count ?? 0;
+            return `Confirm ${count} Item Batch Processing`;
         }
         case 'create_item':
         case 'create_items': {
