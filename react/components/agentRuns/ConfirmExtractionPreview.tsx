@@ -21,6 +21,7 @@ interface ConfirmExtractionPreviewProps {
  */
 export const ConfirmExtractionPreview: React.FC<ConfirmExtractionPreviewProps> = ({
     attachmentCount,
+    extraCredits,
     totalCredits,
     status = 'pending',
 }) => {
@@ -37,7 +38,7 @@ export const ConfirmExtractionPreview: React.FC<ConfirmExtractionPreviewProps> =
                 ) : (
                     <span>
                         Extracting from <span className="font-color-primary font-medium">{attachmentCount} paper{attachmentCount !== 1 ? 's' : ''}</span> will
-                        use <span className="font-color-primary font-medium">{totalCredits} extra request{totalCredits !== 1 ? 's' : ''}</span>.
+                        use <span className="font-color-primary font-medium">{extraCredits} extra request{extraCredits !== 1 ? 's' : ''}</span>.
                     </span>
                 )}
             </div>
