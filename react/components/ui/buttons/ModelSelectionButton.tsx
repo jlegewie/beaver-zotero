@@ -20,6 +20,7 @@ const ModelMenuItemContent: React.FC<{
     isSelected: boolean;
     showCreditCosts?: boolean
 }> = ({ model, isSelected,  showCreditCosts= false}) => {
+    const creditCost = model.credit_cost ?? 1;
     return (
         <div className="display-flex flex-col min-w-0">
             <div className="display-flex flex-row items-center gap-2 min-w-0">
@@ -27,11 +28,12 @@ const ModelMenuItemContent: React.FC<{
                     {model.name}
                 </div>
             </div>
-            {showCreditCosts && model.credit_cost &&
-                <div className="text-xs font-color-tertiary items-center">
-                    <div className="text-xs">{model.credit_cost > 0.001 ? `${model.credit_cost} credit${model.credit_cost !== 1 ? 's' : ''} per step` : 'Unlimited'}</div>
-                </div>
-            }
+            <div className="text-xs font-color-tertiary items-center">
+                {showCreditCosts
+                    ? <div className="text-xs">{creditCost} credit${creditCost !== 1 ? 's' : ''}</div>
+                    : <div className="text-xs">Recommended</div>
+                }
+            </div>
         </div>
     );
 };
@@ -52,12 +54,12 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         validateSelectedModel();
     }, [availableModels, validateSelectedModel]);
 
+    const custom_models = useMemo(() => availableModels.filter((model) => model.is_custom), [availableModels]);
+    const included_models = useMemo(() => availableModels.filter((model) => model.allow_app_key && model.is_enabled && !model.is_custom) || [], [availableModels]);
+    const byok_models = useMemo(() => availableModels.filter((model) => model.allow_byok && model.is_enabled && !model.is_custom), [availableModels]);
+
     const menuItems = useMemo((): MenuItem[] => {
         const items: MenuItem[] = [];
-
-        const custom_models = availableModels.filter((model) => model.is_custom);
-        const included_models = availableModels.filter((model) => model.allow_app_key && model.is_enabled && !model.is_custom) || [];
-        const byok_models = availableModels.filter((model) => model.allow_byok && model.is_enabled && !model.is_custom);
 
         // Helper to create a composite key for selection comparison
         const getModelKey = (model: any) => {
@@ -79,7 +81,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                     <ModelMenuItemContent 
                         model={model} 
                         isSelected={selectedKey === modelKey}
-                        showCreditCosts={true}
+                        showCreditCosts={included_models.length > 1}
                     />
                 )
             });
@@ -138,7 +140,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         }
 
         return items;
-    }, [availableModels, updateSelectedModel, selectedModel]);
+    }, [custom_models, included_models, byok_models, updateSelectedModel, selectedModel]);
 
     const getButtonLabel = () => {
         if (!selectedModel) return 'None Selected';
@@ -167,6 +169,9 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         maxWidth: '250px',
     };
 
+    if (custom_models.length == 0 && byok_models.length == 0) {
+        return null;
+    }
 
     return (
         <MenuButton
