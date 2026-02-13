@@ -21,6 +21,7 @@ import { EditMetadataPreview } from './EditMetadataPreview';
 import { CreateCollectionPreview } from './CreateCollectionPreview';
 import { OrganizeItemsPreview } from './OrganizeItemsPreview';
 import { CreateItemsPreview } from './CreateItemsPreview';
+import { ConfirmExtractionPreview } from './ConfirmExtractionPreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
@@ -47,6 +48,7 @@ import {
     FolderAddIcon,
     TaskDoneIcon,
     DocumentValidationIcon,
+    DollarCircleIcon,
 } from '../icons/icons';
 import { revealSource } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
@@ -333,7 +335,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         : isMultiAction 
             ? getOverallStatus(actions)
             : (action?.status ?? 'pending');
-    const config = STATUS_CONFIGS[status];
+    // For confirm_extraction, hide post-run Apply/Undo/Reject/Retry — only approval during awaiting is meaningful
+    const isConfirmExtraction = toolName === 'confirm_extraction';
+    const baseConfig = STATUS_CONFIGS[status];
+    const config = (isConfirmExtraction && status !== 'awaiting')
+        ? { ...baseConfig, showApply: false, showReject: false, showUndo: false, showRetry: false }
+        : baseConfig;
 
     // Handlers for awaiting approval (during agent run)
     const handleApprove = useCallback(() => {
@@ -562,6 +569,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
             if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
+            if (toolName === 'confirm_extraction') return DollarCircleIcon;
             return ClockIcon;
         };
         if (isAwaitingApproval) return getToolIcon();
@@ -796,6 +804,8 @@ function getActionLabel(toolName: string): string {
             return 'Create';
         case 'organize_items':
             return 'Organize';
+        case 'confirm_extraction':
+            return 'Confirm Extraction';
         default:
             return toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
@@ -819,6 +829,12 @@ function getActionTitle(
             return itemCount === 1 && itemTitle
                 ? itemTitle
                 : `${itemCount} item${itemCount !== 1 ? 's' : ''}`;
+        }
+        case 'confirm_extraction': {
+            const count = actionData?.attachment_count ?? 0;
+            const total = actionData?.total_credits ?? 0;
+            if (count > 0) return `${count} papers (~${total} request${total !== 1 ? 's' : ''})`;
+            return null;
         }
         case 'create_item':
         case 'create_items': {
@@ -957,6 +973,18 @@ const ActionPreview: React.FC<{
                 collections={collections}
                 status={status}
                 resultData={previewData.resultData as OrganizeItemsResultData | undefined}
+            />
+        );
+    }
+
+    if (toolName === 'confirm_extraction' || previewData.actionType === 'confirm_extraction') {
+        return (
+            <ConfirmExtractionPreview
+                attachmentCount={previewData.actionData.attachment_count ?? 0}
+                extraCredits={previewData.actionData.extra_credits ?? 0}
+                totalCredits={previewData.actionData.total_credits ?? 0}
+                includedFree={previewData.actionData.included_free ?? 0}
+                status={status}
             />
         );
     }

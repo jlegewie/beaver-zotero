@@ -105,6 +105,13 @@ export const isOrganizeItemsAgentAction = (action: AgentAction): boolean => {
 };
 
 /**
+ * Type guard for confirm extraction actions
+ */
+export const isConfirmExtractionAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'confirm_extraction';
+};
+
+/**
  * Typed agent action for create_item actions
  */
 export type CreateItemAgentAction = AgentAction & {
@@ -275,6 +282,14 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             tags: proposedData.tags ?? null,
             collections: proposedData.collections ?? null,
             current_state: proposedData.current_state ?? proposedData.currentState ?? null,
+        };
+    } else if (actionType === 'confirm_extraction') {
+        // Normalize confirm_extraction proposed data
+        proposedData = {
+            attachment_count: proposedData.attachment_count ?? proposedData.attachmentCount ?? 0,
+            extra_credits: proposedData.extra_credits ?? proposedData.extraCredits ?? 0,
+            total_credits: proposedData.total_credits ?? proposedData.totalCredits ?? 0,
+            included_free: proposedData.included_free ?? proposedData.includedFree ?? 0,
         };
     }
     
@@ -820,6 +835,9 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
         // For organize_items, current_state contains the current tags/collections for each item
         // We can use it directly from the proposed data if available
         currentValue = actionData.current_state ?? null;
+    } else if (actionType === 'confirm_extraction') {
+        // No Zotero data fetching needed — cost info is entirely in proposed_data
+        currentValue = undefined;
     }
 
     return {
