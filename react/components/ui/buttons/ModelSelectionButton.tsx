@@ -65,14 +65,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         };
         const selectedKey = selectedModel ? getModelKey(selectedModel) : null;
 
-        // if (included_models.length > 0) {
-        //     items.push({
-        //         label: 'Included Models',
-        //         isGroupHeader: true,
-        //         onClick: () => {},
-        //     });
-        // }
-
         included_models.sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
             // Create a model variant with access_mode set to 'app_key'
             const modelWithAccessMode = { ...model, access_mode: 'app_key' as const };
