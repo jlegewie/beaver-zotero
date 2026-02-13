@@ -714,8 +714,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
                     {/* Action buttons */}
                     <div className="display-flex flex-row gap-1 px-2 py-2 mt-1">
-                        {/* Preference for applying agent actions */}
-                        <DeferredToolPreferenceButton toolName={toolName} />
+                        {/* confirm_extraction is a one-shot credit confirmation and must always require explicit approval */}
+                        {!isConfirmExtraction && (
+                            <DeferredToolPreferenceButton toolName={toolName} />
+                        )}
                         <div className="flex-1" />
                         
                         {/* Processing indicator - shown while waiting for backend response */}

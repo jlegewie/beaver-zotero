@@ -39,7 +39,9 @@ export async function handleAgentActionValidateRequest(
             return await validateCreateItemAction(request);
         }
 
-        // Unsupported action type
+        // Unsupported action type.
+        // Note: confirm_extraction approvals are backend-managed and intentionally
+        // not validated through this local deferred-tool preference flow.
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,

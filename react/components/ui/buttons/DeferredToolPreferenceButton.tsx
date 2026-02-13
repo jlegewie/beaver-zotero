@@ -15,6 +15,8 @@ interface DeferredToolPreferenceButtonProps {
     toolName: string;
     /** Optional callback after preference changes */
     onPreferenceChange?: (preference: DeferredToolPreference) => void;
+    /** Optional allowed preference subset (defaults to all deferred preferences) */
+    allowedPreferences?: DeferredToolPreference[];
 }
 
 /**
@@ -24,6 +26,7 @@ interface DeferredToolPreferenceButtonProps {
 const DeferredToolPreferenceButton: React.FC<DeferredToolPreferenceButtonProps> = ({
     toolName,
     onPreferenceChange,
+    allowedPreferences,
 }) => {
     const getPreferenceForTool = useAtomValue(getPreferenceForToolAtom);
     const updateToolPreference = useSetAtom(updateToolPreferenceAtom);
@@ -36,7 +39,7 @@ const DeferredToolPreferenceButton: React.FC<DeferredToolPreferenceButtonProps> 
     };
 
     const menuItems = useMemo((): MenuItem[] => {
-        const preferences: DeferredToolPreference[] = [
+        const preferences: DeferredToolPreference[] = allowedPreferences ?? [
             'always_ask',
             'always_apply',
             'continue_without_applying',
@@ -56,7 +59,7 @@ const DeferredToolPreferenceButton: React.FC<DeferredToolPreferenceButtonProps> 
                 </div>
             ),
         }));
-    }, [currentPreference, toolName]);
+    }, [allowedPreferences, currentPreference, toolName]);
 
     const buttonLabel = DEFERRED_TOOL_PREFERENCE_LABELS[currentPreference];
 
