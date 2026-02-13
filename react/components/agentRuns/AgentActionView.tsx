@@ -662,7 +662,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 </div>
 
                 {/* Reject and Apply buttons - show during awaiting, pending, or processing */}
-                {((isAwaitingApproval || status === 'pending') && !isProcessing) && (
+                {((isAwaitingApproval || status === 'pending') && !isProcessing && !isConfirmExtraction) && (
                     <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
                         {/* Show Reject button only if not processing or if Reject was clicked */}
                         {(!isProcessing || clickedButton === 'reject') && (
@@ -769,7 +769,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 loading={isProcessing && clickedButton === 'approve'}
                                 disabled={isProcessing}
                             >
-                                <span>Apply
+                                <span>
+                                    {isConfirmExtraction ? 'Confirm Charge' : 'Apply'}
                                     {/* {isAwaitingApproval && <span className="opacity-50 ml-1">⏎</span>} */}
                                 </span>
                             </Button>
@@ -831,10 +832,8 @@ function getActionTitle(
                 : `${itemCount} item${itemCount !== 1 ? 's' : ''}`;
         }
         case 'confirm_extraction': {
-            const count = actionData?.attachment_count ?? 0;
             const total = actionData?.total_credits ?? 0;
-            if (count > 0) return `${count} papers (~${total} request${total !== 1 ? 's' : ''})`;
-            return null;
+            return `Cost: ${total} request${total !== 1 ? 's' : ''}`;
         }
         case 'create_item':
         case 'create_items': {
