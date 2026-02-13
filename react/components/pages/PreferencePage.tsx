@@ -27,6 +27,7 @@ import AddSelectedItemsOnOpenToggle from "../preferences/AddSelectedItemsOnOpenT
 import SyncedLibraries from "../preferences/SyncedLibraries";
 import { ProcessingMode } from "../../types/profile";
 import DeferredToolPreferenceSetting from "../preferences/DeferredToolPreferenceSetting";
+import { BeaverUIFactory } from "../../../src/ui/ui";
 
 const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <h2 className="text-xl font-semibold mt-6 mb-2 font-color-primary">
@@ -49,6 +50,10 @@ const PreferencePage: React.FC = () => {
     const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>(getCustomPromptsFromPreferences());
     const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
+    const [keyboardShortcut, setKeyboardShortcut] = useState(() => {
+        const shortcut = getPref('keyboardShortcut');
+        return /^[a-z]$/i.test(shortcut) ? shortcut.toUpperCase() : 'J';
+    });
     const [addSelectedOnNewThread, setAddSelectedOnNewThread] = useState(() => getPref('addSelectedItemsOnNewThread'));
     const [addSelectedOnOpen, setAddSelectedOnOpen] = useState(() => getPref('addSelectedItemsOnOpen'));
     const [consentToShare, setConsentToShare] = useState(() => profileWithPlan?.consent_to_share || false);
@@ -133,6 +138,21 @@ const PreferencePage: React.FC = () => {
         setCustomInstructions(newValue);
         handlePrefSave('customInstructions', newValue);
     };
+
+    const handleKeyboardShortcutChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+        const nextShortcut = event.target.value.toLowerCase();
+        if (!/^[a-z]$/.test(nextShortcut)) {
+            return;
+        }
+
+        setKeyboardShortcut(nextShortcut.toUpperCase());
+
+        if (nextShortcut !== getPref('keyboardShortcut')) {
+            setPref('keyboardShortcut', nextShortcut);
+            BeaverUIFactory.registerShortcuts();
+            logger(`Updated keyboard shortcut to ${nextShortcut.toUpperCase()}`);
+        }
+    }, []);
 
     // --- Custom Prompt Change Handler ---
     const handleCustomPromptChange = useCallback((index: number, updatedPrompt: CustomPrompt) => {
@@ -382,6 +402,8 @@ const PreferencePage: React.FC = () => {
     const syncButtonProps = getSyncButtonProps();
     const verifyButtonProps = getVerifyButtonProps();
     const rebuildIndexButtonProps = getRebuildIndexButtonProps();
+    const sidebarShortcutLabel = `${Zotero.isMac ? '⌘' : 'Ctrl'}+${keyboardShortcut}`;
+    const windowShortcutLabel = `${Zotero.isMac ? '⌘⇧' : 'Ctrl+Shift'}+${keyboardShortcut}`;
 
     return (
         <div
@@ -528,6 +550,34 @@ const PreferencePage: React.FC = () => {
             {/* --- General Settings Section --- */}
             <SectionHeader>General Settings</SectionHeader>
             <div className="display-flex flex-col gap-3">
+                <div className="display-flex flex-row gap-1 items-start mb-2">
+                    <div className="display-flex flex-col gap-1 flex-1">                
+                        <label htmlFor="keyboard-shortcut" className="text-base font-color-primary">
+                            Keyboard Shortcut Key
+                        </label>
+                        <div className="display-flex flex-col gap-05">
+                            <div className="font-color-secondary text-sm">
+                                Sidebar: {sidebarShortcutLabel}
+                            </div>
+                            <div className="font-color-secondary text-sm">
+                                Separate window: {windowShortcutLabel}
+                            </div>
+                        </div>
+                    </div>
+                        <select
+                            id="keyboard-shortcut"
+                            value={keyboardShortcut}
+                            onChange={handleKeyboardShortcutChange}
+                            className="py-1 px-2 border preference-input text-sm"
+                            style={{ width: '40px', margin: '0px' }}
+                        >
+                            {'DGHJKMRVX'.split('').map((letter) => (
+                                <option key={letter} value={letter}>
+                                    {letter}
+                                </option>
+                            ))}
+                        </select>
+                </div>
                 <CitationFormatToggle 
                     checked={citationFormat} 
                     onChange={setCitationFormat} 
