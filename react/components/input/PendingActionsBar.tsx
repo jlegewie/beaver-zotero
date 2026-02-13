@@ -6,7 +6,7 @@ import Button from '../ui/Button';
 
 /**
  * Bar that appears above the input area when there are pending agent actions.
- * Shows the count and provides "Apply All" / "Reject All" buttons.
+ * Shows the count and provides "Approve All" / "Reject All" buttons.
  */
 const PendingActionsBar: React.FC = () => {
     const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
@@ -20,7 +20,7 @@ const PendingActionsBar: React.FC = () => {
         return null;
     }
 
-    const handleApplyAll = (e: React.FormEvent | React.MouseEvent) => {
+    const handleApproveAll = (e: React.FormEvent | React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
         for (const pendingApproval of pendingApprovalsMap.values()) {
@@ -45,8 +45,8 @@ const PendingActionsBar: React.FC = () => {
     };
 
     const label = pendingCount === 1 
-        ? '1 Pending Change' 
-        : `${pendingCount} Pending Changes`;
+        ? '1 Pending Approval' 
+        : `${pendingCount} Pending Approvals`;
 
     return (
         <div className="pending-actions-bar display-flex flex-row items-center px-3 py-2 bg-senary border-bottom-quinary gap-2">
@@ -67,10 +67,10 @@ const PendingActionsBar: React.FC = () => {
                 </Button>
                 <Button
                     variant="outline"
-                    onClick={handleApplyAll}
+                    onClick={handleApproveAll}
                     style={{ padding: '2px 8px', fontSize: '0.875rem' }}
                 >
-                    Apply All
+                    Approve All
                 </Button>
             </div>
         </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart } from '../../agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
@@ -24,10 +24,11 @@ import {
     DatabaseIcon,
     IdeaIcon,
     TaskDoneIcon,
+    TaskDailyIcon,
     TagIcon,
     PropertyEditIcon,
 } from '../icons/icons';
-import { toolExpandedAtom, toggleToolExpandedAtom } from '../../atoms/messageUIState';
+import { toolExpandedAtom, toggleToolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 
 type IconComponent = React.FC<React.SVGProps<SVGSVGElement>>;
 
@@ -62,7 +63,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     view_pages: ViewIcon,
 
     // Extract tool
-    extract: DocumentValidationIcon,
+    extract: TaskDailyIcon,
 
     // External search tools
     external_search: GlobalSearchIcon,
@@ -159,6 +160,7 @@ interface ToolCallPartViewProps {
 export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId, runStatus }) => {
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const result = resultsMap.get(part.tool_call_id);
+    const hasResult = result !== undefined;
     const status = getToolCallStatus(part.tool_call_id, resultsMap, runStatus);
     const baseLabel = getToolCallLabel(part, status);
     
@@ -173,12 +175,26 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const hasAgentAction = agentActions.length > 0;
     
     // Determine if this tool should use AgentActionView
-    const isAgentActionTool =
+    const isStandardAgentActionTool =
         part.tool_name === 'edit_metadata' ||
         part.tool_name === 'create_collection' ||
         part.tool_name === 'organize_items' ||
         part.tool_name === 'create_items';
-    const showAgentActionView = isAgentActionTool && (isAwaitingApproval || hasAgentAction);
+    const isExtractConfirmApproval =
+        part.tool_name === 'extract' &&
+        pendingApproval?.actionType === 'confirm_extraction';
+    const isExtractionRejected =
+        part.tool_name === 'extract' &&
+        hasResult &&
+        result?.content?.status &&
+        result?.content?.status === 'REJECTED';
+
+    // For extract, only render AgentActionView while approval is pending.
+    // After approval, fall back to normal tool-call rendering so the in-progress spinner stays visible.
+    const showAgentActionView =
+        (isStandardAgentActionTool && (isAwaitingApproval || hasAgentAction)) ||
+        isExtractConfirmApproval;
+    const actionToolName = isExtractConfirmApproval ? 'confirm_extraction' : part.tool_name;
 
     const resultCount =
         result && result.part_kind === 'tool-return'
@@ -194,13 +210,24 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const expansionKey = `${runId}:${part.tool_call_id}`;
     const expansionState = useAtomValue(toolExpandedAtom);
     const toggleExpanded = useSetAtom(toggleToolExpandedAtom);
+    const setExpanded = useSetAtom(setToolExpandedAtom);
     const isExpanded = expansionState[expansionKey] ?? false;
+    const wasExtractConfirmApprovalRef = useRef(isExtractConfirmApproval);
+
+    // When extract approval resolves, collapse once so the completed result doesn't auto-expand.
+    // Users can still expand manually afterward.
+    useEffect(() => {
+        const wasExtractConfirmApproval = wasExtractConfirmApprovalRef.current;
+        if (part.tool_name === 'extract' && wasExtractConfirmApproval && !isExtractConfirmApproval) {
+            setExpanded({ key: expansionKey, expanded: false });
+        }
+        wasExtractConfirmApprovalRef.current = isExtractConfirmApproval;
+    }, [part.tool_name, isExtractConfirmApproval, expansionKey, setExpanded]);
 
     const [isHovered, setIsHovered] = useState(false);
 
     const isInProgress = status === 'in_progress';
     const hasError = status === 'error';
-    const hasResult = result !== undefined;
 
     const canExpand =
         hasResult &&
@@ -208,6 +235,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (resultCount === null || resultCount > 0) &&
         part.tool_name !== 'read_file' &&
+        !isExtractionRejected && 
         !showAgentActionView; // Don't allow expand toggle for agent action tools
 
     const effectiveExpanded = isExpanded && canExpand;
@@ -236,7 +264,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         return (
             <AgentActionView
                 toolcallId={part.tool_call_id}
-                toolName={part.tool_name}
+                toolName={actionToolName}
                 runId={runId}
                 pendingApproval={pendingApproval}
             />
@@ -293,4 +321,3 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
 };
 
 export default ToolCallPartView;
-

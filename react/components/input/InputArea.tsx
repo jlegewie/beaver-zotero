@@ -298,7 +298,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             }
                         >
                             {isAwaitingApproval && messageContent.trim().length > 0
-                                ? pendingApprovalsMap.size > 1 ? 'Reject all' : 'Reject'
+                                ? pendingApprovalsMap.size > 1 ? 'Reject All' : 'Reject'
                                 : isPending
                                     ? 'Stop'
                                     : (<span>Send <span className="opacity-50">⏎</span></span>)
