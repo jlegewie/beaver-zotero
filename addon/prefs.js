@@ -10,7 +10,7 @@ pref("showHighTokenUsageWarningMessage", true);
 pref("authMethod", "otp");
 
 // App settings
-pref("keyboardShortcut", "l");
+pref("keyboardShortcut", "j");
 pref("statefulChat", true);
 pref("addSelectedItemsOnOpen", true);
 pref("addSelectedItemsOnNewThread", true);

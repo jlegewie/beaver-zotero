@@ -142,7 +142,7 @@ export class BeaverUIFactory {
         const toolbar = win.document.querySelector("#zotero-tabs-toolbar");
         if (!toolbar) return;
 
-        const key = getPref("keyboardShortcut").toUpperCase() || "L";
+        const key = getPref("keyboardShortcut").toUpperCase() || "J";
         const shortcut = Zotero.isMac ? `⌘${key}` : `Ctrl+${key}`;
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
         chatToggleBtn.setAttribute("id", "zotero-beaver-tb-chat-toggle");
@@ -261,7 +261,7 @@ export class BeaverUIFactory {
         
         ztoolkit.log("Registering keyboard shortcuts...");
 
-        const keyboardShortcut = getPref("keyboardShortcut").toLowerCase() || "l";
+        const keyboardShortcut = getPref("keyboardShortcut").toLowerCase() || "j";
 
         // Debounce variables for toggle shortcut
         let lastToggleTime = 0;
@@ -271,7 +271,7 @@ export class BeaverUIFactory {
         keyboardManager.register(
             (ev, keyOptions) => {
                 const isMacToggle = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey;
-                const isWindowsToggle = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && !ev.altKey && !ev.shiftKey;
+                const isWindowsToggle = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && !ev.altKey && !ev.shiftKey && !ev.metaKey;
                 
                 if (isMacToggle || isWindowsToggle) {
                     const now = Date.now();
@@ -308,11 +308,11 @@ export class BeaverUIFactory {
         );
 
         // Register keyboard shortcut for opening separate window
-        // Mac: Cmd+Ctrl+L, Windows/Linux: Ctrl+Alt+L
+        // Mac: Cmd+Shift+J, Windows/Linux: Ctrl+Shift+J
         keyboardManager.register(
             (ev, keyOptions) => {
-                const isMacShortcut = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && ev.ctrlKey && !ev.shiftKey && !ev.altKey;
-                const isWindowsShortcut = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && ev.altKey && !ev.shiftKey && !ev.metaKey;
+                const isMacShortcut = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && ev.shiftKey && !ev.ctrlKey && !ev.altKey;
+                const isWindowsShortcut = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && ev.shiftKey && !ev.altKey && !ev.metaKey;
                 
                 if (isMacShortcut || isWindowsShortcut) {
                     ev.preventDefault();

@@ -277,7 +277,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         featureList: [
             {
                 title: "Keyboard shortcut updated",
-                description: "Toggle Beaver with ⌘L (Ctrl+L on Windows/Linux). Open in a separate window with ⌃⌘L (Ctrl+Alt+L on Windows/Linux).",
+                description: "Toggle Beaver with ⌘J (Ctrl+J on Windows/Linux). Open in a separate window with ⌘⇧J (Ctrl+Shift+J on Windows/Linux).",
             },
         ],
     },

@@ -54,7 +54,7 @@ This is only one dimension of evaluation (and not the hardest). We also track ot
 1. Create an account and download Beaver [here](https://www.beaverapp.ai/join).
 2. In Zotero, go to Tools → Add‑ons → Install Add‑on From File.
 3. Select the downloaded `.xpi` file.
-4. Open Beaver using the magic wand icon in the top‑right corner or press Cmd (macOS) / Ctrl (Windows) + L.
+4. Open Beaver using the magic wand icon in the top‑right corner or press Cmd (macOS) / Ctrl (Windows) + J.
 
 More details are available in the [documentation](https://www.beaverapp.ai/docs/getting-started).
 

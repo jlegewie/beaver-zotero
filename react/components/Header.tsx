@@ -56,10 +56,10 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
     }, [isWindow]);
 
     // Get platform-specific shortcut text
-    const keyboardShortcut = getPref("keyboardShortcut").toUpperCase() || "L";
+    const keyboardShortcut = getPref("keyboardShortcut").toUpperCase() || "J";
     const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
     const closeChatShortcut = Zotero.isMac ? `⌘${keyboardShortcut}` : `Ctrl+${keyboardShortcut}`;
-    const openWindowShortcut = Zotero.isMac ? `⌃⌘${keyboardShortcut}` : `Ctrl+Alt+${keyboardShortcut}`;
+    const openWindowShortcut = Zotero.isMac ? `⌘⇧${keyboardShortcut}` : `Ctrl+Shift+${keyboardShortcut}`;
 
     return (
         <div id="beaver-header" className="display-flex flex-row px-3 py-2">
