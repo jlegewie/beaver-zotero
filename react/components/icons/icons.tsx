@@ -11,6 +11,7 @@ export { default as PlusSignIcon } from './PlusSignIcon';
 export { default as IdeaIcon } from './IdeaIcon';
 export { default as SettingsIcon } from './SettingsIcon';
 export { default as TaskDoneIcon } from './TaskDoneIcon';
+export { default as TaskDailyIcon } from './TaskDailyIcon';
 export { default as SettingsSolidIcon } from './SettingsSolidIcon';
 export { default as LinkForwardIcon } from './LinkForwardIcon';
 export { default as LinkBackwardIcon } from './LinkBackwardIcon';
