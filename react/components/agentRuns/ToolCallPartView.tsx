@@ -24,6 +24,7 @@ import {
     DatabaseIcon,
     IdeaIcon,
     TaskDoneIcon,
+    TaskDailyIcon,
     TagIcon,
     PropertyEditIcon,
 } from '../icons/icons';
@@ -62,7 +63,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     view_pages: ViewIcon,
 
     // Extract tool
-    extract: DocumentValidationIcon,
+    extract: TaskDailyIcon,
 
     // External search tools
     external_search: GlobalSearchIcon,
@@ -159,6 +160,7 @@ interface ToolCallPartViewProps {
 export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId, runStatus }) => {
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const result = resultsMap.get(part.tool_call_id);
+    const hasResult = result !== undefined;
     const status = getToolCallStatus(part.tool_call_id, resultsMap, runStatus);
     const baseLabel = getToolCallLabel(part, status);
     
@@ -181,6 +183,11 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const isExtractConfirmApproval =
         part.tool_name === 'extract' &&
         pendingApproval?.actionType === 'confirm_extraction';
+    const isExtractionRejected =
+        part.tool_name === 'extract' &&
+        hasResult &&
+        result?.content?.status &&
+        result?.content?.status === 'REJECTED';
 
     // For extract, only render AgentActionView while approval is pending.
     // After approval, fall back to normal tool-call rendering so the in-progress spinner stays visible.
@@ -221,7 +228,6 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
 
     const isInProgress = status === 'in_progress';
     const hasError = status === 'error';
-    const hasResult = result !== undefined;
 
     const canExpand =
         hasResult &&
@@ -229,6 +235,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (resultCount === null || resultCount > 0) &&
         part.tool_name !== 'read_file' &&
+        !isExtractionRejected && 
         !showAgentActionView; // Don't allow expand toggle for agent action tools
 
     const effectiveExpanded = isExpanded && canExpand;
