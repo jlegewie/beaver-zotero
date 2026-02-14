@@ -6,14 +6,28 @@ import { ExternalReference } from '../types/externalReferences';
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
 export const isWebSearchEnabledAtom = atom(false);
-export const isPreferencePageVisibleAtom = atom(false);
 export type PreferencePageTab = 'general' | 'sync' | 'permissions' | 'models' | 'prompts' | 'account';
 export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
+const preferencePageVisibleStateAtom = atom(false);
+export const isPreferencePageVisibleAtom = atom(
+    (get) => get(preferencePageVisibleStateAtom),
+    (get, set, update: boolean | ((prev: boolean) => boolean)) => {
+        const previousValue = get(preferencePageVisibleStateAtom);
+        const nextValue = typeof update === 'function' ? update(previousValue) : update;
+
+        // Generic open entry points should always land on General.
+        if (!previousValue && nextValue) {
+            set(activePreferencePageTabAtom, 'general');
+        }
+
+        set(preferencePageVisibleStateAtom, nextValue);
+    }
+);
 export const openPreferencePageAtTabAtom = atom(
     null,
     (_get, set, tab: PreferencePageTab) => {
-        set(activePreferencePageTabAtom, tab);
         set(isPreferencePageVisibleAtom, true);
+        set(activePreferencePageTabAtom, tab);
     }
 );
 export const showFileStatusDetailsAtom = atom(false);
