@@ -259,7 +259,9 @@ export class BeaverUIFactory {
         // Always unregister all existing shortcuts first to prevent duplicates
         keyboardManager.unregisterAll();
         
-        ztoolkit.log("Registering keyboard shortcuts...");
+        if (typeof ztoolkit !== 'undefined') {
+            ztoolkit.log("Registering keyboard shortcuts...");
+        }
 
         const keyboardShortcut = getPref("keyboardShortcut").toLowerCase() || "j";
 
@@ -278,11 +280,15 @@ export class BeaverUIFactory {
                     const timeSinceLastToggle = now - lastToggleTime;
                     
                     const timestamp = new Date().toISOString();
-                    ztoolkit.log(`keyboardManager [${timestamp}]: Keyboard shortcut detected - key: ${ev.key}, metaKey: ${ev.metaKey}, ctrlKey: ${ev.ctrlKey}, shiftKey: ${ev.shiftKey}, altKey: ${ev.altKey}, timeSinceLastToggle: ${timeSinceLastToggle}ms`);
+                    if (typeof ztoolkit !== 'undefined') {
+                        ztoolkit.log(`keyboardManager [${timestamp}]: Keyboard shortcut detected - key: ${ev.key}, metaKey: ${ev.metaKey}, ctrlKey: ${ev.ctrlKey}, shiftKey: ${ev.shiftKey}, altKey: ${ev.altKey}, timeSinceLastToggle: ${timeSinceLastToggle}ms`);
+                    }
                     
                     // Debounce: ignore if called too soon after last toggle
                     if (timeSinceLastToggle < TOGGLE_DEBOUNCE_MS) {
-                        ztoolkit.log(`keyboardManager [${timestamp}]: Toggle ignored (debounced), only ${timeSinceLastToggle}ms since last toggle`);
+                        if (typeof ztoolkit !== 'undefined') {
+                            ztoolkit.log(`keyboardManager [${timestamp}]: Toggle ignored (debounced), only ${timeSinceLastToggle}ms since last toggle`);
+                        }
                         ev.preventDefault();
                         return;
                     }

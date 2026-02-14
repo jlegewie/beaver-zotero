@@ -145,14 +145,13 @@ const PreferencePage: React.FC = () => {
         if (!/^[a-z]$/.test(nextShortcut)) {
             return;
         }
-
         setKeyboardShortcut(nextShortcut.toUpperCase());
 
-        if (nextShortcut !== getPref('keyboardShortcut')) {
-            setPref('keyboardShortcut', nextShortcut);
-            BeaverUIFactory.registerShortcuts();
-            logger(`Updated keyboard shortcut to ${nextShortcut.toUpperCase()}`);
-        }
+        // if (nextShortcut !== getPref('keyboardShortcut')) {
+        //     setPref('keyboardShortcut', nextShortcut);
+        //     BeaverUIFactory.registerShortcuts();
+        //     logger(`Updated keyboard shortcut to ${nextShortcut.toUpperCase()}`);
+        // }
     }, []);
 
     // --- Custom Prompt Change Handler ---
