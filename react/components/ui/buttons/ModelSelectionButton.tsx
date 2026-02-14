@@ -18,8 +18,9 @@ const MAX_MODEL_NAME_LENGTH = 25;
 const ModelMenuItemContent: React.FC<{
     model: any;
     isSelected: boolean;
-    showCreditCosts?: boolean
-}> = ({ model, isSelected,  showCreditCosts= false}) => {
+    showCreditCosts?: boolean;
+    showRecommended?: boolean;
+}> = ({ model, isSelected, showCreditCosts = false, showRecommended = false }) => {
     const creditCost = model.credit_cost ?? 1;
     return (
         <div className="display-flex flex-col min-w-0">
@@ -28,12 +29,15 @@ const ModelMenuItemContent: React.FC<{
                     {model.name}
                 </div>
             </div>
-            <div className="text-xs font-color-tertiary items-center">
-                {showCreditCosts
-                    ? <div className="text-xs">{creditCost} credit${creditCost !== 1 ? 's' : ''}</div>
-                    : <div className="text-xs">Recommended</div>
-                }
-            </div>
+            {(showCreditCosts || showRecommended) && (
+                <div className="text-xs font-color-tertiary items-center">
+                    {showCreditCosts ? (
+                        <div className="text-xs">{creditCost} credit${creditCost !== 1 ? 's' : ''}</div>
+                    ) : showRecommended ? (
+                        <div className="text-xs">Recommended</div>
+                    ) : null}
+                </div>
+            )}
         </div>
     );
 };
@@ -82,6 +86,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                         model={model} 
                         isSelected={selectedKey === modelKey}
                         showCreditCosts={included_models.length > 1}
+                        showRecommended={included_models.length === 1}
                     />
                 )
             });
