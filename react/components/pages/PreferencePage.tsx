@@ -54,7 +54,7 @@ const SettingsRow: React.FC<SettingsRowProps> = ({
 }) => (
     <div
         className={`display-flex flex-row items-center justify-between gap-4 ${hasBorder ? 'border-top-quinary' : ''} ${onClick && !disabled ? 'cursor-pointer' : ''} ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
-        style={{ padding: '10px 14px', minHeight: '44px' }}
+        style={{ padding: '8px 12px', minHeight: '38px' }}
         onClick={(e) => {
             if (disabled || !onClick) return;
             const target = e.target as HTMLElement;
@@ -487,9 +487,10 @@ const PreferencePage: React.FC = () => {
     const windowShortcutLabel = `${Zotero.isMac ? '⌘⇧' : 'Ctrl+Shift'}+${keyboardShortcut}`;
     const tabs = useMemo<{ id: PreferencePageTab; label: string }[]>(() => [
         { id: 'general', label: 'General' },
-        { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search Index' },
+        { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search' },
         { id: 'permissions', label: 'Permissions' },
-        { id: 'models', label: 'Models & API Keys' },
+        // { id: 'models', label: 'Models & API Keys' },
+        { id: 'models', label: 'API Keys' },
         { id: 'prompts', label: 'Prompts' },
     ], [isDatabaseSyncSupported]);
 
@@ -513,7 +514,7 @@ const PreferencePage: React.FC = () => {
                 {/* <Button variant="outline" rightIcon={CancelIcon} onClick={() => togglePreferencePage((prev) => !prev)} className="mt-1">Close</Button> */}
             </div>
 
-            <div className="display-flex flex-row flex-wrap gap-2 items-center pb-1">
+            <div className="display-flex flex-row flex-wrap gap-1 items-center pb-1">
                 {tabs.map((tab) => (
                     <button
                         key={tab.id}
@@ -527,8 +528,8 @@ const PreferencePage: React.FC = () => {
                             borderRadius: '4px',
                             background: tab.id === activeTab ? 'var(--fill-quinary)' : 'transparent',
                             color: tab.id === activeTab ? 'var(--fill-primary)' : 'var(--fill-secondary)',
-                            padding: '4px 10px',
-                            minHeight: '30px',
+                            padding: '4px 8px',
+                            minHeight: '20px',
                             lineHeight: 1.2,
                             whiteSpace: 'nowrap',
                             transition: 'background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease'
@@ -629,7 +630,7 @@ const PreferencePage: React.FC = () => {
                                 />
                                 <SettingsRow
                                     title="Add Selected Items to New Threads"
-                                    description="Automatically include Zotero-selected items when creating a new chat"
+                                    description="Automatically attach selected items to new thread"
                                     onClick={handleAddSelectedOnNewThreadToggle}
                                     hasBorder
                                     tooltip="When enabled, any items you have selected in Zotero will be automatically added as sources when you start a new conversation thread."
@@ -645,7 +646,7 @@ const PreferencePage: React.FC = () => {
                                 />
                                 <SettingsRow
                                     title="Add Selected Items When Opening"
-                                    description="Include Zotero-selected items when opening the Beaver sidebar"
+                                    description="Automatically attach selected items when opening Beaver"
                                     onClick={handleAddSelectedOnOpenToggle}
                                     hasBorder
                                     tooltip="When enabled, any items you have selected in Zotero will be automatically added as sources when you open Beaver."
@@ -724,7 +725,7 @@ const PreferencePage: React.FC = () => {
             {/* ===== SYNC TAB ===== */}
             {activeTab === 'sync' && (
                 <>
-                    <div className="text-sm font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
+                    <div className="text-base font-color-secondary mt-1 mb-4" style={{ paddingLeft: '2px' }}>
                         {isDatabaseSyncSupported ? (
                             <>
                                 Choose synced libraries and control coordination with Zotero sync.
@@ -834,26 +835,26 @@ const PreferencePage: React.FC = () => {
             {/* ===== PERMISSIONS TAB ===== */}
             {activeTab === 'permissions' && (
                 <>
-                    <div className="text-sm font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
+                    <div className="text-base font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
                         Choose how Beaver handles write actions in Zotero.
-                        See <DocLink path="editing-metadata">metadata editing docs</DocLink>.
+                        See documentation on <DocLink path="editing-metadata">editing metadata</DocLink> and <DocLink path="library-management">organizing your library items</DocLink>.
                     </div>
                     <SettingsGroup>
-                        <div style={{ padding: '10px 14px' }}>
+                        <div style={{ padding: '8px 12px' }}>
                             <DeferredToolPreferenceSetting
                                 toolName="edit_metadata"
                                 label="Metadata Edits"
                                 description="Changes to item titles, authors, abstracts, and other metadata"
                             />
                         </div>
-                        <div className="border-top-quinary" style={{ padding: '10px 14px' }}>
+                        <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
                             <DeferredToolPreferenceSetting
                                 toolName="create_items"
                                 label="Item Imports"
                                 description="Importing new items from external sources"
                             />
                         </div>
-                        <div className="border-top-quinary" style={{ padding: '10px 14px' }}>
+                        <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
                             <DeferredToolPreferenceSetting
                                 toolName="create_collection"
                                 label="Library Organization"
@@ -867,12 +868,12 @@ const PreferencePage: React.FC = () => {
             {/* ===== MODELS & API KEYS TAB ===== */}
             {activeTab === 'models' && (
                 <>
-                    <div className="text-sm font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
+                    <div className="text-base font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
                         Connect provider API keys or advanced model providers.
                         See <DocLink path="api-key">API key guide</DocLink> and <DocLink path="custom-models">custom models</DocLink>.
                     </div>
                     <SettingsGroup>
-                        <div style={{ padding: '10px 14px' }}>
+                        <div style={{ padding: '8px 12px' }}>
                             <ApiKeyInput
                                 id="gemini-key"
                                 label="Google API Key"
@@ -884,7 +885,7 @@ const PreferencePage: React.FC = () => {
                                 linkUrl="https://aistudio.google.com/app/apikey"
                             />
                         </div>
-                        <div className="border-top-quinary" style={{ padding: '10px 14px' }}>
+                        <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
                             <ApiKeyInput
                                 id="openai-key"
                                 label="OpenAI API Key"
@@ -896,7 +897,7 @@ const PreferencePage: React.FC = () => {
                                 linkUrl="https://platform.openai.com/api-keys"
                             />
                         </div>
-                        <div className="border-top-quinary" style={{ padding: '10px 14px' }}>
+                        <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
                             <ApiKeyInput
                                 id="anthropic-key"
                                 label="Anthropic API Key"
@@ -911,12 +912,11 @@ const PreferencePage: React.FC = () => {
                     </SettingsGroup>
 
                     <SectionLabel>Additional Providers</SectionLabel>
-                    <SettingsGroup>
-                        <SettingsRow
-                            title="Model Providers"
-                            description="Additional model providers and custom endpoints are supported via advanced settings."
-                        />
-                    </SettingsGroup>
+
+                    <div className="text-base font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
+                        Additional model providers and custom endpoints are supported via <DocLink path="custom-models">custom models</DocLink>.
+                    </div>
+                
                 </>
             )}
 
@@ -925,8 +925,8 @@ const PreferencePage: React.FC = () => {
                 <>
                     <SectionLabel>Custom Instructions</SectionLabel>
                     <SettingsGroup>
-                        <div style={{ padding: '10px 14px' }}>
-                            <div className="text-sm font-color-secondary mb-2">
+                        <div style={{ padding: '8px 12px' }}>
+                            <div className="text-base font-color-secondary mb-2">
                                 Custom instructions are added to all chats and help steer responses. (Max ~250 words)
                             </div>
                             <textarea
@@ -971,7 +971,7 @@ const PreferencePage: React.FC = () => {
             )}
 
             {/* Spacer at the bottom */}
-            <div style={{ height: "20px" }} />
+            {/* <div style={{ height: "20px" }} /> */}
           </div>
         </div>
     );
