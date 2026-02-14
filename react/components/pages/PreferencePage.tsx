@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, SearchIcon } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom } from "../../atoms/profile";
@@ -412,17 +412,17 @@ const PreferencePage: React.FC = () => {
         }
         if (embeddingIndexState.failedItems > 0) {
             return {
-                icon: SearchIcon,
+                icon: RepeatIcon,
                 iconClassName: '',
                 disabled: false,
-                text: `Rebuild & Retry Failed (${embeddingIndexState.failedItems})`
+                text: `Indexing Failed (${embeddingIndexState.failedItems})`
             };
         }
         return {
-            icon: SearchIcon,
+            icon: RepeatIcon,
             iconClassName: '',
             disabled: false,
-            text: 'Rebuild Search Index'
+            text: 'Sync'
         };
     };
 
@@ -528,7 +528,7 @@ const PreferencePage: React.FC = () => {
                             borderRadius: '4px',
                             background: tab.id === activeTab ? 'var(--fill-quinary)' : 'transparent',
                             color: tab.id === activeTab ? 'var(--fill-primary)' : 'var(--fill-secondary)',
-                            padding: '4px 8px',
+                            padding: '4px 6px',
                             minHeight: '20px',
                             lineHeight: 1.2,
                             whiteSpace: 'nowrap',
@@ -736,23 +736,25 @@ const PreferencePage: React.FC = () => {
                             <>Beaver indexes your library locally for semantic search.</>
                         )}
                     </div> */}
-                    <SettingsGroup>
-                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
-                            {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
-                            <div className="font-color-secondary text-sm">
-                                {isDatabaseSyncSupported ? (
-                                    <>
-                                        Select the libraries you want to sync with Beaver.
-                                        Beaver can only access  synced libraries.
-                                        For more details, see documentation on <DocLink path="libraries">libraries</DocLink> and <DocLink path="trouble-file-sync">sync troubleshooting</DocLink>.
-                                    </>
-                                ) : (
-                                    <>Beaver indexes your library locally for semantic search.</>
-                                )}
+                    {isDatabaseSyncSupported && (
+                        <SettingsGroup>
+                            <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
+                                {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
+                                <div className="font-color-secondary text-sm">
+                                    {isDatabaseSyncSupported ? (
+                                        <>
+                                            Select the libraries you want to sync with Beaver.
+                                            Beaver can only access  synced libraries.
+                                            For more details, see documentation on <DocLink path="libraries">libraries</DocLink> and <DocLink path="trouble-file-sync">sync troubleshooting</DocLink>.
+                                        </>
+                                    ) : (
+                                        <>Beaver indexes your library locally for semantic search.</>
+                                    )}
 
+                                </div>
                             </div>
-                        </div>
-                    </SettingsGroup>
+                        </SettingsGroup>
+                    )}
 
                     {isDatabaseSyncSupported ? (
                         <span className="mt-4">
@@ -819,7 +821,7 @@ const PreferencePage: React.FC = () => {
                                 title="Search Index"
                                 description={
                                     <>
-                                        Rebuilding the index retries failed items and reindexes all libraries.
+                                        Syncing the search index ensures that all your library items are indexed and searchable.
                                         {embeddingIndexState.failedItems > 0 && (
                                             <span className="display-flex font-color-yellow mt-1">
                                                 {embeddingIndexState.failedItems} items failed to index
