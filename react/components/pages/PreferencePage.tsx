@@ -514,7 +514,7 @@ const PreferencePage: React.FC = () => {
                 {/* <Button variant="outline" rightIcon={CancelIcon} onClick={() => togglePreferencePage((prev) => !prev)} className="mt-1">Close</Button> */}
             </div>
 
-            <div className="display-flex flex-row flex-wrap gap-1 items-center pb-1">
+            <div className="display-flex flex-row flex-wrap gap-1 items-center pb-1 mt-1">
                 {tabs.map((tab) => (
                     <button
                         key={tab.id}
@@ -725,19 +725,37 @@ const PreferencePage: React.FC = () => {
             {/* ===== SYNC TAB ===== */}
             {activeTab === 'sync' && (
                 <>
-                    <div className="text-base font-color-secondary mt-1 mb-4" style={{ paddingLeft: '2px' }}>
+                    {/* <div className="text-base font-color-secondary mt-1 mb-4" style={{ paddingLeft: '2px' }}>
                         {isDatabaseSyncSupported ? (
                             <>
-                                Choose synced libraries and control coordination with Zotero sync.
-                                See <DocLink path="libraries">libraries</DocLink> and <DocLink path="trouble-file-sync">sync troubleshooting</DocLink>.
+                                Select the libraries you want to sync with Beaver.
+                                Beaver can only access  synced libraries.
+                                For more details, see documentation on <DocLink path="libraries">libraries</DocLink> and <DocLink path="trouble-file-sync">sync troubleshooting</DocLink>.
                             </>
                         ) : (
                             <>Beaver indexes your library locally for semantic search.</>
                         )}
-                    </div>
+                    </div> */}
+                    <SettingsGroup>
+                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
+                            {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
+                            <div className="font-color-secondary text-sm">
+                                {isDatabaseSyncSupported ? (
+                                    <>
+                                        Select the libraries you want to sync with Beaver.
+                                        Beaver can only access  synced libraries.
+                                        For more details, see documentation on <DocLink path="libraries">libraries</DocLink> and <DocLink path="trouble-file-sync">sync troubleshooting</DocLink>.
+                                    </>
+                                ) : (
+                                    <>Beaver indexes your library locally for semantic search.</>
+                                )}
+
+                            </div>
+                        </div>
+                    </SettingsGroup>
 
                     {isDatabaseSyncSupported ? (
-                        <>
+                        <span className="mt-4">
                             <SyncedLibraries />
                             <div className="display-flex flex-row items-center gap-4 justify-end mt-1" style={{ marginRight: '1px' }}>
                                 <Button
@@ -794,7 +812,7 @@ const PreferencePage: React.FC = () => {
                                     }
                                 />
                             </SettingsGroup>
-                        </>
+                        </span>
                     ) : (
                         <SettingsGroup>
                             <SettingsRow
@@ -835,10 +853,18 @@ const PreferencePage: React.FC = () => {
             {/* ===== PERMISSIONS TAB ===== */}
             {activeTab === 'permissions' && (
                 <>
-                    <div className="text-base font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
-                        Choose how Beaver handles write actions in Zotero.
-                        See documentation on <DocLink path="editing-metadata">editing metadata</DocLink> and <DocLink path="library-management">organizing your library items</DocLink>.
-                    </div>
+                    <SettingsGroup>
+                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
+                            {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
+                            <div className="font-color-secondary text-sm">
+                                When Beaver modifies your library, all changes require your approval by default.
+                                You can change this behavior here. Be careful, Beaver might make changes you didn't expect.
+                            
+                                For more details, see documentation on <DocLink path="editing-metadata">editing metadata</DocLink> and <DocLink path="library-management">organizing your library items</DocLink>.
+
+                            </div>
+                        </div>
+                    </SettingsGroup>
                     <SettingsGroup>
                         <div style={{ padding: '8px 12px' }}>
                             <DeferredToolPreferenceSetting
@@ -868,10 +894,10 @@ const PreferencePage: React.FC = () => {
             {/* ===== MODELS & API KEYS TAB ===== */}
             {activeTab === 'models' && (
                 <>
-                    <div className="text-base font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
+                    {/* <div className="text-base font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
                         Connect provider API keys or advanced model providers.
                         See <DocLink path="api-key">API key guide</DocLink> and <DocLink path="custom-models">custom models</DocLink>.
-                    </div>
+                    </div> */}
                     <SettingsGroup>
                         <div style={{ padding: '8px 12px' }}>
                             <ApiKeyInput
