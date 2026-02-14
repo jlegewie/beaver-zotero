@@ -24,30 +24,25 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
     onRemove,
     availabilityNote
 }) => {
-    const [isEditing, setIsEditing] = useState(false);
+    const [isEditing, setIsEditing] = useState(() => !prompt.title && !prompt.text);
     const [editTitle, setEditTitle] = useState(prompt.title);
     const [editText, setEditText] = useState(prompt.text);
     const [editRequiresAttachment, setEditRequiresAttachment] = useState(prompt.requiresAttachment);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const titleInputRef = useRef<HTMLInputElement | null>(null);
     const cardRef = useRef<HTMLDivElement | null>(null);
+    const previousPromptRef = useRef(prompt);
 
-    // Open in edit mode if prompt is empty (newly created)
-    const isNewPrompt = !prompt.title && !prompt.text;
+    // Sync local draft state when prompt changes, and always reset if this card now points to a different prompt.
     useEffect(() => {
-        if (isNewPrompt) {
-            setIsEditing(true);
-        }
-    }, [isNewPrompt]);
-
-    // Sync local state when prompt prop changes (e.g. external update)
-    useEffect(() => {
-        if (!isEditing) {
+        const promptSwitched = previousPromptRef.current !== prompt;
+        if (promptSwitched || !isEditing) {
             setEditTitle(prompt.title);
             setEditText(prompt.text);
             setEditRequiresAttachment(prompt.requiresAttachment);
         }
-    }, [prompt.title, prompt.text, prompt.requiresAttachment, isEditing]);
+        previousPromptRef.current = prompt;
+    }, [prompt, prompt.title, prompt.text, prompt.requiresAttachment, isEditing]);
 
     // Focus title input when entering edit mode
     useEffect(() => {
