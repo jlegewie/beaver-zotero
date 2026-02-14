@@ -26,7 +26,7 @@ import { BeaverUIFactory } from "../../../src/ui/ui";
 
 /** Section label displayed above a settings group */
 const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    <div className="text-sm font-color-secondary font-medium" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
+    <div className="text-lg font-color-primary font-bold" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
         {children}
     </div>
 );
@@ -64,7 +64,7 @@ const SettingsRow: React.FC<SettingsRowProps> = ({
         title={tooltip}
     >
         <div className="display-flex flex-col gap-05 flex-1 min-w-0">
-            <div className="font-color-primary text-base font-semibold">{title}</div>
+            <div className="font-color-primary text-base font-medium">{title}</div>
             {description && (
                 <div className="font-color-secondary text-sm">{description}</div>
             )}
@@ -503,8 +503,9 @@ const PreferencePage: React.FC = () => {
     return (
         <div
             id="beaver-preferences"
-            className="display-flex flex-col flex-1 min-h-0 overflow-y-auto gap-2 scrollbar min-w-0 p-4"
+            className="flex-1 min-h-0 overflow-y-auto scrollbar min-w-0"
         >
+          <div className="display-flex flex-col gap-2 p-4">
             <div className="display-flex flex-row items-center gap-4 justify-between">
                 <h1 className="text-2xl font-semibold  font-color-primary" style={{ marginBlock: "0rem" }}>
                     Settings
@@ -971,6 +972,7 @@ const PreferencePage: React.FC = () => {
 
             {/* Spacer at the bottom */}
             <div style={{ height: "20px" }} />
+          </div>
         </div>
     );
 };
