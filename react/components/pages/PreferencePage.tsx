@@ -17,18 +17,65 @@ import {
 } from "../../atoms/embeddingIndex";
 import ApiKeyInput from "../preferences/ApiKeyInput";
 import CustomPromptSettings from "../preferences/CustomPromptSettings";
-import ZoteroSyncToggle from "../preferences/SyncToggle";
 import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { accountService } from "../../../src/services/accountService";
-import HelpImproveBeaverToggle from "../preferences/HelpImproveBeaverToggle";
-import EmailToggle from "../preferences/EmailToggle";
-import CitationFormatToggle from "../preferences/CitationFormatToggle";
-import AddSelectedItemsOnNewThreadToggle from "../preferences/AddSelectedItemsOnNewThreadToggle";
-import AddSelectedItemsOnOpenToggle from "../preferences/AddSelectedItemsOnOpenToggle";
 import SyncedLibraries from "../preferences/SyncedLibraries";
 import { ProcessingMode } from "../../types/profile";
 import DeferredToolPreferenceSetting from "../preferences/DeferredToolPreferenceSetting";
 import { BeaverUIFactory } from "../../../src/ui/ui";
+
+/** Section label displayed above a settings group */
+const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    <div className="text-sm font-color-secondary font-medium" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
+        {children}
+    </div>
+);
+
+/** Card container for grouping related settings */
+const SettingsGroup: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
+    <div className={`display-flex flex-col rounded-lg border-quinary overflow-hidden ${className}`}>
+        {children}
+    </div>
+);
+
+interface SettingsRowProps {
+    title: string;
+    description?: React.ReactNode;
+    control?: React.ReactNode;
+    onClick?: () => void;
+    disabled?: boolean;
+    tooltip?: string;
+    hasBorder?: boolean;
+}
+
+/** Individual setting row with title, description, and optional control */
+const SettingsRow: React.FC<SettingsRowProps> = ({
+    title, description, control, onClick, disabled, tooltip, hasBorder = false
+}) => (
+    <div
+        className={`display-flex flex-row items-center justify-between gap-4 ${hasBorder ? 'border-top-quinary' : ''} ${onClick && !disabled ? 'cursor-pointer' : ''} ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+        style={{ padding: '10px 14px', minHeight: '44px' }}
+        onClick={(e) => {
+            if (disabled || !onClick) return;
+            const target = e.target as HTMLElement;
+            if (target.tagName === 'A' || target.closest('a')) return;
+            onClick();
+        }}
+        title={tooltip}
+    >
+        <div className="display-flex flex-col gap-05 flex-1 min-w-0">
+            <div className="font-color-primary text-base font-semibold">{title}</div>
+            {description && (
+                <div className="font-color-secondary text-sm">{description}</div>
+            )}
+        </div>
+        {control && (
+            <div className="display-flex flex-row items-center flex-shrink-0">
+                {control}
+            </div>
+        )}
+    </div>
+);
 
 const DocLink: React.FC<{ path: string; children: React.ReactNode }> = ({ path, children }) => (
     <a
@@ -325,6 +372,33 @@ const PreferencePage: React.FC = () => {
         forceReindex();
     }, [isEmbeddingIndexing, forceReindex]);
 
+    // --- Inline toggle handlers for card-based layout ---
+    const handleCitationFormatToggle = useCallback(() => {
+        const newChecked = !citationFormat;
+        setPref("citationFormat", newChecked ? "numeric" : "author-year");
+        setCitationFormat(newChecked);
+    }, [citationFormat]);
+
+    const handleAddSelectedOnNewThreadToggle = useCallback(() => {
+        const newValue = !addSelectedOnNewThread;
+        setPref("addSelectedItemsOnNewThread", newValue);
+        setAddSelectedOnNewThread(newValue);
+    }, [addSelectedOnNewThread]);
+
+    const handleAddSelectedOnOpenToggle = useCallback(() => {
+        const newValue = !addSelectedOnOpen;
+        setPref("addSelectedItemsOnOpen", newValue);
+        setAddSelectedOnOpen(newValue);
+    }, [addSelectedOnOpen]);
+
+    const handleConsentToggle = useCallback(() => {
+        handleConsentChange(!consentToShare);
+    }, [consentToShare, handleConsentChange]);
+
+    const handleEmailToggle = useCallback(() => {
+        handleEmailNotificationsChange(!emailNotifications);
+    }, [emailNotifications, handleEmailNotificationsChange]);
+
     // Helper function to get rebuild index button props
     const getRebuildIndexButtonProps = () => {
         if (isEmbeddingIndexing) {
@@ -464,71 +538,160 @@ const PreferencePage: React.FC = () => {
                 ))}
             </div>
 
-            <div className="text-sm font-color-secondary mt-1 mb-2">
-                {activeTab === 'general' && (
-                    <>
-                        Manage your account details and everyday Beaver behavior.
-                        See <DocLink path="account-management">account management docs</DocLink>.
-                    </>
-                )}
-                {activeTab === 'sync' && (
-                    <>
-                        Choose synced libraries and control coordination with Zotero sync.
-                        See <DocLink path="libraries">libraries</DocLink> and <DocLink path="trouble-file-sync">sync troubleshooting</DocLink>.
-                    </>
-                )}
-                {activeTab === 'permissions' && (
-                    <>
-                        Choose how Beaver handles write actions in Zotero and when approvals are required.
-                        See <DocLink path="editing-metadata">metadata editing docs</DocLink>.
-                    </>
-                )}
-                {activeTab === 'models' && (
-                    <>
-                        Connect provider API keys or advanced model providers.
-                        See <DocLink path="api-key">API key guide</DocLink> and <DocLink path="custom-models">custom models</DocLink>.
-                    </>
-                )}
-                {activeTab === 'prompts' && (
-                    <>
-                        Customize assistant behavior and create reusable shortcuts for repeated workflows.
-                    </>
-                )}
-            </div>
-
+            {/* ===== GENERAL TAB ===== */}
             {activeTab === 'general' && (
                 <>
                     {user ? (
-                        <div className="display-flex flex-col gap-3 mb-4">
-                            <div className="display-flex flex-row items-center gap-2">
-                                <div className="font-color-secondary">Signed in as:</div>
-                                <div className="font-color-primary">{user.email}</div>
-                            </div>
-                            <div className="display-flex flex-row items-center gap-2">
-                                <div className="font-color-secondary">Plan:</div>
-                                <div className="font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</div>
-                            </div>
-                            {isDatabaseSyncSupported && profileBalance.pagesRemaining !== undefined &&
-                                <div className="display-flex flex-row items-center gap-2">
-                                    <div className="font-color-secondary">Remaining Page Balance:</div>
-                                    <div className="font-color-primary">{profileBalance.pagesRemaining.toLocaleString() || 'Unknown'}</div>
-                                </div>
-                            }
-                            <div className="display-flex flex-row items-center gap-2">
-                                <div className="font-color-secondary">Remaining Chat Credits:</div>
-                                <div className="font-color-primary">{remainingBeaverCredits.toLocaleString() || 'Unknown'}</div>
-                            </div>
-                            <div className="display-flex flex-row items-center gap-3 mt-2">
-                                <Button
-                                    variant="outline"
-                                    icon={UserIcon}
-                                    onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/login')}
-                                >
-                                    Manage Account
-                                </Button>
-                                <Button variant="outline" icon={LogoutIcon} onClick={logout}>Logout</Button>
-                            </div>
-                            <div className="display-flex flex-row gap-1 items-start mt-15">
+                        <>
+                            <SettingsGroup className="mt-2">
+                                <SettingsRow
+                                    title="Manage Account"
+                                    description={<>Signed in as {user.email} ({profileWithPlan?.plan.display_name || 'Unknown'} plan)</>}
+                                    control={
+                                        <Button
+                                            variant="outline"
+                                            icon={UserIcon}
+                                            onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/login')}
+                                        >
+                                            Open
+                                        </Button>
+                                    }
+                                />
+                                {isDatabaseSyncSupported && profileBalance.pagesRemaining !== undefined && (
+                                    <SettingsRow
+                                        title="Page Balance"
+                                        description="Remaining pages for full-document search"
+                                        hasBorder
+                                        control={
+                                            <span className="font-color-primary text-sm font-medium">
+                                                {profileBalance.pagesRemaining.toLocaleString()}
+                                            </span>
+                                        }
+                                    />
+                                )}
+                                <SettingsRow
+                                    title="Chat Credits"
+                                    description="Remaining Beaver chat credits"
+                                    hasBorder
+                                    control={
+                                        <span className="font-color-primary text-sm font-medium">
+                                            {remainingBeaverCredits.toLocaleString()}
+                                        </span>
+                                    }
+                                />
+                                <SettingsRow
+                                    title="Sign Out"
+                                    description="End your current session"
+                                    hasBorder
+                                    control={
+                                        <Button variant="outline" icon={LogoutIcon} onClick={logout}>
+                                            Logout
+                                        </Button>
+                                    }
+                                />
+                            </SettingsGroup>
+
+                            <SectionLabel>Preferences</SectionLabel>
+                            <SettingsGroup>
+                                <SettingsRow
+                                    title="Keyboard Shortcut"
+                                    description={<>Sidebar: {sidebarShortcutLabel} &middot; Window: {windowShortcutLabel} &middot; Changes require restart</>}
+                                    control={
+                                        <select
+                                            id="keyboard-shortcut"
+                                            value={keyboardShortcut}
+                                            onChange={handleKeyboardShortcutChange}
+                                            className="py-1 px-2 border preference-input text-sm"
+                                            style={{ width: '40px', margin: 0 }}
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            {'DGHJKMRVX'.split('').map((letter) => (
+                                                <option key={letter} value={letter}>{letter}</option>
+                                            ))}
+                                        </select>
+                                    }
+                                />
+                                <SettingsRow
+                                    title={`Citation Format: ${citationFormat ? 'Numeric' : 'Author-Year'}`}
+                                    description="Choose between numeric [1] or author-year (Smith, 2023) citations"
+                                    onClick={handleCitationFormatToggle}
+                                    hasBorder
+                                    control={
+                                        <input
+                                            type="checkbox"
+                                            checked={citationFormat}
+                                            onChange={handleCitationFormatToggle}
+                                            onClick={(e) => e.stopPropagation()}
+                                            style={{ cursor: 'pointer', margin: 0 }}
+                                        />
+                                    }
+                                />
+                                <SettingsRow
+                                    title="Add Selected Items to New Threads"
+                                    description="Automatically include Zotero-selected items when creating a new chat"
+                                    onClick={handleAddSelectedOnNewThreadToggle}
+                                    hasBorder
+                                    tooltip="When enabled, any items you have selected in Zotero will be automatically added as sources when you start a new conversation thread."
+                                    control={
+                                        <input
+                                            type="checkbox"
+                                            checked={addSelectedOnNewThread}
+                                            onChange={handleAddSelectedOnNewThreadToggle}
+                                            onClick={(e) => e.stopPropagation()}
+                                            style={{ cursor: 'pointer', margin: 0 }}
+                                        />
+                                    }
+                                />
+                                <SettingsRow
+                                    title="Add Selected Items When Opening"
+                                    description="Include Zotero-selected items when opening the Beaver sidebar"
+                                    onClick={handleAddSelectedOnOpenToggle}
+                                    hasBorder
+                                    tooltip="When enabled, any items you have selected in Zotero will be automatically added as sources when you open Beaver."
+                                    control={
+                                        <input
+                                            type="checkbox"
+                                            checked={addSelectedOnOpen}
+                                            onChange={handleAddSelectedOnOpenToggle}
+                                            onClick={(e) => e.stopPropagation()}
+                                            style={{ cursor: 'pointer', margin: 0 }}
+                                        />
+                                    }
+                                />
+                                <SettingsRow
+                                    title="Help Improve Beaver"
+                                    description="Share anonymized prompts to help improve Beaver"
+                                    onClick={handleConsentToggle}
+                                    hasBorder
+                                    tooltip="When enabled, we use your prompts, queries, and AI responses to improve Beaver's features and performance. We automatically remove personal information and never share your PDFs, documents, or other files."
+                                    control={
+                                        <input
+                                            type="checkbox"
+                                            checked={consentToShare}
+                                            onChange={handleConsentToggle}
+                                            onClick={(e) => e.stopPropagation()}
+                                            style={{ cursor: 'pointer', margin: 0 }}
+                                        />
+                                    }
+                                />
+                                <SettingsRow
+                                    title="Email Notifications"
+                                    description="Receive email notifications with updates and announcements"
+                                    onClick={handleEmailToggle}
+                                    hasBorder
+                                    control={
+                                        <input
+                                            type="checkbox"
+                                            checked={emailNotifications}
+                                            onChange={handleEmailToggle}
+                                            onClick={(e) => e.stopPropagation()}
+                                            style={{ cursor: 'pointer', margin: 0 }}
+                                        />
+                                    }
+                                />
+                            </SettingsGroup>
+
+                            <div className="display-flex flex-row gap-1 items-start mt-3" style={{ paddingLeft: '2px' }}>
                                 <button
                                     type="button"
                                     onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/terms')}
@@ -545,71 +708,36 @@ const PreferencePage: React.FC = () => {
                                     Privacy Policy
                                 </button>
                             </div>
-                        </div>
+                        </>
                     ) : (
-                        <div className="card p-3 mb-4">
-                            <span className="font-color-secondary">You are not signed in.</span>
-                        </div>
+                        <SettingsGroup className="mt-2">
+                            <SettingsRow
+                                title="Account"
+                                description="You are not signed in."
+                            />
+                        </SettingsGroup>
                     )}
-                    <div className="display-flex flex-col gap-3">
-                        <div className="display-flex flex-row gap-1 items-start mb-2">
-                            <div className="display-flex flex-col gap-1 flex-1">
-                                <label htmlFor="keyboard-shortcut" className="text-base font-color-primary">
-                                    Keyboard Shortcut Key
-                                </label>
-                                <div className="display-flex flex-col gap-05">
-                                    <div className="font-color-secondary text-sm">
-                                        Sidebar: {sidebarShortcutLabel} - Separate window: {windowShortcutLabel}
-                                    </div>
-                                    <div className="font-color-secondary text-sm">
-                                        Changes require restart
-                                    </div>
-                                </div>
-                            </div>
-                            <select
-                                id="keyboard-shortcut"
-                                value={keyboardShortcut}
-                                onChange={handleKeyboardShortcutChange}
-                                className="py-1 px-2 border preference-input text-sm"
-                                style={{ width: '40px', margin: '0px' }}
-                            >
-                                {'DGHJKMRVX'.split('').map((letter) => (
-                                    <option key={letter} value={letter}>
-                                        {letter}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        <CitationFormatToggle
-                            checked={citationFormat}
-                            onChange={setCitationFormat}
-                        />
-                        <AddSelectedItemsOnNewThreadToggle
-                            checked={addSelectedOnNewThread}
-                            onChange={setAddSelectedOnNewThread}
-                        />
-                        <AddSelectedItemsOnOpenToggle
-                            checked={addSelectedOnOpen}
-                            onChange={setAddSelectedOnOpen}
-                        />
-                        <HelpImproveBeaverToggle
-                            checked={consentToShare}
-                            onChange={handleConsentChange}
-                        />
-                        <EmailToggle
-                            checked={emailNotifications}
-                            onChange={handleEmailNotificationsChange}
-                        />
-                    </div>
                 </>
             )}
 
+            {/* ===== SYNC TAB ===== */}
             {activeTab === 'sync' && (
                 <>
+                    <div className="text-sm font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
+                        {isDatabaseSyncSupported ? (
+                            <>
+                                Choose synced libraries and control coordination with Zotero sync.
+                                See <DocLink path="libraries">libraries</DocLink> and <DocLink path="trouble-file-sync">sync troubleshooting</DocLink>.
+                            </>
+                        ) : (
+                            <>Beaver indexes your library locally for semantic search.</>
+                        )}
+                    </div>
+
                     {isDatabaseSyncSupported ? (
-                        <div className="display-flex flex-col gap-3">
+                        <>
                             <SyncedLibraries />
-                            <div className="display-flex flex-row items-center gap-4 justify-end" style={{ marginRight: '1px' }}>
+                            <div className="display-flex flex-row items-center gap-4 justify-end mt-1" style={{ marginRight: '1px' }}>
                                 <Button
                                     variant="outline"
                                     rightIcon={verifyButtonProps.icon}
@@ -620,137 +748,200 @@ const PreferencePage: React.FC = () => {
                                     {verifyButtonProps.text}
                                 </Button>
                             </div>
-                            <div className="mt-2">
-                                <ZoteroSyncToggle
-                                    checked={localSyncToggle}
-                                    onChange={handleSyncToggleChange}
+
+                            <SectionLabel>Sync Settings</SectionLabel>
+                            <SettingsGroup>
+                                <SettingsRow
+                                    title="Coordinate with Zotero Sync"
+                                    description="Builds on Zotero sync for multi-device and group library support"
+                                    onClick={() => {
+                                        if ((!isLibrarySynced(1) && !syncWithZotero)) return;
+                                        handleSyncToggleChange(!localSyncToggle);
+                                    }}
                                     disabled={!isLibrarySynced(1) && !syncWithZotero}
-                                    error={!isLibrarySynced(1) && syncWithZotero}
+                                    tooltip={
+                                        !isLibrarySynced(1) && !syncWithZotero
+                                            ? 'Enable Zotero sync for your main library to use this feature.'
+                                            : 'When enabled, Beaver will build on Zotero sync for multi-device support and improved sync.'
+                                    }
+                                    control={
+                                        <div className="display-flex flex-row items-center gap-2">
+                                            {!(!isLibrarySynced(1) && !syncWithZotero) && !(!isLibrarySynced(1) && syncWithZotero) && !localSyncToggle && (
+                                                <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">
+                                                    Recommended
+                                                </span>
+                                            )}
+                                            {!isLibrarySynced(1) && syncWithZotero && (
+                                                <span
+                                                    className="text-xs px-15 py-05 rounded-md"
+                                                    style={{ color: 'var(--tag-red-secondary)', border: '1px solid var(--tag-red-tertiary)', background: 'var(--tag-red-quinary)' }}
+                                                    title="Unable to sync with Beaver. Please enable Zotero sync in Zotero preferences, sign into your Zotero account or disable the Beaver preference 'Sync with Zotero'."
+                                                >
+                                                    Error
+                                                </span>
+                                            )}
+                                            <input
+                                                type="checkbox"
+                                                checked={localSyncToggle}
+                                                onChange={() => handleSyncToggleChange(!localSyncToggle)}
+                                                onClick={(e) => e.stopPropagation()}
+                                                disabled={!isLibrarySynced(1) && !syncWithZotero}
+                                                style={{ cursor: 'pointer', margin: 0 }}
+                                            />
+                                        </div>
+                                    }
                                 />
-                            </div>
-                        </div>
+                            </SettingsGroup>
+                        </>
                     ) : (
-                        <div className="display-flex flex-col gap-3">
-                            <div className="font-color-secondary">
-                                Beaver indexes your library locally for semantic search. Rebuilding the index retries failed items and reindexes all libraries.
-                            </div>
-                            <div className="display-flex flex-row items-center gap-4 justify-between">
-                                <div className="display-flex flex-col gap-1">
-                                    {embeddingIndexState.failedItems > 0 && (
-                                        <div className="text-sm font-color-yellow">
-                                            {embeddingIndexState.failedItems} items failed to index
-                                        </div>
-                                    )}
-                                    {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
-                                        <div className="text-sm font-color-red">
-                                            Error: {embeddingIndexState.error}
-                                        </div>
-                                    )}
-                                </div>
-                                <Button
-                                    variant="outline"
-                                    rightIcon={rebuildIndexButtonProps.icon}
-                                    iconClassName={rebuildIndexButtonProps.iconClassName}
-                                    onClick={handleRebuildSearchIndex}
-                                    disabled={rebuildIndexButtonProps.disabled}
-                                    loading={isEmbeddingIndexing}
-                                >
-                                    {rebuildIndexButtonProps.text}
-                                </Button>
-                            </div>
-                        </div>
+                        <SettingsGroup>
+                            <SettingsRow
+                                title="Search Index"
+                                description={
+                                    <>
+                                        Rebuilding the index retries failed items and reindexes all libraries.
+                                        {embeddingIndexState.failedItems > 0 && (
+                                            <span className="display-flex font-color-yellow mt-1">
+                                                {embeddingIndexState.failedItems} items failed to index
+                                            </span>
+                                        )}
+                                        {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
+                                            <span className="display-flex font-color-red mt-1">
+                                                Error: {embeddingIndexState.error}
+                                            </span>
+                                        )}
+                                    </>
+                                }
+                                control={
+                                    <Button
+                                        variant="outline"
+                                        rightIcon={rebuildIndexButtonProps.icon}
+                                        iconClassName={rebuildIndexButtonProps.iconClassName}
+                                        onClick={handleRebuildSearchIndex}
+                                        disabled={rebuildIndexButtonProps.disabled}
+                                        loading={isEmbeddingIndexing}
+                                    >
+                                        {rebuildIndexButtonProps.text}
+                                    </Button>
+                                }
+                            />
+                        </SettingsGroup>
                     )}
                 </>
             )}
 
+            {/* ===== PERMISSIONS TAB ===== */}
             {activeTab === 'permissions' && (
                 <>
-                    <div className="display-flex flex-col gap-3">
-                        <DeferredToolPreferenceSetting
-                            toolName="edit_metadata"
-                            label="Metadata Edits"
-                            description="Changes to item titles, authors, abstracts, and other metadata"
-                        />
-                        <DeferredToolPreferenceSetting
-                            toolName="create_items"
-                            label="Item Imports"
-                            description="Importing new items from external sources"
-                        />
-                        <DeferredToolPreferenceSetting
-                            toolName="create_collection"
-                            label="Library Organization"
-                            description="Creating collections and organizing items into collections and by tags"
-                        />
+                    <div className="text-sm font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
+                        Choose how Beaver handles write actions in Zotero.
+                        See <DocLink path="editing-metadata">metadata editing docs</DocLink>.
                     </div>
+                    <SettingsGroup>
+                        <div style={{ padding: '10px 14px' }}>
+                            <DeferredToolPreferenceSetting
+                                toolName="edit_metadata"
+                                label="Metadata Edits"
+                                description="Changes to item titles, authors, abstracts, and other metadata"
+                            />
+                        </div>
+                        <div className="border-top-quinary" style={{ padding: '10px 14px' }}>
+                            <DeferredToolPreferenceSetting
+                                toolName="create_items"
+                                label="Item Imports"
+                                description="Importing new items from external sources"
+                            />
+                        </div>
+                        <div className="border-top-quinary" style={{ padding: '10px 14px' }}>
+                            <DeferredToolPreferenceSetting
+                                toolName="create_collection"
+                                label="Library Organization"
+                                description="Creating collections and organizing items into collections and by tags"
+                            />
+                        </div>
+                    </SettingsGroup>
                 </>
             )}
 
+            {/* ===== MODELS & API KEYS TAB ===== */}
             {activeTab === 'models' && (
                 <>
-                    <div className="display-flex flex-col gap-3">
-                        <ApiKeyInput
-                            id="gemini-key"
-                            label="Google API Key"
-                            provider="google"
-                            value={geminiKey}
-                            onChange={setGeminiKey}
-                            savePref={(newValue) => handlePrefSave('googleGenerativeAiApiKey', newValue)}
-                            placeholder="Enter your Google AI Studio API Key"
-                            linkUrl="https://aistudio.google.com/app/apikey"
-                        />
-                        <ApiKeyInput
-                            id="openai-key"
-                            label="OpenAI API Key"
-                            provider="openai"
-                            value={openaiKey}
-                            onChange={setOpenaiKey}
-                            savePref={(newValue) => handlePrefSave('openAiApiKey', newValue)}
-                            placeholder="Enter your OpenAI API Key"
-                            linkUrl="https://platform.openai.com/api-keys"
-                        />
-                        <ApiKeyInput
-                            id="anthropic-key"
-                            label="Anthropic API Key"
-                            provider="anthropic"
-                            value={anthropicKey}
-                            onChange={setAnthropicKey}
-                            savePref={(newValue) => handlePrefSave('anthropicApiKey', newValue)}
-                            placeholder="Enter your Anthropic API Key"
-                            linkUrl="https://console.anthropic.com/settings/keys"
-                        />
+                    <div className="text-sm font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
+                        Connect provider API keys or advanced model providers.
+                        See <DocLink path="api-key">API key guide</DocLink> and <DocLink path="custom-models">custom models</DocLink>.
                     </div>
+                    <SettingsGroup>
+                        <div style={{ padding: '10px 14px' }}>
+                            <ApiKeyInput
+                                id="gemini-key"
+                                label="Google API Key"
+                                provider="google"
+                                value={geminiKey}
+                                onChange={setGeminiKey}
+                                savePref={(newValue) => handlePrefSave('googleGenerativeAiApiKey', newValue)}
+                                placeholder="Enter your Google AI Studio API Key"
+                                linkUrl="https://aistudio.google.com/app/apikey"
+                            />
+                        </div>
+                        <div className="border-top-quinary" style={{ padding: '10px 14px' }}>
+                            <ApiKeyInput
+                                id="openai-key"
+                                label="OpenAI API Key"
+                                provider="openai"
+                                value={openaiKey}
+                                onChange={setOpenaiKey}
+                                savePref={(newValue) => handlePrefSave('openAiApiKey', newValue)}
+                                placeholder="Enter your OpenAI API Key"
+                                linkUrl="https://platform.openai.com/api-keys"
+                            />
+                        </div>
+                        <div className="border-top-quinary" style={{ padding: '10px 14px' }}>
+                            <ApiKeyInput
+                                id="anthropic-key"
+                                label="Anthropic API Key"
+                                provider="anthropic"
+                                value={anthropicKey}
+                                onChange={setAnthropicKey}
+                                savePref={(newValue) => handlePrefSave('anthropicApiKey', newValue)}
+                                placeholder="Enter your Anthropic API Key"
+                                linkUrl="https://console.anthropic.com/settings/keys"
+                            />
+                        </div>
+                    </SettingsGroup>
 
-                    <div className="display-flex flex-col items-start gap-1 mt-2 mb-1">
-                        <div className="display-flex flex-row items-start gap-1 flex-1 w-full">
-                            <label htmlFor="custom-models" className="text-sm font-semibold font-color-primary">Additional Model Providers</label>
-                        </div>
-                        <div className="text-sm font-color-secondary mb-3">
-                            Additional model providers and custom endpoints are supported via advanced settings.
-                        </div>
-                    </div>
+                    <SectionLabel>Additional Providers</SectionLabel>
+                    <SettingsGroup>
+                        <SettingsRow
+                            title="Model Providers"
+                            description="Additional model providers and custom endpoints are supported via advanced settings."
+                        />
+                    </SettingsGroup>
                 </>
             )}
 
+            {/* ===== PROMPTS TAB ===== */}
             {activeTab === 'prompts' && (
                 <>
-                    <div className="text-sm font-semibold font-color-primary mb-1">
-                        Custom Instructions
-                    </div>
-                    <div className="text-sm font-color-secondary mb-2">
-                        Custom instructions are added to all chats and help steer responses based on your preferences. (Max ~250 words)
-                    </div>
-                    <textarea
-                        value={customInstructions}
-                        onChange={handleCustomInstructionsChange}
-                        placeholder="Enter custom instructions here..."
-                        rows={5}
-                        className="p-2 border preference-input resize-y text-sm"
-                        maxLength={1500}
-                    />
-                    <div className="text-sm font-semibold font-color-primary mt-2 mb-1">
-                        Custom Prompts
-                    </div>
-                    <div className="text-sm font-color-secondary mb-2">
+                    <SectionLabel>Custom Instructions</SectionLabel>
+                    <SettingsGroup>
+                        <div style={{ padding: '10px 14px' }}>
+                            <div className="text-sm font-color-secondary mb-2">
+                                Custom instructions are added to all chats and help steer responses. (Max ~250 words)
+                            </div>
+                            <textarea
+                                value={customInstructions}
+                                onChange={handleCustomInstructionsChange}
+                                placeholder="Enter custom instructions here..."
+                                rows={5}
+                                className="p-2 border preference-input resize-y text-sm"
+                                style={{ width: '100%', boxSizing: 'border-box' }}
+                                maxLength={1500}
+                            />
+                        </div>
+                    </SettingsGroup>
+
+                    <SectionLabel>Custom Prompts</SectionLabel>
+                    <div className="text-sm font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
                         Configure up to 9 custom prompts with keyboard shortcuts ({Zotero.isMac ? '⌘^1-⌘^9' : 'Ctrl+Win+1-9'}). Enable library search or set conditions based on attachments.
                     </div>
                     <div className="display-flex flex-col gap-5">
