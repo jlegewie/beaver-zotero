@@ -16,7 +16,7 @@ import {
     isEmbeddingIndexingAtom 
 } from "../../atoms/embeddingIndex";
 import ApiKeyInput from "../preferences/ApiKeyInput";
-import CustomPromptSettings from "../preferences/CustomPromptSettings";
+import CustomPromptCard from "../preferences/CustomPromptCard";
 import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { accountService } from "../../../src/services/accountService";
 import SyncedLibraries from "../preferences/SyncedLibraries";
@@ -969,13 +969,23 @@ const PreferencePage: React.FC = () => {
                         </div>
                     </SettingsGroup>
 
-                    <SectionLabel>Custom Prompts</SectionLabel>
+                    <div className="display-flex flex-row items-end justify-between">
+                        <SectionLabel>Custom Prompts</SectionLabel>
+                        <Button
+                            variant="outline"
+                            onClick={handleAddPrompt}
+                            disabled={customPrompts.length >= 9}
+                            className="text-sm mb-15"
+                        >
+                            Add Prompt
+                        </Button>
+                    </div>
                     <div className="text-sm font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
                         Configure up to 9 custom prompts with keyboard shortcuts ({Zotero.isMac ? '⌘^1-⌘^9' : 'Ctrl+Win+1-9'}). Enable library search or set conditions based on attachments.
                     </div>
-                    <div className="display-flex flex-col gap-5">
+                    <div className="display-flex flex-col gap-4">
                         {customPrompts.map((prompt: CustomPrompt, index: number) => (
-                            <CustomPromptSettings
+                            <CustomPromptCard
                                 key={index}
                                 index={index}
                                 prompt={prompt}
@@ -984,7 +994,7 @@ const PreferencePage: React.FC = () => {
                                 availabilityNote={getCustomPromptAvailabilityNote(prompt)}
                             />
                         ))}
-                        <div className="display-flex flex-row items-center justify-start">
+                        {/* <div className="display-flex flex-row items-center justify-start">
                             <Button
                                 variant="outline"
                                 onClick={handleAddPrompt}
@@ -993,7 +1003,7 @@ const PreferencePage: React.FC = () => {
                             >
                                 Add Prompt
                             </Button>
-                        </div>
+                        </div> */}
                     </div>
                 </>
             )}
