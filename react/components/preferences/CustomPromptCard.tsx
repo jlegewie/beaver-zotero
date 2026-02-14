@@ -32,6 +32,11 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
     const titleInputRef = useRef<HTMLInputElement | null>(null);
     const cardRef = useRef<HTMLDivElement | null>(null);
     const previousPromptRef = useRef(prompt);
+    // Ref to hold latest draft values so the click-outside listener doesn't re-register on every keystroke
+    const draftRef = useRef({ editTitle, editText, editRequiresAttachment });
+    useEffect(() => {
+        draftRef.current = { editTitle, editText, editRequiresAttachment };
+    }, [editTitle, editText, editRequiresAttachment]);
 
     // Sync local draft state when prompt changes, and always reset if this card now points to a different prompt.
     useEffect(() => {
@@ -43,6 +48,30 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
         }
         previousPromptRef.current = prompt;
     }, [prompt, prompt.title, prompt.text, prompt.requiresAttachment, isEditing]);
+
+    // Close edit mode on click outside — auto-saves, or removes if the prompt is empty
+    useEffect(() => {
+        if (!isEditing) return;
+        const doc = cardRef.current?.ownerDocument;
+        if (!doc) return;
+
+        const handleClickOutside = (e: MouseEvent) => {
+            if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
+                const { editTitle: title, editText: text, editRequiresAttachment: reqAttach } = draftRef.current;
+                // New prompt that's still empty — remove it (same as Cancel)
+                if (!title && !text && !prompt.title && !prompt.text) {
+                    onRemove(index);
+                } else {
+                    // Auto-save current draft
+                    onChange(index, { ...prompt, title, text, requiresAttachment: reqAttach });
+                }
+                setIsEditing(false);
+            }
+        };
+
+        doc.addEventListener("mousedown", handleClickOutside);
+        return () => doc.removeEventListener("mousedown", handleClickOutside);
+    }, [isEditing, prompt, index, onChange, onRemove]);
 
     // Focus title input when entering edit mode
     useEffect(() => {
