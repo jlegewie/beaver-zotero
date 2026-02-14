@@ -7,8 +7,8 @@ export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
 export const isWebSearchEnabledAtom = atom(false);
 export const isPreferencePageVisibleAtom = atom(false);
-export type PreferencePageTab = 'account' | 'sync' | 'general' | 'models' | 'prompts';
-export const activePreferencePageTabAtom = atom<PreferencePageTab>('account');
+export type PreferencePageTab = 'general' | 'sync' | 'permissions' | 'models' | 'prompts' | 'account';
+export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
 export const openPreferencePageAtTabAtom = atom(
     null,
     (_get, set, tab: PreferencePageTab) => {

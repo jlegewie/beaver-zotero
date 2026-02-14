@@ -30,10 +30,15 @@ import { ProcessingMode } from "../../types/profile";
 import DeferredToolPreferenceSetting from "../preferences/DeferredToolPreferenceSetting";
 import { BeaverUIFactory } from "../../../src/ui/ui";
 
-const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    <h2 className="text-xl font-semibold mt-6 mb-2 font-color-primary">
+const DocLink: React.FC<{ path: string; children: React.ReactNode }> = ({ path, children }) => (
+    <a
+        onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/docs/${path}`)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-link"
+    >
         {children}
-    </h2>
+    </a>
 );
 
 const PreferencePage: React.FC = () => {
@@ -407,12 +412,19 @@ const PreferencePage: React.FC = () => {
     const sidebarShortcutLabel = `${Zotero.isMac ? '⌘' : 'Ctrl'}+${keyboardShortcut}`;
     const windowShortcutLabel = `${Zotero.isMac ? '⌘⇧' : 'Ctrl+Shift'}+${keyboardShortcut}`;
     const tabs = useMemo<{ id: PreferencePageTab; label: string }[]>(() => [
-        { id: 'account', label: 'Account' },
-        { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search Index' },
         { id: 'general', label: 'General' },
+        { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search Index' },
+        { id: 'permissions', label: 'Permissions' },
         { id: 'models', label: 'Models & API Keys' },
         { id: 'prompts', label: 'Prompts' },
     ], [isDatabaseSyncSupported]);
+
+    // Backward compatibility for existing entry points that still request "account".
+    React.useEffect(() => {
+        if (activeTab === 'account') {
+            setActiveTab('general');
+        }
+    }, [activeTab, setActiveTab]);
 
     return (
         <div
@@ -426,25 +438,68 @@ const PreferencePage: React.FC = () => {
                 {/* <Button variant="outline" rightIcon={CancelIcon} onClick={() => togglePreferencePage((prev) => !prev)} className="mt-1">Close</Button> */}
             </div>
 
-            <div className="display-flex flex-row gap-2 overflow-x-auto scrollbar pb-2">
+            <div className="display-flex flex-row flex-wrap gap-2 items-center pb-1">
                 {tabs.map((tab) => (
-                    <Button
+                    <button
                         key={tab.id}
-                        variant={tab.id === activeTab ? 'surface-light' : 'ghost-secondary'}
-                        className="fit-content text-sm"
+                        type="button"
                         onClick={() => setActiveTab(tab.id)}
-                        ariaLabel={`Open ${tab.label} tab`}
+                        aria-label={`Open ${tab.label} tab`}
+                        aria-pressed={tab.id === activeTab}
+                        className="text-sm"
+                        style={{
+                            border: '1px solid var(--fill-quarternary)',
+                            borderRadius: '4px',
+                            background: tab.id === activeTab ? 'var(--fill-quinary)' : 'transparent',
+                            color: tab.id === activeTab ? 'var(--fill-primary)' : 'var(--fill-secondary)',
+                            padding: '4px 10px',
+                            minHeight: '30px',
+                            lineHeight: 1.2,
+                            whiteSpace: 'nowrap',
+                            transition: 'background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease'
+                        }}
                     >
                         {tab.label}
-                    </Button>
+                    </button>
                 ))}
             </div>
 
-            {activeTab === 'account' && (
+            <div className="text-sm font-color-secondary mt-1 mb-2">
+                {activeTab === 'general' && (
+                    <>
+                        Manage your account details and everyday Beaver behavior.
+                        See <DocLink path="account-management">account management docs</DocLink>.
+                    </>
+                )}
+                {activeTab === 'sync' && (
+                    <>
+                        Choose synced libraries and control coordination with Zotero sync.
+                        See <DocLink path="libraries">libraries</DocLink> and <DocLink path="trouble-file-sync">sync troubleshooting</DocLink>.
+                    </>
+                )}
+                {activeTab === 'permissions' && (
+                    <>
+                        Choose how Beaver handles write actions in Zotero and when approvals are required.
+                        See <DocLink path="editing-metadata">metadata editing docs</DocLink>.
+                    </>
+                )}
+                {activeTab === 'models' && (
+                    <>
+                        Connect provider API keys or advanced model providers.
+                        See <DocLink path="api-key">API key guide</DocLink> and <DocLink path="custom-models">custom models</DocLink>.
+                    </>
+                )}
+                {activeTab === 'prompts' && (
+                    <>
+                        Customize assistant behavior and create reusable shortcuts for repeated workflows.
+                    </>
+                )}
+            </div>
+
+            {activeTab === 'general' && (
                 <>
-                    <SectionHeader>Account</SectionHeader>
                     {user ? (
-                        <div className="display-flex flex-col gap-3">
+                        <div className="display-flex flex-col gap-3 mb-4">
                             <div className="display-flex flex-row items-center gap-2">
                                 <div className="font-color-secondary">Signed in as:</div>
                                 <div className="font-color-primary">{user.email}</div>
@@ -492,81 +547,10 @@ const PreferencePage: React.FC = () => {
                             </div>
                         </div>
                     ) : (
-                        <div className="card p-3">
+                        <div className="card p-3 mb-4">
                             <span className="font-color-secondary">You are not signed in.</span>
                         </div>
                     )}
-                </>
-            )}
-
-            {activeTab === 'sync' && (
-                <>
-                    {isDatabaseSyncSupported ? (
-                        <>
-                            <SectionHeader>Beaver Syncing</SectionHeader>
-                            <div className="display-flex flex-col gap-3">
-                                <SyncedLibraries />
-                                <div className="display-flex flex-row items-center gap-4 justify-end" style={{ marginRight: '1px' }}>
-                                    <Button
-                                        variant="outline"
-                                        rightIcon={verifyButtonProps.icon}
-                                        iconClassName={verifyButtonProps.iconClassName}
-                                        onClick={handleVerifySync}
-                                        disabled={verifyButtonProps.disabled}
-                                    >
-                                        {verifyButtonProps.text}
-                                    </Button>
-                                </div>
-                                <div className="mt-2">
-                                    <ZoteroSyncToggle
-                                        checked={localSyncToggle}
-                                        onChange={handleSyncToggleChange}
-                                        disabled={!isLibrarySynced(1) && !syncWithZotero}
-                                        error={!isLibrarySynced(1) && syncWithZotero}
-                                    />
-                                </div>
-                            </div>
-                        </>
-                    ) : (
-                        <>
-                            <SectionHeader>Search Index</SectionHeader>
-                            <div className="font-color-secondary mb-3">
-                                Beaver indexes your library locally for semantic search. Rebuilding the index will retry any failed items and reindex all libraries.
-                            </div>
-                            <div className="display-flex flex-col gap-3">
-                                <div className="display-flex flex-row items-center gap-4 justify-between">
-                                    <div className="display-flex flex-col gap-1">
-                                        {embeddingIndexState.failedItems > 0 && (
-                                            <div className="text-sm font-color-yellow">
-                                                {embeddingIndexState.failedItems} items failed to index
-                                            </div>
-                                        )}
-                                        {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
-                                            <div className="text-sm font-color-red">
-                                                Error: {embeddingIndexState.error}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <Button
-                                        variant="outline"
-                                        rightIcon={rebuildIndexButtonProps.icon}
-                                        iconClassName={rebuildIndexButtonProps.iconClassName}
-                                        onClick={handleRebuildSearchIndex}
-                                        disabled={rebuildIndexButtonProps.disabled}
-                                        loading={isEmbeddingIndexing}
-                                    >
-                                        {rebuildIndexButtonProps.text}
-                                    </Button>
-                                </div>
-                            </div>
-                        </>
-                    )}
-                </>
-            )}
-
-            {activeTab === 'general' && (
-                <>
-                    <SectionHeader>General Settings</SectionHeader>
                     <div className="display-flex flex-col gap-3">
                         <div className="display-flex flex-row gap-1 items-start mb-2">
                             <div className="display-flex flex-col gap-1 flex-1">
@@ -617,11 +601,70 @@ const PreferencePage: React.FC = () => {
                             onChange={handleEmailNotificationsChange}
                         />
                     </div>
+                </>
+            )}
 
-                    <SectionHeader>Permissions</SectionHeader>
-                    <div className="text-sm font-color-secondary mb-3">
-                        Control how Beaver handles actions that modify your Zotero library.
-                    </div>
+            {activeTab === 'sync' && (
+                <>
+                    {isDatabaseSyncSupported ? (
+                        <div className="display-flex flex-col gap-3">
+                            <SyncedLibraries />
+                            <div className="display-flex flex-row items-center gap-4 justify-end" style={{ marginRight: '1px' }}>
+                                <Button
+                                    variant="outline"
+                                    rightIcon={verifyButtonProps.icon}
+                                    iconClassName={verifyButtonProps.iconClassName}
+                                    onClick={handleVerifySync}
+                                    disabled={verifyButtonProps.disabled}
+                                >
+                                    {verifyButtonProps.text}
+                                </Button>
+                            </div>
+                            <div className="mt-2">
+                                <ZoteroSyncToggle
+                                    checked={localSyncToggle}
+                                    onChange={handleSyncToggleChange}
+                                    disabled={!isLibrarySynced(1) && !syncWithZotero}
+                                    error={!isLibrarySynced(1) && syncWithZotero}
+                                />
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="display-flex flex-col gap-3">
+                            <div className="font-color-secondary">
+                                Beaver indexes your library locally for semantic search. Rebuilding the index retries failed items and reindexes all libraries.
+                            </div>
+                            <div className="display-flex flex-row items-center gap-4 justify-between">
+                                <div className="display-flex flex-col gap-1">
+                                    {embeddingIndexState.failedItems > 0 && (
+                                        <div className="text-sm font-color-yellow">
+                                            {embeddingIndexState.failedItems} items failed to index
+                                        </div>
+                                    )}
+                                    {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
+                                        <div className="text-sm font-color-red">
+                                            Error: {embeddingIndexState.error}
+                                        </div>
+                                    )}
+                                </div>
+                                <Button
+                                    variant="outline"
+                                    rightIcon={rebuildIndexButtonProps.icon}
+                                    iconClassName={rebuildIndexButtonProps.iconClassName}
+                                    onClick={handleRebuildSearchIndex}
+                                    disabled={rebuildIndexButtonProps.disabled}
+                                    loading={isEmbeddingIndexing}
+                                >
+                                    {rebuildIndexButtonProps.text}
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                </>
+            )}
+
+            {activeTab === 'permissions' && (
+                <>
                     <div className="display-flex flex-col gap-3">
                         <DeferredToolPreferenceSetting
                             toolName="edit_metadata"
@@ -644,13 +687,6 @@ const PreferencePage: React.FC = () => {
 
             {activeTab === 'models' && (
                 <>
-                    <SectionHeader>API Keys</SectionHeader>
-                    <div className="text-sm font-color-secondary mb-3">
-                        Add your own API key to use models from Google, Anthropic, and OpenAI.
-                        When you use your own API key, your provider's terms and data-use rules apply.
-                        Your keys are only stored locally and never on our server. Learn more about API keys
-                        <a onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/api-keys')} target="_blank" rel="noopener noreferrer" className="text-link"> here</a>.
-                    </div>
                     <div className="display-flex flex-col gap-3">
                         <ApiKeyInput
                             id="gemini-key"
@@ -689,8 +725,7 @@ const PreferencePage: React.FC = () => {
                             <label htmlFor="custom-models" className="text-sm font-semibold font-color-primary">Additional Model Providers</label>
                         </div>
                         <div className="text-sm font-color-secondary mb-3">
-                            Additional model providers and custom endpoints are supported via advanced settings. Learn more about custom models
-                            <a onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/custom-models')} target="_blank" rel="noopener noreferrer" className="text-link"> here</a>.
+                            Additional model providers and custom endpoints are supported via advanced settings.
                         </div>
                     </div>
                 </>
@@ -698,7 +733,9 @@ const PreferencePage: React.FC = () => {
 
             {activeTab === 'prompts' && (
                 <>
-                    <SectionHeader>Custom Instructions</SectionHeader>
+                    <div className="text-sm font-semibold font-color-primary mb-1">
+                        Custom Instructions
+                    </div>
                     <div className="text-sm font-color-secondary mb-2">
                         Custom instructions are added to all chats and help steer responses based on your preferences. (Max ~250 words)
                     </div>
@@ -710,7 +747,9 @@ const PreferencePage: React.FC = () => {
                         className="p-2 border preference-input resize-y text-sm"
                         maxLength={1500}
                     />
-                    <SectionHeader>Custom Prompts</SectionHeader>
+                    <div className="text-sm font-semibold font-color-primary mt-2 mb-1">
+                        Custom Prompts
+                    </div>
                     <div className="text-sm font-color-secondary mb-2">
                         Configure up to 9 custom prompts with keyboard shortcuts ({Zotero.isMac ? '⌘^1-⌘^9' : 'Ctrl+Win+1-9'}). Enable library search or set conditions based on attachments.
                     </div>
