@@ -32,7 +32,7 @@ export const ConfirmExtractionPreview: React.FC<ConfirmExtractionPreviewProps> =
         <div className={`confirm-extraction-preview overflow-hidden ${isRejectedOrUndone ? 'opacity-60' : ''}`}>
             <div className="px-3 py-3 text-sm font-color-secondary">
                 {isApplied ? (
-                    <span>Approved extraction from {attachmentCount} paper{attachmentCount !== 1 ? 's' : ''} ({totalCredits} request{totalCredits !== 1 ? 's' : ''}).</span>
+                    <span>Approved extraction from {attachmentCount} paper{attachmentCount !== 1 ? 's' : ''}.</span>
                 ) : isRejectedOrUndone ? (
                     <span>Declined extraction from {attachmentCount} paper{attachmentCount !== 1 ? 's' : ''}.</span>
                 ) : (
