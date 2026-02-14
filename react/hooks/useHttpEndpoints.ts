@@ -12,6 +12,7 @@ import { useEffect } from 'react';
 import { useAtomValue } from 'jotai';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
+import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
 import {
     handleZoteroDataRequest,
     handleExternalReferenceCheckRequest,
@@ -92,6 +93,7 @@ const ENDPOINT_PATHS = [
     '/beaver/agent-action/validate',
     '/beaver/agent-action/execute',
     // Utility
+    '/beaver/user-info',
     '/beaver/delete-items',
 ] as const;
 
@@ -466,6 +468,10 @@ async function handleAgentActionExecuteHttpRequest(request: any) {
     };
 }
 
+async function handleUserInfoHttpRequest(_request: any) {
+    return getZoteroUserIdentifier();
+}
+
 async function handleDeleteItemsHttpRequest(request: any) {
     return await handleDeleteItemsRequest({
         item_ids: request.item_ids || [],
@@ -531,6 +537,9 @@ function registerEndpoints(): boolean {
         createEndpoint(handleAgentActionExecuteHttpRequest);
 
     // Utility endpoints
+    Zotero.Server.Endpoints['/beaver/user-info'] =
+        createEndpoint(handleUserInfoHttpRequest);
+
     Zotero.Server.Endpoints['/beaver/delete-items'] =
         createEndpoint(handleDeleteItemsHttpRequest);
 
