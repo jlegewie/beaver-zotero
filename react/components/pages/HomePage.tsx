@@ -3,7 +3,7 @@ import Button from "../ui/Button";
 import FileStatusButton from "../ui/buttons/FileStatusButton";
 import { ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { useFileStatus } from '../../hooks/useFileStatus';
-import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../atoms/ui';
+import { openPreferencePageAtTabAtom, showFileStatusDetailsAtom } from '../../atoms/ui';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { isStreamingAtom } from '../../agents/atoms';
 import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
@@ -18,7 +18,7 @@ interface HomePageProps {
 }
 
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
-    const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
+    const openPreferencePageAtTab = useSetAtom(openPreferencePageAtTabAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
     const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
@@ -62,7 +62,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                 <div className="display-flex flex-row justify-between items-center">
                     {/* <div className="font-semibold text-lg mb-1">Custom Prompts</div> */}
                     <div className="text-xl font-semibold">Custom Prompts</div>
-                    <Button variant="outline" className="scale-85 fit-content" onClick={() => togglePreferencePage((prev) => !prev)}> Edit </Button>
+                    <Button variant="outline" className="scale-85 fit-content" onClick={() => openPreferencePageAtTab('prompts')}> Edit </Button>
                 </div>
                 {/* <div className="display-flex flex-col items-start mb-4">
                     <p className="text-base font-color-secondary -mt-2">Beaver will sync your library, upload your PDFs, and index your files for search. This process can take 20-60 min.</p>
