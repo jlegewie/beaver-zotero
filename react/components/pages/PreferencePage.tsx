@@ -961,8 +961,8 @@ const PreferencePage: React.FC = () => {
                             onChange={handleCustomInstructionsChange}
                             placeholder="Enter custom instructions here..."
                             rows={5}
-                            className="chat-input custom-prompt-edit-textarea text-sm resize-y"
-                            style={{ width: '100%', boxSizing: 'border-box' }}
+                            className="chat-input custom-prompt-edit-textarea text-sm"
+                            style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical' }}
                             maxLength={1500}
                         />
                     </div>
