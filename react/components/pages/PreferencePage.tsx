@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
@@ -6,6 +6,7 @@ import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, Search
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom } from "../../atoms/profile";
+import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
 import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
@@ -64,6 +65,7 @@ const PreferencePage: React.FC = () => {
     const remainingBeaverCredits = useAtomValue(remainingBeaverCreditsAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const processingMode = useAtomValue(processingModeAtom);
+    const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -404,6 +406,13 @@ const PreferencePage: React.FC = () => {
     const rebuildIndexButtonProps = getRebuildIndexButtonProps();
     const sidebarShortcutLabel = `${Zotero.isMac ? '⌘' : 'Ctrl'}+${keyboardShortcut}`;
     const windowShortcutLabel = `${Zotero.isMac ? '⌘⇧' : 'Ctrl+Shift'}+${keyboardShortcut}`;
+    const tabs = useMemo<{ id: PreferencePageTab; label: string }[]>(() => [
+        { id: 'account', label: 'Account' },
+        { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search Index' },
+        { id: 'general', label: 'General' },
+        { id: 'models', label: 'Models & API Keys' },
+        { id: 'prompts', label: 'Prompts' },
+    ], [isDatabaseSyncSupported]);
 
     return (
         <div
@@ -417,308 +426,318 @@ const PreferencePage: React.FC = () => {
                 {/* <Button variant="outline" rightIcon={CancelIcon} onClick={() => togglePreferencePage((prev) => !prev)} className="mt-1">Close</Button> */}
             </div>
 
-            {/* --- Account Section --- */}
-            <SectionHeader>Account</SectionHeader>
-            {user ? (
-                <div className="display-flex flex-col gap-3">
-                    <div className="display-flex flex-row items-center gap-2">
-                        <div className="font-color-secondary">Signed in as:</div>
-                        <div className="font-color-primary">{user.email}</div>
-                    </div>
-                    <div className="display-flex flex-row items-center gap-2">
-                        <div className="font-color-secondary">Plan:</div>
-                        <div className="font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</div>
-                    </div>
-                    {isDatabaseSyncSupported && profileBalance.pagesRemaining !== undefined && 
-                        <div className="display-flex flex-row items-center gap-2">
-                            <div className="font-color-secondary">Remaining Page Balance:</div>
-                            <div className="font-color-primary">{profileBalance.pagesRemaining.toLocaleString() || 'Unknown'}</div>
-                        </div>
-                    }
-                    <div className="display-flex flex-row items-center gap-2">
-                        <div className="font-color-secondary">Remaining Chat Credits:</div>
-                        <div className="font-color-primary">{remainingBeaverCredits.toLocaleString() || 'Unknown'}</div>
-                    </div>
-                    <div className="display-flex flex-row items-center gap-3 mt-2">
-                        <Button
-                            variant="outline"
-                            icon={UserIcon}
-                            onClick= {() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/login')}
-                        >
-                            Manage Account
-                        </Button>
-                        <Button variant="outline" icon={LogoutIcon} onClick={logout}>Logout</Button>
-                    </div>
-                    <div className="display-flex flex-row gap-1 items-start mt-15">
-                        <button
-                            type="button"
-                            onClick= {() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/terms')}
-                            className="text-link-muted text-sm"
-                        >
-                            Terms of Service
-                        </button>
-                        <div className="font-color-secondary">|</div>
-                        <button
-                            type="button"
-                            onClick= {() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/privacy-policy')}
-                            className="text-link-muted text-sm"
-                        >
-                            Privacy Policy
-                        </button>
-                    </div>
-                </div>
-            ) : (
-                <div className="card p-3">
-                     <span className="font-color-secondary">You are not signed in.</span>
-                </div>
-            )}
-
-            {/* --- Library Syncing Section --- */}
-            {isDatabaseSyncSupported && (
-                <>
-                    <SectionHeader>Beaver Syncing</SectionHeader>
-
-
-                    <div className="display-flex flex-col gap-3">
-                        {/* Synced Libraries */}
-                        <SyncedLibraries />
-
-                        {/* Verify Data Button */}
-                        <div className="display-flex flex-row items-center gap-4 justify-end" style={{ marginRight: '1px' }}>
-                            <Button 
-                                variant="outline" 
-                                rightIcon={verifyButtonProps.icon}
-                                iconClassName={verifyButtonProps.iconClassName}
-                                onClick={handleVerifySync}
-                                disabled={verifyButtonProps.disabled}
-                            >
-                                {verifyButtonProps.text}
-                            </Button>
-                        </div>
-
-                        {/* Sync with Zotero Toggle */}
-                        <div className="mt-2">
-                            <ZoteroSyncToggle 
-                                checked={localSyncToggle}
-                                onChange={handleSyncToggleChange}
-                                disabled={!isLibrarySynced(1) && !syncWithZotero}
-                                error={!isLibrarySynced(1) && syncWithZotero}
-                            />
-                        </div>
-                    </div>
-                </>
-            )}
-            
-            {/* <LibrarySelection /> */}
-
-            {/* --- Search Index Section (only for users without databaseSync) --- */}
-            {!isDatabaseSyncSupported && (
-                <>
-                    <SectionHeader>Search Index</SectionHeader>
-                    <div className="font-color-secondary mb-3">
-                        Beaver indexes your library locally for semantic search. Rebuilding the index will retry any failed items and reindex all libraries.
-                    </div>
-                    <div className="display-flex flex-col gap-3">
-                        <div className="display-flex flex-row items-center gap-4 justify-between">
-                            <div className="display-flex flex-col gap-1">
-                                {embeddingIndexState.failedItems > 0 && (
-                                    <div className="text-sm font-color-yellow">
-                                        {embeddingIndexState.failedItems} items failed to index
-                                    </div>
-                                )}
-                                {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
-                                    <div className="text-sm font-color-red">
-                                        Error: {embeddingIndexState.error}
-                                    </div>
-                                )}
-                            </div>
-                            <Button 
-                                variant="outline" 
-                                rightIcon={rebuildIndexButtonProps.icon}
-                                iconClassName={rebuildIndexButtonProps.iconClassName}
-                                onClick={handleRebuildSearchIndex}
-                                disabled={rebuildIndexButtonProps.disabled}
-                                loading={isEmbeddingIndexing}
-                            >
-                                {rebuildIndexButtonProps.text}
-                            </Button>
-                        </div>
-                    </div>
-                </>
-            )}
-
-            {/* --- General Settings Section --- */}
-            <SectionHeader>General Settings</SectionHeader>
-            <div className="display-flex flex-col gap-3">
-                <div className="display-flex flex-row gap-1 items-start mb-2">
-                    <div className="display-flex flex-col gap-1 flex-1">                
-                        <label htmlFor="keyboard-shortcut" className="text-base font-color-primary">
-                            Keyboard Shortcut Key
-                        </label>
-                        <div className="display-flex flex-col gap-05">
-                            <div className="font-color-secondary text-sm">
-                                Sidebar: {sidebarShortcutLabel} - Separate window: {windowShortcutLabel}
-                            </div>
-                            <div className="font-color-secondary text-sm">
-                                Changes require restart
-                            </div>
-                        </div>
-                    </div>
-                        <select
-                            id="keyboard-shortcut"
-                            value={keyboardShortcut}
-                            onChange={handleKeyboardShortcutChange}
-                            className="py-1 px-2 border preference-input text-sm"
-                            style={{ width: '40px', margin: '0px' }}
-                        >
-                            {'DGHJKMRVX'.split('').map((letter) => (
-                                <option key={letter} value={letter}>
-                                    {letter}
-                                </option>
-                            ))}
-                        </select>
-                </div>
-                <CitationFormatToggle 
-                    checked={citationFormat} 
-                    onChange={setCitationFormat} 
-                />
-                <AddSelectedItemsOnNewThreadToggle 
-                    checked={addSelectedOnNewThread} 
-                    onChange={setAddSelectedOnNewThread} 
-                />
-                <AddSelectedItemsOnOpenToggle 
-                    checked={addSelectedOnOpen} 
-                    onChange={setAddSelectedOnOpen} 
-                />
-                <HelpImproveBeaverToggle
-                    checked={consentToShare}
-                    onChange={handleConsentChange}
-                />
-                <EmailToggle
-                    checked={emailNotifications}
-                    onChange={handleEmailNotificationsChange}
-                />
-            </div>
-
-            {/* --- Permissions Section --- */}
-            <SectionHeader>Permissions</SectionHeader>
-            <div className="text-sm font-color-secondary mb-3">
-                Control how Beaver handles actions that modify your Zotero library.
-            </div>
-            <div className="display-flex flex-col gap-3">
-                <DeferredToolPreferenceSetting
-                    toolName="edit_metadata"
-                    label="Metadata Edits"
-                    description="Changes to item titles, authors, abstracts, and other metadata"
-                />
-                <DeferredToolPreferenceSetting
-                    toolName="create_items"
-                    label="Item Imports"
-                    description="Importing new items from external sources"
-                />
-                <DeferredToolPreferenceSetting
-                    toolName="create_collection"
-                    label="Library Organization"
-                    description="Creating collections and organizing items into collections and by tags"
-                />
-            </div>
-
-            {/* --- API Keys Section --- */}
-            <SectionHeader>API Keys</SectionHeader>
-            <div className="text-sm font-color-secondary mb-3">
-                Add your own API key to use models from Google, Anthropic, and OpenAI.
-                When you use your own API key, your provider's terms and data-use rules apply.
-                Your keys are only stored locally and never on our server. Learn more about API keys
-                <a onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/api-keys')} target="_blank" rel="noopener noreferrer" className="text-link"> here</a>.
-            </div>
-            <div className="display-flex flex-col gap-3">
-                <ApiKeyInput
-                    id="gemini-key"
-                    label="Google API Key"
-                    provider="google"
-                    value={geminiKey}
-                    onChange={setGeminiKey}
-                    savePref={(newValue) => handlePrefSave('googleGenerativeAiApiKey', newValue)}
-                    placeholder="Enter your Google AI Studio API Key"
-                    linkUrl="https://aistudio.google.com/app/apikey"
-                />
-                <ApiKeyInput
-                    id="openai-key"
-                    label="OpenAI API Key"
-                    provider="openai"
-                    value={openaiKey}
-                    onChange={setOpenaiKey}
-                    savePref={(newValue) => handlePrefSave('openAiApiKey', newValue)}
-                    placeholder="Enter your OpenAI API Key"
-                    linkUrl="https://platform.openai.com/api-keys"
-                />
-                <ApiKeyInput
-                    id="anthropic-key"
-                    label="Anthropic API Key"
-                    provider="anthropic"
-                    value={anthropicKey}
-                    onChange={setAnthropicKey}
-                    savePref={(newValue) => handlePrefSave('anthropicApiKey', newValue)}
-                    placeholder="Enter your Anthropic API Key"
-                    linkUrl="https://console.anthropic.com/settings/keys"
-                />
-            </div>
-
-            <div className={`display-flex flex-col items-start gap-1 mt-2 mb-1`}>
-                <div className="display-flex flex-row items-start gap-1 flex-1 w-full">
-                    <label htmlFor="custom-models" className="text-sm font-semibold font-color-primary">Additional Model Providers</label>
-                </div>
-                <div className="text-sm font-color-secondary mb-3">
-                    Additional model providers and custom endpoints are supported via advanced settings. Learn more about custom models
-                    <a onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/custom-models')} target="_blank" rel="noopener noreferrer" className="text-link"> here</a>.
-                </div>
-            </div>
-
-
-            {/* --- Custom Instructions Section --- */}
-            <SectionHeader>Custom Instructions</SectionHeader>
-            <div className="text-sm font-color-secondary mb-2">
-                Custom instructions are added to all chats and help steer responses based on your preferences. (Max ~250 words)
-            </div>
-            <textarea
-                value={customInstructions}
-                onChange={handleCustomInstructionsChange}
-                placeholder="Enter custom instructions here..."
-                rows={5}
-                className="p-2 border preference-input resize-y text-sm"
-                maxLength={1500}
-            />
-            {/* TODO: Add word/char counter */}
-
-            {/* --- Custom Prompts Section --- */}
-            <SectionHeader>Custom Prompts</SectionHeader>
-            <div className="text-sm font-color-secondary mb-2">
-                Configure up to 9 custom prompts with keyboard shortcuts ({Zotero.isMac ? '⌘^1-⌘^9' : 'Ctrl+Win+1-9'}). Enable library search or set conditions based on attachments.
-            </div>
-            <div className="display-flex flex-col gap-5">
-                {customPrompts.map((prompt: CustomPrompt, index: number) => (
-                    <CustomPromptSettings
-                        key={index}
-                        index={index}
-                        prompt={prompt}
-                        onChange={handleCustomPromptChange}
-                        onRemove={handleRemovePrompt}
-                        availabilityNote={getCustomPromptAvailabilityNote(prompt)}
-                    />
-                ))}
-                
-                {/* Add Prompt Button */}
-                <div className="display-flex flex-row items-center justify-start">
+            <div className="display-flex flex-row gap-2 overflow-x-auto scrollbar pb-2">
+                {tabs.map((tab) => (
                     <Button
-                        variant="outline"
-                        onClick={handleAddPrompt}
-                        disabled={customPrompts.length >= 9}
-                        className="text-sm"
+                        key={tab.id}
+                        variant={tab.id === activeTab ? 'surface-light' : 'ghost-secondary'}
+                        className="fit-content text-sm"
+                        onClick={() => setActiveTab(tab.id)}
+                        ariaLabel={`Open ${tab.label} tab`}
                     >
-                        Add Prompt
+                        {tab.label}
                     </Button>
-                </div>
+                ))}
             </div>
+
+            {activeTab === 'account' && (
+                <>
+                    <SectionHeader>Account</SectionHeader>
+                    {user ? (
+                        <div className="display-flex flex-col gap-3">
+                            <div className="display-flex flex-row items-center gap-2">
+                                <div className="font-color-secondary">Signed in as:</div>
+                                <div className="font-color-primary">{user.email}</div>
+                            </div>
+                            <div className="display-flex flex-row items-center gap-2">
+                                <div className="font-color-secondary">Plan:</div>
+                                <div className="font-color-primary">{profileWithPlan?.plan.display_name || 'Unknown'}</div>
+                            </div>
+                            {isDatabaseSyncSupported && profileBalance.pagesRemaining !== undefined &&
+                                <div className="display-flex flex-row items-center gap-2">
+                                    <div className="font-color-secondary">Remaining Page Balance:</div>
+                                    <div className="font-color-primary">{profileBalance.pagesRemaining.toLocaleString() || 'Unknown'}</div>
+                                </div>
+                            }
+                            <div className="display-flex flex-row items-center gap-2">
+                                <div className="font-color-secondary">Remaining Chat Credits:</div>
+                                <div className="font-color-primary">{remainingBeaverCredits.toLocaleString() || 'Unknown'}</div>
+                            </div>
+                            <div className="display-flex flex-row items-center gap-3 mt-2">
+                                <Button
+                                    variant="outline"
+                                    icon={UserIcon}
+                                    onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/login')}
+                                >
+                                    Manage Account
+                                </Button>
+                                <Button variant="outline" icon={LogoutIcon} onClick={logout}>Logout</Button>
+                            </div>
+                            <div className="display-flex flex-row gap-1 items-start mt-15">
+                                <button
+                                    type="button"
+                                    onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/terms')}
+                                    className="text-link-muted text-sm"
+                                >
+                                    Terms of Service
+                                </button>
+                                <div className="font-color-secondary">|</div>
+                                <button
+                                    type="button"
+                                    onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/privacy-policy')}
+                                    className="text-link-muted text-sm"
+                                >
+                                    Privacy Policy
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="card p-3">
+                            <span className="font-color-secondary">You are not signed in.</span>
+                        </div>
+                    )}
+                </>
+            )}
+
+            {activeTab === 'sync' && (
+                <>
+                    {isDatabaseSyncSupported ? (
+                        <>
+                            <SectionHeader>Beaver Syncing</SectionHeader>
+                            <div className="display-flex flex-col gap-3">
+                                <SyncedLibraries />
+                                <div className="display-flex flex-row items-center gap-4 justify-end" style={{ marginRight: '1px' }}>
+                                    <Button
+                                        variant="outline"
+                                        rightIcon={verifyButtonProps.icon}
+                                        iconClassName={verifyButtonProps.iconClassName}
+                                        onClick={handleVerifySync}
+                                        disabled={verifyButtonProps.disabled}
+                                    >
+                                        {verifyButtonProps.text}
+                                    </Button>
+                                </div>
+                                <div className="mt-2">
+                                    <ZoteroSyncToggle
+                                        checked={localSyncToggle}
+                                        onChange={handleSyncToggleChange}
+                                        disabled={!isLibrarySynced(1) && !syncWithZotero}
+                                        error={!isLibrarySynced(1) && syncWithZotero}
+                                    />
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <SectionHeader>Search Index</SectionHeader>
+                            <div className="font-color-secondary mb-3">
+                                Beaver indexes your library locally for semantic search. Rebuilding the index will retry any failed items and reindex all libraries.
+                            </div>
+                            <div className="display-flex flex-col gap-3">
+                                <div className="display-flex flex-row items-center gap-4 justify-between">
+                                    <div className="display-flex flex-col gap-1">
+                                        {embeddingIndexState.failedItems > 0 && (
+                                            <div className="text-sm font-color-yellow">
+                                                {embeddingIndexState.failedItems} items failed to index
+                                            </div>
+                                        )}
+                                        {embeddingIndexState.status === 'error' && embeddingIndexState.error && (
+                                            <div className="text-sm font-color-red">
+                                                Error: {embeddingIndexState.error}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        rightIcon={rebuildIndexButtonProps.icon}
+                                        iconClassName={rebuildIndexButtonProps.iconClassName}
+                                        onClick={handleRebuildSearchIndex}
+                                        disabled={rebuildIndexButtonProps.disabled}
+                                        loading={isEmbeddingIndexing}
+                                    >
+                                        {rebuildIndexButtonProps.text}
+                                    </Button>
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </>
+            )}
+
+            {activeTab === 'general' && (
+                <>
+                    <SectionHeader>General Settings</SectionHeader>
+                    <div className="display-flex flex-col gap-3">
+                        <div className="display-flex flex-row gap-1 items-start mb-2">
+                            <div className="display-flex flex-col gap-1 flex-1">
+                                <label htmlFor="keyboard-shortcut" className="text-base font-color-primary">
+                                    Keyboard Shortcut Key
+                                </label>
+                                <div className="display-flex flex-col gap-05">
+                                    <div className="font-color-secondary text-sm">
+                                        Sidebar: {sidebarShortcutLabel} - Separate window: {windowShortcutLabel}
+                                    </div>
+                                    <div className="font-color-secondary text-sm">
+                                        Changes require restart
+                                    </div>
+                                </div>
+                            </div>
+                            <select
+                                id="keyboard-shortcut"
+                                value={keyboardShortcut}
+                                onChange={handleKeyboardShortcutChange}
+                                className="py-1 px-2 border preference-input text-sm"
+                                style={{ width: '40px', margin: '0px' }}
+                            >
+                                {'DGHJKMRVX'.split('').map((letter) => (
+                                    <option key={letter} value={letter}>
+                                        {letter}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        <CitationFormatToggle
+                            checked={citationFormat}
+                            onChange={setCitationFormat}
+                        />
+                        <AddSelectedItemsOnNewThreadToggle
+                            checked={addSelectedOnNewThread}
+                            onChange={setAddSelectedOnNewThread}
+                        />
+                        <AddSelectedItemsOnOpenToggle
+                            checked={addSelectedOnOpen}
+                            onChange={setAddSelectedOnOpen}
+                        />
+                        <HelpImproveBeaverToggle
+                            checked={consentToShare}
+                            onChange={handleConsentChange}
+                        />
+                        <EmailToggle
+                            checked={emailNotifications}
+                            onChange={handleEmailNotificationsChange}
+                        />
+                    </div>
+
+                    <SectionHeader>Permissions</SectionHeader>
+                    <div className="text-sm font-color-secondary mb-3">
+                        Control how Beaver handles actions that modify your Zotero library.
+                    </div>
+                    <div className="display-flex flex-col gap-3">
+                        <DeferredToolPreferenceSetting
+                            toolName="edit_metadata"
+                            label="Metadata Edits"
+                            description="Changes to item titles, authors, abstracts, and other metadata"
+                        />
+                        <DeferredToolPreferenceSetting
+                            toolName="create_items"
+                            label="Item Imports"
+                            description="Importing new items from external sources"
+                        />
+                        <DeferredToolPreferenceSetting
+                            toolName="create_collection"
+                            label="Library Organization"
+                            description="Creating collections and organizing items into collections and by tags"
+                        />
+                    </div>
+                </>
+            )}
+
+            {activeTab === 'models' && (
+                <>
+                    <SectionHeader>API Keys</SectionHeader>
+                    <div className="text-sm font-color-secondary mb-3">
+                        Add your own API key to use models from Google, Anthropic, and OpenAI.
+                        When you use your own API key, your provider's terms and data-use rules apply.
+                        Your keys are only stored locally and never on our server. Learn more about API keys
+                        <a onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/api-keys')} target="_blank" rel="noopener noreferrer" className="text-link"> here</a>.
+                    </div>
+                    <div className="display-flex flex-col gap-3">
+                        <ApiKeyInput
+                            id="gemini-key"
+                            label="Google API Key"
+                            provider="google"
+                            value={geminiKey}
+                            onChange={setGeminiKey}
+                            savePref={(newValue) => handlePrefSave('googleGenerativeAiApiKey', newValue)}
+                            placeholder="Enter your Google AI Studio API Key"
+                            linkUrl="https://aistudio.google.com/app/apikey"
+                        />
+                        <ApiKeyInput
+                            id="openai-key"
+                            label="OpenAI API Key"
+                            provider="openai"
+                            value={openaiKey}
+                            onChange={setOpenaiKey}
+                            savePref={(newValue) => handlePrefSave('openAiApiKey', newValue)}
+                            placeholder="Enter your OpenAI API Key"
+                            linkUrl="https://platform.openai.com/api-keys"
+                        />
+                        <ApiKeyInput
+                            id="anthropic-key"
+                            label="Anthropic API Key"
+                            provider="anthropic"
+                            value={anthropicKey}
+                            onChange={setAnthropicKey}
+                            savePref={(newValue) => handlePrefSave('anthropicApiKey', newValue)}
+                            placeholder="Enter your Anthropic API Key"
+                            linkUrl="https://console.anthropic.com/settings/keys"
+                        />
+                    </div>
+
+                    <div className="display-flex flex-col items-start gap-1 mt-2 mb-1">
+                        <div className="display-flex flex-row items-start gap-1 flex-1 w-full">
+                            <label htmlFor="custom-models" className="text-sm font-semibold font-color-primary">Additional Model Providers</label>
+                        </div>
+                        <div className="text-sm font-color-secondary mb-3">
+                            Additional model providers and custom endpoints are supported via advanced settings. Learn more about custom models
+                            <a onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/custom-models')} target="_blank" rel="noopener noreferrer" className="text-link"> here</a>.
+                        </div>
+                    </div>
+                </>
+            )}
+
+            {activeTab === 'prompts' && (
+                <>
+                    <SectionHeader>Custom Instructions</SectionHeader>
+                    <div className="text-sm font-color-secondary mb-2">
+                        Custom instructions are added to all chats and help steer responses based on your preferences. (Max ~250 words)
+                    </div>
+                    <textarea
+                        value={customInstructions}
+                        onChange={handleCustomInstructionsChange}
+                        placeholder="Enter custom instructions here..."
+                        rows={5}
+                        className="p-2 border preference-input resize-y text-sm"
+                        maxLength={1500}
+                    />
+                    <SectionHeader>Custom Prompts</SectionHeader>
+                    <div className="text-sm font-color-secondary mb-2">
+                        Configure up to 9 custom prompts with keyboard shortcuts ({Zotero.isMac ? '⌘^1-⌘^9' : 'Ctrl+Win+1-9'}). Enable library search or set conditions based on attachments.
+                    </div>
+                    <div className="display-flex flex-col gap-5">
+                        {customPrompts.map((prompt: CustomPrompt, index: number) => (
+                            <CustomPromptSettings
+                                key={index}
+                                index={index}
+                                prompt={prompt}
+                                onChange={handleCustomPromptChange}
+                                onRemove={handleRemovePrompt}
+                                availabilityNote={getCustomPromptAvailabilityNote(prompt)}
+                            />
+                        ))}
+                        <div className="display-flex flex-row items-center justify-start">
+                            <Button
+                                variant="outline"
+                                onClick={handleAddPrompt}
+                                disabled={customPrompts.length >= 9}
+                                className="text-sm"
+                            >
+                                Add Prompt
+                            </Button>
+                        </div>
+                    </div>
+                </>
+            )}
 
             {/* Spacer at the bottom */}
             <div style={{ height: "20px" }} />

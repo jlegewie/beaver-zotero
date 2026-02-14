@@ -7,6 +7,15 @@ export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
 export const isWebSearchEnabledAtom = atom(false);
 export const isPreferencePageVisibleAtom = atom(false);
+export type PreferencePageTab = 'account' | 'sync' | 'general' | 'models' | 'prompts';
+export const activePreferencePageTabAtom = atom<PreferencePageTab>('account');
+export const openPreferencePageAtTabAtom = atom(
+    null,
+    (_get, set, tab: PreferencePageTab) => {
+        set(activePreferencePageTabAtom, tab);
+        set(isPreferencePageVisibleAtom, true);
+    }
+);
 export const showFileStatusDetailsAtom = atom(false);
 
 // Error Report Dialog

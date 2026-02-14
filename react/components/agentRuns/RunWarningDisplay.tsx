@@ -5,7 +5,7 @@ import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { RunWarning, dismissWarningAtom } from '../../atoms/warnings';
-import { isPreferencePageVisibleAtom } from '../../atoms/ui';
+import { openPreferencePageAtTabAtom } from '../../atoms/ui';
 
 interface RunWarningDisplayProps {
     warning: RunWarning;
@@ -17,7 +17,7 @@ interface RunWarningDisplayProps {
  */
 export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning }) => {
     const dismissWarning = useSetAtom(dismissWarningAtom);
-    const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
+    const openPreferencePageAtTab = useSetAtom(openPreferencePageAtTabAtom);
 
     const handleDismiss = () => {
         dismissWarning(warning.id);
@@ -52,7 +52,7 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
                         variant="outline"
                         className="scale-90 mt-020"
                         rightIcon={SettingsIcon}
-                        onClick={() => setIsPreferencePageVisible(true)}
+                        onClick={() => openPreferencePageAtTab('models')}
                     >
                         Settings
                     </Button>
@@ -63,4 +63,3 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
 };
 
 export default RunWarningDisplay;
-
