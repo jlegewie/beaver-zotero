@@ -558,10 +558,10 @@ const PreferencePage: React.FC = () => {
                         </label>
                         <div className="display-flex flex-col gap-05">
                             <div className="font-color-secondary text-sm">
-                                Sidebar: {sidebarShortcutLabel}
+                                Sidebar: {sidebarShortcutLabel} - Separate window: {windowShortcutLabel}
                             </div>
                             <div className="font-color-secondary text-sm">
-                                Separate window: {windowShortcutLabel}
+                                Changes require restart
                             </div>
                         </div>
                     </div>
