@@ -426,7 +426,7 @@
 
 [id^="beaver-pane-"] .custom-prompt-edit-textarea {
     padding: 4px !important;
-    min-height: 50px;
+    min-height: 80px;
     resize: none;
     overflow-y: auto;
 }

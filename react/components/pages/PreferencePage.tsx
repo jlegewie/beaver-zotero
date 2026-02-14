@@ -952,22 +952,20 @@ const PreferencePage: React.FC = () => {
             {activeTab === 'prompts' && (
                 <>
                     <SectionLabel>Custom Instructions</SectionLabel>
-                    <SettingsGroup>
-                        <div style={{ padding: '8px 12px' }}>
-                            <div className="text-base font-color-secondary mb-2">
-                                Custom instructions are added to all chats and help steer responses. (Max ~250 words)
-                            </div>
-                            <textarea
-                                value={customInstructions}
-                                onChange={handleCustomInstructionsChange}
-                                placeholder="Enter custom instructions here..."
-                                rows={5}
-                                className="p-2 border preference-input resize-y text-sm"
-                                style={{ width: '100%', boxSizing: 'border-box' }}
-                                maxLength={1500}
-                            />
+                    <div className="custom-prompt-card" style={{ cursor: 'default' }}>
+                        <div className="font-color-secondary text-sm mb-2">
+                            Custom instructions are added to all chats and help steer responses. (Max ~250 words)
                         </div>
-                    </SettingsGroup>
+                        <textarea
+                            value={customInstructions}
+                            onChange={handleCustomInstructionsChange}
+                            placeholder="Enter custom instructions here..."
+                            rows={5}
+                            className="chat-input custom-prompt-edit-textarea text-sm resize-y"
+                            style={{ width: '100%', boxSizing: 'border-box' }}
+                            maxLength={1500}
+                        />
+                    </div>
 
                     <div className="display-flex flex-row items-end justify-between">
                         <SectionLabel>Custom Prompts</SectionLabel>
