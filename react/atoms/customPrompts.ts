@@ -1,7 +1,7 @@
 /**
  * Custom Prompts Atoms
  *
- * Reactive Jotai atoms for custom prompts, replacing imperative reads from
+ * Reactive Jotai atoms for custom prompts (actions), replacing imperative reads from
  * Zotero preferences. Follows the same pattern as deferredToolPreferences.ts:
  * a base atom initialised from prefs, a write atom that updates both atom and
  * prefs, and derived atoms for filtered / projected views.

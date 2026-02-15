@@ -105,7 +105,7 @@ Beaver explores your library using different tools. A clean library helps it fin
 
 1. **Keep Zotero organized**: Clear filenames (e.g., `main_article.pdf`, `appendix.pdf`, `book_review.pdf`) help Beaver distinguish document types and improve retrieval accuracy.
 
-2. **Use custom prompts**: Add details in Preferences → Custom Prompt. This text is included in every conversation and helps tailor results to your context.
+2. **Use actions** (previously custom prompts): Add details in Preferences → Actions. This text is included in every conversation and helps tailor results to your context.
 
 3. **Help improve Beaver**: Consider enabling anonymized data sharing in account settings.
 
