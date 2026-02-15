@@ -35,6 +35,9 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
     const titleInputRef = useRef<HTMLInputElement | null>(null);
     const cardRef = useRef<HTMLDivElement | null>(null);
     const previousPromptRef = useRef(prompt);
+    // Track when the shortcut <select> dropdown is open so the click-outside
+    // handler doesn't fire (native popup renders outside the card's DOM tree).
+    const isSelectOpenRef = useRef(false);
     // Ref to hold latest draft values so the click-outside listener doesn't re-register on every keystroke
     const draftRef = useRef({ editTitle, editText, editRequiresAttachment, editShortcut });
     useEffect(() => {
@@ -60,6 +63,9 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
         if (!doc) return;
 
         const handleClickOutside = (e: MouseEvent) => {
+            // Skip if the shortcut select dropdown is open — its native popup
+            // renders outside the card DOM, so contains() returns false.
+            if (isSelectOpenRef.current) return;
             if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
                 const { editTitle: title, editText: text, editRequiresAttachment: reqAttach, editShortcut: shortcut } = draftRef.current;
                 // New prompt that's still empty — remove it (same as Cancel)
@@ -224,8 +230,15 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
                         onChange={(e) => {
                             const val = e.target.value;
                             setEditShortcut(val === '' ? undefined : Number(val));
+                            requestAnimationFrame(() => { isSelectOpenRef.current = false; });
                         }}
-                        onMouseDown={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => {
+                            e.stopPropagation();
+                            isSelectOpenRef.current = true;
+                        }}
+                        onBlur={() => {
+                            requestAnimationFrame(() => { isSelectOpenRef.current = false; });
+                        }}
                         className="font-color-tertiary text-xs flex-shrink-0 preference-input"
                         style={{ padding: '1px 2px', margin: 0, width: 'auto', minWidth: '58px' }}
                     >
