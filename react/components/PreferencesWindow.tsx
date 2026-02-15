@@ -16,10 +16,8 @@ const PreferencesWindow: React.FC<PreferencesWindowProps> = ({ initialTab }) => 
         // Signal that preferences are visible (used by useProfileSync)
         setPreferencePageVisible(true);
 
-        // Set the initial tab if provided
-        if (initialTab) {
-            setActiveTab(initialTab);
-        }
+        // Set the initial tab, defaulting to 'general' for generic opens
+        setActiveTab(initialTab || 'general');
 
         // Register global function so BeaverUIFactory can switch tabs on already-open window
         (Zotero as any).__beaverOpenPreferencesTab = (tab: PreferencePageTab) => {
