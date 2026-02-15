@@ -514,7 +514,8 @@ const PreferencePage: React.FC = () => {
                 {/* <Button variant="outline" rightIcon={CancelIcon} onClick={() => togglePreferencePage((prev) => !prev)} className="mt-1">Close</Button> */}
             </div>
 
-            <div className="display-flex flex-row flex-wrap gap-1 items-center pb-1 mt-1">
+
+            <div className="display-flex flex-row flex-wrap gap-1 items-center pb-1 mt-2">
                 {tabs.map((tab) => (
                     <button
                         key={tab.id}
@@ -522,7 +523,7 @@ const PreferencePage: React.FC = () => {
                         onClick={() => setActiveTab(tab.id)}
                         aria-label={`Open ${tab.label} tab`}
                         aria-pressed={tab.id === activeTab}
-                        className="text-sm"
+                        className="text-base"
                         style={{
                             border: '1px solid var(--fill-quarternary)',
                             borderRadius: '4px',
