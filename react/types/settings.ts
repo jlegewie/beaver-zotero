@@ -1,4 +1,4 @@
-import { getPref } from "../../src/utils/prefs";
+import { getPref, setPref } from "../../src/utils/prefs";
 import { store } from "../store";
 import { addPopupMessageAtom } from "../utils/popupMessageUtils";
 import { ProcessingMode } from "./profile";
@@ -124,19 +124,46 @@ export const isCustomPrompt = (obj: any): obj is CustomPrompt => {
     );
 };
 
+/** Current storage format version for custom prompts. */
+const CUSTOM_PROMPTS_VERSION = 2;
+
 export const getCustomPromptsFromPreferences = (): CustomPrompt[] => {
     try {
         const raw = getPref('customPrompts');
         if (raw && typeof raw === 'string') {
-            const customPrompts = JSON.parse(raw as string);
-            if(!Array.isArray(customPrompts)) throw new Error("customPrompts preference must be an array");
-            const validated = customPrompts.filter(isCustomPrompt);
+            const parsed = JSON.parse(raw as string);
 
-            // Legacy migration: if no prompt has a `shortcut` property, auto-assign 1-9 based on position
-            const hasAnyShortcut = validated.some((p: any) => p.shortcut !== undefined);
+            let prompts: any[];
+            let isLegacy: boolean;
+
+            if (Array.isArray(parsed)) {
+                // Legacy format: bare array (version 1)
+                prompts = parsed;
+                isLegacy = true;
+            } else if (
+                typeof parsed === 'object' && parsed !== null &&
+                parsed.version >= CUSTOM_PROMPTS_VERSION && Array.isArray(parsed.prompts)
+            ) {
+                // Current versioned format
+                prompts = parsed.prompts;
+                isLegacy = false;
+            } else {
+                throw new Error("customPrompts preference has unrecognized format");
+            }
+
+            const validated = prompts.filter(isCustomPrompt);
+
+            // Legacy migration: auto-assign shortcuts 1-9 based on position
+            if (isLegacy) {
+                return validated.map((prompt, index) => ({
+                    ...prompt,
+                    ...(index < 9 ? { shortcut: index + 1 } : {}),
+                    index: index + 1,
+                } as CustomPrompt));
+            }
+
             return validated.map((prompt, index) => ({
                 ...prompt,
-                ...(!hasAnyShortcut && index < 9 ? { shortcut: index + 1 } : {}),
                 index: index + 1,
             } as CustomPrompt));
         }
@@ -145,6 +172,13 @@ export const getCustomPromptsFromPreferences = (): CustomPrompt[] => {
         return [];
     }
     return [];
+};
+
+/** Save custom prompts in the versioned format. Strips the `index` field (derived at load time). */
+export const saveCustomPromptsToPreferences = (prompts: CustomPrompt[]): void => {
+    const promptsToSave = prompts.map(({ index, ...prompt }) => prompt);
+    const data = { version: CUSTOM_PROMPTS_VERSION, prompts: promptsToSave };
+    setPref('customPrompts', JSON.stringify(data));
 };
 
 export interface CustomPromptAvailabilityContext {

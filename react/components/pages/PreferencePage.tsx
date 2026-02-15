@@ -8,7 +8,7 @@ import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
-import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
+import { getCustomPromptsFromPreferences, saveCustomPromptsToPreferences, CustomPrompt } from "../../types/settings";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
 import { 
     embeddingIndexStateAtom, 
@@ -173,10 +173,7 @@ const PreferencePage: React.FC = () => {
 
     // Helper function to save custom prompts array to preferences
     const saveCustomPromptsToPrefs = useCallback((prompts: CustomPrompt[]) => {
-        // Remove the index field before saving since it's derived from array position
-        const promptsToSave = prompts.map(({ index, ...prompt }) => prompt);
-        const promptsJson = JSON.stringify(promptsToSave);
-        setPref('customPrompts', promptsJson);
+        saveCustomPromptsToPreferences(prompts);
         logger('Saved custom prompts to preferences');
     }, []);
 
