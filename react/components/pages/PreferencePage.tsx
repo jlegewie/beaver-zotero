@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom } from "../../atoms/profile";
@@ -465,12 +465,12 @@ const PreferencePage: React.FC = () => {
     const rebuildIndexButtonProps = getRebuildIndexButtonProps();
     const sidebarShortcutLabel = `${Zotero.isMac ? '⌘' : 'Ctrl'}+${keyboardShortcut}`;
     const windowShortcutLabel = `${Zotero.isMac ? '⌘⇧' : 'Ctrl+Shift'}+${keyboardShortcut}`;
-    const tabs = useMemo<{ id: PreferencePageTab; label: string }[]>(() => [
-        { id: 'general', label: 'General' },
-        { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search' },
-        { id: 'permissions', label: 'Permissions' },
-        { id: 'models', label: 'Models & API Keys' },
-        { id: 'prompts', label: 'Prompts' },
+    const tabs = useMemo<{ id: PreferencePageTab; label: string; icon: React.ComponentType<React.SVGProps<SVGSVGElement>> | React.ReactElement }[]>(() => [
+        { id: 'general', label: 'General', icon: SettingsIcon },
+        { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search', icon: isDatabaseSyncSupported ? SyncIcon : SearchIcon },
+        { id: 'permissions', label: 'Permissions', icon: LockIcon },
+        { id: 'models', label: 'API Keys', icon: KeyIcon },
+        { id: 'prompts', label: 'Prompt & Actions', icon: ZapIcon },
     ], [isDatabaseSyncSupported]);
 
     // Backward compatibility for existing entry points that still request "account".
@@ -511,11 +511,19 @@ const PreferencePage: React.FC = () => {
                             color: tab.id === activeTab ? 'var(--fill-primary)' : 'var(--fill-secondary)',
                             padding: '4px 12px',
                             minHeight: '20px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
                             lineHeight: 1.2,
+                            gap: '4px',
                             whiteSpace: 'nowrap',
                             transition: 'background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease'
                         }}
                     >
+                        <Icon
+                            icon={tab.icon as React.ComponentType<React.SVGProps<SVGSVGElement>>}
+                            className="scale-95 -ml-05"
+                        />
                         {tab.label}
                     </button>
                 ))}
@@ -949,17 +957,19 @@ const PreferencePage: React.FC = () => {
                     </div>
 
                     <div className="display-flex flex-row items-end justify-between">
-                        <SectionLabel>Custom Prompts</SectionLabel>
+                        <SectionLabel>Actions</SectionLabel>
                         <Button
                             variant="outline"
                             onClick={handleAddPrompt}
                             className="text-sm mb-15"
                         >
-                            Add Prompt
+                            Add Action
                         </Button>
                     </div>
                     <div className="text-sm font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
-                        Create custom prompts and optionally assign keyboard shortcuts ({Zotero.isMac ? '⌘^1-⌘^9' : 'Ctrl+Win+1-9'}). Enable library search or set conditions based on attachments.
+                        {/* Actions are reusable prompts you define once and trigger anytime from chat, the right-click menu, or automatically. */}
+                        {/* Actions are reusable prompts that tell the agent what to do with your research. You can trigger them manually with / in chat, from the right-click menu on any item, or set them to run automatically. */}
+                        Actions are reusable prompts you define once and trigger anytime.
                     </div>
                     <div className="display-flex flex-col gap-4">
                         {customPrompts.map((prompt: CustomPrompt, index: number) => (
