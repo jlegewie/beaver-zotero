@@ -273,13 +273,21 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.11.4",
-        title: "Beaver Version 0.11.4",
-        featureList: [
+        title: "New in Beaver 0.11.4",
+        steps: [
+            {
+                title: "A New Brain for Beaver",
+                description: "Beaver now uses a new, more powerful default model. This is rolling out as a test in 0.11.4 and will be fully integrated in 0.12."
+            },
             {
                 title: "Keyboard shortcut updated",
                 description: "Toggle Beaver with ⌘J (Ctrl+J on Windows/Linux). Open in a separate window with ⌘⇧J (Ctrl+Shift+J on Windows/Linux).",
             },
-        ],
+            {
+                title: "Redesigned settings page",
+                description: "The settings page has been redesigned to be more user-friendly and intuitive.",
+            }
+        ]
     },
 ];
 
