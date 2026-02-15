@@ -174,7 +174,7 @@ const PreferencePage: React.FC = () => {
     // Helper function to save custom prompts array to preferences
     const saveCustomPromptsToPrefs = useCallback((prompts: CustomPrompt[]) => {
         saveCustomPromptsToPreferences(prompts);
-        logger('Saved custom prompts to preferences');
+        logger('Saved custom prompts to preferences', prompts);
     }, []);
 
     // --- Save Preferences ---
