@@ -74,12 +74,12 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                         onClick={() => handleCustomPrompt(prompt)}
                         disabled={isPending || (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment)}
                     >
-                        <span className={`text-sm mr-2 ${prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
-                            {`${shortcutKey}${prompt.index}`}
-                        </span>
-                        <span
-                            className={`text-base truncate
-                                `}>
+                        {prompt.shortcut != null && (
+                            <span className={`text-sm mr-2 ${prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
+                                {`${shortcutKey}${prompt.shortcut}`}
+                            </span>
+                        )}
+                        <span className="text-base truncate">
                             {prompt.title}
                         </span>
                     </Button>

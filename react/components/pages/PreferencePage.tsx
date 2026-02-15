@@ -223,21 +223,19 @@ const PreferencePage: React.FC = () => {
 
     // --- Add Prompt Handler ---
     const handleAddPrompt = useCallback(() => {
-        if (customPrompts.length >= 9) return; // Safety check
-        
         const newPrompt: CustomPrompt = {
             title: "",
             text: "",
             librarySearch: false,
             requiresAttachment: false
         };
-        
+
         setCustomPrompts((currentPrompts) => {
             const newPrompts = [...currentPrompts, newPrompt];
             saveCustomPromptsToPrefs(newPrompts);
             return newPrompts;
         });
-    }, [customPrompts.length, saveCustomPromptsToPrefs]);
+    }, [saveCustomPromptsToPrefs]);
 
     // --- Verify Sync Handler ---
     const handleVerifySync = useCallback(async () => {
@@ -973,14 +971,13 @@ const PreferencePage: React.FC = () => {
                         <Button
                             variant="outline"
                             onClick={handleAddPrompt}
-                            disabled={customPrompts.length >= 9}
                             className="text-sm mb-15"
                         >
                             Add Prompt
                         </Button>
                     </div>
                     <div className="text-sm font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
-                        Configure up to 9 custom prompts with keyboard shortcuts ({Zotero.isMac ? '⌘^1-⌘^9' : 'Ctrl+Win+1-9'}). Enable library search or set conditions based on attachments.
+                        Create custom prompts and optionally assign keyboard shortcuts ({Zotero.isMac ? '⌘^1-⌘^9' : 'Ctrl+Win+1-9'}). Enable library search or set conditions based on attachments.
                     </div>
                     <div className="display-flex flex-col gap-4">
                         {customPrompts.map((prompt: CustomPrompt, index: number) => (
@@ -991,6 +988,7 @@ const PreferencePage: React.FC = () => {
                                 onChange={handleCustomPromptChange}
                                 onRemove={handleRemovePrompt}
                                 availabilityNote={getCustomPromptAvailabilityNote(prompt)}
+                                usedShortcuts={customPrompts.filter(p => p.shortcut != null).map(p => p.shortcut!)}
                             />
                         ))}
                         {/* <div className="display-flex flex-row items-center justify-start">

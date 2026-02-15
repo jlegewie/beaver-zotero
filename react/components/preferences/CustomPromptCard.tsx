@@ -10,6 +10,7 @@ interface CustomPromptCardProps {
     onChange: (index: number, updatedPrompt: CustomPrompt) => void;
     onRemove: (index: number) => void;
     availabilityNote?: string;
+    usedShortcuts: number[];
 }
 
 /**
@@ -22,21 +23,23 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
     prompt,
     onChange,
     onRemove,
-    availabilityNote
+    availabilityNote,
+    usedShortcuts
 }) => {
     const [isEditing, setIsEditing] = useState(() => !prompt.title && !prompt.text);
     const [editTitle, setEditTitle] = useState(prompt.title);
     const [editText, setEditText] = useState(prompt.text);
     const [editRequiresAttachment, setEditRequiresAttachment] = useState(prompt.requiresAttachment);
+    const [editShortcut, setEditShortcut] = useState<number | undefined>(prompt.shortcut);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const titleInputRef = useRef<HTMLInputElement | null>(null);
     const cardRef = useRef<HTMLDivElement | null>(null);
     const previousPromptRef = useRef(prompt);
     // Ref to hold latest draft values so the click-outside listener doesn't re-register on every keystroke
-    const draftRef = useRef({ editTitle, editText, editRequiresAttachment });
+    const draftRef = useRef({ editTitle, editText, editRequiresAttachment, editShortcut });
     useEffect(() => {
-        draftRef.current = { editTitle, editText, editRequiresAttachment };
-    }, [editTitle, editText, editRequiresAttachment]);
+        draftRef.current = { editTitle, editText, editRequiresAttachment, editShortcut };
+    }, [editTitle, editText, editRequiresAttachment, editShortcut]);
 
     // Sync local draft state when prompt changes, and always reset if this card now points to a different prompt.
     useEffect(() => {
@@ -45,9 +48,10 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
             setEditTitle(prompt.title);
             setEditText(prompt.text);
             setEditRequiresAttachment(prompt.requiresAttachment);
+            setEditShortcut(prompt.shortcut);
         }
         previousPromptRef.current = prompt;
-    }, [prompt, prompt.title, prompt.text, prompt.requiresAttachment, isEditing]);
+    }, [prompt, prompt.title, prompt.text, prompt.requiresAttachment, prompt.shortcut, isEditing]);
 
     // Close edit mode on click outside — auto-saves, or removes if the prompt is empty
     useEffect(() => {
@@ -57,13 +61,13 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
 
         const handleClickOutside = (e: MouseEvent) => {
             if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
-                const { editTitle: title, editText: text, editRequiresAttachment: reqAttach } = draftRef.current;
+                const { editTitle: title, editText: text, editRequiresAttachment: reqAttach, editShortcut: shortcut } = draftRef.current;
                 // New prompt that's still empty — remove it (same as Cancel)
                 if (!title && !text && !prompt.title && !prompt.text) {
                     onRemove(index);
                 } else {
                     // Auto-save current draft
-                    onChange(index, { ...prompt, title, text, requiresAttachment: reqAttach });
+                    onChange(index, { ...prompt, title, text, requiresAttachment: reqAttach, shortcut });
                 }
                 setIsEditing(false);
             }
@@ -99,6 +103,7 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
             setEditTitle(prompt.title);
             setEditText(prompt.text);
             setEditRequiresAttachment(prompt.requiresAttachment);
+            setEditShortcut(prompt.shortcut);
             setIsEditing(true);
         }
     }, [isEditing, prompt]);
@@ -111,6 +116,7 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
         setEditTitle(prompt.title);
         setEditText(prompt.text);
         setEditRequiresAttachment(prompt.requiresAttachment);
+        setEditShortcut(prompt.shortcut);
         setIsEditing(false);
     }, [prompt, index, onRemove]);
 
@@ -120,17 +126,20 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
             title: editTitle,
             text: editText,
             requiresAttachment: editRequiresAttachment,
+            shortcut: editShortcut,
         };
         onChange(index, updated);
         setIsEditing(false);
-    }, [prompt, editTitle, editText, editRequiresAttachment, index, onChange]);
+    }, [prompt, editTitle, editText, editRequiresAttachment, editShortcut, index, onChange]);
 
     const handleRemove = useCallback(() => {
         onRemove(index);
         setIsEditing(false);
     }, [index, onRemove]);
 
-    const shortcutLabel = Zotero.isMac ? `⌘^${index + 1}` : `Ctrl+Win+${index + 1}`;
+    const shortcutLabel = prompt.shortcut != null
+        ? (Zotero.isMac ? `⌘^${prompt.shortcut}` : `Ctrl+Win+${prompt.shortcut}`)
+        : undefined;
 
     // --- View mode ---
     if (!isEditing) {
@@ -144,7 +153,7 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
                     <div className="display-flex flex-col flex-1 min-w-0" style={{ gap: '3px' }}>
                         <div className="font-color-primary text-sm font-medium">
                             {prompt.title || <span className="font-color-tertiary">Untitled prompt</span>}
-                            <span className="font-color-tertiary text-xs ml-2">{shortcutLabel}</span>
+                            {shortcutLabel && <span className="font-color-tertiary text-xs ml-2">{shortcutLabel}</span>}
                         </div>
                         {prompt.text && (
                             <div className="font-color-secondary text-sm custom-prompt-card-preview">
@@ -175,7 +184,26 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
                     placeholder="Prompt title..."
                     className="chat-input text-sm font-medium font-color-primary custom-prompt-edit-title"
                 />
-                <span className="font-color-tertiary text-xs flex-shrink-0">{shortcutLabel}</span>
+                <select
+                    value={editShortcut ?? ''}
+                    onChange={(e) => {
+                        const val = e.target.value;
+                        setEditShortcut(val === '' ? undefined : Number(val));
+                    }}
+                    className="font-color-tertiary text-xs flex-shrink-0 preference-input"
+                    style={{ padding: '1px 2px', margin: 0, width: 'auto', minWidth: '58px' }}
+                >
+                    <option value="">None</option>
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+                        <option
+                            key={n}
+                            value={n}
+                            disabled={usedShortcuts.includes(n) && prompt.shortcut !== n}
+                        >
+                            {Zotero.isMac ? `⌘^${n}` : `Ctrl+Win+${n}`}
+                        </option>
+                    ))}
+                </select>
                 <IconButton
                     variant="ghost-secondary"
                     icon={CancelIcon}

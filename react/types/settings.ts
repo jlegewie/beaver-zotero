@@ -106,6 +106,7 @@ export interface CustomPrompt {
     requiresAttachment: boolean;
     requiresDatabaseSync?: boolean;
     id_model?: string;
+    shortcut?: number;
     index?: number;
 }
 
@@ -118,7 +119,8 @@ export const isCustomPrompt = (obj: any): obj is CustomPrompt => {
         typeof obj.librarySearch === 'boolean' &&
         typeof obj.requiresAttachment === 'boolean' &&
         (obj.requiresDatabaseSync === undefined || typeof obj.requiresDatabaseSync === 'boolean') &&
-        (obj.id_model === undefined || typeof obj.id_model === 'string')
+        (obj.id_model === undefined || typeof obj.id_model === 'string') &&
+        (obj.shortcut === undefined || (typeof obj.shortcut === 'number' && obj.shortcut >= 1 && obj.shortcut <= 9))
     );
 };
 
@@ -128,12 +130,15 @@ export const getCustomPromptsFromPreferences = (): CustomPrompt[] => {
         if (raw && typeof raw === 'string') {
             const customPrompts = JSON.parse(raw as string);
             if(!Array.isArray(customPrompts)) throw new Error("customPrompts preference must be an array");
-            return customPrompts
-                .filter(isCustomPrompt)
-                .map((prompt, index) => ({
-                    ...prompt,
-                    index: index + 1,
-                } as CustomPrompt));
+            const validated = customPrompts.filter(isCustomPrompt);
+
+            // Legacy migration: if no prompt has a `shortcut` property, auto-assign 1-9 based on position
+            const hasAnyShortcut = validated.some((p: any) => p.shortcut !== undefined);
+            return validated.map((prompt, index) => ({
+                ...prompt,
+                ...(!hasAnyShortcut && index < 9 ? { shortcut: index + 1 } : {}),
+                index: index + 1,
+            } as CustomPrompt));
         }
     } catch (e) {
         console.error("Error parsing customPrompts:", e);
@@ -165,6 +170,6 @@ export const getCustomPromptsForContext = (
         .filter((prompt) => isCustomPromptAvailable(prompt, context))
         .map((prompt, index) => ({
             ...prompt,
-            index: index + 1
+            index: index + 1,
         }));
 };
