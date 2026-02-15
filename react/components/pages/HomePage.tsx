@@ -55,9 +55,9 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
             {/* Custom Prompt */}
             {prompts.length > 0 && (
                 <>
-                <div className="display-flex flex-row justify-between items-center">
+                <div className="display-flex flex-row justify-between items-center mb-2">
                     {/* <div className="font-semibold text-lg mb-1">Custom Prompts</div> */}
-                    <div className="text-xl font-semibold">Custom Prompts</div>
+                    <div className="text-xl font-semibold">How can I help you?</div>
                     <Button variant="outline" className="scale-85 fit-content" onClick={() => openPreferencesWindow('prompts')}> Edit </Button>
                 </div>
                 {/* <div className="display-flex flex-col items-start mb-4">
@@ -66,10 +66,11 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                 {prompts.map((prompt) => (
                     <Button
                         key={prompt.id || prompt.index}
-                        variant="ghost-secondary"
+                        variant="ghost"
                         onClick={() => handleCustomPrompt(prompt)}
                         disabled={isPending || (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment)}
                         className="w-full justify-between"
+                        style={{ padding: '6px 8px' }}
                     >
                         <span className="text-base truncate">
                             {prompt.title}
