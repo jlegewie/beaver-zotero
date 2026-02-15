@@ -184,26 +184,6 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
                     placeholder="Prompt title..."
                     className="chat-input text-sm font-medium font-color-primary custom-prompt-edit-title"
                 />
-                <select
-                    value={editShortcut ?? ''}
-                    onChange={(e) => {
-                        const val = e.target.value;
-                        setEditShortcut(val === '' ? undefined : Number(val));
-                    }}
-                    className="font-color-tertiary text-xs flex-shrink-0 preference-input"
-                    style={{ padding: '1px 2px', margin: 0, width: 'auto', minWidth: '58px' }}
-                >
-                    <option value="">None</option>
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
-                        <option
-                            key={n}
-                            value={n}
-                            disabled={usedShortcuts.includes(n) && prompt.shortcut !== n}
-                        >
-                            {Zotero.isMac ? `⌘^${n}` : `Ctrl+Win+${n}`}
-                        </option>
-                    ))}
-                </select>
                 <IconButton
                     variant="ghost-secondary"
                     icon={CancelIcon}
@@ -229,15 +209,38 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
 
             {/* Options and action buttons */}
             <div className="display-flex flex-row items-center justify-between mt-2">
-                <label className={`display-flex items-center gap-05 text-sm ${editRequiresAttachment ? 'font-color-primary' : 'font-color-secondary'} cursor-pointer`}>
-                    <input
-                        type="checkbox"
-                        checked={editRequiresAttachment}
-                        onChange={(e) => setEditRequiresAttachment(e.target.checked)}
-                        className="scale-90"
-                    />
-                    Requires Attachment
-                </label>
+                <div className="display-flex flex-row items-center gap-3">
+                    <label className={`display-flex items-center gap-05 text-sm ${editRequiresAttachment ? 'font-color-primary' : 'font-color-secondary'} cursor-pointer`}>
+                        <input
+                            type="checkbox"
+                            checked={editRequiresAttachment}
+                            onChange={(e) => setEditRequiresAttachment(e.target.checked)}
+                            className="scale-90"
+                        />
+                        Requires Attachment
+                    </label>
+                    <select
+                        value={editShortcut ?? ''}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            setEditShortcut(val === '' ? undefined : Number(val));
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="font-color-tertiary text-xs flex-shrink-0 preference-input"
+                        style={{ padding: '1px 2px', margin: 0, width: 'auto', minWidth: '58px' }}
+                    >
+                        <option value="">No shortcut</option>
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+                            <option
+                                key={n}
+                                value={n}
+                                disabled={usedShortcuts.includes(n) && prompt.shortcut !== n}
+                            >
+                                {Zotero.isMac ? `⌘^${n}` : `Ctrl+Win+${n}`}
+                            </option>
+                        ))}
+                    </select>
+                </div>
 
                 <div className="display-flex flex-row items-center gap-3">
                     <Button
