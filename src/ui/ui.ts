@@ -402,11 +402,8 @@ export class BeaverUIFactory {
         try {
             const wm = Services.wm;
             const enumerator = wm.getEnumerator('beaver:preferences');
-            while (enumerator.hasMoreElements()) {
-                const win = enumerator.getNext() as Window;
-                if (win.name === BEAVER_PREFERENCES_WINDOW_NAME) {
-                    return win;
-                }
+            if (enumerator.hasMoreElements()) {
+                return enumerator.getNext() as Window;
             }
         } catch (e) {
             // Silently handle errors
