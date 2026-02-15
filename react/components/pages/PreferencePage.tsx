@@ -66,7 +66,7 @@ const SettingsRow: React.FC<SettingsRowProps> = ({
         <div className="display-flex flex-col gap-05 flex-1 min-w-0">
             <div className="font-color-primary text-base font-medium">{title}</div>
             {description && (
-                <div className="font-color-secondary text-sm">{description}</div>
+                <div className="font-color-secondary text-base">{description}</div>
             )}
         </div>
         {control && (
@@ -506,7 +506,7 @@ const PreferencePage: React.FC = () => {
             className="flex-1 min-h-0 overflow-y-auto scrollbar min-w-0"
         >
           <div className="display-flex flex-col gap-2 p-4">
-            <div className="display-flex flex-row items-center gap-3">
+            <div className="display-flex flex-row items-center gap-3 px-1">
                 <Icon icon={SettingsIcon} className="scale-16 mt-020" />
                 <h1 className="text-2xl font-semibold  font-color-primary" style={{ marginBlock: "0rem" }}>
                     Settings

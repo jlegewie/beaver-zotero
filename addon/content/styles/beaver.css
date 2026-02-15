@@ -66,6 +66,14 @@
     font-size: 13px !important;
 }
 
+/* Preferences window: sizing and constraints.
+ * Use !important to override Zotero.UIProperties.registerRoot() font scaling. */
+#beaver-preferences-window {
+    min-width: 550px;
+    min-height: 500px;
+    font-size: 13px !important;
+}
+
 /* Toolbar Button */
 #zotero-beaver-tb-chat-toggle {
     list-style-image: url("chrome://beaver/content/icons/magic-wand.svg");
