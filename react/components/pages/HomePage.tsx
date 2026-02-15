@@ -71,6 +71,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                         disabled={isPending || (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment)}
                         className="w-full justify-between"
                         style={{ padding: '6px 8px' }}
+                        title={(prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment) ? 'Requires attachments' : 'Run action'}
                     >
                         <span className="text-base truncate">
                             {prompt.title}
