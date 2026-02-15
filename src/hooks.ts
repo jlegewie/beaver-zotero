@@ -286,8 +286,9 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         ztoolkit.unregisterAll();
         addon.data.dialog?.window?.close();
 
-        // 9. Close separate Beaver window if open
+        // 9. Close separate Beaver and preferences windows if open
         BeaverUIFactory.closeBeaverWindow();
+        BeaverUIFactory.closePreferencesWindow();
 
         // 10. Unregister quit observer
         unregisterQuitObserver();
@@ -394,7 +395,8 @@ async function onShutdown(): Promise<void> {
         }
 
         BeaverUIFactory.closeBeaverWindow();
-        
+        BeaverUIFactory.closePreferencesWindow();
+
         unloadKatexStylesheet();
         unloadStylesheet();
         

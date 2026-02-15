@@ -1,5 +1,5 @@
 import React, { useRef, useCallback } from 'react';
-import { CancelIcon, PlusSignIcon, SettingsIcon, Share05Icon } from './icons/icons';
+import { CancelIcon, PlusSignIcon, Share05Icon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
@@ -13,9 +13,7 @@ import { isAuthenticatedAtom, isWaitingForProfileAtom } from '../atoms/auth';
 import ThreadsMenu from './ui/menus/ThreadsMenu';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
-import { isPreferencePageVisibleAtom } from '../atoms/ui';
 import { hasCompletedOnboardingAtom, isDatabaseSyncSupportedAtom, updateRequiredAtom, isProfileLoadedAtom } from '../atoms/profile';
-import Button from './ui/Button';
 import { getWindowFromElement } from '../utils/windowContext';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
 import { getPref } from '../../src/utils/prefs';
@@ -23,17 +21,14 @@ import { getPref } from '../../src/utils/prefs';
 
 interface HeaderProps {
     onClose?: () => void;
-    settingsPage?: boolean;
     isWindow?: boolean;
 }
 
-const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false }) => {
+const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
     const runsCount = useAtomValue(runsCountAtom);
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const isWaitingForProfile = useAtomValue(isWaitingForProfileAtom);
-    const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
-    const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const updateRequired = useAtomValue(updateRequiredAtom);
@@ -92,7 +87,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                             onClick={handleNewThread}
                             className="scale-14"
                             ariaLabel="New thread"
-                            disabled={runsCount === 0 && !isPreferencePageVisible}
+                            disabled={runsCount === 0}
                         />
                     </Tooltip>
                     </>
@@ -121,7 +116,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
             </div>
 
             {/* Database status, embedding index status, and user account menu */}
-            {isAuthenticated && !settingsPage && (
+            {isAuthenticated && (
                 <div className="display-flex gap-4">
                     {/* Show embedding index status for users without databaseSync */}
                     {!isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
@@ -144,18 +139,6 @@ const Header: React.FC<HeaderProps> = ({ onClose, settingsPage, isWindow = false
                         ariaLabel="User settings"
                     />
                 </div>
-            )}
-
-            {/* Close settings page */}
-            {isAuthenticated && settingsPage && (
-                <Button
-                    variant="outline"
-                    rightIcon={SettingsIcon}
-                    onClick={() => setPreferencePageVisible((prev) => !prev)}
-                    iconClassName="scale-12"
-                >
-                    <span className="text-base">Close</span>
-                </Button>
             )}
         </div>
     );

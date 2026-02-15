@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom } from "../../atoms/profile";
@@ -66,7 +66,7 @@ const SettingsRow: React.FC<SettingsRowProps> = ({
         <div className="display-flex flex-col gap-05 flex-1 min-w-0">
             <div className="font-color-primary text-base font-medium">{title}</div>
             {description && (
-                <div className="font-color-secondary text-sm">{description}</div>
+                <div className="font-color-secondary text-base">{description}</div>
             )}
         </div>
         {control && (
@@ -489,8 +489,7 @@ const PreferencePage: React.FC = () => {
         { id: 'general', label: 'General' },
         { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search' },
         { id: 'permissions', label: 'Permissions' },
-        // { id: 'models', label: 'Models & API Keys' },
-        { id: 'models', label: 'API Keys' },
+        { id: 'models', label: 'Models & API Keys' },
         { id: 'prompts', label: 'Prompts' },
     ], [isDatabaseSyncSupported]);
 
@@ -507,14 +506,16 @@ const PreferencePage: React.FC = () => {
             className="flex-1 min-h-0 overflow-y-auto scrollbar min-w-0"
         >
           <div className="display-flex flex-col gap-2 p-4">
-            <div className="display-flex flex-row items-center gap-4 justify-between">
+            <div className="display-flex flex-row items-center gap-3 px-1">
+                <Icon icon={SettingsIcon} className="scale-16 mt-020" />
                 <h1 className="text-2xl font-semibold  font-color-primary" style={{ marginBlock: "0rem" }}>
                     Settings
                 </h1>
                 {/* <Button variant="outline" rightIcon={CancelIcon} onClick={() => togglePreferencePage((prev) => !prev)} className="mt-1">Close</Button> */}
             </div>
 
-            <div className="display-flex flex-row flex-wrap gap-1 items-center pb-1 mt-1">
+
+            <div className="display-flex flex-row flex-wrap gap-1 items-center pb-1 mt-2">
                 {tabs.map((tab) => (
                     <button
                         key={tab.id}
@@ -522,13 +523,13 @@ const PreferencePage: React.FC = () => {
                         onClick={() => setActiveTab(tab.id)}
                         aria-label={`Open ${tab.label} tab`}
                         aria-pressed={tab.id === activeTab}
-                        className="text-sm"
+                        className="text-base"
                         style={{
                             border: '1px solid var(--fill-quarternary)',
                             borderRadius: '4px',
                             background: tab.id === activeTab ? 'var(--fill-quinary)' : 'transparent',
                             color: tab.id === activeTab ? 'var(--fill-primary)' : 'var(--fill-secondary)',
-                            padding: '4px 6px',
+                            padding: '4px 12px',
                             minHeight: '20px',
                             lineHeight: 1.2,
                             whiteSpace: 'nowrap',

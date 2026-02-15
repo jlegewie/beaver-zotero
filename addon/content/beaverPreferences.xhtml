@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero/skin/zotero.css" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero/skin/overlay.css" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero-platform/content/zotero.css" type="text/css"?>
+<?xml-stylesheet href="chrome://beaver/content/styles/beaver.css" type="text/css"?>
+<!DOCTYPE window>
+<window
+    id="beaver-preferences-window"
+    orient="vertical"
+    width="550"
+    height="650"
+    minwidth="550"
+    title="Beaver Settings"
+    persist="screenX screenY width height"
+    windowtype="beaver:preferences"
+    xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+    xmlns:html="http://www.w3.org/1999/xhtml"
+>
+    <script type="application/javascript" src="chrome://beaver/content/beaverPreferences.js"/>
+
+    <!-- React mount point -->
+    <html:div id="beaver-pane-preferences" class="display-flex flex-1 flex-col h-full w-full min-w-0" style="height: 100%; width: 100%; display: flex;"></html:div>
+</window>

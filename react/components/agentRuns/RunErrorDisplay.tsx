@@ -6,7 +6,7 @@ import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { regenerateFromRunAtom, resumeFromRunAtom } from '../../atoms/agentRunAtoms';
-import { openPreferencePageAtTabAtom } from '../../atoms/ui';
+import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { runErrorVisibilityAtom, setRunErrorVisibilityAtom } from '../../atoms/messageUIState';
 
 interface RunError {
@@ -83,7 +83,6 @@ const typeMap: Record<string, string> = {
 export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, isLastRun }) => {
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
     const resumeFromRun = useSetAtom(resumeFromRunAtom);
-    const openPreferencePageAtTab = useSetAtom(openPreferencePageAtTabAtom);
     
     // Visibility state
     const runErrorVisibility = useAtomValue(runErrorVisibilityAtom);
@@ -175,7 +174,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                         variant="error"
                                         iconClassName="font-color-red"
                                         rightIcon={SettingsIcon}
-                                        onClick={() => openPreferencePageAtTab('models')}
+                                        onClick={() => openPreferencesWindow('models')}
                                     >
                                         Settings
                                     </Button>

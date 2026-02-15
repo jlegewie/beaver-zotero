@@ -2,10 +2,11 @@ import React from 'react';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import { SettingsIcon, UserIcon, LogoutIcon, BugIcon } from '../../icons/icons';
-import { isPreferencePageVisibleAtom, isErrorReportDialogVisibleAtom } from '../../../atoms/ui';
+import { isErrorReportDialogVisibleAtom } from '../../../atoms/ui';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { hasCompletedOnboardingAtom, updateRequiredAtom } from '../../../atoms/profile';
 import { logoutAtom } from '../../../atoms/auth';
+import { openPreferencesWindow } from '../../../../src/ui/openPreferencesWindow';
 
 interface UserAccountMenuButtonProps {
     className?: string;
@@ -21,7 +22,6 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
 }) => {
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const updateRequired = useAtomValue(updateRequiredAtom);
-    const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
     const setErrorReportDialogVisible = useSetAtom(isErrorReportDialogVisibleAtom);
     const logout = useSetAtom(logoutAtom);
 
@@ -30,7 +30,7 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
         // Hide settings when update is required
         ...(!updateRequired ? [{
             label: "Settings",
-            onClick: () => togglePreferencePage((prev) => !prev),
+            onClick: () => openPreferencesWindow(),
             icon: SettingsIcon,
             disabled: !hasCompletedOnboarding,
         }] : []),
