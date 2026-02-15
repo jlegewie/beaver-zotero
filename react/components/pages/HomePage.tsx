@@ -9,10 +9,11 @@ import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { isStreamingAtom } from '../../agents/atoms';
 import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atoms/messageComposition";
-import { getCustomPromptsForContext, CustomPrompt } from "../../types/settings";
+import { CustomPrompt } from "../../types/settings";
+import { customPromptsForContextAtom } from "../../atoms/customPrompts";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import FileStatusDisplay from "../status/FileStatusDisplay";
-import { isDatabaseSyncSupportedAtom, processingModeAtom } from "../../atoms/profile";
+import { isDatabaseSyncSupportedAtom } from "../../atoms/profile";
 
 interface HomePageProps {
     isWindow?: boolean;
@@ -26,7 +27,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
-    const processingMode = useAtomValue(processingModeAtom);
+    const prompts = useAtomValue(customPromptsForContextAtom);
 
     // Realtime listening for file status updates (only in sidebar, not in separate windows)
     const { connectionStatus } = useFileStatus(!isWindow);
@@ -41,11 +42,6 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
         // Send message via WebSocket
         await sendWSMessage(prompt.text);
     };
-
-    const prompts: CustomPrompt[] = getCustomPromptsForContext({
-        isDatabaseSyncSupported,
-        processingMode
-    });
     const shortcutKey = Zotero.isMac ? '⌘^' : 'Ctrl+Win+';
 
     return (

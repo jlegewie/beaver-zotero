@@ -8,7 +8,8 @@ import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
-import { getCustomPromptsFromPreferences, saveCustomPromptsToPreferences, generatePromptId, CustomPrompt } from "../../types/settings";
+import { generatePromptId, CustomPrompt } from "../../types/settings";
+import { customPromptsAtom, saveCustomPromptsAtom, usedShortcutsAtom } from "../../atoms/customPrompts";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
 import { 
     embeddingIndexStateAtom, 
@@ -100,7 +101,9 @@ const PreferencePage: React.FC = () => {
     const [openaiKey, setOpenaiKey] = useState(() => getPref('openAiApiKey'));
     const [anthropicKey, setAnthropicKey] = useState(() => getPref('anthropicApiKey'));
     const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
-    const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>(getCustomPromptsFromPreferences());
+    const customPrompts = useAtomValue(customPromptsAtom);
+    const saveCustomPrompts = useSetAtom(saveCustomPromptsAtom);
+    const usedShortcuts = useAtomValue(usedShortcutsAtom);
     const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
     const [keyboardShortcut, setKeyboardShortcut] = useState(() => {
@@ -171,12 +174,6 @@ const PreferencePage: React.FC = () => {
         loadLastSynced();
     }, [loadLastSynced]);
 
-    // Helper function to save custom prompts array to preferences
-    const saveCustomPromptsToPrefs = useCallback((prompts: CustomPrompt[]) => {
-        saveCustomPromptsToPreferences(prompts);
-        logger('Saved custom prompts to preferences', prompts);
-    }, []);
-
     // --- Save Preferences ---
     const handlePrefSave = (key: "googleGenerativeAiApiKey" | "openAiApiKey" | "anthropicApiKey" | "customInstructions", value: string) => {
         if (value !== getPref(key)) {
@@ -207,16 +204,10 @@ const PreferencePage: React.FC = () => {
 
     // --- Custom Prompt Change Handler ---
     const handleCustomPromptChange = useCallback((index: number, updatedPrompt: CustomPrompt) => {
-        setCustomPrompts((currentPrompts) => {
-            const newPrompts = [...currentPrompts];
-            newPrompts[index] = updatedPrompt;
-            
-            // Save to preferences
-            saveCustomPromptsToPrefs(newPrompts);
-            
-            return newPrompts;
-        });
-    }, [saveCustomPromptsToPrefs]);
+        const newPrompts = [...customPrompts];
+        newPrompts[index] = updatedPrompt;
+        saveCustomPrompts(newPrompts);
+    }, [customPrompts, saveCustomPrompts]);
 
     // --- Add Prompt Handler ---
     const handleAddPrompt = useCallback(() => {
@@ -228,12 +219,8 @@ const PreferencePage: React.FC = () => {
             requiresAttachment: false
         };
 
-        setCustomPrompts((currentPrompts) => {
-            const newPrompts = [...currentPrompts, newPrompt];
-            saveCustomPromptsToPrefs(newPrompts);
-            return newPrompts;
-        });
-    }, [saveCustomPromptsToPrefs]);
+        saveCustomPrompts([...customPrompts, newPrompt]);
+    }, [customPrompts, saveCustomPrompts]);
 
     // --- Verify Sync Handler ---
     const handleVerifySync = useCallback(async () => {
@@ -265,12 +252,9 @@ const PreferencePage: React.FC = () => {
 
     // --- Remove Prompt Handler ---
     const handleRemovePrompt = useCallback((indexToRemove: number) => {
-        setCustomPrompts((currentPrompts) => {
-            const newPrompts = currentPrompts.filter((_, filterIndex) => filterIndex !== indexToRemove);
-            saveCustomPromptsToPrefs(newPrompts);
-            return newPrompts;
-        });
-    }, [saveCustomPromptsToPrefs]);
+        const newPrompts = customPrompts.filter((_, filterIndex) => filterIndex !== indexToRemove);
+        saveCustomPrompts(newPrompts);
+    }, [customPrompts, saveCustomPrompts]);
 
     const getCustomPromptAvailabilityNote = useCallback((prompt: CustomPrompt): string | undefined => {
         if (!prompt.requiresDatabaseSync) return undefined;
@@ -986,7 +970,7 @@ const PreferencePage: React.FC = () => {
                                 onChange={handleCustomPromptChange}
                                 onRemove={handleRemovePrompt}
                                 availabilityNote={getCustomPromptAvailabilityNote(prompt)}
-                                usedShortcuts={customPrompts.filter(p => p.shortcut != null).map(p => p.shortcut!)}
+                                usedShortcuts={usedShortcuts}
                             />
                         ))}
                         {/* <div className="display-flex flex-row items-center justify-start">
