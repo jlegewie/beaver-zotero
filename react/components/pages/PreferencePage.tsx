@@ -8,7 +8,7 @@ import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
-import { getCustomPromptsFromPreferences, saveCustomPromptsToPreferences, CustomPrompt } from "../../types/settings";
+import { getCustomPromptsFromPreferences, saveCustomPromptsToPreferences, generatePromptId, CustomPrompt } from "../../types/settings";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
 import { 
     embeddingIndexStateAtom, 
@@ -221,6 +221,7 @@ const PreferencePage: React.FC = () => {
     // --- Add Prompt Handler ---
     const handleAddPrompt = useCallback(() => {
         const newPrompt: CustomPrompt = {
+            id: generatePromptId(),
             title: "",
             text: "",
             librarySearch: false,

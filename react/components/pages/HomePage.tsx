@@ -67,9 +67,9 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                 {/* <div className="display-flex flex-col items-start mb-4">
                     <p className="text-base font-color-secondary -mt-2">Beaver will sync your library, upload your PDFs, and index your files for search. This process can take 20-60 min.</p>
                 </div> */}
-                {prompts.map((prompt, index) => (
+                {prompts.map((prompt) => (
                     <Button
-                        key={index}
+                        key={prompt.id || prompt.index}
                         variant="ghost-secondary"
                         onClick={() => handleCustomPrompt(prompt)}
                         disabled={isPending || (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment)}
