@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { currentMessageItemsAtom, currentMessageContentAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
-import { isLibraryTabAtom, isPreferencePageVisibleAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
+import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
 
 import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom } from "./citations";
 import { isExternalCitation } from "../types/citations";
@@ -181,7 +181,6 @@ export const newThreadAtom = atom(
             set(citationDataMapAtom, {});
             set(currentMessageContentAtom, '');
             set(resetMessageUIStateAtom);
-            set(isPreferencePageVisibleAtom, false);
             set(clearExternalReferenceCacheAtom);
             // Update message items from Zotero selection or reader
             const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
@@ -229,7 +228,6 @@ export const loadThreadAtom = atom(
             set(windowUserScrolledAtom, false);
             // Set the current thread ID
             set(currentThreadIdAtom, threadId);
-            set(isPreferencePageVisibleAtom, false);
             set(clearExternalReferenceCacheAtom);
             set(isWebSearchEnabledAtom, false);
             set(resetCitationMarkersAtom);

@@ -7,11 +7,10 @@ import { allRunsAtom } from '../agents/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
-import { isPreferencePageVisibleAtom, userScrolledAtom, windowUserScrolledAtom, isSkippedFilesDialogVisibleAtom } from '../atoms/ui';
+import { userScrolledAtom, windowUserScrolledAtom, isSkippedFilesDialogVisibleAtom } from '../atoms/ui';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import OnboardingRouter from './pages/OnboardingRouter';
-import PreferencePage from './pages/PreferencePage';
 import DeviceAuthorizationPage from './pages/DeviceAuthorizationPage';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import DragDropWrapper from './input/DragDropWrapper';
@@ -49,7 +48,6 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const setIsSkippedFilesDialogVisible = useSetAtom(isSkippedFilesDialogVisibleAtom);
-    const isPreferencePageVisible = useAtomValue(isPreferencePageVisibleAtom);
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const hasAuthorizedFreeAccess = useAtomValue(hasAuthorizedFreeAccessAtom);
     const hasAuthorizedProAccess = useAtomValue(hasAuthorizedProAccessAtom);
@@ -164,17 +162,6 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
             <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
                 <Header isWindow={isWindow} />
                 <DeviceAuthorizationPage />
-                <DialogContainer />
-            </div>
-        );
-    }
-
-    {/* Preference page */}
-    if (isPreferencePageVisible) {
-        return (
-            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
-                <Header settingsPage={true} isWindow={isWindow} />
-                <PreferencePage />
                 <DialogContainer />
             </div>
         );
