@@ -333,8 +333,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 noResultsText="No actions found"
                 placeholder="Search actions..."
                 closeOnSelect={true}
-                // showSearchInput={customPrompts.length > 6}
-                showSearchInput={true}
+                showSearchInput={customPrompts.length > 5}
                 onEmptyBackspace={handleSlashBackspace}
             />
 
