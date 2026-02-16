@@ -5,6 +5,10 @@ import IconButton from "../ui/IconButton";
 import Button from "../ui/Button";
 import ShortcutSelector from "./ShortcutSelector";
 
+const MAX_TITLE_LENGTH = 45;
+const MAX_PROMPT_TEXT_LENGTH = 2250;
+
+
 interface CustomPromptCardProps {
     index: number;
     prompt: CustomPrompt;
@@ -188,6 +192,7 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
                     placeholder="Prompt title..."
+                    maxLength={MAX_TITLE_LENGTH}
                     className="chat-input text-sm font-medium font-color-primary custom-prompt-edit-title"
                 />
                 <IconButton
@@ -209,6 +214,7 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
                     e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
                 }}
                 placeholder="Enter prompt text..."
+                maxLength={MAX_PROMPT_TEXT_LENGTH}
                 className="chat-input custom-prompt-edit-textarea text-sm"
                 rows={2}
             />
