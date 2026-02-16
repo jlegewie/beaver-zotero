@@ -11,7 +11,7 @@ import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { CustomPrompt } from '../../types/settings';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
-import { customPromptsForContextAtom, markPromptUsedAtom } from '../../atoms/customPrompts';
+import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom } from '../../atoms/customPrompts';
 import { logger } from '../../../src/utils/logger';
 import { isLibraryTabAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { selectedModelAtom } from '../../atoms/models';
@@ -35,6 +35,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 }) => {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
+    const sendResolvedPrompt = useSetAtom(sendResolvedPromptAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
     const newThread = useSetAtom(newThreadAtom);
     const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);
@@ -157,31 +158,31 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
     };
 
-    const handleCustomPrompt = (i: number) => {
+    const handleCustomPrompt = async (i: number) => {
         const customPrompt = customPrompts.find(p => p.shortcut === i);
         if (!customPrompt) return;
         logger(`Custom prompt: ${i} ${customPrompt.text} ${currentMessageItems.length}`);
         if (!customPrompt.requiresAttachment || currentMessageItems.length > 0) {
             if (customPrompt.id) markPromptUsed(customPrompt.id);
-            sendMessage(customPrompt.text);
+            sendResolvedPrompt(customPrompt.text);
         }
     }
 
     // Slash menu: derived state & handlers
     const hasAttachment = currentMessageItems.length > 0 || !!currentReaderAttachment;
 
-    const handleSlashSelect = useCallback((prompt: CustomPrompt) => {
+    const handleSlashSelect = useCallback(async (prompt: CustomPrompt) => {
         const pre = preSlashTextRef.current;
-        const fullMessage = pre.length > 0
-            ? (pre + '\n\n' + prompt.text).trim()
+        const fullPromptText = pre.length > 0
+            ? `${pre}\n\n${prompt.text}`.trim()
             : prompt.text.trim();
         setIsSlashMenuOpen(false);
         setSlashSearchQuery('');
         setMessageContent('');
         if (prompt.id) markPromptUsed(prompt.id);
-        sendMessage(fullMessage);
+        sendResolvedPrompt(fullPromptText);
         setTimeout(() => inputRef.current?.focus(), 0);
-    }, [sendMessage, markPromptUsed]);
+    }, [sendResolvedPrompt, markPromptUsed]);
 
     const handleSlashDismiss = useCallback(() => {
         setIsSlashMenuOpen(false);
