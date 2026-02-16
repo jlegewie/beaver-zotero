@@ -10,7 +10,7 @@ import { NoteProposedData } from '../../types/agentActions/base';
 import { AgentRun } from '../../agents/types';
 import { ZoteroItemReference } from '../../types/zotero';
 import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
-import { TickIcon, CancelIcon, ArrowUpRightIcon, Icon, Spinner } from '../icons/icons';
+import { TickIcon, CancelIcon, ArrowUpRightIcon, Icon, Spinner, CheckmarkCircleIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import { selectItemById } from '../../../src/utils/selectItem';
@@ -47,6 +47,7 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
     const title = proposed?.title || 'New note';
     const isApplied = action.status === 'applied';
     const isPending = action.status === 'pending' || action.status === 'error';
+    const actionLabel = isApplied ? 'Created Note' : 'Create Note';
 
     // Reveal note in Zotero
     const handleReveal = useCallback(async () => {
@@ -147,53 +148,69 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
         };
     }, []);
 
+    const getHeaderIcon = () => {
+        if (isBusy) return SpinnerWrapper;
+        if (isApplied) return CheckmarkCircleIcon;
+        return () => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={12} className="mt-010"/>;
+    };
+
+    const getIconClassName = () => {
+        if (isApplied) return 'font-color-green scale-11';
+        return undefined;
+    };
+
     return (
         <div className="border-popup rounded-md display-flex flex-col min-w-0">
-            <div className="display-flex flex-row bg-senary items-center py-15 px-25">
-                {/* Icon + Title */}
+            <div className="display-flex flex-row bg-senary items-start py-15">
+                {/* Icon + label + title (clickable to reveal when applied) */}
                 <div
-                    className={`display-flex flex-row flex-1 gap-25 items-center min-w-0 ${isApplied ? 'cursor-pointer' : ''}`}
-                    onMouseEnter={() => setIsHovered(true)}
+                    className={`display-flex flex-row ml-3 gap-2 min-w-0 ${isApplied ? 'cursor-pointer' : ''}`}
+                    onMouseEnter={() => isApplied && setIsHovered(true)}
                     onMouseLeave={() => setIsHovered(false)}
                     onClick={isApplied ? handleReveal : undefined}
                 >
-                    <div style={{ justifyContent: 'center', transition: 'color 0.15s ease' }}>
-                        <Icon
-                            icon={isBusy
-                                ? SpinnerWrapper
-                                : () => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={12} />
-                            }
-                            className={isHovered ? 'font-color-primary' : 'font-color-secondary'}
-                            size={12}
-                        />
+                    <div className="display-flex mt-010" style={{ flexShrink: 0 }}>
+                        <Icon icon={getHeaderIcon()} className={getIconClassName()} />
                     </div>
-                    {/* Title — clickable to reveal in Zotero when applied */}
-                    <div className="display-flex flex-row gap-1 items-center min-w-0">
+                    <div
+                        className="min-w-0"
+                        style={{
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            wordBreak: 'break-word',
+                        }}
+                    >
+                        <span className="font-color-primary font-medium">{actionLabel}</span>
                         <span
-                            className={`text-base truncate ${isHovered ? 'font-color-primary' : 'font-color-secondary'}`}
+                            className={`ml-15 ${isHovered ? 'font-color-primary' : 'font-color-secondary'}`}
                             style={{ transition: 'color 0.15s ease' }}
-                            title={title}
                         >
                             {title}
                         </span>
                         {isApplied && (
-                            <Icon icon={ArrowUpRightIcon} className="font-color-tertiary" size={10} />
+                            <span style={{ display: 'inline-flex', verticalAlign: 'start', marginLeft: '2px' }}>
+                                <Icon icon={ArrowUpRightIcon} className="font-color-secondary" size={10} />
+                            </span>
                         )}
                     </div>
-                    <div className="flex-1" />
                 </div>
 
+                <div className="flex-1" />
+
                 {/* Action buttons */}
-                <div className="display-flex flex-row items-center gap-2">
+                <div className="display-flex flex-row items-center gap-1 mr-2">
                     {isApplied && (
-                        <div className="display-flex flex-row items-center gap-0">
+                        <>
                             <Tooltip content="Dismiss" showArrow singleLine>
                                 <IconButton
                                     icon={CancelIcon}
                                     variant="ghost-secondary"
                                     onClick={handleDismiss}
                                     disabled={isBusy}
-                                    className="scale-90 mt-010"
+                                    className="scale-80 mt-020"
                                 />
                             </Tooltip>
                             <Button
@@ -203,28 +220,29 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
                             >
                                 Undo
                             </Button>
-                        </div>
+                        </>
                     )}
                     {isPending && (
-                        <div className="display-flex flex-row items-center gap-0">
+                        <>
                             <Tooltip content="Dismiss" showArrow singleLine>
                                 <IconButton
                                     icon={CancelIcon}
                                     variant="ghost-secondary"
+                                    iconClassName="font-color-red"
                                     onClick={handleDismiss}
                                     disabled={isBusy}
-                                    className="scale-90 mt-010"
                                 />
                             </Tooltip>
                             <Tooltip content="Create note" showArrow singleLine>
                                 <IconButton
                                     icon={TickIcon}
                                     variant="ghost-secondary"
+                                    iconClassName="font-color-green scale-14"
                                     onClick={handleConfirm}
                                     disabled={isBusy}
                                 />
                             </Tooltip>
-                        </div>
+                        </>
                     )}
                 </div>
             </div>
