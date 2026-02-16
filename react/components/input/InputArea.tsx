@@ -169,7 +169,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     const hasAttachment = currentMessageItems.length > 0 || !!currentReaderAttachment;
 
     const handleSlashSelect = useCallback((prompt: CustomPrompt) => {
-        const fullMessage = (preSlashTextRef.current + prompt.text).trim();
+        const pre = preSlashTextRef.current;
+        const fullMessage = pre.length > 0
+            ? (pre + '\n\n' + prompt.text).trim()
+            : prompt.text.trim();
         setIsSlashMenuOpen(false);
         setSlashSearchQuery('');
         setMessageContent('');
@@ -180,7 +183,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const handleSlashDismiss = useCallback(() => {
         setIsSlashMenuOpen(false);
         setSlashSearchQuery('');
-        setMessageContent(preSlashTextRef.current);
+        // Keep the "/" in the input when dismissing
+        setMessageContent(preSlashTextRef.current + '/');
         setTimeout(() => inputRef.current?.focus(), 0);
     }, []);
 
@@ -188,23 +192,10 @@ const InputArea: React.FC<InputAreaProps> = ({
         const query = slashSearchQuery.toLowerCase();
         const items: SearchMenuItem[] = [];
 
-        // Group header
-        items.push({ label: 'Actions', onClick: () => {}, isGroupHeader: true });
+        // Note: SearchMenu reverses items for verticalPosition="above",
+        // so we build in reverse visual order: footer first, prompts, header last.
 
-        // Custom prompt items
-        for (const prompt of customPrompts) {
-            if (query && !prompt.title.toLowerCase().includes(query) && !prompt.text.toLowerCase().includes(query)) {
-                continue;
-            }
-            const disabled = prompt.requiresAttachment && !hasAttachment;
-            items.push({
-                label: prompt.title,
-                onClick: () => handleSlashSelect(prompt),
-                disabled,
-            });
-        }
-
-        // "Create Action" footer
+        // "Create Action" footer (visually at bottom)
         if (!query || 'create action'.includes(query)) {
             items.push({
                 label: 'Create Action',
@@ -212,11 +203,37 @@ const InputArea: React.FC<InputAreaProps> = ({
                 onClick: () => {
                     setIsSlashMenuOpen(false);
                     setSlashSearchQuery('');
-                    setMessageContent(preSlashTextRef.current);
+                    setMessageContent(preSlashTextRef.current + '/');
                     openPreferencesWindow('prompts');
                 },
             });
         }
+
+        // Custom prompt items: enabled first, disabled last (reversed for "above")
+        const filtered = customPrompts.filter(prompt =>
+            !query || prompt.title.toLowerCase().includes(query) || prompt.text.toLowerCase().includes(query)
+        );
+        const enabled = filtered.filter(p => !p.requiresAttachment || hasAttachment);
+        const disabled = filtered.filter(p => p.requiresAttachment && !hasAttachment);
+
+        // Disabled items go first in array (visually at bottom after reverse)
+        for (let i = disabled.length - 1; i >= 0; i--) {
+            items.push({
+                label: disabled[i].title,
+                onClick: () => handleSlashSelect(disabled[i]),
+                disabled: true,
+            });
+        }
+        // Enabled items go after (visually above disabled after reverse)
+        for (let i = enabled.length - 1; i >= 0; i--) {
+            items.push({
+                label: enabled[i].title,
+                onClick: () => handleSlashSelect(enabled[i]),
+            });
+        }
+
+        // Group header (visually at top)
+        items.push({ label: 'Actions', onClick: () => {}, isGroupHeader: true });
 
         return items;
     }, [customPrompts, slashSearchQuery, hasAttachment, handleSlashSelect]);
@@ -345,6 +362,21 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 if (e.key === 'Escape') {
                                     e.preventDefault();
                                     handleSlashDismiss();
+                                    return;
+                                }
+                                // Space with empty search query closes the menu (keeps /)
+                                if (e.key === ' ' && slashSearchQuery.length === 0) {
+                                    e.preventDefault();
+                                    handleSlashDismiss();
+                                    return;
+                                }
+                                // Backspace closes the menu and removes the /
+                                if (e.key === 'Backspace') {
+                                    e.preventDefault();
+                                    setIsSlashMenuOpen(false);
+                                    setSlashSearchQuery('');
+                                    setMessageContent(preSlashTextRef.current);
+                                    setTimeout(() => inputRef.current?.focus(), 0);
                                     return;
                                 }
                             }
