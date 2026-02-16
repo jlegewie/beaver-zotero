@@ -249,9 +249,9 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
 
         // Group header (visually at top)
-        const groupHeaderItem = { label: 'Actions', onClick: () => {}, isGroupHeader: true };
+        // const groupHeaderItem = { label: 'Actions', onClick: () => {}, isGroupHeader: true };
 
-        return [...items.reverse(), ...createActionItem, groupHeaderItem];
+        return [...items.reverse(), ...createActionItem];
     }, [customPrompts, slashSearchQuery, hasAttachment, handleSlashSelect]);
 
     const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
