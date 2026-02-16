@@ -12,6 +12,7 @@ import { CustomPrompt } from '../../types/settings';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
 import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom } from '../../atoms/customPrompts';
+import { resolvePromptVariables } from '../../utils/promptVariables';
 import { logger } from '../../../src/utils/logger';
 import { isLibraryTabAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { selectedModelAtom } from '../../atoms/models';
@@ -34,7 +35,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
-    const currentMessageItems = useAtomValue(currentMessageItemsAtom);
+    const [currentMessageItems, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
     const sendResolvedPrompt = useSetAtom(sendResolvedPromptAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
     const newThread = useSetAtom(newThreadAtom);
@@ -163,8 +164,20 @@ const InputArea: React.FC<InputAreaProps> = ({
         if (!customPrompt) return;
         logger(`Custom prompt: ${i} ${customPrompt.text} ${currentMessageItems.length}`);
         if (!customPrompt.requiresAttachment || currentMessageItems.length > 0) {
-            if (customPrompt.id) markPromptUsed(customPrompt.id);
-            sendResolvedPrompt(customPrompt.text);
+            if (isPending) {
+                // During streaming: resolve variables and insert into textarea without sending
+                const { text: resolvedText, items } = await resolvePromptVariables(customPrompt.text);
+                setMessageContent(resolvedText);
+                if (items.length > 0) {
+                    const existingKeys = new Set(currentMessageItems.map(i => `${i.libraryID}-${i.key}`));
+                    const newItems = items.filter(i => !existingKeys.has(`${i.libraryID}-${i.key}`));
+                    if (newItems.length > 0) setCurrentMessageItems([...currentMessageItems, ...newItems]);
+                }
+                if (customPrompt.id) markPromptUsed(customPrompt.id);
+            } else {
+                if (customPrompt.id) markPromptUsed(customPrompt.id);
+                sendResolvedPrompt(customPrompt.text);
+            }
         }
     }
 
@@ -178,11 +191,24 @@ const InputArea: React.FC<InputAreaProps> = ({
             : prompt.text.trim();
         setIsSlashMenuOpen(false);
         setSlashSearchQuery('');
-        setMessageContent('');
-        if (prompt.id) markPromptUsed(prompt.id);
-        sendResolvedPrompt(fullPromptText);
+
+        if (isPending) {
+            // During streaming: resolve variables and insert into textarea without sending
+            const { text: resolvedText, items } = await resolvePromptVariables(fullPromptText);
+            setMessageContent(resolvedText);
+            if (items.length > 0) {
+                const existingKeys = new Set(currentMessageItems.map(i => `${i.libraryID}-${i.key}`));
+                const newItems = items.filter(i => !existingKeys.has(`${i.libraryID}-${i.key}`));
+                if (newItems.length > 0) setCurrentMessageItems([...currentMessageItems, ...newItems]);
+            }
+            if (prompt.id) markPromptUsed(prompt.id);
+        } else {
+            setMessageContent('');
+            if (prompt.id) markPromptUsed(prompt.id);
+            sendResolvedPrompt(fullPromptText);
+        }
         setTimeout(() => inputRef.current?.focus(), 0);
-    }, [sendResolvedPrompt, markPromptUsed]);
+    }, [isPending, sendResolvedPrompt, markPromptUsed]);
 
     const handleSlashDismiss = useCallback(() => {
         setIsSlashMenuOpen(false);
