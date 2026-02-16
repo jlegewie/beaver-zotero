@@ -495,7 +495,7 @@ const PreferencePage: React.FC = () => {
             </div>
 
 
-            <div className="display-flex flex-row flex-wrap gap-1 items-center pb-1 mt-2">
+            <div className="display-flex flex-row flex-wrap gap-1 items-center pb-3 mt-2">
                 {tabs.map((tab) => (
                     <button
                         key={tab.id}
@@ -534,7 +534,7 @@ const PreferencePage: React.FC = () => {
                 <>
                     {user ? (
                         <>
-                            <SettingsGroup className="mt-2">
+                            <SettingsGroup>
                                 <SettingsRow
                                     title="Manage Account"
                                     description={<>Signed in as {user.email} ({profileWithPlan?.plan.display_name || 'Unknown'} plan)</>}
@@ -729,7 +729,7 @@ const PreferencePage: React.FC = () => {
                         <SettingsGroup>
                             <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
                                 {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
-                                <div className="font-color-secondary text-sm">
+                                <div className="font-color-secondary text-base">
                                     {isDatabaseSyncSupported ? (
                                         <>
                                             Select the libraries you want to sync with Beaver.
@@ -847,7 +847,7 @@ const PreferencePage: React.FC = () => {
                     <SettingsGroup>
                         <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
                             {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
-                            <div className="font-color-secondary text-sm">
+                            <div className="font-color-secondary text-base">
                                 When Beaver modifies your library, all changes require your approval by default.
                                 You can change this behavior here. Be careful, Beaver might make changes you didn't expect.
                             
@@ -885,10 +885,16 @@ const PreferencePage: React.FC = () => {
             {/* ===== MODELS & API KEYS TAB ===== */}
             {activeTab === 'models' && (
                 <>
-                    {/* <div className="text-base font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
-                        Connect provider API keys or advanced model providers.
-                        See <DocLink path="api-key">API key guide</DocLink> and <DocLink path="custom-models">custom models</DocLink>.
-                    </div> */}
+                    <SettingsGroup>
+                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
+                            {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
+                            <div className="font-color-secondary text-base">
+                                Beaver supports multiple model providers. Connect your API keys to use Gemini, Claude, or OpenAI models.
+                                See our <DocLink path="api-key">API key guide</DocLink> or learn about <DocLink path="custom-models">additional providers and custom endpoints</DocLink>.
+                            </div>
+                        </div>
+                    </SettingsGroup>
+
                     <SettingsGroup>
                         <div style={{ padding: '8px 12px' }}>
                             <ApiKeyInput
@@ -942,7 +948,7 @@ const PreferencePage: React.FC = () => {
                 <>
                     <SectionLabel>Custom Instructions</SectionLabel>
                     <div className="custom-prompt-card" style={{ cursor: 'default' }}>
-                        <div className="font-color-secondary text-sm mb-2">
+                        <div className="font-color-secondary text-text mb-2">
                             Custom instructions are added to all chats and help steer responses. (Max ~250 words)
                         </div>
                         <textarea
@@ -950,7 +956,7 @@ const PreferencePage: React.FC = () => {
                             onChange={handleCustomInstructionsChange}
                             placeholder="Enter custom instructions here..."
                             rows={5}
-                            className="chat-input custom-prompt-edit-textarea text-sm"
+                            className="chat-input custom-prompt-edit-textarea text-base"
                             style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical' }}
                             maxLength={1500}
                         />
@@ -966,7 +972,7 @@ const PreferencePage: React.FC = () => {
                             Add Action
                         </Button>
                     </div>
-                    <div className="text-sm font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
+                    <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
                         {/* Actions are reusable prompts you define once and trigger anytime from chat, the right-click menu, or automatically. */}
                         {/* Actions are reusable prompts that tell the agent what to do with your research. You can trigger them manually with / in chat, from the right-click menu on any item, or set them to run automatically. */}
                         Actions are reusable prompts you define once and trigger anytime.
