@@ -10,7 +10,7 @@ import { NoteProposedData } from '../../types/agentActions/base';
 import { AgentRun } from '../../agents/types';
 import { ZoteroItemReference } from '../../types/zotero';
 import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
-import { TickIcon, CancelIcon, Icon, Spinner } from '../icons/icons';
+import { TickIcon, CancelIcon, ArrowUpRightIcon, Icon, Spinner } from '../icons/icons';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import { selectItemById } from '../../../src/utils/selectItem';
@@ -24,6 +24,7 @@ import {
 import { citationDataMapAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { logger } from '../../../src/utils/logger';
+import Button from '../ui/Button';
 
 interface NoteAgentActionRowProps {
     action: AgentAction;
@@ -33,6 +34,7 @@ interface NoteAgentActionRowProps {
 
 const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, noteBlocks }) => {
     const [isBusy, setIsBusy] = useState(false);
+    const [isHovered, setIsHovered] = useState(false);
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
@@ -147,59 +149,56 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
 
     return (
         <div className="border-popup rounded-md display-flex flex-col min-w-0">
-            <div className="display-flex flex-row bg-senary items-start py-15 px-25">
-                {/* Icon */}
-                <div className="display-flex flex-row flex-1 gap-25 items-start min-w-0">
-                    <div className="mt-015" style={{ justifyContent: 'center' }}>
+            <div className="display-flex flex-row bg-senary items-center py-15 px-25">
+                {/* Icon + Title */}
+                <div
+                    className={`display-flex flex-row flex-1 gap-25 items-center min-w-0 ${isApplied ? 'cursor-pointer' : ''}`}
+                    onMouseEnter={() => setIsHovered(true)}
+                    onMouseLeave={() => setIsHovered(false)}
+                    onClick={isApplied ? handleReveal : undefined}
+                >
+                    <div style={{ justifyContent: 'center', transition: 'color 0.15s ease' }}>
                         <Icon
                             icon={isBusy
                                 ? SpinnerWrapper
                                 : () => <ZoteroIcon icon={ZOTERO_ICONS.NOTES} size={12} />
                             }
-                            className="font-color-secondary"
+                            className={isHovered ? 'font-color-primary' : 'font-color-secondary'}
                             size={12}
                         />
                     </div>
                     {/* Title — clickable to reveal in Zotero when applied */}
-                    <div
-                        className={`text-base truncate font-color-secondary ${isApplied ? 'cursor-pointer' : ''}`}
-                        title={title}
-                        onClick={isApplied ? handleReveal : undefined}
-                    >
-                        {title}
+                    <div className="display-flex flex-row gap-1 items-center min-w-0">
+                        <span
+                            className={`text-base truncate ${isHovered ? 'font-color-primary' : 'font-color-secondary'}`}
+                            style={{ transition: 'color 0.15s ease' }}
+                            title={title}
+                        >
+                            {title}
+                        </span>
+                        {isApplied && (
+                            <Icon icon={ArrowUpRightIcon} className="font-color-tertiary" size={10} />
+                        )}
                     </div>
                     <div className="flex-1" />
                 </div>
 
                 {/* Action buttons */}
-                <div className="display-flex flex-row gap-3">
+                <div className="display-flex flex-row items-center gap-3">
                     {isApplied && (
-                        <>
-                            <Tooltip content="Reveal in Zotero" showArrow singleLine>
-                                <IconButton
-                                    icon={() => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={10} />}
-                                    className="mt-015"
-                                    variant="ghost-secondary"
-                                    onClick={handleReveal}
-                                />
-                            </Tooltip>
-                            <Tooltip content="Undo" showArrow singleLine>
-                                <IconButton
-                                    icon={CancelIcon}
-                                    className="mt-015"
-                                    variant="ghost-secondary"
-                                    onClick={handleUndo}
-                                    disabled={isBusy}
-                                />
-                            </Tooltip>
-                        </>
+                        <Button
+                            variant="ghost-secondary"
+                            onClick={isBusy ? undefined : handleUndo}
+                            disabled={isBusy}
+                        >
+                            Undo
+                        </Button>
                     )}
                     {isPending && (
                         <>
                             <Tooltip content="Dismiss" showArrow singleLine>
                                 <IconButton
                                     icon={CancelIcon}
-                                    className="mt-015"
                                     variant="ghost-secondary"
                                     onClick={handleDismiss}
                                     disabled={isBusy}
@@ -208,7 +207,6 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
                             <Tooltip content="Create note" showArrow singleLine>
                                 <IconButton
                                     icon={TickIcon}
-                                    className="mt-015"
                                     variant="ghost-secondary"
                                     onClick={handleConfirm}
                                     disabled={isBusy}
@@ -232,8 +230,8 @@ interface NoteAgentActionDisplayProps {
  * Each note is a non-expandable row styled like a collapsed NoteDisplay:
  *   [NoteIcon] Title [Action buttons]
  *
- * Applied notes show Reveal + Undo buttons.
- * Pending notes show Dismiss + Confirm buttons.
+ * Applied notes: title is clickable (reveals in Zotero) + "Undo" text button.
+ * Pending notes: Dismiss (x) + Confirm (tick) icon buttons.
  */
 const NoteAgentActionDisplay: React.FC<NoteAgentActionDisplayProps> = ({ run, actions }) => {
     // Filter to visible note actions (not rejected/undone)
