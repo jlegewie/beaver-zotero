@@ -7,10 +7,10 @@ import { showFileStatusDetailsAtom } from '../../atoms/ui';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { isStreamingAtom } from '../../agents/atoms';
-import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
+import { isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atoms/messageComposition";
 import { CustomPrompt } from "../../types/settings";
-import { customPromptsForContextAtom, markPromptUsedAtom } from "../../atoms/customPrompts";
+import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom } from "../../atoms/customPrompts";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import FileStatusDisplay from "../status/FileStatusDisplay";
 import { isDatabaseSyncSupportedAtom } from "../../atoms/profile";
@@ -24,7 +24,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
     const isPending = useAtomValue(isWSChatPendingAtom);
     const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
-    const sendWSMessage = useSetAtom(sendWSMessageAtom);
+    const sendResolvedPrompt = useSetAtom(sendResolvedPromptAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const prompts = useAtomValue(customPromptsForContextAtom);
@@ -34,15 +34,11 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
     const { connectionStatus } = useFileStatus(!isWindow);
     useIndexingCompleteMessage();
 
-    const handleCustomPrompt = async (
-        prompt: CustomPrompt
-    ) => {
+    const handleCustomPrompt = async (prompt: CustomPrompt) => {
         if (isPending || isStreaming || prompt.text.length === 0) return;
         if (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment) return;
-
         if (prompt.id) markPromptUsed(prompt.id);
-        // Send message via WebSocket
-        await sendWSMessage(prompt.text);
+        await sendResolvedPrompt(prompt.text);
     };
     const shortcutKey = Zotero.isMac ? '⌘^' : 'Ctrl+Win+';
 

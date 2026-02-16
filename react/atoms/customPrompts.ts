@@ -12,9 +12,14 @@ import {
     CustomPrompt,
     getCustomPromptsFromPreferences,
     saveCustomPromptsToPreferences,
+    savePromptLastUsed,
 } from '../types/settings';
 import { ProcessingMode } from '../types/profile';
 import { isDatabaseSyncSupportedAtom, processingModeAtom } from './profile';
+import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
+import { sendWSMessageAtom } from './agentRunAtoms';
+import { currentMessageItemsAtom } from './messageComposition';
+import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 
 // =============================================================================
 // Base atom – initialised once from Zotero prefs
@@ -41,12 +46,14 @@ export const saveCustomPromptsAtom = atom(
 export const markPromptUsedAtom = atom(
     null,
     (get, set, id: string) => {
+        const timestamp = new Date().toISOString();
         const prompts = get(customPromptsAtom);
         const updated = prompts.map((p) =>
-            p.id === id ? { ...p, lastUsed: new Date().toISOString() } : p,
+            p.id === id ? { ...p, lastUsed: timestamp } : p,
         );
         set(customPromptsAtom, updated);
-        saveCustomPromptsToPreferences(updated);
+        // Persist to separate preference so the main customPrompts pref stays clean
+        savePromptLastUsed(id, timestamp);
     },
 );
 
@@ -83,3 +90,43 @@ export const usedShortcutsAtom = atom<number[]>((get) => {
     const prompts = get(customPromptsAtom);
     return prompts.filter((p) => p.shortcut != null).map((p) => p.shortcut!);
 });
+
+// =============================================================================
+// Atomic prompt execution – resolves variables, adds items, sends message
+// =============================================================================
+
+/**
+ * Resolve {{variables}} in prompt text and send the message atomically.
+ * Ensures resolved items are in currentMessageItemsAtom before sendWSMessageAtom reads them.
+ * Blocks sending and shows a popup if any item variables resolved to zero items.
+ */
+export const sendResolvedPromptAtom = atom(
+    null,
+    async (get, set, promptText: string) => {
+        const { text, items, emptyItemVariables } = await resolvePromptVariables(promptText);
+
+        // Block send when item variables resolved to nothing
+        if (emptyItemVariables.length > 0) {
+            const hint = EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.';
+            set(addPopupMessageAtom, {
+                type: 'warning',
+                title: 'Action skipped',
+                text: hint,
+                expire: true,
+                duration: 4000,
+            });
+            return;
+        }
+
+        if (items.length > 0) {
+            const currentItems = get(currentMessageItemsAtom);
+            const existingKeys = new Set(currentItems.map(i => `${i.libraryID}-${i.key}`));
+            const newItems = items.filter(i => !existingKeys.has(`${i.libraryID}-${i.key}`));
+            if (newItems.length > 0) {
+                set(currentMessageItemsAtom, [...currentItems, ...newItems]);
+            }
+        }
+
+        return set(sendWSMessageAtom, text);
+    },
+);

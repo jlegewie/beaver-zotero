@@ -4,6 +4,7 @@ import { CancelIcon } from "../icons/icons";
 import IconButton from "../ui/IconButton";
 import Button from "../ui/Button";
 import ShortcutSelector from "./ShortcutSelector";
+// import { PROMPT_VARIABLES } from "../../utils/promptVariables";
 
 const MAX_TITLE_LENGTH = 45;
 const MAX_PROMPT_TEXT_LENGTH = 2250;
@@ -218,6 +219,16 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
                 className="chat-input custom-prompt-edit-textarea text-sm"
                 rows={2}
             />
+
+            {/* Variables hint */}
+            {/* <div className="text-xs font-color-tertiary mt-1" style={{ lineHeight: '1.4' }}>
+                Variables: {PROMPT_VARIABLES.map(v => (
+                    <span key={v.name} title={v.description}>
+                        <code style={{ fontSize: '10px' }}>{`{{${v.name}}}`}</code>
+                        {v !== PROMPT_VARIABLES[PROMPT_VARIABLES.length - 1] ? ', ' : ''}
+                    </span>
+                ))}
+            </div> */}
 
             {/* Options and action buttons */}
             <div className="display-flex flex-row items-center justify-between mt-2">

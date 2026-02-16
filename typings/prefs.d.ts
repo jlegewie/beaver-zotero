@@ -36,6 +36,7 @@ declare namespace _ZoteroTypes {
       "citationStyle": string;
       "citationLocale": string;
       "customPrompts": string;
+      "customPromptsLastUsed": string;
       "deletionJobs": string;
       "skippedItems": string;
       "runConsistencyCheck": boolean;
