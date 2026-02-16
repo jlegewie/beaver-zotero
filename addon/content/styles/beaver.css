@@ -69,7 +69,7 @@
 /* Preferences window: sizing and constraints.
  * Use !important to override Zotero.UIProperties.registerRoot() font scaling. */
 #beaver-preferences-window {
-    min-width: 550px;
+    min-width: 570px;
     min-height: 500px;
     font-size: 13px !important;
 }
