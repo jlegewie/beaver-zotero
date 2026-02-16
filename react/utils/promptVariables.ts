@@ -26,10 +26,19 @@ import { getCurrentReader } from './readerUtils';
 // Public API
 // ---------------------------------------------------------------------------
 
+/** Human-readable hints shown when an item variable resolves to zero items */
+export const EMPTY_VARIABLE_HINTS: Record<string, string> = {
+    recent_items:    'No recently added items found in your library.',
+    recent_item:     'No recently added item found in your library.',
+    selected_items:  'No items are selected in the library view.',
+    open_attachment: 'No attachment is open in the reader.',
+    active_item:     'No active item found. Try opening a PDF or selecting an item.',
+};
+
 /** Metadata for each supported variable (used for UI hints) */
 export const PROMPT_VARIABLES: { name: string; description: string }[] = [
-    { name: 'recent_items',      description: 'Last 5 recently added papers' },
-    { name: 'recent_item',       description: 'Most recently added paper' },
+    { name: 'recent_items',      description: 'Last 5 recently added items' },
+    { name: 'recent_item',       description: 'Most recently added item' },
     { name: 'selected_items',     description: 'Currently selected items' },
     { name: 'open_attachment',    description: 'Attachment open in the reader' },
     { name: 'active_item',        description: 'Active item (open file → selected → recent)' },
@@ -42,6 +51,8 @@ export interface PromptResolution {
     text: string;
     /** Zotero items to add as message attachments */
     items: Zotero.Item[];
+    /** Item variable names that were present but resolved to zero items */
+    emptyItemVariables: string[];
 }
 
 /**
@@ -51,7 +62,7 @@ export interface PromptResolution {
 export async function resolvePromptVariables(text: string): Promise<PromptResolution> {
     const pattern = /\{\{(\w+)\}\}/g;
     const matches = [...text.matchAll(pattern)];
-    if (matches.length === 0) return { text, items: [] };
+    if (matches.length === 0) return { text, items: [], emptyItemVariables: [] };
 
     // Resolve all unique variables in parallel
     const uniqueVars = [...new Set(matches.map(m => m[1]))];
@@ -71,11 +82,16 @@ export async function resolvePromptVariables(text: string): Promise<PromptResolu
 
     // Replace placeholders and collect items
     const allItems: Zotero.Item[] = [];
+    const emptyItemVariables: string[] = [];
 
     let result = text.replace(pattern, (fullMatch, varName) => {
         const resolution = resolutionMap.get(varName);
         if (!resolution) return fullMatch; // Unknown variable — keep placeholder
         allItems.push(...resolution.items);
+        // Track item variables (text === '') that resolved to zero items
+        if (resolution.text === '' && resolution.items.length === 0) {
+            emptyItemVariables.push(varName);
+        }
         return resolution.text;
     });
 
@@ -85,7 +101,7 @@ export async function resolvePromptVariables(text: string): Promise<PromptResolu
         .replace(/\n{3,}/g, '\n\n')     // Collapse 3+ newlines to 2
         .trim();
 
-    return { text: result, items: allItems };
+    return { text: result, items: allItems, emptyItemVariables };
 }
 
 // ---------------------------------------------------------------------------

@@ -12,7 +12,8 @@ import { CustomPrompt } from '../../types/settings';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
 import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom } from '../../atoms/customPrompts';
-import { resolvePromptVariables } from '../../utils/promptVariables';
+import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../../utils/promptVariables';
+import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 import { logger } from '../../../src/utils/logger';
 import { isLibraryTabAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { selectedModelAtom } from '../../atoms/models';
@@ -45,6 +46,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
     const customPrompts = useAtomValue(customPromptsForContextAtom);
     const markPromptUsed = useSetAtom(markPromptUsedAtom);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
     const [slashMenuPosition, setSlashMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -166,7 +168,11 @@ const InputArea: React.FC<InputAreaProps> = ({
         if (!customPrompt.requiresAttachment || currentMessageItems.length > 0) {
             if (isPending) {
                 // During streaming: resolve variables and insert into textarea without sending
-                const { text: resolvedText, items } = await resolvePromptVariables(customPrompt.text);
+                const { text: resolvedText, items, emptyItemVariables } = await resolvePromptVariables(customPrompt.text);
+                if (emptyItemVariables.length > 0) {
+                    addPopupMessage({ type: 'warning', title: 'Action skipped', text: EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.', expire: true, duration: 4000 });
+                    return;
+                }
                 setMessageContent(resolvedText);
                 if (items.length > 0) {
                     const existingKeys = new Set(currentMessageItems.map(i => `${i.libraryID}-${i.key}`));
@@ -194,7 +200,12 @@ const InputArea: React.FC<InputAreaProps> = ({
 
         if (isPending) {
             // During streaming: resolve variables and insert into textarea without sending
-            const { text: resolvedText, items } = await resolvePromptVariables(fullPromptText);
+            const { text: resolvedText, items, emptyItemVariables } = await resolvePromptVariables(fullPromptText);
+            if (emptyItemVariables.length > 0) {
+                addPopupMessage({ type: 'warning', title: 'Action skipped', text: EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.', expire: true, duration: 4000 });
+                setTimeout(() => inputRef.current?.focus(), 0);
+                return;
+            }
             setMessageContent(resolvedText);
             if (items.length > 0) {
                 const existingKeys = new Set(currentMessageItems.map(i => `${i.libraryID}-${i.key}`));

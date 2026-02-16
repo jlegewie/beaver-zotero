@@ -16,9 +16,10 @@ import {
 } from '../types/settings';
 import { ProcessingMode } from '../types/profile';
 import { isDatabaseSyncSupportedAtom, processingModeAtom } from './profile';
-import { resolvePromptVariables } from '../utils/promptVariables';
+import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { currentMessageItemsAtom } from './messageComposition';
+import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 
 // =============================================================================
 // Base atom – initialised once from Zotero prefs
@@ -97,11 +98,25 @@ export const usedShortcutsAtom = atom<number[]>((get) => {
 /**
  * Resolve {{variables}} in prompt text and send the message atomically.
  * Ensures resolved items are in currentMessageItemsAtom before sendWSMessageAtom reads them.
+ * Blocks sending and shows a popup if any item variables resolved to zero items.
  */
 export const sendResolvedPromptAtom = atom(
     null,
     async (get, set, promptText: string) => {
-        const { text, items } = await resolvePromptVariables(promptText);
+        const { text, items, emptyItemVariables } = await resolvePromptVariables(promptText);
+
+        // Block send when item variables resolved to nothing
+        if (emptyItemVariables.length > 0) {
+            const hint = EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.';
+            set(addPopupMessageAtom, {
+                type: 'warning',
+                title: 'Action skipped',
+                text: hint,
+                expire: true,
+                duration: 4000,
+            });
+            return;
+        }
 
         if (items.length > 0) {
             const currentItems = get(currentMessageItemsAtom);
