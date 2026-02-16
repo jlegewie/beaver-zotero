@@ -384,8 +384,8 @@ const PreferencePage: React.FC = () => {
         if (isEmbeddingIndexing) {
             const progress = embeddingIndexState.progress > 0 ? ` (${embeddingIndexState.progress}%)` : '';
             return {
-                icon: Spinner,
-                iconClassName: 'animate-spin',
+                icon: RepeatIcon,
+                iconClassName: '',
                 disabled: true,
                 text: `Indexing${progress}`
             };
