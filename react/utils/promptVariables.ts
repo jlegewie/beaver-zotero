@@ -209,7 +209,7 @@ async function resolveActiveItem(): Promise<ResolvedVariable> {
 async function resolveCurrentCollection(): Promise<ResolvedVariable> {
     try {
         const zp = Zotero.getActiveZoteroPane?.();
-        if (!zp) return { text: '', items: [] };
+        if (!zp) return { text: 'None selected', items: [] };
         const collection = zp.getSelectedCollection?.();
         return { text: collection?.name ? `"${collection?.name}"` : 'None selected', items: [] };
     } catch (e) {
