@@ -184,24 +184,36 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
                 </div>
 
                 {/* Action buttons */}
-                <div className="display-flex flex-row items-center gap-3">
+                <div className="display-flex flex-row items-center gap-2">
                     {isApplied && (
-                        <Button
-                            variant="ghost-secondary"
-                            onClick={isBusy ? undefined : handleUndo}
-                            disabled={isBusy}
-                        >
-                            Undo
-                        </Button>
-                    )}
-                    {isPending && (
-                        <>
+                        <div className="display-flex flex-row items-center gap-0">
                             <Tooltip content="Dismiss" showArrow singleLine>
                                 <IconButton
                                     icon={CancelIcon}
                                     variant="ghost-secondary"
                                     onClick={handleDismiss}
                                     disabled={isBusy}
+                                    className="scale-90 mt-010"
+                                />
+                            </Tooltip>
+                            <Button
+                                variant="ghost-secondary"
+                                onClick={isBusy ? undefined : handleUndo}
+                                disabled={isBusy}
+                            >
+                                Undo
+                            </Button>
+                        </div>
+                    )}
+                    {isPending && (
+                        <div className="display-flex flex-row items-center gap-0">
+                            <Tooltip content="Dismiss" showArrow singleLine>
+                                <IconButton
+                                    icon={CancelIcon}
+                                    variant="ghost-secondary"
+                                    onClick={handleDismiss}
+                                    disabled={isBusy}
+                                    className="scale-90 mt-010"
                                 />
                             </Tooltip>
                             <Tooltip content="Create note" showArrow singleLine>
@@ -212,7 +224,7 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
                                     disabled={isBusy}
                                 />
                             </Tooltip>
-                        </>
+                        </div>
                     )}
                 </div>
             </div>
