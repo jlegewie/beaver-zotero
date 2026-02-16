@@ -198,8 +198,14 @@ const InputArea: React.FC<InputAreaProps> = ({
         // Note: SearchMenu reverses items for verticalPosition="above",
         // so we build in reverse visual order: footer first, prompts, header last.
 
+        // Custom prompt items: enabled first, disabled last (reversed for "above")
+        const filtered = customPrompts.filter(prompt =>
+            !query || prompt.title.toLowerCase().includes(query) || prompt.text.toLowerCase().includes(query)
+        );
+
         // "Create Action" footer (visually at bottom)
-        const createActionItem: SearchMenuItem[] = !query || 'create action'.includes(query)
+        // Show when: no query, query matches "create action", or no matching prompts
+        const createActionItem: SearchMenuItem[] = !query || 'create action'.includes(query) || filtered.length === 0
             ? [{
                 label: 'Create Action',
                 icon: PlusSignIcon,
@@ -210,11 +216,6 @@ const InputArea: React.FC<InputAreaProps> = ({
                     openPreferencesWindow('prompts');
                 },
             }] : [];
-
-        // Custom prompt items: enabled first, disabled last (reversed for "above")
-        const filtered = customPrompts.filter(prompt =>
-            !query || prompt.title.toLowerCase().includes(query) || prompt.text.toLowerCase().includes(query)
-        );
         const enabled = filtered.filter(p => !p.requiresAttachment || hasAttachment);
         const disabled = filtered.filter(p => p.requiresAttachment && !hasAttachment);
 
@@ -250,7 +251,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         // Group header (visually at top)
         const groupHeaderItem = { label: 'Actions', onClick: () => {}, isGroupHeader: true };
 
-        return [...createActionItem, ...items.reverse(), groupHeaderItem];
+        return [...items.reverse(), ...createActionItem, groupHeaderItem];
     }, [customPrompts, slashSearchQuery, hasAttachment, handleSlashSelect]);
 
     const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -317,7 +318,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                 noResultsText="No actions found"
                 placeholder="Search actions..."
                 closeOnSelect={true}
-                showSearchInput={customPrompts.length > 6}
+                // showSearchInput={customPrompts.length > 6}
+                showSearchInput={true}
             />
 
             {/* Input Form */}
