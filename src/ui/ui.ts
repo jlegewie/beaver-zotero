@@ -13,6 +13,7 @@ interface BeaverWindow extends Window {
         renderAiSidebar: (container: Element, location: string) => any;
         renderGlobalInitializer: (container: Element) => any;
         renderWindowSidebar: (container: Element) => any;
+        renderFloatingPopup: (container: Element) => any;
         renderPreferencesWindow: (container: Element, initialTab?: PreferencePageTab | null) => any;
         unmountFromElement: (container: Element) => boolean;
     };
@@ -126,6 +127,25 @@ export class BeaverUIFactory {
                 ztoolkit.log("registerChatPanel: global initializer root already existed");
             }
             
+            // Create and render floating popup overlay
+            let floatingPopupRoot = win.document.getElementById("beaver-pane-floating-popup");
+            if (!floatingPopupRoot) {
+                floatingPopupRoot = win.document.createElement("div");
+                floatingPopupRoot.id = "beaver-pane-floating-popup";
+                win.document.documentElement.appendChild(floatingPopupRoot);
+                ztoolkit.log("registerChatPanel: created floating popup root element");
+
+                if (typeof win.BeaverReact?.renderFloatingPopup === 'function') {
+                    const root = win.BeaverReact.renderFloatingPopup(floatingPopupRoot);
+                    if (root) roots.add(root);
+                    ztoolkit.log("registerChatPanel: renderFloatingPopup mounted");
+                } else {
+                    ztoolkit.log("Beaver Error: renderFloatingPopup function not found on window object.");
+                }
+            } else {
+                ztoolkit.log("registerChatPanel: floating popup root already existed");
+            }
+
             // Render React components for actual sidebars
             const libraryRootEl = win.document.getElementById("beaver-react-root-library");
             const readerRootEl = win.document.getElementById("beaver-react-root-reader");
@@ -186,7 +206,7 @@ export class BeaverUIFactory {
 
             // Unmount React components - CRITICAL for triggering cleanup effects
             if (win.BeaverReact && typeof win.BeaverReact.unmountFromElement === 'function') {
-                const elementIds = ["beaver-react-root-library", "beaver-react-root-reader", "beaver-global-initializer-root"];
+                const elementIds = ["beaver-react-root-library", "beaver-react-root-reader", "beaver-global-initializer-root", "beaver-pane-floating-popup"];
                 elementIds.forEach(id => {
                     try {
                         const element = win.document?.getElementById?.(id);
@@ -224,11 +244,12 @@ export class BeaverUIFactory {
             if (win.document) {
                 try {
                     const elementIds = [
-                        "beaver-pane-library", 
-                        "beaver-pane-reader", 
-                        "zotero-beaver-tb-chat-toggle", 
+                        "beaver-pane-library",
+                        "beaver-pane-reader",
+                        "zotero-beaver-tb-chat-toggle",
                         "beaver-tb-separator",
-                        "beaver-global-initializer-root"
+                        "beaver-global-initializer-root",
+                        "beaver-pane-floating-popup"
                     ];
                     elementIds.forEach(id => {
                         try {

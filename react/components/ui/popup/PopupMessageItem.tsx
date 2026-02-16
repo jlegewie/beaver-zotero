@@ -17,11 +17,14 @@ import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinks
 
 interface PopupMessageItemProps {
     message: PopupMessage;
+    /** Optional override for message removal. When provided, called instead of the default removePopupMessageAtom. */
+    onRemove?: (messageId: string) => void;
 }
 
-const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
+const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove }) => {
     const containerRef = useRef<HTMLDivElement>(null);
-    const removeMessage = useSetAtom(removePopupMessageAtom);
+    const defaultRemoveMessage = useSetAtom(removePopupMessageAtom);
+    const removeMessage = onRemove ?? defaultRemoveMessage;
     const newThread = useSetAtom(newThreadAtom);
     const setShowFileStatusDetails = useSetAtom(showFileStatusDetailsAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
