@@ -14,10 +14,13 @@
  *   {{recent_items}}      — (items) Last 5 recently added papers
  *   {{recent_item}}       — (items) Most recently added paper
  *   {{selected_items}}     — (items) Currently selected items in the library view
+ *   {{open_attachment}}    — (items) Attachment currently open in the reader
+ *   {{active_item}}        — (items) Active context item (open parent > selected > recent)
  *   {{current_collection}} — (text)  Name of the currently selected collection
  */
 
 import { logger } from '../../src/utils/logger';
+import { getCurrentReader } from './readerUtils';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -28,6 +31,8 @@ export const PROMPT_VARIABLES: { name: string; description: string }[] = [
     { name: 'recent_items',      description: 'Last 5 recently added papers' },
     { name: 'recent_item',       description: 'Most recently added paper' },
     { name: 'selected_items',     description: 'Currently selected items' },
+    { name: 'open_attachment',    description: 'Attachment open in the reader' },
+    { name: 'active_item',        description: 'Active item (open file → selected → recent)' },
     { name: 'current_collection', description: 'Currently selected collection' },
 ];
 
@@ -98,8 +103,10 @@ type VariableResolver = () => Promise<ResolvedVariable>;
 
 const RESOLVERS: Record<string, VariableResolver> = {
     recent_items:       resolveRecentItems,
-    recent_item:       resolveRecentPaper,
+    recent_item:        resolveRecentPaper,
     selected_items:     resolveSelectedItems,
+    open_attachment:    resolveOpenAttachment,
+    active_item:        resolveActiveItem,
     current_collection: resolveCurrentCollection,
 };
 
@@ -131,6 +138,54 @@ async function resolveSelectedItems(): Promise<ResolvedVariable> {
     }
 }
 
+/** Returns the attachment currently open in the reader */
+async function resolveOpenAttachment(): Promise<ResolvedVariable> {
+    try {
+        const attachment = await getOpenReaderAttachment();
+        return { text: '', items: attachment ? [attachment] : [] };
+    } catch (e) {
+        logger(`promptVariables: resolveOpenAttachment error: ${e}`, 1);
+        return { text: '', items: [] };
+    }
+}
+
+/**
+ * Active context item with fallback:
+ *   1. Parent item of open attachment (+ the attachment), or just the attachment
+ *   2. Selected items in library view
+ *   3. Most recently added item
+ */
+async function resolveActiveItem(): Promise<ResolvedVariable> {
+    try {
+        // 1. Reader: parent item (with attachment) or attachment itself
+        const attachment = await getOpenReaderAttachment();
+        if (attachment) {
+            const parent = attachment.parentItem;
+            if (parent) {
+                return { text: '', items: [parent, attachment] };
+            }
+            return { text: '', items: [attachment] };
+        }
+
+        // 2. Selected items in library view
+        const zp = Zotero.getActiveZoteroPane?.();
+        if (zp) {
+            const selectedItems: Zotero.Item[] = zp.getSelectedItems?.() || [];
+            const regularItems = selectedItems.filter((item: Zotero.Item) => item.isRegularItem());
+            if (regularItems.length > 0) {
+                return { text: '', items: regularItems.slice(0, 10) };
+            }
+        }
+
+        // 3. Most recently added item
+        const recentItems = await fetchRecentItems(1);
+        return { text: '', items: recentItems };
+    } catch (e) {
+        logger(`promptVariables: resolveActiveItem error: ${e}`, 1);
+        return { text: '', items: [] };
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Text Resolvers (return text replacement, no items)
 // ---------------------------------------------------------------------------
@@ -150,6 +205,15 @@ async function resolveCurrentCollection(): Promise<ResolvedVariable> {
 // ---------------------------------------------------------------------------
 // Shared Helpers
 // ---------------------------------------------------------------------------
+
+/** Get the attachment item currently open in the reader, or null */
+async function getOpenReaderAttachment(): Promise<Zotero.Item | null> {
+    const win = Zotero.getMainWindow();
+    if (win.Zotero_Tabs?.selectedType !== 'reader') return null;
+    const reader = getCurrentReader(win);
+    if (!reader?.itemID) return null;
+    return await Zotero.Items.getAsync(reader.itemID) || null;
+}
 
 /** Fetch the N most recently added regular items from the user's library */
 async function fetchRecentItems(limit: number): Promise<Zotero.Item[]> {
