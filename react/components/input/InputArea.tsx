@@ -227,8 +227,15 @@ const InputArea: React.FC<InputAreaProps> = ({
         const enabled = filtered.filter(p => !p.requiresAttachment || hasAttachment);
         const disabled = filtered.filter(p => p.requiresAttachment && !hasAttachment);
 
-        // Sort each group: most recently used first, then by preferences order
-        const sortByUsage = (a: CustomPrompt, b: CustomPrompt): number => {
+        // Sort each group: title matches first when searching, then by recency, then by preferences order
+        const sortByRelevance = (a: CustomPrompt, b: CustomPrompt): number => {
+            // When there's a search query, prioritize title matches over text-only matches
+            if (query) {
+                const aTitleMatch = a.title.toLowerCase().includes(query);
+                const bTitleMatch = b.title.toLowerCase().includes(query);
+                if (aTitleMatch && !bTitleMatch) return -1;
+                if (!aTitleMatch && bTitleMatch) return 1;
+            }
             if (a.lastUsed && !b.lastUsed) return -1;
             if (!a.lastUsed && b.lastUsed) return 1;
             if (a.lastUsed && b.lastUsed) {
@@ -237,8 +244,8 @@ const InputArea: React.FC<InputAreaProps> = ({
             }
             return (a.index ?? Infinity) - (b.index ?? Infinity);
         };
-        enabled.sort(sortByUsage);
-        disabled.sort(sortByUsage);
+        enabled.sort(sortByRelevance);
+        disabled.sort(sortByRelevance);
 
         // Disabled items go first in array (visually at bottom after reverse)
         for (let i = disabled.length - 1; i >= 0; i--) {
