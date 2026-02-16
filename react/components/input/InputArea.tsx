@@ -175,9 +175,11 @@ const InputArea: React.FC<InputAreaProps> = ({
                 }
                 setMessageContent(resolvedText);
                 if (items.length > 0) {
-                    const existingKeys = new Set(currentMessageItems.map(i => `${i.libraryID}-${i.key}`));
-                    const newItems = items.filter(i => !existingKeys.has(`${i.libraryID}-${i.key}`));
-                    if (newItems.length > 0) setCurrentMessageItems([...currentMessageItems, ...newItems]);
+                    setCurrentMessageItems(prev => {
+                        const existingKeys = new Set(prev.map(item => `${item.libraryID}-${item.key}`));
+                        const newItems = items.filter(item => !existingKeys.has(`${item.libraryID}-${item.key}`));
+                        return newItems.length > 0 ? [...prev, ...newItems] : prev;
+                    });
                 }
                 if (customPrompt.id) markPromptUsed(customPrompt.id);
             } else {
@@ -208,9 +210,11 @@ const InputArea: React.FC<InputAreaProps> = ({
             }
             setMessageContent(resolvedText);
             if (items.length > 0) {
-                const existingKeys = new Set(currentMessageItems.map(i => `${i.libraryID}-${i.key}`));
-                const newItems = items.filter(i => !existingKeys.has(`${i.libraryID}-${i.key}`));
-                if (newItems.length > 0) setCurrentMessageItems([...currentMessageItems, ...newItems]);
+                setCurrentMessageItems(prev => {
+                    const existingKeys = new Set(prev.map(item => `${item.libraryID}-${item.key}`));
+                    const newItems = items.filter(item => !existingKeys.has(`${item.libraryID}-${item.key}`));
+                    return newItems.length > 0 ? [...prev, ...newItems] : prev;
+                });
             }
             if (prompt.id) markPromptUsed(prompt.id);
         } else {
