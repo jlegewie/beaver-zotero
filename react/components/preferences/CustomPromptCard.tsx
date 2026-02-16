@@ -3,6 +3,11 @@ import { CustomPrompt } from "../../types/settings";
 import { CancelIcon } from "../icons/icons";
 import IconButton from "../ui/IconButton";
 import Button from "../ui/Button";
+import ShortcutSelector from "./ShortcutSelector";
+
+const MAX_TITLE_LENGTH = 45;
+const MAX_PROMPT_TEXT_LENGTH = 2250;
+
 
 interface CustomPromptCardProps {
     index: number;
@@ -10,6 +15,7 @@ interface CustomPromptCardProps {
     onChange: (index: number, updatedPrompt: CustomPrompt) => void;
     onRemove: (index: number) => void;
     availabilityNote?: string;
+    usedShortcuts: number[];
 }
 
 /**
@@ -22,21 +28,23 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
     prompt,
     onChange,
     onRemove,
-    availabilityNote
+    availabilityNote,
+    usedShortcuts
 }) => {
     const [isEditing, setIsEditing] = useState(() => !prompt.title && !prompt.text);
     const [editTitle, setEditTitle] = useState(prompt.title);
     const [editText, setEditText] = useState(prompt.text);
     const [editRequiresAttachment, setEditRequiresAttachment] = useState(prompt.requiresAttachment);
+    const [editShortcut, setEditShortcut] = useState<number | undefined>(prompt.shortcut);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const titleInputRef = useRef<HTMLInputElement | null>(null);
     const cardRef = useRef<HTMLDivElement | null>(null);
     const previousPromptRef = useRef(prompt);
     // Ref to hold latest draft values so the click-outside listener doesn't re-register on every keystroke
-    const draftRef = useRef({ editTitle, editText, editRequiresAttachment });
+    const draftRef = useRef({ editTitle, editText, editRequiresAttachment, editShortcut });
     useEffect(() => {
-        draftRef.current = { editTitle, editText, editRequiresAttachment };
-    }, [editTitle, editText, editRequiresAttachment]);
+        draftRef.current = { editTitle, editText, editRequiresAttachment, editShortcut };
+    }, [editTitle, editText, editRequiresAttachment, editShortcut]);
 
     // Sync local draft state when prompt changes, and always reset if this card now points to a different prompt.
     useEffect(() => {
@@ -45,9 +53,10 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
             setEditTitle(prompt.title);
             setEditText(prompt.text);
             setEditRequiresAttachment(prompt.requiresAttachment);
+            setEditShortcut(prompt.shortcut);
         }
         previousPromptRef.current = prompt;
-    }, [prompt, prompt.title, prompt.text, prompt.requiresAttachment, isEditing]);
+    }, [prompt, prompt.title, prompt.text, prompt.requiresAttachment, prompt.shortcut, isEditing]);
 
     // Close edit mode on click outside — auto-saves, or removes if the prompt is empty
     useEffect(() => {
@@ -57,13 +66,13 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
 
         const handleClickOutside = (e: MouseEvent) => {
             if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
-                const { editTitle: title, editText: text, editRequiresAttachment: reqAttach } = draftRef.current;
+                const { editTitle: title, editText: text, editRequiresAttachment: reqAttach, editShortcut: shortcut } = draftRef.current;
                 // New prompt that's still empty — remove it (same as Cancel)
                 if (!title && !text && !prompt.title && !prompt.text) {
                     onRemove(index);
                 } else {
                     // Auto-save current draft
-                    onChange(index, { ...prompt, title, text, requiresAttachment: reqAttach });
+                    onChange(index, { ...prompt, title, text, requiresAttachment: reqAttach, shortcut });
                 }
                 setIsEditing(false);
             }
@@ -99,6 +108,7 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
             setEditTitle(prompt.title);
             setEditText(prompt.text);
             setEditRequiresAttachment(prompt.requiresAttachment);
+            setEditShortcut(prompt.shortcut);
             setIsEditing(true);
         }
     }, [isEditing, prompt]);
@@ -111,6 +121,7 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
         setEditTitle(prompt.title);
         setEditText(prompt.text);
         setEditRequiresAttachment(prompt.requiresAttachment);
+        setEditShortcut(prompt.shortcut);
         setIsEditing(false);
     }, [prompt, index, onRemove]);
 
@@ -120,17 +131,25 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
             title: editTitle,
             text: editText,
             requiresAttachment: editRequiresAttachment,
+            shortcut: editShortcut,
         };
         onChange(index, updated);
         setIsEditing(false);
-    }, [prompt, editTitle, editText, editRequiresAttachment, index, onChange]);
+    }, [prompt, editTitle, editText, editRequiresAttachment, editShortcut, index, onChange]);
 
     const handleRemove = useCallback(() => {
         onRemove(index);
         setIsEditing(false);
     }, [index, onRemove]);
 
-    const shortcutLabel = Zotero.isMac ? `⌘^${index + 1}` : `Ctrl+Win+${index + 1}`;
+    const otherUsedShortcuts = React.useMemo(() => 
+        usedShortcuts.filter(s => s !== prompt.shortcut), 
+        [usedShortcuts, prompt.shortcut]
+    );
+
+    const shortcutLabel = prompt.shortcut != null
+        ? (Zotero.isMac ? `⌘^${prompt.shortcut}` : `Ctrl+Win+${prompt.shortcut}`)
+        : undefined;
 
     // --- View mode ---
     if (!isEditing) {
@@ -144,7 +163,7 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
                     <div className="display-flex flex-col flex-1 min-w-0" style={{ gap: '3px' }}>
                         <div className="font-color-primary text-sm font-medium">
                             {prompt.title || <span className="font-color-tertiary">Untitled prompt</span>}
-                            <span className="font-color-tertiary text-xs ml-2">{shortcutLabel}</span>
+                            {shortcutLabel && <span className="font-color-tertiary text-xs ml-2">{shortcutLabel}</span>}
                         </div>
                         {prompt.text && (
                             <div className="font-color-secondary text-sm custom-prompt-card-preview">
@@ -173,9 +192,9 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
                     placeholder="Prompt title..."
+                    maxLength={MAX_TITLE_LENGTH}
                     className="chat-input text-sm font-medium font-color-primary custom-prompt-edit-title"
                 />
-                <span className="font-color-tertiary text-xs flex-shrink-0">{shortcutLabel}</span>
                 <IconButton
                     variant="ghost-secondary"
                     icon={CancelIcon}
@@ -195,21 +214,30 @@ const CustomPromptCard: React.FC<CustomPromptCardProps> = ({
                     e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
                 }}
                 placeholder="Enter prompt text..."
+                maxLength={MAX_PROMPT_TEXT_LENGTH}
                 className="chat-input custom-prompt-edit-textarea text-sm"
                 rows={2}
             />
 
             {/* Options and action buttons */}
             <div className="display-flex flex-row items-center justify-between mt-2">
-                <label className={`display-flex items-center gap-05 text-sm ${editRequiresAttachment ? 'font-color-primary' : 'font-color-secondary'} cursor-pointer`}>
-                    <input
-                        type="checkbox"
-                        checked={editRequiresAttachment}
-                        onChange={(e) => setEditRequiresAttachment(e.target.checked)}
-                        className="scale-90"
+                <div className="display-flex flex-row items-center gap-3">
+                    <label className="text-sm font-color-secondary">Shortcut</label>
+                    <ShortcutSelector
+                        value={editShortcut}
+                        onChange={setEditShortcut}
+                        usedShortcuts={otherUsedShortcuts}
                     />
-                    Requires Attachment
-                </label>
+                    <label className={`display-flex items-center gap-05 text-sm ${editRequiresAttachment ? 'font-color-primary' : 'font-color-secondary'} cursor-pointer`}>
+                        <input
+                            type="checkbox"
+                            checked={editRequiresAttachment}
+                            onChange={(e) => setEditRequiresAttachment(e.target.checked)}
+                            className="scale-90"
+                        />
+                        Requires Attachment
+                    </label>
+                </div>
 
                 <div className="display-flex flex-row items-center gap-3">
                     <Button

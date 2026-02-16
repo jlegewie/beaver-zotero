@@ -1,4 +1,4 @@
-import { getPref } from "../../src/utils/prefs";
+import { getPref, setPref } from "../../src/utils/prefs";
 import { store } from "../store";
 import { addPopupMessageAtom } from "../utils/popupMessageUtils";
 import { ProcessingMode } from "./profile";
@@ -100,14 +100,19 @@ export const getCustomChatModelsFromPreferences = (): CustomChatModel[] => {
 };
 
 export interface CustomPrompt {
+    id?: string;
     title: string;
     text: string;
     librarySearch: boolean;
     requiresAttachment: boolean;
     requiresDatabaseSync?: boolean;
     id_model?: string;
+    shortcut?: number;
     index?: number;
 }
+
+/** Generate a stable unique identifier for a custom prompt. */
+export const generatePromptId = (): string => crypto.randomUUID();
 
 export const isCustomPrompt = (obj: any): obj is CustomPrompt => {
     return (
@@ -118,28 +123,73 @@ export const isCustomPrompt = (obj: any): obj is CustomPrompt => {
         typeof obj.librarySearch === 'boolean' &&
         typeof obj.requiresAttachment === 'boolean' &&
         (obj.requiresDatabaseSync === undefined || typeof obj.requiresDatabaseSync === 'boolean') &&
-        (obj.id_model === undefined || typeof obj.id_model === 'string')
+        (obj.id === undefined || typeof obj.id === 'string') &&
+        (obj.id_model === undefined || typeof obj.id_model === 'string') &&
+        (obj.shortcut === undefined || (typeof obj.shortcut === 'number' && obj.shortcut >= 1 && obj.shortcut <= 9))
     );
 };
+
+/** Current storage format version for custom prompts. */
+const CUSTOM_PROMPTS_VERSION = 2;
 
 export const getCustomPromptsFromPreferences = (): CustomPrompt[] => {
     try {
         const raw = getPref('customPrompts');
         if (raw && typeof raw === 'string') {
-            const customPrompts = JSON.parse(raw as string);
-            if(!Array.isArray(customPrompts)) throw new Error("customPrompts preference must be an array");
-            return customPrompts
-                .filter(isCustomPrompt)
-                .map((prompt, index) => ({
+            const parsed = JSON.parse(raw as string);
+
+            let prompts: any[];
+            let isLegacy: boolean;
+
+            if (Array.isArray(parsed)) {
+                // Legacy format: bare array (version 1)
+                prompts = parsed;
+                isLegacy = true;
+            } else if (
+                typeof parsed === 'object' && parsed !== null &&
+                parsed.version >= CUSTOM_PROMPTS_VERSION && Array.isArray(parsed.prompts)
+            ) {
+                // Current versioned format
+                prompts = parsed.prompts;
+                isLegacy = false;
+            } else {
+                throw new Error("customPrompts preference has unrecognized format");
+            }
+
+            const validated = prompts.filter(isCustomPrompt);
+
+            // Ensure every prompt has a stable unique id
+            const ensureId = (prompt: CustomPrompt): CustomPrompt => ({
+                ...prompt,
+                id: prompt.id || generatePromptId(),
+            });
+
+            // Legacy migration: auto-assign shortcuts 1-9 based on position
+            if (isLegacy) {
+                return validated.map((prompt, index) => ensureId({
                     ...prompt,
+                    ...(index < 9 ? { shortcut: index + 1 } : {}),
                     index: index + 1,
-                } as CustomPrompt));
+                }));
+            }
+
+            return validated.map((prompt, index) => ensureId({
+                ...prompt,
+                index: index + 1,
+            }));
         }
     } catch (e) {
         console.error("Error parsing customPrompts:", e);
         return [];
     }
     return [];
+};
+
+/** Save custom prompts in the versioned format. Strips the `index` field (derived at load time). */
+export const saveCustomPromptsToPreferences = (prompts: CustomPrompt[]): void => {
+    const promptsToSave = prompts.map(({ index, ...prompt }) => prompt);
+    const data = { version: CUSTOM_PROMPTS_VERSION, prompts: promptsToSave };
+    setPref('customPrompts', JSON.stringify(data));
 };
 
 export interface CustomPromptAvailabilityContext {
@@ -165,6 +215,6 @@ export const getCustomPromptsForContext = (
         .filter((prompt) => isCustomPromptAvailable(prompt, context))
         .map((prompt, index) => ({
             ...prompt,
-            index: index + 1
+            index: index + 1,
         }));
 };

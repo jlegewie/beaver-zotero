@@ -9,13 +9,12 @@ import Button from '../ui/Button';
 import { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
-import { getCustomPromptsForContext } from '../../types/settings';
+import { customPromptsForContextAtom } from '../../atoms/customPrompts';
 import { logger } from '../../../src/utils/logger';
 import { isLibraryTabAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { selectedModelAtom } from '../../atoms/models';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
-import { isDatabaseSyncSupportedAtom, processingModeAtom } from '../../atoms/profile';
 import PendingActionsBar from './PendingActionsBar';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import { allRunsAtom } from '../../agents/atoms';
@@ -40,8 +39,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
-    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
-    const processingMode = useAtomValue(processingModeAtom);
+    const customPrompts = useAtomValue(customPromptsForContextAtom);
     const allRuns = useAtomValue(allRunsAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const dismissedWarningsByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
@@ -142,24 +140,20 @@ const InputArea: React.FC<InputAreaProps> = ({
             newThread();
         }
 
-        // Handle ⌘^1 (Mac) or Ctrl+Win+1 (Windows/Linux) etc. for custom prompt
-        for (let i = 1 as 1 | 2 | 3 | 4 | 5 | 6; i <= 6; i++) {
-            if (e.key === i.toString() &&  ((Zotero.isMac && e.metaKey && e.ctrlKey) || (!Zotero.isMac && e.ctrlKey && e.metaKey))) {
+        // Handle ⌘^1-9 (Mac) or Ctrl+Win+1-9 (Windows/Linux) for custom prompt
+        for (let i = 1; i <= 9; i++) {
+            if (e.key === i.toString() && ((Zotero.isMac && e.metaKey && e.ctrlKey) || (!Zotero.isMac && e.ctrlKey && e.metaKey))) {
                 e.preventDefault();
                 handleCustomPrompt(i);
             }
         }
     };
 
-    const handleCustomPrompt = (i: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9) => {
-        const customPrompts = getCustomPromptsForContext({
-            isDatabaseSyncSupported,
-            processingMode: processingMode
-        });
-        if (!customPrompts[i - 1]) return;
-        const customPrompt = customPrompts[i - 1];
+    const handleCustomPrompt = (i: number) => {
+        const customPrompt = customPrompts.find(p => p.shortcut === i);
+        if (!customPrompt) return;
         logger(`Custom prompt: ${i} ${customPrompt.text} ${currentMessageItems.length}`);
-        if (customPrompt && (!customPrompt.requiresAttachment || currentMessageItems.length > 0)) {
+        if (!customPrompt.requiresAttachment || currentMessageItems.length > 0) {
             sendMessage(customPrompt.text);
         }
     }

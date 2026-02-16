@@ -252,7 +252,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 ],
             },
             {
-                title: "Tip: Use Custom Prompts for Common Tasks",
+                title: "Tip: Use Actions for Common Tasks",
                 description: "Save time by creating reusable prompts in Beaver settings for common library management tasks.\n\nRead about all changes in the <a href='https://github.com/jlegewie/beaver-zotero/releases/tag/v0.11.0'>change log</a>.",
             }
         ]

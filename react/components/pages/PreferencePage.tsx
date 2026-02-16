@@ -2,13 +2,14 @@ import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
-import { getCustomPromptsFromPreferences, CustomPrompt } from "../../types/settings";
+import { generatePromptId, CustomPrompt } from "../../types/settings";
+import { customPromptsAtom, saveCustomPromptsAtom, usedShortcutsAtom } from "../../atoms/customPrompts";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
 import { 
     embeddingIndexStateAtom, 
@@ -100,7 +101,9 @@ const PreferencePage: React.FC = () => {
     const [openaiKey, setOpenaiKey] = useState(() => getPref('openAiApiKey'));
     const [anthropicKey, setAnthropicKey] = useState(() => getPref('anthropicApiKey'));
     const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
-    const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>(getCustomPromptsFromPreferences());
+    const customPrompts = useAtomValue(customPromptsAtom);
+    const saveCustomPrompts = useSetAtom(saveCustomPromptsAtom);
+    const usedShortcuts = useAtomValue(usedShortcutsAtom);
     const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
     const [keyboardShortcut, setKeyboardShortcut] = useState(() => {
@@ -171,15 +174,6 @@ const PreferencePage: React.FC = () => {
         loadLastSynced();
     }, [loadLastSynced]);
 
-    // Helper function to save custom prompts array to preferences
-    const saveCustomPromptsToPrefs = useCallback((prompts: CustomPrompt[]) => {
-        // Remove the index field before saving since it's derived from array position
-        const promptsToSave = prompts.map(({ index, ...prompt }) => prompt);
-        const promptsJson = JSON.stringify(promptsToSave);
-        setPref('customPrompts', promptsJson);
-        logger('Saved custom prompts to preferences');
-    }, []);
-
     // --- Save Preferences ---
     const handlePrefSave = (key: "googleGenerativeAiApiKey" | "openAiApiKey" | "anthropicApiKey" | "customInstructions", value: string) => {
         if (value !== getPref(key)) {
@@ -210,34 +204,23 @@ const PreferencePage: React.FC = () => {
 
     // --- Custom Prompt Change Handler ---
     const handleCustomPromptChange = useCallback((index: number, updatedPrompt: CustomPrompt) => {
-        setCustomPrompts((currentPrompts) => {
-            const newPrompts = [...currentPrompts];
-            newPrompts[index] = updatedPrompt;
-            
-            // Save to preferences
-            saveCustomPromptsToPrefs(newPrompts);
-            
-            return newPrompts;
-        });
-    }, [saveCustomPromptsToPrefs]);
+        const newPrompts = [...customPrompts];
+        newPrompts[index] = updatedPrompt;
+        saveCustomPrompts(newPrompts);
+    }, [customPrompts, saveCustomPrompts]);
 
     // --- Add Prompt Handler ---
     const handleAddPrompt = useCallback(() => {
-        if (customPrompts.length >= 9) return; // Safety check
-        
         const newPrompt: CustomPrompt = {
+            id: generatePromptId(),
             title: "",
             text: "",
             librarySearch: false,
             requiresAttachment: false
         };
-        
-        setCustomPrompts((currentPrompts) => {
-            const newPrompts = [...currentPrompts, newPrompt];
-            saveCustomPromptsToPrefs(newPrompts);
-            return newPrompts;
-        });
-    }, [customPrompts.length, saveCustomPromptsToPrefs]);
+
+        saveCustomPrompts([...customPrompts, newPrompt]);
+    }, [customPrompts, saveCustomPrompts]);
 
     // --- Verify Sync Handler ---
     const handleVerifySync = useCallback(async () => {
@@ -269,12 +252,9 @@ const PreferencePage: React.FC = () => {
 
     // --- Remove Prompt Handler ---
     const handleRemovePrompt = useCallback((indexToRemove: number) => {
-        setCustomPrompts((currentPrompts) => {
-            const newPrompts = currentPrompts.filter((_, filterIndex) => filterIndex !== indexToRemove);
-            saveCustomPromptsToPrefs(newPrompts);
-            return newPrompts;
-        });
-    }, [saveCustomPromptsToPrefs]);
+        const newPrompts = customPrompts.filter((_, filterIndex) => filterIndex !== indexToRemove);
+        saveCustomPrompts(newPrompts);
+    }, [customPrompts, saveCustomPrompts]);
 
     const getCustomPromptAvailabilityNote = useCallback((prompt: CustomPrompt): string | undefined => {
         if (!prompt.requiresDatabaseSync) return undefined;
@@ -485,12 +465,12 @@ const PreferencePage: React.FC = () => {
     const rebuildIndexButtonProps = getRebuildIndexButtonProps();
     const sidebarShortcutLabel = `${Zotero.isMac ? '⌘' : 'Ctrl'}+${keyboardShortcut}`;
     const windowShortcutLabel = `${Zotero.isMac ? '⌘⇧' : 'Ctrl+Shift'}+${keyboardShortcut}`;
-    const tabs = useMemo<{ id: PreferencePageTab; label: string }[]>(() => [
-        { id: 'general', label: 'General' },
-        { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search' },
-        { id: 'permissions', label: 'Permissions' },
-        { id: 'models', label: 'Models & API Keys' },
-        { id: 'prompts', label: 'Prompts' },
+    const tabs = useMemo<{ id: PreferencePageTab; label: string; icon: React.ComponentType<React.SVGProps<SVGSVGElement>> | React.ReactElement }[]>(() => [
+        { id: 'general', label: 'General', icon: SettingsIcon },
+        { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search', icon: isDatabaseSyncSupported ? SyncIcon : SearchIcon },
+        { id: 'permissions', label: 'Permissions', icon: LockIcon },
+        { id: 'models', label: 'API Keys', icon: KeyIcon },
+        { id: 'prompts', label: 'Prompt & Actions', icon: ZapIcon },
     ], [isDatabaseSyncSupported]);
 
     // Backward compatibility for existing entry points that still request "account".
@@ -515,7 +495,7 @@ const PreferencePage: React.FC = () => {
             </div>
 
 
-            <div className="display-flex flex-row flex-wrap gap-1 items-center pb-1 mt-2">
+            <div className="display-flex flex-row flex-wrap gap-1 items-center pb-3 mt-2">
                 {tabs.map((tab) => (
                     <button
                         key={tab.id}
@@ -531,11 +511,19 @@ const PreferencePage: React.FC = () => {
                             color: tab.id === activeTab ? 'var(--fill-primary)' : 'var(--fill-secondary)',
                             padding: '4px 12px',
                             minHeight: '20px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
                             lineHeight: 1.2,
+                            gap: '4px',
                             whiteSpace: 'nowrap',
                             transition: 'background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease'
                         }}
                     >
+                        <Icon
+                            icon={tab.icon as React.ComponentType<React.SVGProps<SVGSVGElement>>}
+                            className="scale-95 -ml-05"
+                        />
                         {tab.label}
                     </button>
                 ))}
@@ -546,7 +534,7 @@ const PreferencePage: React.FC = () => {
                 <>
                     {user ? (
                         <>
-                            <SettingsGroup className="mt-2">
+                            <SettingsGroup>
                                 <SettingsRow
                                     title="Manage Account"
                                     description={<>Signed in as {user.email} ({profileWithPlan?.plan.display_name || 'Unknown'} plan)</>}
@@ -741,7 +729,7 @@ const PreferencePage: React.FC = () => {
                         <SettingsGroup>
                             <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
                                 {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
-                                <div className="font-color-secondary text-sm">
+                                <div className="font-color-secondary text-base">
                                     {isDatabaseSyncSupported ? (
                                         <>
                                             Select the libraries you want to sync with Beaver.
@@ -859,7 +847,7 @@ const PreferencePage: React.FC = () => {
                     <SettingsGroup>
                         <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
                             {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
-                            <div className="font-color-secondary text-sm">
+                            <div className="font-color-secondary text-base">
                                 When Beaver modifies your library, all changes require your approval by default.
                                 You can change this behavior here. Be careful, Beaver might make changes you didn't expect.
                             
@@ -897,10 +885,16 @@ const PreferencePage: React.FC = () => {
             {/* ===== MODELS & API KEYS TAB ===== */}
             {activeTab === 'models' && (
                 <>
-                    {/* <div className="text-base font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
-                        Connect provider API keys or advanced model providers.
-                        See <DocLink path="api-key">API key guide</DocLink> and <DocLink path="custom-models">custom models</DocLink>.
-                    </div> */}
+                    <SettingsGroup>
+                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
+                            {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
+                            <div className="font-color-secondary text-base">
+                                Beaver supports multiple model providers. Connect your API keys to use Gemini, Claude, or OpenAI models.
+                                See our <DocLink path="api-key">API key guide</DocLink> or learn about <DocLink path="custom-models">additional providers and custom endpoints</DocLink>.
+                            </div>
+                        </div>
+                    </SettingsGroup>
+
                     <SettingsGroup>
                         <div style={{ padding: '8px 12px' }}>
                             <ApiKeyInput
@@ -954,7 +948,7 @@ const PreferencePage: React.FC = () => {
                 <>
                     <SectionLabel>Custom Instructions</SectionLabel>
                     <div className="custom-prompt-card" style={{ cursor: 'default' }}>
-                        <div className="font-color-secondary text-sm mb-2">
+                        <div className="font-color-secondary text-text mb-2">
                             Custom instructions are added to all chats and help steer responses. (Max ~250 words)
                         </div>
                         <textarea
@@ -962,25 +956,26 @@ const PreferencePage: React.FC = () => {
                             onChange={handleCustomInstructionsChange}
                             placeholder="Enter custom instructions here..."
                             rows={5}
-                            className="chat-input custom-prompt-edit-textarea text-sm"
+                            className="chat-input custom-prompt-edit-textarea text-base"
                             style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical' }}
                             maxLength={1500}
                         />
                     </div>
 
                     <div className="display-flex flex-row items-end justify-between">
-                        <SectionLabel>Custom Prompts</SectionLabel>
+                        <SectionLabel>Actions</SectionLabel>
                         <Button
                             variant="outline"
                             onClick={handleAddPrompt}
-                            disabled={customPrompts.length >= 9}
                             className="text-sm mb-15"
                         >
-                            Add Prompt
+                            Add Action
                         </Button>
                     </div>
-                    <div className="text-sm font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
-                        Configure up to 9 custom prompts with keyboard shortcuts ({Zotero.isMac ? '⌘^1-⌘^9' : 'Ctrl+Win+1-9'}). Enable library search or set conditions based on attachments.
+                    <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
+                        {/* Actions are reusable prompts you define once and trigger anytime from chat, the right-click menu, or automatically. */}
+                        {/* Actions are reusable prompts that tell the agent what to do with your research. You can trigger them manually with / in chat, from the right-click menu on any item, or set them to run automatically. */}
+                        Actions are reusable prompts you define once and trigger anytime.
                     </div>
                     <div className="display-flex flex-col gap-4">
                         {customPrompts.map((prompt: CustomPrompt, index: number) => (
@@ -991,6 +986,7 @@ const PreferencePage: React.FC = () => {
                                 onChange={handleCustomPromptChange}
                                 onRemove={handleRemovePrompt}
                                 availabilityNote={getCustomPromptAvailabilityNote(prompt)}
+                                usedShortcuts={usedShortcuts}
                             />
                         ))}
                         {/* <div className="display-flex flex-row items-center justify-start">
