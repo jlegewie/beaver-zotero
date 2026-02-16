@@ -103,7 +103,6 @@ export interface CustomPrompt {
     id?: string;
     title: string;
     text: string;
-    librarySearch: boolean;
     requiresAttachment: boolean;
     requiresDatabaseSync?: boolean;
     id_model?: string;
@@ -121,7 +120,6 @@ export const isCustomPrompt = (obj: any): obj is CustomPrompt => {
         obj !== null &&
         typeof obj.title === 'string' &&
         typeof obj.text === 'string' &&
-        typeof obj.librarySearch === 'boolean' &&
         typeof obj.requiresAttachment === 'boolean' &&
         (obj.requiresDatabaseSync === undefined || typeof obj.requiresDatabaseSync === 'boolean') &&
         (obj.id === undefined || typeof obj.id === 'string') &&

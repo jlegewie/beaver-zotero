@@ -215,7 +215,6 @@ const PreferencePage: React.FC = () => {
             id: generatePromptId(),
             title: "",
             text: "",
-            librarySearch: false,
             requiresAttachment: false
         };
 

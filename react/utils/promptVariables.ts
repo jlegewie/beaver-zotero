@@ -11,8 +11,8 @@
  *   - Text variables: resolve to a string that replaces the placeholder.
  *
  * Supported variables:
- *   {{recent_papers}}      — (items) Last 5 recently added papers
- *   {{recent_paper}}       — (items) Most recently added paper
+ *   {{recent_items}}      — (items) Last 5 recently added papers
+ *   {{recent_item}}       — (items) Most recently added paper
  *   {{selected_items}}     — (items) Currently selected items in the library view
  *   {{current_collection}} — (text)  Name of the currently selected collection
  */
@@ -25,8 +25,8 @@ import { logger } from '../../src/utils/logger';
 
 /** Metadata for each supported variable (used for UI hints) */
 export const PROMPT_VARIABLES: { name: string; description: string }[] = [
-    { name: 'recent_papers',      description: 'Last 5 recently added papers' },
-    { name: 'recent_paper',       description: 'Most recently added paper' },
+    { name: 'recent_items',      description: 'Last 5 recently added papers' },
+    { name: 'recent_item',       description: 'Most recently added paper' },
     { name: 'selected_items',     description: 'Currently selected items' },
     { name: 'current_collection', description: 'Currently selected collection' },
 ];
@@ -97,8 +97,8 @@ interface ResolvedVariable {
 type VariableResolver = () => Promise<ResolvedVariable>;
 
 const RESOLVERS: Record<string, VariableResolver> = {
-    recent_papers:      resolveRecentPapers,
-    recent_paper:       resolveRecentPaper,
+    recent_items:       resolveRecentItems,
+    recent_item:       resolveRecentPaper,
     selected_items:     resolveSelectedItems,
     current_collection: resolveCurrentCollection,
 };
@@ -107,7 +107,7 @@ const RESOLVERS: Record<string, VariableResolver> = {
 // Item Resolvers (return items, placeholder removed from text)
 // ---------------------------------------------------------------------------
 
-async function resolveRecentPapers(): Promise<ResolvedVariable> {
+async function resolveRecentItems(): Promise<ResolvedVariable> {
     const items = await fetchRecentItems(5);
     return { text: '', items };
 }
