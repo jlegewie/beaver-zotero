@@ -161,7 +161,7 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
 
     return (
         <div className="border-popup rounded-md display-flex flex-col min-w-0">
-            <div className="display-flex flex-row bg-senary items-start py-15">
+            <div className="display-flex flex-row bg-senary items-start py-15 gap-1">
                 {/* Icon + label + title (clickable to reveal when applied) */}
                 <div
                     className={`display-flex flex-row ml-3 gap-2 min-w-0 ${isApplied ? 'cursor-pointer' : ''}`}
@@ -264,9 +264,9 @@ interface NoteAgentActionDisplayProps {
  * Pending notes: Dismiss (x) + Confirm (tick) icon buttons.
  */
 const NoteAgentActionDisplay: React.FC<NoteAgentActionDisplayProps> = ({ run, actions }) => {
-    // Filter to visible note actions (not rejected/undone)
+    // Only show pending/error notes — once accepted or dismissed, the row disappears
     const visibleActions = actions.filter(a =>
-        a.status !== 'rejected' && a.status !== 'undone'
+        a.status === 'pending' || a.status === 'error'
     );
 
     // Pre-extract note blocks from run messages for content matching
