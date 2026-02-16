@@ -12,6 +12,7 @@ import {
     CustomPrompt,
     getCustomPromptsFromPreferences,
     saveCustomPromptsToPreferences,
+    savePromptLastUsed,
 } from '../types/settings';
 import { ProcessingMode } from '../types/profile';
 import { isDatabaseSyncSupportedAtom, processingModeAtom } from './profile';
@@ -44,12 +45,14 @@ export const saveCustomPromptsAtom = atom(
 export const markPromptUsedAtom = atom(
     null,
     (get, set, id: string) => {
+        const timestamp = new Date().toISOString();
         const prompts = get(customPromptsAtom);
         const updated = prompts.map((p) =>
-            p.id === id ? { ...p, lastUsed: new Date().toISOString() } : p,
+            p.id === id ? { ...p, lastUsed: timestamp } : p,
         );
         set(customPromptsAtom, updated);
-        saveCustomPromptsToPreferences(updated);
+        // Persist to separate preference so the main customPrompts pref stays clean
+        savePromptLastUsed(id, timestamp);
     },
 );
 
