@@ -191,6 +191,14 @@ const InputArea: React.FC<InputAreaProps> = ({
         setTimeout(() => inputRef.current?.focus(), 0);
     }, []);
 
+    const handleSlashBackspace = useCallback(() => {
+        setIsSlashMenuOpen(false);
+        setSlashSearchQuery('');
+        // Remove the "/" from the input on backspace
+        setMessageContent(preSlashTextRef.current);
+        setTimeout(() => inputRef.current?.focus(), 0);
+    }, []);
+
     const slashMenuItems = useMemo<SearchMenuItem[]>(() => {
         const query = slashSearchQuery.toLowerCase();
         const items: SearchMenuItem[] = [];
@@ -320,6 +328,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 closeOnSelect={true}
                 // showSearchInput={customPrompts.length > 6}
                 showSearchInput={true}
+                onEmptyBackspace={handleSlashBackspace}
             />
 
             {/* Input Form */}
