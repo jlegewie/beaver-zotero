@@ -86,7 +86,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
             
             {/* File Processing Status */}
             {isDatabaseSyncSupported && !isWindow && (
-                <div className="display-flex flex-row justify-between items-center mt-4">
+                <div className="display-flex flex-row justify-between items-center mt-5">
                     <Button
                         variant="ghost-secondary"
                         onClick={() => setShowFileStatusDetails(!showFileStatusDetails)}
