@@ -23,6 +23,7 @@ pref("maxPageCount", 300);
 
 // Agent actions
 pref("autoApplyAnnotations", true);
+pref("autoCreateNotes", true);
 pref("autoImportItems", false);
 
 // Deferred tool preferences: maps tool group to preference (always_ask, always_apply, continue_without_applying)
