@@ -277,15 +277,15 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         steps: [
             {
                 title: "A New Brain for Beaver",
-                description: "Beaver now uses a new, more powerful default model. This is rolling out as a test in 0.11.4 and will be fully integrated in 0.12."
+                description: "Beaver now uses a new, more powerful default model. Try it out and let us know what you think."
+            },
+            {
+                title: "Custom Actions for common tasks",
+                description: "Use the new slash menu '/' to to trigger custom actions.",
             },
             {
                 title: "Keyboard shortcut updated",
                 description: "Toggle Beaver with ⌘J (Ctrl+J on Windows/Linux). Open in a separate window with ⌘⇧J (Ctrl+Shift+J on Windows/Linux).",
-            },
-            {
-                title: "Redesigned settings page",
-                description: "The settings page has been redesigned to be more user-friendly and intuitive.",
             }
         ]
     },
