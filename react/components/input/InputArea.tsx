@@ -11,7 +11,7 @@ import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { CustomPrompt } from '../../types/settings';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
-import { customPromptsForContextAtom } from '../../atoms/customPrompts';
+import { customPromptsForContextAtom, markPromptUsedAtom } from '../../atoms/customPrompts';
 import { logger } from '../../../src/utils/logger';
 import { isLibraryTabAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { selectedModelAtom } from '../../atoms/models';
@@ -42,6 +42,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
     const customPrompts = useAtomValue(customPromptsForContextAtom);
+    const markPromptUsed = useSetAtom(markPromptUsedAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
     const [slashMenuPosition, setSlashMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -161,6 +162,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         if (!customPrompt) return;
         logger(`Custom prompt: ${i} ${customPrompt.text} ${currentMessageItems.length}`);
         if (!customPrompt.requiresAttachment || currentMessageItems.length > 0) {
+            if (customPrompt.id) markPromptUsed(customPrompt.id);
             sendMessage(customPrompt.text);
         }
     }
@@ -176,9 +178,10 @@ const InputArea: React.FC<InputAreaProps> = ({
         setIsSlashMenuOpen(false);
         setSlashSearchQuery('');
         setMessageContent('');
+        if (prompt.id) markPromptUsed(prompt.id);
         sendMessage(fullMessage);
         setTimeout(() => inputRef.current?.focus(), 0);
-    }, [sendMessage]);
+    }, [sendMessage, markPromptUsed]);
 
     const handleSlashDismiss = useCallback(() => {
         setIsSlashMenuOpen(false);
@@ -196,8 +199,8 @@ const InputArea: React.FC<InputAreaProps> = ({
         // so we build in reverse visual order: footer first, prompts, header last.
 
         // "Create Action" footer (visually at bottom)
-        if (!query || 'create action'.includes(query)) {
-            items.push({
+        const createActionItem: SearchMenuItem[] = !query || 'create action'.includes(query)
+            ? [{
                 label: 'Create Action',
                 icon: PlusSignIcon,
                 onClick: () => {
@@ -206,8 +209,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                     setMessageContent(preSlashTextRef.current + '/');
                     openPreferencesWindow('prompts');
                 },
-            });
-        }
+            }] : [];
 
         // Custom prompt items: enabled first, disabled last (reversed for "above")
         const filtered = customPrompts.filter(prompt =>
@@ -215,6 +217,19 @@ const InputArea: React.FC<InputAreaProps> = ({
         );
         const enabled = filtered.filter(p => !p.requiresAttachment || hasAttachment);
         const disabled = filtered.filter(p => p.requiresAttachment && !hasAttachment);
+
+        // Sort each group: most recently used first, then by preferences order
+        const sortByUsage = (a: CustomPrompt, b: CustomPrompt): number => {
+            if (a.lastUsed && !b.lastUsed) return -1;
+            if (!a.lastUsed && b.lastUsed) return 1;
+            if (a.lastUsed && b.lastUsed) {
+                const diff = new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime();
+                if (diff !== 0) return diff;
+            }
+            return (a.index ?? Infinity) - (b.index ?? Infinity);
+        };
+        enabled.sort(sortByUsage);
+        disabled.sort(sortByUsage);
 
         // Disabled items go first in array (visually at bottom after reverse)
         for (let i = disabled.length - 1; i >= 0; i--) {
@@ -233,9 +248,9 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
 
         // Group header (visually at top)
-        items.push({ label: 'Actions', onClick: () => {}, isGroupHeader: true });
+        const groupHeaderItem = { label: 'Actions', onClick: () => {}, isGroupHeader: true };
 
-        return items;
+        return [...createActionItem, ...items.reverse(), groupHeaderItem];
     }, [customPrompts, slashSearchQuery, hasAttachment, handleSlashSelect]);
 
     const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {

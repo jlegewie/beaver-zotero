@@ -35,6 +35,22 @@ export const saveCustomPromptsAtom = atom(
 );
 
 // =============================================================================
+// Write atom – marks a prompt as recently used (updates lastUsed timestamp)
+// =============================================================================
+
+export const markPromptUsedAtom = atom(
+    null,
+    (get, set, id: string) => {
+        const prompts = get(customPromptsAtom);
+        const updated = prompts.map((p) =>
+            p.id === id ? { ...p, lastUsed: new Date().toISOString() } : p,
+        );
+        set(customPromptsAtom, updated);
+        saveCustomPromptsToPreferences(updated);
+    },
+);
+
+// =============================================================================
 // Derived: context-filtered prompts (replaces getCustomPromptsForContext)
 // =============================================================================
 

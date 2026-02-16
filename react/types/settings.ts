@@ -109,6 +109,7 @@ export interface CustomPrompt {
     id_model?: string;
     shortcut?: number;
     index?: number;
+    lastUsed?: string;
 }
 
 /** Generate a stable unique identifier for a custom prompt. */
@@ -125,7 +126,8 @@ export const isCustomPrompt = (obj: any): obj is CustomPrompt => {
         (obj.requiresDatabaseSync === undefined || typeof obj.requiresDatabaseSync === 'boolean') &&
         (obj.id === undefined || typeof obj.id === 'string') &&
         (obj.id_model === undefined || typeof obj.id_model === 'string') &&
-        (obj.shortcut === undefined || (typeof obj.shortcut === 'number' && obj.shortcut >= 1 && obj.shortcut <= 9))
+        (obj.shortcut === undefined || (typeof obj.shortcut === 'number' && obj.shortcut >= 1 && obj.shortcut <= 9)) &&
+        (obj.lastUsed === undefined || typeof obj.lastUsed === 'string')
     );
 };
 

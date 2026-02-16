@@ -10,7 +10,7 @@ import { isStreamingAtom } from '../../agents/atoms';
 import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atoms/messageComposition";
 import { CustomPrompt } from "../../types/settings";
-import { customPromptsForContextAtom } from "../../atoms/customPrompts";
+import { customPromptsForContextAtom, markPromptUsedAtom } from "../../atoms/customPrompts";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import FileStatusDisplay from "../status/FileStatusDisplay";
 import { isDatabaseSyncSupportedAtom } from "../../atoms/profile";
@@ -28,6 +28,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const prompts = useAtomValue(customPromptsForContextAtom);
+    const markPromptUsed = useSetAtom(markPromptUsedAtom);
 
     // Realtime listening for file status updates (only in sidebar, not in separate windows)
     const { connectionStatus } = useFileStatus(!isWindow);
@@ -39,6 +40,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
         if (isPending || isStreaming || prompt.text.length === 0) return;
         if (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment) return;
 
+        if (prompt.id) markPromptUsed(prompt.id);
         // Send message via WebSocket
         await sendWSMessage(prompt.text);
     };
