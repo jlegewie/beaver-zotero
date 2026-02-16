@@ -4,9 +4,12 @@ import { AgentRun } from '../../agents/types';
 import {
     getAgentActionsByRunAtom,
     isCreateItemAgentAction,
+    isZoteroNoteAgentAction,
     CreateItemAgentAction,
+    AgentAction,
 } from '../../agents/agentActions';
 import CreateItemAgentActionDisplay from './CreateItemAgentActionDisplay';
+import NoteAgentActionDisplay from './NoteAgentActionDisplay';
 
 interface AgentActionsReviewProps {
     run: AgentRun;
@@ -14,7 +17,7 @@ interface AgentActionsReviewProps {
 
 /**
  * Displays agent actions for a completed run.
- * Currently supports create_item actions from citations.
+ * Supports create_item actions from citations and zotero_note actions.
  */
 export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) => {
     const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
@@ -30,32 +33,42 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
         return countB - countA;
     });
 
+    // Get note actions
+    const noteActions = getAgentActionsByRun(
+        run.id,
+        (action) => isZoteroNoteAgentAction(action)
+    ) as AgentAction[];
+
     // Don't show during streaming
     if (run.status === 'in_progress') {
         return null;
     }
 
-    // Don't show if no actions or all are rejected/undone/error
-    if (
-        createItemActions.length === 0 ||
-        createItemActions.every(
-            (action) =>
-                action.status === 'rejected' ||
-                action.status === 'undone'
-        )
-    ) {
+    const hasCreateItems = createItemActions.length > 0 &&
+        !createItemActions.every(a => a.status === 'rejected' || a.status === 'undone');
+    const hasNotes = noteActions.length > 0 &&
+        !noteActions.every(a => a.status === 'rejected' || a.status === 'undone');
+
+    if (!hasCreateItems && !hasNotes) {
         return null;
     }
 
     return (
-        <div className="px-4">
-            <CreateItemAgentActionDisplay
-                runId={run.id}
-                actions={createItemActions}
-            />
+        <div className="px-4 display-flex flex-col gap-2">
+            {hasCreateItems && (
+                <CreateItemAgentActionDisplay
+                    runId={run.id}
+                    actions={createItemActions}
+                />
+            )}
+            {hasNotes && (
+                <NoteAgentActionDisplay
+                    run={run}
+                    actions={noteActions}
+                />
+            )}
         </div>
     );
 };
 
 export default AgentActionsReview;
-

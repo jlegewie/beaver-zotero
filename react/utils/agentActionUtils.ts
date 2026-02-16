@@ -2,10 +2,10 @@
  * Utility functions for agent actions
  */
 
-import React, { createElement, useCallback } from 'react';
 import { Setter } from 'jotai';
-import { AgentAction, isAnnotationAgentAction, isZoteroNoteAgentAction, hasAppliedZoteroItem, ackAgentActionsAtom, undoAgentActionAtom } from '../agents/agentActions';
+import { AgentAction, isAnnotationAgentAction, isZoteroNoteAgentAction, hasAppliedZoteroItem, ackAgentActionsAtom } from '../agents/agentActions';
 import { NoteProposedData } from '../types/agentActions/base';
+import { ModelMessage } from '../agents/types';
 import { ZoteroItemReference } from '../types/zotero';
 import { activeRunAtom } from '../agents/atoms';
 import { loadFullItemDataWithAllTypes, isLibraryEditable } from '../../src/utils/zoteroUtils';
@@ -16,9 +16,6 @@ import { citationDataMapAtom } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
 import { toolAnnotationApplyBatcher, filterAnnotationAgentActions } from './toolAnnotationApplyBatcher';
 import { saveStreamingNote } from './noteActions';
-import { addPopupMessageAtom, removePopupMessageAtom } from './popupMessageUtils';
-import { truncateText } from './stringUtils';
-import { ZOTERO_ICONS, ZoteroIcon } from '../components/icons/ZoteroIcon';
 import { logger } from '../../src/utils/logger';
 
 /**
@@ -157,38 +154,6 @@ export function autoApplyAnnotationAgentActions(runId: string, actions: AgentAct
 }
 
 /**
- * Small popup content component for auto-created notes.
- * Shows "Saved to Zotero." with an "Undo" button.
- */
-const NoteCreatedPopupContent: React.FC<{
-    resultLibraryId: number;
-    resultZoteroKey: string;
-    actionId: string;
-    popupId: string;
-}> = ({ resultLibraryId, resultZoteroKey, actionId, popupId }) => {
-    const handleUndo = useCallback(async () => {
-        try {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(resultLibraryId, resultZoteroKey);
-            if (item) await item.eraseTx();
-            store.set(undoAgentActionAtom, actionId);
-            store.set(removePopupMessageAtom, popupId);
-        } catch (err) {
-            logger(`Undo auto-created note failed: ${err}`, 1);
-        }
-    }, [resultLibraryId, resultZoteroKey, actionId, popupId]);
-
-    return createElement('div', {
-        className: 'display-flex flex-row items-center gap-2 text-sm font-color-tertiary',
-    },
-        createElement('span', null, 'Saved to Zotero.'),
-        createElement('button', {
-            className: 'text-link text-sm',
-            onClick: handleUndo,
-        }, 'Undo')
-    );
-};
-
-/**
  * Parse note attributes from a `<note ...>` opening tag string.
  * Returns a map of attribute name → value.
  */
@@ -207,7 +172,7 @@ function parseNoteTagAttributes(tag: string): Record<string, string> {
  * (excluding 'id' which is injected by the backend).
  * Uses sorted attribute comparison — same logic as `tagsMatch` in agentActions.ts.
  */
-function noteTagsMatch(tag1: string, tag2: string): boolean {
+export function noteTagsMatch(tag1: string, tag2: string): boolean {
     const attrs1 = parseNoteTagAttributes(tag1);
     const attrs2 = parseNoteTagAttributes(tag2);
     // Exclude 'id' attribute
@@ -220,7 +185,7 @@ function noteTagsMatch(tag1: string, tag2: string): boolean {
     return keys1.every((key, i) => key === keys2[i] && attrs1[key] === attrs2[key]);
 }
 
-interface ParsedNoteBlock {
+export interface ParsedNoteBlock {
     rawTag: string;
     title: string;
     content: string;
@@ -264,15 +229,12 @@ function extractNoteBlocksFromText(text: string): ParsedNoteBlock[] {
 }
 
 /**
- * Extract all note content from the active run's model messages.
- * Concatenates all text parts from response messages and parses note blocks.
+ * Extract all note content from model messages.
+ * Iterates through response text parts and parses note blocks.
  */
-function extractNoteBlocksFromRun(runId: string): ParsedNoteBlock[] {
-    const run = store.get(activeRunAtom);
-    if (!run || run.id !== runId) return [];
-
+export function extractNoteBlocksFromMessages(messages: ModelMessage[]): ParsedNoteBlock[] {
     const allBlocks: ParsedNoteBlock[] = [];
-    for (const message of run.model_messages) {
+    for (const message of messages) {
         if (message.kind !== 'response') continue;
         for (const part of message.parts) {
             if (part.part_kind !== 'text') continue;
@@ -280,6 +242,16 @@ function extractNoteBlocksFromRun(runId: string): ParsedNoteBlock[] {
         }
     }
     return allBlocks;
+}
+
+/**
+ * Extract note blocks from the active run (reads from activeRunAtom).
+ * Used by autoCreateNoteAgentActions during onRunComplete.
+ */
+function extractNoteBlocksFromRun(runId: string): ParsedNoteBlock[] {
+    const run = store.get(activeRunAtom);
+    if (!run || run.id !== runId) return [];
+    return extractNoteBlocksFromMessages(run.model_messages);
 }
 
 /**
@@ -371,23 +343,6 @@ export async function autoCreateNoteAgentActions(
 
             // Acknowledge the action (marks as 'applied')
             set(ackAgentActionsAtom, runId, [{ action_id: action.id, result_data: result }]);
-
-            // Show popup with undo
-            const popupId = `auto-note-${action.id}`;
-            set(addPopupMessageAtom, {
-                id: popupId,
-                type: 'info' as const,
-                icon: createElement(ZoteroIcon, { icon: ZOTERO_ICONS.NOTES, size: 12 }),
-                title: `Note: ${truncateText(title, 50)}`,
-                customContent: createElement(NoteCreatedPopupContent, {
-                    resultLibraryId: result.library_id,
-                    resultZoteroKey: result.zotero_key,
-                    actionId: action.id,
-                    popupId,
-                }),
-                expire: true,
-                duration: 6000,
-            });
         } catch (error: any) {
             logger(`autoCreateNoteAgentActions: Failed to create note "${title}": ${error.message}`, 1);
         }
