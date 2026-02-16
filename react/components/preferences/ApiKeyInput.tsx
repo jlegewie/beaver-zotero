@@ -158,7 +158,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     return (
         <div className={`display-flex flex-col items-start gap-1 mt-1 mb-1 ${className}`}>
             <div className="display-flex flex-row items-start gap-1 flex-1 w-full">
-                <label htmlFor={id} className="text-sm font-semibold font-color-primary">{label}</label>
+                <label htmlFor={id} className="text-base font-semibold font-color-primary">{label}</label>
                 {linkUrl && (
                     <IconButton
                         variant="ghost-secondary"

@@ -31,6 +31,24 @@ export interface RunUsage {
     output_tokens: number;
     /** Total number of output/completion tokens. */
 
+    /**
+     * Optional per-model-request usage entries in chronological order.
+     * When present, this can be used to inspect latest-request usage
+     * instead of relying only on aggregate totals.
+     */
+    model_requests?: ModelRequestUsage[];
+
+    details?: Record<string, number>;
+}
+
+/**
+ * Token usage for a single model request within a run.
+ */
+export interface ModelRequestUsage {
+    input_tokens: number;
+    output_tokens?: number;
+    cache_write_tokens?: number;
+    cache_read_tokens?: number;
     details?: Record<string, number>;
 }
 

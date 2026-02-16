@@ -8,7 +8,8 @@ import IndexingCompleteMessageContent from './IndexingCompleteMessageContent';
 import VersionUpdateMessageContent from './VersionUpdateMessageContent';
 import EmbeddingIndexingMessageContent from './EmbeddingIndexingMessageContent';
 import { newThreadAtom, currentThreadIdAtom } from '../../../atoms/threads';
-import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../../atoms/ui';
+import { showFileStatusDetailsAtom } from '../../../atoms/ui';
+import { openPreferencesWindow } from '../../../../src/ui/openPreferencesWindow';
 import Button from "../Button";
 import PopupMessageHeader from './PopupMessageHeader';
 import { getWindowFromElement } from '../../../utils/windowContext';
@@ -23,7 +24,6 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
     const removeMessage = useSetAtom(removePopupMessageAtom);
     const newThread = useSetAtom(newThreadAtom);
     const setShowFileStatusDetails = useSetAtom(showFileStatusDetailsAtom);
-    const setIsPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const updatePopupMessage = useSetAtom(updatePopupMessageAtom);
     
@@ -75,7 +75,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message }) => {
     };
 
     const showSettings = () => {
-        setIsPreferencePageVisible(true);
+        openPreferencesWindow();
         handleDismiss();
     };
 

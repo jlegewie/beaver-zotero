@@ -7,6 +7,7 @@ import { getPref } from '../../src/utils/prefs';
 import { removePopupMessagesByTypeAtom } from '../atoms/ui';
 import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom } from '../atoms/messageComposition';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
+import { logger } from '../../src/utils/logger';
 
 export function useToggleSidebar() {
     const setSidebarVisible = useSetAtom(isSidebarVisibleAtom);
@@ -20,6 +21,8 @@ export function useToggleSidebar() {
             const currentlyOpen = prev;
             const newIsVisible = !currentlyOpen;
             const isLibraryTab = Zotero.getMainWindow().Zotero_Tabs.selectedType === 'library';
+            
+            logger(`useToggleSidebar: toggleChat event received - currently open: ${currentlyOpen}, will be: ${newIsVisible}, location: ${isLibraryTab ? 'library' : 'reader'}`);
 
             // If just opened, initialize
             if (!currentlyOpen) {

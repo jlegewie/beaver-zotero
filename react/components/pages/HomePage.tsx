@@ -3,22 +3,23 @@ import Button from "../ui/Button";
 import FileStatusButton from "../ui/buttons/FileStatusButton";
 import { ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { useFileStatus } from '../../hooks/useFileStatus';
-import { isPreferencePageVisibleAtom, showFileStatusDetailsAtom } from '../../atoms/ui';
+import { showFileStatusDetailsAtom } from '../../atoms/ui';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
+import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { isStreamingAtom } from '../../agents/atoms';
 import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atoms/messageComposition";
-import { getCustomPromptsForContext, CustomPrompt } from "../../types/settings";
+import { CustomPrompt } from "../../types/settings";
+import { customPromptsForContextAtom, markPromptUsedAtom } from "../../atoms/customPrompts";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import FileStatusDisplay from "../status/FileStatusDisplay";
-import { isDatabaseSyncSupportedAtom, processingModeAtom } from "../../atoms/profile";
+import { isDatabaseSyncSupportedAtom } from "../../atoms/profile";
 
 interface HomePageProps {
     isWindow?: boolean;
 }
 
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
-    const togglePreferencePage = useSetAtom(isPreferencePageVisibleAtom);
     const isStreaming = useAtomValue(isStreamingAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
     const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
@@ -26,7 +27,8 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
-    const processingMode = useAtomValue(processingModeAtom);
+    const prompts = useAtomValue(customPromptsForContextAtom);
+    const markPromptUsed = useSetAtom(markPromptUsedAtom);
 
     // Realtime listening for file status updates (only in sidebar, not in separate windows)
     const { connectionStatus } = useFileStatus(!isWindow);
@@ -38,14 +40,10 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
         if (isPending || isStreaming || prompt.text.length === 0) return;
         if (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment) return;
 
+        if (prompt.id) markPromptUsed(prompt.id);
         // Send message via WebSocket
         await sendWSMessage(prompt.text);
     };
-
-    const prompts: CustomPrompt[] = getCustomPromptsForContext({
-        isDatabaseSyncSupported,
-        processingMode
-    });
     const shortcutKey = Zotero.isMac ? '⌘^' : 'Ctrl+Win+';
 
     return (
@@ -59,29 +57,32 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
             {/* Custom Prompt */}
             {prompts.length > 0 && (
                 <>
-                <div className="display-flex flex-row justify-between items-center">
+                <div className="display-flex flex-row justify-between items-center mb-2">
                     {/* <div className="font-semibold text-lg mb-1">Custom Prompts</div> */}
-                    <div className="text-xl font-semibold">Custom Prompts</div>
-                    <Button variant="outline" className="scale-85 fit-content" onClick={() => togglePreferencePage((prev) => !prev)}> Edit </Button>
+                    <div className="text-xl font-semibold">How can I help you?</div>
+                    <Button variant="outline" className="scale-85 fit-content" onClick={() => openPreferencesWindow('prompts')}> Edit </Button>
                 </div>
                 {/* <div className="display-flex flex-col items-start mb-4">
                     <p className="text-base font-color-secondary -mt-2">Beaver will sync your library, upload your PDFs, and index your files for search. This process can take 20-60 min.</p>
                 </div> */}
-                {prompts.map((prompt, index) => (
+                {prompts.map((prompt) => (
                     <Button
-                        key={index}
-                        variant="ghost-secondary"
+                        key={prompt.id || prompt.index}
+                        variant="ghost"
                         onClick={() => handleCustomPrompt(prompt)}
                         disabled={isPending || (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment)}
+                        className="w-full justify-between"
+                        style={{ padding: '6px 8px' }}
+                        title={(prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment) ? 'Requires attachments' : 'Run action'}
                     >
-                        <span className={`text-sm mr-2 ${prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
-                            {`${shortcutKey}${prompt.index}`}
-                        </span>
-                        <span
-                            className={`text-base truncate
-                                `}>
+                        <span className="text-base truncate">
                             {prompt.title}
                         </span>
+                        {prompt.shortcut != null && (
+                            <span className={`text-sm ml-2 flex-shrink-0 ${prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
+                                {`${shortcutKey}${prompt.shortcut}`}
+                            </span>
+                        )}
                     </Button>
                 ))}
                 </>

@@ -39,7 +39,9 @@ export async function handleAgentActionValidateRequest(
             return await validateCreateItemAction(request);
         }
 
-        // Unsupported action type
+        // Unsupported action type.
+        // Note: confirm_extraction approvals are backend-managed and intentionally
+        // not validated through this local deferred-tool preference flow.
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -85,6 +87,8 @@ const AI_RESTRICTED_FIELDS = [
     // Structural changes - too risky for AI
     'itemTypeID',       // Changing item type can lose data
 ] as const;
+
+const ATTACHMENT_EDITABLE_FIELDS = ['title', 'url'] as const;
 
 // ============================================================================
 // Field Validation Types and Functions
@@ -144,6 +148,18 @@ interface CreatorValidationResult {
  * @returns Validation result with allowed status and error details if not allowed
  */
 export function validateFieldEdit(item: Zotero.Item, field: string): FieldValidationResult {
+    // Attachments are intentionally scoped to a small safe subset.
+    if (
+        item.isAttachment() &&
+        !(ATTACHMENT_EDITABLE_FIELDS as readonly string[]).includes(field)
+    ) {
+        return {
+            allowed: false,
+            error: `Field '${field}' is not editable for attachments. Only these fields are allowed: ${ATTACHMENT_EDITABLE_FIELDS.join(', ')}`,
+            error_code: 'field_restricted',
+        };
+    }
+
     // 1. Check if field is restricted by AI safety policy
     if ((AI_RESTRICTED_FIELDS as readonly string[]).includes(field)) {
         return {
@@ -167,21 +183,12 @@ export function validateFieldEdit(item: Zotero.Item, field: string): FieldValida
     if (!canSetField(item, field)) {
         const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
         const itemTypeID = item.itemTypeID;
-
-        // If the field is a base field, list valid fields for this item type
-        if (fieldID && Zotero.ItemFields.isBaseField(fieldID)) {
-            const typeFields = Zotero.ItemFields.getItemTypeFields(itemTypeID);
-            const typeFieldNames = typeFields.map((fid: number) => Zotero.ItemFields.getName(fid));
-            return {
-                allowed: false,
-                error: `Field '${field}' is not valid for item type '${itemType}'. Valid fields: ${typeFieldNames.join(', ')}`,
-                error_code: 'field_invalid_for_type'
-            };
-        }
+        const typeFields = Zotero.ItemFields.getItemTypeFields(itemTypeID);
+        const typeFieldNames = typeFields.map((fid: number) => Zotero.ItemFields.getName(fid));
 
         return {
             allowed: false,
-            error: `Field '${field}' is not valid for item type '${itemType}'`,
+            error: `Field '${field}' is not valid for item type '${itemType}'. Valid fields: ${typeFieldNames.join(', ')}`,
             error_code: 'field_invalid_for_type'
         };
     }
@@ -387,17 +394,20 @@ async function validateEditMetadataAction(
     }
 
     if (item.isAttachment()) {
-        return {
-            type: 'agent_action_validate_response',
-            request_id: request.request_id,
-            valid: false,
-            error: `Editing Attachments is not supported`,
-            error_code: 'attachment_items_not_supported',
-            preference: 'always_ask',
-        };
-    }
-
-    if (!item.isRegularItem()) {
+        // Attachments support a limited set of fields (title, url).
+        // Reject creator edits — attachments have no valid creator types.
+        if (creators != null && creators.length > 0) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: 'Attachments do not support creators. Only the following fields can be edited on attachments: title, url.',
+                error_code: 'creators_not_supported_for_attachments',
+                preference: 'always_ask',
+            };
+        }
+        // Attachment field allowlist is enforced by validateFieldEdit()/validateAllEdits() below.
+    } else if (!item.isRegularItem()) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -499,8 +509,10 @@ async function validateEditMetadataAction(
         }
     }
 
-    // Include current creators for before/after tracking
-    currentValue.current_creators = item.getCreatorsJSON();
+    // Include current creators for before/after tracking (not applicable for attachments)
+    if (item.isRegularItem()) {
+        currentValue.current_creators = item.getCreatorsJSON();
+    }
 
     // Get user preference from settings
     const preference = getDeferredToolPreference('edit_metadata');

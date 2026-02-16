@@ -54,7 +54,7 @@ This is only one dimension of evaluation (and not the hardest). We also track ot
 1. Create an account and download Beaver [here](https://www.beaverapp.ai/join).
 2. In Zotero, go to Tools → Add‑ons → Install Add‑on From File.
 3. Select the downloaded `.xpi` file.
-4. Open Beaver using the magic wand icon in the top‑right corner or press Cmd (macOS) / Ctrl (Windows) + L.
+4. Open Beaver using the magic wand icon in the top‑right corner or press Cmd (macOS) / Ctrl (Windows) + J.
 
 More details are available in the [documentation](https://www.beaverapp.ai/docs/getting-started).
 
@@ -105,7 +105,7 @@ Beaver explores your library using different tools. A clean library helps it fin
 
 1. **Keep Zotero organized**: Clear filenames (e.g., `main_article.pdf`, `appendix.pdf`, `book_review.pdf`) help Beaver distinguish document types and improve retrieval accuracy.
 
-2. **Use custom prompts**: Add details in Preferences → Custom Prompt. This text is included in every conversation and helps tailor results to your context.
+2. **Use actions** (previously custom prompts): Add details in Preferences → Actions. This text is included in every conversation and helps tailor results to your context.
 
 3. **Help improve Beaver**: Consider enabling anonymized data sharing in account settings.
 

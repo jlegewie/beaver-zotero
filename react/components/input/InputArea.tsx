@@ -1,22 +1,30 @@
-import React, { useState, useEffect } from 'react';
-import { StopIcon, GlobalSearchIcon } from '../icons/icons';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { StopIcon, GlobalSearchIcon, PlusSignIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { newThreadAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
+import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
+import { currentMessageContentAtom, currentMessageItemsAtom, currentReaderAttachmentAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
-import { MenuPosition } from '../ui/menus/SearchMenu';
+import SearchMenu, { MenuPosition, SearchMenuItem } from '../ui/menus/SearchMenu';
+import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
+import { CustomPrompt } from '../../types/settings';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
-import { getCustomPromptsForContext } from '../../types/settings';
+import { customPromptsForContextAtom, markPromptUsedAtom } from '../../atoms/customPrompts';
 import { logger } from '../../../src/utils/logger';
 import { isLibraryTabAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { selectedModelAtom } from '../../atoms/models';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
-import { isDatabaseSyncSupportedAtom, processingModeAtom } from '../../atoms/profile';
 import PendingActionsBar from './PendingActionsBar';
+import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
+import { allRunsAtom } from '../../agents/atoms';
+import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom } from '../../atoms/messageUIState';
+import { getLastRequestInputTokens } from '../../utils/runUsage';
+import { getPref } from '../../../src/utils/prefs';
+
+const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -33,8 +41,17 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
-    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
-    const processingMode = useAtomValue(processingModeAtom);
+    const customPrompts = useAtomValue(customPromptsForContextAtom);
+    const markPromptUsed = useSetAtom(markPromptUsedAtom);
+    const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
+    const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
+    const [slashMenuPosition, setSlashMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+    const [slashSearchQuery, setSlashSearchQuery] = useState('');
+    const preSlashTextRef = useRef('');
+    const allRuns = useAtomValue(allRunsAtom);
+    const currentThreadId = useAtomValue(currentThreadIdAtom);
+    const dismissedWarningsByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
+    const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -51,6 +68,21 @@ const InputArea: React.FC<InputAreaProps> = ({
     const firstPendingApproval = pendingApprovalsMap.size > 0 
         ? Array.from(pendingApprovalsMap.values())[0] 
         : null;
+    const lastRun = allRuns.length > 0 ? allRuns[allRuns.length - 1] : null;
+    const lastRunUsage = lastRun?.total_usage;
+    const lastRequestInputTokens = lastRunUsage ? getLastRequestInputTokens(lastRunUsage) : null;
+    const warningThreadId = lastRun?.thread_id ?? currentThreadId;
+    const dismissedRunId = warningThreadId ? dismissedWarningsByThread[warningThreadId] : undefined;
+    const showHighTokenUsageWarningMessage = getPref('showHighTokenUsageWarningMessage');
+    const shouldShowHighTokenWarning = Boolean(
+        showHighTokenUsageWarningMessage &&
+        !isAwaitingApproval &&
+        lastRun &&
+        warningThreadId &&
+        lastRequestInputTokens !== null &&
+        lastRequestInputTokens > HIGH_INPUT_TOKEN_WARNING_THRESHOLD &&
+        dismissedRunId !== lastRun.id
+    );
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -116,28 +148,126 @@ const InputArea: React.FC<InputAreaProps> = ({
             newThread();
         }
 
-        // Handle ⌘^1 (Mac) or Ctrl+Win+1 (Windows/Linux) etc. for custom prompt
-        for (let i = 1 as 1 | 2 | 3 | 4 | 5 | 6; i <= 6; i++) {
-            if (e.key === i.toString() &&  ((Zotero.isMac && e.metaKey && e.ctrlKey) || (!Zotero.isMac && e.ctrlKey && e.metaKey))) {
+        // Handle ⌘^1-9 (Mac) or Ctrl+Win+1-9 (Windows/Linux) for custom prompt
+        for (let i = 1; i <= 9; i++) {
+            if (e.key === i.toString() && ((Zotero.isMac && e.metaKey && e.ctrlKey) || (!Zotero.isMac && e.ctrlKey && e.metaKey))) {
                 e.preventDefault();
                 handleCustomPrompt(i);
             }
         }
     };
 
-    const handleCustomPrompt = (i: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9) => {
-        const customPrompts = getCustomPromptsForContext({
-            isDatabaseSyncSupported,
-            processingMode: processingMode
-        });
-        if (!customPrompts[i - 1]) return;
-        const customPrompt = customPrompts[i - 1];
+    const handleCustomPrompt = (i: number) => {
+        const customPrompt = customPrompts.find(p => p.shortcut === i);
+        if (!customPrompt) return;
         logger(`Custom prompt: ${i} ${customPrompt.text} ${currentMessageItems.length}`);
-        if (customPrompt && (!customPrompt.requiresAttachment || currentMessageItems.length > 0)) {
+        if (!customPrompt.requiresAttachment || currentMessageItems.length > 0) {
+            if (customPrompt.id) markPromptUsed(customPrompt.id);
             sendMessage(customPrompt.text);
         }
     }
 
+    // Slash menu: derived state & handlers
+    const hasAttachment = currentMessageItems.length > 0 || !!currentReaderAttachment;
+
+    const handleSlashSelect = useCallback((prompt: CustomPrompt) => {
+        const pre = preSlashTextRef.current;
+        const fullMessage = pre.length > 0
+            ? (pre + '\n\n' + prompt.text).trim()
+            : prompt.text.trim();
+        setIsSlashMenuOpen(false);
+        setSlashSearchQuery('');
+        setMessageContent('');
+        if (prompt.id) markPromptUsed(prompt.id);
+        sendMessage(fullMessage);
+        setTimeout(() => inputRef.current?.focus(), 0);
+    }, [sendMessage, markPromptUsed]);
+
+    const handleSlashDismiss = useCallback(() => {
+        setIsSlashMenuOpen(false);
+        setSlashSearchQuery('');
+        // Keep the "/" in the input when dismissing
+        setMessageContent(preSlashTextRef.current + '/');
+        setTimeout(() => inputRef.current?.focus(), 0);
+    }, []);
+
+    const handleSlashBackspace = useCallback(() => {
+        setIsSlashMenuOpen(false);
+        setSlashSearchQuery('');
+        // Remove the "/" from the input on backspace
+        setMessageContent(preSlashTextRef.current);
+        setTimeout(() => inputRef.current?.focus(), 0);
+    }, []);
+
+    const slashMenuItems = useMemo<SearchMenuItem[]>(() => {
+        const query = slashSearchQuery.toLowerCase();
+        const items: SearchMenuItem[] = [];
+
+        // Note: SearchMenu reverses items for verticalPosition="above",
+        // so we build in reverse visual order: footer first, prompts, header last.
+
+        // Custom prompt items: enabled first, disabled last (reversed for "above")
+        const filtered = customPrompts.filter(prompt =>
+            !query || prompt.title.toLowerCase().includes(query) || prompt.text.toLowerCase().includes(query)
+        );
+
+        // "Create Action" footer (visually at bottom)
+        // Show when: no query, query matches "create action", or no matching prompts
+        const createActionItem: SearchMenuItem[] = !query || 'create action'.includes(query) || filtered.length === 0
+            ? [{
+                label: 'Create Action',
+                icon: PlusSignIcon,
+                onClick: () => {
+                    setIsSlashMenuOpen(false);
+                    setSlashSearchQuery('');
+                    setMessageContent(preSlashTextRef.current + '/');
+                    openPreferencesWindow('prompts');
+                },
+            }] : [];
+        const enabled = filtered.filter(p => !p.requiresAttachment || hasAttachment);
+        const disabled = filtered.filter(p => p.requiresAttachment && !hasAttachment);
+
+        // Sort each group: title matches first when searching, then by recency, then by preferences order
+        const sortByRelevance = (a: CustomPrompt, b: CustomPrompt): number => {
+            // When there's a search query, prioritize title matches over text-only matches
+            if (query) {
+                const aTitleMatch = a.title.toLowerCase().includes(query);
+                const bTitleMatch = b.title.toLowerCase().includes(query);
+                if (aTitleMatch && !bTitleMatch) return -1;
+                if (!aTitleMatch && bTitleMatch) return 1;
+            }
+            if (a.lastUsed && !b.lastUsed) return -1;
+            if (!a.lastUsed && b.lastUsed) return 1;
+            if (a.lastUsed && b.lastUsed) {
+                const diff = new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime();
+                if (diff !== 0) return diff;
+            }
+            return (a.index ?? Infinity) - (b.index ?? Infinity);
+        };
+        enabled.sort(sortByRelevance);
+        disabled.sort(sortByRelevance);
+
+        // Disabled items go first in array (visually at bottom after reverse)
+        for (let i = disabled.length - 1; i >= 0; i--) {
+            items.push({
+                label: disabled[i].title,
+                onClick: () => handleSlashSelect(disabled[i]),
+                disabled: true,
+            });
+        }
+        // Enabled items go after (visually above disabled after reverse)
+        for (let i = enabled.length - 1; i >= 0; i--) {
+            items.push({
+                label: enabled[i].title,
+                onClick: () => handleSlashSelect(enabled[i]),
+            });
+        }
+
+        // Group header (visually at top)
+        // const groupHeaderItem = { label: 'Actions', onClick: () => {}, isGroupHeader: true };
+
+        return [...items.reverse(), ...createActionItem];
+    }, [customPrompts, slashSearchQuery, hasAttachment, handleSlashSelect]);
 
     const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
         // Check if the click target is a button or within a button
@@ -149,6 +279,16 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
     };
 
+    const handleDismissHighTokenWarning = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!warningThreadId || !lastRun) return;
+        dismissHighTokenWarning({
+            threadId: warningThreadId,
+            runId: lastRun.id,
+        });
+    };
+
     return (
         <div
             className="user-message-display shadow-md shadow-md-top"
@@ -157,6 +297,16 @@ const InputArea: React.FC<InputAreaProps> = ({
         >
             {/* Pending actions bar - shown when awaiting approval */}
             <PendingActionsBar />
+            {shouldShowHighTokenWarning && lastRequestInputTokens !== null && (
+                <HighTokenUsageWarningBar
+                    onNewThread={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        newThread();
+                    }}
+                    onDismiss={handleDismissHighTokenWarning}
+                />
+            )}
 
             {/* Message attachments */}
             <MessageAttachmentDisplay
@@ -168,6 +318,25 @@ const InputArea: React.FC<InputAreaProps> = ({
                 disabled={isAwaitingApproval}
             />
 
+            {/* Slash command menu */}
+            <SearchMenu
+                menuItems={slashMenuItems}
+                isOpen={isSlashMenuOpen}
+                onClose={handleSlashDismiss}
+                position={slashMenuPosition}
+                verticalPosition="above"
+                useFixedPosition={true}
+                width="250px"
+                searchQuery={slashSearchQuery}
+                setSearchQuery={setSlashSearchQuery}
+                onSearch={() => {}}
+                noResultsText="No actions found"
+                placeholder="Search actions..."
+                closeOnSelect={true}
+                showSearchInput={customPrompts.length > 5}
+                onEmptyBackspace={handleSlashBackspace}
+            />
+
             {/* Input Form */}
             <form onSubmit={handleSubmit} className="display-flex flex-col">
                 {/* Message Input  */}
@@ -176,10 +345,29 @@ const InputArea: React.FC<InputAreaProps> = ({
                         ref={inputRef as React.RefObject<HTMLTextAreaElement>}
                         value={messageContent}
                         onChange={(e) => {
-                            // Don't open attachment menu when awaiting approval
-                            if (e.target.value.endsWith('@') && !isAwaitingApproval) {
+                            // Block textarea changes while slash menu is open
+                            if (isSlashMenuOpen) return;
+
+                            const value = e.target.value;
+
+                            // Detect `/` trigger: at start or after whitespace/newline
+                            if (value.endsWith('/') && !isAddAttachmentMenuOpen) {
+                                const charBefore = value.length > 1 ? value[value.length - 2] : null;
+                                if (charBefore === null || charBefore === ' ' || charBefore === '\n') {
+                                    preSlashTextRef.current = value.slice(0, -1);
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    setSlashMenuPosition({ x: rect.left, y: rect.top - 5 });
+                                    setIsSlashMenuOpen(true);
+                                    setSlashSearchQuery('');
+                                    setMessageContent(value);
+                                    return;
+                                }
+                            }
+
+                            // Don't open attachment menu when awaiting approval or slash menu is open
+                            if (e.target.value.endsWith('@') && !isAwaitingApproval && !isSlashMenuOpen) {
                                 const rect = e.currentTarget.getBoundingClientRect();
-                                setMenuPosition({ 
+                                setMenuPosition({
                                     x: rect.left,
                                     y: rect.top - 5
                                 })
@@ -192,15 +380,42 @@ const InputArea: React.FC<InputAreaProps> = ({
                             e.currentTarget.style.height = 'auto';
                             e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
                         }}
-                        placeholder={isAwaitingApproval 
-                            ? "Add instructions to reject" 
-                            : (isLibraryTab ? "@ to add a source" : "@ to add a source, drag to add annotations")}
+                        placeholder={isAwaitingApproval
+                            ? "Add instructions to reject"
+                            : (isLibraryTab ? "@ to add a source, / for actions" : "@ to add a source, / for actions, drag to add annotations")}
                         className="chat-input"
                         onKeyDown={(e) => {
+                            // When slash menu is open, prevent Enter/Arrow keys from reaching textarea
+                            if (isSlashMenuOpen) {
+                                if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                                    e.preventDefault();
+                                    return;
+                                }
+                                if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    handleSlashDismiss();
+                                    return;
+                                }
+                                // Space with empty search query closes the menu (keeps /)
+                                if (e.key === ' ' && slashSearchQuery.length === 0) {
+                                    e.preventDefault();
+                                    handleSlashDismiss();
+                                    return;
+                                }
+                                // Backspace closes the menu and removes the /
+                                if (e.key === 'Backspace') {
+                                    e.preventDefault();
+                                    setIsSlashMenuOpen(false);
+                                    setSlashSearchQuery('');
+                                    setMessageContent(preSlashTextRef.current);
+                                    setTimeout(() => inputRef.current?.focus(), 0);
+                                    return;
+                                }
+                            }
                             handleKeyDown(e);
                             // Submit on Enter (without Shift) - guard against pending to prevent race with button click
                             // Don't trigger reject on Enter when awaiting approval (must click button)
-                            if (e.key === 'Enter' && !e.shiftKey && !isPending && !isAwaitingApproval) {
+                            if (e.key === 'Enter' && !e.shiftKey && !isPending && !isAwaitingApproval && !isSlashMenuOpen) {
                                 e.preventDefault();
                                 handleSubmit(e as any);
                             }
@@ -248,11 +463,11 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 // Otherwise, disable if no content and not pending, or no model selected
                                 isAwaitingApproval 
                                     ? false
-                                    : ((messageContent.length === 0 && !isPending) || !selectedModel)
+                                    : ((messageContent.length === 0 && !isPending) || !selectedModel || isSlashMenuOpen)
                             }
                         >
                             {isAwaitingApproval && messageContent.trim().length > 0
-                                ? pendingApprovalsMap.size > 1 ? 'Reject all' : 'Reject'
+                                ? pendingApprovalsMap.size > 1 ? 'Reject All' : 'Reject'
                                 : isPending
                                     ? 'Stop'
                                     : (<span>Send <span className="opacity-50">⏎</span></span>)

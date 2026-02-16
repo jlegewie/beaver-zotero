@@ -252,7 +252,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 ],
             },
             {
-                title: "Tip: Use Custom Prompts for Common Tasks",
+                title: "Tip: Use Actions for Common Tasks",
                 description: "Save time by creating reusable prompts in Beaver settings for common library management tasks.\n\nRead about all changes in the <a href='https://github.com/jlegewie/beaver-zotero/releases/tag/v0.11.0'>change log</a>.",
             }
         ]
@@ -270,6 +270,24 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 description: "Improved performance so that adding tags to 100+ items should be a breeze.",
             },
         ],
+    },
+    {
+        version: "0.11.4",
+        title: "New in Beaver 0.11.4",
+        steps: [
+            {
+                title: "A New Brain for Beaver",
+                description: "Beaver now uses a new, more powerful default model. Try it out and let us know what you think."
+            },
+            {
+                title: "Custom Actions for common tasks",
+                description: "Use the new slash menu '/' to to trigger custom actions.",
+            },
+            {
+                title: "Keyboard shortcut updated",
+                description: "Toggle Beaver with ⌘J (Ctrl+J on Windows/Linux). Open in a separate window with ⌘⇧J (Ctrl+Shift+J on Windows/Linux).",
+            }
+        ]
     },
 ];
 

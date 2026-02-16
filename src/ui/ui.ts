@@ -3,6 +3,7 @@ import { triggerToggleChat } from "./toggleChat";
 import { initializeReactUI } from "../../react/ui/initialization";
 import { KeyboardManager } from "../utils/keyboardManager";
 import { getPref } from "../utils/prefs";
+import { PreferencePageTab } from "../../react/atoms/ui";
 
 // Create a single instance of keyboard manager
 const keyboardManager = new KeyboardManager();
@@ -12,12 +13,16 @@ interface BeaverWindow extends Window {
         renderAiSidebar: (container: Element, location: string) => any;
         renderGlobalInitializer: (container: Element) => any;
         renderWindowSidebar: (container: Element) => any;
+        renderPreferencesWindow: (container: Element, initialTab?: PreferencePageTab | null) => any;
         unmountFromElement: (container: Element) => boolean;
     };
 }
 
 // Window name for the separate Beaver window
 const BEAVER_WINDOW_NAME = 'beaver-separate-window';
+
+// Window name for the separate Beaver preferences window
+const BEAVER_PREFERENCES_WINDOW_NAME = 'beaver-preferences-window';
 
 export class BeaverUIFactory {
     // Store root references per window
@@ -142,7 +147,7 @@ export class BeaverUIFactory {
         const toolbar = win.document.querySelector("#zotero-tabs-toolbar");
         if (!toolbar) return;
 
-        const key = getPref("keyboardShortcut").toUpperCase() || "L";
+        const key = getPref("keyboardShortcut").toUpperCase() || "J";
         const shortcut = Zotero.isMac ? `⌘${key}` : `Ctrl+${key}`;
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
         chatToggleBtn.setAttribute("id", "zotero-beaver-tb-chat-toggle");
@@ -259,18 +264,42 @@ export class BeaverUIFactory {
         // Always unregister all existing shortcuts first to prevent duplicates
         keyboardManager.unregisterAll();
         
-        ztoolkit.log("Registering keyboard shortcuts...");
+        if (typeof ztoolkit !== 'undefined') {
+            ztoolkit.log("Registering keyboard shortcuts...");
+        }
 
-        const keyboardShortcut = getPref("keyboardShortcut").toLowerCase() || "l";
+        const keyboardShortcut = getPref("keyboardShortcut").toLowerCase() || "j";
+
+        // Debounce variables for toggle shortcut
+        let lastToggleTime = 0;
+        const TOGGLE_DEBOUNCE_MS = 200; // 200ms debounce to prevent rapid repeated toggles
 
         // Register keyboard shortcut for toggling chat panel
         keyboardManager.register(
             (ev, keyOptions) => {
                 const isMacToggle = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey;
-                const isWindowsToggle = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && !ev.altKey && !ev.shiftKey;
+                const isWindowsToggle = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && !ev.altKey && !ev.shiftKey && !ev.metaKey;
                 
                 if (isMacToggle || isWindowsToggle) {
+                    const now = Date.now();
+                    const timeSinceLastToggle = now - lastToggleTime;
+                    
+                    const timestamp = new Date().toISOString();
+                    if (typeof ztoolkit !== 'undefined') {
+                        ztoolkit.log(`keyboardManager [${timestamp}]: Keyboard shortcut detected - key: ${ev.key}, metaKey: ${ev.metaKey}, ctrlKey: ${ev.ctrlKey}, shiftKey: ${ev.shiftKey}, altKey: ${ev.altKey}, timeSinceLastToggle: ${timeSinceLastToggle}ms`);
+                    }
+                    
+                    // Debounce: ignore if called too soon after last toggle
+                    if (timeSinceLastToggle < TOGGLE_DEBOUNCE_MS) {
+                        if (typeof ztoolkit !== 'undefined') {
+                            ztoolkit.log(`keyboardManager [${timestamp}]: Toggle ignored (debounced), only ${timeSinceLastToggle}ms since last toggle`);
+                        }
+                        ev.preventDefault();
+                        return;
+                    }
+                    
                     ev.preventDefault();
+                    lastToggleTime = now;
                     
                     let win;
                     if (ev.target && (ev.target as HTMLElement).ownerDocument) {
@@ -290,10 +319,11 @@ export class BeaverUIFactory {
         );
 
         // Register keyboard shortcut for opening separate window
+        // Mac: Cmd+Shift+J, Windows/Linux: Ctrl+Shift+J
         keyboardManager.register(
             (ev, keyOptions) => {
-                const isMacShortcut = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && ev.shiftKey && !ev.ctrlKey;
-                const isWindowsShortcut = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && ev.shiftKey && !ev.metaKey;
+                const isMacShortcut = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && ev.shiftKey && !ev.ctrlKey && !ev.altKey;
+                const isWindowsShortcut = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && ev.shiftKey && !ev.altKey && !ev.metaKey;
                 
                 if (isMacShortcut || isWindowsShortcut) {
                     ev.preventDefault();
@@ -362,6 +392,58 @@ export class BeaverUIFactory {
         if (existingWindow) {
             existingWindow.close();
             Zotero.debug("Beaver: Closed separate window");
+        }
+    }
+
+    /**
+     * Find an existing Beaver preferences window
+     */
+    static findPreferencesWindow(): Window | undefined {
+        try {
+            const wm = Services.wm;
+            const enumerator = wm.getEnumerator('beaver:preferences');
+            if (enumerator.hasMoreElements()) {
+                return enumerator.getNext() as Window;
+            }
+        } catch (e) {
+            // Silently handle errors
+        }
+        return undefined;
+    }
+
+    /**
+     * Open Beaver preferences in a separate window
+     */
+    static openPreferencesWindow(tab?: PreferencePageTab): void {
+        const existingWindow = this.findPreferencesWindow();
+        if (existingWindow) {
+            // Switch tab if requested via the global function
+            if (tab && (Zotero as any).__beaverOpenPreferencesTab) {
+                (Zotero as any).__beaverOpenPreferencesTab(tab);
+            }
+            existingWindow.focus();
+            Zotero.debug("Beaver: Focusing existing preferences window");
+            return;
+        }
+
+        const mainWindow = Zotero.getMainWindow();
+        mainWindow.openDialog(
+            'chrome://beaver/content/beaverPreferences.xhtml',
+            BEAVER_PREFERENCES_WINDOW_NAME,
+            'chrome,resizable,centerscreen,dialog=false',
+            { tab: tab || null }
+        );
+        Zotero.debug("Beaver: Opened preferences window");
+    }
+
+    /**
+     * Close the Beaver preferences window if it exists
+     */
+    static closePreferencesWindow(): void {
+        const existingWindow = this.findPreferencesWindow();
+        if (existingWindow) {
+            existingWindow.close();
+            Zotero.debug("Beaver: Closed preferences window");
         }
     }
 }

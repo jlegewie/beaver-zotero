@@ -363,31 +363,17 @@ const AddSourcesMenu: React.FC<{
                 ? "Search collections"
                 : "Search tags";
 
-    // Handle keyboard events - go back to sources mode on backspace/delete when search is empty
-    const handleKeyDown = useCallback((e: KeyboardEvent) => {
-        if (!isMenuOpen) return;
-        
-        // Check if backspace or delete key was pressed
-        if (e.key === 'Backspace' || e.key === 'Delete') {
-            // If in libraries or collections mode and search query is empty, go back to sources
-            if ((menuMode === 'libraries' || menuMode === 'collections' || menuMode === 'tags') && searchQuery === '') {
-                e.preventDefault();
-                setSearchQuery('');
-                setMenuMode('sources');
-            }
+    // Handle backspace/delete when search input is empty
+    const handleEmptyBackspace = useCallback(() => {
+        if (menuMode === 'libraries' || menuMode === 'collections' || menuMode === 'tags') {
+            // Navigate back to sources mode
+            setSearchQuery('');
+            setMenuMode('sources');
+        } else {
+            // In sources mode, close the menu
+            handleOnClose();
         }
-    }, [isMenuOpen, menuMode, searchQuery]);
-
-    // Add keyboard event listener
-    useEffect(() => {
-        if (!isMenuOpen) return;
-        
-        const mainWindow = Zotero.getMainWindow();
-        mainWindow.addEventListener('keydown', handleKeyDown);
-        return () => {
-            mainWindow.removeEventListener('keydown', handleKeyDown);
-        };
-    }, [isMenuOpen, handleKeyDown]);
+    }, [menuMode, setSearchQuery, setMenuMode, handleOnClose]);
 
     return (
         <>
@@ -418,6 +404,7 @@ const AddSourcesMenu: React.FC<{
                 closeOnSelect={false}
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
+                onEmptyBackspace={handleEmptyBackspace}
             />
         </>
     );

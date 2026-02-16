@@ -785,7 +785,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'confirm_extraction';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {

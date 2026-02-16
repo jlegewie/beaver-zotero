@@ -71,6 +71,8 @@ export interface SearchMenuProps {
     closeOnSelect?: boolean;
     /** Minimum number of items for search bar to appear */
     showSearchInput?: boolean;
+    /** Optional callback when backspace/delete is pressed with empty search. Defaults to onClose. */
+    onEmptyBackspace?: () => void;
 }
 
 /**
@@ -94,7 +96,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     closeOnSelect = true,
     searchQuery,
     setSearchQuery,
-    showSearchInput = true
+    showSearchInput = true,
+    onEmptyBackspace
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
     const inputRef = useRef<HTMLInputElement | null>(null);
@@ -439,6 +442,12 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={handleSearchInput}
+                onKeyDown={(e) => {
+                    if ((e.key === 'Backspace' || e.key === 'Delete') && searchQuery.length === 0) {
+                        e.preventDefault();
+                        (onEmptyBackspace ?? onClose)();
+                    }
+                }}
                 placeholder={placeholder}
                 className="w-full bg-quaternary font-color-primary outline-none chat-input"
                 style={{ fontSize: '12px' }}

@@ -8,6 +8,8 @@ import { useEmbeddingIndexProgress } from './hooks/useEmbeddingIndexProgress';
 import { useAuth } from './hooks/useAuth';
 import ReaderSidebar from './components/ReaderSidebar';
 import WindowSidebar from './components/WindowSidebar';
+import PreferencesWindow from './components/PreferencesWindow';
+import { PreferencePageTab } from './atoms/ui';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
 import { useProfileSync } from './hooks/useProfileSync';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
@@ -129,6 +131,30 @@ export function renderWindowSidebar(domElement: HTMLElement) {
     root.render(
         <Provider store={store}>
             <WindowSidebar />
+        </Provider>
+    );
+
+    return root;
+}
+
+/**
+ * Renders the PreferencesWindow into the separate preferences window.
+ * Uses the shared Jotai store for consistent state.
+ */
+export function renderPreferencesWindow(domElement: HTMLElement, initialTab?: PreferencePageTab | null) {
+    // Clean up any existing root first
+    const existingRoot = rootsMap.get(domElement);
+    if (existingRoot) {
+        existingRoot.unmount();
+        rootsMap.delete(domElement);
+    }
+
+    const root = createRoot(domElement);
+    rootsMap.set(domElement, root);
+
+    root.render(
+        <Provider store={store}>
+            <PreferencesWindow initialTab={initialTab ?? undefined} />
         </Provider>
     );
 

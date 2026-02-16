@@ -66,6 +66,14 @@
     font-size: 13px !important;
 }
 
+/* Preferences window: sizing and constraints.
+ * Use !important to override Zotero.UIProperties.registerRoot() font scaling. */
+#beaver-preferences-window {
+    min-width: 580px;
+    min-height: 500px;
+    font-size: 13px !important;
+}
+
 /* Toolbar Button */
 #zotero-beaver-tb-chat-toggle {
     list-style-image: url("chrome://beaver/content/icons/magic-wand.svg");
@@ -194,6 +202,14 @@
 [id^="beaver-pane-"] .pending-actions-bar {
     margin: -0.65rem -0.65rem 0.65rem -0.65rem;
     border-radius: 5px 5px 0 0;
+}
+
+/* High token usage warning above composer */
+[id^="beaver-pane-"] .high-token-usage-warning-bar {
+    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
+    border-radius: 5px 5px 0 0;
+    background-color: var(--tag-yellow-senary);
+    border-bottom: 1px solid var(--fill-quinary);
 }
 
 /* UserRequestView - Clickable user message display */
@@ -373,6 +389,55 @@
 
 [id^="beaver-pane-"] .preference-input::placeholder {
     color: var(--fill-tertiary);
+}
+
+
+/* Custom Prompt Card - View mode */
+[id^="beaver-pane-"] .custom-prompt-card {
+    padding: 10px 12px;
+    border: 1px solid var(--fill-quinary);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+[id^="beaver-pane-"] .custom-prompt-card:hover:not(.custom-prompt-card-editing) {
+    background-color: var(--material-mix-quarternary);
+}
+
+/* Preview text: 2-line clamp */
+[id^="beaver-pane-"] .custom-prompt-card-preview {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Custom Prompt Card - Edit mode */
+[id^="beaver-pane-"] .custom-prompt-card-editing {
+    cursor: default;
+    background-color: var(--material-mix-quarternary);
+    border-color: var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .custom-prompt-edit-title {
+    padding: 2px 4px !important;
+    margin: 0 !important;
+    border-bottom: 1px solid transparent !important;
+}
+
+[id^="beaver-pane-"] .custom-prompt-edit-title:focus {
+    border-bottom: 1px solid var(--fill-quarternary) !important;
+}
+
+[id^="beaver-pane-"] .custom-prompt-edit-textarea {
+    padding: 4px !important;
+    min-height: 80px;
+    resize: none;
+    overflow-y: auto;
 }
 
 

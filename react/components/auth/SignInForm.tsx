@@ -15,7 +15,7 @@ import {
   setAuthMethodAtom,
 } from '../../atoms/auth'
 import { OTPVerification } from './OTPVerification'
-import { sendOTP, verifyOTP, getOTPErrorMessage } from './otp'
+import { sendOTP, verifyOTP, getOTPErrorMessage, isServiceUnavailableError, SERVICE_UNAVAILABLE_MESSAGE } from './otp'
 import { getPref } from '../../../src/utils/prefs'
 
 interface SignInFormProps {
@@ -126,7 +126,10 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
       setStep('otp')
       setResendCountdown(60)
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to send verification code')
+      const msg = isServiceUnavailableError(error)
+        ? SERVICE_UNAVAILABLE_MESSAGE
+        : error instanceof Error ? error.message : 'Failed to send verification code'
+      setError(msg)
     } finally {
       setIsLoading(false)
     }
@@ -201,7 +204,9 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
         // isLoading will be set to false when profile loads or timeout occurs
       }
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'An error occurred during login'
+      const errorMessage = isServiceUnavailableError(error)
+        ? SERVICE_UNAVAILABLE_MESSAGE
+        : error instanceof Error ? error.message : 'An error occurred during login'
       setError(errorMessage)
       setErrorMsg(errorMessage)
       setIsLoading(false)

@@ -18,24 +18,26 @@ const MAX_MODEL_NAME_LENGTH = 25;
 const ModelMenuItemContent: React.FC<{
     model: any;
     isSelected: boolean;
-    showCreditCosts?: boolean
-}> = ({ model, isSelected,  showCreditCosts= false}) => {
+    showCreditCosts?: boolean;
+    showRecommended?: boolean;
+}> = ({ model, isSelected, showCreditCosts = false, showRecommended = false }) => {
+    const creditCost = model.credit_cost ?? 1;
     return (
         <div className="display-flex flex-col min-w-0">
             <div className="display-flex flex-row items-center gap-2 min-w-0">
                 <div className={`display-flex text-sm truncate ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`}>
                     {model.name}
                 </div>
-                {model.reasoning_model
-                    ? <Icon icon={BrainIcon} className={`-ml-015 ${isSelected ? 'font-medium font-color-primary' : 'font-color-secondary'}`} />
-                    : undefined
-                }
             </div>
-            {showCreditCosts && model.credit_cost &&
+            {(showCreditCosts || showRecommended) && (
                 <div className="text-xs font-color-tertiary items-center">
-                    <div className="text-xs">{model.credit_cost > 0.001 ? `${model.credit_cost} credit${model.credit_cost !== 1 ? 's' : ''} per step` : 'Unlimited'}</div>
+                    {showCreditCosts ? (
+                        <div className="text-xs">{creditCost} credit${creditCost !== 1 ? 's' : ''}</div>
+                    ) : showRecommended ? (
+                        <div className="text-xs">Recommended</div>
+                    ) : null}
                 </div>
-            }
+            )}
         </div>
     );
 };
@@ -56,26 +58,18 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         validateSelectedModel();
     }, [availableModels, validateSelectedModel]);
 
+    const custom_models = useMemo(() => availableModels.filter((model) => model.is_custom), [availableModels]);
+    const included_models = useMemo(() => availableModels.filter((model) => model.allow_app_key && model.is_enabled && !model.is_custom) || [], [availableModels]);
+    const byok_models = useMemo(() => availableModels.filter((model) => model.allow_byok && model.is_enabled && !model.is_custom), [availableModels]);
+
     const menuItems = useMemo((): MenuItem[] => {
         const items: MenuItem[] = [];
-
-        const custom_models = availableModels.filter((model) => model.is_custom);
-        const included_models = availableModels.filter((model) => model.allow_app_key && model.is_enabled && !model.is_custom) || [];
-        const byok_models = availableModels.filter((model) => model.allow_byok && model.is_enabled && !model.is_custom);
 
         // Helper to create a composite key for selection comparison
         const getModelKey = (model: any) => {
             return `${model.id}:${model.access_mode || 'app_key'}`;
         };
         const selectedKey = selectedModel ? getModelKey(selectedModel) : null;
-
-        if (included_models.length > 0) {
-            items.push({
-                label: 'Included Models',
-                isGroupHeader: true,
-                onClick: () => {},
-            });
-        }
 
         included_models.sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
             // Create a model variant with access_mode set to 'app_key'
@@ -87,12 +81,12 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                 onClick: () => {
                     updateSelectedModel(modelWithAccessMode);
                 },
-                icon: model.reasoning_model ? BrainIcon : undefined,
                 customContent: (
                     <ModelMenuItemContent 
                         model={model} 
                         isSelected={selectedKey === modelKey}
-                        showCreditCosts={true}
+                        showCreditCosts={included_models.length > 1}
+                        showRecommended={included_models.length === 1}
                     />
                 )
             });
@@ -113,7 +107,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                     onClick: () => {
                         updateSelectedModel(model);
                     },
-                    icon: model.reasoning_model ? BrainIcon : undefined,
                     customContent: (
                         <ModelMenuItemContent 
                             model={model} 
@@ -141,7 +134,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                     onClick: () => {
                         updateSelectedModel(modelWithAccessMode);
                     },
-                    icon: model.reasoning_model ? BrainIcon : undefined,
                     customContent: (
                         <ModelMenuItemContent 
                             model={model} 
@@ -153,7 +145,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         }
 
         return items;
-    }, [availableModels, updateSelectedModel, selectedModel]);
+    }, [custom_models, included_models, byok_models, updateSelectedModel, selectedModel]);
 
     const getButtonLabel = () => {
         if (!selectedModel) return 'None Selected';
@@ -170,7 +162,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
 
     const agentComponent = (
         <div className="display-flex items-center gap-1">
-            {(selectedModel?.reasoning_model || false) && <Icon icon={BrainIcon} />}
+            <Icon icon={BrainIcon} />
             {getButtonLabel()}
             <Icon icon={ArrowDownIcon} className="scale-11 -ml-1" />
         </div>
@@ -182,6 +174,9 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         maxWidth: '250px',
     };
 
+    if (custom_models.length == 0 && byok_models.length == 0) {
+        return null;
+    }
 
     return (
         <MenuButton
@@ -189,7 +184,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             variant="ghost-secondary"
             customContent={agentComponent}
             buttonLabel={getButtonLabel()}
-            icon={selectedModel && selectedModel.reasoning_model ? BrainIcon : undefined}
             rightIcon={ArrowDownIcon}
             className="truncate"
             style={dynamicStyle}

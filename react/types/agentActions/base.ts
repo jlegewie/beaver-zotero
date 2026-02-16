@@ -190,10 +190,29 @@ export interface OrganizeItemsResultData {
     failed_items?: Record<string, string>;
 }
 
+// =============================================================================
+// Confirm Extraction Types
+// =============================================================================
+
+/**
+ * Proposed data for confirming a large extraction cost.
+ * Shown when extraction exceeds the free attachment threshold.
+ */
+export interface ConfirmExtractionProposedData {
+    /** Total number of attachments to extract from */
+    attachment_count: number;
+    /** Number of additional credits (surcharge) */
+    extra_credits: number;
+    /** Total credits including base cost */
+    total_credits: number;
+    /** Number of papers included in base cost (free) */
+    included_free: number;
+}
+
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'confirm_extraction';
 
 /**
  * Union type for all proposed data types
@@ -219,7 +238,8 @@ export type ProposedData =
     CreateItemProposedData |
     EditMetadataProposedData |
     CreateCollectionProposedData |
-    OrganizeItemsProposedData;
+    OrganizeItemsProposedData |
+    ConfirmExtractionProposedData;
 
 /**
  * Type of result data after applying an action
