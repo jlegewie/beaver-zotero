@@ -38,7 +38,8 @@ export const ConfirmExtractionPreview: React.FC<ConfirmExtractionPreviewProps> =
                 ) : (
                     <span>
                         Extracting from <span className="font-color-primary font-medium">{attachmentCount} paper{attachmentCount !== 1 ? 's' : ''}</span> will
-                        use <span className="font-color-primary font-medium">{extraCredits} extra request{extraCredits !== 1 ? 's' : ''}</span>.
+                        use up to <span className="font-color-primary font-medium">{extraCredits} extra request{extraCredits !== 1 ? 's' : ''}</span>.
+                        {' '}Only successful extractions are charged as extra requests.
                     </span>
                 )}
             </div>
