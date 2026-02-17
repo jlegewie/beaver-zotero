@@ -11,7 +11,9 @@ import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { CustomPrompt } from '../../types/settings';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
-import { customPromptsForContextAtom, markPromptUsedAtom } from '../../atoms/customPrompts';
+import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom } from '../../atoms/customPrompts';
+import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../../utils/promptVariables';
+import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 import { logger } from '../../../src/utils/logger';
 import { isLibraryTabAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { selectedModelAtom } from '../../atoms/models';
@@ -34,7 +36,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     inputRef
 }) => {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
-    const currentMessageItems = useAtomValue(currentMessageItemsAtom);
+    const [currentMessageItems, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
+    const sendResolvedPrompt = useSetAtom(sendResolvedPromptAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
     const newThread = useSetAtom(newThreadAtom);
     const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);
@@ -43,6 +46,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
     const customPrompts = useAtomValue(customPromptsForContextAtom);
     const markPromptUsed = useSetAtom(markPromptUsedAtom);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
     const [slashMenuPosition, setSlashMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -157,31 +161,69 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
     };
 
-    const handleCustomPrompt = (i: number) => {
+    const handleCustomPrompt = async (i: number) => {
         const customPrompt = customPrompts.find(p => p.shortcut === i);
         if (!customPrompt) return;
         logger(`Custom prompt: ${i} ${customPrompt.text} ${currentMessageItems.length}`);
         if (!customPrompt.requiresAttachment || currentMessageItems.length > 0) {
-            if (customPrompt.id) markPromptUsed(customPrompt.id);
-            sendMessage(customPrompt.text);
+            if (isPending) {
+                // During streaming: resolve variables and insert into textarea without sending
+                const { text: resolvedText, items, emptyItemVariables } = await resolvePromptVariables(customPrompt.text);
+                if (emptyItemVariables.length > 0) {
+                    addPopupMessage({ type: 'warning', title: 'Action skipped', text: EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.', expire: true, duration: 4000 });
+                    return;
+                }
+                setMessageContent(resolvedText);
+                if (items.length > 0) {
+                    setCurrentMessageItems(prev => {
+                        const existingKeys = new Set(prev.map(item => `${item.libraryID}-${item.key}`));
+                        const newItems = items.filter(item => !existingKeys.has(`${item.libraryID}-${item.key}`));
+                        return newItems.length > 0 ? [...prev, ...newItems] : prev;
+                    });
+                }
+                if (customPrompt.id) markPromptUsed(customPrompt.id);
+            } else {
+                if (customPrompt.id) markPromptUsed(customPrompt.id);
+                sendResolvedPrompt(customPrompt.text);
+            }
         }
     }
 
     // Slash menu: derived state & handlers
     const hasAttachment = currentMessageItems.length > 0 || !!currentReaderAttachment;
 
-    const handleSlashSelect = useCallback((prompt: CustomPrompt) => {
+    const handleSlashSelect = useCallback(async (prompt: CustomPrompt) => {
         const pre = preSlashTextRef.current;
-        const fullMessage = pre.length > 0
-            ? (pre + '\n\n' + prompt.text).trim()
+        const fullPromptText = pre.length > 0
+            ? `${pre}\n\n${prompt.text}`.trim()
             : prompt.text.trim();
         setIsSlashMenuOpen(false);
         setSlashSearchQuery('');
-        setMessageContent('');
-        if (prompt.id) markPromptUsed(prompt.id);
-        sendMessage(fullMessage);
+
+        if (isPending) {
+            // During streaming: resolve variables and insert into textarea without sending
+            const { text: resolvedText, items, emptyItemVariables } = await resolvePromptVariables(fullPromptText);
+            if (emptyItemVariables.length > 0) {
+                addPopupMessage({ type: 'warning', title: 'Action skipped', text: EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.', expire: true, duration: 4000 });
+                setTimeout(() => inputRef.current?.focus(), 0);
+                return;
+            }
+            setMessageContent(resolvedText);
+            if (items.length > 0) {
+                setCurrentMessageItems(prev => {
+                    const existingKeys = new Set(prev.map(item => `${item.libraryID}-${item.key}`));
+                    const newItems = items.filter(item => !existingKeys.has(`${item.libraryID}-${item.key}`));
+                    return newItems.length > 0 ? [...prev, ...newItems] : prev;
+                });
+            }
+            if (prompt.id) markPromptUsed(prompt.id);
+        } else {
+            setMessageContent('');
+            if (prompt.id) markPromptUsed(prompt.id);
+            sendResolvedPrompt(fullPromptText);
+        }
         setTimeout(() => inputRef.current?.focus(), 0);
-    }, [sendMessage, markPromptUsed]);
+    }, [isPending, sendResolvedPrompt, markPromptUsed]);
 
     const handleSlashDismiss = useCallback(() => {
         setIsSlashMenuOpen(false);

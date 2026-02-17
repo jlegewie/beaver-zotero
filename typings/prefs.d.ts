@@ -23,6 +23,7 @@ declare namespace _ZoteroTypes {
       "maxFileSizeMB": number;
       "maxPageCount": number;
       "autoApplyAnnotations": boolean;
+      "autoCreateNotes": boolean;
       "autoImportItems": boolean;
       "deferredToolPreferences": string;
       "customInstructions": string;
@@ -36,6 +37,7 @@ declare namespace _ZoteroTypes {
       "citationStyle": string;
       "citationLocale": string;
       "customPrompts": string;
+      "customPromptsLastUsed": string;
       "deletionJobs": string;
       "skippedItems": string;
       "runConsistencyCheck": boolean;

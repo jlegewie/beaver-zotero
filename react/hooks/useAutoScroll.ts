@@ -72,6 +72,7 @@ export function useAutoScroll(
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const lastScrollTopRef = useRef(0);
     const lastStoredScrollTopRef = useRef(0); // Track what we last stored in atom
+    const lastScrollHeightRef = useRef(0); // Track scrollHeight to detect content shrinkage
     const scrollDebounceTimer = useRef<number | null>(null);
     const lastScrollDirectionRef = useRef<'up' | 'down' | null>(null);
     const cumulativeUpScrollRef = useRef(0); // Track cumulative upward scroll distance
@@ -128,12 +129,46 @@ export function useAutoScroll(
         }
 
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-        
+
+        // Detect content shrinkage (e.g., action row removed after confirmation).
+        // When content shrinks, the browser adjusts scrollTop downward, which fires
+        // a scroll event that looks like upward user scrolling. Skip the upward-scroll
+        // detection in this case and just re-evaluate position relative to bottom.
+        const prevScrollHeight = lastScrollHeightRef.current;
+        lastScrollHeightRef.current = scrollHeight;
+        if (prevScrollHeight > 0 && scrollHeight < prevScrollHeight) {
+            cumulativeUpScrollRef.current = 0;
+            if (cumulativeResetTimer.current !== null) {
+                win.clearTimeout(cumulativeResetTimer.current);
+                cumulativeResetTimer.current = null;
+            }
+            if (scrollDebounceTimer.current !== null) {
+                win.clearTimeout(scrollDebounceTimer.current);
+                scrollDebounceTimer.current = null;
+            }
+
+            if (distanceFromBottom <= threshold) {
+                if (lastScrolledStateRef.current) {
+                    store.set(scrolledAtom, false);
+                    lastScrolledStateRef.current = false;
+                }
+            }
+
+            // Update tracking refs so subsequent events have correct baselines
+            lastScrollTopRef.current = scrollTop;
+            const scrollPositionDelta = Math.abs(scrollTop - lastStoredScrollTopRef.current);
+            if (scrollPositionDelta > SCROLL_POSITION_UPDATE_THRESHOLD) {
+                store.set(scrollPositionAtom, scrollTop);
+                lastStoredScrollTopRef.current = scrollTop;
+            }
+            return;
+        }
+
         // Detect scroll direction and magnitude
         const scrollDelta = scrollTop - lastScrollTopRef.current;
-        const scrollDirection = scrollTop > lastScrollTopRef.current ? 'down' : 
+        const scrollDirection = scrollTop > lastScrollTopRef.current ? 'down' :
                                scrollTop < lastScrollTopRef.current ? 'up' : null;
-        
+
         // Handle upward scrolling (interruption)
         if (scrollDirection === 'up') {
             // Accumulate upward scroll distance

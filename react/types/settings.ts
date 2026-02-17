@@ -103,7 +103,6 @@ export interface CustomPrompt {
     id?: string;
     title: string;
     text: string;
-    librarySearch: boolean;
     requiresAttachment: boolean;
     requiresDatabaseSync?: boolean;
     id_model?: string;
@@ -121,7 +120,6 @@ export const isCustomPrompt = (obj: any): obj is CustomPrompt => {
         obj !== null &&
         typeof obj.title === 'string' &&
         typeof obj.text === 'string' &&
-        typeof obj.librarySearch === 'boolean' &&
         typeof obj.requiresAttachment === 'boolean' &&
         (obj.requiresDatabaseSync === undefined || typeof obj.requiresDatabaseSync === 'boolean') &&
         (obj.id === undefined || typeof obj.id === 'string') &&
@@ -166,19 +164,29 @@ export const getCustomPromptsFromPreferences = (): CustomPrompt[] => {
                 id: prompt.id || generatePromptId(),
             });
 
+            // Merge lastUsed timestamps from separate preference
+            const lastUsedMap = getPromptLastUsedMap();
+            const mergeLastUsed = (prompt: CustomPrompt): CustomPrompt => {
+                const id = prompt.id;
+                if (id && lastUsedMap[id]) {
+                    return { ...prompt, lastUsed: lastUsedMap[id] };
+                }
+                return prompt;
+            };
+
             // Legacy migration: auto-assign shortcuts 1-9 based on position
             if (isLegacy) {
-                return validated.map((prompt, index) => ensureId({
+                return validated.map((prompt, index) => mergeLastUsed(ensureId({
                     ...prompt,
                     ...(index < 9 ? { shortcut: index + 1 } : {}),
                     index: index + 1,
-                }));
+                })));
             }
 
-            return validated.map((prompt, index) => ensureId({
+            return validated.map((prompt, index) => mergeLastUsed(ensureId({
                 ...prompt,
                 index: index + 1,
-            }));
+            })));
         }
     } catch (e) {
         console.error("Error parsing customPrompts:", e);
@@ -187,11 +195,41 @@ export const getCustomPromptsFromPreferences = (): CustomPrompt[] => {
     return [];
 };
 
-/** Save custom prompts in the versioned format. Strips the `index` field (derived at load time). */
+/** Save custom prompts in the versioned format. Strips `index` and `lastUsed` (both derived/stored elsewhere). */
 export const saveCustomPromptsToPreferences = (prompts: CustomPrompt[]): void => {
-    const promptsToSave = prompts.map(({ index, ...prompt }) => prompt);
+    const promptsToSave = prompts.map(({ index, lastUsed, ...prompt }) => prompt);
     const data = { version: CUSTOM_PROMPTS_VERSION, prompts: promptsToSave };
     setPref('customPrompts', JSON.stringify(data));
+};
+
+// =============================================================================
+// Separate lastUsed storage – keeps the main customPrompts pref clean so
+// developer-shipped defaults can still propagate to users who haven't edited.
+// =============================================================================
+
+type PromptLastUsedMap = Record<string, string>;
+
+/** Read the { [promptId]: isoTimestamp } map from its own preference. */
+export const getPromptLastUsedMap = (): PromptLastUsedMap => {
+    try {
+        const raw = getPref('customPromptsLastUsed');
+        if (raw && typeof raw === 'string') {
+            const parsed = JSON.parse(raw);
+            if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                return parsed as PromptLastUsedMap;
+            }
+        }
+    } catch (e) {
+        console.error('Error parsing customPromptsLastUsed:', e);
+    }
+    return {};
+};
+
+/** Persist a single prompt's lastUsed timestamp (merges into existing map). */
+export const savePromptLastUsed = (id: string, timestamp: string): void => {
+    const map = getPromptLastUsedMap();
+    map[id] = timestamp;
+    setPref('customPromptsLastUsed', JSON.stringify(map));
 };
 
 export interface CustomPromptAvailabilityContext {

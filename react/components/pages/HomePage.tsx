@@ -7,10 +7,10 @@ import { showFileStatusDetailsAtom } from '../../atoms/ui';
 import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { isStreamingAtom } from '../../agents/atoms';
-import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
+import { isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atoms/messageComposition";
 import { CustomPrompt } from "../../types/settings";
-import { customPromptsForContextAtom, markPromptUsedAtom } from "../../atoms/customPrompts";
+import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom } from "../../atoms/customPrompts";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import FileStatusDisplay from "../status/FileStatusDisplay";
 import { isDatabaseSyncSupportedAtom } from "../../atoms/profile";
@@ -24,7 +24,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
     const isPending = useAtomValue(isWSChatPendingAtom);
     const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
-    const sendWSMessage = useSetAtom(sendWSMessageAtom);
+    const sendResolvedPrompt = useSetAtom(sendResolvedPromptAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const prompts = useAtomValue(customPromptsForContextAtom);
@@ -34,15 +34,11 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
     const { connectionStatus } = useFileStatus(!isWindow);
     useIndexingCompleteMessage();
 
-    const handleCustomPrompt = async (
-        prompt: CustomPrompt
-    ) => {
+    const handleCustomPrompt = async (prompt: CustomPrompt) => {
         if (isPending || isStreaming || prompt.text.length === 0) return;
         if (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment) return;
-
         if (prompt.id) markPromptUsed(prompt.id);
-        // Send message via WebSocket
-        await sendWSMessage(prompt.text);
+        await sendResolvedPrompt(prompt.text);
     };
     const shortcutKey = Zotero.isMac ? '⌘^' : 'Ctrl+Win+';
 
@@ -59,7 +55,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                 <>
                 <div className="display-flex flex-row justify-between items-center mb-2">
                     {/* <div className="font-semibold text-lg mb-1">Custom Prompts</div> */}
-                    <div className="text-xl font-semibold">How can I help you?</div>
+                    <div className="text-2xl font-semibold">How can I help you?</div>
                     <Button variant="outline" className="scale-85 fit-content" onClick={() => openPreferencesWindow('prompts')}> Edit </Button>
                 </div>
                 {/* <div className="display-flex flex-col items-start mb-4">
@@ -75,7 +71,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                         style={{ padding: '6px 8px' }}
                         title={(prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment) ? 'Requires attachments' : 'Run action'}
                     >
-                        <span className="text-base truncate">
+                        <span className="text-lg truncate">
                             {prompt.title}
                         </span>
                         {prompt.shortcut != null && (
@@ -90,7 +86,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
             
             {/* File Processing Status */}
             {isDatabaseSyncSupported && !isWindow && (
-                <div className="display-flex flex-row justify-between items-center mt-4">
+                <div className="display-flex flex-row justify-between items-center mt-5">
                     <Button
                         variant="ghost-secondary"
                         onClick={() => setShowFileStatusDetails(!showFileStatusDetails)}

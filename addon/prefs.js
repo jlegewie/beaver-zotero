@@ -23,6 +23,7 @@ pref("maxPageCount", 300);
 
 // Agent actions
 pref("autoApplyAnnotations", true);
+pref("autoCreateNotes", true);
 pref("autoImportItems", false);
 
 // Deferred tool preferences: maps tool group to preference (always_ask, always_apply, continue_without_applying)
@@ -47,7 +48,12 @@ pref("citationStyle", "http://www.zotero.org/styles/chicago-author-date");
 pref("citationLocale", "en-US");
 
 // Custom Prompts (versioned format: { version, prompts }; each prompt has a stable id)
-pref("customPrompts", '{ "version": 2, "prompts": [ { "id": "default-organize-collections", "title": "Organize my recent additions into collections", "text": "Review the papers I added in the last two weeks. Check what collections I have, then help me file these items into the appropriate existing collections based on their topics.", "librarySearch": false, "requiresAttachment": false, "shortcut": 1 }, { "id": "default-review-metadata", "title": "Review and fix metadata", "text": "Check my 10 most recently added items for missing or incomplete metadata especially DOIs for journal articles, publication info, and abstracts. Look up the correct information and help me fix any issues.", "librarySearch": false, "requiresAttachment": false, "shortcut": 2 }, { "id": "default-find-related", "title": "Find related work in my library", "text": "What papers in my library are most relevant to this one? Identify similar methodologies, topics, or findings and explain the connections.", "librarySearch": true, "requiresAttachment": true, "shortcut": 3 }, { "id": "default-highlight-annotate", "title": "Highlight and annotate key findings", "text": "Add highlight annotations to the most important findings, evidence, and conclusions. Include brief notes explaining why each section matters.", "librarySearch": false, "requiresAttachment": true, "requiresDatabaseSync": true, "shortcut": 4 }, { "id": "default-compare-studies", "title": "Compare this to other studies", "text": "How do the findings here compare to similar research in my library? Identify agreements, contradictions, and gaps.", "librarySearch": true, "requiresAttachment": true, "shortcut": 5 } ] }');
+// Variables supported in prompt text: {{recent_items}}, {{recent_item}}, {{open_attachment}}, {{active_item}}, {{selected_items}}, {{current_collection}}
+pref("customPrompts", '{ "version": 2, "prompts": [ { "id": "default-discover-missing", "title": "What recent research am I missing?", "text": "Based on the topics of these recently added papers, search for external references that I might be missing. Focus on papers from the last two years that are relevant to my main research areas.{{recent_items}}", "requiresAttachment": false, "shortcut": 1 }, { "id": "default-fit-research", "title": "How does this paper fit into my library?", "text": "How does this paper connect to the rest of my library? Does it support, challenge, or extend ideas in papers I already have? Write a short report that directly compares the paper to other research in my library including a comparison table. Use a Zotero note attached to the item.{{active_item}}", "requiresAttachment": false, "shortcut": 2 }, { "id": "default-organize-collections", "title": "Organize my recent additions", "text": "Review the papers I added in the last two weeks. Check what collections I have, then help me file these items into the appropriate existing collections based on their topics.", "requiresAttachment": false, "shortcut": 3 }, { "id": "default-review-metadata", "title": "Review and fix metadata", "text": "Check my 10 most recently added items for missing or incomplete metadata — especially DOIs for journal articles, publication info, and abstracts. Look up the correct information and help me fix any issues.", "requiresAttachment": false, "shortcut": 4 } ] }');
+
+// Separate storage for prompt lastUsed timestamps (keyed by prompt id)
+// Kept outside customPrompts so using a prompt doesn't dirty the main pref default
+pref("customPromptsLastUsed", "{}");
 
 // Deletion jobs
 pref("deletionJobs", "[]");
