@@ -108,7 +108,7 @@ const FloatingVersionCard: React.FC<{
             {/* Header: NOW AVAILABLE + dismiss */}
             <div className="display-flex flex-col gap-05 w-full">
                 <div className="display-flex flex-row items-center justify-between w-full">
-                    <span className="text-sm font-medium font-color-tertiary" style={{ letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                    <span className="text-sm font-medium font-color-tertiary" style={{ textTransform: 'uppercase' }}>
                         Now Available
                     </span>
                     <IconButton

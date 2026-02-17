@@ -285,7 +285,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
             {
                 title: "Automate common tasks",
-                description: "Use the new '/' slash menu for custom actions",
+                description: "Use the <a href='https://www.beaverapp.ai/docs/actions'>/ slash menu</a> for custom actions",
             },
             // {</div>
             //     title: "Keyboard shortcut updated",
