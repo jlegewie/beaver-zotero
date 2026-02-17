@@ -773,7 +773,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             }
 
             // Show floating popup when the user can't see the result
-            const sidebarVisible = store.get(isSidebarVisibleAtom);
+            /*const sidebarVisible = store.get(isSidebarVisibleAtom);
             const beaverWindow = BeaverUIFactory.findBeaverWindow();
             const beaverWindowFocused = beaverWindow != null && !beaverWindow.closed &&
                 beaverWindow.document?.hasFocus?.() === true;
@@ -791,7 +791,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                         onClick: () => eventManager.dispatch('toggleChat', { location: isLibraryTab ? 'library' : 'reader' }),
                     },
                 });
-            }
+            }*/
         },
 
         onThread: (newThreadId: string) => {
