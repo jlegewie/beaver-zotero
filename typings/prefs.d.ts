@@ -23,6 +23,7 @@ declare namespace _ZoteroTypes {
       "maxFileSizeMB": number;
       "maxPageCount": number;
       "autoApplyAnnotations": boolean;
+      "autoCreateNotes": boolean;
       "autoImportItems": boolean;
       "deferredToolPreferences": string;
       "customInstructions": string;

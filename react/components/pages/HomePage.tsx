@@ -55,7 +55,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                 <>
                 <div className="display-flex flex-row justify-between items-center mb-2">
                     {/* <div className="font-semibold text-lg mb-1">Custom Prompts</div> */}
-                    <div className="text-xl font-semibold">How can I help you?</div>
+                    <div className="text-2xl font-semibold">How can I help you?</div>
                     <Button variant="outline" className="scale-85 fit-content" onClick={() => openPreferencesWindow('prompts')}> Edit </Button>
                 </div>
                 {/* <div className="display-flex flex-col items-start mb-4">
@@ -71,7 +71,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                         style={{ padding: '6px 8px' }}
                         title={(prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment) ? 'Requires attachments' : 'Run action'}
                     >
-                        <span className="text-base truncate">
+                        <span className="text-lg truncate">
                             {prompt.title}
                         </span>
                         {prompt.shortcut != null && (
@@ -86,7 +86,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
             
             {/* File Processing Status */}
             {isDatabaseSyncSupported && !isWindow && (
-                <div className="display-flex flex-row justify-between items-center mt-4">
+                <div className="display-flex flex-row justify-between items-center mt-5">
                     <Button
                         variant="ghost-secondary"
                         onClick={() => setShowFileStatusDetails(!showFileStatusDetails)}

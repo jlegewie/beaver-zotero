@@ -87,7 +87,7 @@ import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
-import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
+import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '../agents/toolLabels';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { store } from '../store';
@@ -763,6 +763,10 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 );
                 // Auto-apply annotations if enabled
                 autoApplyAnnotationAgentActions(event.run_id, actions);
+                // Auto-create notes if enabled
+                await autoCreateNoteAgentActions(event.run_id, actions, set).catch(err =>
+                    logger(`WS onRunComplete: Failed to auto-create notes: ${err}`, 1)
+                );
             }
         },
 
