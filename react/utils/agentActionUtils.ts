@@ -3,7 +3,7 @@
  */
 
 import { Setter } from 'jotai';
-import { AgentAction, isAnnotationAgentAction, isZoteroNoteAgentAction, hasAppliedZoteroItem, ackAgentActionsAtom } from '../agents/agentActions';
+import { AgentAction, isAnnotationAgentAction, isZoteroNoteAgentAction, hasAppliedZoteroItem, ackAgentActionsAtom, threadAgentActionsAtom } from '../agents/agentActions';
 import { NoteProposedData } from '../types/agentActions/base';
 import { ModelMessage } from '../agents/types';
 import { ZoteroItemReference } from '../types/zotero';
@@ -255,6 +255,22 @@ function extractNoteBlocksFromRun(runId: string): ParsedNoteBlock[] {
 }
 
 /**
+ * Tracks note action IDs that were auto-applied this session.
+ * Resets on page/module reload — intentionally not persisted.
+ */
+const sessionAutoAppliedNoteIds = new Set<string>();
+
+/** Check if a note action was auto-applied this session */
+export function isNoteAutoApplied(actionId: string): boolean {
+    return sessionAutoAppliedNoteIds.has(actionId);
+}
+
+/** Remove a note action from the auto-applied set (e.g. after undo or dismiss) */
+export function clearNoteAutoApplied(actionId: string): void {
+    sessionAutoAppliedNoteIds.delete(actionId);
+}
+
+/**
  * Auto-create Zotero notes from agent actions if enabled in settings.
  *
  * Note content is NOT stored in agent action proposed_data (it's always null).
@@ -295,6 +311,13 @@ export async function autoCreateNoteAgentActions(
     const externalReferencesMap = store.get(externalReferenceMappingAtom);
 
     for (const action of noteActions) {
+        // Re-check current status from the store — the user may have manually
+        // applied the note via the + button while we were awaiting earlier actions.
+        const currentAction = store.get(threadAgentActionsAtom).find((a: AgentAction) => a.id === action.id);
+        if (!currentAction || currentAction.status !== 'pending') {
+            continue;
+        }
+
         const proposed = action.proposed_data as NoteProposedData;
         const actionRawTag = proposed.raw_tag;
 
@@ -343,6 +366,7 @@ export async function autoCreateNoteAgentActions(
 
             // Acknowledge the action (marks as 'applied')
             set(ackAgentActionsAtom, runId, [{ action_id: action.id, result_data: result }]);
+            sessionAutoAppliedNoteIds.add(action.id);
         } catch (error: any) {
             logger(`autoCreateNoteAgentActions: Failed to create note "${title}": ${error.message}`, 1);
         }

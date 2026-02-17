@@ -18,11 +18,14 @@ import { isLibraryEditable } from '../../../src/utils/zoteroUtils';
 import { saveStreamingNote } from '../../utils/noteActions';
 import {
     extractNoteBlocksFromMessages,
+    isNoteAutoApplied,
+    clearNoteAutoApplied,
     noteTagsMatch,
     ParsedNoteBlock,
 } from '../../utils/agentActionUtils';
 import { citationDataMapAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
+import { isLibraryTabAtom } from '../../atoms/ui';
 import { logger } from '../../../src/utils/logger';
 import Button from '../ui/Button';
 
@@ -42,6 +45,7 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
     const citationDataMap = useAtomValue(citationDataMapAtom);
     const externalMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
+    const isLibraryTab = useAtomValue(isLibraryTabAtom);
 
     const proposed = action.proposed_data as NoteProposedData;
     const title = proposed?.title || 'New note';
@@ -70,6 +74,7 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
                 );
                 if (item) await item.eraseTx();
             }
+            clearNoteAutoApplied(action.id);
             undoAgentAction(action.id);
         } catch (err) {
             logger(`NoteAgentActionRow: Undo failed: ${err}`, 1);
@@ -111,8 +116,14 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
                 }
             }
 
-            if (!targetLibraryId || !isLibraryEditable(targetLibraryId)) {
-                logger('NoteAgentActionRow: No valid editable target library', 1);
+            // Fall back to user's personal library for standalone notes
+            if (!targetLibraryId) {
+                targetLibraryId = Zotero.Libraries.userLibraryID;
+            }
+
+            if (!isLibraryEditable(targetLibraryId)) {
+                logger('NoteAgentActionRow: Target library is not editable, rejecting action', 1);
+                rejectAgentAction(action.id);
                 return;
             }
 
@@ -126,15 +137,24 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
             });
 
             await ackAgentActions(runId, [{ action_id: action.id, result_data: result }]);
+
+            // Reveal the created note in Zotero when in library view
+            if (isLibraryTab && result.library_id && result.zotero_key) {
+                const noteItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                    result.library_id, result.zotero_key
+                );
+                if (noteItem) await selectItemById(noteItem.id);
+            }
         } catch (err: any) {
             logger(`NoteAgentActionRow: Confirm failed: ${err.message}`, 1);
         } finally {
             setIsBusy(false);
         }
-    }, [action, isBusy, noteBlocks, proposed, title, runId, ackAgentActions, citationDataMap, externalMapping, externalReferencesMap]);
+    }, [action, isBusy, noteBlocks, proposed, title, runId, ackAgentActions, rejectAgentAction, isLibraryTab, citationDataMap, externalMapping, externalReferencesMap]);
 
     // Dismiss: reject the action
     const handleDismiss = useCallback(() => {
+        clearNoteAutoApplied(action.id);
         rejectAgentAction(action.id);
     }, [action.id, rejectAgentAction]);
 
@@ -201,7 +221,7 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
                 <div className="flex-1" />
 
                 {/* Action buttons */}
-                <div className="display-flex flex-row items-center gap-1 mr-2">
+                <div className={`display-flex flex-row items-center gap-1 ${isApplied ? 'mr-2' : 'mr-3 mt-020'}`}>
                     {isApplied && (
                         <>
                             <Tooltip content="Dismiss" showArrow singleLine>
@@ -264,9 +284,13 @@ interface NoteAgentActionDisplayProps {
  * Pending notes: Dismiss (x) + Confirm (tick) icon buttons.
  */
 const NoteAgentActionDisplay: React.FC<NoteAgentActionDisplayProps> = ({ run, actions }) => {
-    // Only show pending/error notes — once accepted or dismissed, the row disappears
+    // Show pending/error (awaiting user confirmation) and auto-applied notes (allowing undo).
+    // Auto-applied notes are tracked in a session-only set — they don't reappear on reload.
+    // Manually confirmed notes become 'applied' but aren't in the auto-applied set, so they disappear.
     const visibleActions = actions.filter(a =>
-        a.status === 'pending' || a.status === 'error'
+        // FOR NOW: Only show for auto-applied notes
+        // a.status === 'pending' || a.status === 'error' || (a.status === 'applied' && isNoteAutoApplied(a.id))
+        (a.status === 'applied' && isNoteAutoApplied(a.id))
     );
 
     // Pre-extract note blocks from run messages for content matching
