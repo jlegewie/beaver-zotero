@@ -24,6 +24,7 @@ const FloatingPopupContainer: React.FC = () => {
                     key={message.id}
                     message={message}
                     onRemove={handleRemove}
+                    isFloating={true}
                 />
             ))}
         </div>

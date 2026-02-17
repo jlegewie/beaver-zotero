@@ -7,7 +7,7 @@ import { performConsistencyCheck } from '../../src/utils/syncConsistency';
 import { syncCollectionsOnly } from '../../src/utils/sync';
 import { version } from '../../package.json';
 import { logger } from '../../src/utils/logger';
-import { addPopupMessageAtom } from '../utils/popupMessageUtils';
+import { addFloatingPopupMessageAtom } from '../atoms/floatingPopup';
 import { getPendingVersionNotifications, removePendingVersionNotification } from '../../src/utils/versionNotificationPrefs';
 import { getVersionUpdateMessageConfig } from '../constants/versionUpdateMessages';
 import { isDatabaseSyncSupportedAtom, profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom } from '../atoms/profile';
@@ -28,7 +28,7 @@ export const useUpgradeHandler = () => {
     const processedVersionsRef = useRef<Set<string>>(new Set());
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const profile = useAtomValue(profileWithPlanAtom);
-    const addPopupMessage = useSetAtom(addPopupMessageAtom);
+    const addFloatingPopupMessage = useSetAtom(addFloatingPopupMessageAtom);
 
     // Run consistency check after upgrade
     useEffect(() => {
@@ -193,7 +193,7 @@ export const useUpgradeHandler = () => {
             processedVersionsRef.current.add(config.version);
             logger(`useUpgradeHandler: Displaying release notes popup for version ${config.version}.`, 3);
 
-            addPopupMessage({
+            addFloatingPopupMessage({
                 type: 'version_update',
                 title: config.title,
                 text: config.text,
@@ -209,5 +209,5 @@ export const useUpgradeHandler = () => {
             removePendingVersionNotification(pendingVersion);
         });
 
-    }, [isAuthenticated, addPopupMessage]);
+    }, [isAuthenticated, addFloatingPopupMessage]);
 };

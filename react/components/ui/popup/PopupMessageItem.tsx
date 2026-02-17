@@ -16,9 +16,11 @@ interface PopupMessageItemProps {
     message: PopupMessage;
     /** Optional override for message removal. When provided, called instead of the default removePopupMessageAtom. */
     onRemove?: (messageId: string) => void;
+    /** When true, renders in floating popup mode (e.g. version_update gets its own header) */
+    isFloating?: boolean;
 }
 
-const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove }) => {
+const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, isFloating }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const defaultRemoveMessage = useSetAtom(removePopupMessageAtom);
     const removeMessage = onRemove ?? defaultRemoveMessage;
@@ -110,16 +112,19 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove }
             onMouseLeave={() => setIsHovering(false)}
         >
             <div className="p-3 display-flex flex-col items-start gap-2">
-                <PopupMessageHeader
-                    icon={message.icon || getDefaultIcon()}
-                    title={message.title}
-                    count={message.count}
-                    buttonIcon={message.buttonIcon}
-                    buttonOnClick={message.buttonOnClick}
-                    fontColor={fontColor}
-                    handleDismiss={handleDismiss}
-                    cancelable={message.cancelable}
-                />
+                {/* Floating version_update renders its own header inside VersionUpdateMessageContent */}
+                {!(isFloating && message.type === 'version_update') && (
+                    <PopupMessageHeader
+                        icon={message.icon || getDefaultIcon()}
+                        title={message.title}
+                        count={message.count}
+                        buttonIcon={message.buttonIcon}
+                        buttonOnClick={message.buttonOnClick}
+                        fontColor={fontColor}
+                        handleDismiss={handleDismiss}
+                        cancelable={message.cancelable}
+                    />
+                )}
 
                 {/* Content for info, warning, error */}
                 {['info', 'warning', 'error', 'items_summary'].includes(message.type) && (
@@ -160,7 +165,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove }
                 )}
 
                 {message.type === 'version_update' && (
-                    <VersionUpdateMessageContent message={message} onDismiss={handleDismiss} />
+                    <VersionUpdateMessageContent message={message} onDismiss={handleDismiss} isFloating={isFloating} />
                 )}
 
                 {message.type === 'embedding_indexing' && (
