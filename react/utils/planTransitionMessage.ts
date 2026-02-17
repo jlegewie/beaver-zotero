@@ -7,6 +7,8 @@ import { store } from "../store";
 import { fileStatusSummaryAtom, calculateFileStatusSummary } from "../atoms/files";
 import { fetchFileStatus } from "../hooks/useFileStatus";
 import { Icon, PuzzleIcon } from "../components/icons/icons";
+import { newThreadAtom, currentThreadIdAtom } from "../atoms/threads";
+import { showFileStatusDetailsAtom } from "../atoms/ui";
 
 export const planTransitionMessage = async (profile: SafeProfileWithPlan) => {
 
@@ -39,7 +41,16 @@ export const planTransitionMessage = async (profile: SafeProfileWithPlan) => {
             }),
             showProgress: true,
             expire: false,
-            showGoToFileStatusButton: true
+            button: {
+                text: "View File Status",
+                onClick: () => {
+                    const currentThreadId = store.get(currentThreadIdAtom);
+                    if (currentThreadId !== null) {
+                        store.set(newThreadAtom);
+                    }
+                    store.set(showFileStatusDetailsAtom, true);
+                },
+            }
         });
     }
 

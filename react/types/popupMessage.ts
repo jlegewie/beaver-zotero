@@ -1,5 +1,6 @@
 import { FileStatusSummary } from "./fileStatus";
 import { FeatureStep } from "../constants/versionUpdateMessages";
+import { ButtonVariant } from "../components/ui/Button";
 
 export const POPUP_MESSAGE_DURATION = 4000; // 4 seconds
 
@@ -8,6 +9,13 @@ export type PopupMessageType = 'info' | 'warning' | 'error' | 'plan_change' | 'i
 export interface PopupMessageFeature {
     title: string;
     description?: string;
+}
+
+export interface PopupMessageButton {
+    text: string;
+    onClick: () => void;
+    icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+    variant?: ButtonVariant;
 }
 
 export interface PopupMessage {
@@ -27,8 +35,8 @@ export interface PopupMessage {
     progress?: number; // 0-100 for progress bar
     count?: number;   // Count message occurrences
     duration?: number; // Duration in milliseconds, defaults to POPUP_MESSAGE_DURATION
-    showGoToFileStatusButton?: boolean;
-    showSettingsButton?: boolean;
+    /** Optional action button displayed at the bottom of the message */
+    button?: PopupMessageButton;
     /** @deprecated Use steps for new version messages */
     featureList?: PopupMessageFeature[];
     learnMoreUrl?: string;

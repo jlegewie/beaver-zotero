@@ -7,6 +7,7 @@ import { parseTextWithLinksAndNewlines } from '../../../utils/parseTextWithLinks
 interface FeatureTourContentProps {
     steps: FeatureStep[];
     onComplete: () => void;
+    footer?: string;
 }
 
 /**
@@ -83,7 +84,7 @@ const StepIndicator: React.FC<{
 /**
  * Feature tour component with step-by-step navigation
  */
-const FeatureTourContent: React.FC<FeatureTourContentProps> = ({ steps, onComplete }) => {
+const FeatureTourContent: React.FC<FeatureTourContentProps> = ({ steps, onComplete, footer }) => {
     const [currentStep, setCurrentStep] = useState(0);
     
     const isLastStep = currentStep === steps.length - 1;
@@ -147,14 +148,19 @@ const FeatureTourContent: React.FC<FeatureTourContentProps> = ({ steps, onComple
                 
                 {/* Step indicator + Navigation row */}
                 <div className="display-flex flex-row justify-between items-center">
-                    {/* Step indicator on the left */}
-                    <div>
+                    {/* Left side: step indicator or footer */}
+                    <div className="display-flex flex-col gap-1">
                         {steps.length > 1 && (
                             <StepIndicator 
                                 totalSteps={steps.length} 
                                 currentStep={currentStep}
                                 onStepClick={handleStepClick}
                             />
+                        )}
+                        {footer && isLastStep && (
+                            <div className="font-color-tertiary text-sm">
+                                {parseTextWithLinksAndNewlines(footer)}
+                            </div>
                         )}
                     </div>
                     

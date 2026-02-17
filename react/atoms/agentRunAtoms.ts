@@ -42,7 +42,10 @@ import {
     readerTextSelectionAtom,
     currentMessageContentAtom,
 } from './messageComposition';
-import { isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom } from './ui';
+import { isSidebarVisibleAtom, isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom } from './ui';
+import { addFloatingPopupMessageAtom } from './floatingPopup';
+import { BeaverUIFactory } from '../../src/ui/ui';
+import { eventManager } from '../events/eventManager';
 import { isAnnotationAttachment } from '../types/attachments/apiTypes';
 import { getCurrentPage } from '../utils/readerUtils';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
@@ -768,6 +771,27 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     logger(`WS onRunComplete: Failed to auto-create notes: ${err}`, 1)
                 );
             }
+
+            // Show floating popup when the user can't see the result
+            /*const sidebarVisible = store.get(isSidebarVisibleAtom);
+            const beaverWindow = BeaverUIFactory.findBeaverWindow();
+            const beaverWindowFocused = beaverWindow != null && !beaverWindow.closed &&
+                beaverWindow.document?.hasFocus?.() === true;
+
+            if (!sidebarVisible && !beaverWindowFocused) {
+                const isLibraryTab = Zotero.getMainWindow().Zotero_Tabs.selectedType === 'library';
+                set(addFloatingPopupMessageAtom, {
+                    type: 'info',
+                    title: 'Response ready',
+                    text: 'Open Beaver to read the reply.',
+                    expire: false,
+                    duration: 6000,
+                    button: {
+                        text: 'Open',
+                        onClick: () => eventManager.dispatch('toggleChat', { location: isLibraryTab ? 'library' : 'reader' }),
+                    },
+                });
+            }*/
         },
 
         onThread: (newThreadId: string) => {

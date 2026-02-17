@@ -8,6 +8,7 @@ import { useEmbeddingIndexProgress } from './hooks/useEmbeddingIndexProgress';
 import { useAuth } from './hooks/useAuth';
 import ReaderSidebar from './components/ReaderSidebar';
 import WindowSidebar from './components/WindowSidebar';
+import FloatingPopupRoot from './components/FloatingPopupRoot';
 import PreferencesWindow from './components/PreferencesWindow';
 import { PreferencePageTab } from './atoms/ui';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
@@ -131,6 +132,30 @@ export function renderWindowSidebar(domElement: HTMLElement) {
     root.render(
         <Provider store={store}>
             <WindowSidebar />
+        </Provider>
+    );
+
+    return root;
+}
+
+/**
+ * Renders the floating popup overlay into the main Zotero window.
+ * Displays notifications independent of the sidebar (bottom-right corner).
+ */
+export function renderFloatingPopup(domElement: HTMLElement) {
+    // Clean up any existing root first
+    const existingRoot = rootsMap.get(domElement);
+    if (existingRoot) {
+        existingRoot.unmount();
+        rootsMap.delete(domElement);
+    }
+
+    const root = createRoot(domElement);
+    rootsMap.set(domElement, root);
+
+    root.render(
+        <Provider store={store}>
+            <FloatingPopupRoot />
         </Provider>
     );
 

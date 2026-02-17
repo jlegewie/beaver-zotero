@@ -74,6 +74,24 @@
     font-size: 13px !important;
 }
 
+/* Floating Popup Overlay - renders over main Zotero window, bottom-right */
+#beaver-pane-floating-popup {
+    position: fixed;
+    bottom: 2px;
+    right: 7px;
+    width: 340px;
+    max-height: 80vh;
+    z-index: 9999;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+}
+
+#beaver-pane-floating-popup > * {
+    pointer-events: auto;
+}
+
 /* Toolbar Button */
 #zotero-beaver-tb-chat-toggle {
     list-style-image: url("chrome://beaver/content/icons/magic-wand.svg");
