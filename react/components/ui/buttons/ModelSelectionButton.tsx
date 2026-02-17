@@ -174,9 +174,9 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         maxWidth: '250px',
     };
 
-    if (custom_models.length == 0 && byok_models.length == 0) {
-        return null;
-    }
+    // if (custom_models.length == 0 && byok_models.length == 0) {
+    //     return null;
+    // }
 
     return (
         <MenuButton
