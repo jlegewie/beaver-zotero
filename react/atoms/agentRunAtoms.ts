@@ -782,12 +782,12 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 const isLibraryTab = Zotero.getMainWindow().Zotero_Tabs.selectedType === 'library';
                 set(addFloatingPopupMessageAtom, {
                     type: 'info',
-                    title: 'Run complete',
-                    text: 'Your Beaver run has finished. Open the sidebar to see the results.',
-                    expire: true,
+                    title: 'Response ready',
+                    text: 'Open Beaver to read the reply.',
+                    expire: false,
                     duration: 6000,
                     button: {
-                        text: 'Open Sidebar',
+                        text: 'Open',
                         onClick: () => eventManager.dispatch('toggleChat', { location: isLibraryTab ? 'library' : 'reader' }),
                     },
                 });
