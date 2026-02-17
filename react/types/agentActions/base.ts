@@ -207,6 +207,8 @@ export interface ConfirmExtractionProposedData {
     total_credits: number;
     /** Number of papers included in base cost (free) */
     included_free: number;
+    /** Attachment IDs for frontend pre-validation of file existence */
+    attachment_ids?: string[];
 }
 
 /**

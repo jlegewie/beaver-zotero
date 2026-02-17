@@ -98,7 +98,7 @@ import { searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
 import { syncingItemFilterAsync } from '../../src/utils/sync';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
-import { ZoteroItemReference } from '../types/zotero';
+import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
 
@@ -642,6 +642,46 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
 });
 
 /**
+ * Pre-validate a confirm_extraction approval by checking which attachments
+ * actually have files locally. If the number of existing attachments is within
+ * the free tier (included_free), auto-approve without showing the dialog.
+ * Credit logic stays on the backend -- this only gates whether to bother the user.
+ */
+async function prevalidateExtractionApproval(
+    set: Setter,
+    event: WSDeferredApprovalRequest,
+    attachmentIds: string[],
+    includedFree: number,
+): Promise<void> {
+    let existingCount = 0;
+
+    for (const attachmentId of attachmentIds) {
+        try {
+            const ref = createZoteroItemReference(attachmentId);
+            if (!ref) continue;
+
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
+            if (item && item.isAttachment()) {
+                existingCount++;
+            }
+        } catch {
+            // Skip attachments that fail to resolve
+        }
+    }
+
+    logger(`prevalidateExtractionApproval: ${existingCount}/${attachmentIds.length} attachments have files locally (included_free=${includedFree})`, 1);
+
+    if (existingCount <= includedFree) {
+        // Not enough real attachments to incur extra charges -- auto-approve
+        logger(`prevalidateExtractionApproval: Auto-approving (${existingCount} <= ${includedFree})`, 1);
+        agentService.sendApprovalResponse(event.action_id, true);
+    } else {
+        // Show the dialog with the backend's original numbers
+        set(addPendingApprovalAtom, event);
+    }
+}
+
+/**
  * Create WebSocket callbacks for handling streaming events.
  * Shared between sendWSMessageAtom and regenerateFromRunAtom.
  */
@@ -932,7 +972,22 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 toolcallId: event.toolcall_id,
                 actionType: event.action_type,
             }, 1);
-            // Add the pending approval to the map - UI will render ApprovalView for each
+
+            // Pre-validate confirm_extraction: auto-approve if few attachments exist locally
+            if (event.action_type === 'confirm_extraction') {
+                const attachmentIds: string[] = event.action_data?.attachment_ids ?? [];
+                const includedFree: number = event.action_data?.included_free ?? 0;
+
+                if (attachmentIds.length > 0) {
+                    prevalidateExtractionApproval(set, event, attachmentIds, includedFree).catch(err => {
+                        logger(`WS onDeferredApprovalRequest: Pre-validation failed, showing dialog: ${err}`, 1);
+                        set(addPendingApprovalAtom, event);
+                    });
+                    return;
+                }
+            }
+
+            // Default: add to pending approvals map for UI rendering
             set(addPendingApprovalAtom, event);
         },
 

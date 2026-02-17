@@ -290,6 +290,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             extra_credits: proposedData.extra_credits ?? proposedData.extraCredits ?? 0,
             total_credits: proposedData.total_credits ?? proposedData.totalCredits ?? 0,
             included_free: proposedData.included_free ?? proposedData.includedFree ?? 0,
+            attachment_ids: proposedData.attachment_ids ?? proposedData.attachmentIds ?? [],
         };
     }
     
