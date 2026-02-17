@@ -8,6 +8,8 @@ import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroItemReference, 
 import { isLibrarySynced, getClientDateModifiedAsISOString, getZoteroUserIdentifier, getCollectionClientDateModifiedAsISOString, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
+import { openPreferencesWindow } from '../ui/openPreferencesWindow';
+import { SettingsIcon } from '../../react/components/icons/icons';
 import { syncWithZoteroAtom, isDatabaseSyncSupportedAtom, syncDeniedForPlanAtom } from '../../react/atoms/profile';
 import { ApiError } from '../../react/types/apiErrors';
 import { SyncMethod } from '../../react/atoms/sync';
@@ -740,7 +742,11 @@ export async function syncZoteroDatabase(
                     title: 'Unable to Complete Sync with Beaver',
                     text: `The library '${libraryName}' is not synced with Zotero so Beaver cannot sync it. Remove the library from Beaver or add the library to Zotero sync.`,
                     expire: true,
-                    showSettingsButton: true
+                    button: {
+                        text: "Settings",
+                        onClick: () => openPreferencesWindow(),
+                        icon: SettingsIcon,
+                    }
                 });
                 continue;
             }

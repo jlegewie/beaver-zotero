@@ -1,15 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../../../types/popupMessage';
-import { Icon, AlertIcon, InformationCircleIcon, PuzzleIcon, SettingsIcon, AiMagicIcon, SearchIcon } from '../../icons/icons';
-import { useAtomValue, useSetAtom } from 'jotai';
-import { removePopupMessageAtom, updatePopupMessageAtom } from '../../../utils/popupMessageUtils';
+import { Icon, AlertIcon, InformationCircleIcon, PuzzleIcon, SearchIcon } from '../../icons/icons';
+import { useSetAtom } from 'jotai';
+import { removePopupMessageAtom } from '../../../utils/popupMessageUtils';
 import PlanChangeMessageContent from './PlanChangeMessageContent';
 import IndexingCompleteMessageContent from './IndexingCompleteMessageContent';
 import VersionUpdateMessageContent from './VersionUpdateMessageContent';
 import EmbeddingIndexingMessageContent from './EmbeddingIndexingMessageContent';
-import { newThreadAtom, currentThreadIdAtom } from '../../../atoms/threads';
-import { showFileStatusDetailsAtom } from '../../../atoms/ui';
-import { openPreferencesWindow } from '../../../../src/ui/openPreferencesWindow';
 import Button from "../Button";
 import PopupMessageHeader from './PopupMessageHeader';
 import { getWindowFromElement } from '../../../utils/windowContext';
@@ -25,10 +22,6 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove }
     const containerRef = useRef<HTMLDivElement>(null);
     const defaultRemoveMessage = useSetAtom(removePopupMessageAtom);
     const removeMessage = onRemove ?? defaultRemoveMessage;
-    const newThread = useSetAtom(newThreadAtom);
-    const setShowFileStatusDetails = useSetAtom(showFileStatusDetailsAtom);
-    const currentThreadId = useAtomValue(currentThreadIdAtom);
-    const updatePopupMessage = useSetAtom(updatePopupMessageAtom);
     
     const [isHovering, setIsHovering] = useState(false);
     const [timerExpired, setTimerExpired] = useState(false);
@@ -61,25 +54,6 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove }
 
     const handleDismiss = () => {
         removeMessage(message.id);
-    };
-
-    const showFileStatusDetails = async () => {
-        if (currentThreadId !== null) {
-            await newThread();
-        }
-        setShowFileStatusDetails(true);
-        updatePopupMessage({
-            messageId: message.id,
-            updates: {
-                expire: true,
-                duration: 100
-            }
-        });
-    };
-
-    const showSettings = () => {
-        openPreferencesWindow();
-        handleDismiss();
     };
 
     const getDefaultIcon = () => {
@@ -193,15 +167,18 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove }
                     <EmbeddingIndexingMessageContent message={message} />
                 )}
 
-                {message.showGoToFileStatusButton && (
+                {message.button && (
                     <div className="display-flex flex-row gap-2 items-end w-full justify-end py-1">
-                        <Button onClick={showFileStatusDetails} variant="outline">View File Status</Button>
-                    </div>
-                )}
-
-                {message.showSettingsButton && !message.showGoToFileStatusButton && (
-                    <div className="display-flex flex-row gap-2 items-end w-full justify-end py-1">
-                        <Button onClick={showSettings} icon={SettingsIcon} variant="outline">Settings</Button>
+                        <Button
+                            onClick={() => {
+                                message.button!.onClick();
+                                handleDismiss();
+                            }}
+                            icon={message.button.icon}
+                            variant={message.button.variant ?? "outline"}
+                        >
+                            {message.button.text}
+                        </Button>
                     </div>
                 )}
             </div>
