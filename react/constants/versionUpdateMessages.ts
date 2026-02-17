@@ -272,22 +272,27 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         ],
     },
     {
-        version: "0.11.4",
-        title: "New in Beaver 0.11.4",
+        version: "0.12.0",
+        title: "New in Beaver 0.12",
         steps: [
             {
                 title: "A New Brain for Beaver",
-                description: "Beaver now uses a new, more powerful default model. Try it out and let us know what you think."
+                description: "More capable default model"
             },
             {
-                title: "Custom Actions for common tasks",
-                description: "Use the new slash menu '/' to to trigger custom actions.",
+                title: "Extract tool",
+                description: "Extract key info from 12+ papers at once",
             },
             {
-                title: "Keyboard shortcut updated",
-                description: "Toggle Beaver with ⌘J (Ctrl+J on Windows/Linux). Open in a separate window with ⌘⇧J (Ctrl+Shift+J on Windows/Linux).",
-            }
-        ]
+                title: "Automate common tasks",
+                description: "Use the new '/' slash menu for custom actions",
+            },
+            // {</div>
+            //     title: "Keyboard shortcut updated",
+            //     description: "Toggle Beaver with ⌘J (Ctrl+J on Windows/Linux). Open in a separate window with ⌘⇧J (Ctrl+Shift+J on Windows/Linux).",
+            // }
+        ],
+        footer: "Credits reset, give it a spin!"
     },
 ];
 

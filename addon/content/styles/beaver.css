@@ -77,9 +77,9 @@
 /* Floating Popup Overlay - renders over main Zotero window, bottom-right */
 #beaver-pane-floating-popup {
     position: fixed;
-    bottom: 16px;
-    right: 16px;
-    width: 380px;
+    bottom: 2px;
+    right: 7px;
+    width: 340px;
     max-height: 80vh;
     z-index: 9999;
     pointer-events: none;

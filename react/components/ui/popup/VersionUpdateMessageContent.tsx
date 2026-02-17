@@ -87,10 +87,11 @@ const FloatingVersionCard: React.FC<{
     text?: string;
     subtitle?: string;
     features: PopupMessageFeature[];
+    footer?: string;
     learnMoreUrl?: string;
     learnMoreLabel?: string;
     onDismiss: () => void;
-}> = ({ title, text, subtitle, features, learnMoreUrl, learnMoreLabel, onDismiss }) => {
+}> = ({ title, text, subtitle, features, footer, learnMoreUrl, learnMoreLabel, onDismiss }) => {
     const handleOpenBeaver = () => {
         eventManager.dispatch('toggleChat', {});
         onDismiss();
@@ -105,23 +106,25 @@ const FloatingVersionCard: React.FC<{
     return (
         <div className="display-flex flex-col gap-4 w-full">
             {/* Header: NOW AVAILABLE + dismiss */}
-            <div className="display-flex flex-row items-center justify-between w-full">
-                <span className="text-md font-medium font-color-tertiary" style={{ letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                    Now Available
-                </span>
-                <IconButton
-                    icon={CancelIcon}
-                    variant="ghost-secondary"
-                    onClick={onDismiss}
-                />
-            </div>
-
-            {/* Version title */}
-            {title && (
-                <div className="font-color-primary text-lg font-semibold">
-                    {title}
+            <div className="display-flex flex-col gap-05 w-full">
+                <div className="display-flex flex-row items-center justify-between w-full">
+                    <span className="text-sm font-medium font-color-tertiary" style={{ letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                        Now Available
+                    </span>
+                    <IconButton
+                        icon={CancelIcon}
+                        variant="ghost-secondary"
+                        onClick={onDismiss}
+                    />
                 </div>
-            )}
+
+                {/* Version title */}
+                {title && (
+                    <div className="font-color-primary text-xl font-semibold">
+                        {title}
+                    </div>
+                )}
+            </div>
 
             {/* Optional intro text */}
             {(subtitle || text) && (
@@ -155,7 +158,7 @@ const FloatingVersionCard: React.FC<{
 
             {/* Footer buttons */}
             <div className="display-flex flex-row items-center justify-between pt-2" style={{ borderTop: '1px solid var(--fill-quinary)' }}>
-                {learnMoreUrl ? (
+                {learnMoreUrl && (
                     <a
                         href={learnMoreUrl}
                         className="text-link text-base"
@@ -166,9 +169,14 @@ const FloatingVersionCard: React.FC<{
                     >
                         {learnMoreLabel || 'Learn More'}
                     </a>
-                ) : (
-                    <div />
                 )}
+                {/* Footer text */}
+                {footer && (
+                    <div className="font-color-tertiary text-sm" style={{ whiteSpace: 'pre-line' }}>
+                        {parseTextWithLinksAndNewlines(footer)}
+                    </div>
+                )}
+                {!footer && !learnMoreUrl && <div />}
                 <Button onClick={handleOpenBeaver} variant="solid">
                     Open Beaver
                 </Button>
@@ -203,6 +211,7 @@ const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = 
                 text={text}
                 subtitle={subtitle}
                 features={buildFeatureList(message)}
+                footer={footer}
                 learnMoreUrl={learnMoreUrl}
                 learnMoreLabel={learnMoreLabel}
                 onDismiss={onDismiss || (() => {})}
@@ -224,6 +233,7 @@ const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = 
                 <FeatureTourContent
                     steps={steps as FeatureStep[]}
                     onComplete={onDismiss || (() => {})}
+                    footer={footer}
                 />
             </div>
         );
