@@ -86,7 +86,7 @@ export const ThinkingPartView: React.FC<ThinkingPartViewProps> = ({
                 <div className="opacity-70 p-3 text-sm" id={`thinking-content-${thinkingId}`}>
                     <MarkdownRenderer 
                         className="markdown" 
-                        content={content.replace(/^undefined/, '')}
+                        content={content.trim().replace(/^undefined/, '')}
                         enableNoteBlocks={false}
                     />
                 </div>
