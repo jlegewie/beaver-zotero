@@ -123,6 +123,35 @@ The Zotero plugin is open source under the [AGPL‑3.0 License](LICENSE). The ba
 
 Beaver includes an advanced setting to define custom models. These models are untested and not all features are be supported. You can learn more [here](https://www.beaverapp.ai/docs/custom-models)
 
+### Building from source
+
+```bash
+git clone https://github.com/jlegewie/beaver-zotero.git
+cd beaver-zotero
+npm install
+npm run build
+```
+
+The build requires environment variables for the Supabase URL, anon key, and API endpoints. Create a `.env.production` file or set them in your environment:
+
+```
+SUPABASE_URL=<supabase-url>
+SUPABASE_ANON_KEY=<supabase-anon-key>
+API_BASE_URL=<api-url>
+WEBAPP_BASE_URL=<webapp-url>
+```
+
+The built XPI will be in `.scaffold/build/`.
+
+**Source maps:** To generate source maps for the production React bundle, change `devtool` in `webpack.config.js` from `false` to `'source-map'` and rebuild:
+
+```js
+// webpack.config.js, line 37
+devtool: mode === 'development' ? 'inline-source-map' : 'source-map',
+```
+
+This produces a `reactBundle.js.map` that maps back to the original TypeScript source. The esbuild bundle (`content/scripts/beaver.js`) is not minified and readable as-is.
+
 ## System Requirements
 
 - Zotero 7.0 or later
