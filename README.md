@@ -21,9 +21,9 @@ We welcome feedback on GitHub.
 
 ## Key Features
 
-- **Chat with your Entire Library**: Ask questions about your research and get answers drawn from your entire library. Beaver searches across metadata, topics, and the full content of your PDFs to give grounded answers. [Learn more]https://www.beaverapp.ai/docs/searching)
+- **Chat with your Entire Library**: Ask questions about your research and get answers drawn from your entire library. Beaver searches across metadata, topics, and the full content of your PDFs to give grounded answers. [Learn more](https://www.beaverapp.ai/docs/searching)
 
-- **Reading Assistant**: Beaver is integrated inside your PDF reader. Select complex equations or highlight text to get explanations. Need more context? Ask how a claim compares to the rest of your library without ever leaving the page. [Learn more]https://www.beaverapp.ai/docs/zotero-reader)
+- **Reading Assistant**: Beaver is integrated inside your PDF reader. Select complex equations or highlight text to get explanations. Need more context? Ask how a claim compares to the rest of your library without ever leaving the page. [Learn more](https://www.beaverapp.ai/docs/zotero-reader)
 
 - **Discover New Research**: Search over 240 million scholarly works outside your Zotero library. Understand citation patterns and find papers to expand your collection. [Learn more](https://www.beaverapp.ai/docs/web-search)
 
