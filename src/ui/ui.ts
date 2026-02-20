@@ -5,8 +5,14 @@ import { KeyboardManager } from "../utils/keyboardManager";
 import { getPref } from "../utils/prefs";
 import { PreferencePageTab } from "../../react/atoms/ui";
 
-// Create a single instance of keyboard manager
-const keyboardManager = new KeyboardManager();
+let keyboardManager: KeyboardManager | null = null;
+
+function getKeyboardManager(): KeyboardManager {
+    if (!keyboardManager) {
+        keyboardManager = new KeyboardManager();
+    }
+    return keyboardManager;
+}
 
 interface BeaverWindow extends Window {
     BeaverReact?: {
@@ -282,8 +288,10 @@ export class BeaverUIFactory {
     }
 
     static registerShortcuts() {
+        const manager = getKeyboardManager();
+
         // Always unregister all existing shortcuts first to prevent duplicates
-        keyboardManager.unregisterAll();
+        manager.unregisterAll();
         
         if (typeof ztoolkit !== 'undefined') {
             ztoolkit.log("Registering keyboard shortcuts...");
@@ -296,7 +304,7 @@ export class BeaverUIFactory {
         const TOGGLE_DEBOUNCE_MS = 200; // 200ms debounce to prevent rapid repeated toggles
 
         // Register keyboard shortcut for toggling chat panel
-        keyboardManager.register(
+        manager.register(
             (ev, keyOptions) => {
                 const isMacToggle = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey;
                 const isWindowsToggle = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && !ev.altKey && !ev.shiftKey && !ev.metaKey;
@@ -341,7 +349,7 @@ export class BeaverUIFactory {
 
         // Register keyboard shortcut for opening separate window
         // Mac: Cmd+Shift+J, Windows/Linux: Ctrl+Shift+J
-        keyboardManager.register(
+        manager.register(
             (ev, keyOptions) => {
                 const isMacShortcut = Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.metaKey && ev.shiftKey && !ev.ctrlKey && !ev.altKey;
                 const isWindowsShortcut = !Zotero.isMac && ev.key.toLowerCase() === keyboardShortcut && ev.ctrlKey && ev.shiftKey && !ev.altKey && !ev.metaKey;
@@ -362,7 +370,10 @@ export class BeaverUIFactory {
      * 2. Unregister Zotero.Reader event listeners
      */
     static unregisterShortcuts() {
-        keyboardManager.unregisterAll();
+        if (keyboardManager) {
+            keyboardManager.unregisterAll();
+            keyboardManager = null;
+        }
     }
 
     /**
