@@ -201,9 +201,12 @@ export async function serializeCollection(
 /**
  * Extracts relevant data from a Zotero item for syncing, including a metadata hash.
  * @param item Zotero item
+ * @param options.skipHash If true, skip SHA-256 hash computation and set item_metadata_hash to ''.
+ *   Use for search/lookup paths where the hash is not consumed by the backend.
  * @returns Promise resolving to ItemData object for syncing
  */
-export async function serializeItem(item: Zotero.Item, clientDateModified: string | undefined): Promise<ItemData> {
+export async function serializeItem(item: Zotero.Item, clientDateModified: string | undefined, options?: { skipHash?: boolean }): Promise<ItemData> {
+    const skipHash = options?.skipHash ?? false;
 
     // ------- 1. Get full item data -------
     // @ts-ignore - Returns of item.toJSON are not typed correctly
@@ -241,7 +244,7 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
     };
 
     // ------- 3. Calculate hash from the extracted hashed fields -------
-    const metadataHash = await calculateObjectHash(hashedFields);
+    const metadataHash = skipHash ? '' : await calculateObjectHash(hashedFields);
 
     // ------- 4. Construct final ItemData object -------
     let finalDateModified: string;
@@ -289,10 +292,11 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
 export async function serializeAttachment(
     item: Zotero.Item,
     clientDateModified: string | undefined,
-    options?: { skipFileHash?: boolean, skipSyncingFilter?: boolean }
+    options?: { skipFileHash?: boolean, skipSyncingFilter?: boolean, skipHash?: boolean }
 ): Promise<AttachmentDataWithMimeType | null> {
-    const skipFileHash = options?.skipFileHash || false;
-    const skipSyncingFilter = options?.skipSyncingFilter || false;
+    const skipFileHash = options?.skipFileHash ?? false;
+    const skipSyncingFilter = options?.skipSyncingFilter ?? false;
+    const skipHash = options?.skipHash ?? false;
 
     // 1. File: Confirm that the item is an attachment and passes the syncing filter (exists locally or on server)
     const passesSyncingFilter = skipSyncingFilter ? true : (await syncingItemFilterAsync(item));
@@ -356,7 +360,7 @@ export async function serializeAttachment(
     };
 
     // 3. Metadata Hash: Calculate hash from the prepared hashed fields object
-    const metadataHash = await calculateObjectHash(hashedFields);
+    const metadataHash = skipHash ? '' : await calculateObjectHash(hashedFields);
 
     let finalDateModified: string;
     if (clientDateModified) {

@@ -317,8 +317,8 @@ export async function handleItemSearchByTopicRequest(
             batch.map(async ({ item, similarity }): Promise<ItemSearchFrontendResultItem | null> => {
                 try {
                     const [itemData, attachments] = await Promise.all([
-                        serializeItem(item, undefined),
-                        processAttachmentsParallel(item, attachmentContext)
+                        serializeItem(item, undefined, { skipHash: true }),
+                        processAttachmentsParallel(item, attachmentContext, { skipHash: true })
                     ]);
                     return { item: itemData, attachments, similarity };
                 } catch (error) {

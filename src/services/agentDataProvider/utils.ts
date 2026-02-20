@@ -372,12 +372,15 @@ export interface AttachmentProcessingContext {
  * 
  * @param item - Parent Zotero item
  * @param context - Sync configuration context
+ * @param options.skipHash - If true, skip SHA-256 hash computation (for search/lookup paths)
  * @returns Array of processed attachments with status
  */
 export async function processAttachmentsParallel(
     item: Zotero.Item,
-    context: AttachmentProcessingContext
+    context: AttachmentProcessingContext,
+    options?: { skipHash?: boolean }
 ): Promise<AttachmentDataWithStatus[]> {
+    const skipHash = options?.skipHash ?? false;
     const attachmentIds = item.getAttachments();
     if (attachmentIds.length === 0) {
         return [];
@@ -401,7 +404,7 @@ export async function processAttachmentsParallel(
         }
 
         // Serialize attachment (skip file hash — not needed for search results)
-        const attachmentData = await serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true });
+        const attachmentData = await serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true, skipHash });
         if (!attachmentData) {
             return null;
         }

@@ -239,8 +239,8 @@ export async function handleItemSearchByMetadataRequest(
             batch.map(async (item): Promise<ItemSearchFrontendResultItem | null> => {
                 try {
                     const [itemData, attachments] = await Promise.all([
-                        serializeItem(item, undefined),
-                        processAttachmentsParallel(item, attachmentContext)
+                        serializeItem(item, undefined, { skipHash: true }),
+                        processAttachmentsParallel(item, attachmentContext, { skipHash: true })
                     ]);
                     return { item: itemData, attachments };
                 } catch (error) {

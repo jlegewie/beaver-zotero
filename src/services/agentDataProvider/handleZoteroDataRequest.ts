@@ -245,12 +245,12 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
     
     const [itemResults, attachmentResults] = await Promise.all([
         Promise.all(itemsToSerialize.map(async (item): Promise<ItemDataWithStatus | null> => {
-            const serialized = await serializeItem(item, undefined);
+            const serialized = await serializeItem(item, undefined, { skipHash: true });
             const status = await computeItemStatus(item, searchableLibraryIds, syncWithZotero, userId);
             return { item: serialized, status };
         })),
         Promise.all(attachmentsToSerialize.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
-            const serialized = await serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true });
+            const serialized = await serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true, skipHash: true });
             if (!serialized) {
                 errors.push({
                     reference: { library_id: attachment.libraryID, zotero_key: attachment.key },
