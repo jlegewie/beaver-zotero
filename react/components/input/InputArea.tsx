@@ -228,17 +228,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const handleSlashDismiss = useCallback(() => {
         setIsSlashMenuOpen(false);
         setSlashSearchQuery('');
-        // Keep the "/" in the input when dismissing
-        setMessageContent(preSlashTextRef.current + '/');
-        setTimeout(() => inputRef.current?.focus(), 0);
-    }, []);
-
-    const handleSlashBackspace = useCallback(() => {
-        setIsSlashMenuOpen(false);
-        setSlashSearchQuery('');
-        // Remove the "/" from the input on backspace
-        setMessageContent(preSlashTextRef.current);
-        setTimeout(() => inputRef.current?.focus(), 0);
+        // Keep whatever is in the textarea as-is
     }, []);
 
     const slashMenuItems = useMemo<SearchMenuItem[]>(() => {
@@ -250,7 +240,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
         // Custom prompt items: enabled first, disabled last (reversed for "above")
         const filtered = customPrompts.filter(prompt =>
-            !query || prompt.title.toLowerCase().includes(query) || prompt.text.toLowerCase().includes(query)
+            !query || prompt.title.toLowerCase().includes(query)
         );
 
         // "Create Action" footer (visually at bottom)
@@ -262,22 +252,14 @@ const InputArea: React.FC<InputAreaProps> = ({
                 onClick: () => {
                     setIsSlashMenuOpen(false);
                     setSlashSearchQuery('');
-                    setMessageContent(preSlashTextRef.current + '/');
                     openPreferencesWindow('prompts');
                 },
             }] : [];
         const enabled = filtered.filter(p => !p.requiresAttachment || hasAttachment);
         const disabled = filtered.filter(p => p.requiresAttachment && !hasAttachment);
 
-        // Sort each group: title matches first when searching, then by recency, then by preferences order
+        // Sort each group: by recency, then by preferences order
         const sortByRelevance = (a: CustomPrompt, b: CustomPrompt): number => {
-            // When there's a search query, prioritize title matches over text-only matches
-            if (query) {
-                const aTitleMatch = a.title.toLowerCase().includes(query);
-                const bTitleMatch = b.title.toLowerCase().includes(query);
-                if (aTitleMatch && !bTitleMatch) return -1;
-                if (!aTitleMatch && bTitleMatch) return 1;
-            }
             if (a.lastUsed && !b.lastUsed) return -1;
             if (!a.lastUsed && b.lastUsed) return 1;
             if (a.lastUsed && b.lastUsed) {
@@ -374,9 +356,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                 onSearch={() => {}}
                 noResultsText="No actions found"
                 placeholder="Search actions..."
-                closeOnSelect={true}
-                showSearchInput={customPrompts.length > 5}
-                onEmptyBackspace={handleSlashBackspace}
+                closeOnSelect={false}
+                showSearchInput={false}
             />
 
             {/* Input Form */}
@@ -387,10 +368,22 @@ const InputArea: React.FC<InputAreaProps> = ({
                         ref={inputRef as React.RefObject<HTMLTextAreaElement>}
                         value={messageContent}
                         onChange={(e) => {
-                            // Block textarea changes while slash menu is open
-                            if (isSlashMenuOpen) return;
-
                             const value = e.target.value;
+
+                            // When slash menu is open, track search query from typed text
+                            if (isSlashMenuOpen) {
+                                const prefix = preSlashTextRef.current + '/';
+                                if (value.startsWith(prefix)) {
+                                    setSlashSearchQuery(value.slice(prefix.length));
+                                    setMessageContent(value);
+                                } else {
+                                    // User deleted past the slash, close the menu
+                                    setIsSlashMenuOpen(false);
+                                    setSlashSearchQuery('');
+                                    setMessageContent(value);
+                                }
+                                return;
+                            }
 
                             // Detect `/` trigger: at start or after whitespace/newline
                             if (value.endsWith('/') && !isAddAttachmentMenuOpen) {
@@ -406,8 +399,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 }
                             }
 
-                            // Don't open attachment menu when awaiting approval or slash menu is open
-                            if (e.target.value.endsWith('@') && !isAwaitingApproval && !isSlashMenuOpen) {
+                            // Don't open attachment menu when awaiting approval
+                            if (e.target.value.endsWith('@') && !isAwaitingApproval) {
                                 const rect = e.currentTarget.getBoundingClientRect();
                                 setMenuPosition({
                                     x: rect.left,
@@ -427,32 +420,20 @@ const InputArea: React.FC<InputAreaProps> = ({
                             : (isLibraryTab ? "@ to add a source, / for actions" : "@ to add a source, / for actions, drag to add annotations")}
                         className="chat-input"
                         onKeyDown={(e) => {
-                            // When slash menu is open, prevent Enter/Arrow keys from reaching textarea
+                            // When slash menu is open, handle navigation and dismiss keys
                             if (isSlashMenuOpen) {
                                 if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                                     e.preventDefault();
                                     return;
                                 }
-                                if (e.key === 'Escape') {
-                                    e.preventDefault();
-                                    handleSlashDismiss();
-                                    return;
-                                }
-                                // Space with empty search query closes the menu (keeps /)
-                                if (e.key === ' ' && slashSearchQuery.length === 0) {
-                                    e.preventDefault();
-                                    handleSlashDismiss();
-                                    return;
-                                }
-                                // Backspace closes the menu and removes the /
-                                if (e.key === 'Backspace') {
+                                if (e.key === 'Escape' || e.key === ' ') {
                                     e.preventDefault();
                                     setIsSlashMenuOpen(false);
                                     setSlashSearchQuery('');
-                                    setMessageContent(preSlashTextRef.current);
-                                    setTimeout(() => inputRef.current?.focus(), 0);
                                     return;
                                 }
+                                // All other keys (letters, backspace, etc.) pass through to textarea
+                                // The onChange handler will update the search query
                             }
                             handleKeyDown(e);
                             // Submit on Enter (without Shift) - guard against pending to prevent race with button click
