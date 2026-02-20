@@ -71,7 +71,7 @@ export const SuggestionsView: React.FC<SuggestionsViewProps> = ({ part, onDismis
                         onClick={onDismiss}
                         ariaLabel="Dismiss suggestions"
                         variant="ghost-secondary"
-                        className="scale-08"
+                        className="scale-80"
                     />
                 )}
             </div>
