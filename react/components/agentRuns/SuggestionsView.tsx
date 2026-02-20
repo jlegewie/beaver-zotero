@@ -2,6 +2,8 @@ import React from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { ToolCallPart } from '../../agents/types';
 import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
+import { CancelIcon } from '../icons/icons';
+import IconButton from '../ui/IconButton';
 
 interface Suggestion {
     text: string;
@@ -11,6 +13,7 @@ interface Suggestion {
 
 interface SuggestionsViewProps {
     part: ToolCallPart;
+    onDismiss?: () => void;
 }
 
 /**
@@ -41,7 +44,7 @@ function parseSuggestions(part: ToolCallPart): Suggestion[] {
  * Renders follow-up suggestions as clickable buttons.
  * Displayed instead of the normal tool call UI for return_suggestions.
  */
-export const SuggestionsView: React.FC<SuggestionsViewProps> = ({ part }) => {
+export const SuggestionsView: React.FC<SuggestionsViewProps> = ({ part, onDismiss }) => {
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
 
@@ -58,8 +61,19 @@ export const SuggestionsView: React.FC<SuggestionsViewProps> = ({ part }) => {
 
     return (
         <div className="display-flex flex-col gap-2 pt-3">
-            <div className="font-color-tertiary text-xs font-semibold uppercase" style={{ letterSpacing: '0.05em' }}>
-                Suggestions
+            <div className="display-flex flex-row items-center justify-between gap-2">
+                <div className="font-color-tertiary text-xs font-semibold uppercase" style={{ letterSpacing: '0.05em' }}>
+                    Suggestions
+                </div>
+                {onDismiss && (
+                    <IconButton
+                        icon={CancelIcon}
+                        onClick={onDismiss}
+                        ariaLabel="Dismiss suggestions"
+                        variant="ghost-secondary"
+                        className="scale-08"
+                    />
+                )}
             </div>
             <div className="display-flex flex-col gap-1">
                 {suggestions.map((suggestion, index) => (

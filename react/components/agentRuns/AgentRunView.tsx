@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ModelResponse, ToolCallPart } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
@@ -93,6 +93,9 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
         return parts;
     }, [run.model_messages, isLastRun]);
 
+    const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
+    const handleDismissSuggestions = useCallback(() => setSuggestionsDismissed(true), []);
+
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && (run.status === 'completed' || run.status === 'error' || run.status === 'canceled');
 
@@ -130,12 +133,13 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
             )}
 
             {/* Suggestions (only for the last run, rendered below footer) */}
-            {suggestionParts.length > 0 && (
+            {suggestionParts.length > 0 && !suggestionsDismissed && (
                 <div className="px-4">
                     {suggestionParts.map((part) => (
                         <SuggestionsView
                             key={`suggestions-${part.tool_call_id}`}
                             part={part}
+                            onDismiss={handleDismissSuggestions}
                         />
                     ))}
                 </div>
