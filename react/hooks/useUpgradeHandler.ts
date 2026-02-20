@@ -167,11 +167,8 @@ export const useUpgradeHandler = () => {
     }, [isAuthenticated, profile, syncedLibraryIds, isDatabaseSyncSupported]);
 
     // Run version notification popup after upgrade — show only the most recent version
+    // No auth guard: floating popups are used to re-engage lapsed/unauthenticated users too.
     useEffect(() => {
-        if (!isAuthenticated) {
-            return;
-        }
-
         const pendingVersions = getPendingVersionNotifications();
         if (!pendingVersions.length) {
             return;
@@ -219,5 +216,5 @@ export const useUpgradeHandler = () => {
             expire: false,
         });
 
-    }, [isAuthenticated, addFloatingPopupMessage]);
+    }, [addFloatingPopupMessage]);
 };
