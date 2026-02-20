@@ -13,7 +13,7 @@ import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/ato
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
 import { serializeAttachment, serializeItem } from '../../utils/zoteroSerializers';
-import { computeItemStatus, getAttachmentFileStatus, getAttachmentFileStatusLightweight } from './utils';
+import { computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight } from './utils';
 import {
     WSZoteroDataRequest,
     WSZoteroDataResponse,
@@ -242,11 +242,18 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
     // Phase 6: Serialize all items and attachments with status
     // Determine file status level from request (default to 'lightweight' for backward compatibility)
     const fileStatusLevel = request.file_status_level ?? 'lightweight';
-    
+
+    // Pre-fetch sync dates for all libraries (1 query per unique library instead of per item)
+    const allLibraryIds = [...new Set([
+        ...itemsToSerialize.map(item => item.libraryID),
+        ...attachmentsToSerialize.map(att => att.libraryID)
+    ])];
+    const syncDateCache = await prefetchSyncDates(allLibraryIds, syncWithZotero, userId);
+
     const [itemResults, attachmentResults] = await Promise.all([
         Promise.all(itemsToSerialize.map(async (item): Promise<ItemDataWithStatus | null> => {
             const serialized = await serializeItem(item, undefined, { skipHash: true });
-            const status = await computeItemStatus(item, searchableLibraryIds, syncWithZotero, userId);
+            const status = await computeItemStatus(item, searchableLibraryIds, syncWithZotero, userId, { syncDateCache });
             return { item: serialized, status };
         })),
         Promise.all(attachmentsToSerialize.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
@@ -259,7 +266,7 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
                 });
                 return null;
             }
-            const status = await computeItemStatus(attachment, searchableLibraryIds, syncWithZotero, userId);
+            const status = await computeItemStatus(attachment, searchableLibraryIds, syncWithZotero, userId, { syncDateCache });
             
             // Determine if this is the primary attachment for its parent (using cached data)
             let isPrimary = false;

@@ -293,30 +293,76 @@ export async function getAttachmentFileStatusLightweight(
 }
 
 /**
+ * Pre-fetch sync dates for a set of libraries.
+ * Returns a Map from libraryId to the last sync date SQL string (or null if no sync log).
+ * This avoids redundant DB queries when computing status for many items from the same libraries.
+ *
+ * @param libraryIds - Library IDs to pre-fetch sync dates for
+ * @param syncWithZotero - Sync settings from profile
+ * @param userId - Current user ID
+ * @returns Map from libraryId to lastSyncDateSQL (null means no sync log found)
+ */
+export async function prefetchSyncDates(
+    libraryIds: number[],
+    syncWithZotero: any,
+    userId: string | null
+): Promise<Map<number, string | null>> {
+    const cache = new Map<number, string | null>();
+    if (!userId) return cache;
+
+    const uniqueLibraryIds = [...new Set(libraryIds)];
+
+    await Promise.all(uniqueLibraryIds.map(async (libraryId) => {
+        try {
+            const syncLog = syncWithZotero
+                ? await Zotero.Beaver.db.getSyncLogWithHighestVersion(userId, libraryId)
+                : await Zotero.Beaver.db.getSyncLogWithMostRecentDate(userId, libraryId);
+
+            if (!syncLog) {
+                cache.set(libraryId, null);
+            } else {
+                const lastSyncDate = syncLog.library_date_modified;
+                const lastSyncDateSQL = Zotero.Date.isISODate(lastSyncDate)
+                    ? Zotero.Date.isoToSQL(lastSyncDate)
+                    : lastSyncDate;
+                cache.set(libraryId, lastSyncDateSQL);
+            }
+        } catch (e) {
+            // Don't cache errors — let computeItemStatus fall back to per-item query,
+            // which will also fail and correctly set isPendingSync = null (unknown).
+        }
+    }));
+
+    return cache;
+}
+
+/**
  * Compute sync status information for a Zotero item.
  * Determines why an item might not be available in the backend.
- * 
+ *
  * @param item - Zotero item to compute status for
  * @param syncedLibraryIds - List of library IDs configured for sync
  * @param syncWithZotero - Sync settings from profile
  * @param userId - Current user ID (for pending sync detection)
+ * @param options.syncDateCache - Pre-fetched sync dates from prefetchSyncDates() to avoid per-item DB queries
  * @returns Status information for the item
  */
 export async function computeItemStatus(
     item: Zotero.Item,
     syncedLibraryIds: number[],
     syncWithZotero: any,
-    userId: string | null
+    userId: string | null,
+    options?: { syncDateCache?: Map<number, string | null> }
 ): Promise<ZoteroItemStatus> {
     const isSyncedLibrary = syncedLibraryIds.includes(item.libraryID);
     const trashState = safeIsInTrash(item);
     const isInTrash = trashState === true;
-    
+
     // Determine if item is available locally or on server
     // For attachments: check file exists (but skip for linked URLs which have no file)
     let availableLocallyOrOnServer = true;
     let passesSyncFilters = true;
-    
+
     if (item.isAttachment()) {
         if (isLinkedUrlAttachment(item)) {
             // Linked URLs are web links with no file - they don't pass sync filters
@@ -332,13 +378,25 @@ export async function computeItemStatus(
         // Regular items - check sync filters normally
         passesSyncFilters = await syncingItemFilterAsync(item);
     }
-    
+
     // Compute is_pending_sync only if we have a userId
     let isPendingSync: boolean | null = null;
     if (userId) {
         try {
-            const wasAddedBeforeSync = await wasItemAddedBeforeLastSync(item, syncWithZotero, userId);
-            isPendingSync = !wasAddedBeforeSync;
+            const syncDateCache = options?.syncDateCache;
+            if (syncDateCache && syncDateCache.has(item.libraryID)) {
+                const lastSyncDateSQL = syncDateCache.get(item.libraryID)!;
+                if (lastSyncDateSQL === null) {
+                    // No sync log found for this library
+                    isPendingSync = true;
+                } else {
+                    isPendingSync = !(item.dateAdded <= lastSyncDateSQL);
+                }
+            } else {
+                // No cache or library not in cache — fall back to per-item query
+                const wasAddedBeforeSync = await wasItemAddedBeforeLastSync(item, syncWithZotero, userId);
+                isPendingSync = !wasAddedBeforeSync;
+            }
         } catch (e) {
             // Unable to determine pending status
             isPendingSync = null;
@@ -386,10 +444,11 @@ export async function processAttachmentsParallel(
         return [];
     }
 
-    // Fetch attachment items and primary attachment in parallel
-    const [attachmentItems, primaryAttachment] = await Promise.all([
+    // Fetch attachment items, primary attachment, and sync dates in parallel
+    const [attachmentItems, primaryAttachment, syncDateCache] = await Promise.all([
         Zotero.Items.getAsync(attachmentIds),
-        item.getBestAttachment()
+        item.getBestAttachment(),
+        prefetchSyncDates([item.libraryID], context.syncWithZotero, context.userId)
     ]);
 
     // Load data types for all attachments
@@ -413,7 +472,7 @@ export async function processAttachmentsParallel(
         // Use lightweight file status to avoid reading full PDFs
         const isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
         const [status, fileStatus] = await Promise.all([
-            computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId),
+            computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId, { syncDateCache }),
             getAttachmentFileStatusLightweight(attachment, isPrimary)
         ]);
 
