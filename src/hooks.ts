@@ -250,6 +250,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         try {
             if (win?.__beaverDisposeSupabase) {
                 await win.__beaverDisposeSupabase();
+                win.__beaverDisposeSupabase = undefined;
             }
         } catch (e) {
             ztoolkit.log(`disposeSupabase: ${e}`);
@@ -374,6 +375,7 @@ async function onShutdown(): Promise<void> {
             const mainWin = Zotero.getMainWindow();
             if (mainWin?.__beaverDisposeSupabase) {
                 await mainWin.__beaverDisposeSupabase();
+                mainWin.__beaverDisposeSupabase = undefined;
             }
         } catch (_e) { /* may not be available during shutdown */ }
         await disposeMuPDF();
