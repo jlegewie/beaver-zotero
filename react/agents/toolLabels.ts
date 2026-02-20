@@ -124,6 +124,9 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     add_highlight_annotations: 'Highlight annotations',
     add_note_annotations: 'Note annotations',
 
+    // Suggestions
+    return_suggestions: 'Suggestions',
+
     // External search
     search_external_references: 'Web search',
     create_zotero_item: 'Add item',

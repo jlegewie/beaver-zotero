@@ -1,9 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
-import { AgentRun, ModelResponse } from '../../agents/types';
+import { AgentRun, ModelResponse, ToolCallPart } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
+import { SuggestionsView } from './SuggestionsView';
 import { AgentActionsReview } from './AgentActionsReview';
 import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
@@ -76,6 +77,25 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
         (wasResumed &&  run.model_messages.length > 0 && run.model_messages[run.model_messages.length - 1].parts.some(part => part.part_kind === 'text' && part.content.trim() !== '')) ||
         (run.status === 'error' && !isLastRun);
 
+    // Extract suggestion parts from the last model message (only shown for last run)
+    const suggestionParts = useMemo(() => {
+        if (!isLastRun) return [];
+        const parts: ToolCallPart[] = [];
+        for (const message of run.model_messages) {
+            if (message.kind === 'response') {
+                for (const part of message.parts) {
+                    if (part.part_kind === 'tool-call' && part.tool_name === 'return_suggestions') {
+                        parts.push(part);
+                    }
+                }
+            }
+        }
+        return parts;
+    }, [run.model_messages, isLastRun]);
+
+    const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
+    const handleDismissSuggestions = useCallback(() => setSuggestionsDismissed(true), []);
+
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && (run.status === 'completed' || run.status === 'error' || run.status === 'canceled');
 
@@ -112,8 +132,22 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
                 <AgentRunFooter run={run} />
             )}
 
+
             {/* Agent actions (e.g., create item from citations) */}
             {run.status === 'completed' && <AgentActionsReview run={run} />}
+
+            {/* Suggestions (only for the last run, rendered below footer) */}
+            {suggestionParts.length > 0 && !suggestionsDismissed && (
+                <div className="px-4">
+                    {suggestionParts.map((part) => (
+                        <SuggestionsView
+                            key={`suggestions-${part.tool_call_id}`}
+                            part={part}
+                            onDismiss={handleDismissSuggestions}
+                        />
+                    ))}
+                </div>
+            )}
 
             {/* Resuming failed request display */}
             {wasResumed && <RunResumeDisplay runId={run.id} />}

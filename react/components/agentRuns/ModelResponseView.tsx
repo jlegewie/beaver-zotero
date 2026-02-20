@@ -48,7 +48,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
     // Separate parts by type for rendering
     const thinkingParts = message.parts.filter(part => part.part_kind === 'thinking');
     const textParts = message.parts.filter(part => part.part_kind === 'text');
-    const toolCallParts = message.parts.filter(part => part.part_kind === 'tool-call');
+    const toolCallParts = message.parts.filter(part => part.part_kind === 'tool-call' && part.tool_name !== 'return_suggestions');
 
     // Check if we have any visible content
     const hasContent = thinkingParts.length > 0 || textParts.length > 0 || toolCallParts.length > 0;

@@ -1753,6 +1753,30 @@
     flex-shrink: 0;
 }
 
+/* Suggestion buttons (follow-up suggestions from return_suggestions tool) */
+[id^="beaver-pane-"] .suggestion-button {
+    cursor: pointer;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 6px;
+    transition: all 0.15s ease-in-out;
+    font-size: 0.85rem;
+    background-color: transparent;
+    color: var(--fill-secondary);
+    padding: 6px 10px;
+    text-align: left;
+    line-height: 1.4;
+}
+
+[id^="beaver-pane-"] .suggestion-button:hover {
+    background-color: var(--fill-quinary);
+    border-color: var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .suggestion-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
 [id^="beaver-pane-"] .welcome-page-button {
     cursor: pointer;
     border: 1px solid var(--fill-quinary);
