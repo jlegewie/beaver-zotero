@@ -12,7 +12,8 @@ class UIManager {
     private elements: DOMElements;
     private collapseState: CollapseState;
     private sidebarWidth: number = 350;
-    private originalOnChangeSidebarWidth = Zotero.Reader.onChangeSidebarWidth;
+    private originalOnChangeSidebarWidth: ((...args: any[]) => void) | null = null;
+    private isReaderWidthHandlerOverridden = false;
 
     constructor() {
         this.collapseState = {
@@ -20,28 +21,32 @@ class UIManager {
             reader: null
         };
         this.elements = this.initializeElements();
-        this.initSidebarWidthTracking();
     }
 
     private initSidebarWidthTracking(): void {
         try {
-            const win = Zotero.getMainWindow();
-            if (win && !win.closed) {
-                const readerSidebarWidth = Zotero.Reader?.getSidebarWidth?.();
-                if (readerSidebarWidth) {
-                    this.sidebarWidth = readerSidebarWidth;
-                }
-                
-                // Override the reader's width change handler to maintain fixed width
-                if (Zotero.Reader) {
-                    Zotero.Reader.onChangeSidebarWidth = (width) => {
-                        if (this.originalOnChangeSidebarWidth) {
-                            this.originalOnChangeSidebarWidth(this.sidebarWidth);
-                        }
-                        setTimeout(() => this.enforceConsistentWidth(), 50);
-                    };
-                }
+            if (this.isReaderWidthHandlerOverridden || !Zotero?.Reader) {
+                return;
             }
+
+            const readerSidebarWidth = Zotero.Reader.getSidebarWidth?.();
+            if (readerSidebarWidth) {
+                this.sidebarWidth = readerSidebarWidth;
+            }
+
+            const originalHandler = (Zotero.Reader as any).onChangeSidebarWidth;
+            this.originalOnChangeSidebarWidth = typeof originalHandler === "function"
+                ? originalHandler
+                : null;
+
+            // Override the reader's width change handler only after startup is ready.
+            Zotero.Reader.onChangeSidebarWidth = () => {
+                if (this.originalOnChangeSidebarWidth) {
+                    this.originalOnChangeSidebarWidth.call(Zotero.Reader);
+                }
+                setTimeout(() => this.enforceConsistentWidth(), 50);
+            };
+            this.isReaderWidthHandlerOverridden = true;
         } catch (e) {
             // Silently handle initialization errors
         }
@@ -61,18 +66,37 @@ class UIManager {
     }
 
     private initializeElements(): DOMElements {
-        const win = Zotero.getMainWindow();
-        const itemPane = win.document.querySelector("#zotero-item-pane") as HTMLElement | null;
-        const readerPane = win.document.querySelector("#zotero-context-pane") as HTMLElement | null;
-        return {
-            chatToggleButton: win.document.querySelector("#zotero-beaver-tb-chat-toggle"),
-            libraryPane: itemPane,
-            libraryContent: itemPane ? itemPane.querySelectorAll(":scope > *:not(#beaver-pane-library)") : null,
-            librarySidebar: itemPane ? itemPane.querySelector("#beaver-pane-library") : null,
-            readerPane: readerPane,
-            readerContent: readerPane ? readerPane.querySelectorAll(":scope > *:not(#beaver-pane-reader)") : null,
-            readerSidebar: readerPane ? readerPane.querySelector("#beaver-pane-reader") : null
+        const emptyElements: DOMElements = {
+            chatToggleButton: null,
+            libraryPane: null,
+            libraryContent: null,
+            librarySidebar: null,
+            readerPane: null,
+            readerContent: null,
+            readerSidebar: null
         };
+
+        try {
+            const win = Zotero?.getMainWindow?.();
+            if (!win || win.closed || !win.document) {
+                return emptyElements;
+            }
+
+            const itemPane = win.document.querySelector("#zotero-item-pane") as HTMLElement | null;
+            const readerPane = win.document.querySelector("#zotero-context-pane") as HTMLElement | null;
+
+            return {
+                chatToggleButton: win.document.querySelector("#zotero-beaver-tb-chat-toggle"),
+                libraryPane: itemPane,
+                libraryContent: itemPane ? itemPane.querySelectorAll(":scope > *:not(#beaver-pane-library)") : null,
+                librarySidebar: itemPane ? itemPane.querySelector("#beaver-pane-library") as HTMLElement | null : null,
+                readerPane: readerPane,
+                readerContent: readerPane ? readerPane.querySelectorAll(":scope > *:not(#beaver-pane-reader)") : null,
+                readerSidebar: readerPane ? readerPane.querySelector("#beaver-pane-reader") as HTMLElement | null : null
+            };
+        } catch (e) {
+            return emptyElements;
+        }
     }
 
     public updateToolbarButton(isVisible: boolean): void {
@@ -168,9 +192,11 @@ class UIManager {
     }
 
     public updateUI(state: UIState): void {
+        this.elements = this.initializeElements();
         this.updateToolbarButton(state.isVisible);
         
         if (state.isVisible) {
+            this.initSidebarWidthTracking();
             setTimeout(() => this.enforceConsistentWidth(), 50);
             if (state.isLibraryTab) {
                 this.handleLibraryPane(true);
@@ -206,17 +232,21 @@ class UIManager {
     public cleanup(): void {
         // CRITICAL: Restore Zotero.Reader.onChangeSidebarWidth FIRST
         try {
-            if (this.originalOnChangeSidebarWidth && Zotero?.Reader) {
-                Zotero.Reader.onChangeSidebarWidth = this.originalOnChangeSidebarWidth;
+            if (this.isReaderWidthHandlerOverridden && Zotero?.Reader) {
+                (Zotero.Reader as any).onChangeSidebarWidth = this.originalOnChangeSidebarWidth;
             }
         } catch (e) {
             // Ignore errors during cleanup
+        } finally {
+            this.originalOnChangeSidebarWidth = null;
+            this.isReaderWidthHandlerOverridden = false;
         }
 
         // Only do UI cleanup if window is still valid
         const win = Zotero.getMainWindow();
         if (win && !win.closed) {
             try {
+                this.elements = this.initializeElements();
                 this.handleLibraryPane(false);
                 this.handleReaderPane(false);
                 this.updateToolbarButton(false);
