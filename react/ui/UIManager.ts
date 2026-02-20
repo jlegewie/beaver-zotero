@@ -40,9 +40,9 @@ class UIManager {
                 : null;
 
             // Override the reader's width change handler only after startup is ready.
-            Zotero.Reader.onChangeSidebarWidth = () => {
+            Zotero.Reader.onChangeSidebarWidth = (width: number) => {
                 if (this.originalOnChangeSidebarWidth) {
-                    this.originalOnChangeSidebarWidth.call(Zotero.Reader);
+                    this.originalOnChangeSidebarWidth.call(Zotero.Reader, width);
                 }
                 setTimeout(() => this.enforceConsistentWidth(), 50);
             };
