@@ -1,6 +1,7 @@
 export interface BeaverEvents {
     toggleChat: {
         location?: 'library' | 'reader';
+        forceOpen?: boolean;
     };
 }
 

@@ -93,7 +93,7 @@ const FloatingVersionCard: React.FC<{
     onDismiss: () => void;
 }> = ({ title, text, subtitle, features, footer, learnMoreUrl, learnMoreLabel, onDismiss }) => {
     const handleOpenBeaver = () => {
-        eventManager.dispatch('toggleChat', {});
+        eventManager.dispatch('toggleChat', { forceOpen: true });
         onDismiss();
     };
 

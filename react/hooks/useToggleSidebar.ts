@@ -19,7 +19,10 @@ export function useToggleSidebar() {
         // Update atoms
         setSidebarVisible((prev) => {
             const currentlyOpen = prev;
-            const newIsVisible = !currentlyOpen;
+            const newIsVisible = detail?.forceOpen ? true : !currentlyOpen;
+
+            // Already in the desired state — no-op
+            if (newIsVisible === currentlyOpen) return prev;
             const isLibraryTab = Zotero.getMainWindow().Zotero_Tabs.selectedType === 'library';
             
             logger(`useToggleSidebar: toggleChat event received - currently open: ${currentlyOpen}, will be: ${newIsVisible}, location: ${isLibraryTab ? 'library' : 'reader'}`);
