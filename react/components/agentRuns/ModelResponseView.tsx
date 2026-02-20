@@ -3,7 +3,6 @@ import { AgentRunStatus, ModelResponse } from '../../agents/types';
 import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
 import { ToolCallPartView } from './ToolCallPartView';
-import { SuggestionsView } from './SuggestionsView';
 import { AnnotationToolCallView } from './AnnotationToolCallView';
 import { isAnnotationToolResult } from '../../agents/toolResultTypes';
 import ContextMenu from '../ui/menu/ContextMenu';
@@ -50,10 +49,9 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
     const thinkingParts = message.parts.filter(part => part.part_kind === 'thinking');
     const textParts = message.parts.filter(part => part.part_kind === 'text');
     const toolCallParts = message.parts.filter(part => part.part_kind === 'tool-call' && part.tool_name !== 'return_suggestions');
-    const suggestionParts = message.parts.filter(part => part.part_kind === 'tool-call' && part.tool_name === 'return_suggestions');
 
     // Check if we have any visible content
-    const hasContent = thinkingParts.length > 0 || textParts.length > 0 || toolCallParts.length > 0 || suggestionParts.length > 0;
+    const hasContent = thinkingParts.length > 0 || textParts.length > 0 || toolCallParts.length > 0;
 
     if (!hasContent) {
         return null;
@@ -122,16 +120,6 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
                     })}
                 </div>
             )}
-
-            {/* Suggestions (rendered as clickable buttons, not as tool calls) */}
-            {suggestionParts.map((part) => (
-                part.part_kind === 'tool-call' && (
-                    <SuggestionsView
-                        key={`suggestions-${part.tool_call_id}`}
-                        part={part}
-                    />
-                )
-            ))}
 
             {/* Text selection context menu */}
             <ContextMenu
