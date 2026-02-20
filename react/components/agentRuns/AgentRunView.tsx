@@ -132,6 +132,10 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
                 <AgentRunFooter run={run} />
             )}
 
+
+            {/* Agent actions (e.g., create item from citations) */}
+            {run.status === 'completed' && <AgentActionsReview run={run} />}
+
             {/* Suggestions (only for the last run, rendered below footer) */}
             {suggestionParts.length > 0 && !suggestionsDismissed && (
                 <div className="px-4">
@@ -144,9 +148,6 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
                     ))}
                 </div>
             )}
-
-            {/* Agent actions (e.g., create item from citations) */}
-            {run.status === 'completed' && <AgentActionsReview run={run} />}
 
             {/* Resuming failed request display */}
             {wasResumed && <RunResumeDisplay runId={run.id} />}
