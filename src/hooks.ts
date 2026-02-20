@@ -10,6 +10,7 @@ import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
 import { disposeMuPDF } from "./utils/mupdf";
+import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 
 let isAppQuitting = false;
 let quitObserverRegistered = false;
@@ -145,7 +146,10 @@ async function onStartup() {
 
     // -------- Add event bus to window --------
     Zotero.getMainWindow().__beaverEventBus = eventBus;
-    
+
+    // -------- Register protocol handler (zotero://beaver) --------
+    registerBeaverProtocolHandler();
+
     // -------- Load UI for all windows --------
     await Promise.all(
         Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
@@ -294,7 +298,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 10. Unregister quit observer
         unregisterQuitObserver();
 
-        // 11. Mark addon as not alive to prevent any further callbacks
+        // 11. Unregister protocol handler
+        unregisterBeaverProtocolHandler();
+
+        // 12. Mark addon as not alive to prevent any further callbacks
         addon.data.alive = false;
 
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
@@ -403,6 +410,7 @@ async function onShutdown(): Promise<void> {
         unloadStylesheet();
         
         unregisterQuitObserver();
+        unregisterBeaverProtocolHandler();
 
         ztoolkit.unregisterAll();
         addon.data.dialog?.window?.close();

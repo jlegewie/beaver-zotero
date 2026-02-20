@@ -26,6 +26,12 @@ import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
 import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
 
+/**
+ * Stores a run ID that ThreadView should scroll to after a thread finishes loading.
+ * Set by the protocol handler hook, cleared by ThreadView after scrolling.
+ */
+export const pendingScrollToRunAtom = atom<string | null>(null);
+
 // Thread types
 export interface ThreadData {
     id: string;

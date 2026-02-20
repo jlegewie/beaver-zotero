@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, forwardRef, useLayoutEffect, useCallback } from "react";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { allRunsAtom } from "../../agents/atoms";
 import { AgentRunView } from "./AgentRunView";
 import { scrollToBottom } from "../../utils/scrollToBottom";
 import { userScrolledAtom, windowUserScrolledAtom } from "../../atoms/ui";
-import { currentThreadScrollPositionAtom, windowScrollPositionAtom, currentThreadIdAtom } from "../../atoms/threads";
+import { currentThreadScrollPositionAtom, windowScrollPositionAtom, currentThreadIdAtom, pendingScrollToRunAtom, isLoadingThreadAtom } from "../../atoms/threads";
 import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
@@ -295,6 +295,26 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             
             return () => win.clearTimeout(timeoutId);
         }, [toolExpansionState, sourcesVisibilityState, annotationPanelState, scrolledAtom, win]);
+
+        // Scroll to a specific run when navigated via zotero://beaver protocol link
+        const pendingRunId = useAtomValue(pendingScrollToRunAtom);
+        const isLoadingThread = useAtomValue(isLoadingThreadAtom);
+        const setPendingScrollToRun = useSetAtom(pendingScrollToRunAtom);
+
+        useEffect(() => {
+            if (!pendingRunId || isLoadingThread || runs.length === 0) return;
+
+            const timeoutId = win.setTimeout(() => {
+                const element = scrollContainerRef.current?.querySelector(`#run-${CSS.escape(pendingRunId)}`);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    store.set(scrolledAtom, true);
+                }
+                setPendingScrollToRun(null);
+            }, 100);
+
+            return () => win.clearTimeout(timeoutId);
+        }, [pendingRunId, isLoadingThread, runs.length, scrolledAtom, win, setPendingScrollToRun]);
 
         if (runs.length === 0) {
             return (
