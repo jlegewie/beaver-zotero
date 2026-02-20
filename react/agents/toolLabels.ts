@@ -143,7 +143,7 @@ const SKILL_NAME_LABELS: Record<string, string> = {
  * Detect the type of file being read by the read_file tool.
  * 
  * Categorizes files according to:
- * - Tool results: Files ending with .json.gz (compressed tool results from GCS)
+ * - Tool results: Storage ref paths (agent_runs/.../tool_results/...) or .json.gz files (legacy)
  * - Agent Skills: Files in /skills/{skill-name}/ directory
  * - Skill resources: Bundled resources in /skills/{skill-name}/{scripts|references|assets}/
  * - Documentation: Files in /docs/ directory
@@ -153,8 +153,11 @@ const SKILL_NAME_LABELS: Record<string, string> = {
 function detectReadFileType(path: string): 'tool_result' | 'skill' | 'skill_resource' | 'documentation' | 'unknown' {
     const trimmedPath = path.trim();
     const pathLower = trimmedPath.toLowerCase();
-    
-    // Tool results: files ending with .json.gz
+
+    // Tool results: storage_ref format (new) or .json.gz files (legacy)
+    if (/^agent_runs\/[^/]+\/tool_results\//.test(trimmedPath)) {
+        return 'tool_result';
+    }
     if (pathLower.endsWith('.json.gz')) {
         return 'tool_result';
     }
