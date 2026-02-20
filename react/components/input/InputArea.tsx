@@ -244,8 +244,8 @@ const InputArea: React.FC<InputAreaProps> = ({
         );
 
         // "Create Action" footer (visually at bottom)
-        // Show when: no query, query matches "create action", or no matching prompts
-        const createActionItem: SearchMenuItem[] = !query || 'create action'.includes(query) || filtered.length === 0
+        // Show when: no query (initial menu), or no matching prompts
+        const createActionItem: SearchMenuItem[] = !query || filtered.length === 0
             ? [{
                 label: 'Create Action',
                 icon: PlusSignIcon,
@@ -258,8 +258,14 @@ const InputArea: React.FC<InputAreaProps> = ({
         const enabled = filtered.filter(p => !p.requiresAttachment || hasAttachment);
         const disabled = filtered.filter(p => p.requiresAttachment && !hasAttachment);
 
-        // Sort each group: by recency, then by preferences order
+        // Sort each group: when searching, prioritize earlier match position,
+        // then by recency, then by preferences order
         const sortByRelevance = (a: CustomPrompt, b: CustomPrompt): number => {
+            if (query) {
+                const posA = a.title.toLowerCase().indexOf(query);
+                const posB = b.title.toLowerCase().indexOf(query);
+                if (posA !== posB) return posA - posB;
+            }
             if (a.lastUsed && !b.lastUsed) return -1;
             if (!a.lastUsed && b.lastUsed) return 1;
             if (a.lastUsed && b.lastUsed) {

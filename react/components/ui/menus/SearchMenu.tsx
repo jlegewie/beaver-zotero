@@ -366,6 +366,25 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         ? [...menuItems].reverse() 
         : menuItems;
 
+    // Highlight matching substring in a label
+    const highlightMatch = (label: string, query: string): ReactNode => {
+        if (!query) return label;
+        const lowerLabel = label.toLowerCase();
+        const lowerQuery = query.toLowerCase();
+        const matchIndex = lowerLabel.indexOf(lowerQuery);
+        if (matchIndex === -1) return label;
+        const before = label.slice(0, matchIndex);
+        const match = label.slice(matchIndex, matchIndex + query.length);
+        const after = label.slice(matchIndex + query.length);
+        return (
+            <>
+                {before}
+                <span className="font-color-accent-blue">{match}</span>
+                {after}
+            </>
+        );
+    };
+
     // Helper function to render menu item
     const renderMenuItem = (item: SearchMenuItem, index: number) => {
         if (item.isGroupHeader) {
@@ -421,7 +440,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                         {item.icon && (
                             <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
                         )}
-                        <span className="flex-1 text-sm font-color-secondary truncate">{item.label}</span>
+                        <span className="flex-1 text-sm font-color-secondary truncate">{highlightMatch(item.label, searchQuery)}</span>
                     </span>
                 )}
             </div>
