@@ -42,7 +42,11 @@ async function startup({ id, version, resourceURI, rootURI }, reason) {
     `${rootURI}/content/scripts/__addonRef__.js`,
     ctx,
   );
-  Zotero.__addonInstance__.hooks.onStartup();
+  try {
+    await Zotero.__addonInstance__.hooks.onStartup();
+  } catch (error) {
+    Zotero.logError(error);
+  }
 }
 
 async function onMainWindowLoad({ window }, reason) {
