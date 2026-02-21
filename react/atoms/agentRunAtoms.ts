@@ -663,6 +663,17 @@ async function prevalidateExtractionApproval(
             const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
             if (item && item.isAttachment()) {
                 existingCount++;
+            } else if (item && item.isRegularItem()) {
+                // Count regular items with exactly one PDF attachment
+                // (the agent likely confused item ID with attachment ID)
+                await Zotero.Items.loadDataTypes([item], ['childItems']);
+                const attachmentIDs = item.getAttachments();
+                const pdfAttachments = attachmentIDs
+                    .map((id: number) => Zotero.Items.get(id))
+                    .filter((a: any) => a && a.isPDFAttachment());
+                if (pdfAttachments.length === 1) {
+                    existingCount++;
+                }
             }
         } catch {
             // Skip attachments that fail to resolve

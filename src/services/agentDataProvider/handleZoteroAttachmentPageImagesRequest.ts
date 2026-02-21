@@ -44,7 +44,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         error_code,
     });
 
-    const unique_key = `${attachment.library_id}-${attachment.zotero_key}`;
+    let unique_key = `${attachment.library_id}-${attachment.zotero_key}`;
 
     // 0. Validate attachment reference format
     const formatError = validateZoteroItemReference(attachment);
@@ -57,11 +57,11 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
     try {
         // 1. Get the attachment item from Zotero
-        const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
-            attachment.library_id, 
+        let zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
+            attachment.library_id,
             attachment.zotero_key
         );
-        
+
         if (!zoteroItem) {
             return errorResponse(
                 `Attachment does not exist in user's library: ${unique_key}`,
@@ -72,34 +72,54 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // Load all data for the item
         await zoteroItem.loadAllData();
 
-        // 2. Verify it's a PDF attachment
+        // 2. Verify it's a PDF attachment (or auto-resolve regular items with one PDF)
         if (!zoteroItem.isAttachment()) {
 
-            // Item is a regular item
-            if(zoteroItem.isRegularItem()) {
+            // Item is a regular item — try to auto-resolve to its PDF attachment
+            if (zoteroItem.isRegularItem()) {
                 const info = await getAttachmentInfo(zoteroItem);
-                const message = info.count > 0
-                    ? `The id '${unique_key}' is a regular item, not an attachment. The item has ${info.count} attachments: ${info.text}`
-                    : `The id '${unique_key}' is a regular item, not an attachment. The item has no attachments.`;
-                return errorResponse(
-                    message,
-                    'not_attachment'
-                );
-            }
+
+                // Auto-resolve if the item has exactly one PDF attachment
+                if (info.count === 1 && info.bestAttachmentKey) {
+                    const [libIdStr, key] = info.bestAttachmentKey.split('-');
+                    const resolvedItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                        parseInt(libIdStr, 10),
+                        key
+                    );
+                    if (!resolvedItem) {
+                        return errorResponse(
+                            `The id '${unique_key}' is a regular item with one attachment (${info.text}) but it could not be resolved.`,
+                            'not_attachment'
+                        );
+                    }
+                    await resolvedItem.loadAllData();
+                    zoteroItem = resolvedItem;
+                    unique_key = info.bestAttachmentKey;
+                    // Continue below with the resolved attachment
+                } else {
+                    const message = info.count > 0
+                        ? `The id '${unique_key}' is a regular item, not an attachment. The item has ${info.count} attachments: ${info.text}`
+                        : `The id '${unique_key}' is a regular item, not an attachment. The item has no attachments.`;
+                    return errorResponse(
+                        message,
+                        'not_attachment'
+                    );
+                }
 
             // Item is a note or annotation
-            if(zoteroItem.isNote() || zoteroItem.isAnnotation()) {
+            } else if (zoteroItem.isNote() || zoteroItem.isAnnotation()) {
                 return errorResponse(
                     `The id '${unique_key}' is a note or annotation, not an attachment.`,
                     'not_attachment'
                 );
-            }
 
-            // Return generic error response for non-regular items
-            return errorResponse(
-                `attachment_id '${unique_key}' is not an attachment.`,
-                'not_attachment'
-            );
+            // Unknown non-attachment item type
+            } else {
+                return errorResponse(
+                    `attachment_id '${unique_key}' is not an attachment.`,
+                    'not_attachment'
+                );
+            }
         }
 
         if (!zoteroItem.isPDFAttachment()) {
