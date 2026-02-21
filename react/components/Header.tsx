@@ -1,5 +1,5 @@
 import React, { useRef, useCallback } from 'react';
-import { CancelIcon, PlusSignIcon, Share05Icon } from './icons/icons';
+import { CancelIcon, PlusSignIcon, PictureInPictureIcon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
@@ -130,9 +130,9 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                     {!isWindow && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                         <Tooltip content="Open in Separate Window" secondaryContent={openWindowShortcut} showArrow singleLine>
                             <IconButton
-                                icon={Share05Icon}
+                                icon={PictureInPictureIcon}
                                 onClick={openBeaverWindow}
-                                className="scale-13"
+                                className="scale-14"
                                 ariaLabel="Open in Separate Window"
                             />
                         </Tooltip>
