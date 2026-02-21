@@ -225,17 +225,18 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const toggleExpanded = useSetAtom(toggleToolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
     const isExpanded = expansionState[expansionKey] ?? false;
-    const wasExtractConfirmApprovalRef = useRef(isExtractConfirmApproval);
+    const wasConfirmApprovalRef = useRef(isConfirmApproval);
 
-    // When extract approval resolves, collapse once so the completed result doesn't auto-expand.
-    // Users can still expand manually afterward.
+    // When extract/external_search approval resolves, collapse once so the completed result
+    // doesn't auto-expand. Users can still expand manually afterward.
     useEffect(() => {
-        const wasExtractConfirmApproval = wasExtractConfirmApprovalRef.current;
-        if (part.tool_name === 'extract' && wasExtractConfirmApproval && !isExtractConfirmApproval) {
+        const wasConfirmApproval = wasConfirmApprovalRef.current;
+        const isConfirmTool = part.tool_name === 'extract' || part.tool_name === 'external_search';
+        if (isConfirmTool && wasConfirmApproval && !isConfirmApproval) {
             setExpanded({ key: expansionKey, expanded: false });
         }
-        wasExtractConfirmApprovalRef.current = isExtractConfirmApproval;
-    }, [part.tool_name, isExtractConfirmApproval, expansionKey, setExpanded]);
+        wasConfirmApprovalRef.current = isConfirmApproval;
+    }, [part.tool_name, isConfirmApproval, expansionKey, setExpanded]);
 
     const [isHovered, setIsHovered] = useState(false);
 
