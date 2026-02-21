@@ -8,6 +8,7 @@ import { agentRunService, agentService } from "../../src/services/agentService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { logger } from "../../src/utils/logger";
+import { ApiError } from "../types/apiErrors";
 import { resetMessageUIStateAtom } from "./messageUIState";
 import { checkExternalReferencesAtom, clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom } from "./externalReferences";
 import { ExternalReference } from "../types/externalReferences";
@@ -256,6 +257,14 @@ export const loadThreadAtom = atom(
                 }
                 return run;
             });
+
+            // Protocol deep-links can request a run that does not exist in the target thread.
+            // Clear the pending scroll target deterministically once thread data is loaded.
+            const pendingRunId = get(pendingScrollToRunAtom);
+            if (pendingRunId && !processedRuns.some(run => run.id === pendingRunId)) {
+                logger(`loadThreadAtom: Pending run ${pendingRunId} not found in thread ${threadId}, clearing target`, 1);
+                set(pendingScrollToRunAtom, null);
+            }
             
             if (processedRuns.length > 0) {
                 // Extract citations from runs
@@ -352,7 +361,19 @@ export const loadThreadAtom = atom(
                 set(citationMetadataAtom, []);
             }
         } catch (error) {
-            console.error('Error loading thread:', error);
+            // Load failed, so any pending deep-link target can no longer be fulfilled.
+            set(pendingScrollToRunAtom, null);
+
+            if (error instanceof ApiError && error.status === 404) {
+                logger(`loadThreadAtom: Thread ${threadId} not found, resetting to empty thread state`, 1);
+                set(currentThreadIdAtom, null);
+                set(threadRunsAtom, []);
+                set(activeRunAtom, null);
+                set(threadAgentActionsAtom, []);
+                set(citationMetadataAtom, []);
+            } else {
+                console.error('Error loading thread:', error);
+            }
         } finally {
             set(isLoadingThreadAtom, false);
         }

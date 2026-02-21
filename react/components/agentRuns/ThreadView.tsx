@@ -98,7 +98,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 ?? container.querySelector<HTMLElement>(`#run-${CSS.escape(pendingRunId)}`);
 
             if (!element) {
-                if (!isLoadingThread && runs.length > 0 && !runs.some((run) => run.id === pendingRunId)) {
+                if (!isLoadingThread && !runs.some((run) => run.id === pendingRunId)) {
                     logger("ThreadView: pending run target not found after load", {
                         source,
                         pendingRunId,

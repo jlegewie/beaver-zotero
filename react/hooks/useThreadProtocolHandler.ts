@@ -25,10 +25,8 @@ export function useThreadProtocolHandler() {
     const loadTargetThread = (threadId: string, userId: string, runId?: string) => {
         logger(`useThreadProtocolHandler: Loading thread ${threadId}${runId ? ` / run ${runId}` : ''}`);
 
-        // Set scroll target before loading so ThreadView can pick it up
-        if (runId) {
-            setPendingScrollToRun(runId);
-        }
+        // Set/clear scroll target before loading so ThreadView picks up only the current protocol target.
+        setPendingScrollToRun(runId ?? null);
 
         // Load the thread
         loadThread({ user_id: userId, threadId });
