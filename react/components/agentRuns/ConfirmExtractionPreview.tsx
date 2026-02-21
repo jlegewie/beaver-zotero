@@ -11,6 +11,8 @@ interface ConfirmExtractionPreviewProps {
     totalCredits: number;
     /** Number of papers included in base cost */
     includedFree: number;
+    /** Brief label describing the extraction (e.g., "Extracting wealth measures") */
+    label?: string | null;
     /** Current status of the action */
     status?: ActionStatus;
 }
@@ -22,7 +24,7 @@ interface ConfirmExtractionPreviewProps {
 export const ConfirmExtractionPreview: React.FC<ConfirmExtractionPreviewProps> = ({
     attachmentCount,
     extraCredits,
-    totalCredits,
+    label,
     status = 'pending',
 }) => {
     const isRejectedOrUndone = status === 'rejected' || status === 'undone';
@@ -32,14 +34,23 @@ export const ConfirmExtractionPreview: React.FC<ConfirmExtractionPreviewProps> =
         <div className={`confirm-extraction-preview overflow-hidden ${isRejectedOrUndone ? 'opacity-60' : ''}`}>
             <div className="px-3 py-3 text-sm font-color-secondary">
                 {isApplied ? (
-                    <span>Approved extraction from {attachmentCount} paper{attachmentCount !== 1 ? 's' : ''}.</span>
+                    <span>Approved extraction from {attachmentCount} paper{attachmentCount !== 1 ? 's' : ''}{label ? ` — ${label}` : ''}.</span>
                 ) : isRejectedOrUndone ? (
-                    <span>Declined extraction from {attachmentCount} paper{attachmentCount !== 1 ? 's' : ''}.</span>
+                    <span>Declined extraction from {attachmentCount} paper{attachmentCount !== 1 ? 's' : ''}{label ? ` — ${label}` : ''}.</span>
                 ) : (
                     <span>
-                        Extracting from <span className="font-color-primary font-medium">{attachmentCount} paper{attachmentCount !== 1 ? 's' : ''}</span> will
-                        use up to <span className="font-color-primary font-medium">{extraCredits} extra request{extraCredits !== 1 ? 's' : ''}</span>.
-                        {' '}Only successful extractions are charged as extra requests.
+                        {label ? (
+                            <>Extracting{' '}
+                            <span className="font-color-primary font-medium">{label}</span>
+                            {' '}from{' '}
+                            <span className="font-color-primary font-medium">{attachmentCount} paper{attachmentCount !== 1 ? 's' : ''}</span></>
+                        ) : (
+                            <>Extracting from{' '}
+                            <span className="font-color-primary font-medium">{attachmentCount} paper{attachmentCount !== 1 ? 's' : ''}</span></>
+                        )}
+                        {' '}will use up to{' '}
+                        <span className="font-color-primary font-medium">{extraCredits} extra credit{extraCredits !== 1 ? 's' : ''}</span>.
+                        {' '}You're only charged for successful extractions.
                     </span>
                 )}
             </div>

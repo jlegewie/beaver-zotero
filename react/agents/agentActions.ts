@@ -112,6 +112,13 @@ export const isConfirmExtractionAgentAction = (action: AgentAction): boolean => 
 };
 
 /**
+ * Type guard for confirm external search actions
+ */
+export const isConfirmExternalSearchAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'confirm_external_search';
+};
+
+/**
  * Typed agent action for create_item actions
  */
 export type CreateItemAgentAction = AgentAction & {
@@ -291,6 +298,14 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             total_credits: proposedData.total_credits ?? proposedData.totalCredits ?? 0,
             included_free: proposedData.included_free ?? proposedData.includedFree ?? 0,
             attachment_ids: proposedData.attachment_ids ?? proposedData.attachmentIds ?? [],
+            label: proposedData.label ?? null,
+        };
+    } else if (actionType === 'confirm_external_search') {
+        // Normalize confirm_external_search proposed data
+        proposedData = {
+            extra_credits: proposedData.extra_credits ?? proposedData.extraCredits ?? 0,
+            total_credits: proposedData.total_credits ?? proposedData.totalCredits ?? 0,
+            label: proposedData.label ?? null,
         };
     }
     
@@ -837,6 +852,9 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
         // We can use it directly from the proposed data if available
         currentValue = actionData.current_state ?? null;
     } else if (actionType === 'confirm_extraction') {
+        // No Zotero data fetching needed — cost info is entirely in proposed_data
+        currentValue = undefined;
+    } else if (actionType === 'confirm_external_search') {
         // No Zotero data fetching needed — cost info is entirely in proposed_data
         currentValue = undefined;
     }

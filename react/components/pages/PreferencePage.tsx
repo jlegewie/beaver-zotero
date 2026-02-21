@@ -123,6 +123,8 @@ const PreferencePage: React.FC = () => {
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
+    const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
+    const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -391,6 +393,18 @@ const PreferencePage: React.FC = () => {
         setPref('autoCreateNotes', newValue);
         setAutoCreateNotes(newValue);
     }, [autoCreateNotes]);
+
+    const handleConfirmExtractionCostsToggle = useCallback(() => {
+        const newValue = !confirmExtractionCosts;
+        setPref('confirmExtractionCosts', newValue);
+        setConfirmExtractionCosts(newValue);
+    }, [confirmExtractionCosts]);
+
+    const handleConfirmExternalSearchCostsToggle = useCallback(() => {
+        const newValue = !confirmExternalSearchCosts;
+        setPref('confirmExternalSearchCosts', newValue);
+        setConfirmExternalSearchCosts(newValue);
+    }, [confirmExternalSearchCosts]);
 
     // Helper function to get rebuild index button props
     const getRebuildIndexButtonProps = () => {
@@ -891,6 +905,47 @@ const PreferencePage: React.FC = () => {
                                 description="Creating collections and organizing items into collections and by tags"
                             />
                         </div>
+                    </SettingsGroup>
+
+                    <SectionLabel>Extra Credit Confirmations</SectionLabel>
+                    <SettingsGroup>
+                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
+                            <div className="font-color-secondary text-base">
+                                Choose whether to confirm before operations that use extra credits.
+                                Only relevant when using Beaver credits.
+                                {/* Extraction and external search are not supported when using your own API keys. */}
+                            </div>
+                        </div>
+                    </SettingsGroup>
+                    <SettingsGroup>
+                        <SettingsRow
+                            title="Confirm Extraction Costs"
+                            description="Ask before using extra credits for batch extraction"
+                            onClick={handleConfirmExtractionCostsToggle}
+                            control={
+                                <input
+                                    type="checkbox"
+                                    checked={confirmExtractionCosts}
+                                    onChange={handleConfirmExtractionCostsToggle}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ cursor: 'pointer', margin: 0 }}
+                                />
+                            }
+                        />
+                        <SettingsRow
+                            title="Confirm External Search Costs"
+                            description="Ask before using extra credits for external literature search"
+                            onClick={handleConfirmExternalSearchCostsToggle}
+                            control={
+                                <input
+                                    type="checkbox"
+                                    checked={confirmExternalSearchCosts}
+                                    onChange={handleConfirmExternalSearchCostsToggle}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ cursor: 'pointer', margin: 0 }}
+                                />
+                            }
+                        />
                     </SettingsGroup>
 
                     <SectionLabel>Auto-Apply</SectionLabel>

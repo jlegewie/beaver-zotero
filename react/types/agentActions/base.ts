@@ -209,12 +209,31 @@ export interface ConfirmExtractionProposedData {
     included_free: number;
     /** Attachment IDs for frontend pre-validation of file existence */
     attachment_ids?: string[];
+    /** Brief UI label for progress display (e.g., "Extracting wealth measures") */
+    label?: string | null;
+}
+
+// =============================================================================
+// Confirm External Search Types
+// =============================================================================
+
+/**
+ * Proposed data for confirming an external search extra credit charge.
+ * Shown when an external search would incur additional credit charges.
+ */
+export interface ConfirmExternalSearchProposedData {
+    /** Number of additional credits for this search */
+    extra_credits: number;
+    /** Total credits including base cost */
+    total_credits: number;
+    /** Brief UI label for progress display (e.g., "Searching for recent papers") */
+    label?: string | null;
 }
 
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'confirm_extraction';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'confirm_extraction' | 'confirm_external_search';
 
 /**
  * Union type for all proposed data types
@@ -241,7 +260,8 @@ export type ProposedData =
     EditMetadataProposedData |
     CreateCollectionProposedData |
     OrganizeItemsProposedData |
-    ConfirmExtractionProposedData;
+    ConfirmExtractionProposedData |
+    ConfirmExternalSearchProposedData;
 
 /**
  * Type of result data after applying an action

@@ -973,8 +973,16 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 actionType: event.action_type,
             }, 1);
 
-            // Pre-validate confirm_extraction: auto-approve if few attachments exist locally
+            // confirm_extraction: skip confirmation if user disabled it, then pre-validate
             if (event.action_type === 'confirm_extraction') {
+                const confirmCosts = getPref('confirmExtractionCosts') as boolean;
+                if (!confirmCosts) {
+                    logger('WS onDeferredApprovalRequest: Auto-approving confirm_extraction (confirmation disabled)', 1);
+                    agentService.sendApprovalResponse(event.action_id, true);
+                    return;
+                }
+
+                // Pre-validate: auto-approve if few attachments exist locally
                 const attachmentIds: string[] = event.action_data?.attachment_ids ?? [];
                 const includedFree: number = event.action_data?.included_free ?? 0;
 
@@ -983,6 +991,16 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                         logger(`WS onDeferredApprovalRequest: Pre-validation failed, showing dialog: ${err}`, 1);
                         set(addPendingApprovalAtom, event);
                     });
+                    return;
+                }
+            }
+
+            // confirm_external_search: skip confirmation if user disabled it
+            if (event.action_type === 'confirm_external_search') {
+                const confirmCosts = getPref('confirmExternalSearchCosts') as boolean;
+                if (!confirmCosts) {
+                    logger('WS onDeferredApprovalRequest: Auto-approving confirm_external_search (confirmation disabled)', 1);
+                    agentService.sendApprovalResponse(event.action_id, true);
                     return;
                 }
             }

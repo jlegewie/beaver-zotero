@@ -183,18 +183,31 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const isExtractConfirmApproval =
         part.tool_name === 'extract' &&
         pendingApproval?.actionType === 'confirm_extraction';
+    const isExternalSearchConfirmApproval =
+        part.tool_name === 'external_search' &&
+        pendingApproval?.actionType === 'confirm_external_search';
+    const isConfirmApproval = isExtractConfirmApproval || isExternalSearchConfirmApproval;
     const isExtractionRejected =
         part.tool_name === 'extract' &&
         hasResult &&
         result?.content?.status &&
         result?.content?.status === 'REJECTED';
+    const isExternalSearchRejected =
+        part.tool_name === 'external_search' &&
+        hasResult &&
+        result?.content?.status &&
+        result?.content?.status === 'REJECTED';
 
-    // For extract, only render AgentActionView while approval is pending.
+    // For extract/external_search, only render AgentActionView while approval is pending.
     // After approval, fall back to normal tool-call rendering so the in-progress spinner stays visible.
     const showAgentActionView =
         (isStandardAgentActionTool && (isAwaitingApproval || hasAgentAction)) ||
-        isExtractConfirmApproval;
-    const actionToolName = isExtractConfirmApproval ? 'confirm_extraction' : part.tool_name;
+        isConfirmApproval;
+    const actionToolName = isExtractConfirmApproval
+        ? 'confirm_extraction'
+        : isExternalSearchConfirmApproval
+            ? 'confirm_external_search'
+            : part.tool_name;
 
     const resultCount =
         result && result.part_kind === 'tool-return'
@@ -212,17 +225,18 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const toggleExpanded = useSetAtom(toggleToolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
     const isExpanded = expansionState[expansionKey] ?? false;
-    const wasExtractConfirmApprovalRef = useRef(isExtractConfirmApproval);
+    const wasConfirmApprovalRef = useRef(isConfirmApproval);
 
-    // When extract approval resolves, collapse once so the completed result doesn't auto-expand.
-    // Users can still expand manually afterward.
+    // When extract/external_search approval resolves, collapse once so the completed result
+    // doesn't auto-expand. Users can still expand manually afterward.
     useEffect(() => {
-        const wasExtractConfirmApproval = wasExtractConfirmApprovalRef.current;
-        if (part.tool_name === 'extract' && wasExtractConfirmApproval && !isExtractConfirmApproval) {
+        const wasConfirmApproval = wasConfirmApprovalRef.current;
+        const isConfirmTool = part.tool_name === 'extract' || part.tool_name === 'external_search';
+        if (isConfirmTool && wasConfirmApproval && !isConfirmApproval) {
             setExpanded({ key: expansionKey, expanded: false });
         }
-        wasExtractConfirmApprovalRef.current = isExtractConfirmApproval;
-    }, [part.tool_name, isExtractConfirmApproval, expansionKey, setExpanded]);
+        wasConfirmApprovalRef.current = isConfirmApproval;
+    }, [part.tool_name, isConfirmApproval, expansionKey, setExpanded]);
 
     const [isHovered, setIsHovered] = useState(false);
 
@@ -235,7 +249,8 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (resultCount === null || resultCount > 0) &&
         part.tool_name !== 'read_file' &&
-        !isExtractionRejected && 
+        !isExtractionRejected &&
+        !isExternalSearchRejected &&
         !showAgentActionView; // Don't allow expand toggle for agent action tools
 
     const effectiveExpanded = isExpanded && canExpand;
