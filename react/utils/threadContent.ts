@@ -71,30 +71,51 @@ export function extractRunResponseContent(
     return parts.filter(Boolean).join('\n\n');
 }
 
+export interface ExtractThreadContentOptions {
+    /** Thread title to use as H1 heading */
+    threadName?: string | null;
+    /** Thread ID for building per-run deep links */
+    threadId?: string | null;
+    /** Include per-run [↗] deep links (works in clipboard markdown, not in Zotero notes) */
+    includeRunLinks?: boolean;
+}
+
 /**
- * Combine all runs in a thread into a single conversation-formatted string.
- * Each run's user message is prefixed with **User:** and separated by ---
+ * Combine all runs in a thread into a conversation-formatted string.
+ * Format:
+ *   # Thread Title
+ *
+ *   ## User [↗](zotero://beaver/thread/{threadId}/run/{runId})
+ *   <user message>
+ *   ---
+ *   ## Beaver
+ *   <response>
+ *   ---
  */
 export function extractThreadContent(
     runs: AgentRun[],
-    toolResultsMap: Map<string, any>
+    toolResultsMap: Map<string, any>,
+    options: ExtractThreadContentOptions = {}
 ): string {
+    const { threadName, threadId, includeRunLinks = true } = options;
     const sections: string[] = [];
+
+    if (threadName) {
+        sections.push(`# ${threadName}`);
+    }
 
     for (const run of runs) {
         const userMessage = run.user_prompt.content;
         const responseContent = extractRunResponseContent(run, toolResultsMap);
 
-        const parts: string[] = [];
         if (userMessage) {
-            parts.push(`**User:** ${userMessage}`);
+            const userHeading = includeRunLinks && threadId
+                ? ` [User ↗](zotero://beaver/thread/${threadId}/run/${run.id})`
+                : 'User';
+            sections.push(`## ${userHeading}\n\n${userMessage}`);
         }
         if (responseContent) {
-            parts.push(responseContent);
-        }
-
-        if (parts.length > 0) {
-            sections.push(parts.join('\n\n'));
+            sections.push(`## Beaver\n\n${responseContent}`);
         }
     }
 

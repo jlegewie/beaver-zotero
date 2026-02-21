@@ -6,9 +6,9 @@ import { MoreHorizontalIcon } from '../../icons/icons';
 import { copyToClipboard } from '../../../utils/clipboard';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../../utils/citationRenderers';
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
-import { extractThreadContent } from '../../../utils/threadContent';
+import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { allRunsAtom, toolResultsMapAtom } from '../../../agents/atoms';
-import { currentThreadIdAtom } from '../../../atoms/threads';
+import { currentThreadIdAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
 import { citationDataMapAtom } from '../../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
@@ -36,7 +36,22 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
 
-    const getThreadContent = () => extractThreadContent(runs, toolResultsMap);
+    const getThreadMeta = () => {
+        const threadId = store.get(currentThreadIdAtom);
+        const threads = store.get(recentThreadsAtom);
+        const threadName = (threads as ThreadData[]).find(t => t.id === threadId)?.name || null;
+        return { threadId, threadName };
+    };
+
+    const getThreadContent = (overrides?: Partial<ExtractThreadContentOptions>) => {
+        const { threadId, threadName } = getThreadMeta();
+        return extractThreadContent(runs, toolResultsMap, {
+            threadId,
+            threadName,
+            includeRunLinks: true,
+            ...overrides,
+        });
+    };
 
     const handleCopyThread = async () => {
         const content = getThreadContent();

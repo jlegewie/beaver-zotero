@@ -1,5 +1,5 @@
 import React from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw';
@@ -28,10 +28,20 @@ const customSchema = deepmerge(defaultSchema, {
         // attachment_id is normalized to att_id during preprocessing
         // citation_key is used for metadata lookup (replaces raw_tag)
         citation: ['item_id', 'att_id', 'attachment_id', 'sid', 'page', 'external_id', 'consecutive', 'adjacent', 'citation_key']
+    },
+    protocols: {
+        ...defaultSchema.protocols,
+        href: [...(defaultSchema.protocols?.href || []), 'zotero']
     }
 });
 
-type Segment = 
+/** Allow zotero:// URLs through react-markdown's URL sanitization */
+function urlTransform(url: string): string {
+    if (url.startsWith('zotero://')) return url;
+    return defaultUrlTransform(url);
+}
+
+type Segment =
     | { type: 'markdown', content: string }
     | { type: 'note', data: StreamingNoteBlock };
 
@@ -268,6 +278,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                         <ReactMarkdown
                             remarkPlugins={[remarkMath, remarkGfm]}
                             rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema], rehypeKatex]}
+                            urlTransform={urlTransform}
                             components={{
                                 // @ts-expect-error - Custom component not in ReactMarkdown types
                                 citation: ({node, ...props}: any) => {
