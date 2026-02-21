@@ -123,6 +123,7 @@ const PreferencePage: React.FC = () => {
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
+    const [autoApproveExtraction, setAutoApproveExtraction] = useState(() => getPref('autoApproveExtraction'));
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -391,6 +392,12 @@ const PreferencePage: React.FC = () => {
         setPref('autoCreateNotes', newValue);
         setAutoCreateNotes(newValue);
     }, [autoCreateNotes]);
+
+    const handleAutoApproveExtractionToggle = useCallback(() => {
+        const newValue = !autoApproveExtraction;
+        setPref('autoApproveExtraction', newValue);
+        setAutoApproveExtraction(newValue);
+    }, [autoApproveExtraction]);
 
     // Helper function to get rebuild index button props
     const getRebuildIndexButtonProps = () => {
@@ -891,6 +898,24 @@ const PreferencePage: React.FC = () => {
                                 description="Creating collections and organizing items into collections and by tags"
                             />
                         </div>
+                    </SettingsGroup>
+
+                    <SectionLabel>Confirmations</SectionLabel>
+                    <SettingsGroup>
+                        <SettingsRow
+                            title="Auto-Approve Extraction Costs"
+                            description="Skip confirmation when batch extraction uses extra credits"
+                            onClick={handleAutoApproveExtractionToggle}
+                            control={
+                                <input
+                                    type="checkbox"
+                                    checked={autoApproveExtraction}
+                                    onChange={handleAutoApproveExtractionToggle}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ cursor: 'pointer', margin: 0 }}
+                                />
+                            }
+                        />
                     </SettingsGroup>
 
                     <SectionLabel>Auto-Apply</SectionLabel>
