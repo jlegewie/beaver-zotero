@@ -1,14 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { StopIcon, GlobalSearchIcon, PlusSignIcon } from '../icons/icons';
+import React, { useState, useEffect } from 'react';
+import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessageItemsAtom, currentReaderAttachmentAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
-import SearchMenu, { MenuPosition, SearchMenuItem } from '../ui/menus/SearchMenu';
-import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
-import { CustomPrompt } from '../../types/settings';
+import SearchMenu, { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
 import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom } from '../../atoms/customPrompts';
@@ -25,6 +23,7 @@ import { allRunsAtom } from '../../agents/atoms';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
 import { getPref } from '../../../src/utils/prefs';
+import { useSlashMenu } from '../../hooks/useSlashMenu';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
 
@@ -47,11 +46,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     const customPrompts = useAtomValue(customPromptsForContextAtom);
     const markPromptUsed = useSetAtom(markPromptUsedAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
-    const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
-    const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
-    const [slashMenuPosition, setSlashMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
-    const [slashSearchQuery, setSlashSearchQuery] = useState('');
-    const preSlashTextRef = useRef('');
     const allRuns = useAtomValue(allRunsAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const dismissedWarningsByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
@@ -68,10 +62,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const isAwaitingApproval = pendingApprovalsMap.size > 0;
-    // For "reject with instructions" feature, get the first pending approval (if any)
-    const firstPendingApproval = pendingApprovalsMap.size > 0 
-        ? Array.from(pendingApprovalsMap.values())[0] 
-        : null;
+
     const lastRun = allRuns.length > 0 ? allRuns[allRuns.length - 1] : null;
     const lastRunUsage = lastRun?.total_usage;
     const lastRequestInputTokens = lastRunUsage ? getLastRequestInputTokens(lastRunUsage) : null;
@@ -88,6 +79,19 @@ const InputArea: React.FC<InputAreaProps> = ({
         dismissedRunId !== lastRun.id
     );
 
+    // Slash menu hook
+    const {
+        isSlashMenuOpen,
+        slashMenuPosition,
+        slashSearchQuery,
+        setSlashSearchQuery,
+        slashMenuItems,
+        handleSlashDismiss,
+        handleSlashMenuChange,
+        handleSlashTrigger,
+        handleSlashMenuKeyDown,
+    } = useSlashMenu(inputRef);
+
     useEffect(() => {
         inputRef.current?.focus();
     }, []);
@@ -98,7 +102,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             inputRef.current.style.height = `${inputRef.current.scrollHeight}px`;
         }
     }, [messageContent]);
-    
+
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
     ) => {
@@ -189,114 +193,10 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
     }
 
-    // Slash menu: derived state & handlers
-    const hasAttachment = currentMessageItems.length > 0 || !!currentReaderAttachment;
-
-    const handleSlashSelect = useCallback(async (prompt: CustomPrompt) => {
-        const pre = preSlashTextRef.current;
-        const fullPromptText = pre.length > 0
-            ? `${pre}\n\n${prompt.text}`.trim()
-            : prompt.text.trim();
-        setIsSlashMenuOpen(false);
-        setSlashSearchQuery('');
-
-        if (isPending) {
-            // During streaming: resolve variables and insert into textarea without sending
-            const { text: resolvedText, items, emptyItemVariables } = await resolvePromptVariables(fullPromptText);
-            if (emptyItemVariables.length > 0) {
-                addPopupMessage({ type: 'warning', title: 'Action skipped', text: EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.', expire: true, duration: 4000 });
-                setTimeout(() => inputRef.current?.focus(), 0);
-                return;
-            }
-            setMessageContent(resolvedText);
-            if (items.length > 0) {
-                setCurrentMessageItems(prev => {
-                    const existingKeys = new Set(prev.map(item => `${item.libraryID}-${item.key}`));
-                    const newItems = items.filter(item => !existingKeys.has(`${item.libraryID}-${item.key}`));
-                    return newItems.length > 0 ? [...prev, ...newItems] : prev;
-                });
-            }
-            if (prompt.id) markPromptUsed(prompt.id);
-        } else {
-            setMessageContent('');
-            if (prompt.id) markPromptUsed(prompt.id);
-            sendResolvedPrompt(fullPromptText);
-        }
-        setTimeout(() => inputRef.current?.focus(), 0);
-    }, [isPending, sendResolvedPrompt, markPromptUsed]);
-
-    const handleSlashDismiss = useCallback(() => {
-        setIsSlashMenuOpen(false);
-        setSlashSearchQuery('');
-        // Keep whatever is in the textarea as-is
-    }, []);
-
-    const slashMenuItems = useMemo<SearchMenuItem[]>(() => {
-        const query = slashSearchQuery.toLowerCase();
-        const items: SearchMenuItem[] = [];
-
-        // Note: SearchMenu reverses items for verticalPosition="above",
-        // so we build in reverse visual order: footer first, prompts, header last.
-
-        // Custom prompt items: enabled first, disabled last (reversed for "above")
-        const filtered = customPrompts.filter(prompt =>
-            !query || prompt.title.toLowerCase().includes(query)
-        );
-
-        // "Create Action" footer (visually at bottom)
-        // Show when: no query, query matches "create action", or no matching prompts
-        const createActionItem: SearchMenuItem[] = !query || 'create action'.includes(query) || filtered.length === 0
-            ? [{
-                label: 'Create Action',
-                icon: PlusSignIcon,
-                onClick: () => {
-                    setIsSlashMenuOpen(false);
-                    setSlashSearchQuery('');
-                    openPreferencesWindow('prompts');
-                },
-            }] : [];
-        const enabled = filtered.filter(p => !p.requiresAttachment || hasAttachment);
-        const disabled = filtered.filter(p => p.requiresAttachment && !hasAttachment);
-
-        // Sort each group: by recency, then by preferences order
-        const sortByRelevance = (a: CustomPrompt, b: CustomPrompt): number => {
-            if (a.lastUsed && !b.lastUsed) return -1;
-            if (!a.lastUsed && b.lastUsed) return 1;
-            if (a.lastUsed && b.lastUsed) {
-                const diff = new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime();
-                if (diff !== 0) return diff;
-            }
-            return (a.index ?? Infinity) - (b.index ?? Infinity);
-        };
-        enabled.sort(sortByRelevance);
-        disabled.sort(sortByRelevance);
-
-        // Disabled items go first in array (visually at bottom after reverse)
-        for (let i = disabled.length - 1; i >= 0; i--) {
-            items.push({
-                label: disabled[i].title,
-                onClick: () => handleSlashSelect(disabled[i]),
-                disabled: true,
-            });
-        }
-        // Enabled items go after (visually above disabled after reverse)
-        for (let i = enabled.length - 1; i >= 0; i--) {
-            items.push({
-                label: enabled[i].title,
-                onClick: () => handleSlashSelect(enabled[i]),
-            });
-        }
-
-        // Group header (visually at top)
-        // const groupHeaderItem = { label: 'Actions', onClick: () => {}, isGroupHeader: true };
-
-        return [...items.reverse(), ...createActionItem];
-    }, [customPrompts, slashSearchQuery, hasAttachment, handleSlashSelect]);
-
     const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
         // Check if the click target is a button or within a button
         const isButtonClick = (e.target as Element).closest('button') !== null;
-        
+
         // Only focus if not clicking a button and editing is enabled
         if (!isButtonClick && inputRef.current) {
             inputRef.current.focus();
@@ -371,33 +271,10 @@ const InputArea: React.FC<InputAreaProps> = ({
                             const value = e.target.value;
 
                             // When slash menu is open, track search query from typed text
-                            if (isSlashMenuOpen) {
-                                const prefix = preSlashTextRef.current + '/';
-                                if (value.startsWith(prefix)) {
-                                    setSlashSearchQuery(value.slice(prefix.length));
-                                    setMessageContent(value);
-                                } else {
-                                    // User deleted past the slash, close the menu
-                                    setIsSlashMenuOpen(false);
-                                    setSlashSearchQuery('');
-                                    setMessageContent(value);
-                                }
-                                return;
-                            }
+                            if (handleSlashMenuChange(value)) return;
 
                             // Detect `/` trigger: at start or after whitespace/newline
-                            if (value.endsWith('/') && !isAddAttachmentMenuOpen) {
-                                const charBefore = value.length > 1 ? value[value.length - 2] : null;
-                                if (charBefore === null || charBefore === ' ' || charBefore === '\n') {
-                                    preSlashTextRef.current = value.slice(0, -1);
-                                    const rect = e.currentTarget.getBoundingClientRect();
-                                    setSlashMenuPosition({ x: rect.left, y: rect.top - 5 });
-                                    setIsSlashMenuOpen(true);
-                                    setSlashSearchQuery('');
-                                    setMessageContent(value);
-                                    return;
-                                }
-                            }
+                            if (!isAddAttachmentMenuOpen && handleSlashTrigger(value, e.currentTarget.getBoundingClientRect())) return;
 
                             // Don't open attachment menu when awaiting approval
                             if (e.target.value.endsWith('@') && !isAwaitingApproval) {
@@ -421,20 +298,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                         className="chat-input"
                         onKeyDown={(e) => {
                             // When slash menu is open, handle navigation and dismiss keys
-                            if (isSlashMenuOpen) {
-                                if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                                    e.preventDefault();
-                                    return;
-                                }
-                                if (e.key === 'Escape' || e.key === ' ') {
-                                    e.preventDefault();
-                                    setIsSlashMenuOpen(false);
-                                    setSlashSearchQuery('');
-                                    return;
-                                }
-                                // All other keys (letters, backspace, etc.) pass through to textarea
-                                // The onChange handler will update the search query
-                            }
+                            if (handleSlashMenuKeyDown(e)) return;
                             handleKeyDown(e);
                             // Submit on Enter (without Shift) - guard against pending to prevent race with button click
                             // Don't trigger reject on Enter when awaiting approval (must click button)
@@ -476,15 +340,15 @@ const InputArea: React.FC<InputAreaProps> = ({
                             onClick={
                                 isAwaitingApproval && messageContent.trim().length > 0
                                     ? handleRejectWithInstructions
-                                    : (isPending 
-                                        ? (e) => handleStop(e as any) 
+                                    : (isPending
+                                        ? (e) => handleStop(e as any)
                                         : handleSubmit)
                             }
                             disabled={
                                 // When awaiting approval with text, never disable (Reject button)
                                 // When awaiting approval without text, never disable (Stop button)
                                 // Otherwise, disable if no content and not pending, or no model selected
-                                isAwaitingApproval 
+                                isAwaitingApproval
                                     ? false
                                     : ((messageContent.length === 0 && !isPending) || !selectedModel || isSlashMenuOpen)
                             }
