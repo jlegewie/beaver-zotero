@@ -8,6 +8,7 @@ import MenuButton from '../ui/MenuButton';
 import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
+import { getBeaverNoteFooterHTML } from '../../utils/noteActions';
 import CopyButton from '../ui/buttons/CopyButton';
 import { citationDataMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
@@ -214,13 +215,18 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     /** Save as standalone note to current library/collection */
     const saveToLibrary = async () => {
-        const formattedContent = renderToHTML(preprocessNoteContent(combinedContent), "markdown", { 
-            citationDataMap, 
+        let formattedContent = renderToHTML(preprocessNoteContent(combinedContent), "markdown", {
+            citationDataMap,
             externalMapping: externalReferenceMapping,
-            externalReferencesMap 
+            externalReferencesMap
         });
         const context = getZoteroTargetContextSync();
-        
+
+        const threadId = store.get(currentThreadIdAtom);
+        if (threadId) {
+            formattedContent += getBeaverNoteFooterHTML(threadId, run.id);
+        }
+
         const newNote = new Zotero.Item('note');
         if (context.targetLibraryId !== undefined) {
             newNote.libraryID = context.targetLibraryId;
@@ -243,15 +249,20 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     /** Save as child note attached to selected/current item */
     const saveToItem = async () => {
-        const formattedContent = renderToHTML(preprocessNoteContent(combinedContent), "markdown", { 
-            citationDataMap, 
+        let formattedContent = renderToHTML(preprocessNoteContent(combinedContent), "markdown", {
+            citationDataMap,
             externalMapping: externalReferenceMapping,
-            externalReferencesMap 
+            externalReferencesMap
         });
         const context = getZoteroTargetContextSync();
-        
+
         if (!context.parentReference) return;
-        
+
+        const threadId = store.get(currentThreadIdAtom);
+        if (threadId) {
+            formattedContent += getBeaverNoteFooterHTML(threadId, run.id);
+        }
+
         const newNote = new Zotero.Item('note');
         newNote.libraryID = context.parentReference.library_id;
         newNote.parentKey = context.parentReference.zotero_key;

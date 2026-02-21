@@ -16,6 +16,7 @@ import { citationDataMapAtom } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
 import { toolAnnotationApplyBatcher, filterAnnotationAgentActions } from './toolAnnotationApplyBatcher';
 import { saveStreamingNote } from './noteActions';
+import { currentThreadIdAtom } from '../atoms/threads';
 import { logger } from '../../src/utils/logger';
 
 /**
@@ -356,12 +357,15 @@ export async function autoCreateNoteAgentActions(
 
         try {
             const noteContent = `<h1>${title}</h1>\n\n${content}`;
+            const threadId = store.get(currentThreadIdAtom);
             const result = await saveStreamingNote({
                 markdownContent: noteContent,
                 title,
                 parentReference,
                 targetLibraryId,
-                contextData: { citationDataMap, externalMapping, externalReferencesMap }
+                contextData: { citationDataMap, externalMapping, externalReferencesMap },
+                threadId: threadId || undefined,
+                runId,
             });
 
             // Acknowledge the action (marks as 'applied')
