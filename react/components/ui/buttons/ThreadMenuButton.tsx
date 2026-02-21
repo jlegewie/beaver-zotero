@@ -22,7 +22,7 @@ interface ThreadMenuButtonProps {
 
 const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     className = '',
-    ariaLabel = 'Thread actions',
+    ariaLabel = 'Chat actions',
 }) => {
     const [, forceUpdate] = useState({});
 
@@ -162,7 +162,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             ariaLabel={ariaLabel}
             variant="ghost"
             toggleCallback={handleMenuToggle}
-            tooltipContent="Thread actions"
+            tooltipContent="Chat actions"
             showArrow={true}
         />
     );

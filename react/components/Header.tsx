@@ -88,12 +88,12 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                         className="scale-14"
                         ariaLabel="Show chat history"
                     />
-                    <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
+                    <Tooltip content="New chat" secondaryContent={newChatShortcut} showArrow singleLine>
                         <IconButton
                             icon={PlusSignIcon}
                             onClick={handleNewThread}
                             className="scale-14"
-                            ariaLabel="New thread"
+                            ariaLabel="New chat"
                             disabled={runsCount === 0}
                         />
                     </Tooltip>
@@ -123,17 +123,17 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                     {threadId && (
                         <ThreadMenuButton
                             className="scale-14"
-                            ariaLabel="Thread actions"
+                            ariaLabel="Chat actions"
                         />
                     )}
                     {/* Open in separate window */}
                     {!isWindow && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
-                        <Tooltip content="Open in Separate Window" secondaryContent={openWindowShortcut} showArrow singleLine>
+                        <Tooltip content="Open in separate window" secondaryContent={openWindowShortcut} showArrow singleLine>
                             <IconButton
                                 icon={PictureInPictureIcon}
                                 onClick={openBeaverWindow}
                                 className="scale-14"
-                                ariaLabel="Open in Separate Window"
+                                ariaLabel="Open in separate window"
                             />
                         </Tooltip>
                     )}
