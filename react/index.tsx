@@ -18,6 +18,7 @@ import { store } from './store';
 import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
 import { useHttpEndpoints } from './hooks/useHttpEndpoints';
+import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 
 
 /**
@@ -55,6 +56,9 @@ const GlobalContextInitializer = () => {
 
     // Register HTTP endpoints for local FrontendCapability (when authenticated)
     useHttpEndpoints();
+
+    // Handle zotero://beaver protocol links (thread deep-linking)
+    useThreadProtocolHandler();
 
     return null; // This component does not render any UI
 };

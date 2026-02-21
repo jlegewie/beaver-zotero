@@ -3,6 +3,10 @@ export interface BeaverEvents {
         location?: 'library' | 'reader';
         forceOpen?: boolean;
     };
+    loadThread: {
+        threadId: string;
+        runId?: string;
+    };
 }
 
 export type BeaverEventName = keyof BeaverEvents;

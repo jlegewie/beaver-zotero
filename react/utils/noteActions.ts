@@ -7,6 +7,13 @@ export interface SaveStreamingNoteOptions {
     parentReference?: ZoteroItemReference;
     targetLibraryId?: number;
     contextData?: RenderContextData;
+    threadId?: string;
+    runId?: string;
+}
+
+export function getBeaverNoteFooterHTML(threadId: string, runId: string): string {
+    const url = `zotero://beaver/thread/${threadId}/run/${runId}`;
+    return `<p><span style="color: #aaa;"><a href="${url}">Open in Beaver</a></span></p>`;
 }
 
 export interface SavedNoteReference {
@@ -17,8 +24,12 @@ export interface SavedNoteReference {
 }
 
 export async function saveStreamingNote(options: SaveStreamingNoteOptions): Promise<SavedNoteReference> {
-    const { markdownContent, parentReference, targetLibraryId, contextData } = options;
-    const htmlContent = renderToHTML(markdownContent.trim(), "markdown", contextData);
+    const { markdownContent, parentReference, targetLibraryId, contextData, threadId, runId } = options;
+    let htmlContent = renderToHTML(markdownContent.trim(), "markdown", contextData);
+
+    if (threadId && runId) {
+        htmlContent += getBeaverNoteFooterHTML(threadId, runId);
+    }
 
     const zoteroNote = new Zotero.Item('note');
 

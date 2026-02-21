@@ -34,6 +34,8 @@ import Tooltip from '../ui/Tooltip';
 import { renderToMarkdown } from '../../utils/citationRenderers';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
+import { currentThreadIdAtom } from '../../atoms/threads';
+import { store } from '../../store';
 
 export interface StreamingNoteBlock {
     id: string;
@@ -333,12 +335,15 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, messageId, expor
             }
 
             const noteContent = `<h1>${noteTitle}</h1>\n\n${trimmedContent || note.content}`;
+            const threadId = store.get(currentThreadIdAtom);
             const result = await saveStreamingNote({
                 markdownContent: noteContent,
                 title: noteTitle,
                 parentReference: parentReference || undefined,
                 targetLibraryId: targetLibraryId,
-                contextData: { citationDataMap, externalMapping, externalReferencesMap }
+                contextData: { citationDataMap, externalMapping, externalReferencesMap },
+                threadId: threadId || undefined,
+                runId: runId || undefined,
             });
             
             // Handle collection addition if needed

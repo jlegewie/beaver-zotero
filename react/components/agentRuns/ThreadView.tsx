@@ -1,14 +1,15 @@
 import React, { useEffect, useRef, forwardRef, useLayoutEffect, useCallback } from "react";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { allRunsAtom } from "../../agents/atoms";
 import { AgentRunView } from "./AgentRunView";
 import { scrollToBottom } from "../../utils/scrollToBottom";
 import { userScrolledAtom, windowUserScrolledAtom } from "../../atoms/ui";
-import { currentThreadScrollPositionAtom, windowScrollPositionAtom, currentThreadIdAtom } from "../../atoms/threads";
+import { currentThreadScrollPositionAtom, windowScrollPositionAtom, currentThreadIdAtom, pendingScrollToRunAtom, isLoadingThreadAtom } from "../../atoms/threads";
 import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
 import { toolExpandedAtom, messageSourcesVisibilityAtom, annotationPanelStateAtom } from "../../atoms/messageUIState";
+import { logger } from "../../../src/utils/logger";
 
 const BOTTOM_THRESHOLD = 120; // pixels
 const RESTORE_THRESHOLD = 100; // pixels - threshold for restoring scroll position
@@ -16,6 +17,7 @@ const RESTORE_DEBOUNCE_MS = 50; // ms - debounce delay for scroll restoration
 const ANIMATION_LOCKOUT_MS = 400; // ms - time to wait after animation before allowing restore
 const PENDING_APPROVAL_SCROLL_DELAY = 100; // ms - delay before scrolling for pending approval (allows content to render)
 const EXPANSION_SCROLL_EVAL_DELAY = 50; // ms - delay before re-evaluating scroll state after expansion toggle
+const PROTOCOL_SCROLL_LOCKOUT_MS = 800; // ms - block other scroll restorations right after protocol target jump
 
 type ThreadViewProps = {
     /** Optional className for styling */
@@ -32,6 +34,9 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
     function ThreadView({ className, isWindow = false }: ThreadViewProps, ref: React.ForwardedRef<HTMLDivElement>) {
         const win = Zotero.getMainWindow();
         const runs = useAtomValue(allRunsAtom);
+        const pendingRunId = useAtomValue(pendingScrollToRunAtom);
+        const isLoadingThread = useAtomValue(isLoadingThreadAtom);
+        const setPendingScrollToRun = useSetAtom(pendingScrollToRunAtom);
         const restoredFromAtomRef = useRef(false);
         const currentThreadId = useAtomValue(currentThreadIdAtom);
         const prevThreadIdRef = useRef<string | null>(null);
@@ -49,6 +54,10 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         const isAnimatingRef = useRef(false);
         // Debounce timer for restore
         const restoreDebounceRef = useRef<number | null>(null);
+        // Target run element for protocol navigation
+        const pendingRunElementRef = useRef<HTMLDivElement | null>(null);
+        // Timestamp lock to prevent post-target-jump scroll overrides
+        const protocolScrollLockUntilRef = useRef(0);
         
         // Select the correct atoms based on whether we're in the separate window
         const scrollPositionAtom = isWindow ? windowScrollPositionAtom : currentThreadScrollPositionAtom;
@@ -70,11 +79,79 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             isWindow
         });
 
+        const isProtocolScrollLocked = useCallback(() => {
+            return Date.now() < protocolScrollLockUntilRef.current;
+        }, []);
+
+        const tryScrollToPendingRun = useCallback((source: string, targetElement?: HTMLElement | null) => {
+            if (!pendingRunId) {
+                return false;
+            }
+
+            const container = scrollContainerRef.current;
+            if (!container || container.clientHeight === 0) {
+                return false;
+            }
+
+            const element = targetElement
+                ?? pendingRunElementRef.current
+                ?? container.querySelector<HTMLElement>(`#run-${CSS.escape(pendingRunId)}`);
+
+            if (!element) {
+                if (!isLoadingThread && !runs.some((run) => run.id === pendingRunId)) {
+                    logger("ThreadView: pending run target not found after load", {
+                        source,
+                        pendingRunId,
+                        currentThreadId,
+                        runsCount: runs.length,
+                    }, 1);
+                    setPendingScrollToRun(null);
+                }
+                return false;
+            }
+
+            // Prevent restore/auto-bottom effects from overriding this jump.
+            protocolScrollLockUntilRef.current = Date.now() + PROTOCOL_SCROLL_LOCKOUT_MS;
+            isAnimatingRef.current = true;
+            win.setTimeout(() => {
+                isAnimatingRef.current = false;
+            }, ANIMATION_LOCKOUT_MS);
+
+            element.scrollIntoView({ behavior: "smooth", block: "start" });
+            // Determine scroll state based on whether the target is near the bottom.
+            // scrollIntoView is async (smooth), so project the final scroll position:
+            // use getBoundingClientRect relative to the container to get the element's
+            // position within the scrollable area (offsetTop is relative to offsetParent,
+            // which may not be the scroll container).
+            const { scrollHeight, scrollTop, clientHeight } = container;
+            const elementTopInContainer = element.getBoundingClientRect().top - container.getBoundingClientRect().top + scrollTop;
+            const projectedDistanceFromBottom = scrollHeight - elementTopInContainer - clientHeight;
+            store.set(scrolledAtom, projectedDistanceFromBottom > BOTTOM_THRESHOLD);
+            setPendingScrollToRun(null);
+            return true;
+        }, [pendingRunId, currentThreadId, isLoadingThread, scrollContainerRef, runs, scrolledAtom, setPendingScrollToRun, win]);
+
+        const setPendingRunRef = useCallback((node: HTMLDivElement | null) => {
+            pendingRunElementRef.current = node;
+            if (node) {
+                tryScrollToPendingRun("target-ref", node);
+            }
+        }, [tryScrollToPendingRun]);
+
         /**
          * Helper function to restore scroll position.
          * Only restores if there's a significant difference and we're not animating.
          */
         const restoreScrollPosition = useCallback((force = false) => {
+            if (pendingRunId && !force) {
+                restoredFromAtomRef.current = false;
+                return;
+            }
+            if (isProtocolScrollLocked() && !force) {
+                restoredFromAtomRef.current = false;
+                return;
+            }
+
             const container = scrollContainerRef.current;
             if (!container) {
                 restoredFromAtomRef.current = false;
@@ -125,7 +202,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     }
                 }
             }
-        }, [storedScrollTop, scrolledAtom, scrollContainerRef, currentThreadId]);
+        }, [pendingRunId, isProtocolScrollLocked, storedScrollTop, scrolledAtom, scrollContainerRef, currentThreadId, isLoadingThread]);
 
         // Restore scroll position from atom (only for thread switching, not during streaming)
         // Note: userScrolledAtom is managed by useAutoScroll.handleScroll, not here
@@ -133,6 +210,13 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             restoreScrollPosition();
             prevThreadIdRef.current = currentThreadId;
         }, [restoreScrollPosition, currentThreadId]);
+
+        // Deterministic retry path for protocol navigation:
+        // attempt again on render-state changes instead of relying on timers.
+        useEffect(() => {
+            if (!pendingRunId) return;
+            tryScrollToPendingRun("retry-effect");
+        }, [pendingRunId, isLoadingThread, runs, tryScrollToPendingRun]);
 
         // Watch for visibility transitions and container resizes
         useEffect(() => {
@@ -158,6 +242,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     restoreDebounceRef.current = win.setTimeout(() => {
                         restoreDebounceRef.current = null;
                         restoreScrollPosition();
+                        tryScrollToPendingRun("visibility-transition");
                     }, RESTORE_DEBOUNCE_MS);
                 }
                 // Re-evaluate scroll state when container height changes (window resize)
@@ -180,10 +265,14 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     win.clearTimeout(restoreDebounceRef.current);
                 }
             };
-        }, [restoreScrollPosition, scrolledAtom, win]);
+        }, [restoreScrollPosition, scrolledAtom, tryScrollToPendingRun, win]);
 
         // Scroll to bottom when runs change
         useEffect(() => {
+            if (pendingRunId || isProtocolScrollLocked()) {
+                return;
+            }
+
             if (restoredFromAtomRef.current) {
                 restoredFromAtomRef.current = false;
                 return;
@@ -214,7 +303,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     isAnimatingRef.current = false;
                 }, ANIMATION_LOCKOUT_MS);
             }
-        }, [runs, scrolledAtom, win]);
+        }, [pendingRunId, isProtocolScrollLocked, runs, scrolledAtom, win]);
 
         // Scroll to bottom when a new pending approval appears
         // This ensures the approval buttons are visible, even if user had scrolled up
@@ -222,6 +311,11 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         // With parallel tool calls, we track all pending approval IDs
         useEffect(() => {
             const currentApprovalIds = new Set(pendingApprovalsMap.keys());
+
+            if (pendingRunId || isProtocolScrollLocked()) {
+                prevPendingApprovalIdsRef.current = currentApprovalIds;
+                return;
+            }
             
             // Check if there are any NEW pending approvals (not seen before)
             let hasNewApproval = false;
@@ -259,7 +353,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
             }
             
             prevPendingApprovalIdsRef.current = currentApprovalIds;
-        }, [pendingApprovalsMap, scrolledAtom, win]);
+        }, [pendingApprovalsMap, pendingRunId, isProtocolScrollLocked, scrolledAtom, win]);
 
         // Re-evaluate scroll state when content expands/collapses
         // This ensures the ScrollDownButton visibility is updated when user toggles:
@@ -318,6 +412,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 {runs.map((run, index) => (
                     <AgentRunView
                         key={run.id}
+                        ref={run.id === pendingRunId ? setPendingRunRef : undefined}
                         run={run}
                         isLastRun={index === runs.length - 1}
                     />
@@ -328,4 +423,3 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
 );
 
 export default ThreadView;
-

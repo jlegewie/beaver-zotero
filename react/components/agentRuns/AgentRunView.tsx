@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ModelResponse, ToolCallPart } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
@@ -37,7 +37,7 @@ const hasVisibleContent = (run: AgentRun): boolean => {
  * Container component for a single agent run.
  * Renders the user's request, model messages, status indicator, and usage footer.
  */
-export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) => {
+export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(function AgentRunView({ run, isLastRun }, ref) {
     const isStreaming = run.status === 'in_progress';
     const hasError = run.status === 'error';
     const allWarnings = useAtomValue(threadWarningsAtom);
@@ -100,7 +100,7 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
     const canEdit = !isStreaming && (run.status === 'completed' || run.status === 'error' || run.status === 'canceled');
 
     return (
-        <div id={`run-${run.id}`} className="display-flex flex-col gap-4">
+        <div id={`run-${run.id}`} className="display-flex flex-col gap-4" ref={ref}>
             {/* User's message */}
             {showUserMessage && <UserRequestView userPrompt={run.user_prompt} runId={run.id} canEdit={canEdit} />}
 
@@ -154,7 +154,8 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({ run, isLastRun }) =>
 
         </div>
     );
-};
+});
+
+AgentRunView.displayName = 'AgentRunView';
 
 export default AgentRunView;
-
