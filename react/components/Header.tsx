@@ -105,15 +105,6 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                     )}
                     </>
                 )}
-
-                {/* Development tools */}
-                {process.env.NODE_ENV === 'development' && (
-                    <DevToolsMenuButton
-                        className="scale-14"
-                        ariaLabel="Development tools"
-                        currentMessageContent={currentMessageContent}
-                    />
-                )}
             </div>
 
             {/* Right side: Current Context & Global Actions */}
@@ -126,6 +117,14 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                     {/* Database status for users with databaseSync */}
                     {isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                         <DatabaseStatusButton />
+                    )}
+                    {/* Development tools */}
+                    {process.env.NODE_ENV === 'development' && (
+                        <DevToolsMenuButton
+                            className="scale-14"
+                            ariaLabel="Development tools"
+                            currentMessageContent={currentMessageContent}
+                        />
                     )}
                     {/* Open in separate window */}
                     {!isWindow && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
