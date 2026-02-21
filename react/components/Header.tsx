@@ -5,7 +5,7 @@ import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton'
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
 import { newThreadAtom } from '../atoms/threads';
-import { runsCountAtom } from '../agents/atoms';
+import { currentThreadIdAtom, runsCountAtom } from '../agents/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './ui/IconButton';
 import Tooltip from './ui/Tooltip';
@@ -35,6 +35,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
     const updateRequired = useAtomValue(updateRequiredAtom);
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const currentMessageContent = useAtomValue(currentMessageContentAtom);
+    const threadId = useAtomValue(currentThreadIdAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
     const handleNewThread = async () => {
@@ -96,10 +97,12 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                             disabled={runsCount === 0}
                         />
                     </Tooltip>
-                    <ThreadMenuButton
-                        className="scale-14"
-                        ariaLabel="Thread actions"
-                    />
+                    {threadId && (
+                        <ThreadMenuButton
+                            className="scale-14"
+                            ariaLabel="Thread actions"
+                        />
+                    )}
                     </>
                 )}
 
