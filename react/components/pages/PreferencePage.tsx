@@ -123,8 +123,8 @@ const PreferencePage: React.FC = () => {
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
-    const [autoApproveExtraction, setAutoApproveExtraction] = useState(() => getPref('autoApproveExtraction'));
-    const [autoApproveExternalSearch, setAutoApproveExternalSearch] = useState(() => getPref('autoApproveExternalSearch'));
+    const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
+    const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -394,17 +394,17 @@ const PreferencePage: React.FC = () => {
         setAutoCreateNotes(newValue);
     }, [autoCreateNotes]);
 
-    const handleAutoApproveExtractionToggle = useCallback(() => {
-        const newValue = !autoApproveExtraction;
-        setPref('autoApproveExtraction', newValue);
-        setAutoApproveExtraction(newValue);
-    }, [autoApproveExtraction]);
+    const handleConfirmExtractionCostsToggle = useCallback(() => {
+        const newValue = !confirmExtractionCosts;
+        setPref('confirmExtractionCosts', newValue);
+        setConfirmExtractionCosts(newValue);
+    }, [confirmExtractionCosts]);
 
-    const handleAutoApproveExternalSearchToggle = useCallback(() => {
-        const newValue = !autoApproveExternalSearch;
-        setPref('autoApproveExternalSearch', newValue);
-        setAutoApproveExternalSearch(newValue);
-    }, [autoApproveExternalSearch]);
+    const handleConfirmExternalSearchCostsToggle = useCallback(() => {
+        const newValue = !confirmExternalSearchCosts;
+        setPref('confirmExternalSearchCosts', newValue);
+        setConfirmExternalSearchCosts(newValue);
+    }, [confirmExternalSearchCosts]);
 
     // Helper function to get rebuild index button props
     const getRebuildIndexButtonProps = () => {
@@ -907,31 +907,40 @@ const PreferencePage: React.FC = () => {
                         </div>
                     </SettingsGroup>
 
-                    <SectionLabel>Confirmations</SectionLabel>
+                    <SectionLabel>Extra Credit Confirmations</SectionLabel>
+                    <SettingsGroup>
+                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
+                            <div className="font-color-secondary text-base">
+                                Choose whether to confirm before operations that use extra credits.
+                                Only relevant when using Beaver credits.
+                                {/* Extraction and external search are not supported when using your own API keys. */}
+                            </div>
+                        </div>
+                    </SettingsGroup>
                     <SettingsGroup>
                         <SettingsRow
-                            title="Auto-Approve Extraction Costs"
-                            description="Skip confirmation when batch extraction uses extra credits"
-                            onClick={handleAutoApproveExtractionToggle}
+                            title="Confirm Extraction Costs"
+                            description="Ask before using extra credits for batch extraction"
+                            onClick={handleConfirmExtractionCostsToggle}
                             control={
                                 <input
                                     type="checkbox"
-                                    checked={autoApproveExtraction}
-                                    onChange={handleAutoApproveExtractionToggle}
+                                    checked={confirmExtractionCosts}
+                                    onChange={handleConfirmExtractionCostsToggle}
                                     onClick={(e) => e.stopPropagation()}
                                     style={{ cursor: 'pointer', margin: 0 }}
                                 />
                             }
                         />
                         <SettingsRow
-                            title="Auto-Approve External Search Costs"
-                            description="Skip confirmation when external literature search uses extra credits"
-                            onClick={handleAutoApproveExternalSearchToggle}
+                            title="Confirm External Search Costs"
+                            description="Ask before using extra credits for external literature search"
+                            onClick={handleConfirmExternalSearchCostsToggle}
                             control={
                                 <input
                                     type="checkbox"
-                                    checked={autoApproveExternalSearch}
-                                    onChange={handleAutoApproveExternalSearchToggle}
+                                    checked={confirmExternalSearchCosts}
+                                    onChange={handleConfirmExternalSearchCostsToggle}
                                     onClick={(e) => e.stopPropagation()}
                                     style={{ cursor: 'pointer', margin: 0 }}
                                 />

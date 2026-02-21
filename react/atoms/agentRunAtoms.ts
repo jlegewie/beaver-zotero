@@ -973,11 +973,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 actionType: event.action_type,
             }, 1);
 
-            // confirm_extraction: check auto-approve setting, then pre-validate
+            // confirm_extraction: skip confirmation if user disabled it, then pre-validate
             if (event.action_type === 'confirm_extraction') {
-                const autoApprove = getPref('autoApproveExtraction') as boolean;
-                if (autoApprove) {
-                    logger('WS onDeferredApprovalRequest: Auto-approving confirm_extraction (setting enabled)', 1);
+                const confirmCosts = getPref('confirmExtractionCosts') as boolean;
+                if (!confirmCosts) {
+                    logger('WS onDeferredApprovalRequest: Auto-approving confirm_extraction (confirmation disabled)', 1);
                     agentService.sendApprovalResponse(event.action_id, true);
                     return;
                 }
@@ -995,11 +995,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 }
             }
 
-            // confirm_external_search: check auto-approve setting
+            // confirm_external_search: skip confirmation if user disabled it
             if (event.action_type === 'confirm_external_search') {
-                const autoApprove = getPref('autoApproveExternalSearch') as boolean;
-                if (autoApprove) {
-                    logger('WS onDeferredApprovalRequest: Auto-approving confirm_external_search (setting enabled)', 1);
+                const confirmCosts = getPref('confirmExternalSearchCosts') as boolean;
+                if (!confirmCosts) {
+                    logger('WS onDeferredApprovalRequest: Auto-approving confirm_external_search (confirmation disabled)', 1);
                     agentService.sendApprovalResponse(event.action_id, true);
                     return;
                 }

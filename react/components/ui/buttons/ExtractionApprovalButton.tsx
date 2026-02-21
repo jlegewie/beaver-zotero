@@ -15,7 +15,7 @@ const LABELS: Record<string, string> = {
 };
 
 /**
- * Dropdown button for the confirm_extraction auto-approve preference.
+ * Dropdown button for the confirm_extraction cost confirmation preference.
  * Binary choice: "Always ask" (default) or "Always approve".
  * When switching to "Always approve", fires onAlwaysApprove so the caller
  * can also approve the currently pending action.
@@ -24,13 +24,13 @@ const ExtractionApprovalButton: React.FC<ExtractionApprovalButtonProps> = ({
     onAlwaysApprove,
 }) => {
     const [current, setCurrent] = useState<'ask' | 'approve'>(() => {
-        const val = getPref('autoApproveExtraction') as boolean;
-        return val ? 'approve' : 'ask';
+        const val = getPref('confirmExtractionCosts') as boolean;
+        return val ? 'ask' : 'approve';
     });
 
     const handleSelect = (value: 'ask' | 'approve') => {
         setCurrent(value);
-        setPref('autoApproveExtraction', value === 'approve');
+        setPref('confirmExtractionCosts', value === 'ask');
         if (value === 'approve') {
             onAlwaysApprove?.();
         }

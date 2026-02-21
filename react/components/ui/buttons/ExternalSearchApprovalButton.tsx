@@ -15,7 +15,7 @@ const LABELS: Record<string, string> = {
 };
 
 /**
- * Dropdown button for the confirm_external_search auto-approve preference.
+ * Dropdown button for the confirm_external_search cost confirmation preference.
  * Binary choice: "Always ask" (default) or "Always approve".
  * When switching to "Always approve", fires onAlwaysApprove so the caller
  * can also approve the currently pending action.
@@ -24,13 +24,13 @@ const ExternalSearchApprovalButton: React.FC<ExternalSearchApprovalButtonProps> 
     onAlwaysApprove,
 }) => {
     const [current, setCurrent] = useState<'ask' | 'approve'>(() => {
-        const val = getPref('autoApproveExternalSearch') as boolean;
-        return val ? 'approve' : 'ask';
+        const val = getPref('confirmExternalSearchCosts') as boolean;
+        return val ? 'ask' : 'approve';
     });
 
     const handleSelect = (value: 'ask' | 'approve') => {
         setCurrent(value);
-        setPref('autoApproveExternalSearch', value === 'approve');
+        setPref('confirmExternalSearchCosts', value === 'ask');
         if (value === 'approve') {
             onAlwaysApprove?.();
         }
