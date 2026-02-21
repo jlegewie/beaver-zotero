@@ -184,6 +184,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                 disabled: !hasParent
             },
             {
+                label: 'Copy URL to Run',
+                onClick: () => copyRunUrl()
+            },
+            {
                 label: 'Copy Run ID',
                 onClick: () => copyRunId()
             }
@@ -260,6 +264,12 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         if (!isInReader) {
             selectItem(newNote);
         }
+    };
+
+    const copyRunUrl = async () => {
+        const threadId = store.get(currentThreadIdAtom);
+        if (!threadId) return;
+        await copyToClipboard(`zotero://beaver/thread/${threadId}/run/${run.id}`);
     };
 
     const copyRunId = async () => {
