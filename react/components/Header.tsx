@@ -58,14 +58,15 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
 
     return (
         <div id="beaver-header" className="display-flex flex-row px-3 py-2">
+            {/* Left side: Navigation & Workspace */}
             <div className="flex-1 display-flex gap-4">
 
-                {/* Close chat / Close window */}
+                {/* Close chat */}
                 {!isWindow && (
-                    <Tooltip 
-                        content={isWindow ? "Close window" : "Close chat"} 
-                        secondaryContent={isWindow ? undefined : closeChatShortcut} 
-                        showArrow 
+                    <Tooltip
+                        content="Close chat"
+                        secondaryContent={closeChatShortcut}
+                        showArrow
                         singleLine
                     >
                         <IconButton
@@ -73,14 +74,18 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                             icon={CancelIcon}
                             onClick={handleClose}
                             className="scale-14"
-                            ariaLabel={isWindow ? "Close window" : "Close chat"}
+                            ariaLabel="Close chat"
                         />
                     </Tooltip>
                 )}
-                
-                {/* New chat and chat history */}
+
+                {/* Chat history and new chat */}
                 {isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                     <>
+                    <ThreadsMenu
+                        className="scale-14"
+                        ariaLabel="Show chat history"
+                    />
                     <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
                         <IconButton
                             icon={PlusSignIcon}
@@ -93,18 +98,6 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                     </>
                 )}
 
-                {/* Only show "Open in Separate Window" button when not already in a separate window and user is authenticated and has completed onboarding */}
-                {!isWindow && isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
-                    <Tooltip content="Open in Separate Window" secondaryContent={openWindowShortcut} showArrow singleLine>
-                        <IconButton
-                            icon={Share05Icon}
-                            onClick={openBeaverWindow}
-                            className="scale-13"
-                            ariaLabel="Open in Separate Window"
-                        />
-                    </Tooltip>
-                )}
-
                 {/* Development tools */}
                 {process.env.NODE_ENV === 'development' && (
                     <DevToolsMenuButton
@@ -115,25 +108,29 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                 )}
             </div>
 
-            {/* Database status, embedding index status, and user account menu */}
+            {/* Right side: Current Context & Global Actions */}
             {isAuthenticated && (
                 <div className="display-flex gap-4">
-                    {/* Show embedding index status for users without databaseSync */}
+                    {/* Embedding index status for users without databaseSync */}
                     {!isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                         <EmbeddingIndexStatusButton />
                     )}
-                    {/* Show database status for users with databaseSync */}
+                    {/* Database status for users with databaseSync */}
                     {isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                         <DatabaseStatusButton />
                     )}
-                    {/* Show chat history menu */}
-                    {isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
-                        <ThreadsMenu
-                            className="scale-14"
-                            ariaLabel="Show chat history"
-                        />
+                    {/* Open in separate window */}
+                    {!isWindow && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
+                        <Tooltip content="Open in Separate Window" secondaryContent={openWindowShortcut} showArrow singleLine>
+                            <IconButton
+                                icon={Share05Icon}
+                                onClick={openBeaverWindow}
+                                className="scale-13"
+                                ariaLabel="Open in Separate Window"
+                            />
+                        </Tooltip>
                     )}
-                    {/* Show user account menu */}
+                    {/* User account menu */}
                     <UserAccountMenuButton
                         className="scale-14"
                         ariaLabel="User settings"
