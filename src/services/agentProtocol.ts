@@ -80,6 +80,13 @@ export interface WSThreadEvent extends WSBaseEvent {
     thread_id: string;
 }
 
+/** Thread name event sent after background thread name generation completes */
+export interface WSThreadNameEvent extends WSBaseEvent {
+    event: 'thread_name';
+    thread_id: string;
+    name: string;
+}
+
 /** Error event for communicating failures */
 export interface WSErrorEvent extends WSBaseEvent {
     event: 'error';
@@ -868,6 +875,7 @@ export type WSEvent =
     | WSRunCompleteEvent
     | WSDoneEvent
     | WSThreadEvent
+    | WSThreadNameEvent
     | WSErrorEvent
     | WSWarningEvent
     | WSRetryEvent
@@ -1050,6 +1058,12 @@ export interface WSCallbacks {
      * @param threadId The thread ID
      */
     onThread: (threadId: string) => void;
+
+    /**
+     * Called when the backend generates a name for a new thread
+     * @param event The thread name event with thread_id and name
+     */
+    onThreadName?: (event: WSThreadNameEvent) => void;
 
     /**
      * Called when an error occurs

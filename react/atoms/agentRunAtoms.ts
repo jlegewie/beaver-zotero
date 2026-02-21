@@ -23,6 +23,7 @@ import {
     WSToolCallProgressEvent,
     WSMissingZoteroDataEvent,
     WSDeferredApprovalRequest,
+    WSThreadNameEvent,
     CurrentLibrary,
     CurrentCollection,
 } from '../../src/services/agentProtocol';
@@ -90,6 +91,7 @@ import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
+import { currentThreadNameAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '../agents/toolLabels';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
@@ -849,6 +851,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             logger('WS onThread:', { threadId: newThreadId }, 1);
             set(currentThreadIdAtom, newThreadId);
             set(activeRunAtom, (prev) => prev ? { ...prev, thread_id: newThreadId } : prev);
+        },
+
+        onThreadName: (event: WSThreadNameEvent) => {
+            logger('WS onThreadName:', { threadId: event.thread_id, name: event.name }, 1);
+            set(currentThreadNameAtom, event.name);
         },
 
         onDone: () => {
