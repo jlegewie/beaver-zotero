@@ -130,9 +130,9 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         const context = getZoteroTargetContextSync();
         const hasParent = context.parentReference !== null;
 
-        return [
+        const items = [
             {
-                label: 'Copy chat',
+                label: 'Copy entire chat',
                 onClick: handleCopyThread,
                 disabled: !hasRuns,
             },
@@ -152,6 +152,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                 disabled: !threadId,
             },
         ];
+        return items;
     };
 
     return (
