@@ -13,6 +13,7 @@ import { isAuthenticatedAtom, isWaitingForProfileAtom } from '../atoms/auth';
 import ThreadsMenu from './ui/menus/ThreadsMenu';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
+import ThreadMenuButton from './ui/buttons/ThreadMenuButton';
 import { hasCompletedOnboardingAtom, isDatabaseSyncSupportedAtom, updateRequiredAtom, isProfileLoadedAtom } from '../atoms/profile';
 import { getWindowFromElement } from '../utils/windowContext';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
@@ -95,6 +96,10 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                             disabled={runsCount === 0}
                         />
                     </Tooltip>
+                    <ThreadMenuButton
+                        className="scale-14"
+                        ariaLabel="Thread actions"
+                    />
                     </>
                 )}
 
