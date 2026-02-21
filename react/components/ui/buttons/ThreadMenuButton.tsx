@@ -8,7 +8,7 @@ import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../../
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { allRunsAtom, toolResultsMapAtom } from '../../../agents/atoms';
-import { currentThreadIdAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
+import { currentThreadIdAtom, currentThreadNameAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
 import { citationDataMapAtom } from '../../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
@@ -38,8 +38,11 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
     const getThreadMeta = () => {
         const threadId = store.get(currentThreadIdAtom);
+        const currentName = store.get(currentThreadNameAtom);
         const threads = store.get(recentThreadsAtom);
-        const threadName = (threads as ThreadData[]).find(t => t.id === threadId)?.name || null;
+        const threadName = currentName
+            || (threads as ThreadData[]).find(t => t.id === threadId)?.name
+            || null;
         return { threadId, threadName };
     };
 

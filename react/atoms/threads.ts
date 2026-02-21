@@ -43,6 +43,7 @@ export interface ThreadData {
 
 // Thread messages and attachments
 export const currentThreadIdAtom = atom<string | null>(null);
+export const currentThreadNameAtom = atom<string | null>(null);
 
 /**
  * Atom to store the scroll position of the current thread
@@ -172,7 +173,8 @@ export const newThreadAtom = atom(
             
             const isLibraryTab = get(isLibraryTabAtom);
             set(currentThreadIdAtom, null);
-            
+            set(currentThreadNameAtom, null);
+
             // Clear agent-based atoms
             set(threadRunsAtom, []);
             set(activeRunAtom, null);
@@ -218,7 +220,7 @@ export const isLoadingThreadAtom = atom<boolean>(false);
  */
 export const loadThreadAtom = atom(
     null,
-    async (get, set, { user_id, threadId }: { user_id: string; threadId: string }) => {
+    async (get, set, { user_id, threadId, threadName }: { user_id: string; threadId: string; threadName?: string }) => {
         // Show loading state immediately for instant UI feedback
         set(isLoadingThreadAtom, true);
         
@@ -233,8 +235,9 @@ export const loadThreadAtom = atom(
             // Reset scroll state for both sidebar and window
             set(userScrolledAtom, false);
             set(windowUserScrolledAtom, false);
-            // Set the current thread ID
+            // Set the current thread ID and name
             set(currentThreadIdAtom, threadId);
+            set(currentThreadNameAtom, threadName ?? null);
             set(clearExternalReferenceCacheAtom);
             set(isWebSearchEnabledAtom, false);
             set(resetCitationMarkersAtom);
