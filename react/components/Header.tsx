@@ -97,12 +97,6 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                             disabled={runsCount === 0}
                         />
                     </Tooltip>
-                    {threadId && (
-                        <ThreadMenuButton
-                            className="scale-14"
-                            ariaLabel="Thread actions"
-                        />
-                    )}
                     </>
                 )}
             </div>
@@ -119,11 +113,17 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                         <DatabaseStatusButton />
                     )}
                     {/* Development tools */}
-                    {process.env.NODE_ENV === 'development' && (
+                    {process.env.NODE_ENV === 'development4' && (
                         <DevToolsMenuButton
                             className="scale-14"
                             ariaLabel="Development tools"
                             currentMessageContent={currentMessageContent}
+                        />
+                    )}
+                    {threadId && (
+                        <ThreadMenuButton
+                            className="scale-14"
+                            ariaLabel="Thread actions"
                         />
                     )}
                     {/* Open in separate window */}
