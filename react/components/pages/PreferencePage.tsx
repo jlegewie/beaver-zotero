@@ -124,6 +124,7 @@ const PreferencePage: React.FC = () => {
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
     const [autoApproveExtraction, setAutoApproveExtraction] = useState(() => getPref('autoApproveExtraction'));
+    const [autoApproveExternalSearch, setAutoApproveExternalSearch] = useState(() => getPref('autoApproveExternalSearch'));
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -398,6 +399,12 @@ const PreferencePage: React.FC = () => {
         setPref('autoApproveExtraction', newValue);
         setAutoApproveExtraction(newValue);
     }, [autoApproveExtraction]);
+
+    const handleAutoApproveExternalSearchToggle = useCallback(() => {
+        const newValue = !autoApproveExternalSearch;
+        setPref('autoApproveExternalSearch', newValue);
+        setAutoApproveExternalSearch(newValue);
+    }, [autoApproveExternalSearch]);
 
     // Helper function to get rebuild index button props
     const getRebuildIndexButtonProps = () => {
@@ -911,6 +918,20 @@ const PreferencePage: React.FC = () => {
                                     type="checkbox"
                                     checked={autoApproveExtraction}
                                     onChange={handleAutoApproveExtractionToggle}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ cursor: 'pointer', margin: 0 }}
+                                />
+                            }
+                        />
+                        <SettingsRow
+                            title="Auto-Approve External Search Costs"
+                            description="Skip confirmation when external literature search uses extra credits"
+                            onClick={handleAutoApproveExternalSearchToggle}
+                            control={
+                                <input
+                                    type="checkbox"
+                                    checked={autoApproveExternalSearch}
+                                    onChange={handleAutoApproveExternalSearchToggle}
                                     onClick={(e) => e.stopPropagation()}
                                     style={{ cursor: 'pointer', margin: 0 }}
                                 />

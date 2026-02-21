@@ -995,6 +995,16 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 }
             }
 
+            // confirm_external_search: check auto-approve setting
+            if (event.action_type === 'confirm_external_search') {
+                const autoApprove = getPref('autoApproveExternalSearch') as boolean;
+                if (autoApprove) {
+                    logger('WS onDeferredApprovalRequest: Auto-approving confirm_external_search (setting enabled)', 1);
+                    agentService.sendApprovalResponse(event.action_id, true);
+                    return;
+                }
+            }
+
             // Default: add to pending approvals map for UI rendering
             set(addPendingApprovalAtom, event);
         },

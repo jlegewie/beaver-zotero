@@ -22,6 +22,7 @@ import { CreateCollectionPreview } from './CreateCollectionPreview';
 import { OrganizeItemsPreview } from './OrganizeItemsPreview';
 import { CreateItemsPreview } from './CreateItemsPreview';
 import { ConfirmExtractionPreview } from './ConfirmExtractionPreview';
+import { ConfirmExternalSearchPreview } from './ConfirmExternalSearchPreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
@@ -49,6 +50,7 @@ import {
     TaskDoneIcon,
     DocumentValidationIcon,
     DollarCircleIcon,
+    GlobalSearchIcon,
 } from '../icons/icons';
 import { revealSource } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
@@ -56,6 +58,7 @@ import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import DeferredToolPreferenceButton from '../ui/buttons/DeferredToolPreferenceButton';
 import ExtractionApprovalButton from '../ui/buttons/ExtractionApprovalButton';
+import ExternalSearchApprovalButton from '../ui/buttons/ExternalSearchApprovalButton';
 import { truncateText } from '../../utils/stringUtils';
 import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
 
@@ -336,10 +339,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         : isMultiAction 
             ? getOverallStatus(actions)
             : (action?.status ?? 'pending');
-    // For confirm_extraction, hide post-run Apply/Undo/Reject/Retry — only approval during awaiting is meaningful
+    // For confirmation actions, hide post-run Apply/Undo/Reject/Retry — only approval during awaiting is meaningful
     const isConfirmExtraction = toolName === 'confirm_extraction';
+    const isConfirmExternalSearch = toolName === 'confirm_external_search';
+    const isConfirmAction = isConfirmExtraction || isConfirmExternalSearch;
     const baseConfig = STATUS_CONFIGS[status];
-    const config = (isConfirmExtraction && status !== 'awaiting')
+    const config = (isConfirmAction && status !== 'awaiting')
         ? { ...baseConfig, showApply: false, showReject: false, showUndo: false, showRetry: false }
         : baseConfig;
 
@@ -571,6 +576,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             if (toolName === 'organize_items') return TaskDoneIcon;
             if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
             if (toolName === 'confirm_extraction') return DollarCircleIcon;
+            if (toolName === 'confirm_external_search') return GlobalSearchIcon;
             return ClockIcon;
         };
         if (isAwaitingApproval) return getToolIcon();
@@ -663,7 +669,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 </div>
 
                 {/* Reject and Apply buttons - show during awaiting, pending, or processing */}
-                {((isAwaitingApproval || status === 'pending') && !isProcessing && !isConfirmExtraction) && (
+                {((isAwaitingApproval || status === 'pending') && !isProcessing && !isConfirmAction) && (
                     <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
                         {/* Show Reject button only if not processing or if Reject was clicked */}
                         {(!isProcessing || clickedButton === 'reject') && (
@@ -717,6 +723,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     <div className="display-flex flex-row gap-1 px-2 py-2 mt-1">
                         {isConfirmExtraction ? (
                             <ExtractionApprovalButton onAlwaysApprove={handleApprove} />
+                        ) : isConfirmExternalSearch ? (
+                            <ExternalSearchApprovalButton onAlwaysApprove={handleApprove} />
                         ) : (
                             <DeferredToolPreferenceButton toolName={toolName} />
                         )}
@@ -774,7 +782,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 disabled={isProcessing}
                             >
                                 <span>
-                                    {isConfirmExtraction ? 'Confirm' : 'Apply'}
+                                    {isConfirmAction ? 'Confirm' : 'Apply'}
                                     {/* {isAwaitingApproval && <span className="opacity-50 ml-1">⏎</span>} */}
                                 </span>
                             </Button>
@@ -811,6 +819,8 @@ function getActionLabel(toolName: string): string {
             return 'Organize';
         case 'confirm_extraction':
             return 'Extract';
+        case 'confirm_external_search':
+            return 'Search';
         default:
             return toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
@@ -838,6 +848,9 @@ function getActionTitle(
         case 'confirm_extraction': {
             const count = actionData?.attachment_count ?? 0;
             return `Confirm ${count} Item Batch Processing`;
+        }
+        case 'confirm_external_search': {
+            return 'Confirm External Search';
         }
         case 'create_item':
         case 'create_items': {
@@ -987,6 +1000,16 @@ const ActionPreview: React.FC<{
                 extraCredits={previewData.actionData.extra_credits ?? 0}
                 totalCredits={previewData.actionData.total_credits ?? 0}
                 includedFree={previewData.actionData.included_free ?? 0}
+                status={status}
+            />
+        );
+    }
+
+    if (toolName === 'confirm_external_search' || previewData.actionType === 'confirm_external_search') {
+        return (
+            <ConfirmExternalSearchPreview
+                extraCredits={previewData.actionData.extra_credits ?? 0}
+                totalCredits={previewData.actionData.total_credits ?? 0}
                 status={status}
             />
         );
