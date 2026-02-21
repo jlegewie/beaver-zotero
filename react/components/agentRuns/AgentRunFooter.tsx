@@ -123,31 +123,31 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                 onClick: () => handleCopy()
             },
             {
-                label: 'Save as Note',
+                label: 'Save as note',
                 onClick: () => saveToLibrary()
             },
             {
-                label: 'Save as Child Note',
+                label: 'Save as child note',
                 onClick: () => saveToItem(),
                 disabled: !hasParent
             },
             {
-                label: 'Copy URL to Run',
+                label: 'Copy link to message',
                 onClick: () => copyRunUrl()
             },
             {
-                label: 'Copy Run ID',
+                label: 'Copy message ID',
                 onClick: () => copyRunId()
             }
         ];
 
         if (Zotero.Beaver.data.env === "development") {
             items.push({
-                label: 'Copy Thread ID',
+                label: 'Copy chat ID',
                 onClick: () => copyThreadId()
             });
             items.push({
-                label: 'Copy Citation Metadata',
+                label: 'Copy citation metadata',
                 onClick: () => copyCitationMetadata()
             });
         }
