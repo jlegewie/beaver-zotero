@@ -119,12 +119,13 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
 
             element.scrollIntoView({ behavior: "smooth", block: "start" });
             // Determine scroll state based on whether the target is near the bottom.
-            // scrollIntoView is async (smooth), so check the position we'll end up at:
-            // if the element's top is close enough to the bottom of scrollable content,
-            // the final scroll position will be at/near the bottom.
-            const { scrollHeight, clientHeight } = container;
-            const elementOffsetTop = element.offsetTop;
-            const projectedDistanceFromBottom = scrollHeight - elementOffsetTop - clientHeight;
+            // scrollIntoView is async (smooth), so project the final scroll position:
+            // use getBoundingClientRect relative to the container to get the element's
+            // position within the scrollable area (offsetTop is relative to offsetParent,
+            // which may not be the scroll container).
+            const { scrollHeight, scrollTop, clientHeight } = container;
+            const elementTopInContainer = element.getBoundingClientRect().top - container.getBoundingClientRect().top + scrollTop;
+            const projectedDistanceFromBottom = scrollHeight - elementTopInContainer - clientHeight;
             store.set(scrolledAtom, projectedDistanceFromBottom > BOTTOM_THRESHOLD);
             setPendingScrollToRun(null);
             return true;
