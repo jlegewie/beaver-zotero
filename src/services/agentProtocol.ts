@@ -259,6 +259,8 @@ export interface ItemSearchFrontendResultItem {
  * Used for backend diagnostics to understand where time is spent during search operations.
  */
 export interface FrontendTimingMetadata {
+    /** Allow additional timing keys from TimingAccumulator */
+    [key: string]: number | undefined;
     /** Total operation time in milliseconds */
     total_ms?: number;
     /** Time spent in search/query phase */
@@ -269,6 +271,24 @@ export interface FrontendTimingMetadata {
     item_count?: number;
     /** Number of attachments processed */
     attachment_count?: number;
+
+    // Serialization breakdown (cumulative across parallel items)
+    /** Time spent loading Zotero data types before serialization */
+    data_loading_ms?: number;
+    /** Cumulative time in serializeItem() across all items */
+    item_serialization_ms?: number;
+    /** Cumulative time in processAttachmentsParallel() across all items */
+    attachment_processing_ms?: number;
+    /** Cumulative time fetching attachment items + best attachment + sync dates */
+    att_fetch_ms?: number;
+    /** Cumulative time loading attachment data types */
+    att_load_data_ms?: number;
+    /** Cumulative time serializing individual attachments */
+    att_serialize_ms?: number;
+    /** Cumulative time computing item sync status */
+    att_status_ms?: number;
+    /** Cumulative time computing file status (page count, etc.) */
+    att_file_status_ms?: number;
 
     // Reference check specific timings
     /** Time spent in phase 1: identifier (DOI/ISBN) lookup */

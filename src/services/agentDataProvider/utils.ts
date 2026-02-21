@@ -14,6 +14,7 @@ import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import { serializeAttachment } from '../../utils/zoteroSerializers';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from '../../../react/utils/pdfUtils';
+import { TimingAccumulator } from '../../utils/timing';
 
 /**
  * Validate that a ZoteroItemReference has correctly formatted fields.
@@ -436,23 +437,28 @@ export interface AttachmentProcessingContext {
 export async function processAttachmentsParallel(
     item: Zotero.Item,
     context: AttachmentProcessingContext,
-    options?: { skipHash?: boolean }
+    options?: { skipHash?: boolean; timing?: TimingAccumulator }
 ): Promise<AttachmentDataWithStatus[]> {
     const skipHash = options?.skipHash ?? false;
+    const ta = options?.timing;
     const attachmentIds = item.getAttachments();
     if (attachmentIds.length === 0) {
         return [];
     }
 
     // Fetch attachment items, primary attachment, and sync dates in parallel
-    const [attachmentItems, primaryAttachment, syncDateCache] = await Promise.all([
+    const fetchFn = () => Promise.all([
         Zotero.Items.getAsync(attachmentIds),
         item.getBestAttachment(),
         prefetchSyncDates([item.libraryID], context.syncWithZotero, context.userId)
     ]);
+    const [attachmentItems, primaryAttachment, syncDateCache] = ta
+        ? await ta.track('att_fetch_ms', fetchFn)
+        : await fetchFn();
 
     // Load data types for all attachments
-    await Zotero.Items.loadDataTypes(attachmentItems, ["primaryData", "itemData", "tags", "collections", "relations", "childItems"]);
+    const loadFn = () => Zotero.Items.loadDataTypes(attachmentItems, ["primaryData", "itemData", "tags", "collections", "relations", "childItems"]);
+    ta ? await ta.track('att_load_data_ms', loadFn) : await loadFn();
 
     // Process all attachments in parallel
     const attachmentPromises = attachmentItems.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
@@ -463,7 +469,10 @@ export async function processAttachmentsParallel(
         }
 
         // Serialize attachment (skip file hash — not needed for search results)
-        const attachmentData = await serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true, skipHash });
+        const serializeFn = () => serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true, skipHash });
+        const attachmentData = ta
+            ? await ta.track('att_serialize_ms', serializeFn)
+            : await serializeFn();
         if (!attachmentData) {
             return null;
         }
@@ -471,10 +480,15 @@ export async function processAttachmentsParallel(
         // Compute status and file status in parallel
         // Use lightweight file status to avoid reading full PDFs
         const isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
-        const [status, fileStatus] = await Promise.all([
-            computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId, { syncDateCache }),
-            getAttachmentFileStatusLightweight(attachment, isPrimary)
-        ]);
+        const statusFn = () => computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId, { syncDateCache });
+        const fileStatusFn = () => getAttachmentFileStatusLightweight(attachment, isPrimary);
+
+        const [status, fileStatus] = ta
+            ? await Promise.all([
+                ta.track('att_status_ms', statusFn),
+                ta.track('att_file_status_ms', fileStatusFn),
+            ])
+            : await Promise.all([statusFn(), fileStatusFn()]);
 
         return {
             attachment: attachmentData,
@@ -484,7 +498,7 @@ export async function processAttachmentsParallel(
     });
 
     const results = await Promise.all(attachmentPromises);
-    
+
     // Filter out null results (invalid attachments)
     return results.filter((result): result is AttachmentDataWithStatus => result !== null);
 }

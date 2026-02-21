@@ -23,6 +23,7 @@ import {
 } from '../agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../react/utils/searchTools';
 import { getCollectionByIdOrName, processAttachmentsParallel } from './utils';
+import { TimingAccumulator } from '../../utils/timing';
 
 
 /**
@@ -204,9 +205,14 @@ export async function handleItemSearchByMetadataRequest(
     // Deduplicate items, prioritizing items from user's main library (library ID 1)
     items = deduplicateItems(items, 1);
 
+    // Timing accumulator for serialization breakdown
+    const ta = new TimingAccumulator();
+
     // Load item data needed for serialization (searchItemsByMetadata only loads itemData/creators/childItems)
     if (items.length > 0) {
-        await Zotero.Items.loadDataTypes(items, ["primaryData", "tags", "collections", "relations", "childItems"]);
+        await ta.track('data_loading_ms', () =>
+            Zotero.Items.loadDataTypes(items, ["primaryData", "tags", "collections", "relations", "childItems"])
+        );
     }
 
     // Record search completion time
@@ -239,8 +245,8 @@ export async function handleItemSearchByMetadataRequest(
             batch.map(async (item): Promise<ItemSearchFrontendResultItem | null> => {
                 try {
                     const [itemData, attachments] = await Promise.all([
-                        serializeItem(item, undefined, { skipHash: true }),
-                        processAttachmentsParallel(item, attachmentContext, { skipHash: true })
+                        ta.track('item_serialization_ms', () => serializeItem(item, undefined, { skipHash: true })),
+                        ta.track('attachment_processing_ms', () => processAttachmentsParallel(item, attachmentContext, { skipHash: true, timing: ta }))
                     ]);
                     return { item: itemData, attachments };
                 } catch (error) {
@@ -264,13 +270,14 @@ export async function handleItemSearchByMetadataRequest(
     // Calculate total attachment count
     const totalAttachments = resultItems.reduce((sum, item) => sum + item.attachments.length, 0);
     
-    // Build timing metadata
+    // Build timing metadata with serialization breakdown
     const timing: FrontendTimingMetadata = {
         total_ms: Date.now() - startTime,
         search_ms: searchEndTime - startTime,
         serialization_ms: serializationEndTime - searchEndTime,
         item_count: resultItems.length,
         attachment_count: totalAttachments,
+        ...ta.getAll(),
     };
 
     logger(`handleItemSearchByMetadataRequest: Returning ${resultItems.length} items, timing: ${JSON.stringify(timing)}`, 1);
