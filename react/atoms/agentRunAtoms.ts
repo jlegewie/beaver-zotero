@@ -973,8 +973,16 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 actionType: event.action_type,
             }, 1);
 
-            // Pre-validate confirm_extraction: auto-approve if few attachments exist locally
+            // confirm_extraction: check auto-approve setting, then pre-validate
             if (event.action_type === 'confirm_extraction') {
+                const autoApprove = getPref('autoApproveExtraction') as boolean;
+                if (autoApprove) {
+                    logger('WS onDeferredApprovalRequest: Auto-approving confirm_extraction (setting enabled)', 1);
+                    agentService.sendApprovalResponse(event.action_id, true);
+                    return;
+                }
+
+                // Pre-validate: auto-approve if few attachments exist locally
                 const attachmentIds: string[] = event.action_data?.attachment_ids ?? [];
                 const includedFree: number = event.action_data?.included_free ?? 0;
 

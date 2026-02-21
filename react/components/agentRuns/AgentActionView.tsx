@@ -55,6 +55,7 @@ import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import DeferredToolPreferenceButton from '../ui/buttons/DeferredToolPreferenceButton';
+import ExtractionApprovalButton from '../ui/buttons/ExtractionApprovalButton';
 import { truncateText } from '../../utils/stringUtils';
 import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
 
@@ -714,8 +715,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
                     {/* Action buttons */}
                     <div className="display-flex flex-row gap-1 px-2 py-2 mt-1">
-                        {/* confirm_extraction is a one-shot credit confirmation and must always require explicit approval */}
-                        {!isConfirmExtraction && (
+                        {isConfirmExtraction ? (
+                            <ExtractionApprovalButton onAlwaysApprove={handleApprove} />
+                        ) : (
                             <DeferredToolPreferenceButton toolName={toolName} />
                         )}
                         <div className="flex-1" />

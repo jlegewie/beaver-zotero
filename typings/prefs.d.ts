@@ -25,6 +25,7 @@ declare namespace _ZoteroTypes {
       "autoApplyAnnotations": boolean;
       "autoCreateNotes": boolean;
       "autoImportItems": boolean;
+      "autoApproveExtraction": boolean;
       "deferredToolPreferences": string;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;

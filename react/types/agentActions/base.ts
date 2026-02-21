@@ -209,6 +209,8 @@ export interface ConfirmExtractionProposedData {
     included_free: number;
     /** Attachment IDs for frontend pre-validation of file existence */
     attachment_ids?: string[];
+    /** Brief UI label for progress display (e.g., "Extracting wealth measures") */
+    label?: string | null;
 }
 
 /**
