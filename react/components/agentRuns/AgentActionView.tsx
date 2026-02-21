@@ -1000,6 +1000,7 @@ const ActionPreview: React.FC<{
                 extraCredits={previewData.actionData.extra_credits ?? 0}
                 totalCredits={previewData.actionData.total_credits ?? 0}
                 includedFree={previewData.actionData.included_free ?? 0}
+                label={previewData.actionData.label}
                 status={status}
             />
         );
@@ -1010,6 +1011,7 @@ const ActionPreview: React.FC<{
             <ConfirmExternalSearchPreview
                 extraCredits={previewData.actionData.extra_credits ?? 0}
                 totalCredits={previewData.actionData.total_credits ?? 0}
+                label={previewData.actionData.label}
                 status={status}
             />
         );
