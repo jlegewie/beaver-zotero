@@ -132,22 +132,22 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
         return [
             {
-                label: 'Copy Thread',
+                label: 'Copy chat',
                 onClick: handleCopyThread,
                 disabled: !hasRuns,
             },
             {
-                label: 'Save Thread as Note',
+                label: 'Save chat as note',
                 onClick: handleSaveAsNote,
                 disabled: !hasRuns,
             },
             {
-                label: 'Save Thread as Child Note',
+                label: 'Save chat as child note',
                 onClick: handleSaveAsChildNote,
                 disabled: !hasParent || !hasRuns,
             },
             {
-                label: 'Copy Thread URL',
+                label: 'Copy link to chat',
                 onClick: handleCopyThreadUrl,
                 disabled: !threadId,
             },
