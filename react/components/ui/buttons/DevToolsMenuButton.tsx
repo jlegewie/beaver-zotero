@@ -3,7 +3,7 @@ import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import PdfIcon from '../../icons/PdfIcon';
 import SearchIcon from '../../icons/SearchIcon';
-import MoreHorizontalIcon from '../../icons/MoreHorizontalIcon';
+import ToolsIcon from '../../icons/ToolsIcon';
 import { 
     extractByLinesFromZoteroItem,
     ExtractionError, 
@@ -627,7 +627,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         <MenuButton
             menuItems={menuItems}
             variant="ghost"
-            icon={MoreHorizontalIcon}
+            icon={ToolsIcon}
             className={className}
             ariaLabel={ariaLabel}
             tooltipContent="Development Tools"
