@@ -6,7 +6,7 @@
 import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
-import { loadThreadAtom, pendingScrollToRunAtom } from '../atoms/threads';
+import { currentThreadIdAtom, loadThreadAtom, pendingScrollToRunAtom } from '../atoms/threads';
 import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
 import { logger } from '../../src/utils/logger';
@@ -18,11 +18,19 @@ interface PendingProtocolTarget {
 
 export function useThreadProtocolHandler() {
     const user = useAtomValue(userAtom);
+    const currentThreadId = useAtomValue(currentThreadIdAtom);
     const loadThread = useSetAtom(loadThreadAtom);
     const setPendingScrollToRun = useSetAtom(pendingScrollToRunAtom);
     const pendingTargetRef = useRef<PendingProtocolTarget | null>(null);
 
     const loadTargetThread = (threadId: string, userId: string, runId?: string) => {
+        // If the thread is already open, skip reloading — just scroll to the run if requested.
+        if (threadId === currentThreadId) {
+            logger(`useThreadProtocolHandler: Thread ${threadId} already open, skipping reload${runId ? ` — scrolling to run ${runId}` : ''}`);
+            setPendingScrollToRun(runId ?? null);
+            return;
+        }
+
         logger(`useThreadProtocolHandler: Loading thread ${threadId}${runId ? ` / run ${runId}` : ''}`);
 
         // Set/clear scroll target before loading so ThreadView picks up only the current protocol target.
@@ -45,7 +53,7 @@ export function useThreadProtocolHandler() {
         }
 
         loadTargetThread(threadId, user.id, runId);
-    }, [user, loadThread, setPendingScrollToRun]);
+    }, [user, currentThreadId, loadThread, setPendingScrollToRun]);
 
     useEffect(() => {
         if (!user || !pendingTargetRef.current) return;
@@ -54,5 +62,5 @@ export function useThreadProtocolHandler() {
         pendingTargetRef.current = null;
         logger(`useThreadProtocolHandler: Resuming deferred thread load ${threadId}${runId ? ` / run ${runId}` : ''}`);
         loadTargetThread(threadId, user.id, runId);
-    }, [user, loadThread, setPendingScrollToRun]);
+    }, [user, currentThreadId, loadThread, setPendingScrollToRun]);
 }
