@@ -113,7 +113,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                         <DatabaseStatusButton />
                     )}
                     {/* Development tools */}
-                    {process.env.NODE_ENV === 'development4' && (
+                    {process.env.NODE_ENV === 'development' && (
                         <DevToolsMenuButton
                             className="scale-14"
                             ariaLabel="Development tools"
