@@ -46,6 +46,8 @@ declare namespace Zotero {
             env: "development" | "production";
         };
 
+        const attachmentFileCache: import("../src/services/attachmentFileCache").AttachmentFileCache | undefined;
+
         const db: {
             /**
              * Initialize the database by creating tables if they don't exist.
