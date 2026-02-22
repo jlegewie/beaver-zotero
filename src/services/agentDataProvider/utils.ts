@@ -458,7 +458,7 @@ export async function processAttachmentsParallel(
 
     // Load data types for all attachments
     const loadFn = () => Zotero.Items.loadDataTypes(attachmentItems, ["primaryData", "itemData", "tags", "collections", "relations", "childItems"]);
-    ta ? await ta.track('att_load_data_ms', loadFn) : await loadFn();
+    await (ta ? ta.track('att_load_data_ms', loadFn) : loadFn());
 
     // Process all attachments in parallel
     const attachmentPromises = attachmentItems.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
