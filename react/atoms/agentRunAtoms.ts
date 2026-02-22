@@ -1277,6 +1277,11 @@ export const sendWSMessageAtom = atom(
         // Get current thread ID (null for new thread)
         const threadId = get(currentThreadIdAtom);
 
+            // Set temporary thread name for new threads (mirrors backend thread_name_hint[:35])
+            if (!threadId && message) {
+                set(currentThreadNameAtom, message.substring(0, 35));
+            }
+
             // Get user ID for the run
             const userId = get(userIdAtom);
             if (!userId) {

@@ -5,6 +5,7 @@ import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom
 import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom } from "./citations";
 import { isExternalCitation } from "../types/citations";
 import { agentRunService, agentService } from "../../src/services/agentService";
+import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { logger } from "../../src/utils/logger";
@@ -241,10 +242,32 @@ export const loadThreadAtom = atom(
             set(clearExternalReferenceCacheAtom);
             set(isWebSearchEnabledAtom, false);
             set(resetCitationMarkersAtom);
-            
+
             // Clear all pending approvals when loading a different thread
             set(clearAllPendingApprovalsAtom);
-            
+
+            // Fetch thread name if not provided (e.g., from protocol handler deep links).
+            // Check cached recentThreadsAtom first to avoid a network/DB round-trip.
+            const threadNamePromise = !threadName
+                ? (async () => {
+                    const cached = get(recentThreadsAtom).find(t => t.id === threadId);
+                    if (cached?.name) return cached.name;
+                    try {
+                        const statefulChat = getPref('statefulChat');
+                        if (statefulChat) {
+                            const thread = await threadService.getThread(threadId);
+                            return thread.name || null;
+                        } else {
+                            const thread = await Zotero.Beaver.db.getThread(user_id, threadId);
+                            return thread?.name || null;
+                        }
+                    } catch (error) {
+                        logger(`loadThreadAtom: Failed to fetch thread name: ${error}`);
+                        return null;
+                    }
+                })()
+                : null;
+
             // Load agent runs with actions from the backend
             const { runs, agent_actions } = await agentRunService.getThreadRuns(threadId, true);
             
@@ -362,6 +385,14 @@ export const loadThreadAtom = atom(
                 set(threadRunsAtom, []);
                 set(threadAgentActionsAtom, []);
                 set(citationMetadataAtom, []);
+            }
+
+            // Resolve thread name if fetched asynchronously
+            if (threadNamePromise) {
+                const fetchedName = await threadNamePromise;
+                if (fetchedName) {
+                    set(currentThreadNameAtom, fetchedName);
+                }
             }
         } catch (error) {
             // Load failed, so any pending deep-link target can no longer be fulfilled.
