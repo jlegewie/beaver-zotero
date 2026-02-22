@@ -203,8 +203,11 @@ export async function handleZoteroAttachmentPagesRequest(
             throw error;
         }
 
-        // 8. Check page count limit (skip if skip_local_limits is true)
-        if (!skip_local_limits) {
+        // 8. Check page count limit only when extracting all pages (no range specified).
+        // When a specific page range is given, extraction cost scales with the number of
+        // requested pages, not total page count — so the limit is not meaningful there.
+        const extractingAllPages = start_page === null && end_page === null;
+        if (!skip_local_limits && extractingAllPages) {
             const maxPageCount = getPref('maxPageCount');
             
             if (totalPages > maxPageCount) {
