@@ -5,6 +5,7 @@ import { BeaverUIFactory } from "./ui/ui";
 import eventBus from "../react/eventBus";
 import { CitationService } from "./services/CitationService";
 import { BeaverDB } from "./services/database";
+import { AttachmentFileCache } from "./services/attachmentFileCache";
 import { uiManager } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
@@ -136,6 +137,13 @@ async function onStartup() {
     await dbConnection.test();
     await beaverDB.initDatabase(version);
     
+    // -------- Initialize Attachment File Cache --------
+    const attachmentFileCache = new AttachmentFileCache(beaverDB);
+    await attachmentFileCache.init();
+    await attachmentFileCache.runStartupGC();
+    addon.attachmentFileCache = attachmentFileCache;
+    ztoolkit.log("AttachmentFileCache initialized successfully");
+
     // -------- Initialize Citation Service with caching --------
     const citationService = new CitationService(ztoolkit);
     addon.citationService = citationService;
@@ -263,45 +271,51 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 2. Dispose MuPDF WASM module to release native resources
         await disposeMuPDF();
 
-        // 3. Close database connection
+        // 3. Clear attachment file cache
+        if (addon.attachmentFileCache) {
+            addon.attachmentFileCache.clearMemoryCache();
+            addon.attachmentFileCache = undefined;
+        }
+
+        // 4. Close database connection
         if (addon.db) {
             await addon.db.closeDatabase();
             addon.db = undefined;
         }
 
-        // 4. Dispose CitationService
+        // 5. Dispose CitationService
         if (addon.citationService) {
             addon.citationService.dispose();
             addon.citationService = undefined;
         }
 
-        // 5. Unregister keyboard shortcuts (clears interval, unregisters Zotero.Reader listeners)
+        // 6. Unregister keyboard shortcuts (clears interval, unregisters Zotero.Reader listeners)
         BeaverUIFactory.unregisterShortcuts();
 
-        // 6. Clean up UIManager (restores Zotero.Reader.onChangeSidebarWidth)
+        // 7. Clean up UIManager (restores Zotero.Reader.onChangeSidebarWidth)
         if (uiManager) {
             uiManager.cleanup();
         }
 
-        // 7. Unload stylesheets
+        // 8. Unload stylesheets
         unloadKatexStylesheet();
         unloadStylesheet();
 
-        // 8. Unregister ztoolkit
+        // 9. Unregister ztoolkit
         ztoolkit.unregisterAll();
         addon.data.dialog?.window?.close();
 
-        // 9. Close separate Beaver and preferences windows if open
+        // 10. Close separate Beaver and preferences windows if open
         BeaverUIFactory.closeBeaverWindow();
         BeaverUIFactory.closePreferencesWindow();
 
-        // 10. Unregister quit observer
+        // 11. Unregister quit observer
         unregisterQuitObserver();
 
-        // 11. Unregister protocol handler
+        // 12. Unregister protocol handler
         unregisterBeaverProtocolHandler();
 
-        // 12. Mark addon as not alive to prevent any further callbacks
+        // 13. Mark addon as not alive to prevent any further callbacks
         addon.data.alive = false;
 
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
@@ -386,6 +400,11 @@ async function onShutdown(): Promise<void> {
             }
         } catch (_e) { /* may not be available during shutdown */ }
         await disposeMuPDF();
+
+        if (addon.attachmentFileCache) {
+            addon.attachmentFileCache.clearMemoryCache();
+            addon.attachmentFileCache = undefined;
+        }
 
         if (addon.db) {
             await addon.db.closeDatabase();
