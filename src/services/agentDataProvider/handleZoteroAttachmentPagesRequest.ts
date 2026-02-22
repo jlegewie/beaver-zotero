@@ -18,6 +18,8 @@ import {
     WSPageContent,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { EXTRACTION_VERSION } from '../attachmentFileCache';
+import type { CachedPageContent } from '../attachmentFileCache';
 import { resolveToPdfAttachment, validateZoteroItemReference } from './utils';
 
 
@@ -31,6 +33,11 @@ export async function handleZoteroAttachmentPagesRequest(
     const { attachment, start_page, end_page, skip_local_limits, request_id } = request;
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
     let errorKey = requestKey;
+
+    // Hoisted so the catch block can access the resolved PDF identity
+    // for error-state metadata backfill (after auto-resolution).
+    let resolvedPdfItem: Zotero.Item | null = null;
+    let resolvedFilePath: string | null = null;
 
     // Helper to create error response
     const errorResponse = (
@@ -80,9 +87,11 @@ export async function handleZoteroAttachmentPagesRequest(
         }
         const { item: pdfItem, key: pdfKey } = resolveResult;
         errorKey = pdfKey;
+        resolvedPdfItem = pdfItem;
 
         // 3. Get the file path — returns false if missing or nonexistent
         const filePath = await pdfItem.getFilePathAsync();
+        resolvedFilePath = filePath || null;
         if (!filePath) {
             const isOnServer = isAttachmentOnServer(pdfItem);
             return errorResponse(
@@ -109,14 +118,33 @@ export async function handleZoteroAttachmentPagesRequest(
             }
         }
 
-        // 5. Read PDF and get page count (also validates the PDF structure)
-        const pdfData = await IOUtils.read(filePath);
+        // 4b. Try metadata cache for fast prechecks
+        const cache = Zotero.Beaver?.attachmentFileCache;
+        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, filePath).catch(() => null) : null;
+
+        // Fast-path: use cached metadata for known error states
+        if (cachedMeta) {
+            if (cachedMeta.is_encrypted) {
+                return errorResponse(`The PDF file for ${pdfKey} is password-protected`, 'encrypted');
+            }
+            if (cachedMeta.is_invalid) {
+                return errorResponse(`The PDF file for ${pdfKey} is invalid or corrupted`, 'invalid_pdf');
+            }
+        }
+
+        // 5. Determine total page count (from cache or PDF)
+        let totalPages: number;
+        let pdfData: Uint8Array | null = null;
         const extractor = new PDFExtractor();
-        const totalPages = await extractor.getPageCount(pdfData);
+
+        if (cachedMeta?.page_count != null) {
+            totalPages = cachedMeta.page_count;
+        } else {
+            pdfData = await IOUtils.read(filePath);
+            totalPages = await extractor.getPageCount(pdfData);
+        }
 
         // 6. Check page count limit when extracting all pages.
-        // When a specific page range is given, extraction cost scales with the number of
-        // requested pages, not total page count — so the limit is not meaningful there.
         const extractingAllPages = start_page === null && end_page === null;
         if (!skip_local_limits && extractingAllPages) {
             const maxPageCount = getPref('maxPageCount');
@@ -148,7 +176,40 @@ export async function handleZoteroAttachmentPagesRequest(
             );
         }
 
-        // 8. Extract pages (convert to 0-indexed for extractor)
+        // 7b. Try content cache for requested page range (0-indexed)
+        const startIdx = startPage - 1;
+        const endIdx = endPage - 1;
+
+        if (cache) {
+            try {
+                const cachedPages = await cache.getContentRange(
+                    pdfItem.libraryID, pdfItem.key,
+                    filePath, startIdx, endIdx
+                );
+                if (cachedPages) {
+                    logger(`handleZoteroAttachmentPagesRequest: Cache hit for ${requestKey} pages ${startPage}-${endPage}`, 3);
+                    const pages: WSPageContent[] = cachedPages.map((p) => ({
+                        page_number: p.index + 1,
+                        content: p.content,
+                    }));
+                    return {
+                        type: 'zotero_attachment_pages',
+                        request_id,
+                        attachment,
+                        pages,
+                        total_pages: totalPages,
+                    };
+                }
+            } catch (error) {
+                logger(`handleZoteroAttachmentPagesRequest: content cache read error: ${error}`, 1);
+            }
+        }
+
+        // 8. Cache miss — extract pages (convert to 0-indexed for extractor)
+        logger(`handleZoteroAttachmentPagesRequest: Cache miss for ${requestKey} pages ${startPage}-${endPage}`, 3);
+        if (!pdfData) {
+            pdfData = await IOUtils.read(filePath);
+        }
         const pageIndices = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage - 1 + i);
         const result = await extractor.extract(pdfData, {
             pages: pageIndices,
@@ -160,6 +221,60 @@ export async function handleZoteroAttachmentPagesRequest(
             page_number: page.index + 1,
             content: page.content,
         }));
+
+        // 9b. Write-through: persist metadata and content cache
+        if (cache) {
+            try {
+                // Persist or upgrade metadata.
+                // Always write when no row exists. Also upgrade existing rows
+                // that lack OCR state (needs_ocr === null) — those were seeded
+                // by the lightweight/search/image paths and should now receive
+                // the known OCR fields from the successful extraction.
+                if (!cachedMeta || cachedMeta.needs_ocr === null) {
+                    const stat = await IOUtils.stat(filePath);
+                    // Build page labels from extraction result
+                    const pageLabels: Record<number, string> = {};
+                    for (const p of result.pages) {
+                        if (p.label) pageLabels[p.index] = p.label;
+                    }
+                    await cache.setMetadata({
+                        item_id: pdfItem.id,
+                        library_id: pdfItem.libraryID,
+                        zotero_key: pdfItem.key,
+                        file_path: filePath,
+                        file_mtime_ms: stat.lastModified ?? 0,
+                        file_size_bytes: stat.size ?? 0,
+                        content_type: pdfItem.attachmentContentType || 'application/pdf',
+                        page_count: totalPages,
+                        page_labels: Object.keys(pageLabels).length > 0 ? pageLabels : null,
+                        has_text_layer: true,
+                        needs_ocr: false,
+                        is_encrypted: false,
+                        is_invalid: false,
+                        extraction_version: EXTRACTION_VERSION,
+                        has_content_cache: cachedMeta?.has_content_cache ?? false,
+                    });
+                }
+
+                // Persist content pages
+                const contentPages: CachedPageContent[] = result.pages.map((p) => ({
+                    index: p.index,
+                    label: p.label,
+                    content: p.content,
+                    width: p.width,
+                    height: p.height,
+                }));
+                await cache.setContentPages(
+                    pdfItem.libraryID,
+                    pdfItem.key,
+                    filePath,
+                    totalPages,
+                    contentPages
+                );
+            } catch (error) {
+                logger(`handleZoteroAttachmentPagesRequest: cache write error: ${error}`, 1);
+            }
+        }
 
         return {
             type: 'zotero_attachment_pages',
@@ -173,6 +288,26 @@ export async function handleZoteroAttachmentPagesRequest(
         logger(`handleZoteroAttachmentPagesRequest: Extraction failed: ${error}`, 1);
 
         if (error instanceof ExtractionError) {
+            // Backfill metadata for known error states using the already-
+            // resolved identity (hoisted before the try block).
+            const cache = Zotero.Beaver?.attachmentFileCache;
+            if (cache && resolvedPdfItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF || error.code === ExtractionErrorCode.NO_TEXT_LAYER)) {
+                try {
+                    const stat = await IOUtils.stat(resolvedFilePath);
+                    await cache.setMetadata({
+                        item_id: resolvedPdfItem.id, library_id: resolvedPdfItem.libraryID, zotero_key: resolvedPdfItem.key,
+                        file_path: resolvedFilePath, file_mtime_ms: stat.lastModified ?? 0, file_size_bytes: stat.size ?? 0,
+                        content_type: resolvedPdfItem.attachmentContentType || 'application/pdf',
+                        page_count: null, page_labels: null,
+                        has_text_layer: error.code !== ExtractionErrorCode.NO_TEXT_LAYER ? null : false,
+                        needs_ocr: error.code === ExtractionErrorCode.NO_TEXT_LAYER,
+                        is_encrypted: error.code === ExtractionErrorCode.ENCRYPTED,
+                        is_invalid: error.code === ExtractionErrorCode.INVALID_PDF,
+                        extraction_version: EXTRACTION_VERSION, has_content_cache: false,
+                    });
+                } catch { /* best-effort */ }
+            }
+
             switch (error.code) {
                 case ExtractionErrorCode.ENCRYPTED:
                     return errorResponse(`The PDF file for ${errorKey} is password-protected`, 'encrypted');
