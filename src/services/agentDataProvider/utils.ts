@@ -823,6 +823,76 @@ export function extractErrorDetails(error: unknown): { message: string; details:
     return { message: String(error), details: null };
 }
 
+/**
+ * Result of resolving a Zotero item to a PDF attachment.
+ */
+export type PdfAttachmentResolveResult =
+    | { resolved: true; item: Zotero.Item; key: string }
+    | { resolved: false; error: string; error_code: 'not_attachment' | 'is_linked_url' | 'not_pdf' };
+
+/**
+ * Resolve a Zotero item to a PDF attachment.
+ * - If the item is already a PDF attachment, returns it directly.
+ * - If it's a regular item with exactly one PDF attachment, auto-resolves to that attachment.
+ * - Notes, annotations, non-PDF attachments, and ambiguous items return an error.
+ *
+ * @param item - Zotero item to resolve
+ * @param uniqueKey - Human-readable key for error messages (e.g. "1-ABCDE123")
+ */
+export async function resolveToPdfAttachment(
+    item: Zotero.Item,
+    uniqueKey: string
+): Promise<PdfAttachmentResolveResult> {
+    if (item.isAttachment()) {
+        if (item.isPDFAttachment()) {
+            return { resolved: true, item, key: uniqueKey };
+        }
+        if (item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL) {
+            return {
+                resolved: false,
+                error: `Attachment ${uniqueKey} is a linked URL, not a stored file. Beaver cannot access linked URL attachments.`,
+                error_code: 'is_linked_url',
+            };
+        }
+        const contentType = item.attachmentContentType || 'unknown';
+        return {
+            resolved: false,
+            error: `Attachment ${uniqueKey} is not a PDF (type: ${contentType})`,
+            error_code: 'not_pdf',
+        };
+    }
+
+    if (item.isRegularItem()) {
+        const info = await getAttachmentInfo(item);
+
+        if (info.count === 1 && info.bestAttachmentKey) {
+            const [libIdStr, key] = info.bestAttachmentKey.split('-');
+            const resolvedItem = await Zotero.Items.getByLibraryAndKeyAsync(parseInt(libIdStr, 10), key);
+            if (!resolvedItem) {
+                return {
+                    resolved: false,
+                    error: `The id '${uniqueKey}' is a regular item with one attachment (${info.text}) but it could not be resolved.`,
+                    error_code: 'not_attachment',
+                };
+            }
+            await resolvedItem.loadAllData();
+            return resolveToPdfAttachment(resolvedItem, info.bestAttachmentKey);
+        }
+
+        const message = info.count > 0
+            ? `The id '${uniqueKey}' is a regular item, not an attachment. The item has ${info.count} attachments: ${info.text}`
+            : `The id '${uniqueKey}' is a regular item, not an attachment. The item has no attachments.`;
+        return { resolved: false, error: message, error_code: 'not_attachment' };
+    }
+
+    const kind = item.isNote() ? 'note' : item.isAnnotation() ? 'annotation' : 'non-attachment item';
+    return {
+        resolved: false,
+        error: `The id '${uniqueKey}' is a ${kind}, not an attachment.`,
+        error_code: 'not_attachment',
+    };
+}
+
 export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: number, text: string, bestAttachmentKey: string | null }> {
     if (!item.isRegularItem()) {
         return {
