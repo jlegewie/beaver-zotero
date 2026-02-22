@@ -23,6 +23,7 @@ import {
     WSToolCallProgressEvent,
     WSMissingZoteroDataEvent,
     WSDeferredApprovalRequest,
+    WSThreadNameEvent,
     CurrentLibrary,
     CurrentCollection,
 } from '../../src/services/agentProtocol';
@@ -90,6 +91,7 @@ import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
+import { currentThreadNameAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '../agents/toolLabels';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
@@ -851,6 +853,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(activeRunAtom, (prev) => prev ? { ...prev, thread_id: newThreadId } : prev);
         },
 
+        onThreadName: (event: WSThreadNameEvent) => {
+            logger('WS onThreadName:', { threadId: event.thread_id, name: event.name }, 1);
+            set(currentThreadNameAtom, event.name);
+        },
+
         onDone: () => {
             logger('WS onDone: Request fully complete', 1);
 
@@ -1269,6 +1276,11 @@ export const sendWSMessageAtom = atom(
 
         // Get current thread ID (null for new thread)
         const threadId = get(currentThreadIdAtom);
+
+            // Set temporary thread name for new threads (mirrors backend thread_name_hint[:35])
+            if (!threadId && message) {
+                set(currentThreadNameAtom, message.substring(0, 35));
+            }
 
             // Get user ID for the run
             const userId = get(userIdAtom);

@@ -1,6 +1,6 @@
 import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRun, TextPart, ToolCallPart } from '../../agents/types';
+import { AgentRun } from '../../agents/types';
 import { RepeatIcon, ShareIcon, ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
 import { copyToClipboard } from '../../utils/clipboard';
 import IconButton from '../ui/IconButton';
@@ -17,7 +17,7 @@ import { CitationData, getCitationKey } from '../../types/citations';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
 import { toolResultsMapAtom } from '../../agents/atoms';
-import { getToolCallLabel } from '../../agents/toolLabels';
+import { extractRunResponseContent } from '../../utils/threadContent';
 import TokenUsageDisplay from './TokenUsageDisplay';
 import { regenerateFromRunAtom } from '../../atoms/agentRunAtoms';
 import { currentThreadIdAtom } from '../../atoms/threads';
@@ -107,62 +107,9 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         }
     }, [run.id, setSourcesVisibility, sourcesVisible, uniqueCitations.length]);
 
-    // Extract tool call details for copy/export
-    const getToolDetails = (part: ToolCallPart): string => {
-        const label = getToolCallLabel(part, 'completed');
-        let query = "";
-        try {
-            const args = typeof part.args === 'object' && part.args
-                ? part.args
-                : typeof part.args === 'string' && part.args.startsWith('{')
-                    ? JSON.parse(part.args)
-                    : {};
-            query = args.search_label || args.query || args.q || args.keywords || args.topic || args.search_term || "";
-        } catch (e) {
-            console.error('Error parsing tool call arguments:', e);
-        }
-        
-        const result = toolResultsMap.get(part.tool_call_id);
-        const count = result && result.part_kind === 'tool-return'
-            ? result?.metadata?.summary?.result_count ?? null
-            : null;
-        
-        let details = `[${label}`;
-        if (query) details += `: "${query}"`;
-        if (result && count !== null) details += ` (${count} results)`;
-        details += `]`;
-        return details;
-    };
-
     // Combine all text content from the run's model messages
     const combinedContent = useMemo(() => {
-        const parts: string[] = [];
-        
-        for (const message of run.model_messages) {
-            if (message.kind === 'response') {
-                // Extract text parts
-                const textContent = message.parts
-                    .filter((part): part is TextPart => part.part_kind === 'text')
-                    .map(part => part.content)
-                    .filter(Boolean)
-                    .join('\n\n');
-                
-                if (textContent) {
-                    parts.push(textContent);
-                }
-                
-                // Extract tool call descriptions
-                const toolCallParts = message.parts.filter(
-                    (part): part is ToolCallPart => part.part_kind === 'tool-call'
-                );
-                if (toolCallParts.length > 0) {
-                    const toolDescriptions = toolCallParts.map(getToolDetails).join('\n\n');
-                    parts.push(toolDescriptions);
-                }
-            }
-        }
-        
-        return parts.filter(Boolean).join('\n\n');
+        return extractRunResponseContent(run, toolResultsMap);
     }, [run.model_messages, toolResultsMap]);
 
     // Build share menu items
@@ -176,31 +123,31 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                 onClick: () => handleCopy()
             },
             {
-                label: 'Save as Note',
+                label: 'Save as note',
                 onClick: () => saveToLibrary()
             },
             {
-                label: 'Save as Child Note',
+                label: 'Save as child note',
                 onClick: () => saveToItem(),
                 disabled: !hasParent
             },
             {
-                label: 'Copy URL to Run',
+                label: 'Copy link to message',
                 onClick: () => copyRunUrl()
             },
             {
-                label: 'Copy Run ID',
+                label: 'Copy message ID',
                 onClick: () => copyRunId()
             }
         ];
 
         if (Zotero.Beaver.data.env === "development") {
             items.push({
-                label: 'Copy Thread ID',
+                label: 'Copy chat ID',
                 onClick: () => copyThreadId()
             });
             items.push({
-                label: 'Copy Citation Metadata',
+                label: 'Copy citation metadata',
                 onClick: () => copyCitationMetadata()
             });
         }

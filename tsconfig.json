@@ -15,7 +15,8 @@
     },
     "jsx": "react",
     "esModuleInterop": true,
-    "lib": ["DOM", "ES2016"]
+    "lib": ["DOM", "ES2016"],
+    "noEmit": true
   },
   "include": ["src", "react", "typings", "node_modules/zotero-types"],
   "exclude": ["build", "addon"]

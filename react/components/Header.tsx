@@ -1,11 +1,11 @@
 import React, { useRef, useCallback } from 'react';
-import { CancelIcon, PlusSignIcon, Share05Icon } from './icons/icons';
+import { CancelIcon, PlusSignIcon, PictureInPictureIcon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
 import { newThreadAtom } from '../atoms/threads';
-import { runsCountAtom } from '../agents/atoms';
+import { currentThreadIdAtom, runsCountAtom } from '../agents/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './ui/IconButton';
 import Tooltip from './ui/Tooltip';
@@ -13,6 +13,7 @@ import { isAuthenticatedAtom, isWaitingForProfileAtom } from '../atoms/auth';
 import ThreadsMenu from './ui/menus/ThreadsMenu';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
+import ThreadMenuButton from './ui/buttons/ThreadMenuButton';
 import { hasCompletedOnboardingAtom, isDatabaseSyncSupportedAtom, updateRequiredAtom, isProfileLoadedAtom } from '../atoms/profile';
 import { getWindowFromElement } from '../utils/windowContext';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
@@ -34,6 +35,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
     const updateRequired = useAtomValue(updateRequiredAtom);
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const currentMessageContent = useAtomValue(currentMessageContentAtom);
+    const threadId = useAtomValue(currentThreadIdAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
     const handleNewThread = async () => {
@@ -58,14 +60,15 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
 
     return (
         <div id="beaver-header" className="display-flex flex-row px-3 py-2">
+            {/* Left side: Navigation & Workspace */}
             <div className="flex-1 display-flex gap-4">
 
-                {/* Close chat / Close window */}
+                {/* Close chat */}
                 {!isWindow && (
-                    <Tooltip 
-                        content={isWindow ? "Close window" : "Close chat"} 
-                        secondaryContent={isWindow ? undefined : closeChatShortcut} 
-                        showArrow 
+                    <Tooltip
+                        content="Close chat"
+                        secondaryContent={closeChatShortcut}
+                        showArrow
                         singleLine
                     >
                         <IconButton
@@ -73,67 +76,68 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                             icon={CancelIcon}
                             onClick={handleClose}
                             className="scale-14"
-                            ariaLabel={isWindow ? "Close window" : "Close chat"}
+                            ariaLabel="Close chat"
                         />
                     </Tooltip>
                 )}
-                
-                {/* New chat and chat history */}
+
+                {/* Chat history and new chat */}
                 {isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                     <>
-                    <Tooltip content="New Chat" secondaryContent={newChatShortcut} showArrow singleLine>
+                    <ThreadsMenu
+                        className="scale-14"
+                        ariaLabel="Show chat history"
+                    />
+                    <Tooltip content="New chat" secondaryContent={newChatShortcut} showArrow singleLine>
                         <IconButton
                             icon={PlusSignIcon}
                             onClick={handleNewThread}
                             className="scale-14"
-                            ariaLabel="New thread"
+                            ariaLabel="New chat"
                             disabled={runsCount === 0}
                         />
                     </Tooltip>
                     </>
                 )}
-
-                {/* Only show "Open in Separate Window" button when not already in a separate window and user is authenticated and has completed onboarding */}
-                {!isWindow && isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
-                    <Tooltip content="Open in Separate Window" secondaryContent={openWindowShortcut} showArrow singleLine>
-                        <IconButton
-                            icon={Share05Icon}
-                            onClick={openBeaverWindow}
-                            className="scale-13"
-                            ariaLabel="Open in Separate Window"
-                        />
-                    </Tooltip>
-                )}
-
-                {/* Development tools */}
-                {process.env.NODE_ENV === 'development' && (
-                    <DevToolsMenuButton
-                        className="scale-14"
-                        ariaLabel="Development tools"
-                        currentMessageContent={currentMessageContent}
-                    />
-                )}
             </div>
 
-            {/* Database status, embedding index status, and user account menu */}
+            {/* Right side: Current Context & Global Actions */}
             {isAuthenticated && (
                 <div className="display-flex gap-4">
-                    {/* Show embedding index status for users without databaseSync */}
+                    {/* Embedding index status for users without databaseSync */}
                     {!isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                         <EmbeddingIndexStatusButton />
                     )}
-                    {/* Show database status for users with databaseSync */}
+                    {/* Database status for users with databaseSync */}
                     {isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                         <DatabaseStatusButton />
                     )}
-                    {/* Show chat history menu */}
-                    {isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
-                        <ThreadsMenu
+                    {/* Development tools */}
+                    {process.env.NODE_ENV === 'development' && (
+                        <DevToolsMenuButton
                             className="scale-14"
-                            ariaLabel="Show chat history"
+                            ariaLabel="Development tools"
+                            currentMessageContent={currentMessageContent}
                         />
                     )}
-                    {/* Show user account menu */}
+                    {threadId && (
+                        <ThreadMenuButton
+                            className="scale-14"
+                            ariaLabel="Chat actions"
+                        />
+                    )}
+                    {/* Open in separate window */}
+                    {!isWindow && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
+                        <Tooltip content="Open in separate window" secondaryContent={openWindowShortcut} showArrow singleLine>
+                            <IconButton
+                                icon={PictureInPictureIcon}
+                                onClick={openBeaverWindow}
+                                className="scale-14"
+                                ariaLabel="Open in separate window"
+                            />
+                        </Tooltip>
+                    )}
+                    {/* User account menu */}
                     <UserAccountMenuButton
                         className="scale-14"
                         ariaLabel="User settings"

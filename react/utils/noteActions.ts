@@ -11,8 +11,10 @@ export interface SaveStreamingNoteOptions {
     runId?: string;
 }
 
-export function getBeaverNoteFooterHTML(threadId: string, runId: string): string {
-    const url = `zotero://beaver/thread/${threadId}/run/${runId}`;
+export function getBeaverNoteFooterHTML(threadId: string, runId?: string): string {
+    const url = runId
+        ? `zotero://beaver/thread/${threadId}/run/${runId}`
+        : `zotero://beaver/thread/${threadId}`;
     return `<p><span style="color: #aaa;"><a href="${url}">Open in Beaver</a></span></p>`;
 }
 

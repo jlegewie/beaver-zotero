@@ -132,12 +132,12 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
         }
     };
 
-    const handleLoadThread = async (threadId: string) => {
+    const handleLoadThread = async (threadId: string, threadName?: string) => {
         if (!user) {
             throw new Error('User not found');
         }
         try {
-            loadThread({user_id: user.id, threadId: threadId});
+            loadThread({user_id: user.id, threadId, threadName});
         } catch (error) {
             console.error('Error loading thread:', error);
         }
@@ -223,7 +223,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
                 
                 menuItems.push({
                     label: threadName,
-                    onClick: () => handleLoadThread(thread.id),
+                    onClick: () => handleLoadThread(thread.id, thread.name),
                     customContent: (
                         <div className="display-flex flex-col w-full">
                             {editingThreadId === thread.id ? (

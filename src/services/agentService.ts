@@ -352,6 +352,10 @@ export class AgentService {
                     this.callbacks.onThread(event.thread_id);
                     break;
 
+                case 'thread_name':
+                    this.callbacks.onThreadName?.(event);
+                    break;
+
                 case 'error':
                     // Call onError callback
                     this.callbacks.onError(event);
