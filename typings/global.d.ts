@@ -266,6 +266,74 @@ declare namespace Zotero {
              */
             getEmbeddedItemIds(libraryId?: number): Promise<number[]>;
 
+            // --- Attachment File Cache Methods ---
+
+            /**
+             * Insert or update an attachment file cache record.
+             * @param record The attachment file cache data to store
+             */
+            upsertAttachmentFileCache(record: Omit<import("../src/services/database").AttachmentFileCacheRecord, 'cached_at'>): Promise<void>;
+
+            /**
+             * Insert or update multiple attachment file cache records in a batch.
+             * @param records Array of attachment file cache data to store
+             */
+            upsertAttachmentFileCacheBatch(records: Array<Omit<import("../src/services/database").AttachmentFileCacheRecord, 'cached_at'>>): Promise<void>;
+
+            /**
+             * Get an attachment file cache record by item ID.
+             * @param itemId The Zotero item ID
+             * @returns The record or null if not found
+             */
+            getAttachmentFileCache(itemId: number): Promise<import("../src/services/database").AttachmentFileCacheRecord | null>;
+
+            /**
+             * Get an attachment file cache record by library ID and Zotero key.
+             * @param libraryId The Zotero library ID
+             * @param zoteroKey The Zotero item key
+             * @returns The record or null if not found
+             */
+            getAttachmentFileCacheByKey(libraryId: number, zoteroKey: string): Promise<import("../src/services/database").AttachmentFileCacheRecord | null>;
+
+            /**
+             * Get attachment file cache records for multiple item IDs.
+             * @param itemIds Array of Zotero item IDs
+             * @returns Map of item ID to attachment file cache record
+             */
+            getAttachmentFileCacheBatch(itemIds: number[]): Promise<Map<number, import("../src/services/database").AttachmentFileCacheRecord>>;
+
+            /**
+             * Delete an attachment file cache record by item ID.
+             * @param itemId The Zotero item ID
+             */
+            deleteAttachmentFileCache(itemId: number): Promise<void>;
+
+            /**
+             * Delete all attachment file cache records for a library.
+             * @param libraryId The Zotero library ID
+             */
+            deleteAttachmentFileCacheByLibrary(libraryId: number): Promise<void>;
+
+            /**
+             * Update just the has_content_cache flag for an item.
+             * @param itemId The Zotero item ID
+             * @param hasContentCache Whether the content cache exists
+             */
+            updateContentCacheFlag(itemId: number, hasContentCache: boolean): Promise<void>;
+
+            /**
+             * Get count of attachment file cache records.
+             * @param libraryId Optional library ID to filter by
+             * @returns Number of records
+             */
+            getAttachmentFileCacheCount(libraryId?: number): Promise<number>;
+
+            /**
+             * Get all attachment file cache records (for GC operations).
+             * @returns Array of all attachment file cache records
+             */
+            getAllAttachmentFileCache(): Promise<import("../src/services/database").AttachmentFileCacheRecord[]>;
+
         }
 
         /**
