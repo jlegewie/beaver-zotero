@@ -69,6 +69,8 @@ export class AttachmentFileCache {
     private db: BeaverDB;
     private memoryCache = new Map<number, AttachmentFileCacheRecord>();
     private contentCacheDir: string = '';
+    /** Per-key promise chain to serialize read-modify-write on content files. */
+    private contentWriteLocks = new Map<string, Promise<void>>();
 
     constructor(db: BeaverDB) {
         this.db = db;
@@ -152,9 +154,10 @@ export class AttachmentFileCache {
         }
     }
 
-    /** Clear the in-memory metadata cache. */
+    /** Clear the in-memory metadata cache and pending write locks. */
     clearMemoryCache(): void {
         this.memoryCache.clear();
+        this.contentWriteLocks.clear();
     }
 
     // -----------------------------------------------------------------------
@@ -361,6 +364,9 @@ export class AttachmentFileCache {
     /**
      * Store or merge page content into the disk cache.
      * Existing pages are preserved; new pages are added.
+     *
+     * Concurrent writes to the same attachment are serialized via a per-key
+     * promise chain to prevent the read-modify-write cycle from losing pages.
      */
     async setContentPages(
         libraryId: number,
@@ -371,6 +377,34 @@ export class AttachmentFileCache {
     ): Promise<void> {
         if (pages.length === 0) return;
 
+        const lockKey = `${libraryId}/${zoteroKey}`;
+        const prev = this.contentWriteLocks.get(lockKey) ?? Promise.resolve();
+        const next = prev.then(() =>
+            this.doSetContentPages(libraryId, zoteroKey, filePath, totalPages, pages)
+        ).catch((error) => {
+            logger(`AttachmentFileCache.setContentPages error for ${lockKey}: ${error}`, 1);
+        });
+        this.contentWriteLocks.set(lockKey, next);
+
+        // Clean up the lock entry once this operation settles, but only if it's
+        // still the tail of the chain (a newer call may have appended already).
+        next.then(() => {
+            if (this.contentWriteLocks.get(lockKey) === next) {
+                this.contentWriteLocks.delete(lockKey);
+            }
+        });
+
+        return next;
+    }
+
+    /** Inner implementation — always called under the per-key lock. */
+    private async doSetContentPages(
+        libraryId: number,
+        zoteroKey: string,
+        filePath: string,
+        totalPages: number,
+        pages: CachedPageContent[]
+    ): Promise<void> {
         const contentFile = this.getContentFilePath(libraryId, zoteroKey);
 
         // Get file signature
