@@ -21,6 +21,7 @@ import {
     handleListTagsRequest,
     handleListItemsRequest,
 } from '../../src/services/agentDataProvider';
+import { getCitationKeyFromItem } from '../../src/utils/zoteroUtils';
 import { logger } from '../../src/utils/logger';
 import { getPref } from '../../src/utils/prefs';
 import { isAuthenticatedAtom } from '../atoms/auth';
@@ -436,6 +437,10 @@ function formatSearchResultItem(entry: ItemSearchFrontendResultItem, includeSimi
         result.similarity = Math.round(entry.similarity * 100) / 100;
     }
 
+    if (item.citation_key) {
+        result.citation_key = item.citation_key;
+    }
+
     // Abstract truncated to ~300 chars
     if (item.abstract) {
         result.abstract = item.abstract.length > 300
@@ -610,8 +615,22 @@ async function handleGetItemDetails(args: any): Promise<any> {
         return mcpError(`Failed to get item details: ${response.error}`);
     }
 
-    // Transform attachment data to match the MCP format when present
-    const items = response.items.map((item) => {
+    // Enrich items with citation keys and transform attachments
+    const items = await Promise.all(response.items.map(async (item) => {
+        // Add citation_key (BetterBibTeX-aware) if not already present
+        if (!item.citationKey) {
+            const parsed = parseItemId(item.item_id);
+            if (parsed) {
+                try {
+                    const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(parsed.libraryId, parsed.key);
+                    if (zoteroItem) {
+                        const citationKey = await getCitationKeyFromItem(zoteroItem);
+                        if (citationKey) item.citationKey = citationKey;
+                    }
+                } catch { /* best-effort */ }
+            }
+        }
+
         if (item.attachments && Array.isArray(item.attachments)) {
             item.attachments = item.attachments.map((a: any) => ({
                 attachment_id: a.attachment_id,
@@ -627,7 +646,7 @@ async function handleGetItemDetails(args: any): Promise<any> {
         delete item.zotero_synced;
         delete item.item_json;
         return item;
-    });
+    }));
 
     return {
         items,
