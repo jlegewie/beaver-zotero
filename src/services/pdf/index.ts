@@ -140,7 +140,10 @@ export class PDFExtractor {
                 ? opts.pages.filter(i => i >= 0 && i < pageCount)
                 : undefined; // undefined = all pages
 
-            // 4. EXTRACTION PASS: Get all raw data in one pass
+            // 4. Collect all page labels while the document is open
+            const pageLabels = this.mupdf.getAllPageLabels();
+
+            // 5. EXTRACTION PASS: Get all raw data in one pass
             if (process.env.NODE_ENV === "development") {
                 console.log("[PDFExtractor] Starting extraction pass...");
             }
@@ -230,6 +233,7 @@ export class PDFExtractor {
                 pages,
                 analysis,
                 fullText,
+                pageLabels: Object.keys(pageLabels).length > 0 ? pageLabels : undefined,
                 metadata: {
                     extractedAt: new Date().toISOString(),
                     version: "2.0.0",
@@ -303,7 +307,10 @@ export class PDFExtractor {
                 ? opts.pages.filter(i => i >= 0 && i < pageCount)
                 : undefined; // undefined = all pages
 
-            // 4. EXTRACTION PASS: Get all raw data in one pass
+            // 4. Collect all page labels while the document is open
+            const pageLabels = this.mupdf.getAllPageLabels();
+
+            // 5. EXTRACTION PASS: Get all raw data in one pass
             if (process.env.NODE_ENV === "development") {
                 console.log("[PDFExtractor] Starting line-based extraction pass...");
             }
@@ -428,6 +435,7 @@ export class PDFExtractor {
                 pages,
                 analysis,
                 fullText,
+                pageLabels: Object.keys(pageLabels).length > 0 ? pageLabels : undefined,
                 metadata: {
                     extractedAt: new Date().toISOString(),
                     version: "2.0.0",
