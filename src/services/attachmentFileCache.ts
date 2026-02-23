@@ -257,7 +257,7 @@ export class AttachmentFileCache {
     }
 
     /**
-     * Store metadata for an attachment.
+     * Store metadata for an attachment (full upsert — overwrites all fields).
      */
     async setMetadata(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
         await this.db.upsertAttachmentFileCache(input);
@@ -267,6 +267,24 @@ export class AttachmentFileCache {
             cached_at: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ''),
         };
         this.putMemoryCache(input.item_id, record);
+    }
+
+    /**
+     * Insert metadata only if no row exists for this item.
+     * Race-safe: uses INSERT ... ON CONFLICT DO NOTHING at the DB level,
+     * so a concurrent handler that writes richer data is never overwritten.
+     * @returns true if a new row was inserted, false if one already existed.
+     */
+    async setMetadataIfNotExists(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<boolean> {
+        const inserted = await this.db.insertAttachmentFileCacheIfNotExists(input);
+        if (inserted) {
+            const record: AttachmentFileCacheRecord = {
+                ...input,
+                cached_at: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ''),
+            };
+            this.putMemoryCache(input.item_id, record);
+        }
+        return inserted;
     }
 
     /**

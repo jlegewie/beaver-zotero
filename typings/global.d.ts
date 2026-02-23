@@ -271,6 +271,13 @@ declare namespace Zotero {
             // --- Attachment File Cache Methods ---
 
             /**
+             * Insert an attachment file cache record only if no row exists for the item.
+             * @param record The attachment file cache data to store
+             * @returns true if a row was inserted, false if it already existed.
+             */
+            insertAttachmentFileCacheIfNotExists(record: Omit<import("../src/services/database").AttachmentFileCacheRecord, 'cached_at'>): Promise<boolean>;
+
+            /**
              * Insert or update an attachment file cache record.
              * @param record The attachment file cache data to store
              */
