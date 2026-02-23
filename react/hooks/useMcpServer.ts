@@ -550,7 +550,7 @@ async function handleReadAttachment(args: any): Promise<any> {
     }
 
     const startPage = args.start_page ?? 1;
-    let endPage = args.end_page != null
+    const endPage = args.end_page != null
         ? Math.min(args.end_page, startPage + MAX_PAGES - 1)
         : startPage + MAX_PAGES - 1;
 
