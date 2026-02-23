@@ -270,6 +270,27 @@ export class AttachmentFileCache {
     }
 
     /**
+     * Store metadata with an atomic merge for content-derived fields.
+     * Preserves existing page_labels and a true has_content_cache flag.
+     */
+    async setMetadataPreservingContentFields(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
+        await this.db.upsertAttachmentFileCachePreserveContentFields(input);
+
+        // Reload merged row so memory cache reflects the DB-level conflict merge.
+        const merged = await this.db.getAttachmentFileCache(input.item_id);
+        if (merged) {
+            this.putMemoryCache(input.item_id, merged);
+            return;
+        }
+
+        // Fallback should be rare, but keep memory cache populated.
+        this.putMemoryCache(input.item_id, {
+            ...input,
+            cached_at: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ''),
+        });
+    }
+
+    /**
      * Insert metadata only if no row exists for this item.
      * Race-safe: uses INSERT ... ON CONFLICT DO NOTHING at the DB level,
      * so a concurrent handler that writes richer data is never overwritten.

@@ -278,6 +278,13 @@ declare namespace Zotero {
             insertAttachmentFileCacheIfNotExists(record: Omit<import("../src/services/database").AttachmentFileCacheRecord, 'cached_at'>): Promise<boolean>;
 
             /**
+             * Insert or update an attachment file cache record while preserving fields
+             * populated by content extraction handlers.
+             * @param record The attachment file cache data to store
+             */
+            upsertAttachmentFileCachePreserveContentFields(record: Omit<import("../src/services/database").AttachmentFileCacheRecord, 'cached_at'>): Promise<void>;
+
+            /**
              * Insert or update an attachment file cache record.
              * @param record The attachment file cache data to store
              */

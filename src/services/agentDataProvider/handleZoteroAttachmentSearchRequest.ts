@@ -19,6 +19,7 @@ import {
     WSSearchHit,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { EXTRACTION_VERSION } from '../attachmentFileCache';
 import { validateZoteroItemReference } from './utils';
 
 
@@ -30,6 +31,10 @@ export async function handleZoteroAttachmentSearchRequest(
     request: WSZoteroAttachmentSearchRequest
 ): Promise<WSZoteroAttachmentSearchResponse> {
     const { attachment, query, max_hits_per_page, skip_local_limits, request_id } = request;
+
+    // Hoisted for catch-block metadata backfill
+    let resolvedItem: Zotero.Item | null = null;
+    let resolvedFilePath: string | null = null;
 
     // Helper to create error response
     const errorResponse = (
@@ -90,7 +95,9 @@ export async function handleZoteroAttachmentSearchRequest(
         }
 
         // 3. Get the file path
+        resolvedItem = zoteroItem;
         const filePath = await zoteroItem.getFilePathAsync();
+        resolvedFilePath = filePath || null;
         if (!filePath) {
             const isFileAvailableOnServer = isAttachmentOnServer(zoteroItem);
             const errorMessage = isFileAvailableOnServer
@@ -128,30 +135,52 @@ export async function handleZoteroAttachmentSearchRequest(
             }
         }
 
+        // 5b. Try metadata cache for fast prechecks
+        const cache = Zotero.Beaver?.attachmentFileCache;
+        const cachedMeta = cache ? await cache.getMetadata(zoteroItem.id, filePath).catch(() => null) : null;
+
+        if (cachedMeta) {
+            if (cachedMeta.is_encrypted) {
+                return errorResponse('PDF is password-protected', 'encrypted');
+            }
+            if (cachedMeta.is_invalid) {
+                return errorResponse('PDF file is invalid or corrupted', 'invalid_pdf');
+            }
+            if (!skip_local_limits && cachedMeta.page_count != null) {
+                const maxPageCount = getPref('maxPageCount');
+                if (cachedMeta.page_count > maxPageCount) {
+                    return errorResponse(
+                        `PDF has ${cachedMeta.page_count} pages, which exceeds the ${maxPageCount}-page limit`,
+                        'too_many_pages'
+                    );
+                }
+            }
+        }
+
         // 6. Read the PDF data
         const pdfData = await IOUtils.read(filePath);
 
         // 7. Create extractor and get page count first
         const extractor = new PDFExtractor();
         let totalPages: number;
-        
-        try {
-            totalPages = await extractor.getPageCount(pdfData);
-        } catch (error) {
-            if (error instanceof ExtractionError) {
-                if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                    return errorResponse(
-                        'PDF is password-protected',
-                        'encrypted'
-                    );
-                } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                    return errorResponse(
-                        'PDF file is invalid or corrupted',
-                        'invalid_pdf'
-                    );
+
+        if (cachedMeta?.page_count != null) {
+            totalPages = cachedMeta.page_count;
+        } else {
+            try {
+                totalPages = await extractor.getPageCount(pdfData);
+            } catch (error) {
+                if (error instanceof ExtractionError) {
+                    if (error.code === ExtractionErrorCode.ENCRYPTED) {
+                        // Let outer catch backfill encrypted metadata before returning.
+                        throw error;
+                    } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
+                        // Let outer catch backfill invalid metadata before returning.
+                        throw error;
+                    }
                 }
+                throw error;
             }
-            throw error;
         }
 
         // 8. Check page count limit (skip if skip_local_limits is true)
@@ -186,6 +215,26 @@ export async function handleZoteroAttachmentSearchRequest(
             })),
         }));
 
+        // 10b. Backfill metadata if not already cached.
+        // Uses insert-if-not-exists to avoid overwriting richer metadata
+        // that a concurrent handler (e.g. pages) may have written.
+        if (cache && !cachedMeta) {
+            try {
+                const stat = await IOUtils.stat(filePath);
+                await cache.setMetadataIfNotExists({
+                    item_id: zoteroItem.id, library_id: zoteroItem.libraryID, zotero_key: zoteroItem.key,
+                    file_path: filePath, file_mtime_ms: stat.lastModified ?? 0, file_size_bytes: stat.size ?? 0,
+                    content_type: zoteroItem.attachmentContentType || 'application/pdf',
+                    page_count: totalPages, page_labels: null,
+                    has_text_layer: null, needs_ocr: null,
+                    is_encrypted: false, is_invalid: false,
+                    extraction_version: EXTRACTION_VERSION, has_content_cache: false,
+                });
+            } catch (e) {
+                logger(`handleZoteroAttachmentSearchRequest: metadata backfill error: ${e}`, 1);
+            }
+        }
+
         return {
             type: 'zotero_attachment_search',
             request_id,
@@ -202,6 +251,24 @@ export async function handleZoteroAttachmentSearchRequest(
 
         // Handle known extraction errors
         if (error instanceof ExtractionError) {
+            // Backfill metadata for known error states
+            const cache = Zotero.Beaver?.attachmentFileCache;
+            if (cache && resolvedItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF)) {
+                try {
+                    const stat = await IOUtils.stat(resolvedFilePath);
+                    await cache.setMetadata({
+                        item_id: resolvedItem.id, library_id: resolvedItem.libraryID, zotero_key: resolvedItem.key,
+                        file_path: resolvedFilePath, file_mtime_ms: stat.lastModified ?? 0, file_size_bytes: stat.size ?? 0,
+                        content_type: resolvedItem.attachmentContentType || 'application/pdf',
+                        page_count: null, page_labels: null,
+                        has_text_layer: null, needs_ocr: null,
+                        is_encrypted: error.code === ExtractionErrorCode.ENCRYPTED,
+                        is_invalid: error.code === ExtractionErrorCode.INVALID_PDF,
+                        extraction_version: EXTRACTION_VERSION, has_content_cache: false,
+                    });
+                } catch { /* best-effort */ }
+            }
+
             switch (error.code) {
                 case ExtractionErrorCode.ENCRYPTED:
                     return errorResponse('PDF is password-protected', 'encrypted');
