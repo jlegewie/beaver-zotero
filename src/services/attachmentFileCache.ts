@@ -68,6 +68,8 @@ export type { AttachmentFileCacheRecord };
 export class AttachmentFileCache {
     private db: BeaverDB;
     private memoryCache = new Map<number, AttachmentFileCacheRecord>();
+    /** Page labels for items without a full cache record (loaded from PDF on demand). */
+    private pageLabelOnlyCache = new Map<number, Record<number, string>>();
     private contentCacheDir: string = '';
     /** Per-key promise chain to serialize read-modify-write on content files. */
     private contentWriteLocks = new Map<string, Promise<void>>();
@@ -155,15 +157,28 @@ export class AttachmentFileCache {
     }
 
     /**
-     * Synchronous lookup of page labels from the in-memory cache only.
-     * Returns null if the item is not in the memory cache or has no page labels.
+     * Synchronous lookup of page labels from in-memory caches.
+     * Checks the full metadata cache first, then the page-label-only cache.
+     * Returns null if neither cache has labels for this item.
      *
      * Designed for use in synchronous rendering paths (e.g., citation export).
      * Call {@link ensureInMemoryCache} first to populate the cache if needed.
      */
     getPageLabelsSync(itemId: number): Record<number, string> | null {
         const record = this.memoryCache.get(itemId);
-        return record?.page_labels ?? null;
+        if (record?.page_labels) return record.page_labels;
+        return this.pageLabelOnlyCache.get(itemId) ?? null;
+    }
+
+    /**
+     * Check whether a full metadata record exists in the in-memory cache.
+     * Useful for distinguishing "never extracted" (no record) from
+     * "extracted but no custom page labels" (record with page_labels: null).
+     *
+     * Call {@link ensureInMemoryCache} first to load from DB if needed.
+     */
+    hasCachedRecord(itemId: number): boolean {
+        return this.memoryCache.has(itemId);
     }
 
     /**
@@ -180,9 +195,34 @@ export class AttachmentFileCache {
         }
     }
 
+    /**
+     * Store page labels fetched from a PDF.
+     * If the item has an existing metadata record, its page_labels field is
+     * updated in both memory and the database. Otherwise the labels are kept
+     * in a lightweight in-memory-only map so they can be resolved during the
+     * current session without creating an incomplete DB record.
+     */
+    async cachePageLabels(itemId: number, pageLabels: Record<number, string>): Promise<void> {
+        // Update the full record if one exists
+        const record = this.memoryCache.get(itemId);
+        if (record) {
+            record.page_labels = pageLabels;
+            try {
+                await this.db.updateAttachmentFileCachePageLabels(itemId, pageLabels);
+            } catch (error) {
+                logger(`AttachmentFileCache.cachePageLabels: DB update failed for ${itemId}: ${error}`, 1);
+            }
+            return;
+        }
+
+        // No full record — store in the lightweight map
+        this.pageLabelOnlyCache.set(itemId, pageLabels);
+    }
+
     /** Clear the in-memory metadata cache and pending write locks. */
     clearMemoryCache(): void {
         this.memoryCache.clear();
+        this.pageLabelOnlyCache.clear();
         this.contentWriteLocks.clear();
     }
 
