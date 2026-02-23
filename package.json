@@ -29,6 +29,7 @@
         "lint:fix": "prettier --write . && eslint . --fix",
         "release": "zotero-plugin release",
         "test": "vitest run",
+        "test:integration": "vitest run --config vitest.integration.config.ts",
         "test:watch": "vitest",
         "update-deps": "npm update --save",
         "build-react": "webpack --config webpack.config.js",
