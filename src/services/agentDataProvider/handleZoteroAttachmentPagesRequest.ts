@@ -228,32 +228,30 @@ export async function handleZoteroAttachmentPagesRequest(
         // 9b. Write-through: persist metadata and content cache
         if (cache) {
             try {
-                // Persist or upgrade metadata.
-                // Always write when no row exists. Also upgrade existing rows
-                // that lack OCR state (needs_ocr === null) — those were seeded
-                // by the lightweight/search/image paths and should now receive
-                // the known OCR fields from the successful extraction.
-                if (!cachedMeta || cachedMeta.needs_ocr === null) {
-                    const stat = await IOUtils.stat(filePath);
-                    const pageLabels = result.pageLabels ?? null;
-                    await cache.setMetadata({
-                        item_id: pdfItem.id,
-                        library_id: pdfItem.libraryID,
-                        zotero_key: pdfItem.key,
-                        file_path: filePath,
-                        file_mtime_ms: stat.lastModified ?? 0,
-                        file_size_bytes: stat.size ?? 0,
-                        content_type: pdfItem.attachmentContentType || 'application/pdf',
-                        page_count: totalPages,
-                        page_labels: pageLabels && Object.keys(pageLabels).length > 0 ? pageLabels : null,
-                        has_text_layer: true,
-                        needs_ocr: false,
-                        is_encrypted: false,
-                        is_invalid: false,
-                        extraction_version: EXTRACTION_VERSION,
-                        has_content_cache: cachedMeta?.has_content_cache ?? false,
-                    });
-                }
+                // Always persist metadata after successful extraction.
+                // This handler produces document-level properties (page_labels)
+                // that lightweight handlers (search, images, file-status) don't
+                // capture, so we must always write — even when a prior handler
+                // already seeded metadata with those fields as null.
+                const stat = await IOUtils.stat(filePath);
+                const pageLabels = result.pageLabels ?? null;
+                await cache.setMetadata({
+                    item_id: pdfItem.id,
+                    library_id: pdfItem.libraryID,
+                    zotero_key: pdfItem.key,
+                    file_path: filePath,
+                    file_mtime_ms: stat.lastModified ?? 0,
+                    file_size_bytes: stat.size ?? 0,
+                    content_type: pdfItem.attachmentContentType || 'application/pdf',
+                    page_count: totalPages,
+                    page_labels: pageLabels && Object.keys(pageLabels).length > 0 ? pageLabels : null,
+                    has_text_layer: true,
+                    needs_ocr: false,
+                    is_encrypted: false,
+                    is_invalid: false,
+                    extraction_version: EXTRACTION_VERSION,
+                    has_content_cache: cachedMeta?.has_content_cache ?? false,
+                });
 
                 // Persist content pages
                 const contentPages: CachedPageContent[] = result.pages.map((p) => ({
