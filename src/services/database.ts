@@ -1725,6 +1725,20 @@ export class BeaverDB {
     }
 
     /**
+     * Update just the page_labels_json for an existing item.
+     * No-op if no row exists for the given itemId.
+     */
+    public async updateAttachmentFileCachePageLabels(
+        itemId: number,
+        pageLabels: Record<number, string>,
+    ): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE attachment_file_cache SET page_labels_json = ? WHERE item_id = ?`,
+            [JSON.stringify(pageLabels), itemId]
+        );
+    }
+
+    /**
      * Get count of attachment file cache records.
      */
     public async getAttachmentFileCacheCount(libraryId?: number): Promise<number> {
