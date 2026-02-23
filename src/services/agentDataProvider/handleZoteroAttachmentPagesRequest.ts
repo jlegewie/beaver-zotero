@@ -38,6 +38,7 @@ export async function handleZoteroAttachmentPagesRequest(
     // for error-state metadata backfill (after auto-resolution).
     let resolvedPdfItem: Zotero.Item | null = null;
     let resolvedFilePath: string | null = null;
+    let totalPages: number | null = null;
 
     // Helper to create error response
     const errorResponse = (
@@ -130,10 +131,12 @@ export async function handleZoteroAttachmentPagesRequest(
             if (cachedMeta.is_invalid) {
                 return errorResponse(`The PDF file for ${pdfKey} is invalid or corrupted`, 'invalid_pdf');
             }
+            if (cachedMeta.needs_ocr) {
+                return errorResponse(`The PDF file for ${pdfKey} requires OCR (no text layer)`, 'no_text_layer', cachedMeta.page_count ?? null);
+            }
         }
 
         // 5. Determine total page count (from cache or PDF)
-        let totalPages: number;
         let pdfData: Uint8Array | null = null;
         const extractor = new PDFExtractor();
 
@@ -294,7 +297,7 @@ export async function handleZoteroAttachmentPagesRequest(
                         item_id: resolvedPdfItem.id, library_id: resolvedPdfItem.libraryID, zotero_key: resolvedPdfItem.key,
                         file_path: resolvedFilePath, file_mtime_ms: stat.lastModified ?? 0, file_size_bytes: stat.size ?? 0,
                         content_type: resolvedPdfItem.attachmentContentType || 'application/pdf',
-                        page_count: null, page_labels: null,
+                        page_count: totalPages ?? null, page_labels: null,
                         has_text_layer: error.code !== ExtractionErrorCode.NO_TEXT_LAYER ? null : false,
                         needs_ocr: error.code === ExtractionErrorCode.NO_TEXT_LAYER,
                         is_encrypted: error.code === ExtractionErrorCode.ENCRYPTED,
