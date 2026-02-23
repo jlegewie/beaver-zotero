@@ -95,6 +95,13 @@ const ENDPOINT_PATHS = [
     // Utility
     '/beaver/user-info',
     '/beaver/delete-items',
+    // Test-only endpoints (cache inspection/manipulation)
+    '/beaver/test/ping',
+    '/beaver/test/cache-metadata',
+    '/beaver/test/cache-invalidate',
+    '/beaver/test/cache-clear-memory',
+    '/beaver/test/cache-delete-content',
+    '/beaver/test/resolve-item',
 ] as const;
 
 /**
@@ -480,6 +487,94 @@ async function handleDeleteItemsHttpRequest(request: any) {
 
 
 // =============================================================================
+// Test-Only HTTP Handlers (cache inspection / manipulation)
+// =============================================================================
+
+async function handleTestPingHttpRequest(_request: any) {
+    const cache = Zotero.Beaver?.attachmentFileCache;
+    const db = Zotero.Beaver?.db;
+    return {
+        ok: true,
+        cache_available: !!cache,
+        db_available: !!db,
+    };
+}
+
+async function handleTestCacheMetadataHttpRequest(request: any) {
+    const { library_id, zotero_key, item_id } = request;
+    const db = Zotero.Beaver?.db;
+    if (!db) return { error: 'db not available' };
+
+    let record;
+    if (item_id != null) {
+        record = await db.getAttachmentFileCache(item_id);
+    } else if (library_id != null && zotero_key != null) {
+        record = await db.getAttachmentFileCacheByKey(library_id, zotero_key);
+    } else {
+        return { error: 'Provide item_id or library_id + zotero_key' };
+    }
+    return { record: record ?? null };
+}
+
+async function handleTestCacheInvalidateHttpRequest(request: any) {
+    const { library_id, zotero_key, item_id } = request;
+    const cache = Zotero.Beaver?.attachmentFileCache;
+    if (!cache) return { error: 'cache not available' };
+
+    if (item_id != null && library_id != null && zotero_key != null) {
+        await cache.invalidate(item_id, library_id, zotero_key);
+    } else if (library_id != null && zotero_key != null) {
+        // Resolve item_id from DB
+        const db = Zotero.Beaver?.db;
+        if (!db) return { error: 'db not available' };
+        const record = await db.getAttachmentFileCacheByKey(library_id, zotero_key);
+        if (record) {
+            await cache.invalidate(record.item_id, library_id, zotero_key);
+        } else {
+            // No cache entry, nothing to invalidate
+        }
+    } else {
+        return { error: 'Provide library_id + zotero_key (and optionally item_id)' };
+    }
+    return { ok: true };
+}
+
+async function handleTestCacheClearMemoryHttpRequest(_request: any) {
+    const cache = Zotero.Beaver?.attachmentFileCache;
+    if (!cache) return { error: 'cache not available' };
+    cache.clearMemoryCache();
+    return { ok: true };
+}
+
+async function handleTestCacheDeleteContentHttpRequest(request: any) {
+    const { library_id, zotero_key } = request;
+    const cache = Zotero.Beaver?.attachmentFileCache;
+    if (!cache) return { error: 'cache not available' };
+    if (library_id == null || zotero_key == null) {
+        return { error: 'Provide library_id + zotero_key' };
+    }
+    await cache.deleteContent(library_id, zotero_key);
+    return { ok: true };
+}
+
+async function handleTestResolveItemHttpRequest(request: any) {
+    const { library_id, zotero_key } = request;
+    if (library_id == null || zotero_key == null) {
+        return { error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) return { item_id: null, item_type: null };
+    return {
+        item_id: item.id,
+        item_type: item.itemType,
+        is_attachment: item.isAttachment(),
+        parent_id: item.parentID || null,
+        attachment_content_type: item.isAttachment() ? item.attachmentContentType : null,
+    };
+}
+
+
+// =============================================================================
 // Registration Functions
 // =============================================================================
 
@@ -542,6 +637,25 @@ function registerEndpoints(): boolean {
 
     Zotero.Server.Endpoints['/beaver/delete-items'] =
         createEndpoint(handleDeleteItemsHttpRequest);
+
+    // Test-only endpoints (cache inspection/manipulation)
+    Zotero.Server.Endpoints['/beaver/test/ping'] =
+        createEndpoint(handleTestPingHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/test/cache-metadata'] =
+        createEndpoint(handleTestCacheMetadataHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/test/cache-invalidate'] =
+        createEndpoint(handleTestCacheInvalidateHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/test/cache-clear-memory'] =
+        createEndpoint(handleTestCacheClearMemoryHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/test/cache-delete-content'] =
+        createEndpoint(handleTestCacheDeleteContentHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/test/resolve-item'] =
+        createEndpoint(handleTestResolveItemHttpRequest);
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
     return true;
