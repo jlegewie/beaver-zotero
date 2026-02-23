@@ -18,6 +18,7 @@ import {
     WSPageImage,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { EXTRACTION_VERSION } from '../attachmentFileCache';
 import { resolveToPdfAttachment, validateZoteroItemReference } from './utils';
 
 /**
@@ -30,6 +31,10 @@ export async function handleZoteroAttachmentPageImagesRequest(
     const { attachment, pages, scale, dpi, format, jpeg_quality, skip_local_limits, request_id } = request;
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
     let errorKey = requestKey;
+
+    // Hoisted for catch-block metadata backfill
+    let resolvedPdfItem: Zotero.Item | null = null;
+    let resolvedFilePath: string | null = null;
 
     // Helper to create error response
     const errorResponse = (
@@ -78,9 +83,11 @@ export async function handleZoteroAttachmentPageImagesRequest(
         }
         const { item: pdfItem, key: pdfKey } = resolveResult;
         errorKey = pdfKey;
+        resolvedPdfItem = pdfItem;
 
         // 3. Get the file path — returns false if missing or nonexistent
         const filePath = await pdfItem.getFilePathAsync();
+        resolvedFilePath = filePath || null;
         if (!filePath) {
             const isOnServer = isAttachmentOnServer(pdfItem);
             return errorResponse(
@@ -107,10 +114,38 @@ export async function handleZoteroAttachmentPageImagesRequest(
             }
         }
 
-        // 5. Read PDF and get page count (also validates the PDF structure)
+        // 4b. Try metadata cache for fast prechecks
+        const cache = Zotero.Beaver?.attachmentFileCache;
+        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, filePath).catch(() => null) : null;
+
+        if (cachedMeta) {
+            if (cachedMeta.is_encrypted) {
+                return errorResponse(`The PDF file for ${pdfKey} is password-protected`, 'encrypted');
+            }
+            if (cachedMeta.is_invalid) {
+                return errorResponse(`The PDF file for ${pdfKey} is invalid or corrupted`, 'invalid_pdf');
+            }
+            if (!skip_local_limits && cachedMeta.page_count != null) {
+                const maxPageCount = getPref('maxPageCount');
+                if (cachedMeta.page_count > maxPageCount) {
+                    return errorResponse(
+                        `The PDF file for ${pdfKey} has ${cachedMeta.page_count} pages, which exceeds the ${maxPageCount}-page limit`,
+                        'too_many_pages'
+                    );
+                }
+            }
+        }
+
+        // 5. Read PDF and get page count
         const pdfData = await IOUtils.read(filePath);
         const extractor = new PDFExtractor();
-        const totalPages = await extractor.getPageCount(pdfData);
+        let totalPages: number;
+
+        if (cachedMeta?.page_count != null) {
+            totalPages = cachedMeta.page_count;
+        } else {
+            totalPages = await extractor.getPageCount(pdfData);
+        }
 
         // 6. Check page count limit (skip if skip_local_limits is true)
         if (!skip_local_limits) {
@@ -172,6 +207,26 @@ export async function handleZoteroAttachmentPageImagesRequest(
             };
         });
 
+        // 10b. Backfill metadata if not already cached.
+        // Uses insert-if-not-exists to avoid overwriting richer metadata
+        // that a concurrent handler (e.g. pages) may have written.
+        if (cache && !cachedMeta) {
+            try {
+                const stat = await IOUtils.stat(filePath);
+                await cache.setMetadataIfNotExists({
+                    item_id: pdfItem.id, library_id: pdfItem.libraryID, zotero_key: pdfItem.key,
+                    file_path: filePath, file_mtime_ms: stat.lastModified ?? 0, file_size_bytes: stat.size ?? 0,
+                    content_type: pdfItem.attachmentContentType || 'application/pdf',
+                    page_count: totalPages, page_labels: null,
+                    has_text_layer: null, needs_ocr: null,
+                    is_encrypted: false, is_invalid: false,
+                    extraction_version: EXTRACTION_VERSION, has_content_cache: false,
+                });
+            } catch (e) {
+                logger(`handleZoteroAttachmentPageImagesRequest: metadata backfill error: ${e}`, 1);
+            }
+        }
+
         return {
             type: 'zotero_attachment_page_images',
             request_id,
@@ -184,6 +239,24 @@ export async function handleZoteroAttachmentPageImagesRequest(
         logger(`handleZoteroAttachmentPageImagesRequest: Rendering failed: ${error}`, 1);
 
         if (error instanceof ExtractionError) {
+            // Backfill metadata for known error states
+            const cache = Zotero.Beaver?.attachmentFileCache;
+            if (cache && resolvedPdfItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF)) {
+                try {
+                    const stat = await IOUtils.stat(resolvedFilePath);
+                    await cache.setMetadata({
+                        item_id: resolvedPdfItem.id, library_id: resolvedPdfItem.libraryID, zotero_key: resolvedPdfItem.key,
+                        file_path: resolvedFilePath, file_mtime_ms: stat.lastModified ?? 0, file_size_bytes: stat.size ?? 0,
+                        content_type: resolvedPdfItem.attachmentContentType || 'application/pdf',
+                        page_count: null, page_labels: null,
+                        has_text_layer: null, needs_ocr: null,
+                        is_encrypted: error.code === ExtractionErrorCode.ENCRYPTED,
+                        is_invalid: error.code === ExtractionErrorCode.INVALID_PDF,
+                        extraction_version: EXTRACTION_VERSION, has_content_cache: false,
+                    });
+                } catch { /* best-effort */ }
+            }
+
             switch (error.code) {
                 case ExtractionErrorCode.ENCRYPTED:
                     return errorResponse(`The PDF file for ${errorKey} is password-protected`, 'encrypted');
