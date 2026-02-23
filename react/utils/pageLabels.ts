@@ -18,7 +18,7 @@
 
 // Regex for citation tags — matches self-closing and non-self-closing forms
 const CITATION_REGEX = /<citation\s+([^>]+?)\s*(\/>|>(?:.*?<\/citation>)?)/g;
-const ATT_ID_REGEX = /(?:att_id|attachment_id)="([^"]*)"/;
+const ATT_ID_REGEX = /(?:att_id|attachment_id)\s*=\s*"([^"]*)"/;
 
 /**
  * Resolve a 1-based page number (from getCitationPages) to its display label.
