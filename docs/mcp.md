@@ -113,17 +113,49 @@ curl -X POST http://localhost:PORT/beaver/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/list","id":2}'
 
-# Call a tool
+# Semantic search
 curl -X POST http://localhost:PORT/beaver/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"item_search_by_topic","arguments":{"topic_query":"machine learning"}},"id":3}'
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"search_by_topic","arguments":{"topic_query":"machine learning"}},"id":3}'
+
+# Metadata search
+curl -X POST http://localhost:PORT/beaver/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"search_by_metadata","arguments":{"author_query":"Acemoglu"}},"id":4}'
+
+# Read attachment
+curl -X POST http://localhost:PORT/beaver/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"read_attachment","arguments":{"attachment_id":"1-ABC12345","start_page":1,"end_page":5}},"id":5}'
+
+# Get item details
+curl -X POST http://localhost:PORT/beaver/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_item_details","arguments":{"item_ids":["1-ABC12345"],"include_attachments":true}},"id":6}'
+
+# List collections
+curl -X POST http://localhost:PORT/beaver/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_collections","arguments":{}},"id":7}'
+
+# List tags
+curl -X POST http://localhost:PORT/beaver/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_tags","arguments":{"min_item_count":3}},"id":8}'
+
+# List items in a collection
+curl -X POST http://localhost:PORT/beaver/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_items","arguments":{"collection":"DEF456","sort_by":"year","sort_order":"desc"}},"id":9}'
 ```
 
 ## Available Tools
 
-### `item_search_by_topic`
+All tools that accept or return item/attachment IDs use the `<library_id>-<zotero_key>` format (e.g., `1-ABC12345`).
 
-Semantic search across the user's Zotero library. Returns matching references sorted by similarity.
+### `search_by_topic`
+
+Semantic (meaning-based) search across the user's Zotero library. The most important tool for research discovery.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -137,9 +169,120 @@ Semantic search across the user's Zotero library. Returns matching references so
 | `limit` | `integer` | No | Max results per page (default 5, max 25). |
 | `offset` | `integer` | No | Results to skip for pagination (default 0). |
 
-**Response**: Human-readable text listing matching papers with title, authors, year, publication, similarity score, abstract (truncated), tags, Zotero key, and attachment summary.
+**Response**: JSON with `has_more`, `next_offset`, and `results[]`. Each result has `item_id`, `item_type`, `title`, `authors`, `year`, `publication`, `similarity`, `abstract` (truncated ~300 chars), `tags`, and `attachments[]` (with `attachment_id`, `filename`, `page_count`, `status`).
 
 **Underlying handler**: `handleItemSearchByTopicRequest` from `src/services/agentDataProvider/`.
+
+---
+
+### `search_by_metadata`
+
+Find specific papers when you know bibliographic details (author name, title keywords, journal). At least one of `author_query`, `title_query`, or `publication_query` is required.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `author_query` | `string` | No* | Author's last name to search for. |
+| `title_query` | `string` | No* | Keyword or phrase from the title. |
+| `publication_query` | `string` | No* | Journal or publication name. |
+| `min_year` | `integer` | No | Earliest publication year (inclusive). |
+| `max_year` | `integer` | No | Latest publication year (inclusive). |
+| `libraries_filter` | `string[]` | No | Library names or IDs. |
+| `tags_filter` | `string[]` | No | Tags (OR logic). |
+| `collections_filter` | `string[]` | No | Collection names or keys. |
+| `limit` | `integer` | No | Max results per page (default 5, max 25). |
+| `offset` | `integer` | No | Results to skip for pagination (default 0). |
+
+**Response**: JSON with `has_more`, `next_offset`, and `results[]`. Same structure as `search_by_topic` but without the `similarity` field.
+
+**Underlying handler**: `handleItemSearchByMetadataRequest` from `src/services/agentDataProvider/`.
+
+---
+
+### `read_attachment`
+
+Read the text content of a PDF attachment from the user's Zotero library. Maximum 30 pages per request.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `attachment_id` | `string` | Yes | Attachment ID in `<library_id>-<zotero_key>` format. |
+| `start_page` | `integer` | No | Starting page number (1-indexed). Default: 1. |
+| `end_page` | `integer` | No | Ending page number (inclusive). Default: last page (up to 30). |
+
+**Response**: Plain text with page content wrapped in `<pageN>...</pageN>` XML tags. Includes a header with attachment ID, total page count, and the page range shown.
+
+**Underlying handler**: `handleZoteroAttachmentPagesRequest` from `src/services/agentDataProvider/`.
+
+---
+
+### `get_item_details`
+
+Retrieve full Zotero metadata for one or more items.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `item_ids` | `string[]` | Yes | Item IDs in `<library_id>-<zotero_key>` format. Maximum 25 items. |
+| `include_attachments` | `boolean` | No | Include attachment metadata. Default: false. |
+
+**Response**: JSON with `items[]` (full Zotero metadata per item) and `not_found[]` (IDs that couldn't be found). When `include_attachments` is true, each item includes `attachments[]` with `attachment_id`, `filename`, `content_type`, `page_count`, and `status`.
+
+**Underlying handler**: `handleGetMetadataRequest` from `src/services/agentDataProvider/`.
+
+---
+
+### `list_collections`
+
+List collections (folders) in the user's Zotero library.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `library` | `string` | No | Library name or ID. Default: user's library. |
+| `parent_collection` | `string` | No | Collection key to list subcollections within. |
+| `include_item_counts` | `boolean` | No | Include item counts. Default: true. |
+| `limit` | `integer` | No | Max results per page (default 50, max 100). |
+| `offset` | `integer` | No | Results to skip for pagination (default 0). |
+
+**Response**: JSON with `total_count`, `has_more`, `next_offset`, and `collections[]`. Each collection has `collection_key`, `name`, `item_count`, and `subcollection_count`.
+
+**Underlying handler**: `handleListCollectionsRequest` from `src/services/agentDataProvider/`.
+
+---
+
+### `list_tags`
+
+List tags in the user's Zotero library.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `library` | `string` | No | Library name or ID. Default: user's library. |
+| `collection` | `string` | No | Collection key to list tags within. |
+| `min_item_count` | `integer` | No | Minimum items a tag must have. Default: 1. |
+| `limit` | `integer` | No | Max results per page (default 50, max 100). |
+| `offset` | `integer` | No | Results to skip for pagination (default 0). |
+
+**Response**: JSON with `total_count`, `has_more`, `next_offset`, and `tags[]`. Each tag has `name`, `item_count`, and optionally `color`.
+
+**Underlying handler**: `handleListTagsRequest` from `src/services/agentDataProvider/`.
+
+---
+
+### `list_items`
+
+Browse items in the library, optionally filtered by collection or tag.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `library` | `string` | No | Library name or ID. Default: user's library. |
+| `collection` | `string` | No | Collection name or key. |
+| `tag` | `string` | No | Tag to filter by. |
+| `recursive` | `boolean` | No | Include subcollection items. Default: true. |
+| `sort_by` | `string` | No | Sort field: "dateAdded", "dateModified", "title", "creator", "year". Default: "dateModified". |
+| `sort_order` | `string` | No | "asc" or "desc". Default: "desc". |
+| `limit` | `integer` | No | Max results per page (default 20, max 100). |
+| `offset` | `integer` | No | Results to skip for pagination (default 0). |
+
+**Response**: JSON with `total_count`, `has_more`, `next_offset`, and `items[]`. Each item has `item_id`, `item_type`, `title`, `authors`, `year`, `date_added`, `date_modified`. Note: does not include attachment IDs — use `get_item_details` to get those.
+
+**Underlying handler**: `handleListItemsRequest` from `src/services/agentDataProvider/`.
 
 ---
 
