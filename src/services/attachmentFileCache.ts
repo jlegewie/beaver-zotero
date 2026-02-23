@@ -392,6 +392,7 @@ export class AttachmentFileCache {
     async deleteMetadata(itemId: number): Promise<void> {
         await this.db.deleteAttachmentFileCache(itemId);
         this.memoryCache.delete(itemId);
+        this.pageLabelOnlyCache.delete(itemId);
     }
 
     /**
@@ -405,6 +406,9 @@ export class AttachmentFileCache {
                 this.memoryCache.delete(id);
             }
         }
+        // pageLabelOnlyCache doesn't store libraryId, so clear it entirely.
+        // This is a rare bulk operation; labels repopulate lazily on next render.
+        this.pageLabelOnlyCache.clear();
     }
 
     // -----------------------------------------------------------------------
@@ -612,6 +616,7 @@ export class AttachmentFileCache {
     async invalidate(itemId: number, libraryId: number, zoteroKey: string): Promise<void> {
         await this.db.deleteAttachmentFileCache(itemId);
         this.memoryCache.delete(itemId);
+        this.pageLabelOnlyCache.delete(itemId);
         await this.removeContentFile(libraryId, zoteroKey);
     }
 

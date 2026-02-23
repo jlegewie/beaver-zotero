@@ -92,6 +92,9 @@ export function resolvePageStr(itemId: number, pageStr: string): string {
 /** Sentinel returned by {@link withTimeout} when the deadline is exceeded. */
 const TIMED_OUT = Symbol('TIMED_OUT');
 
+/** Sentinel: fetch returned null for a transient reason (file not yet available). */
+const TRANSIENT_NULL = Symbol('TRANSIENT_NULL');
+
 /**
  * Race a promise against a timeout.
  * Returns the {@link TIMED_OUT} symbol if the deadline fires first.
@@ -108,21 +111,27 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIM
 
 /**
  * Read page labels directly from a PDF attachment using MuPDF.
- * Returns the label map or null if unavailable/failed.
+ *
+ * Returns:
+ * - `Record<number, string>` — labels found
+ * - `null` — definitively no custom labels (PDF was read successfully)
+ * - `TRANSIENT_NULL` — could not access the file (not synced / missing);
+ *   the caller should leave the item eligible for retry.
  */
 async function fetchPageLabelsFromPDF(
     itemId: number,
-): Promise<Record<number, string> | null> {
+): Promise<Record<number, string> | null | typeof TRANSIENT_NULL> {
     const item = await Zotero.Items.getAsync(itemId);
     if (!item?.isAttachment?.() || item.attachmentContentType !== 'application/pdf') {
+        // Not a PDF attachment — definitively no labels possible.
         return null;
     }
 
     const filePath = await item.getFilePathAsync();
-    if (!filePath) return null;
+    if (!filePath) return TRANSIENT_NULL; // file path not available yet
 
     const exists = await IOUtils.exists(filePath);
-    if (!exists) return null;
+    if (!exists) return TRANSIENT_NULL; // file not on disk yet (e.g. not synced)
 
     const pdfData = await IOUtils.read(filePath);
     const mupdf = new MuPDFService();
@@ -204,13 +213,15 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
                 PDF_LABEL_FETCH_TIMEOUT_MS,
             );
 
-            if (result === TIMED_OUT) {
-                // Timeout is transient — leave eligible for retry on next render.
-                logger(`preloadPageLabelsForContent: timed out fetching labels for item ${itemId}`);
+            if (result === TIMED_OUT || result === TRANSIENT_NULL) {
+                // Transient — leave eligible for retry on next render.
+                if (result === TIMED_OUT) {
+                    logger(`preloadPageLabelsForContent: timed out fetching labels for item ${itemId}`);
+                }
                 continue;
             }
 
-            // Fetch completed (labels found or definitively unavailable).
+            // Definitive result (labels found, or PDF has no custom labels).
             // Mark as attempted so we don't re-read this PDF.
             attempted.add(itemId);
             if (result) {
