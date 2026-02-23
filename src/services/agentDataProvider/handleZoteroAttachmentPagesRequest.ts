@@ -233,9 +233,11 @@ export async function handleZoteroAttachmentPagesRequest(
                 // that lightweight handlers (search, images, file-status) don't
                 // capture, so we must always write — even when a prior handler
                 // already seeded metadata with those fields as null.
+                // Uses setMetadataPreservingContentFields so that a concurrent
+                // handler's has_content_cache=true is never downgraded to false.
                 const stat = await IOUtils.stat(filePath);
                 const pageLabels = result.pageLabels ?? null;
-                await cache.setMetadata({
+                await cache.setMetadataPreservingContentFields({
                     item_id: pdfItem.id,
                     library_id: pdfItem.libraryID,
                     zotero_key: pdfItem.key,
@@ -250,7 +252,7 @@ export async function handleZoteroAttachmentPagesRequest(
                     is_encrypted: false,
                     is_invalid: false,
                     extraction_version: EXTRACTION_VERSION,
-                    has_content_cache: cachedMeta?.has_content_cache ?? false,
+                    has_content_cache: false,
                 });
 
                 // Persist content pages
