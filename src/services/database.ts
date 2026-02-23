@@ -313,15 +313,6 @@ export class BeaverDB {
         `);
 
         // Attachment file cache table - stores metadata for PDF attachments
-        // One-time migration: drop old schema (never shipped) if it lacks the 'zotero_key' column
-        const afcExists = await this.conn.tableExists('attachment_file_cache');
-        if (afcExists) {
-            const hasZoteroKey = await this.conn.columnExists('attachment_file_cache', 'zotero_key');
-            if (!hasZoteroKey) {
-                await this.conn.queryAsync(`DROP TABLE attachment_file_cache`);
-            }
-        }
-
         await this.conn.queryAsync(`
             CREATE TABLE IF NOT EXISTS attachment_file_cache (
                 item_id              INTEGER PRIMARY KEY,
