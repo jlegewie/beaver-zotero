@@ -346,12 +346,16 @@ export async function getAttachmentFileStatusLightweight(
 
     const { filePath, contentType } = availabilityCheck;
 
-    // Cache-first: try metadata cache (provides richer status when available)
+    // Cache-first: try metadata cache (provides richer status when available).
+    // Only use cache when OCR state is resolved (needs_ocr !== null) or a
+    // terminal error is present.  Rows with needs_ocr === null were seeded by
+    // lightweight handlers that didn't run OCR analysis — for those we fall
+    // through to the optimistic lightweight path below.
     const cache = Zotero.Beaver?.attachmentFileCache;
     if (cache) {
         try {
             const cached = await cache.getMetadata(attachment.id, filePath);
-            if (cached) {
+            if (cached && (cached.needs_ocr !== null || cached.is_encrypted || cached.is_invalid)) {
                 return fileStatusFromCache(cached, isPrimary);
             }
         } catch (error) {
