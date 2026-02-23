@@ -46,8 +46,9 @@ export const logger = function (
 
     const prefix = `[Beaver] ${message}`;
     
-    // Log to browser console in development for object inspection
-    if ("Beaver" in Zotero && (Zotero as any).Beaver.data.env === "development") {
+    // Log to browser console in development for object inspection.
+    // Guard: `console` is unavailable in the esbuild sandbox (`loadSubScript` ctx).
+    if (typeof console !== 'undefined' && "Beaver" in Zotero && (Zotero as any).Beaver.data.env === "development") {
         if (data !== null && data !== undefined) {
             console.log(prefix, data);
         } else {
