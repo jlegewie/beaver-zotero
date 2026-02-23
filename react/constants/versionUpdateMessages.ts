@@ -294,6 +294,24 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         ],
         footer: "Credits reset, give it a spin!"
     },
+        {
+        version: "0.13",
+        title: "New in Beaver 0.13",
+        steps: [
+            {
+                title: "Beaver MCP server",
+                description: "Connect with Beaver from Claude, ChatGPT, VS Code and more to access your library. <a href='https://www.beaverapp.ai/docs/mcp-server'>Learn more →</a>.",
+            },
+            {
+                title: "Deep links to Beaver chats and messages",
+                description: "Copy links to Beaver chats and messages to easily return to them from anywhere.",
+            },
+            {
+                title: "Copy and save entire chats",
+                description: "Copy and save entire chats with using the new '...' menu in the header.",
+            },
+        ],
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));
