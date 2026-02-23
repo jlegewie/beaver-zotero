@@ -22,9 +22,10 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { ZoteroItemReference } from '../../types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
-import { 
-    isExternalReferenceDetailsDialogVisibleAtom, 
-    selectedExternalReferenceAtom 
+import { resolvePageLabel } from '../../utils/pageLabels';
+import {
+    isExternalReferenceDetailsDialogVisibleAtom,
+    selectedExternalReferenceAtom
 } from '../../atoms/ui';
 
 const TOOLTIP_WIDTH = '250px';
@@ -446,8 +447,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             const item = Zotero.Items.getByLibraryAndKey(effectiveLibraryID, effectiveItemKey);
             if (!item) return null;
             const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
-            const startPage = Array.isArray(pages) ? pages[0] : pages; 
-            const navLocator = startPage ? String(startPage) : undefined;
+            const startPage = Array.isArray(pages) ? pages[0] : pages;
+            const navLocator = startPage ? resolvePageLabel(item.id, startPage) : undefined;
             const citationObj = {
                 citationItems: [{
                     uris: [Zotero.URI.getItemURI(item.parentItem || item)],
