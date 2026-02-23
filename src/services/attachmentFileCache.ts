@@ -154,6 +154,32 @@ export class AttachmentFileCache {
         }
     }
 
+    /**
+     * Synchronous lookup of page labels from the in-memory cache only.
+     * Returns null if the item is not in the memory cache or has no page labels.
+     *
+     * Designed for use in synchronous rendering paths (e.g., citation export).
+     * Call {@link ensureInMemoryCache} first to populate the cache if needed.
+     */
+    getPageLabelsSync(itemId: number): Record<number, string> | null {
+        const record = this.memoryCache.get(itemId);
+        return record?.page_labels ?? null;
+    }
+
+    /**
+     * Ensure a record is loaded into the in-memory cache (from DB if needed).
+     * No-op if the item is already in the memory cache.
+     * Does NOT perform staleness checking — intended for pre-loading before
+     * synchronous rendering where only page labels are needed.
+     */
+    async ensureInMemoryCache(itemId: number): Promise<void> {
+        if (this.memoryCache.has(itemId)) return;
+        const record = await this.db.getAttachmentFileCache(itemId);
+        if (record) {
+            this.putMemoryCache(itemId, record);
+        }
+    }
+
     /** Clear the in-memory metadata cache and pending write locks. */
     clearMemoryCache(): void {
         this.memoryCache.clear();

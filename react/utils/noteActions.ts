@@ -1,5 +1,6 @@
 import { ZoteroItemReference } from "../types/zotero";
 import { renderToHTML, RenderContextData } from "./citationRenderers";
+import { preloadPageLabelsForContent } from "./pageLabels";
 
 export interface SaveStreamingNoteOptions {
     markdownContent: string;
@@ -27,6 +28,7 @@ export interface SavedNoteReference {
 
 export async function saveStreamingNote(options: SaveStreamingNoteOptions): Promise<SavedNoteReference> {
     const { markdownContent, parentReference, targetLibraryId, contextData, threadId, runId } = options;
+    await preloadPageLabelsForContent(markdownContent);
     let htmlContent = renderToHTML(markdownContent.trim(), "markdown", contextData);
 
     if (threadId && runId) {

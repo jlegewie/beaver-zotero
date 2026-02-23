@@ -14,6 +14,7 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
 import { selectItem } from '../../../../src/utils/selectItem';
 import { store } from '../../../store';
+import { preloadPageLabelsForContent } from '../../../utils/pageLabels';
 
 interface ThreadMenuButtonProps {
     className?: string;
@@ -58,12 +59,14 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
     const handleCopyThread = async () => {
         const content = getThreadContent();
+        await preloadPageLabelsForContent(content);
         const formatted = renderToMarkdown(content);
         await copyToClipboard(formatted);
     };
 
     const handleSaveAsNote = async () => {
         const content = getThreadContent();
+        await preloadPageLabelsForContent(content);
         let htmlContent = renderToHTML(preprocessNoteContent(content), "markdown", {
             citationDataMap,
             externalMapping: externalReferenceMapping,
@@ -95,6 +98,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
     const handleSaveAsChildNote = async () => {
         const content = getThreadContent();
+        await preloadPageLabelsForContent(content);
         let htmlContent = renderToHTML(preprocessNoteContent(content), "markdown", {
             citationDataMap,
             externalMapping: externalReferenceMapping,
