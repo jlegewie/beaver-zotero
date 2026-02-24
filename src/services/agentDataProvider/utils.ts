@@ -293,15 +293,12 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
 
     const { filePath, contentType } = availabilityCheck;
 
-    // Cache-first: try metadata cache.
-    // All records written by this handler are complete (OCR + labels resolved),
-    // but backfillMetadataForError from other handlers may write records with
-    // needs_ocr: null. Accept those only when terminal flags are set.
+    // Cache-first: all writers produce complete records, so any hit is usable.
     const cache = Zotero.Beaver?.attachmentFileCache;
     if (cache) {
         try {
             const cached = await cache.getMetadata(attachment.id, filePath);
-            if (cached && (cached.needs_ocr !== null || cached.is_encrypted || cached.is_invalid)) {
+            if (cached) {
                 return fileStatusFromCache(cached, isPrimary);
             }
         } catch (error) {
@@ -321,7 +318,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
         } catch (error) {
             if (error instanceof ExtractionError) {
                 if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                    await persistMetadataToCache(attachment, filePath, contentType, { page_count: null, page_labels: {}, has_text_layer: null, needs_ocr: null, is_encrypted: true, is_invalid: false });
+                    await persistMetadataToCache(attachment, filePath, contentType, { page_count: null, page_labels: {}, has_text_layer: null, needs_ocr: false, is_encrypted: true, is_invalid: false });
                     return {
                         is_primary: isPrimary,
                         mime_type: contentType,
@@ -330,7 +327,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                         status_reason: 'PDF is password-protected',
                     };
                 } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                    await persistMetadataToCache(attachment, filePath, contentType, { page_count: null, page_labels: {}, has_text_layer: null, needs_ocr: null, is_encrypted: false, is_invalid: true });
+                    await persistMetadataToCache(attachment, filePath, contentType, { page_count: null, page_labels: {}, has_text_layer: null, needs_ocr: false, is_encrypted: false, is_invalid: true });
                     return {
                         is_primary: isPrimary,
                         mime_type: contentType,
@@ -423,27 +420,17 @@ export async function getAttachmentFileStatusLightweight(
 
     const { filePath, contentType } = availabilityCheck;
 
-    // Cache-first: try metadata cache (provides richer status when available).
-    // Only use cache when OCR state is resolved (needs_ocr !== null) or a
-    // terminal error is present. Rows with needs_ocr === null may come
-    // from backfillMetadataForError (encrypted/invalid without OCR check);
-    // for those we fall through to the optimistic lightweight path below.
+    // Cache-first: all writers produce complete records, so any hit is usable.
     const cache = Zotero.Beaver?.attachmentFileCache;
     if (cache) {
         try {
             const cached = await cache.getMetadata(attachment.id, filePath);
-            if (cached && (cached.needs_ocr !== null || cached.is_encrypted || cached.is_invalid)) {
-                logger(`getAttachmentFileStatusLightweight: cache hit for item=${attachment.id}, using cached status`);
-                return fileStatusFromCache(cached, isPrimary);
-            }
             if (cached) {
-                logger(`getAttachmentFileStatusLightweight: cache hit for item=${attachment.id} but needs_ocr=null, falling through to lightweight path`);
+                return fileStatusFromCache(cached, isPrimary);
             }
         } catch (error) {
             logger(`getAttachmentFileStatusLightweight: cache read error: ${error}`, 1);
         }
-    } else {
-        logger(`getAttachmentFileStatusLightweight: cache not available (Zotero.Beaver?.attachmentFileCache is ${cache === null ? 'null' : 'undefined'})`);
     }
 
     // Cache miss: use lightweight methods (no full file read)
