@@ -603,6 +603,8 @@ export class AttachmentFileCache {
                 this.memoryCache.delete(firstKey);
             }
         }
+        // Delete-then-set to move existing keys to the end (LRU ordering)
+        this.memoryCache.delete(itemId);
         this.memoryCache.set(itemId, record);
     }
 
