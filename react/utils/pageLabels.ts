@@ -215,9 +215,9 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
             // Only fetch from PDF if:
             // - no page labels in any cache, AND
             // - page labels haven't been definitively resolved yet
-            //   (a record with page_labels: null means a lightweight handler
-            //   created it without checking labels; page_labels: {} means
-            //   labels were checked and none were found), AND
+            //   (a record with page_labels: null means an authoritative handler
+            //   wrote OCR info but not labels; page_labels: {} means labels
+            //   were checked and none were found), AND
             // - we haven't already tried reading this PDF this session.
             if (
                 !cache.getPageLabelsSync(item.id) &&
@@ -246,38 +246,42 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
                 continue;
             }
 
-            // Persist a full metadata record so labels survive across renders
-            // and sessions.  We store {} (empty object) when the PDF has no
-            // custom labels to distinguish from null ("not checked yet").
-            //
-            // Uses insert-if-not-exists to avoid overwriting richer data a
-            // concurrent handler may have written.  If a row already exists,
-            // we always update page_labels so the "resolved" state persists.
             if (result.filePath) {
-                const stat = await IOUtils.stat(result.filePath);
                 const labelsToStore = result.labels ?? {};
-                const inserted = await cache.setMetadataIfNotExists({
-                    item_id: itemId,
-                    library_id: result.item.libraryID,
-                    zotero_key: result.item.key,
-                    file_path: result.filePath,
-                    file_mtime_ms: stat.lastModified ?? 0,
-                    file_size_bytes: stat.size ?? 0,
-                    content_type: result.item.attachmentContentType || 'application/pdf',
-                    page_count: result.pageCount,
-                    page_labels: labelsToStore,
-                    has_text_layer: null,
-                    needs_ocr: null,
-                    is_encrypted: false,
-                    is_invalid: false,
-                    extraction_version: EXTRACTION_VERSION,
-                    has_content_cache: false,
-                });
 
-                // Row already existed (concurrent handler) — update labels
-                // to mark them as resolved (either with actual labels or {}).
-                if (!inserted) {
-                    await cache.updatePageLabels(itemId, labelsToStore);
+                // Case 1: Record exists → just update labels on it.
+                await cache.updatePageLabels(itemId, labelsToStore);
+
+                // Case 2: No record existed (updatePageLabels was a no-op) →
+                // create a record so labels are persisted to DB and
+                // available in memory for citation formatting.
+                //
+                // This writes a partial record (has_text_layer and needs_ocr are null)
+                // because running OCR analysis in a rendering path is too expensive.
+                // The record serves only for page-label lookups; it fails the cache guard in
+                // getAttachmentFileStatus / Lightweight (needs_ocr !== null),
+                // so those paths still run full extraction and overwrite it
+                // with a complete record via setMetadataPreservingContentFields
+                // (COALESCE preserves the richer page_labels value).
+                if (!cache.hasResolvedPageLabels(itemId)) {
+                    const stat = await IOUtils.stat(result.filePath);
+                    await cache.setMetadataPreservingContentFields({
+                        item_id: itemId,
+                        library_id: result.item.libraryID,
+                        zotero_key: result.item.key,
+                        file_path: result.filePath,
+                        file_mtime_ms: stat.lastModified ?? 0,
+                        file_size_bytes: stat.size ?? 0,
+                        content_type: result.item.attachmentContentType || 'application/pdf',
+                        page_count: result.pageCount,
+                        page_labels: labelsToStore,
+                        has_text_layer: null,
+                        needs_ocr: null,
+                        is_encrypted: false,
+                        is_invalid: false,
+                        extraction_version: EXTRACTION_VERSION,
+                        has_content_cache: false,
+                    });
                 }
             }
 

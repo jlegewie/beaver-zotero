@@ -8,6 +8,7 @@ import { getPref } from '../../utils/prefs';
 import { isAttachmentOnServer } from '../../utils/webAPI';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { MuPDFService } from '../pdf/MuPDFService';
 import { EXTRACTION_VERSION } from '../attachmentFileCache';
 import type { AttachmentFileCacheRecord } from '../attachmentFileCache';
 import { DeferredToolPreference } from '../agentProtocol';
@@ -154,12 +155,28 @@ function fileStatusFromCache(record: AttachmentFileCacheRecord, isPrimary: boole
 }
 
 /**
+ * Extract page labels from PDF data using MuPDF.
+ * Returns the label mapping (empty {} if no custom labels or on error).
+ */
+async function extractPageLabelsFromData(pdfData: Uint8Array): Promise<Record<number, string>> {
+    const mupdf = new MuPDFService();
+    try {
+        await mupdf.open(pdfData);
+        return mupdf.getAllPageLabels();
+    } catch {
+        return {};
+    } finally {
+        mupdf.close();
+    }
+}
+
+/**
  * Persist metadata to the attachment file cache after extraction.
  * Awaited at call sites to ensure cache consistency before returning.
  * Errors are caught internally and logged — they never propagate.
  *
- * Uses setMetadataPreservingContentFields so that page_labels written by
- * the pages handler and a concurrent has_content_cache=true are preserved.
+ * Uses setMetadataPreservingContentFields so that a concurrent
+ * has_content_cache=true from the pages handler is preserved.
  */
 async function persistMetadataToCache(
     attachment: Zotero.Item,
@@ -167,6 +184,7 @@ async function persistMetadataToCache(
     contentType: string,
     fields: {
         page_count: number | null;
+        page_labels: Record<number, string>;
         has_text_layer: boolean | null;
         needs_ocr: boolean | null;
         is_encrypted: boolean;
@@ -187,9 +205,7 @@ async function persistMetadataToCache(
             file_size_bytes: stat.size ?? 0,
             content_type: contentType,
             page_count: fields.page_count,
-            // Lightweight handlers do not produce labels/content-cache state.
-            // The cache layer atomically preserves richer concurrent values.
-            page_labels: null,
+            page_labels: fields.page_labels,
             has_text_layer: fields.has_text_layer,
             needs_ocr: fields.needs_ocr,
             is_encrypted: fields.is_encrypted,
@@ -199,45 +215,6 @@ async function persistMetadataToCache(
         });
     } catch (error) {
         logger(`persistMetadataToCache: ${error}`, 1);
-    }
-}
-
-/**
- * Backfill metadata after a successful lightweight extraction (images, search).
- * Uses insert-if-not-exists to avoid overwriting richer metadata that
- * a concurrent handler (e.g. pages) may have written.
- * Errors are caught internally and logged — they never propagate.
- */
-export async function backfillMetadataIfNotCached(
-    item: Zotero.Item,
-    filePath: string,
-    totalPages: number,
-    callerTag: string,
-): Promise<void> {
-    const cache = Zotero.Beaver?.attachmentFileCache;
-    if (!cache) return;
-
-    try {
-        const stat = await IOUtils.stat(filePath);
-        await cache.setMetadataIfNotExists({
-            item_id: item.id,
-            library_id: item.libraryID,
-            zotero_key: item.key,
-            file_path: filePath,
-            file_mtime_ms: stat.lastModified ?? 0,
-            file_size_bytes: stat.size ?? 0,
-            content_type: item.attachmentContentType || 'application/pdf',
-            page_count: totalPages,
-            page_labels: null,
-            has_text_layer: null,
-            needs_ocr: null,
-            is_encrypted: false,
-            is_invalid: false,
-            extraction_version: EXTRACTION_VERSION,
-            has_content_cache: false,
-        });
-    } catch (error) {
-        logger(`${callerTag}: metadata backfill error: ${error}`, 1);
     }
 }
 
@@ -267,7 +244,10 @@ export async function backfillMetadataForError(
             file_size_bytes: stat.size ?? 0,
             content_type: item.attachmentContentType || 'application/pdf',
             page_count: totalPages,
-            page_labels: null,
+            // Encrypted/invalid: definitively no labels (can't parse PDF).
+            // NO_TEXT_LAYER: page labels live in the page tree and ARE
+            // readable — leave null so preload can still extract them.
+            page_labels: (errorCode === ExtractionErrorCode.ENCRYPTED || errorCode === ExtractionErrorCode.INVALID_PDF) ? {} : null,
             has_text_layer: errorCode === ExtractionErrorCode.NO_TEXT_LAYER ? false : null,
             needs_ocr: errorCode === ExtractionErrorCode.NO_TEXT_LAYER,
             is_encrypted: errorCode === ExtractionErrorCode.ENCRYPTED,
@@ -302,10 +282,9 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
     const { filePath, contentType } = availabilityCheck;
 
     // Cache-first: try metadata cache.
-    // Use cache when OCR state is known (needs_ocr !== null) OR when the
-    // cached record already indicates terminal error states.
-    // Rows created by the lightweight path store can have needs_ocr: null;
-    // for non-error rows we still run full extraction to determine OCR status.
+    // All records written by this handler are complete (OCR + labels resolved),
+    // but backfillMetadataForError from other handlers may write records with
+    // needs_ocr: null. Accept those only when terminal flags are set.
     const cache = Zotero.Beaver?.attachmentFileCache;
     if (cache) {
         try {
@@ -318,7 +297,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
         }
     }
 
-    // Cache miss (or incomplete OCR state): run full extraction
+    // Cache miss: run full extraction
     try {
         const pdfData = await IOUtils.read(filePath);
         const extractor = new PDFExtractor();
@@ -330,7 +309,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
         } catch (error) {
             if (error instanceof ExtractionError) {
                 if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                    await persistMetadataToCache(attachment, filePath, contentType, { page_count: null, has_text_layer: null, needs_ocr: null, is_encrypted: true, is_invalid: false });
+                    await persistMetadataToCache(attachment, filePath, contentType, { page_count: null, page_labels: {}, has_text_layer: null, needs_ocr: null, is_encrypted: true, is_invalid: false });
                     return {
                         is_primary: isPrimary,
                         mime_type: contentType,
@@ -339,7 +318,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                         status_reason: 'PDF is password-protected',
                     };
                 } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                    await persistMetadataToCache(attachment, filePath, contentType, { page_count: null, has_text_layer: null, needs_ocr: null, is_encrypted: false, is_invalid: true });
+                    await persistMetadataToCache(attachment, filePath, contentType, { page_count: null, page_labels: {}, has_text_layer: null, needs_ocr: null, is_encrypted: false, is_invalid: true });
                     return {
                         is_primary: isPrimary,
                         mime_type: contentType,
@@ -356,7 +335,9 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
         const maxPageCount = getPref('maxPageCount');
 
         if (pageCount > maxPageCount) {
-            await persistMetadataToCache(attachment, filePath, contentType, { page_count: pageCount, has_text_layer: null, needs_ocr: null, is_encrypted: false, is_invalid: false });
+            // No cache write: a full record would require OCR analysis
+            // (expensive, pointless for a rejected PDF). The lightweight
+            // path gets page count cheaply from fulltext/PDFWorker.
             return {
                 is_primary: isPrimary,
                 mime_type: contentType,
@@ -366,11 +347,14 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
             };
         }
 
-        // Check if the PDF has a text layer (needs OCR if not)
-        const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
+        // Analyze OCR needs and extract page labels in parallel
+        const [ocrAnalysis, pageLabels] = await Promise.all([
+            extractor.analyzeOCRNeeds(pdfData),
+            extractPageLabelsFromData(pdfData),
+        ]);
 
         if (ocrAnalysis.needsOCR) {
-            await persistMetadataToCache(attachment, filePath, contentType, { page_count: pageCount, has_text_layer: false, needs_ocr: true, is_encrypted: false, is_invalid: false });
+            await persistMetadataToCache(attachment, filePath, contentType, { page_count: pageCount, page_labels: pageLabels, has_text_layer: false, needs_ocr: true, is_encrypted: false, is_invalid: false });
             return {
                 is_primary: isPrimary,
                 mime_type: contentType,
@@ -381,7 +365,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
         }
 
         // All checks passed - file is fully accessible
-        await persistMetadataToCache(attachment, filePath, contentType, { page_count: pageCount, has_text_layer: true, needs_ocr: false, is_encrypted: false, is_invalid: false });
+        await persistMetadataToCache(attachment, filePath, contentType, { page_count: pageCount, page_labels: pageLabels, has_text_layer: true, needs_ocr: false, is_encrypted: false, is_invalid: false });
         return {
             is_primary: isPrimary,
             mime_type: contentType,
@@ -429,9 +413,9 @@ export async function getAttachmentFileStatusLightweight(
 
     // Cache-first: try metadata cache (provides richer status when available).
     // Only use cache when OCR state is resolved (needs_ocr !== null) or a
-    // terminal error is present.  Rows with needs_ocr === null were seeded by
-    // lightweight handlers that didn't run OCR analysis — for those we fall
-    // through to the optimistic lightweight path below.
+    // terminal error is present. Rows with needs_ocr === null may come
+    // from backfillMetadataForError (encrypted/invalid without OCR check);
+    // for those we fall through to the optimistic lightweight path below.
     const cache = Zotero.Beaver?.attachmentFileCache;
     if (cache) {
         try {
@@ -453,14 +437,10 @@ export async function getAttachmentFileStatusLightweight(
     // Cache miss: use lightweight methods (no full file read)
     // First try fulltext index (instant database query)
     let pageCount = await getPDFPageCountFromFulltext(attachment);
-    let pageCountSource: 'fulltext' | 'worker' | null = pageCount !== null ? 'fulltext' : null;
 
     // Fallback to PDFWorker if not indexed (reads minimal data)
     if (pageCount === null) {
         pageCount = await getPDFPageCountFromWorker(attachment);
-        if (pageCount !== null) {
-            pageCountSource = 'worker';
-        }
     }
 
     // If both page count methods failed, the PDF is likely problematic
@@ -479,11 +459,6 @@ export async function getAttachmentFileStatusLightweight(
     const maxPageCount = getPref('maxPageCount');
 
     if (pageCount > maxPageCount) {
-        // Only persist page_count when derived from PDFWorker (file-derived).
-        // Fulltext totals can lag behind file replacements/reindexing.
-        if (pageCountSource === 'worker') {
-            await persistMetadataToCache(attachment, filePath, contentType, { page_count: pageCount, has_text_layer: null, needs_ocr: null, is_encrypted: false, is_invalid: false });
-        }
         return {
             is_primary: isPrimary,
             mime_type: contentType,
@@ -491,11 +466,6 @@ export async function getAttachmentFileStatusLightweight(
             status: "unavailable",
             status_reason: `PDF has ${pageCount} pages, which exceeds the ${maxPageCount}-page limit`,
         };
-    }
-
-    // Only persist page_count when derived from PDFWorker (file-derived).
-    if (pageCountSource === 'worker') {
-        await persistMetadataToCache(attachment, filePath, contentType, { page_count: pageCount, has_text_layer: null, needs_ocr: null, is_encrypted: false, is_invalid: false });
     }
 
     // All checks passed - file is available

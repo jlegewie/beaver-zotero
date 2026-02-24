@@ -130,35 +130,6 @@ describe('BeaverDB — attachment_file_cache methods', () => {
     });
 
     // ===================================================================
-    // insertAttachmentFileCacheIfNotExists
-    // ===================================================================
-
-    describe('insertAttachmentFileCacheIfNotExists', () => {
-        it('inserts a new row and returns true', async () => {
-            const inserted = await db.insertAttachmentFileCacheIfNotExists(makeRecord());
-            expect(inserted).toBe(true);
-
-            const result = await db.getAttachmentFileCache(100);
-            expect(result).not.toBeNull();
-            expect(result!.item_id).toBe(100);
-        });
-
-        it('returns false and does NOT overwrite existing row', async () => {
-            await db.upsertAttachmentFileCache(makeRecord({ page_count: 42, has_content_cache: true }));
-
-            const inserted = await db.insertAttachmentFileCacheIfNotExists(
-                makeRecord({ page_count: 1, has_content_cache: false })
-            );
-            expect(inserted).toBe(false);
-
-            // Original values preserved
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.page_count).toBe(42);
-            expect(result!.has_content_cache).toBe(true);
-        });
-    });
-
-    // ===================================================================
     // upsertAttachmentFileCachePreserveContentFields
     // ===================================================================
 

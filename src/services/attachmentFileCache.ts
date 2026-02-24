@@ -173,21 +173,10 @@ export class AttachmentFileCache {
     }
 
     /**
-     * Check whether a full metadata record exists in the in-memory cache.
-     * Useful for distinguishing "never extracted" (no record) from
-     * "metadata exists but page labels may still be unresolved".
-     *
-     * Call {@link ensureInMemoryCache} first to load from DB if needed.
-     */
-    hasCachedRecord(itemId: number): boolean {
-        return this.memoryCache.has(itemId);
-    }
-
-    /**
      * Check whether page labels have been definitively resolved for this item.
      *
      * Three states for `page_labels` on a cached record:
-     * - `null` → labels not checked (lightweight handler created the record)
+     * - `null` → labels not checked (authoritative handler wrote OCR info but not labels)
      * - `{}` → labels checked, no custom labels found
      * - `{ 0: "i", ... }` → labels checked, custom labels present
      *
@@ -352,7 +341,10 @@ export class AttachmentFileCache {
 
     /**
      * Store metadata with an atomic merge for content-derived fields.
-     * Preserves existing page_labels and a true has_content_cache flag.
+     * Preserves existing page_labels, has_text_layer, needs_ocr (when
+     * the new value is null) and a true has_content_cache flag. This
+     * prevents the preload path (which writes page-label-only records)
+     * from downgrading richer OCR metadata written by authoritative handlers.
      */
     async setMetadataPreservingContentFields(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
         logger(`AttachmentFileCache.setMetadataPreservingContentFields: item=${input.item_id} key=${input.zotero_key}`);
@@ -370,25 +362,6 @@ export class AttachmentFileCache {
             ...input,
             cached_at: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ''),
         });
-    }
-
-    /**
-     * Insert metadata only if no row exists for this item.
-     * Race-safe: uses INSERT ... ON CONFLICT DO NOTHING at the DB level,
-     * so a concurrent handler that writes richer data is never overwritten.
-     * @returns true if a new row was inserted, false if one already existed.
-     */
-    async setMetadataIfNotExists(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<boolean> {
-        const inserted = await this.db.insertAttachmentFileCacheIfNotExists(input);
-        if (inserted) {
-            logger(`AttachmentFileCache.setMetadataIfNotExists: inserted item=${input.item_id} key=${input.zotero_key}`);
-            const record: AttachmentFileCacheRecord = {
-                ...input,
-                cached_at: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ''),
-            };
-            this.putMemoryCache(input.item_id, record);
-        }
-        return inserted;
     }
 
     /**

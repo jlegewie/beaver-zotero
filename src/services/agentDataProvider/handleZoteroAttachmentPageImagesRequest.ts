@@ -18,7 +18,7 @@ import {
     WSPageImage,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataIfNotCached, backfillMetadataForError } from './utils';
+import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError } from './utils';
 
 /**
  * Handle zotero_attachment_page_images_request event.
@@ -205,11 +205,6 @@ export async function handleZoteroAttachmentPageImagesRequest(
                 height: result.height,
             };
         });
-
-        // 10b. Backfill metadata if not already cached.
-        if (!cachedMeta) {
-            await backfillMetadataIfNotCached(pdfItem, filePath, totalPages, 'handleZoteroAttachmentPageImagesRequest');
-        }
 
         return {
             type: 'zotero_attachment_page_images',

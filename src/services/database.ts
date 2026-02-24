@@ -1437,51 +1437,6 @@ export class BeaverDB {
     }
 
     /**
-     * Insert an attachment file cache record only if no row exists for the item.
-     * Uses INSERT ... ON CONFLICT DO NOTHING to avoid overwriting richer data
-     * written by other handlers in a concurrent scenario.
-     * @returns true if a row was inserted, false if it already existed.
-     */
-    public async insertAttachmentFileCacheIfNotExists(record: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<boolean> {
-        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
-        const pageLabelsJson = record.page_labels ? JSON.stringify(record.page_labels) : null;
-
-        await this.conn.queryAsync(
-            `INSERT INTO attachment_file_cache
-                (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
-                 content_type, page_count, page_labels_json, has_text_layer, needs_ocr,
-                 is_encrypted, is_invalid, extraction_version, has_content_cache, cached_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(item_id) DO NOTHING`,
-            [
-                record.item_id,
-                record.library_id,
-                record.zotero_key,
-                record.file_path,
-                record.file_mtime_ms,
-                record.file_size_bytes,
-                record.content_type,
-                record.page_count,
-                pageLabelsJson,
-                record.has_text_layer == null ? null : (record.has_text_layer ? 1 : 0),
-                record.needs_ocr == null ? null : (record.needs_ocr ? 1 : 0),
-                record.is_encrypted ? 1 : 0,
-                record.is_invalid ? 1 : 0,
-                record.extraction_version,
-                record.has_content_cache ? 1 : 0,
-                now,
-            ]
-        );
-
-        // SQLite changes() returns 1 if a row was inserted, 0 if conflict (DO NOTHING)
-        const changes: number[] = [];
-        await this.conn.queryAsync('SELECT changes() AS cnt', [], {
-            onRow: (row: any) => { changes.push(row.getResultByIndex(0)); },
-        });
-        return (changes[0] ?? 0) > 0;
-    }
-
-    /**
      * Insert or update an attachment file cache record.
      * Uses INSERT ON CONFLICT to avoid accidental field resets.
      */
@@ -1559,8 +1514,8 @@ export class BeaverDB {
                 content_type = excluded.content_type,
                 page_count = excluded.page_count,
                 page_labels_json = COALESCE(excluded.page_labels_json, attachment_file_cache.page_labels_json),
-                has_text_layer = excluded.has_text_layer,
-                needs_ocr = excluded.needs_ocr,
+                has_text_layer = COALESCE(excluded.has_text_layer, attachment_file_cache.has_text_layer),
+                needs_ocr = COALESCE(excluded.needs_ocr, attachment_file_cache.needs_ocr),
                 is_encrypted = excluded.is_encrypted,
                 is_invalid = excluded.is_invalid,
                 extraction_version = excluded.extraction_version,
