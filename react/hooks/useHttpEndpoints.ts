@@ -638,24 +638,26 @@ function registerEndpoints(): boolean {
     Zotero.Server.Endpoints['/beaver/delete-items'] =
         createEndpoint(handleDeleteItemsHttpRequest);
 
-    // Test-only endpoints (cache inspection/manipulation)
-    Zotero.Server.Endpoints['/beaver/test/ping'] =
-        createEndpoint(handleTestPingHttpRequest);
+    // Test-only endpoints (cache inspection/manipulation) — dev builds only
+    if (Zotero.Beaver?.data?.env === 'development') {
+        Zotero.Server.Endpoints['/beaver/test/ping'] =
+            createEndpoint(handleTestPingHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/test/cache-metadata'] =
-        createEndpoint(handleTestCacheMetadataHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/cache-metadata'] =
+            createEndpoint(handleTestCacheMetadataHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/test/cache-invalidate'] =
-        createEndpoint(handleTestCacheInvalidateHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/cache-invalidate'] =
+            createEndpoint(handleTestCacheInvalidateHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/test/cache-clear-memory'] =
-        createEndpoint(handleTestCacheClearMemoryHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/cache-clear-memory'] =
+            createEndpoint(handleTestCacheClearMemoryHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/test/cache-delete-content'] =
-        createEndpoint(handleTestCacheDeleteContentHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/cache-delete-content'] =
+            createEndpoint(handleTestCacheDeleteContentHttpRequest);
 
-    Zotero.Server.Endpoints['/beaver/test/resolve-item'] =
-        createEndpoint(handleTestResolveItemHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/resolve-item'] =
+            createEndpoint(handleTestResolveItemHttpRequest);
+    }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
     return true;

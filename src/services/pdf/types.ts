@@ -539,7 +539,9 @@ export class ExtractionError extends Error {
     constructor(
         public code: ExtractionErrorCode,
         message: string,
-        public details?: unknown
+        public details?: unknown,
+        public pageLabels?: Record<number, string>,
+        public pageCount?: number,
     ) {
         super(message);
         this.name = "ExtractionError";

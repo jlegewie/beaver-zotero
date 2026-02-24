@@ -41,7 +41,6 @@ function makeRecord(overrides: Partial<Omit<AttachmentFileCacheRecord, 'cached_a
         is_encrypted: false,
         is_invalid: false,
         extraction_version: EXTRACTION_VERSION,
-        has_content_cache: false,
         ...overrides,
     };
 }
@@ -284,60 +283,6 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
     });
 
     // ===================================================================
-    // setMetadataPreservingContentFields
-    // ===================================================================
-
-    describe('setMetadataPreservingContentFields', () => {
-        it('updates DB with merge and refreshes memory cache', async () => {
-            // Pre-populate with has_content_cache=true and page_labels
-            await db.upsertAttachmentFileCache(makeRecord({
-                has_content_cache: true,
-                page_labels: { 0: 'i' },
-            }));
-
-            // Now call preserve method with has_content_cache=false and page_labels=null
-            await cache.setMetadataPreservingContentFields(makeRecord({
-                has_content_cache: false,
-                page_labels: null,
-                page_count: 99,
-            }));
-
-            // Memory cache should reflect merged values
-            mockFileStat(1700000000000, 123456);
-            const result = await cache.getMetadata(100, '/data/storage/ABCD1234/test.pdf');
-            expect(result).not.toBeNull();
-            expect(result!.has_content_cache).toBe(true); // preserved
-            expect(result!.page_labels).toEqual({ 0: 'i' }); // preserved
-            expect(result!.page_count).toBe(99); // updated
-        });
-    });
-
-    // ===================================================================
-    // setMetadataIfNotExists
-    // ===================================================================
-
-    describe('setMetadataIfNotExists', () => {
-        it('inserts when no row exists and returns true', async () => {
-            const inserted = await cache.setMetadataIfNotExists(makeRecord());
-            expect(inserted).toBe(true);
-
-            mockFileStat(1700000000000, 123456);
-            const result = await cache.getMetadata(100, '/data/storage/ABCD1234/test.pdf');
-            expect(result).not.toBeNull();
-        });
-
-        it('returns false and does NOT overwrite when row exists', async () => {
-            await cache.setMetadata(makeRecord({ page_count: 42 }));
-            const inserted = await cache.setMetadataIfNotExists(makeRecord({ page_count: 1 }));
-            expect(inserted).toBe(false);
-
-            mockFileStat(1700000000000, 123456);
-            const result = await cache.getMetadata(100, '/data/storage/ABCD1234/test.pdf');
-            expect(result!.page_count).toBe(42);
-        });
-    });
-
-    // ===================================================================
     // setMetadataBatch
     // ===================================================================
 
@@ -505,86 +450,6 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
     });
 
     // ===================================================================
-    // hasCachedRecord
-    // ===================================================================
-
-    describe('hasCachedRecord', () => {
-        it('returns true when record is in memory cache', async () => {
-            await cache.setMetadata(makeRecord());
-            expect(cache.hasCachedRecord(100)).toBe(true);
-        });
-
-        it('returns false when no record in memory cache', () => {
-            expect(cache.hasCachedRecord(999)).toBe(false);
-        });
-
-        it('returns false after record is deleted', async () => {
-            await cache.setMetadata(makeRecord());
-            await cache.deleteMetadata(100);
-            expect(cache.hasCachedRecord(100)).toBe(false);
-        });
-    });
-
-    // ===================================================================
-    // hasResolvedPageLabels
-    // ===================================================================
-
-    describe('hasResolvedPageLabels', () => {
-        it('returns false when no record exists', () => {
-            expect(cache.hasResolvedPageLabels(999)).toBe(false);
-        });
-
-        it('returns false when record has page_labels=null (not checked)', async () => {
-            await cache.setMetadata(makeRecord({ page_labels: null }));
-            expect(cache.hasResolvedPageLabels(100)).toBe(false);
-        });
-
-        it('returns true when record has page_labels={} (checked, none found)', async () => {
-            await cache.setMetadata(makeRecord({ page_labels: {} }));
-            expect(cache.hasResolvedPageLabels(100)).toBe(true);
-        });
-
-        it('returns true when record has populated page_labels', async () => {
-            await cache.setMetadata(makeRecord({ page_labels: { 0: 'i', 1: '1' } }));
-            expect(cache.hasResolvedPageLabels(100)).toBe(true);
-        });
-
-        it('returns false after record is deleted', async () => {
-            await cache.setMetadata(makeRecord({ page_labels: { 0: 'A' } }));
-            await cache.deleteMetadata(100);
-            expect(cache.hasResolvedPageLabels(100)).toBe(false);
-        });
-    });
-
-    // ===================================================================
-    // ensureInMemoryCache
-    // ===================================================================
-
-    describe('ensureInMemoryCache', () => {
-        it('loads record from DB into memory cache', async () => {
-            await db.upsertAttachmentFileCache(makeRecord());
-            expect((cache as any).memoryCache.has(100)).toBe(false);
-
-            await cache.ensureInMemoryCache(100);
-            expect((cache as any).memoryCache.has(100)).toBe(true);
-        });
-
-        it('is a no-op when record is already in memory', async () => {
-            await cache.setMetadata(makeRecord());
-
-            const dbSpy = vi.spyOn(db, 'getAttachmentFileCache');
-            await cache.ensureInMemoryCache(100);
-            expect(dbSpy).not.toHaveBeenCalled();
-            dbSpy.mockRestore();
-        });
-
-        it('is a no-op when record does not exist in DB', async () => {
-            await cache.ensureInMemoryCache(999);
-            expect((cache as any).memoryCache.has(999)).toBe(false);
-        });
-    });
-
-    // ===================================================================
     // Error-state metadata (encrypted, OCR, invalid)
     // ===================================================================
 
@@ -659,94 +524,6 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
             await cache.setMetadata(makeRecord({ needs_ocr: false, has_text_layer: true }));
             const result2 = await cache.getMetadata(100, incomplete.file_path);
             expect(result2!.needs_ocr).toBe(false);
-        });
-    });
-
-    // ===================================================================
-    // Concurrent handler metadata races
-    // ===================================================================
-
-    describe('concurrent handler metadata races', () => {
-        it('setMetadataIfNotExists does not overwrite richer data from setMetadataPreservingContentFields', async () => {
-            // Pages handler writes rich data first
-            await cache.setMetadataPreservingContentFields(makeRecord({
-                page_count: 42,
-                has_text_layer: true,
-                needs_ocr: false,
-                page_labels: { 0: 'i', 1: '1' },
-            }));
-
-            // Images handler tries insert-if-not-exists with sparse data
-            const inserted = await cache.setMetadataIfNotExists(makeRecord({
-                page_count: 42,
-                has_text_layer: null,
-                needs_ocr: null,
-                page_labels: null,
-            }));
-
-            expect(inserted).toBe(false);
-
-            // Original rich data preserved
-            mockFileStat(1700000000000, 123456);
-            const result = await cache.getMetadata(100, '/data/storage/ABCD1234/test.pdf');
-            expect(result!.page_labels).toEqual({ 0: 'i', 1: '1' });
-            expect(result!.has_text_layer).toBe(true);
-            expect(result!.needs_ocr).toBe(false);
-        });
-
-        it('setMetadataPreservingContentFields overwrites sparse data from setMetadataIfNotExists', async () => {
-            // Images handler inserts sparse row first
-            await cache.setMetadataIfNotExists(makeRecord({
-                page_count: 42,
-                has_text_layer: null,
-                needs_ocr: null,
-                page_labels: null,
-            }));
-
-            // Pages handler writes rich data via preserve method
-            await cache.setMetadataPreservingContentFields(makeRecord({
-                page_count: 42,
-                has_text_layer: true,
-                needs_ocr: false,
-                page_labels: { 0: 'i', 1: '1' },
-            }));
-
-            mockFileStat(1700000000000, 123456);
-            const result = await cache.getMetadata(100, '/data/storage/ABCD1234/test.pdf');
-            expect(result!.page_labels).toEqual({ 0: 'i', 1: '1' });
-            expect(result!.has_text_layer).toBe(true);
-            expect(result!.needs_ocr).toBe(false);
-        });
-
-        it('setMetadataPreservingContentFields preserves has_content_cache=true from earlier write', async () => {
-            // Content was written first
-            await cache.setMetadata(makeRecord({ has_content_cache: true }));
-
-            // Pages handler updates metadata without content flag
-            await cache.setMetadataPreservingContentFields(makeRecord({
-                has_content_cache: false,
-                page_count: 99,
-            }));
-
-            mockFileStat(1700000000000, 123456);
-            const result = await cache.getMetadata(100, '/data/storage/ABCD1234/test.pdf');
-            expect(result!.has_content_cache).toBe(true);
-            expect(result!.page_count).toBe(99);
-        });
-
-        it('setMetadataPreservingContentFields preserves page_labels from earlier write when incoming is null', async () => {
-            // Pages handler wrote labels first
-            await cache.setMetadata(makeRecord({ page_labels: { 0: 'i', 1: '1' } }));
-
-            // Second pages request with null labels should preserve existing
-            await cache.setMetadataPreservingContentFields(makeRecord({
-                page_labels: null,
-                page_count: 10,
-            }));
-
-            mockFileStat(1700000000000, 123456);
-            const result = await cache.getMetadata(100, '/data/storage/ABCD1234/test.pdf');
-            expect(result!.page_labels).toEqual({ 0: 'i', 1: '1' });
         });
     });
 
@@ -830,7 +607,7 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
     // ===================================================================
 
     describe('memory cache ordering', () => {
-        it('Map.set on existing key preserves insertion order (FIFO, not LRU)', async () => {
+        it('re-setting an existing key refreshes recency (LRU behavior)', async () => {
             // Insert 500 entries
             for (let i = 1; i <= 500; i++) {
                 await cache.setMetadata(makeRecord({
@@ -840,16 +617,15 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
                 }));
             }
 
-            // Re-set item 1 via setMetadataPreservingContentFields
-            // This calls Map.set() which does NOT change insertion order
-            await cache.setMetadataPreservingContentFields(makeRecord({
+            // Re-set item 1 via setMetadata (should refresh recency)
+            await cache.setMetadata(makeRecord({
                 item_id: 1,
                 zotero_key: 'K0000001',
                 file_path: '/path/1.pdf',
                 page_count: 99,
             }));
 
-            // Add item 501 — evicts item 1 because it's still first by insertion order
+            // Add item 501 — should evict item 2 (oldest), not refreshed item 1
             await cache.setMetadata(makeRecord({
                 item_id: 501,
                 zotero_key: 'K0000501',
@@ -858,12 +634,12 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
 
             mockFileStat(1700000000000, 123456);
 
-            // Item 1 was evicted from memory, falls back to DB
+            // Item 1 should remain in memory (no DB fallback)
             const dbSpy = vi.spyOn(db, 'getAttachmentFileCache');
             const r1 = await cache.getMetadata(1, '/path/1.pdf');
             expect(r1).not.toBeNull();
             expect(r1!.page_count).toBe(99);
-            expect(dbSpy).toHaveBeenCalledWith(1); // loaded from DB
+            expect(dbSpy).not.toHaveBeenCalled();
             dbSpy.mockRestore();
         });
 

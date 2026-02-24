@@ -19,7 +19,7 @@ import {
     WSSearchHit,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { validateZoteroItemReference, backfillMetadataIfNotCached, backfillMetadataForError } from './utils';
+import { validateZoteroItemReference, backfillMetadataForError } from './utils';
 
 
 /**
@@ -217,11 +217,6 @@ export async function handleZoteroAttachmentSearchRequest(
             })),
         }));
 
-        // 10b. Backfill metadata if not already cached.
-        if (!cachedMeta) {
-            await backfillMetadataIfNotCached(zoteroItem, filePath, totalPages, 'handleZoteroAttachmentSearchRequest');
-        }
-
         return {
             type: 'zotero_attachment_search',
             request_id,
@@ -240,7 +235,7 @@ export async function handleZoteroAttachmentSearchRequest(
         if (error instanceof ExtractionError) {
             // Backfill metadata for known error states
             if (resolvedItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF || error.code === ExtractionErrorCode.NO_TEXT_LAYER)) {
-                await backfillMetadataForError(resolvedItem, resolvedFilePath, error.code, null, 'handleZoteroAttachmentSearchRequest');
+                await backfillMetadataForError(resolvedItem, resolvedFilePath, error, null, 'handleZoteroAttachmentSearchRequest');
             }
 
             switch (error.code) {

@@ -59,7 +59,6 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
     const handleCopyThread = async () => {
         const content = getThreadContent();
-        await preloadPageLabelsForContent(content);
         const formatted = renderToMarkdown(content);
         await copyToClipboard(formatted);
     };

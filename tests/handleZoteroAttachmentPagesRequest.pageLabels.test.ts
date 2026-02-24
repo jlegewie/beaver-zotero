@@ -16,10 +16,14 @@ vi.mock('../src/services/pdf', () => {
 
     class MockExtractionError extends Error {
         code: string;
+        pageLabels?: Record<number, string>;
+        pageCount?: number;
 
-        constructor(code: string, message: string) {
+        constructor(code: string, message: string, details?: unknown, pageLabels?: Record<number, string>, pageCount?: number) {
             super(message);
             this.code = code;
+            this.pageLabels = pageLabels;
+            this.pageCount = pageCount;
         }
     }
 
@@ -63,7 +67,7 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
                 page_count: 3,
             }),
             getContentRange: vi.fn().mockResolvedValue(null),
-            setMetadataPreservingContentFields: vi.fn().mockResolvedValue(undefined),
+            setMetadata: vi.fn().mockResolvedValue(undefined),
             setContentPages: vi.fn().mockResolvedValue(undefined),
         };
 
@@ -105,7 +109,7 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
             skip_local_limits: true,
         });
 
-        expect(cache.setMetadataPreservingContentFields).toHaveBeenCalledWith(expect.objectContaining({
+        expect(cache.setMetadata).toHaveBeenCalledWith(expect.objectContaining({
             item_id: 42,
             page_labels: {},
             page_count: 3,

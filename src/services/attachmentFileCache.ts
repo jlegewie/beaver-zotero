@@ -136,10 +136,8 @@ export class AttachmentFileCache {
                     removedMetadata++;
 
                     // Remove content file if it exists
-                    if (record.has_content_cache) {
-                        await this.removeContentFile(record.library_id, record.zotero_key);
-                        removedContent++;
-                    }
+                    await this.removeContentFile(record.library_id, record.zotero_key);
+                    removedContent++;
                 }
             }
 
@@ -164,68 +162,12 @@ export class AttachmentFileCache {
      * - record with `page_labels: {}` (checked, none found)
      *
      * Designed for use in synchronous rendering paths (e.g., citation export).
-     * Call {@link ensureInMemoryCache} first to populate the cache if needed.
+     * Call `getMetadata` first to populate the cache if needed.
      */
     getPageLabelsSync(itemId: number): Record<number, string> | null {
         const labels = this.memoryCache.get(itemId)?.page_labels;
         if (!labels || Object.keys(labels).length === 0) return null;
         return labels;
-    }
-
-    /**
-     * Check whether a full metadata record exists in the in-memory cache.
-     * Useful for distinguishing "never extracted" (no record) from
-     * "metadata exists but page labels may still be unresolved".
-     *
-     * Call {@link ensureInMemoryCache} first to load from DB if needed.
-     */
-    hasCachedRecord(itemId: number): boolean {
-        return this.memoryCache.has(itemId);
-    }
-
-    /**
-     * Check whether page labels have been definitively resolved for this item.
-     *
-     * Three states for `page_labels` on a cached record:
-     * - `null` → labels not checked (lightweight handler created the record)
-     * - `{}` → labels checked, no custom labels found
-     * - `{ 0: "i", ... }` → labels checked, custom labels present
-     *
-     * Returns true for `{}` and populated labels, false for null / no record.
-     * Call {@link ensureInMemoryCache} first to load from DB if needed.
-     */
-    hasResolvedPageLabels(itemId: number): boolean {
-        const record = this.memoryCache.get(itemId);
-        return record?.page_labels != null;
-    }
-
-    /**
-     * Ensure a record is loaded into the in-memory cache (from DB if needed).
-     * No-op if the item is already in the memory cache.
-     * Does NOT perform staleness checking — intended for pre-loading before
-     * synchronous rendering where only page labels are needed.
-     */
-    async ensureInMemoryCache(itemId: number): Promise<void> {
-        if (this.memoryCache.has(itemId)) return;
-        const record = await this.db.getAttachmentFileCache(itemId);
-        if (record) {
-            this.putMemoryCache(itemId, record);
-        }
-    }
-
-    /**
-     * Update page labels on an existing metadata record (memory + DB).
-     * No-op if no record exists for this item.
-     */
-    async updatePageLabels(itemId: number, pageLabels: Record<number, string>): Promise<void> {
-        await this.db.updateAttachmentFileCachePageLabels(itemId, pageLabels);
-        const record = this.memoryCache.get(itemId);
-        if (record) {
-            record.page_labels = pageLabels;
-        } else {
-            // Reload into memory cache so subsequent sync lookups find the labels
-            await this.ensureInMemoryCache(itemId);
-        }
     }
 
     /** Clear the in-memory metadata cache and pending write locks. */
@@ -260,19 +202,19 @@ export class AttachmentFileCache {
         }
 
         if (!record) {
-            logger(`AttachmentFileCache.getMetadata: miss item=${itemId}`);
+            logger(`AttachmentFileCache.getMetadata: miss item=${itemId}`, 3);
             return null;
         }
 
         // Staleness check
         const stale = await this.isStale(record, filePath);
         if (stale) {
-            logger(`AttachmentFileCache.getMetadata: stale item=${itemId}, invalidating`);
+            logger(`AttachmentFileCache.getMetadata: stale item=${itemId}, invalidating`, 3);
             await this.invalidate(itemId, record.library_id, record.zotero_key);
             return null;
         }
 
-        logger(`AttachmentFileCache.getMetadata: hit item=${itemId} source=${source} pages=${record.page_count ?? '?'} ocr=${record.needs_ocr}`);
+        logger(`AttachmentFileCache.getMetadata: hit item=${itemId} source=${source} pages=${record.page_count ?? '?'} ocr=${record.needs_ocr}`, 3);
         return record;
     }
 
@@ -302,18 +244,29 @@ export class AttachmentFileCache {
         const result = new Map<number, AttachmentFileCacheRecord>();
         const idsToFetch: number[] = [];
 
-        // Check memory cache first
+        // Check memory cache first — partition into hits and misses
+        const memoryHits: Array<{ itemId: number; filePath: string; record: AttachmentFileCacheRecord }> = [];
         for (const { itemId, filePath } of items) {
             const cached = this.memoryCache.get(itemId);
             if (cached) {
-                const stale = await this.isStale(cached, filePath);
-                if (!stale) {
-                    result.set(itemId, cached);
-                } else {
-                    await this.invalidate(itemId, cached.library_id, cached.zotero_key);
-                }
+                memoryHits.push({ itemId, filePath, record: cached });
             } else {
                 idsToFetch.push(itemId);
+            }
+        }
+
+        // Parallel staleness checks for memory hits
+        const memoryChecks = await Promise.all(
+            memoryHits.map(async ({ itemId, filePath, record }) => {
+                const stale = await this.isStale(record, filePath);
+                return { itemId, filePath, record, stale };
+            })
+        );
+        for (const { itemId, record, stale } of memoryChecks) {
+            if (!stale) {
+                result.set(itemId, record);
+            } else {
+                await this.invalidate(itemId, record.library_id, record.zotero_key);
             }
         }
 
@@ -322,9 +275,16 @@ export class AttachmentFileCache {
             const dbRecords = await this.db.getAttachmentFileCacheBatch(idsToFetch);
             const filePathMap = new Map(items.map(i => [i.itemId, i.filePath]));
 
-            for (const [itemId, record] of dbRecords) {
-                const filePath = filePathMap.get(itemId)!;
-                const stale = await this.isStale(record, filePath);
+            // Parallel staleness checks for DB hits
+            const dbEntries = Array.from(dbRecords.entries());
+            const dbChecks = await Promise.all(
+                dbEntries.map(async ([itemId, record]) => {
+                    const filePath = filePathMap.get(itemId)!;
+                    const stale = await this.isStale(record, filePath);
+                    return { itemId, record, stale };
+                })
+            );
+            for (const { itemId, record, stale } of dbChecks) {
                 if (!stale) {
                     this.putMemoryCache(itemId, record);
                     result.set(itemId, record);
@@ -341,7 +301,7 @@ export class AttachmentFileCache {
      * Store metadata for an attachment (full upsert — overwrites all fields).
      */
     async setMetadata(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
-        logger(`AttachmentFileCache.setMetadata: item=${input.item_id} key=${input.zotero_key} pages=${input.page_count ?? '?'}`);
+        logger(`AttachmentFileCache.setMetadata: item=${input.item_id} key=${input.zotero_key} pages=${input.page_count ?? '?'}`, 3);
         await this.db.upsertAttachmentFileCache(input);
         const record: AttachmentFileCacheRecord = {
             ...input,
@@ -351,52 +311,11 @@ export class AttachmentFileCache {
     }
 
     /**
-     * Store metadata with an atomic merge for content-derived fields.
-     * Preserves existing page_labels and a true has_content_cache flag.
-     */
-    async setMetadataPreservingContentFields(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
-        logger(`AttachmentFileCache.setMetadataPreservingContentFields: item=${input.item_id} key=${input.zotero_key}`);
-        await this.db.upsertAttachmentFileCachePreserveContentFields(input);
-
-        // Reload merged row so memory cache reflects the DB-level conflict merge.
-        const merged = await this.db.getAttachmentFileCache(input.item_id);
-        if (merged) {
-            this.putMemoryCache(input.item_id, merged);
-            return;
-        }
-
-        // Fallback should be rare, but keep memory cache populated.
-        this.putMemoryCache(input.item_id, {
-            ...input,
-            cached_at: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ''),
-        });
-    }
-
-    /**
-     * Insert metadata only if no row exists for this item.
-     * Race-safe: uses INSERT ... ON CONFLICT DO NOTHING at the DB level,
-     * so a concurrent handler that writes richer data is never overwritten.
-     * @returns true if a new row was inserted, false if one already existed.
-     */
-    async setMetadataIfNotExists(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<boolean> {
-        const inserted = await this.db.insertAttachmentFileCacheIfNotExists(input);
-        if (inserted) {
-            logger(`AttachmentFileCache.setMetadataIfNotExists: inserted item=${input.item_id} key=${input.zotero_key}`);
-            const record: AttachmentFileCacheRecord = {
-                ...input,
-                cached_at: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ''),
-            };
-            this.putMemoryCache(input.item_id, record);
-        }
-        return inserted;
-    }
-
-    /**
      * Store metadata for multiple attachments.
      */
     async setMetadataBatch(inputs: Array<Omit<AttachmentFileCacheRecord, 'cached_at'>>): Promise<void> {
         if (inputs.length === 0) return;
-        logger(`AttachmentFileCache.setMetadataBatch: ${inputs.length} items [${inputs.slice(0, 5).map(i => i.item_id).join(', ')}${inputs.length > 5 ? ', ...' : ''}]`);
+        logger(`AttachmentFileCache.setMetadataBatch: ${inputs.length} items [${inputs.slice(0, 5).map(i => i.item_id).join(', ')}${inputs.length > 5 ? ', ...' : ''}]`, 3);
         await this.db.upsertAttachmentFileCacheBatch(inputs);
         const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
         for (const input of inputs) {
@@ -408,7 +327,7 @@ export class AttachmentFileCache {
      * Delete metadata for an attachment.
      */
     async deleteMetadata(itemId: number): Promise<void> {
-        logger(`AttachmentFileCache.deleteMetadata: item=${itemId}`);
+        logger(`AttachmentFileCache.deleteMetadata: item=${itemId}`, 3);
         await this.db.deleteAttachmentFileCache(itemId);
         this.memoryCache.delete(itemId);
     }
@@ -582,23 +501,8 @@ export class AttachmentFileCache {
         // Write file
         const json = JSON.stringify(cache);
         const cachedCount = Object.keys(cache.pages_by_index).length;
-        logger(`AttachmentFileCache.setContentPages: writing ${pages.length} pages for ${libraryId}/${zoteroKey} (${cachedCount}/${cache.total_pages} total cached)`);
+        logger(`AttachmentFileCache.setContentPages: writing ${pages.length} pages for ${libraryId}/${zoteroKey} (${cachedCount}/${cache.total_pages} total cached)`, 3);
         await IOUtils.writeUTF8(contentFile, json);
-
-        // Update the has_content_cache flag in metadata
-        try {
-            const metaRecord = await this.db.getAttachmentFileCacheByKey(libraryId, zoteroKey);
-            if (metaRecord && !metaRecord.has_content_cache) {
-                await this.db.updateContentCacheFlag(metaRecord.item_id, true);
-                // Update memory cache
-                const memEntry = this.memoryCache.get(metaRecord.item_id);
-                if (memEntry) {
-                    memEntry.has_content_cache = true;
-                }
-            }
-        } catch (error) {
-            logger(`AttachmentFileCache.setContentPages: failed to update flag: ${error}`, 1);
-        }
     }
 
     /**
@@ -631,7 +535,7 @@ export class AttachmentFileCache {
      * Invalidate both tiers for a specific attachment.
      */
     async invalidate(itemId: number, libraryId: number, zoteroKey: string): Promise<void> {
-        logger(`AttachmentFileCache.invalidate: item=${itemId} key=${zoteroKey}`);
+        logger(`AttachmentFileCache.invalidate: item=${itemId} key=${zoteroKey}`, 3);
         await this.db.deleteAttachmentFileCache(itemId);
         this.memoryCache.delete(itemId);
         await this.removeContentFile(libraryId, zoteroKey);
@@ -641,7 +545,7 @@ export class AttachmentFileCache {
      * Invalidate all cache entries for a library.
      */
     async invalidateByLibrary(libraryId: number): Promise<void> {
-        logger(`AttachmentFileCache.invalidateByLibrary: library=${libraryId}`);
+        logger(`AttachmentFileCache.invalidateByLibrary: library=${libraryId}`, 3);
         await this.deleteMetadataByLibrary(libraryId);
         await this.deleteContentByLibrary(libraryId);
     }
@@ -717,6 +621,8 @@ export class AttachmentFileCache {
                 this.memoryCache.delete(firstKey);
             }
         }
+        // Delete-then-set to move existing keys to the end (LRU ordering)
+        this.memoryCache.delete(itemId);
         this.memoryCache.set(itemId, record);
     }
 
@@ -737,8 +643,12 @@ export class AttachmentFileCache {
             if (!exists) {
                 await IOUtils.makeDirectory(dir, { createAncestors: true });
             }
-        } catch {
-            // Directory may already exist from a concurrent call
+        } catch (error) {
+            // Directory may already exist from a concurrent call — log unexpected failures
+            const exists = await IOUtils.exists(dir).catch(() => false);
+            if (!exists) {
+                logger(`AttachmentFileCache.ensureLibraryDir: failed to create ${dir}: ${error}`, 1);
+            }
         }
     }
 
@@ -763,9 +673,7 @@ export class AttachmentFileCache {
     private async removeOrphanContentFiles(validRecords: AttachmentFileCacheRecord[]): Promise<void> {
         // Build a set of valid content file keys: "libraryId/zoteroKey"
         const validKeys = new Set(
-            validRecords
-                .filter(r => r.has_content_cache)
-                .map(r => `${r.library_id}/${r.zotero_key}`)
+            validRecords.map(r => `${r.library_id}/${r.zotero_key}`)
         );
 
         try {

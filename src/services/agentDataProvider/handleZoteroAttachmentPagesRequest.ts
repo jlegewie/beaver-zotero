@@ -236,8 +236,6 @@ export async function handleZoteroAttachmentPagesRequest(
                 // that lightweight handlers (search, images, file-status) don't
                 // capture, so we must always write — even when a prior handler
                 // already seeded metadata with those fields as null.
-                // Uses setMetadataPreservingContentFields so that a concurrent
-                // handler's has_content_cache=true is never downgraded to false.
                 const stat = await IOUtils.stat(filePath);
                 // page_labels semantics:
                 // - null => not checked yet (lightweight metadata path)
@@ -246,7 +244,7 @@ export async function handleZoteroAttachmentPagesRequest(
                 const pageLabels = result.pageLabels && Object.keys(result.pageLabels).length > 0
                     ? result.pageLabels
                     : {};
-                await cache.setMetadataPreservingContentFields({
+                await cache.setMetadata({
                     item_id: pdfItem.id,
                     library_id: pdfItem.libraryID,
                     zotero_key: pdfItem.key,
@@ -261,7 +259,6 @@ export async function handleZoteroAttachmentPagesRequest(
                     is_encrypted: false,
                     is_invalid: false,
                     extraction_version: EXTRACTION_VERSION,
-                    has_content_cache: false,
                 });
 
                 // Persist content pages
@@ -298,7 +295,7 @@ export async function handleZoteroAttachmentPagesRequest(
         if (error instanceof ExtractionError) {
             // Backfill metadata for known error states
             if (resolvedPdfItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF || error.code === ExtractionErrorCode.NO_TEXT_LAYER)) {
-                await backfillMetadataForError(resolvedPdfItem, resolvedFilePath, error.code, totalPages, 'handleZoteroAttachmentPagesRequest');
+                await backfillMetadataForError(resolvedPdfItem, resolvedFilePath, error, totalPages, 'handleZoteroAttachmentPagesRequest');
             }
 
             switch (error.code) {

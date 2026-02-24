@@ -1,71 +1,135 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../src/services/pdf/MuPDFService', () => {
-    class MockMuPDFService {
-        async open(): Promise<void> {}
-        getPageCount(): number { return 7; }
-        getAllPageLabels(): Record<number, string> { return {}; }
-        close(): void {}
-    }
-    return { MuPDFService: MockMuPDFService };
-});
+vi.mock('../src/services/agentDataProvider/utils', () => ({
+    getAttachmentFileStatus: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { preloadPageLabelsForContent } from '../react/utils/pageLabels';
+import { getAttachmentFileStatus } from '../src/services/agentDataProvider/utils';
 
-const mockIOUtils = (globalThis as any).IOUtils as {
-    exists: ReturnType<typeof vi.fn>;
-    read: ReturnType<typeof vi.fn>;
-    stat: ReturnType<typeof vi.fn>;
-};
+const mockGetAttachmentFileStatus = vi.mocked(getAttachmentFileStatus);
+
+function makeItem(id: number, key: string) {
+    return {
+        id,
+        key,
+        libraryID: 1,
+        attachmentContentType: 'application/pdf',
+        isAttachment: () => true,
+        getFilePathAsync: vi.fn().mockResolvedValue(`/storage/${key}/test.pdf`),
+    };
+}
 
 describe('preloadPageLabelsForContent', () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
 
-    it('revalidates stale resolved no-label metadata before skipping PDF extraction', async () => {
-        const state = { resolved: true };
-        const cache = {
-            getPageLabelsSync: vi.fn().mockReturnValue(null),
-            hasResolvedPageLabels: vi.fn(() => state.resolved),
-            ensureInMemoryCache: vi.fn().mockResolvedValue(undefined),
-            getMetadata: vi.fn(async () => {
-                // Simulate staleness invalidation: record was resolved earlier,
-                // but file signature changed so it is now treated as missing.
-                state.resolved = false;
-                return null;
-            }),
-            setMetadataIfNotExists: vi.fn().mockResolvedValue(true),
-            updatePageLabels: vi.fn().mockResolvedValue(undefined),
-        };
+    it('no-ops when cache is unavailable', async () => {
+        (globalThis as any).Zotero.Beaver = undefined;
 
-        const item = {
-            id: 42,
-            key: 'ABCD1234',
-            libraryID: 1,
-            attachmentContentType: 'application/pdf',
-            isAttachment: () => true,
-            getFilePathAsync: vi.fn().mockResolvedValue('/storage/ABCD1234/test.pdf'),
+        await preloadPageLabelsForContent('<citation att_id="1-ABCD1234" />');
+
+        expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+    });
+
+    it('skips items already in cache (cache hit via getMetadata)', async () => {
+        const item = makeItem(42, 'ABCD1234');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue({ item_id: 42, page_labels: { 0: 'i' } }),
         };
 
         (globalThis as any).Zotero.Items = {
             getByLibraryAndKey: vi.fn(() => item),
-            getAsync: vi.fn(async () => item),
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
-
-        mockIOUtils.exists.mockResolvedValue(true);
-        mockIOUtils.read.mockResolvedValue(new Uint8Array([1, 2, 3]));
-        mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
 
         await preloadPageLabelsForContent('<citation att_id="1-ABCD1234" />');
 
         expect(cache.getMetadata).toHaveBeenCalledWith(42, '/storage/ABCD1234/test.pdf');
-        expect(cache.setMetadataIfNotExists).toHaveBeenCalledTimes(1);
-        expect(cache.setMetadataIfNotExists).toHaveBeenCalledWith(expect.objectContaining({
-            item_id: 42,
-            page_labels: {},
-            file_path: '/storage/ABCD1234/test.pdf',
-        }));
+        expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+    });
+
+    it('calls getAttachmentFileStatus on cache miss', async () => {
+        const item = makeItem(43, 'EFGH5678');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue(null),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => item),
+        };
+        (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
+
+        await preloadPageLabelsForContent('<citation att_id="1-EFGH5678" />');
+
+        expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(item, false);
+    });
+
+    it('skips items without file path', async () => {
+        const item = makeItem(44, 'IJKL9012');
+        item.getFilePathAsync = vi.fn().mockResolvedValue(null);
+
+        const cache = {
+            getMetadata: vi.fn(),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => item),
+        };
+        (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
+
+        await preloadPageLabelsForContent('<citation att_id="1-IJKL9012" />');
+
+        expect(cache.getMetadata).not.toHaveBeenCalled();
+        expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+    });
+
+    it('deduplicates by item ID', async () => {
+        const item = makeItem(45, 'MNOP3456');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue(null),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => item),
+        };
+        (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
+
+        await preloadPageLabelsForContent(
+            '<citation att_id="1-MNOP3456" /><citation att_id="1-MNOP3456" />'
+        );
+
+        // Only called once despite two citations referencing the same item
+        expect(mockGetAttachmentFileStatus).toHaveBeenCalledTimes(1);
+    });
+
+    it('continues after individual item failure', async () => {
+        const item1 = makeItem(46, 'QRST7890');
+        const item2 = makeItem(47, 'UVWX1234');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue(null),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn((libId: number, key: string) => {
+                if (key === 'QRST7890') return item1;
+                if (key === 'UVWX1234') return item2;
+                return null;
+            }),
+        };
+        (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
+
+        // First item's getMetadata throws
+        cache.getMetadata
+            .mockRejectedValueOnce(new Error('DB error'))
+            .mockResolvedValueOnce(null);
+
+        await preloadPageLabelsForContent(
+            '<citation att_id="1-QRST7890" /><citation att_id="1-UVWX1234" />'
+        );
+
+        // Second item still processed despite first failing
+        expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(item2, false);
     });
 });

@@ -66,7 +66,6 @@ function makeRecord(overrides: any = {}) {
         is_encrypted: false,
         is_invalid: false,
         extraction_version: EXTRACTION_VERSION,
-        has_content_cache: false,
         ...overrides,
     };
 }
@@ -271,32 +270,6 @@ describe('AttachmentFileCache — content (Tier 2)', () => {
             const written = JSON.parse(mockIOUtils.writeUTF8.mock.calls[0][1]) as AttachmentContentCache;
             expect(written.pages_by_index[0]).toBeUndefined();
             expect(written.pages_by_index[3].content).toBe('new');
-        });
-
-        it('updates has_content_cache flag in metadata', async () => {
-            // Pre-populate a metadata row
-            await db.upsertAttachmentFileCache(makeRecord({ has_content_cache: false }));
-
-            mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
-            mockIOUtils.exists.mockResolvedValue(false);
-
-            await cache.setContentPages(1, 'ABCD1234', '/a.pdf', 10, [makePage(0)]);
-
-            const meta = await db.getAttachmentFileCache(100);
-            expect(meta!.has_content_cache).toBe(true);
-        });
-
-        it('does not downgrade has_content_cache from true', async () => {
-            // Already true
-            await db.upsertAttachmentFileCache(makeRecord({ has_content_cache: true }));
-
-            mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
-            mockIOUtils.exists.mockResolvedValue(false);
-
-            await cache.setContentPages(1, 'ABCD1234', '/a.pdf', 10, [makePage(0)]);
-
-            const meta = await db.getAttachmentFileCache(100);
-            expect(meta!.has_content_cache).toBe(true);
         });
 
         it('handles IOUtils.stat failure gracefully (skips write)', async () => {
@@ -566,13 +539,13 @@ describe('AttachmentFileCache — content (Tier 2)', () => {
     });
 
     // ===================================================================
-    // Content file missing while metadata says has_content_cache (test #111)
+    // Content file missing while metadata present (test #111)
     // ===================================================================
 
     describe('content file deleted while metadata present', () => {
         it('getContentRange returns null when content file is missing', async () => {
-            // Metadata says has_content_cache=true
-            await db.upsertAttachmentFileCache(makeRecord({ has_content_cache: true }));
+            // Metadata row exists
+            await db.upsertAttachmentFileCache(makeRecord());
 
             // But the JSON file doesn't exist on disk
             mockIOUtils.exists.mockResolvedValue(false);
@@ -584,7 +557,7 @@ describe('AttachmentFileCache — content (Tier 2)', () => {
         it('subsequent setContentPages writes fresh file after deletion', async () => {
             let storedData: string | null = null;
 
-            await db.upsertAttachmentFileCache(makeRecord({ has_content_cache: true }));
+            await db.upsertAttachmentFileCache(makeRecord());
 
             mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
             mockIOUtils.exists.mockResolvedValue(false); // file deleted
@@ -696,25 +669,6 @@ describe('AttachmentFileCache — content (Tier 2)', () => {
     // ===================================================================
 
     describe('error recovery — content tier', () => {
-        it('DB flag update failure does not prevent content file write', async () => {
-            // Pre-populate metadata
-            await db.upsertAttachmentFileCache(makeRecord({ has_content_cache: false }));
-
-            mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
-            mockIOUtils.exists.mockResolvedValue(false);
-
-            // Make the DB flag update fail
-            const spy = vi.spyOn(db, 'updateContentCacheFlag')
-                .mockRejectedValue(new Error('disk full'));
-
-            await cache.setContentPages(1, 'ABCD1234', '/a.pdf', 10, [makePage(0)]);
-
-            // Content file was still written
-            expect(mockIOUtils.writeUTF8).toHaveBeenCalledTimes(1);
-
-            spy.mockRestore();
-        });
-
         it('IOUtils.stat failure in setContentPages skips write gracefully', async () => {
             mockIOUtils.stat.mockRejectedValue(new Error('file vanished'));
             mockIOUtils.exists.mockResolvedValue(false);
