@@ -252,19 +252,19 @@ export class AttachmentFileCache {
         }
 
         if (!record) {
-            logger(`AttachmentFileCache.getMetadata: miss item=${itemId}`, 3);
+            logger(`AttachmentFileCache.getMetadata: miss item=${itemId}`);
             return null;
         }
 
         // Staleness check
         const stale = await this.isStale(record, filePath);
         if (stale) {
-            logger(`AttachmentFileCache.getMetadata: stale item=${itemId}, invalidating`, 3);
+            logger(`AttachmentFileCache.getMetadata: stale item=${itemId}, invalidating`);
             await this.invalidate(itemId, record.library_id, record.zotero_key);
             return null;
         }
 
-        logger(`AttachmentFileCache.getMetadata: hit item=${itemId} source=${source} pages=${record.page_count ?? '?'} ocr=${record.needs_ocr}`, 3);
+        logger(`AttachmentFileCache.getMetadata: hit item=${itemId} source=${source} pages=${record.page_count ?? '?'} ocr=${record.needs_ocr}`);
         return record;
     }
 
