@@ -208,7 +208,7 @@ describe('Pages handler', () => {
 describe('Page images handler', () => {
     beforeEach((ctx) => skipIfUnavailable(ctx));
 
-    it('#90 cold image request: returns image data and backfills metadata', async () => {
+    it('#90 cold image request: returns image data and does not write metadata', async () => {
         await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
         await clearMemoryCache();
 
@@ -221,10 +221,9 @@ describe('Page images handler', () => {
         expect(res.pages[0].height).toBeGreaterThan(0);
         expect(res.total_pages).toBe(2);
 
-        // Metadata should be backfilled
+        // Successful image reads should not write partial metadata
         const meta = await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
-        expect(meta).not.toBeNull();
-        expect(meta!.page_count).toBe(2);
+        expect(meta).toBeNull();
     });
 
     it('#92 concurrent pages + images: both succeed, metadata not corrupted', async () => {
@@ -269,7 +268,7 @@ describe('Page images handler', () => {
 describe('Search handler', () => {
     beforeEach((ctx) => skipIfUnavailable(ctx));
 
-    it('#94 cold search: finds matches and backfills metadata', async () => {
+    it('#94 cold search: finds matches and does not write metadata', async () => {
         await invalidateCache(NORMAL_PDF.library_id, NORMAL_PDF.zotero_key);
         await clearMemoryCache();
 
@@ -282,10 +281,9 @@ describe('Search handler', () => {
         expect(res.pages.length).toBeGreaterThan(0);
         expect(res.pages[0].hits.length).toBeGreaterThan(0);
 
-        // Metadata should be backfilled
+        // Successful search should not write partial metadata
         const meta = await getCacheMetadata(NORMAL_PDF.library_id, NORMAL_PDF.zotero_key);
-        expect(meta).not.toBeNull();
-        expect(meta!.page_count).toBe(15);
+        expect(meta).toBeNull();
     });
 
     it('#95 search after pages cached: still works', async () => {
