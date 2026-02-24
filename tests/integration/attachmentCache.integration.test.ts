@@ -89,7 +89,7 @@ describe('Pages handler', () => {
         expect(meta).not.toBeNull();
         expect(meta!.page_count).toBe(15);
         expect(meta!.has_text_layer).toBeTruthy();
-        expect(meta!.has_content_cache).toBeTruthy();
+
     });
 
     it('#80 warm cache: second request returns identical data', async () => {
@@ -353,7 +353,7 @@ describe('Staleness', () => {
         // Content cache should be restored
         const meta = await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
         expect(meta).not.toBeNull();
-        expect(meta!.has_content_cache).toBeTruthy();
+
     });
 });
 

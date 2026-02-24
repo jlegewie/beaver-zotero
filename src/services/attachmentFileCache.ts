@@ -136,10 +136,8 @@ export class AttachmentFileCache {
                     removedMetadata++;
 
                     // Remove content file if it exists
-                    if (record.has_content_cache) {
-                        await this.removeContentFile(record.library_id, record.zotero_key);
-                        removedContent++;
-                    }
+                    await this.removeContentFile(record.library_id, record.zotero_key);
+                    removedContent++;
                 }
             }
 
@@ -341,10 +339,10 @@ export class AttachmentFileCache {
 
     /**
      * Store metadata with an atomic merge for content-derived fields.
-     * Preserves existing page_labels, has_text_layer, needs_ocr (when
-     * the new value is null) and a true has_content_cache flag. This
-     * prevents the preload path (which writes page-label-only records)
-     * from downgrading richer OCR metadata written by authoritative handlers.
+     * Preserves existing page_labels, has_text_layer, needs_ocr when
+     * the new value is null. This prevents the preload path (which writes
+     * page-label-only records) from downgrading richer OCR metadata
+     * written by authoritative handlers.
      */
     async setMetadataPreservingContentFields(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
         logger(`AttachmentFileCache.setMetadataPreservingContentFields: item=${input.item_id} key=${input.zotero_key}`);
@@ -557,21 +555,6 @@ export class AttachmentFileCache {
         const cachedCount = Object.keys(cache.pages_by_index).length;
         logger(`AttachmentFileCache.setContentPages: writing ${pages.length} pages for ${libraryId}/${zoteroKey} (${cachedCount}/${cache.total_pages} total cached)`);
         await IOUtils.writeUTF8(contentFile, json);
-
-        // Update the has_content_cache flag in metadata
-        try {
-            const metaRecord = await this.db.getAttachmentFileCacheByKey(libraryId, zoteroKey);
-            if (metaRecord && !metaRecord.has_content_cache) {
-                await this.db.updateContentCacheFlag(metaRecord.item_id, true);
-                // Update memory cache
-                const memEntry = this.memoryCache.get(metaRecord.item_id);
-                if (memEntry) {
-                    memEntry.has_content_cache = true;
-                }
-            }
-        } catch (error) {
-            logger(`AttachmentFileCache.setContentPages: failed to update flag: ${error}`, 1);
-        }
     }
 
     /**
@@ -736,9 +719,7 @@ export class AttachmentFileCache {
     private async removeOrphanContentFiles(validRecords: AttachmentFileCacheRecord[]): Promise<void> {
         // Build a set of valid content file keys: "libraryId/zoteroKey"
         const validKeys = new Set(
-            validRecords
-                .filter(r => r.has_content_cache)
-                .map(r => `${r.library_id}/${r.zotero_key}`)
+            validRecords.map(r => `${r.library_id}/${r.zotero_key}`)
         );
 
         try {

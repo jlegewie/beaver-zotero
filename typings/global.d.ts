@@ -332,13 +332,6 @@ declare namespace Zotero {
             deleteAttachmentFileCacheByLibrary(libraryId: number): Promise<void>;
 
             /**
-             * Update just the has_content_cache flag for an item.
-             * @param itemId The Zotero item ID
-             * @param hasContentCache Whether the content cache exists
-             */
-            updateContentCacheFlag(itemId: number, hasContentCache: boolean): Promise<void>;
-
-            /**
              * Get count of attachment file cache records.
              * @param libraryId Optional library ID to filter by
              * @returns Number of records

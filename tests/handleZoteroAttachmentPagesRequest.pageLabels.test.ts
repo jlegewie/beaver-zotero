@@ -63,7 +63,7 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
                 page_count: 3,
             }),
             getContentRange: vi.fn().mockResolvedValue(null),
-            setMetadataPreservingContentFields: vi.fn().mockResolvedValue(undefined),
+            setMetadata: vi.fn().mockResolvedValue(undefined),
             setContentPages: vi.fn().mockResolvedValue(undefined),
         };
 
@@ -105,7 +105,7 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
             skip_local_limits: true,
         });
 
-        expect(cache.setMetadataPreservingContentFields).toHaveBeenCalledWith(expect.objectContaining({
+        expect(cache.setMetadata).toHaveBeenCalledWith(expect.objectContaining({
             item_id: 42,
             page_labels: {},
             page_count: 3,

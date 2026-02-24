@@ -280,7 +280,6 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
                         is_encrypted: false,
                         is_invalid: false,
                         extraction_version: EXTRACTION_VERSION,
-                        has_content_cache: false,
                     });
                 }
             }

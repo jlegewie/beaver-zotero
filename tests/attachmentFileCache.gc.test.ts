@@ -44,7 +44,6 @@ function makeRecord(overrides: any = {}) {
         is_encrypted: false,
         is_invalid: false,
         extraction_version: EXTRACTION_VERSION,
-        has_content_cache: false,
         ...overrides,
     };
 }
@@ -82,7 +81,7 @@ describe('AttachmentFileCache — startup GC', () => {
             await db.upsertAttachmentFileCache(makeRecord({
                 item_id: 1,
                 extraction_version: 'old-version',
-                has_content_cache: false,
+
             }));
 
             mockIOUtils.exists.mockResolvedValue(false);
@@ -93,11 +92,10 @@ describe('AttachmentFileCache — startup GC', () => {
             expect(await db.getAttachmentFileCache(1)).toBeNull();
         });
 
-        it('removes content file when stale record has has_content_cache=true', async () => {
+        it('removes content file when stale record exists', async () => {
             await db.upsertAttachmentFileCache(makeRecord({
                 item_id: 2,
                 extraction_version: 'old-version',
-                has_content_cache: true,
             }));
 
             mockIOUtils.exists.mockImplementation(async (path: string) => {
@@ -112,21 +110,6 @@ describe('AttachmentFileCache — startup GC', () => {
             expect(await db.getAttachmentFileCache(2)).toBeNull();
             expect(mockIOUtils.remove).toHaveBeenCalled();
         });
-
-        it('does not remove content file when stale record has has_content_cache=false', async () => {
-            await db.upsertAttachmentFileCache(makeRecord({
-                item_id: 3,
-                extraction_version: 'old-version',
-                has_content_cache: false,
-            }));
-
-            mockIOUtils.exists.mockResolvedValue(false);
-            mockIOUtils.getChildren.mockResolvedValue([]);
-
-            await cache.runStartupGC();
-
-            expect(mockIOUtils.remove).not.toHaveBeenCalled();
-        });
     });
 
     // ===================================================================
@@ -139,7 +122,7 @@ describe('AttachmentFileCache — startup GC', () => {
                 item_id: 10,
                 extraction_version: EXTRACTION_VERSION,
                 file_path: '/data/storage/GONE/missing.pdf',
-                has_content_cache: false,
+
             }));
 
             // Source file does not exist
@@ -151,12 +134,12 @@ describe('AttachmentFileCache — startup GC', () => {
             expect(await db.getAttachmentFileCache(10)).toBeNull();
         });
 
-        it('removes metadata + content when source file is missing and has_content_cache=true', async () => {
+        it('removes metadata + content when source file is missing', async () => {
             await db.upsertAttachmentFileCache(makeRecord({
                 item_id: 11,
                 extraction_version: EXTRACTION_VERSION,
                 file_path: '/data/storage/GONE/missing.pdf',
-                has_content_cache: true,
+
             }));
 
             mockIOUtils.exists.mockImplementation(async (path: string) => {
@@ -176,7 +159,7 @@ describe('AttachmentFileCache — startup GC', () => {
             await db.upsertAttachmentFileCache(makeRecord({
                 item_id: 12,
                 extraction_version: EXTRACTION_VERSION,
-                has_content_cache: false,
+
             }));
 
             mockIOUtils.exists.mockRejectedValue(new Error('permission denied'));
@@ -198,7 +181,7 @@ describe('AttachmentFileCache — startup GC', () => {
                 item_id: 20,
                 extraction_version: EXTRACTION_VERSION,
                 file_path: '/data/storage/FRESH/good.pdf',
-                has_content_cache: true,
+
             }));
 
             // Source file exists
@@ -220,7 +203,7 @@ describe('AttachmentFileCache — startup GC', () => {
                 zotero_key: 'FRESH001',
                 extraction_version: EXTRACTION_VERSION,
                 file_path: '/data/storage/FRESH001/ok.pdf',
-                has_content_cache: false,
+
             }));
             // Stale extraction version
             await db.upsertAttachmentFileCache(makeRecord({
@@ -228,7 +211,7 @@ describe('AttachmentFileCache — startup GC', () => {
                 zotero_key: 'STALE001',
                 extraction_version: 'old',
                 file_path: '/data/storage/STALE001/old.pdf',
-                has_content_cache: false,
+
             }));
             // Source file missing
             await db.upsertAttachmentFileCache(makeRecord({
@@ -236,7 +219,7 @@ describe('AttachmentFileCache — startup GC', () => {
                 zotero_key: 'GONE0001',
                 extraction_version: EXTRACTION_VERSION,
                 file_path: '/data/storage/GONE0001/missing.pdf',
-                has_content_cache: false,
+
             }));
 
             mockIOUtils.exists.mockImplementation(async (path: string) => {
@@ -290,14 +273,14 @@ describe('AttachmentFileCache — startup GC', () => {
         });
 
         it('preserves content files that have matching metadata rows', async () => {
-            // Insert a record with has_content_cache=true
+            // Insert a metadata record for this key
             await db.upsertAttachmentFileCache(makeRecord({
                 item_id: 40,
                 library_id: 1,
                 zotero_key: 'VALID001',
                 extraction_version: EXTRACTION_VERSION,
                 file_path: '/data/storage/VALID001/good.pdf',
-                has_content_cache: true,
+
             }));
 
             // Source file exists for the record
@@ -320,7 +303,7 @@ describe('AttachmentFileCache — startup GC', () => {
                 zotero_key: 'KEEP0001',
                 extraction_version: EXTRACTION_VERSION,
                 file_path: '/data/storage/KEEP0001/good.pdf',
-                has_content_cache: true,
+
             }));
 
             // Source file exists
@@ -376,7 +359,7 @@ describe('AttachmentFileCache — startup GC', () => {
                 library_id: 1,
                 zotero_key: 'VALID001',
                 extraction_version: EXTRACTION_VERSION,
-                has_content_cache: true,
+
             }));
 
             // Source file exists (record is fresh)
@@ -390,28 +373,25 @@ describe('AttachmentFileCache — startup GC', () => {
             await expect(cache.runStartupGC()).resolves.toBeUndefined();
         });
 
-        it('skips records with has_content_cache=false when building valid keys set', async () => {
-            // Record exists but has_content_cache is false — its content file is an orphan
+        it('preserves content files when metadata row exists for key', async () => {
+            // Record exists — its content file should be preserved
             await db.upsertAttachmentFileCache(makeRecord({
                 item_id: 70,
                 library_id: 1,
-                zotero_key: 'NOCACHE1',
+                zotero_key: 'CACHED01',
                 extraction_version: EXTRACTION_VERSION,
-                file_path: '/data/storage/NOCACHE1/ok.pdf',
-                has_content_cache: false,
+                file_path: '/data/storage/CACHED01/ok.pdf',
             }));
 
             mockIOUtils.exists.mockResolvedValue(true);
             mockIOUtils.getChildren
                 .mockResolvedValueOnce(['/mock/profile/beaver/content-cache/1'])
-                .mockResolvedValueOnce(['/mock/profile/beaver/content-cache/1/NOCACHE1.json']);
+                .mockResolvedValueOnce(['/mock/profile/beaver/content-cache/1/CACHED01.json']);
 
             await cache.runStartupGC();
 
-            // File should be removed because record has has_content_cache=false
-            expect(mockIOUtils.remove).toHaveBeenCalledWith(
-                '/mock/profile/beaver/content-cache/1/NOCACHE1.json'
-            );
+            // File should NOT be removed because a metadata row exists for this key
+            expect(mockIOUtils.remove).not.toHaveBeenCalled();
         });
     });
 

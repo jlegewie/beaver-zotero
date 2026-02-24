@@ -40,7 +40,6 @@ export interface CacheMetadataRecord {
     is_encrypted: boolean | number;
     is_invalid: boolean | number;
     extraction_version: string;
-    has_content_cache: boolean | number;
     cached_at: string;
 }
 

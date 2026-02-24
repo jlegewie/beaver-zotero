@@ -174,9 +174,6 @@ async function extractPageLabelsFromData(pdfData: Uint8Array): Promise<Record<nu
  * Persist metadata to the attachment file cache after extraction.
  * Awaited at call sites to ensure cache consistency before returning.
  * Errors are caught internally and logged — they never propagate.
- *
- * Uses setMetadataPreservingContentFields so that a concurrent
- * has_content_cache=true from the pages handler is preserved.
  */
 async function persistMetadataToCache(
     attachment: Zotero.Item,
@@ -196,7 +193,7 @@ async function persistMetadataToCache(
 
     try {
         const stat = await IOUtils.stat(filePath);
-        await cache.setMetadataPreservingContentFields({
+        await cache.setMetadata({
             item_id: attachment.id,
             library_id: attachment.libraryID,
             zotero_key: attachment.key,
@@ -211,7 +208,6 @@ async function persistMetadataToCache(
             is_encrypted: fields.is_encrypted,
             is_invalid: fields.is_invalid,
             extraction_version: EXTRACTION_VERSION,
-            has_content_cache: false,
         });
     } catch (error) {
         logger(`persistMetadataToCache: ${error}`, 1);
@@ -253,7 +249,6 @@ export async function backfillMetadataForError(
             is_encrypted: errorCode === ExtractionErrorCode.ENCRYPTED,
             is_invalid: errorCode === ExtractionErrorCode.INVALID_PDF,
             extraction_version: EXTRACTION_VERSION,
-            has_content_cache: false,
         });
     } catch (error) {
         logger(`${callerTag}: cache backfill error: ${error}`, 1);

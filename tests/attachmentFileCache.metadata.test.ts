@@ -41,7 +41,6 @@ function makeRecord(overrides: Partial<Omit<AttachmentFileCacheRecord, 'cached_a
         is_encrypted: false,
         is_invalid: false,
         extraction_version: EXTRACTION_VERSION,
-        has_content_cache: false,
         ...overrides,
     };
 }
@@ -289,18 +288,16 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
 
     describe('setMetadataPreservingContentFields', () => {
         it('updates DB with merge and refreshes memory cache', async () => {
-            // Pre-populate with has_content_cache=true, page_labels, and OCR state
+            // Pre-populate with page_labels and OCR state
             await db.upsertAttachmentFileCache(makeRecord({
-                has_content_cache: true,
                 page_labels: { 0: 'i' },
                 needs_ocr: true,
                 has_text_layer: false,
             }));
 
-            // Now call preserve method with has_content_cache=false, page_labels=null,
-            // and null OCR fields — all should be preserved from existing record
+            // Now call preserve method with page_labels=null and null OCR fields
+            // — all should be preserved from existing record
             await cache.setMetadataPreservingContentFields(makeRecord({
-                has_content_cache: false,
                 page_labels: null,
                 needs_ocr: null,
                 has_text_layer: null,
@@ -311,7 +308,6 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
             mockFileStat(1700000000000, 123456);
             const result = await cache.getMetadata(100, '/data/storage/ABCD1234/test.pdf');
             expect(result).not.toBeNull();
-            expect(result!.has_content_cache).toBe(true); // preserved
             expect(result!.page_labels).toEqual({ 0: 'i' }); // preserved
             expect(result!.needs_ocr).toBe(true); // preserved
             expect(result!.has_text_layer).toBe(false); // preserved
@@ -628,22 +624,6 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
     // ===================================================================
 
     describe('concurrent handler metadata races', () => {
-        it('setMetadataPreservingContentFields preserves has_content_cache=true from earlier write', async () => {
-            // Content was written first
-            await cache.setMetadata(makeRecord({ has_content_cache: true }));
-
-            // Pages handler updates metadata without content flag
-            await cache.setMetadataPreservingContentFields(makeRecord({
-                has_content_cache: false,
-                page_count: 99,
-            }));
-
-            mockFileStat(1700000000000, 123456);
-            const result = await cache.getMetadata(100, '/data/storage/ABCD1234/test.pdf');
-            expect(result!.has_content_cache).toBe(true);
-            expect(result!.page_count).toBe(99);
-        });
-
         it('setMetadataPreservingContentFields preserves page_labels from earlier write when incoming is null', async () => {
             // Pages handler wrote labels first
             await cache.setMetadata(makeRecord({ page_labels: { 0: 'i', 1: '1' } }));
