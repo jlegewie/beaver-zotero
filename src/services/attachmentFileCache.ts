@@ -175,7 +175,7 @@ export class AttachmentFileCache {
     /**
      * Check whether a full metadata record exists in the in-memory cache.
      * Useful for distinguishing "never extracted" (no record) from
-     * "extracted but no custom page labels" (record with page_labels: null).
+     * "metadata exists but page labels may still be unresolved".
      *
      * Call {@link ensureInMemoryCache} first to load from DB if needed.
      */

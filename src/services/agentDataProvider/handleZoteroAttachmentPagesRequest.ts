@@ -239,7 +239,13 @@ export async function handleZoteroAttachmentPagesRequest(
                 // Uses setMetadataPreservingContentFields so that a concurrent
                 // handler's has_content_cache=true is never downgraded to false.
                 const stat = await IOUtils.stat(filePath);
-                const pageLabels = result.pageLabels ?? null;
+                // page_labels semantics:
+                // - null => not checked yet (lightweight metadata path)
+                // - {} => checked, no custom labels found
+                // - populated object => checked, custom labels found
+                const pageLabels = result.pageLabels && Object.keys(result.pageLabels).length > 0
+                    ? result.pageLabels
+                    : {};
                 await cache.setMetadataPreservingContentFields({
                     item_id: pdfItem.id,
                     library_id: pdfItem.libraryID,
@@ -249,7 +255,7 @@ export async function handleZoteroAttachmentPagesRequest(
                     file_size_bytes: stat.size ?? 0,
                     content_type: pdfItem.attachmentContentType || 'application/pdf',
                     page_count: totalPages,
-                    page_labels: pageLabels && Object.keys(pageLabels).length > 0 ? pageLabels : null,
+                    page_labels: pageLabels,
                     has_text_layer: true,
                     needs_ocr: false,
                     is_encrypted: false,
