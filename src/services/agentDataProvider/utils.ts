@@ -217,17 +217,37 @@ async function persistMetadataToCache(
 /**
  * Backfill metadata for known error states (encrypted, invalid, no text layer).
  * Uses full upsert since error states are authoritative.
+ *
+ * For NO_TEXT_LAYER errors, the ExtractionError carries pageLabels and pageCount
+ * extracted before the OCR check (the PDF is open and page tree is readable
+ * regardless of text layer status). Encrypted/invalid PDFs throw before any
+ * data is accessible, so those always write page_labels: {}.
+ *
  * Errors are caught internally and logged — they never propagate.
  */
 export async function backfillMetadataForError(
     item: Zotero.Item,
     filePath: string,
-    errorCode: ExtractionErrorCode,
-    totalPages: number | null,
+    error: ExtractionError,
+    fallbackPageCount: number | null,
     callerTag: string,
 ): Promise<void> {
     const cache = Zotero.Beaver?.attachmentFileCache;
     if (!cache) return;
+
+    const errorCode = error.code;
+
+    // Resolve page_labels:
+    //  - ENCRYPTED/INVALID_PDF: can't parse PDF → definitively empty
+    //  - NO_TEXT_LAYER: use labels extracted before the OCR check (fall back to {} if absent)
+    let pageLabels: Record<number, string>;
+    if (errorCode === ExtractionErrorCode.NO_TEXT_LAYER) {
+        pageLabels = error.pageLabels && Object.keys(error.pageLabels).length > 0
+            ? error.pageLabels
+            : {};
+    } else {
+        pageLabels = {};
+    }
 
     try {
         const stat = await IOUtils.stat(filePath);
@@ -239,19 +259,16 @@ export async function backfillMetadataForError(
             file_mtime_ms: stat.lastModified ?? 0,
             file_size_bytes: stat.size ?? 0,
             content_type: item.attachmentContentType || 'application/pdf',
-            page_count: totalPages,
-            // Encrypted/invalid: definitively no labels (can't parse PDF).
-            // NO_TEXT_LAYER: page labels are null here; getAttachmentFileStatus
-            // extracts them properly when it runs full extraction.
-            page_labels: (errorCode === ExtractionErrorCode.ENCRYPTED || errorCode === ExtractionErrorCode.INVALID_PDF) ? {} : null,
+            page_count: error.pageCount ?? fallbackPageCount,
+            page_labels: pageLabels,
             has_text_layer: errorCode === ExtractionErrorCode.NO_TEXT_LAYER ? false : null,
             needs_ocr: errorCode === ExtractionErrorCode.NO_TEXT_LAYER,
             is_encrypted: errorCode === ExtractionErrorCode.ENCRYPTED,
             is_invalid: errorCode === ExtractionErrorCode.INVALID_PDF,
             extraction_version: EXTRACTION_VERSION,
         });
-    } catch (error) {
-        logger(`${callerTag}: cache backfill error: ${error}`, 1);
+    } catch (cacheError) {
+        logger(`${callerTag}: cache backfill error: ${cacheError}`, 1);
     }
 }
 

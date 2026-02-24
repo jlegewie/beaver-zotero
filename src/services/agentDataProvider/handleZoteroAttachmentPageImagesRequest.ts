@@ -220,7 +220,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         if (error instanceof ExtractionError) {
             // Backfill metadata for known error states
             if (resolvedPdfItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF)) {
-                await backfillMetadataForError(resolvedPdfItem, resolvedFilePath, error.code, null, 'handleZoteroAttachmentPageImagesRequest');
+                await backfillMetadataForError(resolvedPdfItem, resolvedFilePath, error, null, 'handleZoteroAttachmentPageImagesRequest');
             }
 
             switch (error.code) {

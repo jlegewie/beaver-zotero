@@ -16,10 +16,14 @@ vi.mock('../src/services/pdf', () => {
 
     class MockExtractionError extends Error {
         code: string;
+        pageLabels?: Record<number, string>;
+        pageCount?: number;
 
-        constructor(code: string, message: string) {
+        constructor(code: string, message: string, details?: unknown, pageLabels?: Record<number, string>, pageCount?: number) {
             super(message);
             this.code = code;
+            this.pageLabels = pageLabels;
+            this.pageCount = pageCount;
         }
     }
 

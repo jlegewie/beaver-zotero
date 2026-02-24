@@ -295,7 +295,7 @@ export async function handleZoteroAttachmentPagesRequest(
         if (error instanceof ExtractionError) {
             // Backfill metadata for known error states
             if (resolvedPdfItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF || error.code === ExtractionErrorCode.NO_TEXT_LAYER)) {
-                await backfillMetadataForError(resolvedPdfItem, resolvedFilePath, error.code, totalPages, 'handleZoteroAttachmentPagesRequest');
+                await backfillMetadataForError(resolvedPdfItem, resolvedFilePath, error, totalPages, 'handleZoteroAttachmentPagesRequest');
             }
 
             switch (error.code) {

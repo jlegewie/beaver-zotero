@@ -235,7 +235,7 @@ export async function handleZoteroAttachmentSearchRequest(
         if (error instanceof ExtractionError) {
             // Backfill metadata for known error states
             if (resolvedItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF || error.code === ExtractionErrorCode.NO_TEXT_LAYER)) {
-                await backfillMetadataForError(resolvedItem, resolvedFilePath, error.code, null, 'handleZoteroAttachmentSearchRequest');
+                await backfillMetadataForError(resolvedItem, resolvedFilePath, error, null, 'handleZoteroAttachmentSearchRequest');
             }
 
             switch (error.code) {
