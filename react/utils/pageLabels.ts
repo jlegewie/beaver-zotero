@@ -202,7 +202,15 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
             if (!item || seen.has(item.id)) continue;
             seen.add(item.id);
 
-            await cache.ensureInMemoryCache(item.id);
+            // Validate cached metadata against the current attachment file
+            // signature when possible. This invalidates stale "resolved/no
+            // labels" rows after file replacement so extraction can retry.
+            const filePath = await item.getFilePathAsync();
+            if (filePath) {
+                await cache.getMetadata(item.id, filePath);
+            } else {
+                await cache.ensureInMemoryCache(item.id);
+            }
 
             // Only fetch from PDF if:
             // - no page labels in any cache, AND
