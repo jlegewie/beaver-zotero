@@ -240,24 +240,31 @@ export class AttachmentFileCache {
     async getMetadata(itemId: number, filePath: string): Promise<AttachmentFileCacheRecord | null> {
         // Check memory cache first
         let record = this.memoryCache.get(itemId) ?? null;
+        let source: 'memory' | 'db' | null = record ? 'memory' : null;
 
         // Fall back to DB
         if (!record) {
             record = await this.db.getAttachmentFileCache(itemId);
             if (record) {
+                source = 'db';
                 this.putMemoryCache(itemId, record);
             }
         }
 
-        if (!record) return null;
+        if (!record) {
+            logger(`AttachmentFileCache.getMetadata: miss item=${itemId}`, 3);
+            return null;
+        }
 
         // Staleness check
         const stale = await this.isStale(record, filePath);
         if (stale) {
+            logger(`AttachmentFileCache.getMetadata: stale item=${itemId}, invalidating`, 3);
             await this.invalidate(itemId, record.library_id, record.zotero_key);
             return null;
         }
 
+        logger(`AttachmentFileCache.getMetadata: hit item=${itemId} source=${source} pages=${record.page_count ?? '?'} ocr=${record.needs_ocr}`, 3);
         return record;
     }
 
@@ -326,7 +333,7 @@ export class AttachmentFileCache {
      * Store metadata for an attachment (full upsert — overwrites all fields).
      */
     async setMetadata(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
-        logger(`AttachmentFileCache.setMetadata: item=${input.item_id} key=${input.zotero_key} pages=${input.page_count ?? '?'}`, 3);
+        logger(`AttachmentFileCache.setMetadata: item=${input.item_id} key=${input.zotero_key} pages=${input.page_count ?? '?'}`);
         await this.db.upsertAttachmentFileCache(input);
         const record: AttachmentFileCacheRecord = {
             ...input,
@@ -340,7 +347,7 @@ export class AttachmentFileCache {
      * Preserves existing page_labels and a true has_content_cache flag.
      */
     async setMetadataPreservingContentFields(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
-        logger(`AttachmentFileCache.setMetadataPreservingContentFields: item=${input.item_id} key=${input.zotero_key}`, 3);
+        logger(`AttachmentFileCache.setMetadataPreservingContentFields: item=${input.item_id} key=${input.zotero_key}`);
         await this.db.upsertAttachmentFileCachePreserveContentFields(input);
 
         // Reload merged row so memory cache reflects the DB-level conflict merge.
@@ -366,7 +373,7 @@ export class AttachmentFileCache {
     async setMetadataIfNotExists(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<boolean> {
         const inserted = await this.db.insertAttachmentFileCacheIfNotExists(input);
         if (inserted) {
-            logger(`AttachmentFileCache.setMetadataIfNotExists: inserted item=${input.item_id} key=${input.zotero_key}`, 3);
+            logger(`AttachmentFileCache.setMetadataIfNotExists: inserted item=${input.item_id} key=${input.zotero_key}`);
             const record: AttachmentFileCacheRecord = {
                 ...input,
                 cached_at: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ''),
@@ -381,7 +388,7 @@ export class AttachmentFileCache {
      */
     async setMetadataBatch(inputs: Array<Omit<AttachmentFileCacheRecord, 'cached_at'>>): Promise<void> {
         if (inputs.length === 0) return;
-        logger(`AttachmentFileCache.setMetadataBatch: ${inputs.length} items [${inputs.slice(0, 5).map(i => i.item_id).join(', ')}${inputs.length > 5 ? ', ...' : ''}]`, 3);
+        logger(`AttachmentFileCache.setMetadataBatch: ${inputs.length} items [${inputs.slice(0, 5).map(i => i.item_id).join(', ')}${inputs.length > 5 ? ', ...' : ''}]`);
         await this.db.upsertAttachmentFileCacheBatch(inputs);
         const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
         for (const input of inputs) {
@@ -393,7 +400,7 @@ export class AttachmentFileCache {
      * Delete metadata for an attachment.
      */
     async deleteMetadata(itemId: number): Promise<void> {
-        logger(`AttachmentFileCache.deleteMetadata: item=${itemId}`, 3);
+        logger(`AttachmentFileCache.deleteMetadata: item=${itemId}`);
         await this.db.deleteAttachmentFileCache(itemId);
         this.memoryCache.delete(itemId);
         this.pageLabelOnlyCache.delete(itemId);
@@ -571,7 +578,7 @@ export class AttachmentFileCache {
         // Write file
         const json = JSON.stringify(cache);
         const cachedCount = Object.keys(cache.pages_by_index).length;
-        logger(`AttachmentFileCache.setContentPages: writing ${pages.length} pages for ${libraryId}/${zoteroKey} (${cachedCount}/${cache.total_pages} total cached)`, 3);
+        logger(`AttachmentFileCache.setContentPages: writing ${pages.length} pages for ${libraryId}/${zoteroKey} (${cachedCount}/${cache.total_pages} total cached)`);
         await IOUtils.writeUTF8(contentFile, json);
 
         // Update the has_content_cache flag in metadata
@@ -620,7 +627,7 @@ export class AttachmentFileCache {
      * Invalidate both tiers for a specific attachment.
      */
     async invalidate(itemId: number, libraryId: number, zoteroKey: string): Promise<void> {
-        logger(`AttachmentFileCache.invalidate: item=${itemId} key=${zoteroKey}`, 3);
+        logger(`AttachmentFileCache.invalidate: item=${itemId} key=${zoteroKey}`);
         await this.db.deleteAttachmentFileCache(itemId);
         this.memoryCache.delete(itemId);
         this.pageLabelOnlyCache.delete(itemId);
@@ -631,7 +638,7 @@ export class AttachmentFileCache {
      * Invalidate all cache entries for a library.
      */
     async invalidateByLibrary(libraryId: number): Promise<void> {
-        logger(`AttachmentFileCache.invalidateByLibrary: library=${libraryId}`, 3);
+        logger(`AttachmentFileCache.invalidateByLibrary: library=${libraryId}`);
         await this.deleteMetadataByLibrary(libraryId);
         await this.deleteContentByLibrary(libraryId);
     }

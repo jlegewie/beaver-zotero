@@ -356,11 +356,17 @@ export async function getAttachmentFileStatusLightweight(
         try {
             const cached = await cache.getMetadata(attachment.id, filePath);
             if (cached && (cached.needs_ocr !== null || cached.is_encrypted || cached.is_invalid)) {
+                logger(`getAttachmentFileStatusLightweight: cache hit for item=${attachment.id}, using cached status`);
                 return fileStatusFromCache(cached, isPrimary);
+            }
+            if (cached) {
+                logger(`getAttachmentFileStatusLightweight: cache hit for item=${attachment.id} but needs_ocr=null, falling through to lightweight path`);
             }
         } catch (error) {
             logger(`getAttachmentFileStatusLightweight: cache read error: ${error}`, 1);
         }
+    } else {
+        logger(`getAttachmentFileStatusLightweight: cache not available (Zotero.Beaver?.attachmentFileCache is ${cache === null ? 'null' : 'undefined'})`);
     }
 
     // Cache miss: use lightweight methods (no full file read)
