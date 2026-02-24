@@ -643,8 +643,12 @@ export class AttachmentFileCache {
             if (!exists) {
                 await IOUtils.makeDirectory(dir, { createAncestors: true });
             }
-        } catch {
-            // Directory may already exist from a concurrent call
+        } catch (error) {
+            // Directory may already exist from a concurrent call — log unexpected failures
+            const exists = await IOUtils.exists(dir).catch(() => false);
+            if (!exists) {
+                logger(`AttachmentFileCache.ensureLibraryDir: failed to create ${dir}: ${error}`, 1);
+            }
         }
     }
 
