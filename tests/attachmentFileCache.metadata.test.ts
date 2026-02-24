@@ -607,7 +607,7 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
     // ===================================================================
 
     describe('memory cache ordering', () => {
-        it('Map.set on existing key preserves insertion order (FIFO, not LRU)', async () => {
+        it('re-setting an existing key refreshes recency (LRU behavior)', async () => {
             // Insert 500 entries
             for (let i = 1; i <= 500; i++) {
                 await cache.setMetadata(makeRecord({
@@ -617,8 +617,7 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
                 }));
             }
 
-            // Re-set item 1 via setMetadata
-            // This calls Map.set() which does NOT change insertion order
+            // Re-set item 1 via setMetadata (should refresh recency)
             await cache.setMetadata(makeRecord({
                 item_id: 1,
                 zotero_key: 'K0000001',
@@ -626,7 +625,7 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
                 page_count: 99,
             }));
 
-            // Add item 501 — evicts item 1 because it's still first by insertion order
+            // Add item 501 — should evict item 2 (oldest), not refreshed item 1
             await cache.setMetadata(makeRecord({
                 item_id: 501,
                 zotero_key: 'K0000501',
@@ -635,12 +634,12 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
 
             mockFileStat(1700000000000, 123456);
 
-            // Item 1 was evicted from memory, falls back to DB
+            // Item 1 should remain in memory (no DB fallback)
             const dbSpy = vi.spyOn(db, 'getAttachmentFileCache');
             const r1 = await cache.getMetadata(1, '/path/1.pdf');
             expect(r1).not.toBeNull();
             expect(r1!.page_count).toBe(99);
-            expect(dbSpy).toHaveBeenCalledWith(1); // loaded from DB
+            expect(dbSpy).not.toHaveBeenCalled();
             dbSpy.mockRestore();
         });
 

@@ -14,6 +14,24 @@ export interface AttachmentFixture {
     description: string;
 }
 
+function parseFixtureRef(
+    ref: string | undefined,
+    description: string,
+): AttachmentFixture | null {
+    if (!ref) return null;
+    const clean = ref.trim();
+    const dash = clean.indexOf('-');
+    if (dash <= 0) return null;
+    const libraryId = parseInt(clean.slice(0, dash), 10);
+    const zoteroKey = clean.slice(dash + 1);
+    if (!Number.isFinite(libraryId) || libraryId < 1 || !zoteroKey) return null;
+    return {
+        library_id: libraryId,
+        zotero_key: zoteroKey,
+        description,
+    };
+}
+
 // Normal 15-page PDF
 export const NORMAL_PDF: AttachmentFixture = {
     library_id: 1,
@@ -47,6 +65,13 @@ export const LARGE_PDF: AttachmentFixture = {
     library_id: 1,
     zotero_key: 'SKZIZVMT',
     description: '316-page PDF',
+};
+
+// Missing local file (attachment exists but file is not available locally)
+export const MISSING_FILE_PDF: AttachmentFixture = {
+    library_id: 1,
+    zotero_key: 'VA3DZY5Y',
+    description: 'PDF attachment with missing local file',
 };
 
 // Group library PDF
@@ -90,3 +115,10 @@ export const IMAGE: AttachmentFixture = {
     zotero_key: 'K3XGEA2S',
     description: 'PNG image attachment',
 };
+
+// Optional invalid/corrupted PDF fixture. Set env var:
+//   ZOTERO_INVALID_PDF_REF="1-ABCDEFGH"
+export const INVALID_PDF_FIXTURE = parseFixtureRef(
+    process.env.ZOTERO_INVALID_PDF_REF,
+    'Invalid/corrupted PDF',
+);
