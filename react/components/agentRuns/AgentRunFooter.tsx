@@ -157,7 +157,6 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     };
 
     const handleCopy = async () => {
-        await preloadPageLabelsForContent(combinedContent);
         const formattedContent = renderToMarkdown(combinedContent);
         await copyToClipboard(formattedContent);
     };
