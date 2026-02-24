@@ -157,6 +157,9 @@ function fileStatusFromCache(record: AttachmentFileCacheRecord, isPrimary: boole
  * Persist metadata to the attachment file cache after extraction.
  * Awaited at call sites to ensure cache consistency before returning.
  * Errors are caught internally and logged — they never propagate.
+ *
+ * Uses setMetadataPreservingContentFields so that page_labels written by
+ * the pages handler and a concurrent has_content_cache=true are preserved.
  */
 async function persistMetadataToCache(
     attachment: Zotero.Item,
@@ -196,6 +199,84 @@ async function persistMetadataToCache(
         });
     } catch (error) {
         logger(`persistMetadataToCache: ${error}`, 1);
+    }
+}
+
+/**
+ * Backfill metadata after a successful lightweight extraction (images, search).
+ * Uses insert-if-not-exists to avoid overwriting richer metadata that
+ * a concurrent handler (e.g. pages) may have written.
+ * Errors are caught internally and logged — they never propagate.
+ */
+export async function backfillMetadataIfNotCached(
+    item: Zotero.Item,
+    filePath: string,
+    totalPages: number,
+    callerTag: string,
+): Promise<void> {
+    const cache = Zotero.Beaver?.attachmentFileCache;
+    if (!cache) return;
+
+    try {
+        const stat = await IOUtils.stat(filePath);
+        await cache.setMetadataIfNotExists({
+            item_id: item.id,
+            library_id: item.libraryID,
+            zotero_key: item.key,
+            file_path: filePath,
+            file_mtime_ms: stat.lastModified ?? 0,
+            file_size_bytes: stat.size ?? 0,
+            content_type: item.attachmentContentType || 'application/pdf',
+            page_count: totalPages,
+            page_labels: null,
+            has_text_layer: null,
+            needs_ocr: null,
+            is_encrypted: false,
+            is_invalid: false,
+            extraction_version: EXTRACTION_VERSION,
+            has_content_cache: false,
+        });
+    } catch (error) {
+        logger(`${callerTag}: metadata backfill error: ${error}`, 1);
+    }
+}
+
+/**
+ * Backfill metadata for known error states (encrypted, invalid, no text layer).
+ * Uses full upsert since error states are authoritative.
+ * Errors are caught internally and logged — they never propagate.
+ */
+export async function backfillMetadataForError(
+    item: Zotero.Item,
+    filePath: string,
+    errorCode: ExtractionErrorCode,
+    totalPages: number | null,
+    callerTag: string,
+): Promise<void> {
+    const cache = Zotero.Beaver?.attachmentFileCache;
+    if (!cache) return;
+
+    try {
+        const stat = await IOUtils.stat(filePath);
+        await cache.setMetadata({
+            item_id: item.id,
+            library_id: item.libraryID,
+            zotero_key: item.key,
+            file_path: filePath,
+            file_mtime_ms: stat.lastModified ?? 0,
+            file_size_bytes: stat.size ?? 0,
+            content_type: item.attachmentContentType || 'application/pdf',
+            page_count: totalPages,
+            page_labels: null,
+            has_text_layer: errorCode === ExtractionErrorCode.NO_TEXT_LAYER ? false : null,
+            needs_ocr: errorCode === ExtractionErrorCode.NO_TEXT_LAYER,
+            is_encrypted: errorCode === ExtractionErrorCode.ENCRYPTED,
+            is_invalid: errorCode === ExtractionErrorCode.INVALID_PDF,
+            extraction_version: EXTRACTION_VERSION,
+            has_content_cache: false,
+        });
+    } catch (error) {
+        logger(`${callerTag}: cache backfill error: ${error}`, 1);
     }
 }
 

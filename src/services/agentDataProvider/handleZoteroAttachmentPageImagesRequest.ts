@@ -18,8 +18,7 @@ import {
     WSPageImage,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { EXTRACTION_VERSION } from '../attachmentFileCache';
-import { resolveToPdfAttachment, validateZoteroItemReference } from './utils';
+import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataIfNotCached, backfillMetadataForError } from './utils';
 
 /**
  * Handle zotero_attachment_page_images_request event.
@@ -208,23 +207,8 @@ export async function handleZoteroAttachmentPageImagesRequest(
         });
 
         // 10b. Backfill metadata if not already cached.
-        // Uses insert-if-not-exists to avoid overwriting richer metadata
-        // that a concurrent handler (e.g. pages) may have written.
-        if (cache && !cachedMeta) {
-            try {
-                const stat = await IOUtils.stat(filePath);
-                await cache.setMetadataIfNotExists({
-                    item_id: pdfItem.id, library_id: pdfItem.libraryID, zotero_key: pdfItem.key,
-                    file_path: filePath, file_mtime_ms: stat.lastModified ?? 0, file_size_bytes: stat.size ?? 0,
-                    content_type: pdfItem.attachmentContentType || 'application/pdf',
-                    page_count: totalPages, page_labels: null,
-                    has_text_layer: null, needs_ocr: null,
-                    is_encrypted: false, is_invalid: false,
-                    extraction_version: EXTRACTION_VERSION, has_content_cache: false,
-                });
-            } catch (e) {
-                logger(`handleZoteroAttachmentPageImagesRequest: metadata backfill error: ${e}`, 1);
-            }
+        if (!cachedMeta) {
+            await backfillMetadataIfNotCached(pdfItem, filePath, totalPages, 'handleZoteroAttachmentPageImagesRequest');
         }
 
         return {
@@ -240,21 +224,8 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         if (error instanceof ExtractionError) {
             // Backfill metadata for known error states
-            const cache = Zotero.Beaver?.attachmentFileCache;
-            if (cache && resolvedPdfItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF)) {
-                try {
-                    const stat = await IOUtils.stat(resolvedFilePath);
-                    await cache.setMetadata({
-                        item_id: resolvedPdfItem.id, library_id: resolvedPdfItem.libraryID, zotero_key: resolvedPdfItem.key,
-                        file_path: resolvedFilePath, file_mtime_ms: stat.lastModified ?? 0, file_size_bytes: stat.size ?? 0,
-                        content_type: resolvedPdfItem.attachmentContentType || 'application/pdf',
-                        page_count: null, page_labels: null,
-                        has_text_layer: null, needs_ocr: null,
-                        is_encrypted: error.code === ExtractionErrorCode.ENCRYPTED,
-                        is_invalid: error.code === ExtractionErrorCode.INVALID_PDF,
-                        extraction_version: EXTRACTION_VERSION, has_content_cache: false,
-                    });
-                } catch { /* best-effort */ }
+            if (resolvedPdfItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF)) {
+                await backfillMetadataForError(resolvedPdfItem, resolvedFilePath, error.code, null, 'handleZoteroAttachmentPageImagesRequest');
             }
 
             switch (error.code) {
