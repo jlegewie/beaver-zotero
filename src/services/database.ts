@@ -1483,60 +1483,6 @@ export class BeaverDB {
     }
 
     /**
-     * Insert or update an attachment file cache record while preserving fields
-     * populated by content extraction handlers.
-     *
-     * Concurrency-safe merge rules on conflict:
-     * - page_labels_json keeps the existing value when incoming is NULL
-     * - has_text_layer keeps the existing value when incoming is NULL
-     * - needs_ocr keeps the existing value when incoming is NULL
-     */
-    public async upsertAttachmentFileCachePartial(record: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
-        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
-        const pageLabelsJson = record.page_labels ? JSON.stringify(record.page_labels) : null;
-
-        await this.conn.queryAsync(
-            `INSERT INTO attachment_file_cache
-                (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
-                 content_type, page_count, page_labels_json, has_text_layer, needs_ocr,
-                 is_encrypted, is_invalid, extraction_version, cached_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(item_id) DO UPDATE SET
-                library_id = excluded.library_id,
-                zotero_key = excluded.zotero_key,
-                file_path = excluded.file_path,
-                file_mtime_ms = excluded.file_mtime_ms,
-                file_size_bytes = excluded.file_size_bytes,
-                content_type = excluded.content_type,
-                page_count = excluded.page_count,
-                page_labels_json = COALESCE(excluded.page_labels_json, attachment_file_cache.page_labels_json),
-                has_text_layer = COALESCE(excluded.has_text_layer, attachment_file_cache.has_text_layer),
-                needs_ocr = COALESCE(excluded.needs_ocr, attachment_file_cache.needs_ocr),
-                is_encrypted = excluded.is_encrypted,
-                is_invalid = excluded.is_invalid,
-                extraction_version = excluded.extraction_version,
-                cached_at = excluded.cached_at`,
-            [
-                record.item_id,
-                record.library_id,
-                record.zotero_key,
-                record.file_path,
-                record.file_mtime_ms,
-                record.file_size_bytes,
-                record.content_type,
-                record.page_count,
-                pageLabelsJson,
-                record.has_text_layer == null ? null : (record.has_text_layer ? 1 : 0),
-                record.needs_ocr == null ? null : (record.needs_ocr ? 1 : 0),
-                record.is_encrypted ? 1 : 0,
-                record.is_invalid ? 1 : 0,
-                record.extraction_version,
-                now,
-            ]
-        );
-    }
-
-    /**
      * Insert or update multiple attachment file cache records in a batch.
      */
     public async upsertAttachmentFileCacheBatch(records: Array<Omit<AttachmentFileCacheRecord, 'cached_at'>>): Promise<void> {
@@ -1655,20 +1601,6 @@ export class BeaverDB {
         await this.conn.queryAsync(
             `DELETE FROM attachment_file_cache WHERE library_id = ?`,
             [libraryId]
-        );
-    }
-
-    /**
-     * Update just the page_labels_json for an existing item.
-     * No-op if no row exists for the given itemId.
-     */
-    public async updateAttachmentFileCachePageLabels(
-        itemId: number,
-        pageLabels: Record<number, string>,
-    ): Promise<void> {
-        await this.conn.queryAsync(
-            `UPDATE attachment_file_cache SET page_labels_json = ? WHERE item_id = ?`,
-            [JSON.stringify(pageLabels), itemId]
         );
     }
 

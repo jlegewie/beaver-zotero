@@ -241,8 +241,8 @@ export async function backfillMetadataForError(
             content_type: item.attachmentContentType || 'application/pdf',
             page_count: totalPages,
             // Encrypted/invalid: definitively no labels (can't parse PDF).
-            // NO_TEXT_LAYER: page labels live in the page tree and ARE
-            // readable — leave null so preload can still extract them.
+            // NO_TEXT_LAYER: page labels are null here; getAttachmentFileStatus
+            // extracts them properly when it runs full extraction.
             page_labels: (errorCode === ExtractionErrorCode.ENCRYPTED || errorCode === ExtractionErrorCode.INVALID_PDF) ? {} : null,
             has_text_layer: errorCode === ExtractionErrorCode.NO_TEXT_LAYER ? false : null,
             needs_ocr: errorCode === ExtractionErrorCode.NO_TEXT_LAYER,

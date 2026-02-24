@@ -162,57 +162,12 @@ export class AttachmentFileCache {
      * - record with `page_labels: {}` (checked, none found)
      *
      * Designed for use in synchronous rendering paths (e.g., citation export).
-     * Call {@link ensureInMemoryCache} first to populate the cache if needed.
+     * Call `getMetadata` first to populate the cache if needed.
      */
     getPageLabelsSync(itemId: number): Record<number, string> | null {
         const labels = this.memoryCache.get(itemId)?.page_labels;
         if (!labels || Object.keys(labels).length === 0) return null;
         return labels;
-    }
-
-    /**
-     * Check whether page labels have been definitively resolved for this item.
-     *
-     * Three states for `page_labels` on a cached record:
-     * - `null` → labels not checked (authoritative handler wrote OCR info but not labels)
-     * - `{}` → labels checked, no custom labels found
-     * - `{ 0: "i", ... }` → labels checked, custom labels present
-     *
-     * Returns true for `{}` and populated labels, false for null / no record.
-     * Call {@link ensureInMemoryCache} first to load from DB if needed.
-     */
-    hasResolvedPageLabels(itemId: number): boolean {
-        const record = this.memoryCache.get(itemId);
-        return record?.page_labels != null;
-    }
-
-    /**
-     * Ensure a record is loaded into the in-memory cache (from DB if needed).
-     * No-op if the item is already in the memory cache.
-     * Does NOT perform staleness checking — intended for pre-loading before
-     * synchronous rendering where only page labels are needed.
-     */
-    async ensureInMemoryCache(itemId: number): Promise<void> {
-        if (this.memoryCache.has(itemId)) return;
-        const record = await this.db.getAttachmentFileCache(itemId);
-        if (record) {
-            this.putMemoryCache(itemId, record);
-        }
-    }
-
-    /**
-     * Update page labels on an existing metadata record (memory + DB).
-     * No-op if no record exists for this item.
-     */
-    async updatePageLabels(itemId: number, pageLabels: Record<number, string>): Promise<void> {
-        await this.db.updateAttachmentFileCachePageLabels(itemId, pageLabels);
-        const record = this.memoryCache.get(itemId);
-        if (record) {
-            record.page_labels = pageLabels;
-        } else {
-            // Reload into memory cache so subsequent sync lookups find the labels
-            await this.ensureInMemoryCache(itemId);
-        }
     }
 
     /** Clear the in-memory metadata cache and pending write locks. */
@@ -335,31 +290,6 @@ export class AttachmentFileCache {
             cached_at: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ''),
         };
         this.putMemoryCache(input.item_id, record);
-    }
-
-    /**
-     * Store metadata with an atomic merge for content-derived fields.
-     * Preserves existing page_labels, has_text_layer, needs_ocr when
-     * the new value is null. This prevents the preload path (which writes
-     * page-label-only records) from downgrading richer OCR metadata
-     * written by authoritative handlers.
-     */
-    async setMetadataPartial(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
-        logger(`AttachmentFileCache.setMetadataPartial: item=${input.item_id} key=${input.zotero_key}`);
-        await this.db.upsertAttachmentFileCachePartial(input);
-
-        // Reload merged row so memory cache reflects the DB-level conflict merge.
-        const merged = await this.db.getAttachmentFileCache(input.item_id);
-        if (merged) {
-            this.putMemoryCache(input.item_id, merged);
-            return;
-        }
-
-        // Fallback should be rare, but keep memory cache populated.
-        this.putMemoryCache(input.item_id, {
-            ...input,
-            cached_at: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ''),
-        });
     }
 
     /**

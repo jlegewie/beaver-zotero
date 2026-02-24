@@ -13,25 +13,15 @@
  * - `resolvePageLabel`: for getCitationPages() values (1-based, subtracts 1)
  *
  * All lookups are synchronous (memory cache only). Call `preloadPageLabelsForContent`
- * before rendering to ensure the memory cache is populated.
+ * before rendering to ensure the memory cache is populated. Preloading reuses the
+ * full extraction path (`getAttachmentFileStatus`) on cache miss.
  */
 
-import { MuPDFService } from '../../src/services/pdf/MuPDFService';
-import { EXTRACTION_VERSION } from '../../src/services/attachmentFileCache';
-import { logger } from '../../src/utils/logger';
+import { getAttachmentFileStatus } from '../../src/services/agentDataProvider/utils';
 
 // Regex for citation tags — matches self-closing and non-self-closing forms
 const CITATION_REGEX = /<citation\s+([^>]+?)\s*(\/>|>(?:.*?<\/citation>)?)/g;
 const ATT_ID_REGEX = /(?:att_id|attachment_id)\s*=\s*"([^"]*)"/;
-
-/** Per-attachment timeout for reading page labels from PDF (ms). */
-const PDF_LABEL_FETCH_TIMEOUT_MS = 5_000;
-
-/**
- * Items we've already attempted to fetch page labels from PDF for.
- * Prevents re-reading the same PDF on every render when it has no custom labels.
- */
-const attempted = new Set<number>();
 
 /**
  * Resolve a 1-based page number (from getCitationPages) to its display label.
@@ -86,101 +76,20 @@ export function resolvePageStr(itemId: number, pageStr: string): string {
     }
 }
 
-// ---------------------------------------------------------------------------
-// PDF-based page label fetching (fallback)
-// ---------------------------------------------------------------------------
-
-/** Sentinel returned by {@link withTimeout} when the deadline is exceeded. */
-const TIMED_OUT = Symbol('TIMED_OUT');
-
-/** Sentinel: fetch returned null for a transient reason (file not yet available). */
-const TRANSIENT_NULL = Symbol('TRANSIENT_NULL');
-
-/**
- * Race a promise against a timeout.
- * Returns the {@link TIMED_OUT} symbol if the deadline fires first.
- */
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
-    let timer: ReturnType<typeof setTimeout>;
-    return Promise.race([
-        promise,
-        new Promise<typeof TIMED_OUT>((resolve) => {
-            timer = setTimeout(() => resolve(TIMED_OUT), ms);
-        }),
-    ]).finally(() => clearTimeout(timer!));
-}
-
-/** Successful result from {@link fetchPageLabelsFromPDF}. */
-interface PageLabelFetchResult {
-    labels: Record<number, string> | null;
-    item: Zotero.Item;
-    filePath: string;
-    pageCount: number;
-}
-
-/**
- * Read page labels directly from a PDF attachment using MuPDF.
- *
- * Returns:
- * - `PageLabelFetchResult` — PDF was read successfully (labels may be null if none)
- * - `TRANSIENT_NULL` — could not access the file (not synced / missing);
- *   the caller should leave the item eligible for retry.
- */
-async function fetchPageLabelsFromPDF(
-    itemId: number,
-): Promise<PageLabelFetchResult | typeof TRANSIENT_NULL> {
-    const item = await Zotero.Items.getAsync(itemId);
-    if (!item?.isAttachment?.() || item.attachmentContentType !== 'application/pdf') {
-        // Not a PDF attachment — return a definitive "no labels" result.
-        // We don't have the metadata to build a cache record, so return a
-        // minimal result that the caller can handle.
-        return { labels: null, item: item!, filePath: '', pageCount: 0 };
-    }
-
-    const filePath = await item.getFilePathAsync();
-    if (!filePath) return TRANSIENT_NULL;
-
-    const exists = await IOUtils.exists(filePath);
-    if (!exists) return TRANSIENT_NULL;
-
-    const pdfData = await IOUtils.read(filePath);
-    const mupdf = new MuPDFService();
-    try {
-        await mupdf.open(pdfData);
-        const pageCount = mupdf.getPageCount();
-        const labels = mupdf.getAllPageLabels();
-        return {
-            labels: Object.keys(labels).length > 0 ? labels : null,
-            item,
-            filePath,
-            pageCount,
-        };
-    } finally {
-        mupdf.close();
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Preloading
-// ---------------------------------------------------------------------------
-
 /**
  * Pre-load attachment page labels into the in-memory cache for all citations
  * in the given content string. Must be called (and awaited) before synchronous
  * rendering with `renderToMarkdown` or `renderToHTML`.
  *
  * For each referenced attachment:
- * 1. Try the metadata cache (DB -> memory).
- * 2. If page labels are still missing and we haven't tried this attachment
- *    before, read the PDF directly via MuPDF (with a per-attachment timeout).
- * 3. Cache any labels found so future renders are instant.
+ * 1. Try the metadata cache (DB -> memory) via `getMetadata`.
+ * 2. On cache miss, run full extraction via `getAttachmentFileStatus`.
  */
 export async function preloadPageLabelsForContent(content: string): Promise<void> {
     const cache = Zotero.Beaver?.attachmentFileCache;
     if (!cache) return;
 
     const seen = new Set<number>();
-    const needsFetch: number[] = [];
     const regex = new RegExp(CITATION_REGEX.source, CITATION_REGEX.flags);
     let match: RegExpExecArray | null;
 
@@ -188,7 +97,6 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
         const attMatch = ATT_ID_REGEX.exec(match[1]);
         if (!attMatch) continue;
 
-        // Parse "libraryID-itemKey"
         const ref = attMatch[1].replace('user-content-', '');
         const dashIdx = ref.indexOf('-');
         if (dashIdx <= 0) continue;
@@ -202,94 +110,17 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
             if (!item || seen.has(item.id)) continue;
             seen.add(item.id);
 
-            // Validate cached metadata against the current attachment file
-            // signature when possible. This invalidates stale "resolved/no
-            // labels" rows after file replacement so extraction can retry.
             const filePath = await item.getFilePathAsync();
-            if (filePath) {
-                await cache.getMetadata(item.id, filePath);
-            } else {
-                await cache.ensureInMemoryCache(item.id);
-            }
+            if (!filePath) continue;
 
-            // Only fetch from PDF if:
-            // - no page labels in any cache, AND
-            // - page labels haven't been definitively resolved yet
-            //   (a record with page_labels: null means an authoritative handler
-            //   wrote OCR info but not labels; page_labels: {} means labels
-            //   were checked and none were found), AND
-            // - we haven't already tried reading this PDF this session.
-            if (
-                !cache.getPageLabelsSync(item.id) &&
-                !cache.hasResolvedPageLabels(item.id) &&
-                !attempted.has(item.id)
-            ) {
-                needsFetch.push(item.id);
-            }
+            // Cache hit → page_labels already in memory cache
+            const record = await cache.getMetadata(item.id, filePath);
+            if (record) continue;
+
+            // Cache miss → run full extraction (same as search path)
+            await getAttachmentFileStatus(item, false);
         } catch {
             // Skip items that can't be resolved
-        }
-    }
-
-    // Fetch page labels from PDFs sequentially to limit resource usage.
-    for (const itemId of needsFetch) {
-        try {
-            const result = await withTimeout(
-                fetchPageLabelsFromPDF(itemId),
-                PDF_LABEL_FETCH_TIMEOUT_MS,
-            );
-
-            if (result === TIMED_OUT || result === TRANSIENT_NULL) {
-                if (result === TIMED_OUT) {
-                    logger(`preloadPageLabelsForContent: timed out fetching labels for item ${itemId}`);
-                }
-                continue;
-            }
-
-            if (result.filePath) {
-                const labelsToStore = result.labels ?? {};
-
-                // Case 1: Record exists → just update labels on it.
-                await cache.updatePageLabels(itemId, labelsToStore);
-
-                // Case 2: No record existed (updatePageLabels was a no-op) →
-                // create a record so labels are persisted to DB and
-                // available in memory for citation formatting.
-                //
-                // This writes a partial record (has_text_layer and needs_ocr are null)
-                // because running OCR analysis in a rendering path is too expensive.
-                // The record serves only for page-label lookups; it fails the cache guard in
-                // getAttachmentFileStatus / Lightweight (needs_ocr !== null),
-                // so those paths still run full extraction and overwrite it
-                // with a complete record via setMetadataPartial
-                // (COALESCE preserves the richer page_labels value).
-                if (!cache.hasResolvedPageLabels(itemId)) {
-                    const stat = await IOUtils.stat(result.filePath);
-                    await cache.setMetadataPartial({
-                        item_id: itemId,
-                        library_id: result.item.libraryID,
-                        zotero_key: result.item.key,
-                        file_path: result.filePath,
-                        file_mtime_ms: stat.lastModified ?? 0,
-                        file_size_bytes: stat.size ?? 0,
-                        content_type: result.item.attachmentContentType || 'application/pdf',
-                        page_count: result.pageCount,
-                        page_labels: labelsToStore,
-                        has_text_layer: null,
-                        needs_ocr: null,
-                        is_encrypted: false,
-                        is_invalid: false,
-                        extraction_version: EXTRACTION_VERSION,
-                    });
-                }
-            }
-
-            // Mark attempted only after successful persistence so transient
-            // failures (stat/DB errors) leave the item eligible for retry.
-            attempted.add(itemId);
-        } catch (error) {
-            // Transient error — leave the item eligible for retry.
-            logger(`preloadPageLabelsForContent: failed to fetch labels for item ${itemId}: ${error}`);
         }
     }
 }

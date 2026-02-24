@@ -126,66 +126,6 @@ describe('BeaverDB — attachment_file_cache methods', () => {
     });
 
     // ===================================================================
-    // upsertAttachmentFileCachePartial
-    // ===================================================================
-
-    describe('upsertAttachmentFileCachePartial', () => {
-        it('inserts a new row normally when no conflict', async () => {
-            await db.upsertAttachmentFileCachePartial(makeRecord({ page_count: 5 }));
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.page_count).toBe(5);
-        });
-
-        it('preserves existing page_labels when incoming is null', async () => {
-            const labels = { 0: 'i', 1: 'ii' };
-            await db.upsertAttachmentFileCache(makeRecord({ page_labels: labels }));
-
-            await db.upsertAttachmentFileCachePartial(
-                makeRecord({ page_labels: null })
-            );
-
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.page_labels).toEqual(labels);
-        });
-
-        it('overwrites page_labels when incoming is non-null', async () => {
-            await db.upsertAttachmentFileCache(makeRecord({ page_labels: { 0: 'old' } }));
-
-            const newLabels = { 0: 'A', 1: 'B', 2: 'C' };
-            await db.upsertAttachmentFileCachePartial(
-                makeRecord({ page_labels: newLabels })
-            );
-
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.page_labels).toEqual(newLabels);
-        });
-
-        it('writes page_labels when existing row has null labels', async () => {
-            await db.upsertAttachmentFileCache(makeRecord({ page_labels: null }));
-
-            const labels = { 0: 'i' };
-            await db.upsertAttachmentFileCachePartial(
-                makeRecord({ page_labels: labels })
-            );
-
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.page_labels).toEqual(labels);
-        });
-
-        it('still updates non-preserved fields (file_path, page_count, etc.)', async () => {
-            await db.upsertAttachmentFileCache(makeRecord({ page_count: 10, file_path: '/old.pdf' }));
-
-            await db.upsertAttachmentFileCachePartial(
-                makeRecord({ page_count: 20, file_path: '/new.pdf' })
-            );
-
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.page_count).toBe(20);
-            expect(result!.file_path).toBe('/new.pdf');
-        });
-    });
-
-    // ===================================================================
     // upsertAttachmentFileCacheBatch
     // ===================================================================
 

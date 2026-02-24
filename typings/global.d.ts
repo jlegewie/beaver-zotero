@@ -271,21 +271,6 @@ declare namespace Zotero {
             // --- Attachment File Cache Methods ---
 
             /**
-             * Insert or update an attachment file cache record while preserving fields
-             * populated by content extraction handlers.
-             * @param record The attachment file cache data to store
-             */
-            upsertAttachmentFileCachePartial(record: Omit<import("../src/services/database").AttachmentFileCacheRecord, 'cached_at'>): Promise<void>;
-
-            /**
-             * Update just the page_labels_json for an existing item.
-             * No-op if no row exists for the given itemId.
-             * @param itemId The Zotero item ID
-             * @param pageLabels The page labels to store
-             */
-            updateAttachmentFileCachePageLabels(itemId: number, pageLabels: Record<number, string>): Promise<void>;
-
-            /**
              * Insert or update an attachment file cache record.
              * @param record The attachment file cache data to store
              */
