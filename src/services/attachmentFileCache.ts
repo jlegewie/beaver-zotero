@@ -68,8 +68,8 @@ export type { AttachmentFileCacheRecord };
 export class AttachmentFileCache {
     private db: BeaverDB;
     private memoryCache = new Map<number, AttachmentFileCacheRecord>();
-    /** Page labels for items without a full cache record (loaded from PDF on demand). */
-    private pageLabelOnlyCache = new Map<number, Record<number, string>>();
+    /** Page labels for items without a full metadata record (e.g., backend-only reads). Bounded to MEMORY_CACHE_MAX. */
+    private pageLabelCache = new Map<number, Record<number, string>>();
     private contentCacheDir: string = '';
     /** Per-key promise chain to serialize read-modify-write on content files. */
     private contentWriteLocks = new Map<string, Promise<void>>();
@@ -158,8 +158,7 @@ export class AttachmentFileCache {
 
     /**
      * Synchronous lookup of page labels from in-memory caches.
-     * Checks the full metadata cache first, then the page-label-only cache.
-     * Returns null if neither cache has labels for this item.
+     * Checks the full metadata cache first, then the standalone page-label cache.
      *
      * Designed for use in synchronous rendering paths (e.g., citation export).
      * Call {@link ensureInMemoryCache} first to populate the cache if needed.
@@ -167,7 +166,7 @@ export class AttachmentFileCache {
     getPageLabelsSync(itemId: number): Record<number, string> | null {
         const record = this.memoryCache.get(itemId);
         if (record?.page_labels) return record.page_labels;
-        return this.pageLabelOnlyCache.get(itemId) ?? null;
+        return this.pageLabelCache.get(itemId) ?? null;
     }
 
     /**
@@ -197,13 +196,10 @@ export class AttachmentFileCache {
 
     /**
      * Store page labels fetched from a PDF.
-     * If the item has an existing metadata record, its page_labels field is
-     * updated in both memory and the database. Otherwise the labels are kept
-     * in a lightweight in-memory-only map so they can be resolved during the
-     * current session without creating an incomplete DB record.
+     * If a full metadata record exists, updates it in both memory and DB.
+     * Otherwise stores in the bounded page-label cache for the current session.
      */
     async cachePageLabels(itemId: number, pageLabels: Record<number, string>): Promise<void> {
-        // Update the full record if one exists
         const record = this.memoryCache.get(itemId);
         if (record) {
             record.page_labels = pageLabels;
@@ -215,14 +211,20 @@ export class AttachmentFileCache {
             return;
         }
 
-        // No full record — store in the lightweight map
-        this.pageLabelOnlyCache.set(itemId, pageLabels);
+        // No full record — store in bounded page-label cache
+        if (this.pageLabelCache.size >= MEMORY_CACHE_MAX && !this.pageLabelCache.has(itemId)) {
+            const firstKey = this.pageLabelCache.keys().next().value;
+            if (firstKey !== undefined) {
+                this.pageLabelCache.delete(firstKey);
+            }
+        }
+        this.pageLabelCache.set(itemId, pageLabels);
     }
 
     /** Clear the in-memory metadata cache and pending write locks. */
     clearMemoryCache(): void {
         this.memoryCache.clear();
-        this.pageLabelOnlyCache.clear();
+        this.pageLabelCache.clear();
         this.contentWriteLocks.clear();
     }
 
@@ -403,7 +405,7 @@ export class AttachmentFileCache {
         logger(`AttachmentFileCache.deleteMetadata: item=${itemId}`);
         await this.db.deleteAttachmentFileCache(itemId);
         this.memoryCache.delete(itemId);
-        this.pageLabelOnlyCache.delete(itemId);
+        this.pageLabelCache.delete(itemId);
     }
 
     /**
@@ -417,9 +419,9 @@ export class AttachmentFileCache {
                 this.memoryCache.delete(id);
             }
         }
-        // pageLabelOnlyCache doesn't store libraryId, so clear it entirely.
+        // pageLabelCache doesn't store libraryId, so clear it entirely.
         // This is a rare bulk operation; labels repopulate lazily on next render.
-        this.pageLabelOnlyCache.clear();
+        this.pageLabelCache.clear();
     }
 
     // -----------------------------------------------------------------------
@@ -630,7 +632,7 @@ export class AttachmentFileCache {
         logger(`AttachmentFileCache.invalidate: item=${itemId} key=${zoteroKey}`);
         await this.db.deleteAttachmentFileCache(itemId);
         this.memoryCache.delete(itemId);
-        this.pageLabelOnlyCache.delete(itemId);
+        this.pageLabelCache.delete(itemId);
         await this.removeContentFile(libraryId, zoteroKey);
     }
 

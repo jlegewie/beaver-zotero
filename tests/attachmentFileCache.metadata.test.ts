@@ -499,14 +499,13 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
             expect(dbRow!.page_labels).toEqual(labels);
         });
 
-        it('stores in pageLabelOnlyCache when no full record exists', async () => {
+        it('stores in pageLabelCache when no full record exists', async () => {
             const labels = { 0: 'Cover', 1: 'i' };
             await cache.cachePageLabels(200, labels);
 
-            // Not in main memory cache
+            // Not in main memory cache, but available via getPageLabelsSync
             expect((cache as any).memoryCache.has(200)).toBe(false);
-            // In pageLabelOnlyCache
-            expect((cache as any).pageLabelOnlyCache.get(200)).toEqual(labels);
+            expect(cache.getPageLabelsSync(200)).toEqual(labels);
         });
 
         it('handles DB update failure gracefully — memory is still updated', async () => {
@@ -540,7 +539,7 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
             expect(cache.getPageLabelsSync(100)).toEqual(labels);
         });
 
-        it('returns labels from pageLabelOnlyCache', async () => {
+        it('returns labels from pageLabelCache', async () => {
             const labels = { 0: 'i', 1: 'ii' };
             await cache.cachePageLabels(300, labels);
 
@@ -556,12 +555,12 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
             expect(cache.getPageLabelsSync(100)).toBeNull();
         });
 
-        it('prefers full record over pageLabelOnlyCache', async () => {
+        it('prefers full record over pageLabelCache', async () => {
             const fullLabels = { 0: 'A' };
             const lightLabels = { 0: 'B' };
 
             await cache.setMetadata(makeRecord({ item_id: 400, page_labels: fullLabels }));
-            (cache as any).pageLabelOnlyCache.set(400, lightLabels);
+            (cache as any).pageLabelCache.set(400, lightLabels);
 
             expect(cache.getPageLabelsSync(400)).toEqual(fullLabels);
         });
