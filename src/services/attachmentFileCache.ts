@@ -244,18 +244,29 @@ export class AttachmentFileCache {
         const result = new Map<number, AttachmentFileCacheRecord>();
         const idsToFetch: number[] = [];
 
-        // Check memory cache first
+        // Check memory cache first — partition into hits and misses
+        const memoryHits: Array<{ itemId: number; filePath: string; record: AttachmentFileCacheRecord }> = [];
         for (const { itemId, filePath } of items) {
             const cached = this.memoryCache.get(itemId);
             if (cached) {
-                const stale = await this.isStale(cached, filePath);
-                if (!stale) {
-                    result.set(itemId, cached);
-                } else {
-                    await this.invalidate(itemId, cached.library_id, cached.zotero_key);
-                }
+                memoryHits.push({ itemId, filePath, record: cached });
             } else {
                 idsToFetch.push(itemId);
+            }
+        }
+
+        // Parallel staleness checks for memory hits
+        const memoryChecks = await Promise.all(
+            memoryHits.map(async ({ itemId, filePath, record }) => {
+                const stale = await this.isStale(record, filePath);
+                return { itemId, filePath, record, stale };
+            })
+        );
+        for (const { itemId, record, stale } of memoryChecks) {
+            if (!stale) {
+                result.set(itemId, record);
+            } else {
+                await this.invalidate(itemId, record.library_id, record.zotero_key);
             }
         }
 
@@ -264,9 +275,16 @@ export class AttachmentFileCache {
             const dbRecords = await this.db.getAttachmentFileCacheBatch(idsToFetch);
             const filePathMap = new Map(items.map(i => [i.itemId, i.filePath]));
 
-            for (const [itemId, record] of dbRecords) {
-                const filePath = filePathMap.get(itemId)!;
-                const stale = await this.isStale(record, filePath);
+            // Parallel staleness checks for DB hits
+            const dbEntries = Array.from(dbRecords.entries());
+            const dbChecks = await Promise.all(
+                dbEntries.map(async ([itemId, record]) => {
+                    const filePath = filePathMap.get(itemId)!;
+                    const stale = await this.isStale(record, filePath);
+                    return { itemId, record, stale };
+                })
+            );
+            for (const { itemId, record, stale } of dbChecks) {
                 if (!stale) {
                     this.putMemoryCache(itemId, record);
                     result.set(itemId, record);
