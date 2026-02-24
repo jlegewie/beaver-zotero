@@ -202,19 +202,19 @@ export class AttachmentFileCache {
         }
 
         if (!record) {
-            logger(`AttachmentFileCache.getMetadata: miss item=${itemId}`);
+            logger(`AttachmentFileCache.getMetadata: miss item=${itemId}`, 3);
             return null;
         }
 
         // Staleness check
         const stale = await this.isStale(record, filePath);
         if (stale) {
-            logger(`AttachmentFileCache.getMetadata: stale item=${itemId}, invalidating`);
+            logger(`AttachmentFileCache.getMetadata: stale item=${itemId}, invalidating`, 3);
             await this.invalidate(itemId, record.library_id, record.zotero_key);
             return null;
         }
 
-        logger(`AttachmentFileCache.getMetadata: hit item=${itemId} source=${source} pages=${record.page_count ?? '?'} ocr=${record.needs_ocr}`);
+        logger(`AttachmentFileCache.getMetadata: hit item=${itemId} source=${source} pages=${record.page_count ?? '?'} ocr=${record.needs_ocr}`, 3);
         return record;
     }
 
@@ -301,7 +301,7 @@ export class AttachmentFileCache {
      * Store metadata for an attachment (full upsert — overwrites all fields).
      */
     async setMetadata(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
-        logger(`AttachmentFileCache.setMetadata: item=${input.item_id} key=${input.zotero_key} pages=${input.page_count ?? '?'}`);
+        logger(`AttachmentFileCache.setMetadata: item=${input.item_id} key=${input.zotero_key} pages=${input.page_count ?? '?'}`, 3);
         await this.db.upsertAttachmentFileCache(input);
         const record: AttachmentFileCacheRecord = {
             ...input,
@@ -315,7 +315,7 @@ export class AttachmentFileCache {
      */
     async setMetadataBatch(inputs: Array<Omit<AttachmentFileCacheRecord, 'cached_at'>>): Promise<void> {
         if (inputs.length === 0) return;
-        logger(`AttachmentFileCache.setMetadataBatch: ${inputs.length} items [${inputs.slice(0, 5).map(i => i.item_id).join(', ')}${inputs.length > 5 ? ', ...' : ''}]`);
+        logger(`AttachmentFileCache.setMetadataBatch: ${inputs.length} items [${inputs.slice(0, 5).map(i => i.item_id).join(', ')}${inputs.length > 5 ? ', ...' : ''}]`, 3);
         await this.db.upsertAttachmentFileCacheBatch(inputs);
         const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
         for (const input of inputs) {
@@ -327,7 +327,7 @@ export class AttachmentFileCache {
      * Delete metadata for an attachment.
      */
     async deleteMetadata(itemId: number): Promise<void> {
-        logger(`AttachmentFileCache.deleteMetadata: item=${itemId}`);
+        logger(`AttachmentFileCache.deleteMetadata: item=${itemId}`, 3);
         await this.db.deleteAttachmentFileCache(itemId);
         this.memoryCache.delete(itemId);
     }
@@ -501,7 +501,7 @@ export class AttachmentFileCache {
         // Write file
         const json = JSON.stringify(cache);
         const cachedCount = Object.keys(cache.pages_by_index).length;
-        logger(`AttachmentFileCache.setContentPages: writing ${pages.length} pages for ${libraryId}/${zoteroKey} (${cachedCount}/${cache.total_pages} total cached)`);
+        logger(`AttachmentFileCache.setContentPages: writing ${pages.length} pages for ${libraryId}/${zoteroKey} (${cachedCount}/${cache.total_pages} total cached)`, 3);
         await IOUtils.writeUTF8(contentFile, json);
     }
 
@@ -535,7 +535,7 @@ export class AttachmentFileCache {
      * Invalidate both tiers for a specific attachment.
      */
     async invalidate(itemId: number, libraryId: number, zoteroKey: string): Promise<void> {
-        logger(`AttachmentFileCache.invalidate: item=${itemId} key=${zoteroKey}`);
+        logger(`AttachmentFileCache.invalidate: item=${itemId} key=${zoteroKey}`, 3);
         await this.db.deleteAttachmentFileCache(itemId);
         this.memoryCache.delete(itemId);
         await this.removeContentFile(libraryId, zoteroKey);
@@ -545,7 +545,7 @@ export class AttachmentFileCache {
      * Invalidate all cache entries for a library.
      */
     async invalidateByLibrary(libraryId: number): Promise<void> {
-        logger(`AttachmentFileCache.invalidateByLibrary: library=${libraryId}`);
+        logger(`AttachmentFileCache.invalidateByLibrary: library=${libraryId}`, 3);
         await this.deleteMetadataByLibrary(libraryId);
         await this.deleteContentByLibrary(libraryId);
     }
