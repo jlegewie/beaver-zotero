@@ -478,75 +478,18 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
     });
 
     // ===================================================================
-    // cachePageLabels
-    // ===================================================================
-
-    describe('cachePageLabels', () => {
-        it('updates page_labels in existing record (memory + DB)', async () => {
-            const rec = makeRecord();
-            await cache.setMetadata(rec);
-
-            const labels: Record<number, string> = { 0: 'i', 1: 'ii', 2: '1' };
-            await cache.cachePageLabels(100, labels);
-
-            // Check memory cache
-            mockFileStat(rec.file_mtime_ms, rec.file_size_bytes);
-            const result = await cache.getMetadata(100, rec.file_path);
-            expect(result!.page_labels).toEqual(labels);
-
-            // Check DB
-            const dbRow = await db.getAttachmentFileCache(100);
-            expect(dbRow!.page_labels).toEqual(labels);
-        });
-
-        it('stores in pageLabelCache when no full record exists', async () => {
-            const labels = { 0: 'Cover', 1: 'i' };
-            await cache.cachePageLabels(200, labels);
-
-            // Not in main memory cache, but available via getPageLabelsSync
-            expect((cache as any).memoryCache.has(200)).toBe(false);
-            expect(cache.getPageLabelsSync(200)).toEqual(labels);
-        });
-
-        it('handles DB update failure gracefully — memory is still updated', async () => {
-            const rec = makeRecord();
-            await cache.setMetadata(rec);
-
-            const spy = vi.spyOn(db, 'updateAttachmentFileCachePageLabels')
-                .mockRejectedValue(new Error('disk full'));
-
-            const labels = { 0: 'A' };
-            await cache.cachePageLabels(100, labels);
-
-            // Memory cache still has the labels despite DB failure
-            mockFileStat(rec.file_mtime_ms, rec.file_size_bytes);
-            const result = await cache.getMetadata(100, rec.file_path);
-            expect(result!.page_labels).toEqual(labels);
-
-            spy.mockRestore();
-        });
-    });
-
-    // ===================================================================
     // getPageLabelsSync
     // ===================================================================
 
     describe('getPageLabelsSync', () => {
-        it('returns labels from full record in memory cache', async () => {
+        it('returns labels from record in memory cache', async () => {
             const labels = { 0: 'A', 1: 'B' };
             await cache.setMetadata(makeRecord({ page_labels: labels }));
 
             expect(cache.getPageLabelsSync(100)).toEqual(labels);
         });
 
-        it('returns labels from pageLabelCache', async () => {
-            const labels = { 0: 'i', 1: 'ii' };
-            await cache.cachePageLabels(300, labels);
-
-            expect(cache.getPageLabelsSync(300)).toEqual(labels);
-        });
-
-        it('returns null when no labels cached anywhere', () => {
+        it('returns null when no record exists', () => {
             expect(cache.getPageLabelsSync(999)).toBeNull();
         });
 
@@ -555,14 +498,9 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
             expect(cache.getPageLabelsSync(100)).toBeNull();
         });
 
-        it('prefers full record over pageLabelCache', async () => {
-            const fullLabels = { 0: 'A' };
-            const lightLabels = { 0: 'B' };
-
-            await cache.setMetadata(makeRecord({ item_id: 400, page_labels: fullLabels }));
-            (cache as any).pageLabelCache.set(400, lightLabels);
-
-            expect(cache.getPageLabelsSync(400)).toEqual(fullLabels);
+        it('returns null for record with page_labels={} (resolved, no labels)', async () => {
+            await cache.setMetadata(makeRecord({ page_labels: {} }));
+            expect(cache.getPageLabelsSync(100)).toBeNull();
         });
     });
 
@@ -584,6 +522,37 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
             await cache.setMetadata(makeRecord());
             await cache.deleteMetadata(100);
             expect(cache.hasCachedRecord(100)).toBe(false);
+        });
+    });
+
+    // ===================================================================
+    // hasResolvedPageLabels
+    // ===================================================================
+
+    describe('hasResolvedPageLabels', () => {
+        it('returns false when no record exists', () => {
+            expect(cache.hasResolvedPageLabels(999)).toBe(false);
+        });
+
+        it('returns false when record has page_labels=null (not checked)', async () => {
+            await cache.setMetadata(makeRecord({ page_labels: null }));
+            expect(cache.hasResolvedPageLabels(100)).toBe(false);
+        });
+
+        it('returns true when record has page_labels={} (checked, none found)', async () => {
+            await cache.setMetadata(makeRecord({ page_labels: {} }));
+            expect(cache.hasResolvedPageLabels(100)).toBe(true);
+        });
+
+        it('returns true when record has populated page_labels', async () => {
+            await cache.setMetadata(makeRecord({ page_labels: { 0: 'i', 1: '1' } }));
+            expect(cache.hasResolvedPageLabels(100)).toBe(true);
+        });
+
+        it('returns false after record is deleted', async () => {
+            await cache.setMetadata(makeRecord({ page_labels: { 0: 'A' } }));
+            await cache.deleteMetadata(100);
+            expect(cache.hasResolvedPageLabels(100)).toBe(false);
         });
     });
 
