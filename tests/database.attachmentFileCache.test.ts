@@ -30,7 +30,6 @@ function makeRecord(overrides: Partial<Omit<AttachmentFileCacheRecord, 'cached_a
         is_encrypted: false,
         is_invalid: false,
         extraction_version: '1',
-        has_content_cache: false,
         ...overrides,
     };
 }
@@ -79,7 +78,6 @@ describe('BeaverDB — attachment_file_cache methods', () => {
             expect(result!.is_encrypted).toBe(false);
             expect(result!.is_invalid).toBe(false);
             expect(result!.extraction_version).toBe('1');
-            expect(result!.has_content_cache).toBe(false);
             expect(result!.cached_at).toBeTruthy();
         });
 
@@ -119,127 +117,11 @@ describe('BeaverDB — attachment_file_cache methods', () => {
             await db.upsertAttachmentFileCache(makeRecord({
                 file_path: '/new/path.pdf',
                 page_count: 99,
-                has_content_cache: true,
             }));
 
             const result = await db.getAttachmentFileCache(100);
             expect(result!.file_path).toBe('/new/path.pdf');
             expect(result!.page_count).toBe(99);
-            expect(result!.has_content_cache).toBe(true);
-        });
-    });
-
-    // ===================================================================
-    // insertAttachmentFileCacheIfNotExists
-    // ===================================================================
-
-    describe('insertAttachmentFileCacheIfNotExists', () => {
-        it('inserts a new row and returns true', async () => {
-            const inserted = await db.insertAttachmentFileCacheIfNotExists(makeRecord());
-            expect(inserted).toBe(true);
-
-            const result = await db.getAttachmentFileCache(100);
-            expect(result).not.toBeNull();
-            expect(result!.item_id).toBe(100);
-        });
-
-        it('returns false and does NOT overwrite existing row', async () => {
-            await db.upsertAttachmentFileCache(makeRecord({ page_count: 42, has_content_cache: true }));
-
-            const inserted = await db.insertAttachmentFileCacheIfNotExists(
-                makeRecord({ page_count: 1, has_content_cache: false })
-            );
-            expect(inserted).toBe(false);
-
-            // Original values preserved
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.page_count).toBe(42);
-            expect(result!.has_content_cache).toBe(true);
-        });
-    });
-
-    // ===================================================================
-    // upsertAttachmentFileCachePreserveContentFields
-    // ===================================================================
-
-    describe('upsertAttachmentFileCachePreserveContentFields', () => {
-        it('inserts a new row normally when no conflict', async () => {
-            await db.upsertAttachmentFileCachePreserveContentFields(makeRecord({ page_count: 5 }));
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.page_count).toBe(5);
-        });
-
-        it('preserves has_content_cache=true when incoming is false', async () => {
-            // First: set has_content_cache to true
-            await db.upsertAttachmentFileCache(makeRecord({ has_content_cache: true }));
-
-            // Then: upsert with has_content_cache=false via preserve method
-            await db.upsertAttachmentFileCachePreserveContentFields(
-                makeRecord({ has_content_cache: false })
-            );
-
-            const result = await db.getAttachmentFileCache(100);
-            // OR-merge: true stays true
-            expect(result!.has_content_cache).toBe(true);
-        });
-
-        it('upgrades has_content_cache from false to true', async () => {
-            await db.upsertAttachmentFileCache(makeRecord({ has_content_cache: false }));
-
-            await db.upsertAttachmentFileCachePreserveContentFields(
-                makeRecord({ has_content_cache: true })
-            );
-
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.has_content_cache).toBe(true);
-        });
-
-        it('preserves existing page_labels when incoming is null', async () => {
-            const labels = { 0: 'i', 1: 'ii' };
-            await db.upsertAttachmentFileCache(makeRecord({ page_labels: labels }));
-
-            await db.upsertAttachmentFileCachePreserveContentFields(
-                makeRecord({ page_labels: null })
-            );
-
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.page_labels).toEqual(labels);
-        });
-
-        it('overwrites page_labels when incoming is non-null', async () => {
-            await db.upsertAttachmentFileCache(makeRecord({ page_labels: { 0: 'old' } }));
-
-            const newLabels = { 0: 'A', 1: 'B', 2: 'C' };
-            await db.upsertAttachmentFileCachePreserveContentFields(
-                makeRecord({ page_labels: newLabels })
-            );
-
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.page_labels).toEqual(newLabels);
-        });
-
-        it('writes page_labels when existing row has null labels', async () => {
-            await db.upsertAttachmentFileCache(makeRecord({ page_labels: null }));
-
-            const labels = { 0: 'i' };
-            await db.upsertAttachmentFileCachePreserveContentFields(
-                makeRecord({ page_labels: labels })
-            );
-
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.page_labels).toEqual(labels);
-        });
-
-        it('still updates non-preserved fields (file_path, page_count, etc.)', async () => {
-            await db.upsertAttachmentFileCache(makeRecord({ page_count: 10, file_path: '/old.pdf' }));
-
-            await db.upsertAttachmentFileCachePreserveContentFields(
-                makeRecord({ page_count: 20, file_path: '/new.pdf' })
-            );
-
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.page_count).toBe(20);
-            expect(result!.file_path).toBe('/new.pdf');
         });
     });
 
@@ -406,34 +288,6 @@ describe('BeaverDB — attachment_file_cache methods', () => {
             expect(await db.getAttachmentFileCache(1)).toBeNull();
             expect(await db.getAttachmentFileCache(2)).toBeNull();
             expect(await db.getAttachmentFileCache(3)).not.toBeNull();
-        });
-    });
-
-    // ===================================================================
-    // updateContentCacheFlag
-    // ===================================================================
-
-    describe('updateContentCacheFlag', () => {
-        it('sets flag to true', async () => {
-            await db.upsertAttachmentFileCache(makeRecord({ has_content_cache: false }));
-            await db.updateContentCacheFlag(100, true);
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.has_content_cache).toBe(true);
-        });
-
-        it('sets flag to false', async () => {
-            await db.upsertAttachmentFileCache(makeRecord({ has_content_cache: true }));
-            await db.updateContentCacheFlag(100, false);
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.has_content_cache).toBe(false);
-        });
-
-        it('does not change other fields', async () => {
-            await db.upsertAttachmentFileCache(makeRecord({ page_count: 42, file_path: '/a.pdf' }));
-            await db.updateContentCacheFlag(100, true);
-            const result = await db.getAttachmentFileCache(100);
-            expect(result!.page_count).toBe(42);
-            expect(result!.file_path).toBe('/a.pdf');
         });
     });
 

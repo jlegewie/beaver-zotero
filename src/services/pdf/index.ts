@@ -119,7 +119,11 @@ export class PDFExtractor {
             await this.mupdf.open(pdfData);
             const docAnalyzer = new DocumentAnalyzer(this.mupdf);
 
-            // 2. Check text layer if requested
+            // 2. Get page count and labels before OCR check (always available once opened)
+            const pageCount = docAnalyzer.getPageCount();
+            const pageLabels = this.mupdf.getAllPageLabels();
+
+            // 3. Check text layer if requested
             if (opts.checkTextLayer) {
                 const ocrAnalysis = docAnalyzer.getDetailedOCRAnalysis({
                     minTextPerPage: opts.minTextPerPage,
@@ -129,19 +133,17 @@ export class PDFExtractor {
                     throw new ExtractionError(
                         ExtractionErrorCode.NO_TEXT_LAYER,
                         `Document may require OCR: ${ocrAnalysis.primaryReason} (${Math.round(ocrAnalysis.issueRatio * 100)}% of sampled pages have issues)`,
-                        ocrAnalysis
+                        ocrAnalysis,
+                        pageLabels,
+                        pageCount,
                     );
                 }
             }
 
-            // 3. Determine pages to extract
-            const pageCount = docAnalyzer.getPageCount();
+            // 4. Determine pages to extract
             const pageIndices = opts.pages?.length
                 ? opts.pages.filter(i => i >= 0 && i < pageCount)
                 : undefined; // undefined = all pages
-
-            // 4. Collect all page labels while the document is open
-            const pageLabels = this.mupdf.getAllPageLabels();
 
             // 5. EXTRACTION PASS: Get all raw data in one pass
             if (process.env.NODE_ENV === "development") {
@@ -286,7 +288,11 @@ export class PDFExtractor {
             await this.mupdf.open(pdfData);
             const docAnalyzer = new DocumentAnalyzer(this.mupdf);
 
-            // 2. Check text layer if requested
+            // 2. Get page count and labels before OCR check (always available once opened)
+            const pageCount = docAnalyzer.getPageCount();
+            const pageLabels = this.mupdf.getAllPageLabels();
+
+            // 3. Check text layer if requested
             if (opts.checkTextLayer) {
                 const ocrAnalysis = docAnalyzer.getDetailedOCRAnalysis({
                     minTextPerPage: opts.minTextPerPage,
@@ -296,19 +302,17 @@ export class PDFExtractor {
                     throw new ExtractionError(
                         ExtractionErrorCode.NO_TEXT_LAYER,
                         `Document may require OCR: ${ocrAnalysis.primaryReason} (${Math.round(ocrAnalysis.issueRatio * 100)}% of sampled pages have issues)`,
-                        ocrAnalysis
+                        ocrAnalysis,
+                        pageLabels,
+                        pageCount,
                     );
                 }
             }
 
-            // 3. Determine pages to extract
-            const pageCount = docAnalyzer.getPageCount();
+            // 4. Determine pages to extract
             const pageIndices = opts.pages?.length
                 ? opts.pages.filter(i => i >= 0 && i < pageCount)
                 : undefined; // undefined = all pages
-
-            // 4. Collect all page labels while the document is open
-            const pageLabels = this.mupdf.getAllPageLabels();
 
             // 5. EXTRACTION PASS: Get all raw data in one pass
             if (process.env.NODE_ENV === "development") {

@@ -271,20 +271,6 @@ declare namespace Zotero {
             // --- Attachment File Cache Methods ---
 
             /**
-             * Insert an attachment file cache record only if no row exists for the item.
-             * @param record The attachment file cache data to store
-             * @returns true if a row was inserted, false if it already existed.
-             */
-            insertAttachmentFileCacheIfNotExists(record: Omit<import("../src/services/database").AttachmentFileCacheRecord, 'cached_at'>): Promise<boolean>;
-
-            /**
-             * Insert or update an attachment file cache record while preserving fields
-             * populated by content extraction handlers.
-             * @param record The attachment file cache data to store
-             */
-            upsertAttachmentFileCachePreserveContentFields(record: Omit<import("../src/services/database").AttachmentFileCacheRecord, 'cached_at'>): Promise<void>;
-
-            /**
              * Insert or update an attachment file cache record.
              * @param record The attachment file cache data to store
              */
@@ -329,13 +315,6 @@ declare namespace Zotero {
              * @param libraryId The Zotero library ID
              */
             deleteAttachmentFileCacheByLibrary(libraryId: number): Promise<void>;
-
-            /**
-             * Update just the has_content_cache flag for an item.
-             * @param itemId The Zotero item ID
-             * @param hasContentCache Whether the content cache exists
-             */
-            updateContentCacheFlag(itemId: number, hasContentCache: boolean): Promise<void>;
 
             /**
              * Get count of attachment file cache records.

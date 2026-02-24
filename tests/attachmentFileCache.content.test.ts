@@ -66,7 +66,6 @@ function makeRecord(overrides: any = {}) {
         is_encrypted: false,
         is_invalid: false,
         extraction_version: EXTRACTION_VERSION,
-        has_content_cache: false,
         ...overrides,
     };
 }
@@ -273,32 +272,6 @@ describe('AttachmentFileCache — content (Tier 2)', () => {
             expect(written.pages_by_index[3].content).toBe('new');
         });
 
-        it('updates has_content_cache flag in metadata', async () => {
-            // Pre-populate a metadata row
-            await db.upsertAttachmentFileCache(makeRecord({ has_content_cache: false }));
-
-            mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
-            mockIOUtils.exists.mockResolvedValue(false);
-
-            await cache.setContentPages(1, 'ABCD1234', '/a.pdf', 10, [makePage(0)]);
-
-            const meta = await db.getAttachmentFileCache(100);
-            expect(meta!.has_content_cache).toBe(true);
-        });
-
-        it('does not downgrade has_content_cache from true', async () => {
-            // Already true
-            await db.upsertAttachmentFileCache(makeRecord({ has_content_cache: true }));
-
-            mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
-            mockIOUtils.exists.mockResolvedValue(false);
-
-            await cache.setContentPages(1, 'ABCD1234', '/a.pdf', 10, [makePage(0)]);
-
-            const meta = await db.getAttachmentFileCache(100);
-            expect(meta!.has_content_cache).toBe(true);
-        });
-
         it('handles IOUtils.stat failure gracefully (skips write)', async () => {
             mockIOUtils.stat.mockRejectedValue(new Error('disk error'));
             mockIOUtils.exists.mockResolvedValue(false);
@@ -461,6 +434,264 @@ describe('AttachmentFileCache — content (Tier 2)', () => {
 
             expect(await db.getAttachmentFileCacheCount(5)).toBe(0);
             expect(mockIOUtils.remove).toHaveBeenCalled();
+        });
+    });
+
+    // ===================================================================
+    // Overlapping range extension (test #81)
+    // ===================================================================
+
+    describe('overlapping range extension', () => {
+        it('merges new pages into existing cache — overlapping ranges preserve all pages', async () => {
+            // Simulate two sequential setContentPages calls, where the second
+            // reads back what the first wrote and merges.
+            let storedData: string | null = null;
+
+            mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
+            mockIOUtils.writeUTF8.mockImplementation(async (_path: string, content: string) => {
+                storedData = content;
+            });
+            mockIOUtils.readUTF8.mockImplementation(async () => {
+                return storedData ?? '';
+            });
+
+            // First write: pages 0-4
+            mockIOUtils.exists.mockResolvedValue(false);
+            const firstBatch = Array.from({ length: 5 }, (_, i) => makePage(i, `page-${i}`));
+            await cache.setContentPages(1, 'ABCD1234', '/a.pdf', 10, firstBatch);
+
+            expect(storedData).not.toBeNull();
+            const afterFirst = JSON.parse(storedData!) as AttachmentContentCache;
+            expect(Object.keys(afterFirst.pages_by_index)).toHaveLength(5);
+
+            // Second write: pages 3-7 (overlaps 3-4, adds 5-7)
+            mockIOUtils.exists.mockResolvedValue(true);
+            const secondBatch = Array.from({ length: 5 }, (_, i) => makePage(i + 3, `page-${i + 3}-v2`));
+            await cache.setContentPages(1, 'ABCD1234', '/a.pdf', 10, secondBatch);
+
+            const afterSecond = JSON.parse(storedData!) as AttachmentContentCache;
+            // Pages 0-7 should all be present
+            expect(Object.keys(afterSecond.pages_by_index)).toHaveLength(8);
+            // Pages 0-2 preserved from first write
+            expect(afterSecond.pages_by_index[0].content).toBe('page-0');
+            expect(afterSecond.pages_by_index[1].content).toBe('page-1');
+            expect(afterSecond.pages_by_index[2].content).toBe('page-2');
+            // Pages 3-4 overwritten by second write
+            expect(afterSecond.pages_by_index[3].content).toBe('page-3-v2');
+            expect(afterSecond.pages_by_index[4].content).toBe('page-4-v2');
+            // Pages 5-7 added by second write
+            expect(afterSecond.pages_by_index[5].content).toBe('page-5-v2');
+            expect(afterSecond.pages_by_index[6].content).toBe('page-6-v2');
+            expect(afterSecond.pages_by_index[7].content).toBe('page-7-v2');
+        });
+
+        it('getContentRange returns null for partial miss after partial cache', async () => {
+            const pages: Record<number, CachedPageContent> = {};
+            for (let i = 0; i < 5; i++) pages[i] = makePage(i);
+            const cacheData = makeContentCache({ pages_by_index: pages, total_pages: 10 });
+
+            mockIOUtils.exists.mockResolvedValue(true);
+            mockIOUtils.readUTF8.mockResolvedValue(JSON.stringify(cacheData));
+            mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
+
+            // Pages 0-4 cached, requesting 2-7 — pages 5-7 missing
+            const result = await cache.getContentRange(1, 'ABCD1234', '/a.pdf', 2, 7);
+            expect(result).toBeNull();
+
+            // Pages 0-4 should still be a hit
+            const hit = await cache.getContentRange(1, 'ABCD1234', '/a.pdf', 0, 4);
+            expect(hit).toHaveLength(5);
+        });
+    });
+
+    // ===================================================================
+    // Entire document after partial cache (test #82)
+    // ===================================================================
+
+    describe('entire document after partial cache', () => {
+        it('fills remaining pages to complete entire document', async () => {
+            let storedData: string | null = null;
+
+            mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
+            mockIOUtils.writeUTF8.mockImplementation(async (_path: string, content: string) => {
+                storedData = content;
+            });
+            mockIOUtils.readUTF8.mockImplementation(async () => {
+                return storedData ?? '';
+            });
+
+            // First write: pages 0-4 of a 10-page doc
+            mockIOUtils.exists.mockResolvedValue(false);
+            const firstBatch = Array.from({ length: 5 }, (_, i) => makePage(i, `page-${i}`));
+            await cache.setContentPages(1, 'ABCD1234', '/a.pdf', 10, firstBatch);
+
+            // Second write: pages 5-9 to complete the doc
+            mockIOUtils.exists.mockResolvedValue(true);
+            const secondBatch = Array.from({ length: 5 }, (_, i) => makePage(i + 5, `page-${i + 5}`));
+            await cache.setContentPages(1, 'ABCD1234', '/a.pdf', 10, secondBatch);
+
+            const final = JSON.parse(storedData!) as AttachmentContentCache;
+            expect(Object.keys(final.pages_by_index)).toHaveLength(10);
+            for (let i = 0; i < 10; i++) {
+                expect(final.pages_by_index[i].content).toBe(`page-${i}`);
+            }
+        });
+    });
+
+    // ===================================================================
+    // Content file missing while metadata present (test #111)
+    // ===================================================================
+
+    describe('content file deleted while metadata present', () => {
+        it('getContentRange returns null when content file is missing', async () => {
+            // Metadata row exists
+            await db.upsertAttachmentFileCache(makeRecord());
+
+            // But the JSON file doesn't exist on disk
+            mockIOUtils.exists.mockResolvedValue(false);
+
+            const result = await cache.getContentRange(1, 'ABCD1234', '/a.pdf', 0, 4);
+            expect(result).toBeNull();
+        });
+
+        it('subsequent setContentPages writes fresh file after deletion', async () => {
+            let storedData: string | null = null;
+
+            await db.upsertAttachmentFileCache(makeRecord());
+
+            mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
+            mockIOUtils.exists.mockResolvedValue(false); // file deleted
+            mockIOUtils.writeUTF8.mockImplementation(async (_path: string, content: string) => {
+                storedData = content;
+            });
+
+            await cache.setContentPages(1, 'ABCD1234', '/a.pdf', 10, [makePage(0)]);
+
+            expect(storedData).not.toBeNull();
+            const written = JSON.parse(storedData!) as AttachmentContentCache;
+            expect(written.pages_by_index[0]).toBeDefined();
+            expect(written.total_pages).toBe(10);
+        });
+    });
+
+    // ===================================================================
+    // Multi-library content isolation (test #113)
+    // ===================================================================
+
+    describe('multi-library content isolation', () => {
+        it('stores content files in separate library subdirectories', async () => {
+            mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
+            mockIOUtils.exists.mockResolvedValue(false);
+
+            const writePaths: string[] = [];
+            mockIOUtils.writeUTF8.mockImplementation(async (path: string) => {
+                writePaths.push(path);
+            });
+
+            await cache.setContentPages(1, 'USER0001', '/a.pdf', 5, [makePage(0)]);
+            await cache.setContentPages(5, 'GROUP001', '/b.pdf', 5, [makePage(0)]);
+
+            expect(writePaths).toHaveLength(2);
+            expect(writePaths[0]).toContain('/1/USER0001.json');
+            expect(writePaths[1]).toContain('/5/GROUP001.json');
+        });
+    });
+
+    // ===================================================================
+    // Rapid sequential writes (test #134)
+    // ===================================================================
+
+    describe('rapid sequential writes', () => {
+        it('five sequential writes to same key produce correct merged result', async () => {
+            let storedData: string | null = null;
+
+            mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
+            mockIOUtils.writeUTF8.mockImplementation(async (_path: string, content: string) => {
+                storedData = content;
+            });
+            mockIOUtils.readUTF8.mockImplementation(async () => {
+                return storedData ?? '';
+            });
+
+            // First write creates the file
+            mockIOUtils.exists.mockResolvedValueOnce(false);
+            await cache.setContentPages(1, 'ABCD1234', '/a.pdf', 50, [makePage(0, 'w1')]);
+
+            // Subsequent writes merge
+            for (let w = 1; w <= 4; w++) {
+                mockIOUtils.exists.mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+                await cache.setContentPages(1, 'ABCD1234', '/a.pdf', 50, [makePage(w, `w${w + 1}`)]);
+            }
+
+            const final = JSON.parse(storedData!) as AttachmentContentCache;
+            expect(Object.keys(final.pages_by_index)).toHaveLength(5);
+            expect(final.pages_by_index[0].content).toBe('w1');
+            expect(final.pages_by_index[1].content).toBe('w2');
+            expect(final.pages_by_index[2].content).toBe('w3');
+            expect(final.pages_by_index[3].content).toBe('w4');
+            expect(final.pages_by_index[4].content).toBe('w5');
+        });
+
+        it('concurrent fire-and-forget writes serialize correctly', async () => {
+            let storedData: string | null = null;
+            let writeCount = 0;
+
+            mockIOUtils.stat.mockResolvedValue({ lastModified: 1700000000000, size: 123456 });
+            mockIOUtils.writeUTF8.mockImplementation(async (_path: string, content: string) => {
+                storedData = content;
+                writeCount++;
+            });
+            mockIOUtils.readUTF8.mockImplementation(async () => {
+                return storedData ?? '';
+            });
+            mockIOUtils.exists.mockImplementation(async () => {
+                return storedData !== null;
+            });
+
+            // Fire 5 writes simultaneously
+            const promises = Array.from({ length: 5 }, (_, i) =>
+                cache.setContentPages(1, 'ABCD1234', '/a.pdf', 50, [makePage(i, `concurrent-${i}`)])
+            );
+            await Promise.all(promises);
+
+            expect(writeCount).toBe(5);
+            const final = JSON.parse(storedData!) as AttachmentContentCache;
+            // All 5 pages should be present (serialized writes merge correctly)
+            expect(Object.keys(final.pages_by_index)).toHaveLength(5);
+            for (let i = 0; i < 5; i++) {
+                expect(final.pages_by_index[i].content).toBe(`concurrent-${i}`);
+            }
+        });
+    });
+
+    // ===================================================================
+    // Error recovery — content tier (test #123, #125, #126)
+    // ===================================================================
+
+    describe('error recovery — content tier', () => {
+        it('IOUtils.stat failure in setContentPages skips write gracefully', async () => {
+            mockIOUtils.stat.mockRejectedValue(new Error('file vanished'));
+            mockIOUtils.exists.mockResolvedValue(false);
+
+            // Should not throw
+            await cache.setContentPages(1, 'ABCD1234', '/a.pdf', 10, [makePage(0)]);
+            expect(mockIOUtils.writeUTF8).not.toHaveBeenCalled();
+        });
+
+        it('corrupted content cache JSON triggers fresh extraction on next read', async () => {
+            mockIOUtils.exists.mockResolvedValue(true);
+            mockIOUtils.readUTF8.mockResolvedValue('not valid json {{{');
+
+            const result = await cache.getContentRange(1, 'ABCD1234', '/a.pdf', 0, 0);
+            expect(result).toBeNull();
+        });
+
+        it('IOUtils.readUTF8 failure returns null from getContentRange', async () => {
+            mockIOUtils.exists.mockResolvedValue(true);
+            mockIOUtils.readUTF8.mockRejectedValue(new Error('I/O error'));
+
+            const result = await cache.getContentRange(1, 'ABCD1234', '/a.pdf', 0, 0);
+            expect(result).toBeNull();
         });
     });
 });

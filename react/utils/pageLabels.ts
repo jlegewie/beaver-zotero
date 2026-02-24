@@ -13,8 +13,11 @@
  * - `resolvePageLabel`: for getCitationPages() values (1-based, subtracts 1)
  *
  * All lookups are synchronous (memory cache only). Call `preloadPageLabelsForContent`
- * before rendering to ensure the memory cache is populated.
+ * before rendering to ensure the memory cache is populated. Preloading reuses the
+ * full extraction path (`getAttachmentFileStatus`) on cache miss.
  */
+
+import { getAttachmentFileStatus } from '../../src/services/agentDataProvider/utils';
 
 // Regex for citation tags — matches self-closing and non-self-closing forms
 const CITATION_REGEX = /<citation\s+([^>]+?)\s*(\/>|>(?:.*?<\/citation>)?)/g;
@@ -78,8 +81,9 @@ export function resolvePageStr(itemId: number, pageStr: string): string {
  * in the given content string. Must be called (and awaited) before synchronous
  * rendering with `renderToMarkdown` or `renderToHTML`.
  *
- * Parses citation tags, extracts attachment references, and ensures each
- * attachment's cache record is loaded into memory.
+ * For each referenced attachment:
+ * 1. Try the metadata cache (DB -> memory) via `getMetadata`.
+ * 2. On cache miss, run full extraction via `getAttachmentFileStatus`.
  */
 export async function preloadPageLabelsForContent(content: string): Promise<void> {
     const cache = Zotero.Beaver?.attachmentFileCache;
@@ -93,7 +97,6 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
         const attMatch = ATT_ID_REGEX.exec(match[1]);
         if (!attMatch) continue;
 
-        // Parse "libraryID-itemKey"
         const ref = attMatch[1].replace('user-content-', '');
         const dashIdx = ref.indexOf('-');
         if (dashIdx <= 0) continue;
@@ -107,7 +110,15 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
             if (!item || seen.has(item.id)) continue;
             seen.add(item.id);
 
-            await cache.ensureInMemoryCache(item.id);
+            const filePath = await item.getFilePathAsync();
+            if (!filePath) continue;
+
+            // Cache hit → page_labels already in memory cache
+            const record = await cache.getMetadata(item.id, filePath);
+            if (record) continue;
+
+            // Cache miss → run full extraction (same as search path)
+            await getAttachmentFileStatus(item, false);
         } catch {
             // Skip items that can't be resolved
         }

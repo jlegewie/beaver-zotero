@@ -41,7 +41,6 @@ function makeRecord(overrides: Partial<Omit<AttachmentFileCacheRecord, 'cached_a
         is_encrypted: false,
         is_invalid: false,
         extraction_version: EXTRACTION_VERSION,
-        has_content_cache: false,
         ...overrides,
     };
 }
@@ -284,60 +283,6 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
     });
 
     // ===================================================================
-    // setMetadataPreservingContentFields
-    // ===================================================================
-
-    describe('setMetadataPreservingContentFields', () => {
-        it('updates DB with merge and refreshes memory cache', async () => {
-            // Pre-populate with has_content_cache=true and page_labels
-            await db.upsertAttachmentFileCache(makeRecord({
-                has_content_cache: true,
-                page_labels: { 0: 'i' },
-            }));
-
-            // Now call preserve method with has_content_cache=false and page_labels=null
-            await cache.setMetadataPreservingContentFields(makeRecord({
-                has_content_cache: false,
-                page_labels: null,
-                page_count: 99,
-            }));
-
-            // Memory cache should reflect merged values
-            mockFileStat(1700000000000, 123456);
-            const result = await cache.getMetadata(100, '/data/storage/ABCD1234/test.pdf');
-            expect(result).not.toBeNull();
-            expect(result!.has_content_cache).toBe(true); // preserved
-            expect(result!.page_labels).toEqual({ 0: 'i' }); // preserved
-            expect(result!.page_count).toBe(99); // updated
-        });
-    });
-
-    // ===================================================================
-    // setMetadataIfNotExists
-    // ===================================================================
-
-    describe('setMetadataIfNotExists', () => {
-        it('inserts when no row exists and returns true', async () => {
-            const inserted = await cache.setMetadataIfNotExists(makeRecord());
-            expect(inserted).toBe(true);
-
-            mockFileStat(1700000000000, 123456);
-            const result = await cache.getMetadata(100, '/data/storage/ABCD1234/test.pdf');
-            expect(result).not.toBeNull();
-        });
-
-        it('returns false and does NOT overwrite when row exists', async () => {
-            await cache.setMetadata(makeRecord({ page_count: 42 }));
-            const inserted = await cache.setMetadataIfNotExists(makeRecord({ page_count: 1 }));
-            expect(inserted).toBe(false);
-
-            mockFileStat(1700000000000, 123456);
-            const result = await cache.getMetadata(100, '/data/storage/ABCD1234/test.pdf');
-            expect(result!.page_count).toBe(42);
-        });
-    });
-
-    // ===================================================================
     // setMetadataBatch
     // ===================================================================
 
@@ -474,6 +419,282 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
             expect(stats.metadata_count).toBe(2);
             expect(stats.memory_cache_size).toBe(2);
             expect(stats.content_cache_dir).toBe('/mock/profile/beaver/content-cache');
+        });
+    });
+
+    // ===================================================================
+    // getPageLabelsSync
+    // ===================================================================
+
+    describe('getPageLabelsSync', () => {
+        it('returns labels from record in memory cache', async () => {
+            const labels = { 0: 'A', 1: 'B' };
+            await cache.setMetadata(makeRecord({ page_labels: labels }));
+
+            expect(cache.getPageLabelsSync(100)).toEqual(labels);
+        });
+
+        it('returns null when no record exists', () => {
+            expect(cache.getPageLabelsSync(999)).toBeNull();
+        });
+
+        it('returns null for record with page_labels=null', async () => {
+            await cache.setMetadata(makeRecord({ page_labels: null }));
+            expect(cache.getPageLabelsSync(100)).toBeNull();
+        });
+
+        it('returns null for record with page_labels={} (resolved, no labels)', async () => {
+            await cache.setMetadata(makeRecord({ page_labels: {} }));
+            expect(cache.getPageLabelsSync(100)).toBeNull();
+        });
+    });
+
+    // ===================================================================
+    // Error-state metadata (encrypted, OCR, invalid)
+    // ===================================================================
+
+    describe('error-state metadata', () => {
+        it('caches and returns is_encrypted=true record', async () => {
+            const rec = makeRecord({
+                is_encrypted: true,
+                page_count: null,
+                has_text_layer: null,
+                needs_ocr: null,
+            });
+            await cache.setMetadata(rec);
+            mockFileStat(rec.file_mtime_ms, rec.file_size_bytes);
+
+            const result = await cache.getMetadata(100, rec.file_path);
+            expect(result).not.toBeNull();
+            expect(result!.is_encrypted).toBe(true);
+        });
+
+        it('caches and returns needs_ocr=true record', async () => {
+            const rec = makeRecord({
+                needs_ocr: true,
+                has_text_layer: false,
+            });
+            await cache.setMetadata(rec);
+            mockFileStat(rec.file_mtime_ms, rec.file_size_bytes);
+
+            const result = await cache.getMetadata(100, rec.file_path);
+            expect(result).not.toBeNull();
+            expect(result!.needs_ocr).toBe(true);
+            expect(result!.has_text_layer).toBe(false);
+        });
+
+        it('caches and returns is_invalid=true record', async () => {
+            const rec = makeRecord({
+                is_invalid: true,
+                page_count: null,
+            });
+            await cache.setMetadata(rec);
+            mockFileStat(rec.file_mtime_ms, rec.file_size_bytes);
+
+            const result = await cache.getMetadata(100, rec.file_path);
+            expect(result).not.toBeNull();
+            expect(result!.is_invalid).toBe(true);
+        });
+
+        it('encrypted record returns from memory on second read (no DB hit)', async () => {
+            const rec = makeRecord({ is_encrypted: true });
+            await cache.setMetadata(rec);
+            mockFileStat(rec.file_mtime_ms, rec.file_size_bytes);
+
+            // First read (from memory, setMetadata already populated it)
+            await cache.getMetadata(100, rec.file_path);
+
+            const dbSpy = vi.spyOn(db, 'getAttachmentFileCache');
+            const result = await cache.getMetadata(100, rec.file_path);
+            expect(result!.is_encrypted).toBe(true);
+            expect(dbSpy).not.toHaveBeenCalled();
+            dbSpy.mockRestore();
+        });
+
+        it('needs_ocr=null record is distinguishable from needs_ocr=true/false', async () => {
+            // Incomplete extraction — needs_ocr not yet determined
+            const incomplete = makeRecord({ needs_ocr: null, has_text_layer: null });
+            await cache.setMetadata(incomplete);
+            mockFileStat(incomplete.file_mtime_ms, incomplete.file_size_bytes);
+
+            const result = await cache.getMetadata(100, incomplete.file_path);
+            expect(result!.needs_ocr).toBeNull();
+
+            // Complete extraction — needs_ocr resolved
+            await cache.setMetadata(makeRecord({ needs_ocr: false, has_text_layer: true }));
+            const result2 = await cache.getMetadata(100, incomplete.file_path);
+            expect(result2!.needs_ocr).toBe(false);
+        });
+    });
+
+    // ===================================================================
+    // Multi-library isolation
+    // ===================================================================
+
+    describe('multi-library isolation', () => {
+        it('stores and retrieves records from different libraries independently', async () => {
+            const rec1 = makeRecord({
+                item_id: 1,
+                library_id: 1,
+                zotero_key: 'USER0001',
+                file_path: '/user-lib/USER0001/a.pdf',
+                page_count: 10,
+            });
+            const rec2 = makeRecord({
+                item_id: 2,
+                library_id: 5,
+                zotero_key: 'GROUP001',
+                file_path: '/group-lib/GROUP001/b.pdf',
+                page_count: 20,
+            });
+
+            await cache.setMetadata(rec1);
+            await cache.setMetadata(rec2);
+
+            mockIOUtils.stat.mockImplementation(async (path: string) => {
+                if (path.includes('user-lib') || path.includes('group-lib')) {
+                    return { lastModified: 1700000000000, size: 123456 };
+                }
+                throw new Error('not found');
+            });
+
+            const r1 = await cache.getMetadata(1, '/user-lib/USER0001/a.pdf');
+            const r2 = await cache.getMetadata(2, '/group-lib/GROUP001/b.pdf');
+
+            expect(r1!.library_id).toBe(1);
+            expect(r1!.page_count).toBe(10);
+            expect(r2!.library_id).toBe(5);
+            expect(r2!.page_count).toBe(20);
+        });
+
+        it('getMetadataBatch returns records from multiple libraries', async () => {
+            const rec1 = makeRecord({ item_id: 1, library_id: 1, file_path: '/a.pdf' });
+            const rec2 = makeRecord({ item_id: 2, library_id: 2, file_path: '/b.pdf' });
+
+            await cache.setMetadata(rec1);
+            await cache.setMetadata(rec2);
+
+            mockFileStat(1700000000000, 123456);
+
+            const result = await cache.getMetadataBatch([
+                { itemId: 1, filePath: '/a.pdf' },
+                { itemId: 2, filePath: '/b.pdf' },
+            ]);
+
+            expect(result.size).toBe(2);
+            expect(result.get(1)!.library_id).toBe(1);
+            expect(result.get(2)!.library_id).toBe(2);
+        });
+
+        it('deleteMetadataByLibrary only affects target library', async () => {
+            await cache.setMetadata(makeRecord({ item_id: 1, library_id: 1, file_path: '/a.pdf' }));
+            await cache.setMetadata(makeRecord({ item_id: 2, library_id: 1, file_path: '/b.pdf' }));
+            await cache.setMetadata(makeRecord({ item_id: 3, library_id: 2, file_path: '/c.pdf' }));
+
+            await cache.deleteMetadataByLibrary(1);
+
+            expect(await db.getAttachmentFileCacheCount(1)).toBe(0);
+            expect(await db.getAttachmentFileCacheCount(2)).toBe(1);
+
+            // Library 2 still in memory cache
+            mockFileStat(1700000000000, 123456);
+            expect(await cache.getMetadata(3, '/c.pdf')).not.toBeNull();
+        });
+    });
+
+    // ===================================================================
+    // Memory cache LRU behavior — refresh on re-insert
+    // ===================================================================
+
+    describe('memory cache ordering', () => {
+        it('re-setting an existing key refreshes recency (LRU behavior)', async () => {
+            // Insert 500 entries
+            for (let i = 1; i <= 500; i++) {
+                await cache.setMetadata(makeRecord({
+                    item_id: i,
+                    zotero_key: `K${String(i).padStart(7, '0')}`,
+                    file_path: `/path/${i}.pdf`,
+                }));
+            }
+
+            // Re-set item 1 via setMetadata (should refresh recency)
+            await cache.setMetadata(makeRecord({
+                item_id: 1,
+                zotero_key: 'K0000001',
+                file_path: '/path/1.pdf',
+                page_count: 99,
+            }));
+
+            // Add item 501 — should evict item 2 (oldest), not refreshed item 1
+            await cache.setMetadata(makeRecord({
+                item_id: 501,
+                zotero_key: 'K0000501',
+                file_path: '/path/501.pdf',
+            }));
+
+            mockFileStat(1700000000000, 123456);
+
+            // Item 1 should remain in memory (no DB fallback)
+            const dbSpy = vi.spyOn(db, 'getAttachmentFileCache');
+            const r1 = await cache.getMetadata(1, '/path/1.pdf');
+            expect(r1).not.toBeNull();
+            expect(r1!.page_count).toBe(99);
+            expect(dbSpy).not.toHaveBeenCalled();
+            dbSpy.mockRestore();
+        });
+
+        it('item 2 remains in memory after item 1 is evicted', async () => {
+            // Insert 500 entries
+            for (let i = 1; i <= 500; i++) {
+                await cache.setMetadata(makeRecord({
+                    item_id: i,
+                    zotero_key: `K${String(i).padStart(7, '0')}`,
+                    file_path: `/path/${i}.pdf`,
+                }));
+            }
+
+            // Add item 501 — evicts item 1
+            await cache.setMetadata(makeRecord({
+                item_id: 501,
+                zotero_key: 'K0000501',
+                file_path: '/path/501.pdf',
+            }));
+
+            mockFileStat(1700000000000, 123456);
+
+            // Item 2 is second-oldest and should still be in memory
+            const dbSpy = vi.spyOn(db, 'getAttachmentFileCache');
+            await cache.getMetadata(2, '/path/2.pdf');
+            expect(dbSpy).not.toHaveBeenCalled();
+            dbSpy.mockRestore();
+        });
+    });
+
+    // ===================================================================
+    // Error recovery
+    // ===================================================================
+
+    describe('error recovery', () => {
+        it('setMetadata propagates DB write errors to caller', async () => {
+            const spy = vi.spyOn(db, 'upsertAttachmentFileCache')
+                .mockRejectedValue(new Error('disk full'));
+
+            await expect(cache.setMetadata(makeRecord())).rejects.toThrow('disk full');
+
+            // Memory cache should NOT be populated (error happened before putMemoryCache)
+            expect((cache as any).memoryCache.has(100)).toBe(false);
+
+            spy.mockRestore();
+        });
+
+        it('getMetadata returns null when IOUtils.stat throws', async () => {
+            await cache.setMetadata(makeRecord());
+            mockIOUtils.stat.mockRejectedValue(new Error('permission denied'));
+            mockIOUtils.exists.mockResolvedValue(false);
+
+            // isStale returns true when stat fails (file not accessible)
+            const result = await cache.getMetadata(100, '/data/storage/ABCD1234/test.pdf');
+            expect(result).toBeNull();
         });
     });
 });

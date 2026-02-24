@@ -1,12 +1,13 @@
 # Tests
 
-Unit tests for the Beaver Zotero plugin, using [Vitest](https://vitest.dev/).
+Unit and integration tests for the Beaver Zotero plugin, using [Vitest](https://vitest.dev/).
 
 ## Running tests
 
 ```bash
-npm test            # single run
-npm run test:watch  # re-run on file changes
+npm test                # unit tests (single run, no Zotero needed)
+npm run test:watch      # unit tests — re-run on file changes
+npm run test:integration  # integration tests (requires running Zotero)
 npx vitest run tests/some-file.test.ts  # run a single file
 ```
 
@@ -17,7 +18,13 @@ tests/
   setup.ts                  # Global setup — stubs Zotero/Mozilla globals
   mocks/
     mockDBConnection.ts     # Real SQLite (better-sqlite3) mock of Zotero.DBConnection
-  *.test.ts                 # Test files
+  *.test.ts                 # Unit test files
+  integration/
+    helpers/
+      fixtures.ts           # Test fixture definitions (attachment refs by library_id + zotero_key)
+      zoteroClient.ts       # HTTP client wrapper for Beaver endpoints
+      cacheInspector.ts     # Cache state inspection/cleanup via /beaver/test/* endpoints
+    *.integration.test.ts   # Integration test files
 ```
 
 - **`setup.ts`** runs before every test file (configured in `vitest.config.ts` via `setupFiles`). It stubs the Zotero-specific globals (`IOUtils`, `PathUtils`, `Ci`, `Zotero`, `ztoolkit`) that the source code references at import time. All stubs use `vi.fn()` so individual tests can override behavior with `.mockResolvedValue()`, `.mockImplementation()`, etc.
@@ -125,6 +132,51 @@ describe('ModuleName', () => {
 mockIOUtils.stat.mockRejectedValue(new Error('disk error'));
 await expect(cache.someMethod()).resolves.toBeUndefined();
 ```
+
+## Integration tests
+
+Integration tests exercise the full pipeline against a live Zotero instance: HTTP request -> handler -> PDF extraction -> cache write -> cache read -> response.
+
+### Prerequisites
+
+- Zotero running with the Beaver plugin loaded
+- Logged into Beaver (endpoints are only registered when authenticated)
+- Test attachments present in the library (see `integration/helpers/fixtures.ts` for the expected items)
+
+### Configuration
+
+Zotero's HTTP server port varies between installations. Set `ZOTERO_HTTP_PORT` to match your instance (default: `23119`):
+
+```bash
+ZOTERO_HTTP_PORT=23124 npm run test:integration
+```
+
+To find the port, check Zotero's preferences or run:
+```js
+Zotero.Prefs.get('httpServer.port')
+```
+
+### How it works
+
+- Tests use Beaver's local HTTP endpoints (`/beaver/attachment/pages`, etc.) registered in `react/hooks/useHttpEndpoints.ts`.
+- Cache inspection and manipulation uses test-only endpoints (`/beaver/test/*`) also registered in `useHttpEndpoints.ts`. These are only available in development/staging builds.
+- Tests skip gracefully when Zotero is not available (`beforeAll` pings the server and sets a flag; each `beforeEach` calls `ctx.skip()` if the flag is false).
+- `vitest.integration.config.ts` is a separate Vitest config with no `setupFiles` (no Zotero global stubs), a 30-second timeout, and sequential execution.
+
+### Test-only endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /beaver/test/ping` | Verify Zotero + cache + DB are available |
+| `POST /beaver/test/cache-metadata` | Get raw cache metadata by `library_id` + `zotero_key` or `item_id` |
+| `POST /beaver/test/cache-invalidate` | Invalidate cache (metadata + content) for a specific item |
+| `POST /beaver/test/cache-clear-memory` | Clear in-memory LRU cache |
+| `POST /beaver/test/cache-delete-content` | Delete content cache file only (keep metadata) |
+| `POST /beaver/test/resolve-item` | Resolve `library_id` + `zotero_key` to `item_id` and `item_type` |
+
+### Updating fixtures
+
+Fixtures in `integration/helpers/fixtures.ts` reference real items by `library_id` + `zotero_key`. If your Zotero library differs from the test library, update the keys to match attachments in your library. Each fixture has a `description` field documenting what kind of item it should point to (e.g., "Encrypted PDF", "2-page PDF").
 
 ## Conventions
 
