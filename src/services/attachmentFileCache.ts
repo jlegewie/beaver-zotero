@@ -344,9 +344,9 @@ export class AttachmentFileCache {
      * page-label-only records) from downgrading richer OCR metadata
      * written by authoritative handlers.
      */
-    async setMetadataPreservingContentFields(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
-        logger(`AttachmentFileCache.setMetadataPreservingContentFields: item=${input.item_id} key=${input.zotero_key}`);
-        await this.db.upsertAttachmentFileCachePreserveContentFields(input);
+    async setMetadataPartial(input: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
+        logger(`AttachmentFileCache.setMetadataPartial: item=${input.item_id} key=${input.zotero_key}`);
+        await this.db.upsertAttachmentFileCachePartial(input);
 
         // Reload merged row so memory cache reflects the DB-level conflict merge.
         const merged = await this.db.getAttachmentFileCache(input.item_id);

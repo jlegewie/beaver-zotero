@@ -1491,7 +1491,7 @@ export class BeaverDB {
      * - has_text_layer keeps the existing value when incoming is NULL
      * - needs_ocr keeps the existing value when incoming is NULL
      */
-    public async upsertAttachmentFileCachePreserveContentFields(record: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
+    public async upsertAttachmentFileCachePartial(record: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
         const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
         const pageLabelsJson = record.page_labels ? JSON.stringify(record.page_labels) : null;
 

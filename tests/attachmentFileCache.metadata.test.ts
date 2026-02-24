@@ -283,10 +283,10 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
     });
 
     // ===================================================================
-    // setMetadataPreservingContentFields
+    // setMetadataPartial
     // ===================================================================
 
-    describe('setMetadataPreservingContentFields', () => {
+    describe('setMetadataPartial', () => {
         it('updates DB with merge and refreshes memory cache', async () => {
             // Pre-populate with page_labels and OCR state
             await db.upsertAttachmentFileCache(makeRecord({
@@ -297,7 +297,7 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
 
             // Now call preserve method with page_labels=null and null OCR fields
             // — all should be preserved from existing record
-            await cache.setMetadataPreservingContentFields(makeRecord({
+            await cache.setMetadataPartial(makeRecord({
                 page_labels: null,
                 needs_ocr: null,
                 has_text_layer: null,
@@ -624,12 +624,12 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
     // ===================================================================
 
     describe('concurrent handler metadata races', () => {
-        it('setMetadataPreservingContentFields preserves page_labels from earlier write when incoming is null', async () => {
+        it('setMetadataPartial preserves page_labels from earlier write when incoming is null', async () => {
             // Pages handler wrote labels first
             await cache.setMetadata(makeRecord({ page_labels: { 0: 'i', 1: '1' } }));
 
             // Second pages request with null labels should preserve existing
-            await cache.setMetadataPreservingContentFields(makeRecord({
+            await cache.setMetadataPartial(makeRecord({
                 page_labels: null,
                 page_count: 10,
             }));
@@ -639,12 +639,12 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
             expect(result!.page_labels).toEqual({ 0: 'i', 1: '1' });
         });
 
-        it('setMetadataPreservingContentFields preserves needs_ocr from earlier write when incoming is null', async () => {
+        it('setMetadataPartial preserves needs_ocr from earlier write when incoming is null', async () => {
             // Authoritative handler wrote OCR status
             await cache.setMetadata(makeRecord({ needs_ocr: true, has_text_layer: false }));
 
             // Preload writes page-label-only record (needs_ocr: null)
-            await cache.setMetadataPreservingContentFields(makeRecord({
+            await cache.setMetadataPartial(makeRecord({
                 needs_ocr: null,
                 has_text_layer: null,
                 page_labels: { 0: 'iv' },
@@ -657,12 +657,12 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
             expect(result!.page_labels).toEqual({ 0: 'iv' }); // updated
         });
 
-        it('setMetadataPreservingContentFields overwrites needs_ocr when incoming is non-null', async () => {
+        it('setMetadataPartial overwrites needs_ocr when incoming is non-null', async () => {
             // Preload wrote partial record first (needs_ocr: null)
             await cache.setMetadata(makeRecord({ needs_ocr: null, has_text_layer: null }));
 
             // Authoritative handler writes full record
-            await cache.setMetadataPreservingContentFields(makeRecord({
+            await cache.setMetadataPartial(makeRecord({
                 needs_ocr: false,
                 has_text_layer: true,
             }));
@@ -764,9 +764,9 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
                 }));
             }
 
-            // Re-set item 1 via setMetadataPreservingContentFields
+            // Re-set item 1 via setMetadataPartial
             // This calls Map.set() which does NOT change insertion order
-            await cache.setMetadataPreservingContentFields(makeRecord({
+            await cache.setMetadataPartial(makeRecord({
                 item_id: 1,
                 zotero_key: 'K0000001',
                 file_path: '/path/1.pdf',

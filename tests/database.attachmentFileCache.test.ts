@@ -126,12 +126,12 @@ describe('BeaverDB — attachment_file_cache methods', () => {
     });
 
     // ===================================================================
-    // upsertAttachmentFileCachePreserveContentFields
+    // upsertAttachmentFileCachePartial
     // ===================================================================
 
-    describe('upsertAttachmentFileCachePreserveContentFields', () => {
+    describe('upsertAttachmentFileCachePartial', () => {
         it('inserts a new row normally when no conflict', async () => {
-            await db.upsertAttachmentFileCachePreserveContentFields(makeRecord({ page_count: 5 }));
+            await db.upsertAttachmentFileCachePartial(makeRecord({ page_count: 5 }));
             const result = await db.getAttachmentFileCache(100);
             expect(result!.page_count).toBe(5);
         });
@@ -140,7 +140,7 @@ describe('BeaverDB — attachment_file_cache methods', () => {
             const labels = { 0: 'i', 1: 'ii' };
             await db.upsertAttachmentFileCache(makeRecord({ page_labels: labels }));
 
-            await db.upsertAttachmentFileCachePreserveContentFields(
+            await db.upsertAttachmentFileCachePartial(
                 makeRecord({ page_labels: null })
             );
 
@@ -152,7 +152,7 @@ describe('BeaverDB — attachment_file_cache methods', () => {
             await db.upsertAttachmentFileCache(makeRecord({ page_labels: { 0: 'old' } }));
 
             const newLabels = { 0: 'A', 1: 'B', 2: 'C' };
-            await db.upsertAttachmentFileCachePreserveContentFields(
+            await db.upsertAttachmentFileCachePartial(
                 makeRecord({ page_labels: newLabels })
             );
 
@@ -164,7 +164,7 @@ describe('BeaverDB — attachment_file_cache methods', () => {
             await db.upsertAttachmentFileCache(makeRecord({ page_labels: null }));
 
             const labels = { 0: 'i' };
-            await db.upsertAttachmentFileCachePreserveContentFields(
+            await db.upsertAttachmentFileCachePartial(
                 makeRecord({ page_labels: labels })
             );
 
@@ -175,7 +175,7 @@ describe('BeaverDB — attachment_file_cache methods', () => {
         it('still updates non-preserved fields (file_path, page_count, etc.)', async () => {
             await db.upsertAttachmentFileCache(makeRecord({ page_count: 10, file_path: '/old.pdf' }));
 
-            await db.upsertAttachmentFileCachePreserveContentFields(
+            await db.upsertAttachmentFileCachePartial(
                 makeRecord({ page_count: 20, file_path: '/new.pdf' })
             );
 

@@ -56,7 +56,7 @@ describe('preloadPageLabelsForContent', () => {
                 // Simulate: DB row existed, so update succeeded and labels are now resolved.
                 state.resolved = true;
             }),
-            setMetadataPreservingContentFields: vi.fn().mockResolvedValue(undefined),
+            setMetadataPartial: vi.fn().mockResolvedValue(undefined),
         };
 
         const item = makeItem(42, 'ABCD1234');
@@ -75,7 +75,7 @@ describe('preloadPageLabelsForContent', () => {
 
         expect(cache.updatePageLabels).toHaveBeenCalledWith(42, {});
         // hasResolvedPageLabels returned true after update → no new record created
-        expect(cache.setMetadataPreservingContentFields).not.toHaveBeenCalled();
+        expect(cache.setMetadataPartial).not.toHaveBeenCalled();
     });
 
     it('creates a full record when no cache record exists (case 2: no record)', async () => {
@@ -89,7 +89,7 @@ describe('preloadPageLabelsForContent', () => {
             ensureInMemoryCache: vi.fn().mockResolvedValue(undefined),
             getMetadata: vi.fn().mockResolvedValue(null),
             updatePageLabels: vi.fn().mockResolvedValue(undefined),
-            setMetadataPreservingContentFields: vi.fn().mockResolvedValue(undefined),
+            setMetadataPartial: vi.fn().mockResolvedValue(undefined),
         };
 
         const item = makeItem(43, 'EFGH5678');
@@ -109,7 +109,7 @@ describe('preloadPageLabelsForContent', () => {
         // updatePageLabels called first (no-op since no DB row)
         expect(cache.updatePageLabels).toHaveBeenCalledWith(43, { 0: 'i', 1: 'ii', 2: '1' });
         // hasResolvedPageLabels still false → full record created
-        expect(cache.setMetadataPreservingContentFields).toHaveBeenCalledWith(
+        expect(cache.setMetadataPartial).toHaveBeenCalledWith(
             expect.objectContaining({
                 item_id: 43,
                 library_id: 1,
@@ -139,7 +139,7 @@ describe('preloadPageLabelsForContent', () => {
             ensureInMemoryCache: vi.fn().mockResolvedValue(undefined),
             getMetadata: vi.fn().mockResolvedValue(null),
             updatePageLabels: vi.fn().mockResolvedValue(undefined),
-            setMetadataPreservingContentFields: vi.fn().mockResolvedValue(undefined),
+            setMetadataPartial: vi.fn().mockResolvedValue(undefined),
         };
 
         const item = makeItem(44, 'IJKL9012');
@@ -157,7 +157,7 @@ describe('preloadPageLabelsForContent', () => {
         await preloadPageLabelsForContent('<citation att_id="1-IJKL9012" />');
 
         // Full record created with page_labels: {} (resolved, no custom labels)
-        expect(cache.setMetadataPreservingContentFields).toHaveBeenCalledWith(
+        expect(cache.setMetadataPartial).toHaveBeenCalledWith(
             expect.objectContaining({
                 item_id: 44,
                 page_labels: {},

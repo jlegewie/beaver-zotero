@@ -275,7 +275,7 @@ declare namespace Zotero {
              * populated by content extraction handlers.
              * @param record The attachment file cache data to store
              */
-            upsertAttachmentFileCachePreserveContentFields(record: Omit<import("../src/services/database").AttachmentFileCacheRecord, 'cached_at'>): Promise<void>;
+            upsertAttachmentFileCachePartial(record: Omit<import("../src/services/database").AttachmentFileCacheRecord, 'cached_at'>): Promise<void>;
 
             /**
              * Update just the page_labels_json for an existing item.

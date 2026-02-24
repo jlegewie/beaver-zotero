@@ -261,11 +261,11 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
                 // The record serves only for page-label lookups; it fails the cache guard in
                 // getAttachmentFileStatus / Lightweight (needs_ocr !== null),
                 // so those paths still run full extraction and overwrite it
-                // with a complete record via setMetadataPreservingContentFields
+                // with a complete record via setMetadataPartial
                 // (COALESCE preserves the richer page_labels value).
                 if (!cache.hasResolvedPageLabels(itemId)) {
                     const stat = await IOUtils.stat(result.filePath);
-                    await cache.setMetadataPreservingContentFields({
+                    await cache.setMetadataPartial({
                         item_id: itemId,
                         library_id: result.item.libraryID,
                         zotero_key: result.item.key,
