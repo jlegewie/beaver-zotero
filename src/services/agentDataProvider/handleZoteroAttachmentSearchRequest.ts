@@ -19,7 +19,7 @@ import {
     WSSearchHit,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { validateZoteroItemReference } from './utils';
+import { validateZoteroItemReference, backfillMetadataIfNotCached, backfillMetadataForError } from './utils';
 
 
 /**
@@ -30,6 +30,10 @@ export async function handleZoteroAttachmentSearchRequest(
     request: WSZoteroAttachmentSearchRequest
 ): Promise<WSZoteroAttachmentSearchResponse> {
     const { attachment, query, max_hits_per_page, skip_local_limits, request_id } = request;
+
+    // Hoisted for catch-block metadata backfill
+    let resolvedItem: Zotero.Item | null = null;
+    let resolvedFilePath: string | null = null;
 
     // Helper to create error response
     const errorResponse = (
@@ -90,7 +94,9 @@ export async function handleZoteroAttachmentSearchRequest(
         }
 
         // 3. Get the file path
+        resolvedItem = zoteroItem;
         const filePath = await zoteroItem.getFilePathAsync();
+        resolvedFilePath = filePath || null;
         if (!filePath) {
             const isFileAvailableOnServer = isAttachmentOnServer(zoteroItem);
             const errorMessage = isFileAvailableOnServer
@@ -128,30 +134,55 @@ export async function handleZoteroAttachmentSearchRequest(
             }
         }
 
+        // 5b. Try metadata cache for fast prechecks
+        const cache = Zotero.Beaver?.attachmentFileCache;
+        const cachedMeta = cache ? await cache.getMetadata(zoteroItem.id, filePath).catch(() => null) : null;
+
+        if (cachedMeta) {
+            if (cachedMeta.is_encrypted) {
+                return errorResponse('PDF is password-protected', 'encrypted');
+            }
+            if (cachedMeta.is_invalid) {
+                return errorResponse('PDF file is invalid or corrupted', 'invalid_pdf');
+            }
+            if (cachedMeta.needs_ocr) {
+                return errorResponse('PDF requires OCR (no text layer) — text search unavailable', 'no_text_layer', cachedMeta.page_count ?? null);
+            }
+            if (!skip_local_limits && cachedMeta.page_count != null) {
+                const maxPageCount = getPref('maxPageCount');
+                if (cachedMeta.page_count > maxPageCount) {
+                    return errorResponse(
+                        `PDF has ${cachedMeta.page_count} pages, which exceeds the ${maxPageCount}-page limit`,
+                        'too_many_pages'
+                    );
+                }
+            }
+        }
+
         // 6. Read the PDF data
         const pdfData = await IOUtils.read(filePath);
 
         // 7. Create extractor and get page count first
         const extractor = new PDFExtractor();
         let totalPages: number;
-        
-        try {
-            totalPages = await extractor.getPageCount(pdfData);
-        } catch (error) {
-            if (error instanceof ExtractionError) {
-                if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                    return errorResponse(
-                        'PDF is password-protected',
-                        'encrypted'
-                    );
-                } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                    return errorResponse(
-                        'PDF file is invalid or corrupted',
-                        'invalid_pdf'
-                    );
+
+        if (cachedMeta?.page_count != null) {
+            totalPages = cachedMeta.page_count;
+        } else {
+            try {
+                totalPages = await extractor.getPageCount(pdfData);
+            } catch (error) {
+                if (error instanceof ExtractionError) {
+                    if (error.code === ExtractionErrorCode.ENCRYPTED) {
+                        // Let outer catch backfill encrypted metadata before returning.
+                        throw error;
+                    } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
+                        // Let outer catch backfill invalid metadata before returning.
+                        throw error;
+                    }
                 }
+                throw error;
             }
-            throw error;
         }
 
         // 8. Check page count limit (skip if skip_local_limits is true)
@@ -186,6 +217,11 @@ export async function handleZoteroAttachmentSearchRequest(
             })),
         }));
 
+        // 10b. Backfill metadata if not already cached.
+        if (!cachedMeta) {
+            await backfillMetadataIfNotCached(zoteroItem, filePath, totalPages, 'handleZoteroAttachmentSearchRequest');
+        }
+
         return {
             type: 'zotero_attachment_search',
             request_id,
@@ -202,11 +238,18 @@ export async function handleZoteroAttachmentSearchRequest(
 
         // Handle known extraction errors
         if (error instanceof ExtractionError) {
+            // Backfill metadata for known error states
+            if (resolvedItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF || error.code === ExtractionErrorCode.NO_TEXT_LAYER)) {
+                await backfillMetadataForError(resolvedItem, resolvedFilePath, error.code, null, 'handleZoteroAttachmentSearchRequest');
+            }
+
             switch (error.code) {
                 case ExtractionErrorCode.ENCRYPTED:
                     return errorResponse('PDF is password-protected', 'encrypted');
                 case ExtractionErrorCode.INVALID_PDF:
                     return errorResponse('PDF file is invalid or corrupted', 'invalid_pdf');
+                case ExtractionErrorCode.NO_TEXT_LAYER:
+                    return errorResponse('PDF requires OCR (no text layer) — text search unavailable', 'no_text_layer');
                 default:
                     return errorResponse(
                         `Search failed: ${error.message}`,

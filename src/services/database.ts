@@ -53,6 +53,32 @@ export interface FailedEmbeddingRecord {
 }
 
 /**
+ * Interface for the 'attachment_file_cache' table row
+ *
+ * Table stores cached metadata and content-cache flags for PDF attachments.
+ * Metadata is keyed by item_id. Content (page text) is stored on disk as JSON
+ * under <profileDir>/beaver/content-cache/<libraryId>/<zoteroKey>.json.
+ */
+export interface AttachmentFileCacheRecord {
+    item_id: number;
+    library_id: number;
+    zotero_key: string;
+    file_path: string;
+    file_mtime_ms: number;
+    file_size_bytes: number;
+    content_type: string;
+    page_count: number | null;
+    page_labels: Record<number, string> | null;
+    has_text_layer: boolean | null;
+    needs_ocr: boolean | null;
+    is_encrypted: boolean;
+    is_invalid: boolean;
+    extraction_version: string;
+    has_content_cache: boolean;
+    cached_at: string;
+}
+
+/**
  * Maximum number of failures before an item is considered permanently failed.
  * After this many failures, the item won't be retried automatically.
  */
@@ -284,6 +310,38 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_failed_embeddings_retry
             ON failed_embeddings(next_retry_after);
+        `);
+
+        // Attachment file cache table - stores metadata for PDF attachments
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS attachment_file_cache (
+                item_id              INTEGER PRIMARY KEY,
+                library_id           INTEGER NOT NULL,
+                zotero_key           TEXT NOT NULL,
+                file_path            TEXT NOT NULL,
+                file_mtime_ms        INTEGER NOT NULL,
+                file_size_bytes      INTEGER NOT NULL,
+                content_type         TEXT NOT NULL,
+                page_count           INTEGER,
+                page_labels_json     TEXT,
+                has_text_layer       INTEGER,
+                needs_ocr            INTEGER,
+                is_encrypted         INTEGER NOT NULL DEFAULT 0,
+                is_invalid           INTEGER NOT NULL DEFAULT 0,
+                extraction_version   TEXT NOT NULL,
+                has_content_cache    INTEGER NOT NULL DEFAULT 0,
+                cached_at            TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_afc_library
+            ON attachment_file_cache(library_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_afc_library_key
+            ON attachment_file_cache(library_id, zotero_key);
         `);
     }
 
@@ -1339,6 +1397,371 @@ export class BeaverDB {
 
         const rows = await this.conn.queryAsync(sql, params);
         return rows[0]?.count || 0;
+    }
+
+    // =============================================
+    // Attachment File Cache Methods
+    // =============================================
+
+    /**
+     * Parse a database row into an AttachmentFileCacheRecord.
+     * Converts SQLite integer booleans and JSON strings.
+     */
+    private static rowToAttachmentFileCacheRecord(row: any): AttachmentFileCacheRecord {
+        let pageLabels: Record<number, string> | null = null;
+        if (row.page_labels_json) {
+            try {
+                pageLabels = JSON.parse(row.page_labels_json);
+            } catch {
+                pageLabels = null;
+            }
+        }
+        return {
+            item_id: row.item_id,
+            library_id: row.library_id,
+            zotero_key: row.zotero_key,
+            file_path: row.file_path,
+            file_mtime_ms: row.file_mtime_ms,
+            file_size_bytes: row.file_size_bytes,
+            content_type: row.content_type,
+            page_count: row.page_count ?? null,
+            page_labels: pageLabels,
+            has_text_layer: row.has_text_layer == null ? null : Boolean(row.has_text_layer),
+            needs_ocr: row.needs_ocr == null ? null : Boolean(row.needs_ocr),
+            is_encrypted: Boolean(row.is_encrypted),
+            is_invalid: Boolean(row.is_invalid),
+            extraction_version: row.extraction_version,
+            has_content_cache: Boolean(row.has_content_cache),
+            cached_at: row.cached_at,
+        };
+    }
+
+    /**
+     * Insert an attachment file cache record only if no row exists for the item.
+     * Uses INSERT ... ON CONFLICT DO NOTHING to avoid overwriting richer data
+     * written by other handlers in a concurrent scenario.
+     * @returns true if a row was inserted, false if it already existed.
+     */
+    public async insertAttachmentFileCacheIfNotExists(record: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<boolean> {
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        const pageLabelsJson = record.page_labels ? JSON.stringify(record.page_labels) : null;
+
+        await this.conn.queryAsync(
+            `INSERT INTO attachment_file_cache
+                (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
+                 content_type, page_count, page_labels_json, has_text_layer, needs_ocr,
+                 is_encrypted, is_invalid, extraction_version, has_content_cache, cached_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(item_id) DO NOTHING`,
+            [
+                record.item_id,
+                record.library_id,
+                record.zotero_key,
+                record.file_path,
+                record.file_mtime_ms,
+                record.file_size_bytes,
+                record.content_type,
+                record.page_count,
+                pageLabelsJson,
+                record.has_text_layer == null ? null : (record.has_text_layer ? 1 : 0),
+                record.needs_ocr == null ? null : (record.needs_ocr ? 1 : 0),
+                record.is_encrypted ? 1 : 0,
+                record.is_invalid ? 1 : 0,
+                record.extraction_version,
+                record.has_content_cache ? 1 : 0,
+                now,
+            ]
+        );
+
+        // SQLite changes() returns 1 if a row was inserted, 0 if conflict (DO NOTHING)
+        const changes: number[] = [];
+        await this.conn.queryAsync('SELECT changes() AS cnt', [], {
+            onRow: (row: any) => { changes.push(row.getResultByIndex(0)); },
+        });
+        return (changes[0] ?? 0) > 0;
+    }
+
+    /**
+     * Insert or update an attachment file cache record.
+     * Uses INSERT ON CONFLICT to avoid accidental field resets.
+     */
+    public async upsertAttachmentFileCache(record: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        const pageLabelsJson = record.page_labels ? JSON.stringify(record.page_labels) : null;
+
+        await this.conn.queryAsync(
+            `INSERT INTO attachment_file_cache
+                (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
+                 content_type, page_count, page_labels_json, has_text_layer, needs_ocr,
+                 is_encrypted, is_invalid, extraction_version, has_content_cache, cached_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(item_id) DO UPDATE SET
+                library_id = excluded.library_id,
+                zotero_key = excluded.zotero_key,
+                file_path = excluded.file_path,
+                file_mtime_ms = excluded.file_mtime_ms,
+                file_size_bytes = excluded.file_size_bytes,
+                content_type = excluded.content_type,
+                page_count = excluded.page_count,
+                page_labels_json = excluded.page_labels_json,
+                has_text_layer = excluded.has_text_layer,
+                needs_ocr = excluded.needs_ocr,
+                is_encrypted = excluded.is_encrypted,
+                is_invalid = excluded.is_invalid,
+                extraction_version = excluded.extraction_version,
+                has_content_cache = excluded.has_content_cache,
+                cached_at = excluded.cached_at`,
+            [
+                record.item_id,
+                record.library_id,
+                record.zotero_key,
+                record.file_path,
+                record.file_mtime_ms,
+                record.file_size_bytes,
+                record.content_type,
+                record.page_count,
+                pageLabelsJson,
+                record.has_text_layer == null ? null : (record.has_text_layer ? 1 : 0),
+                record.needs_ocr == null ? null : (record.needs_ocr ? 1 : 0),
+                record.is_encrypted ? 1 : 0,
+                record.is_invalid ? 1 : 0,
+                record.extraction_version,
+                record.has_content_cache ? 1 : 0,
+                now,
+            ]
+        );
+    }
+
+    /**
+     * Insert or update an attachment file cache record while preserving fields
+     * populated by content extraction handlers.
+     *
+     * Concurrency-safe merge rules on conflict:
+     * - page_labels_json keeps the existing value when incoming is NULL
+     * - has_content_cache is OR-merged so true is never downgraded to false
+     */
+    public async upsertAttachmentFileCachePreserveContentFields(record: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+        const pageLabelsJson = record.page_labels ? JSON.stringify(record.page_labels) : null;
+
+        await this.conn.queryAsync(
+            `INSERT INTO attachment_file_cache
+                (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
+                 content_type, page_count, page_labels_json, has_text_layer, needs_ocr,
+                 is_encrypted, is_invalid, extraction_version, has_content_cache, cached_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(item_id) DO UPDATE SET
+                library_id = excluded.library_id,
+                zotero_key = excluded.zotero_key,
+                file_path = excluded.file_path,
+                file_mtime_ms = excluded.file_mtime_ms,
+                file_size_bytes = excluded.file_size_bytes,
+                content_type = excluded.content_type,
+                page_count = excluded.page_count,
+                page_labels_json = COALESCE(excluded.page_labels_json, attachment_file_cache.page_labels_json),
+                has_text_layer = excluded.has_text_layer,
+                needs_ocr = excluded.needs_ocr,
+                is_encrypted = excluded.is_encrypted,
+                is_invalid = excluded.is_invalid,
+                extraction_version = excluded.extraction_version,
+                has_content_cache = CASE
+                    WHEN attachment_file_cache.has_content_cache = 1 OR excluded.has_content_cache = 1 THEN 1
+                    ELSE 0
+                END,
+                cached_at = excluded.cached_at`,
+            [
+                record.item_id,
+                record.library_id,
+                record.zotero_key,
+                record.file_path,
+                record.file_mtime_ms,
+                record.file_size_bytes,
+                record.content_type,
+                record.page_count,
+                pageLabelsJson,
+                record.has_text_layer == null ? null : (record.has_text_layer ? 1 : 0),
+                record.needs_ocr == null ? null : (record.needs_ocr ? 1 : 0),
+                record.is_encrypted ? 1 : 0,
+                record.is_invalid ? 1 : 0,
+                record.extraction_version,
+                record.has_content_cache ? 1 : 0,
+                now,
+            ]
+        );
+    }
+
+    /**
+     * Insert or update multiple attachment file cache records in a batch.
+     */
+    public async upsertAttachmentFileCacheBatch(records: Array<Omit<AttachmentFileCacheRecord, 'cached_at'>>): Promise<void> {
+        if (records.length === 0) return;
+
+        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+
+        await this.conn.executeTransaction(async () => {
+            for (const record of records) {
+                const pageLabelsJson = record.page_labels ? JSON.stringify(record.page_labels) : null;
+                await this.conn.queryAsync(
+                    `INSERT INTO attachment_file_cache
+                        (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
+                         content_type, page_count, page_labels_json, has_text_layer, needs_ocr,
+                         is_encrypted, is_invalid, extraction_version, has_content_cache, cached_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(item_id) DO UPDATE SET
+                        library_id = excluded.library_id,
+                        zotero_key = excluded.zotero_key,
+                        file_path = excluded.file_path,
+                        file_mtime_ms = excluded.file_mtime_ms,
+                        file_size_bytes = excluded.file_size_bytes,
+                        content_type = excluded.content_type,
+                        page_count = excluded.page_count,
+                        page_labels_json = excluded.page_labels_json,
+                        has_text_layer = excluded.has_text_layer,
+                        needs_ocr = excluded.needs_ocr,
+                        is_encrypted = excluded.is_encrypted,
+                        is_invalid = excluded.is_invalid,
+                        extraction_version = excluded.extraction_version,
+                        has_content_cache = excluded.has_content_cache,
+                        cached_at = excluded.cached_at`,
+                    [
+                        record.item_id,
+                        record.library_id,
+                        record.zotero_key,
+                        record.file_path,
+                        record.file_mtime_ms,
+                        record.file_size_bytes,
+                        record.content_type,
+                        record.page_count,
+                        pageLabelsJson,
+                        record.has_text_layer == null ? null : (record.has_text_layer ? 1 : 0),
+                        record.needs_ocr == null ? null : (record.needs_ocr ? 1 : 0),
+                        record.is_encrypted ? 1 : 0,
+                        record.is_invalid ? 1 : 0,
+                        record.extraction_version,
+                        record.has_content_cache ? 1 : 0,
+                        now,
+                    ]
+                );
+            }
+        });
+    }
+
+    /**
+     * Get an attachment file cache record by item ID.
+     */
+    public async getAttachmentFileCache(itemId: number): Promise<AttachmentFileCacheRecord | null> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachment_file_cache WHERE item_id = ?`,
+            [itemId]
+        );
+        if (rows.length === 0) return null;
+        return BeaverDB.rowToAttachmentFileCacheRecord(rows[0]);
+    }
+
+    /**
+     * Get an attachment file cache record by library ID and Zotero key.
+     */
+    public async getAttachmentFileCacheByKey(libraryId: number, zoteroKey: string): Promise<AttachmentFileCacheRecord | null> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachment_file_cache WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey]
+        );
+        if (rows.length === 0) return null;
+        return BeaverDB.rowToAttachmentFileCacheRecord(rows[0]);
+    }
+
+    /**
+     * Get attachment file cache records for multiple item IDs.
+     */
+    public async getAttachmentFileCacheBatch(itemIds: number[]): Promise<Map<number, AttachmentFileCacheRecord>> {
+        if (itemIds.length === 0) return new Map();
+
+        const result = new Map<number, AttachmentFileCacheRecord>();
+        const chunkSize = 500;
+
+        for (let i = 0; i < itemIds.length; i += chunkSize) {
+            const chunk = itemIds.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+            const rows = await this.conn.queryAsync(
+                `SELECT * FROM attachment_file_cache WHERE item_id IN (${placeholders})`,
+                chunk
+            );
+            for (const row of rows) {
+                result.set(row.item_id, BeaverDB.rowToAttachmentFileCacheRecord(row));
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Delete an attachment file cache record by item ID.
+     */
+    public async deleteAttachmentFileCache(itemId: number): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM attachment_file_cache WHERE item_id = ?`,
+            [itemId]
+        );
+    }
+
+    /**
+     * Delete all attachment file cache records for a library.
+     */
+    public async deleteAttachmentFileCacheByLibrary(libraryId: number): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM attachment_file_cache WHERE library_id = ?`,
+            [libraryId]
+        );
+    }
+
+    /**
+     * Update just the has_content_cache flag for an item.
+     */
+    public async updateContentCacheFlag(itemId: number, hasContentCache: boolean): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE attachment_file_cache SET has_content_cache = ? WHERE item_id = ?`,
+            [hasContentCache ? 1 : 0, itemId]
+        );
+    }
+
+    /**
+     * Update just the page_labels_json for an existing item.
+     * No-op if no row exists for the given itemId.
+     */
+    public async updateAttachmentFileCachePageLabels(
+        itemId: number,
+        pageLabels: Record<number, string>,
+    ): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE attachment_file_cache SET page_labels_json = ? WHERE item_id = ?`,
+            [JSON.stringify(pageLabels), itemId]
+        );
+    }
+
+    /**
+     * Get count of attachment file cache records.
+     */
+    public async getAttachmentFileCacheCount(libraryId?: number): Promise<number> {
+        let sql = 'SELECT COUNT(*) as count FROM attachment_file_cache';
+        const params: any[] = [];
+
+        if (libraryId !== undefined) {
+            sql += ' WHERE library_id = ?';
+            params.push(libraryId);
+        }
+
+        const rows = await this.conn.queryAsync(sql, params);
+        return rows[0]?.count || 0;
+    }
+
+    /**
+     * Get all attachment file cache records (for GC operations).
+     */
+    public async getAllAttachmentFileCache(): Promise<AttachmentFileCacheRecord[]> {
+        const rows = await this.conn.queryAsync(
+            `SELECT * FROM attachment_file_cache ORDER BY library_id, item_id`
+        );
+        return rows.map((row: any) => BeaverDB.rowToAttachmentFileCacheRecord(row));
     }
 
 }

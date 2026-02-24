@@ -380,6 +380,8 @@ export interface ExtractionResult {
     analysis: DocumentAnalysis;
     /** Combined plain text from all pages */
     fullText: string;
+    /** Page labels for all pages in the document (0-indexed → label string). Only non-empty labels included. */
+    pageLabels?: Record<number, string>;
     /** Extraction metadata */
     metadata: {
         extractedAt: string;
@@ -399,6 +401,8 @@ export interface LineExtractionResult {
     analysis: DocumentAnalysis;
     /** Combined plain text from all pages */
     fullText: string;
+    /** Page labels for all pages in the document (0-indexed → label string). Only non-empty labels included. */
+    pageLabels?: Record<number, string>;
     /** Extraction metadata */
     metadata: {
         extractedAt: string;

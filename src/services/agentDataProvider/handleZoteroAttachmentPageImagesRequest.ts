@@ -18,7 +18,7 @@ import {
     WSPageImage,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { resolveToPdfAttachment, validateZoteroItemReference } from './utils';
+import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataIfNotCached, backfillMetadataForError } from './utils';
 
 /**
  * Handle zotero_attachment_page_images_request event.
@@ -30,6 +30,10 @@ export async function handleZoteroAttachmentPageImagesRequest(
     const { attachment, pages, scale, dpi, format, jpeg_quality, skip_local_limits, request_id } = request;
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
     let errorKey = requestKey;
+
+    // Hoisted for catch-block metadata backfill
+    let resolvedPdfItem: Zotero.Item | null = null;
+    let resolvedFilePath: string | null = null;
 
     // Helper to create error response
     const errorResponse = (
@@ -78,9 +82,11 @@ export async function handleZoteroAttachmentPageImagesRequest(
         }
         const { item: pdfItem, key: pdfKey } = resolveResult;
         errorKey = pdfKey;
+        resolvedPdfItem = pdfItem;
 
         // 3. Get the file path — returns false if missing or nonexistent
         const filePath = await pdfItem.getFilePathAsync();
+        resolvedFilePath = filePath || null;
         if (!filePath) {
             const isOnServer = isAttachmentOnServer(pdfItem);
             return errorResponse(
@@ -107,10 +113,38 @@ export async function handleZoteroAttachmentPageImagesRequest(
             }
         }
 
-        // 5. Read PDF and get page count (also validates the PDF structure)
+        // 4b. Try metadata cache for fast prechecks
+        const cache = Zotero.Beaver?.attachmentFileCache;
+        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, filePath).catch(() => null) : null;
+
+        if (cachedMeta) {
+            if (cachedMeta.is_encrypted) {
+                return errorResponse(`The PDF file for ${pdfKey} is password-protected`, 'encrypted');
+            }
+            if (cachedMeta.is_invalid) {
+                return errorResponse(`The PDF file for ${pdfKey} is invalid or corrupted`, 'invalid_pdf');
+            }
+            if (!skip_local_limits && cachedMeta.page_count != null) {
+                const maxPageCount = getPref('maxPageCount');
+                if (cachedMeta.page_count > maxPageCount) {
+                    return errorResponse(
+                        `The PDF file for ${pdfKey} has ${cachedMeta.page_count} pages, which exceeds the ${maxPageCount}-page limit`,
+                        'too_many_pages'
+                    );
+                }
+            }
+        }
+
+        // 5. Read PDF and get page count
         const pdfData = await IOUtils.read(filePath);
         const extractor = new PDFExtractor();
-        const totalPages = await extractor.getPageCount(pdfData);
+        let totalPages: number;
+
+        if (cachedMeta?.page_count != null) {
+            totalPages = cachedMeta.page_count;
+        } else {
+            totalPages = await extractor.getPageCount(pdfData);
+        }
 
         // 6. Check page count limit (skip if skip_local_limits is true)
         if (!skip_local_limits) {
@@ -172,6 +206,11 @@ export async function handleZoteroAttachmentPageImagesRequest(
             };
         });
 
+        // 10b. Backfill metadata if not already cached.
+        if (!cachedMeta) {
+            await backfillMetadataIfNotCached(pdfItem, filePath, totalPages, 'handleZoteroAttachmentPageImagesRequest');
+        }
+
         return {
             type: 'zotero_attachment_page_images',
             request_id,
@@ -184,6 +223,11 @@ export async function handleZoteroAttachmentPageImagesRequest(
         logger(`handleZoteroAttachmentPageImagesRequest: Rendering failed: ${error}`, 1);
 
         if (error instanceof ExtractionError) {
+            // Backfill metadata for known error states
+            if (resolvedPdfItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF)) {
+                await backfillMetadataForError(resolvedPdfItem, resolvedFilePath, error.code, null, 'handleZoteroAttachmentPageImagesRequest');
+            }
+
             switch (error.code) {
                 case ExtractionErrorCode.ENCRYPTED:
                     return errorResponse(`The PDF file for ${errorKey} is password-protected`, 'encrypted');

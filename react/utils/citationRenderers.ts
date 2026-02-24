@@ -12,6 +12,7 @@ import { ZoteroItemReference } from '../types/zotero';
 import { logger } from '../../src/utils/logger';
 import { ExternalReference } from '../types/externalReferences';
 import { formatExternalCitation } from '../atoms/externalReferences';
+import { resolvePageStr } from './pageLabels';
 
 // Regex for citation syntax - matches self-closing (/>) and non-self-closing (>) with or without closing tag
 const citationRegex = /<citation\s+([^>]+?)\s*(\/>|>(?:.*?<\/citation>)?)/g;
@@ -168,7 +169,8 @@ export function renderToMarkdown(
             if (itemToCite.isRegularItem()) {
                 const citationObject: Citation = {id: itemToCite.id};
                 if (attrs.page || attrs.pages) {
-                    citationObject.locator = attrs.page || attrs.pages;
+                    const rawPage = (attrs.page || attrs.pages)!;
+                    citationObject.locator = resolvePageStr(item.id, rawPage);
                     citationObject.label = 'p.';
                 }
                 citation = Zotero.Beaver?.citationService?.formatCitation([citationObject]) ?? '';

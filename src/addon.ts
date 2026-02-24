@@ -6,6 +6,7 @@ import { createZToolkit } from "./utils/ztoolkit";
 import { BeaverDB } from "./services/database";
 import { AIProvider } from "./services/OpenAIProvider";
 import { CitationService } from "./services/CitationService";
+import { AttachmentFileCache } from "./services/attachmentFileCache";
 
 class Addon {
     public data: {
@@ -27,6 +28,7 @@ class Addon {
     public aiProvider?: AIProvider;
     public citationService?: CitationService;
     public db?: BeaverDB;
+    public attachmentFileCache?: AttachmentFileCache;
     public pluginVersion?: typeof version;
     // Lifecycle hooks
     public hooks: typeof hooks;

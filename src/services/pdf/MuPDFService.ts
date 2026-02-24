@@ -270,6 +270,25 @@ export class MuPDFService {
         }
     }
 
+    /** Get page labels for all pages in the document (0-indexed → label string). Only non-empty labels included. */
+    getAllPageLabels(): Record<number, string> {
+        this.ensureOpen();
+        const pageCount = this.getPageCount();
+        const labels: Record<number, string> = {};
+        for (let i = 0; i < pageCount; i++) {
+            const page = this.doc!.loadPage(i);
+            try {
+                const label = page.getLabel();
+                if (label) labels[i] = label;
+            } catch {
+                // Label not available for this page
+            } finally {
+                page.destroy();
+            }
+        }
+        return labels;
+    }
+
     /**
      * Extract raw structured text data from a single page.
      * Returns complete page data including dimensions.

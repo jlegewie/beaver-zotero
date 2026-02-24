@@ -23,6 +23,7 @@ import { regenerateFromRunAtom } from '../../atoms/agentRunAtoms';
 import { currentThreadIdAtom } from '../../atoms/threads';
 import { store } from '../../store';
 import Tooltip from '../ui/Tooltip';
+import { preloadPageLabelsForContent } from '../../utils/pageLabels';
 
 interface AgentRunFooterProps {
     run: AgentRun;
@@ -156,12 +157,14 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     };
 
     const handleCopy = async () => {
+        await preloadPageLabelsForContent(combinedContent);
         const formattedContent = renderToMarkdown(combinedContent);
         await copyToClipboard(formattedContent);
     };
 
     /** Save as standalone note to current library/collection */
     const saveToLibrary = async () => {
+        await preloadPageLabelsForContent(combinedContent);
         let formattedContent = renderToHTML(preprocessNoteContent(combinedContent), "markdown", {
             citationDataMap,
             externalMapping: externalReferenceMapping,
@@ -196,6 +199,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     /** Save as child note attached to selected/current item */
     const saveToItem = async () => {
+        await preloadPageLabelsForContent(combinedContent);
         let formattedContent = renderToHTML(preprocessNoteContent(combinedContent), "markdown", {
             citationDataMap,
             externalMapping: externalReferenceMapping,
