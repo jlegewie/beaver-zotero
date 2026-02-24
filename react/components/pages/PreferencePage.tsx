@@ -557,8 +557,8 @@ const PreferencePage: React.FC = () => {
             </div>
 
 
-            <div className="display-flex flex-row flex-wrap gap-1 items-center pb-3 mt-2">
-                {tabs.map((tab) => (
+            <div className="display-flex flex-row items-center mb-3 mt-2" style={{ borderRadius: '6px', overflow: 'hidden', border: '1px solid var(--fill-quarternary)', width: 'fit-content' }}>
+                {tabs.map((tab, index) => (
                     <button
                         key={tab.id}
                         type="button"
@@ -567,8 +567,11 @@ const PreferencePage: React.FC = () => {
                         aria-pressed={tab.id === activeTab}
                         className="text-base"
                         style={{
-                            border: '1px solid var(--fill-quarternary)',
-                            borderRadius: '4px',
+                            borderLeft: index > 0 ? '1px solid var(--fill-quarternary)' : 'none',
+                            borderTop: 'none',
+                            borderBottom: 'none',
+                            borderRight: 'none',
+                            borderRadius: 0,
                             background: tab.id === activeTab ? 'var(--fill-quinary)' : 'transparent',
                             color: tab.id === activeTab ? 'var(--fill-primary)' : 'var(--fill-secondary)',
                             padding: '4px 12px',
@@ -579,7 +582,7 @@ const PreferencePage: React.FC = () => {
                             lineHeight: 1.2,
                             gap: '4px',
                             whiteSpace: 'nowrap',
-                            transition: 'background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease'
+                            transition: 'background-color 0.15s ease, color 0.15s ease'
                         }}
                     >
                         <Icon
