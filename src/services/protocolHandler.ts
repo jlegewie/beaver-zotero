@@ -20,7 +20,7 @@ import { PreferencePageTab } from "../../react/atoms/ui";
 const EXTENSION_KEY = "zotero://beaver";
 
 const VALID_PREFERENCE_TABS = new Set<PreferencePageTab>([
-    "general", "sync", "permissions", "models", "prompts", "advanced",
+    "general", "sync", "permissions", "models", "prompts", "advanced", "account",
 ]);
 
 function doAction(uri: any): void {
@@ -87,6 +87,12 @@ function handleSidebar(): void {
 }
 
 function handlePreferences(tab?: string): void {
+    const win = Zotero.getMainWindow();
+    if (!win) {
+        ztoolkit.log("protocolHandler: No main window available");
+        return;
+    }
+
     const resolvedTab = tab && VALID_PREFERENCE_TABS.has(tab as PreferencePageTab)
         ? (tab as PreferencePageTab)
         : undefined;
