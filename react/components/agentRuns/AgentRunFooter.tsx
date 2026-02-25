@@ -288,21 +288,16 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                         <TokenUsageDisplay usage={run.total_usage} cost={run.total_cost} />
                     )}
                     {/* Share button */}
-                    <Tooltip
-                        content="More options"
-                        showArrow
-                        singleLine
-                    >
-                        <MenuButton
-                            icon={ShareIcon}
-                            menuItems={getShareMenuItems()}
-                            className="scale-11"
-                            ariaLabel="Share"
-                            variant="ghost"
-                            positionAdjustment={{ x: 0, y: 0 }}
-                            toggleCallback={handleMenuToggle}
-                        />
-                    </Tooltip>
+                    <MenuButton
+                        icon={ShareIcon}
+                        menuItems={getShareMenuItems()}
+                        className="scale-11"
+                        ariaLabel="Share"
+                        variant="ghost"
+                        positionAdjustment={{ x: 0, y: 0 }}
+                        toggleCallback={handleMenuToggle}
+                        tooltipContent="More options"
+                    />
                     <Tooltip
                         content="Retry"
                         showArrow
