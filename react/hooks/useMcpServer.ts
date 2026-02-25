@@ -22,7 +22,7 @@ import {
     handleListTagsRequest,
     handleListItemsRequest,
 } from '../../src/services/agentDataProvider';
-import { getCitationKeyFromItem } from '../../src/utils/zoteroUtils';
+import { getCitationKeyFromItem, getZoteroSelectURI } from '../../src/utils/zoteroUtils';
 import { logger } from '../../src/utils/logger';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import { mcpServerEnabledAtom } from '../atoms/ui';
@@ -434,6 +434,9 @@ function formatSearchResultItem(entry: ItemSearchFrontendResultItem, includeSimi
         publication: item.publication_title ?? null,
     };
 
+    const zoteroUri = getZoteroSelectURI(item.library_id, item.zotero_key);
+    if (zoteroUri) result.zotero_uri = zoteroUri;
+
     if (includeSimilarity && entry.similarity != null) {
         result.similarity = Math.round(entry.similarity * 100) / 100;
     }
@@ -616,20 +619,25 @@ async function handleGetItemDetails(args: any): Promise<any> {
         return mcpError(`Failed to get item details: ${response.error}`);
     }
 
-    // Enrich items with citation keys and transform attachments
+    // Enrich items with zotero_uri, citation keys, and transform attachments
     const items = await Promise.all(response.items.map(async (item) => {
+        const parsed = parseItemId(item.item_id);
+
+        // Add zotero://select URI
+        if (parsed) {
+            const zoteroUri = getZoteroSelectURI(parsed.libraryId, parsed.key);
+            if (zoteroUri) item.zotero_uri = zoteroUri;
+        }
+
         // Add citation_key (BetterBibTeX-aware) if not already present
-        if (!item.citationKey) {
-            const parsed = parseItemId(item.item_id);
-            if (parsed) {
-                try {
-                    const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(parsed.libraryId, parsed.key);
-                    if (zoteroItem) {
-                        const citationKey = await getCitationKeyFromItem(zoteroItem);
-                        if (citationKey) item.citationKey = citationKey;
-                    }
-                } catch { /* best-effort */ }
-            }
+        if (!item.citationKey && parsed) {
+            try {
+                const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(parsed.libraryId, parsed.key);
+                if (zoteroItem) {
+                    const citationKey = await getCitationKeyFromItem(zoteroItem);
+                    if (citationKey) item.citationKey = citationKey;
+                }
+            } catch { /* best-effort */ }
         }
 
         if (item.attachments && Array.isArray(item.attachments)) {
@@ -777,15 +785,20 @@ async function handleListItems(args: any): Promise<any> {
         total_count: response.total_count,
         has_more: hasMore,
         next_offset: hasMore ? offset + limit : null,
-        items: response.items.map((item) => ({
-            item_id: item.item_id,
-            item_type: item.item_type,
-            title: item.title ?? null,
-            authors: item.creators ?? null,
-            year: item.year ?? null,
-            date_added: item.date_added ?? null,
-            date_modified: item.date_modified ?? null,
-        })),
+        items: response.items.map((item) => {
+            const parsed = parseItemId(item.item_id);
+            const zoteroUri = parsed ? getZoteroSelectURI(parsed.libraryId, parsed.key) : null;
+            return {
+                item_id: item.item_id,
+                item_type: item.item_type,
+                title: item.title ?? null,
+                authors: item.creators ?? null,
+                year: item.year ?? null,
+                date_added: item.date_added ?? null,
+                date_modified: item.date_modified ?? null,
+                ...(zoteroUri && { zotero_uri: zoteroUri }),
+            };
+        }),
     };
 }
 

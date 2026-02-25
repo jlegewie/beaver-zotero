@@ -341,6 +341,23 @@ export function getZoteroUserIdentifier(): { userID: string | undefined, localUs
     }
 }
 
+/**
+ * Build a zotero://select URI that opens Zotero and selects the given item.
+ * Works without loading the full item — only needs libraryID and key.
+ *
+ * User libraries:  zotero://select/library/items/{key}
+ * Group libraries: zotero://select/groups/{groupID}/items/{key}
+ */
+export function getZoteroSelectURI(libraryId: number, key: string): string | null {
+    const lib = Zotero.Libraries.get(libraryId);
+    if (!lib) return null;
+    if (lib.libraryType === 'group') {
+        // @ts-ignore Zotero.Library.groupID is defined for group libraries
+        return `zotero://select/groups/${lib.groupID}/items/${key}`;
+    }
+    return `zotero://select/library/items/${key}`;
+}
+
 export function isLibraryEditable(libraryId: number): boolean {
     const library = Zotero.Libraries.get(libraryId);
     if (!library) {
