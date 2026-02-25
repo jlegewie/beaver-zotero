@@ -11,6 +11,7 @@
  */
 
 import { useEffect } from 'react';
+import { useAtomValue } from 'jotai';
 import { MCPService } from '../../src/services/mcpService';
 import {
     handleItemSearchByTopicRequest,
@@ -23,8 +24,8 @@ import {
 } from '../../src/services/agentDataProvider';
 import { getCitationKeyFromItem } from '../../src/utils/zoteroUtils';
 import { logger } from '../../src/utils/logger';
-import { getPref } from '../../src/utils/prefs';
 import { isAuthenticatedAtom } from '../atoms/auth';
+import { mcpServerEnabledAtom } from '../atoms/ui';
 import { store } from '../store';
 import type {
     WSItemSearchByTopicRequest,
@@ -793,8 +794,9 @@ async function handleListItems(args: any): Promise<any> {
 // =============================================================================
 
 export function useMcpServer() {
+    const enabled = useAtomValue(mcpServerEnabledAtom);
+
     useEffect(() => {
-        const enabled = getPref('mcpServerEnabled');
         if (!enabled) {
             return;
         }
@@ -826,5 +828,5 @@ export function useMcpServer() {
                 service.unregister();
             }
         };
-    }, []);
+    }, [enabled]);
 }

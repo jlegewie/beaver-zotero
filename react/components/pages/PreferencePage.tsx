@@ -6,7 +6,7 @@ import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, Repeat
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom } from "../../atoms/profile";
-import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
+import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
 import { generatePromptId, CustomPrompt } from "../../types/settings";
 import { customPromptsAtom, saveCustomPromptsAtom, usedShortcutsAtom } from "../../atoms/customPrompts";
@@ -126,7 +126,7 @@ const PreferencePage: React.FC = () => {
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
     const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
     const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
-    const [mcpServerEnabled, setMcpServerEnabled] = useState(() => getPref('mcpServerEnabled'));
+    const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
     const isMcpServerSupported = useAtomValue(isMcpServerSupportedAtom);
     const [mcpCopied, setMcpCopied] = useState(false);
 
@@ -415,7 +415,7 @@ const PreferencePage: React.FC = () => {
         const newValue = !mcpServerEnabled;
         setPref('mcpServerEnabled', newValue);
         setMcpServerEnabled(newValue);
-    }, [mcpServerEnabled, isMcpServerSupported]);
+    }, [mcpServerEnabled, isMcpServerSupported, setMcpServerEnabled]);
 
     const mcpServerPort = useMemo(() => {
         try {
@@ -1157,7 +1157,7 @@ const PreferencePage: React.FC = () => {
                     <SettingsGroup>
                         <SettingsRow
                             title="Enable MCP Server"
-                            description="Changes require restarting Zotero"
+                            description={`Endpoint at localhost:${mcpServerPort}`}
                             onClick={handleMcpServerToggle}
                             disabled={!isMcpServerSupported}
                             tooltip={isMcpServerSupported
@@ -1165,11 +1165,6 @@ const PreferencePage: React.FC = () => {
                                 : 'Only available with Beaver Pro'}
                             control={
                                 <div className="display-flex flex-row items-center gap-2">
-                                    {!isMcpServerSupported && (
-                                        <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">
-                                            Pro
-                                        </span>
-                                    )}
                                     <input
                                         type="checkbox"
                                         checked={mcpServerEnabled}
@@ -1184,16 +1179,18 @@ const PreferencePage: React.FC = () => {
                         <SettingsRow
                             title="Client Configuration"
                             description={
-                                <span className="display-flex flex-row items-center gap-1" style={{ fontFamily: 'monospace', fontSize: '11px' }}>
+                                <span className="display-flex flex-row items-center gap-1" style={{ fontFamily: 'monospace', fontSize: '11px', opacity: mcpServerEnabled ? 1 : 0.45 }}>
                                     {mcpEndpointUrl}
                                 </span>
                             }
                             hasBorder
+                            disabled={!mcpServerEnabled}
                             control={
                                 <Button
                                     variant="outline"
                                     icon={mcpCopied ? TickIcon : CopyIcon}
                                     onClick={handleCopyMcpConfig}
+                                    disabled={!mcpServerEnabled}
                                 >
                                     {mcpCopied ? 'Copied' : 'Copy Config'}
                                 </Button>
