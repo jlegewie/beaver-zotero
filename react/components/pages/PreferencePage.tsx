@@ -1145,7 +1145,10 @@ const PreferencePage: React.FC = () => {
             {/* ===== ADVANCED TAB ===== */}
             {activeTab === 'advanced' && (
                 <>
-                    <SectionLabel>MCP Server</SectionLabel>
+                    <div className="display-flex flex-row items-center gap-2" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
+                        <div className="text-lg font-color-primary font-bold">MCP Server</div>
+                        <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">Experimental</span>
+                    </div>
                     <SettingsGroup>
                         <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
                             <div className="font-color-secondary text-base">
