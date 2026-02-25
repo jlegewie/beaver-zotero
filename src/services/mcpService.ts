@@ -89,16 +89,14 @@ export class MCPService {
             return false;
         }
 
-        const service = this;
-
         // Zotero endpoint constructor pattern (same as useHttpEndpoints)
         const Endpoint = function (this: any) {} as any;
         Endpoint.prototype = {
             supportedMethods: ['POST'],
             supportedDataTypes: ['application/json'],
 
-            async init(requestData: ZoteroRequestData): Promise<[number, string, string]> {
-                return service.handleRequest(requestData);
+            init: async (requestData: ZoteroRequestData): Promise<[number, string, string]> => {
+                return this.handleRequest(requestData);
             },
         };
 
