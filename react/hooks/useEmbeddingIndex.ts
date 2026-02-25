@@ -3,14 +3,15 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { isAuthenticatedAtom } from "../atoms/auth";
 import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom, searchableLibraryIdsAtom, processingModeAtom } from "../atoms/profile";
 import { ProcessingMode } from "../types/profile";
-import { 
-    embeddingIndexStateAtom, 
-    setEmbeddingIndexStatusAtom, 
+import {
+    embeddingIndexStateAtom,
+    setEmbeddingIndexStatusAtom,
     EmbeddingIndexState,
     updateEmbeddingIndexProgressAtom,
     forceReindexCounterAtom,
     updateFailedItemsCountAtom
 } from "../atoms/embeddingIndex";
+import { mcpServerEnabledAtom } from "../atoms/ui";
 import { EmbeddingIndexer, MIN_CONTENT_LENGTH, INDEX_BATCH_SIZE } from "../../src/services/embeddingIndexer";
 import { BeaverDB } from "../../src/services/database";
 import { embeddingsService } from "../../src/services/embeddingsService";
@@ -53,6 +54,7 @@ export function useEmbeddingIndex() {
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const forceReindexCounter = useAtomValue(forceReindexCounterAtom);
     const processingMode = useAtomValue(processingModeAtom);
+    const mcpServerEnabled = useAtomValue(mcpServerEnabledAtom);
 
     // Atoms for state management
     const setIndexStatus = useSetAtom(setEmbeddingIndexStatusAtom);
@@ -478,7 +480,9 @@ export function useEmbeddingIndex() {
         if (!isAuthenticated) return;
         if (!isAuthorized) return;
         if (!isDeviceAuthorized) return;
-        if (processingMode === ProcessingMode.BACKEND) return;
+        // Skip frontend indexing in BACKEND mode unless MCP server is enabled
+        // (MCP search_by_topic tool requires local embeddings)
+        if (processingMode === ProcessingMode.BACKEND && !mcpServerEnabled) return;
 
         logger("useEmbeddingIndex: Setting up embedding index", 3);
 
@@ -618,6 +622,6 @@ export function useEmbeddingIndex() {
             // Clear indexer reference
             indexerRef.current = null;
         };
-    }, [isAuthenticated, isAuthorized, isDeviceAuthorized, processingMode, searchableLibraryIds, forceReindexCounter]);
+    }, [isAuthenticated, isAuthorized, isDeviceAuthorized, processingMode, mcpServerEnabled, searchableLibraryIds, forceReindexCounter]);
 }
 
