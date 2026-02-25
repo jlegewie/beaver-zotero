@@ -191,6 +191,22 @@ export class MCPService {
                 name: 'beaver-zotero',
                 version: '1.0.0',
             },
+            instructions:
+                "You have access to the user's Zotero reference library through Beaver. " +
+                'Use these tools when the user\'s task would benefit from their collected academic sources: ' +
+                'literature reviews, research questions, finding references, reading papers, ' +
+                'or any question where scholarly sources add value.\n\n' +
+                '## Tool Strategy\n' +
+                "- Search the user's library before concluding sources are unavailable.\n" +
+                '- For exploratory discovery, use `search_by_topic`. For known references (author, title, journal), use `search_by_metadata`.\n' +
+                "- Use `read_attachment` to verify claims about a paper's findings or methods — don't rely on metadata alone for substantive claims.\n" +
+                '- Paginate (via `offset`) only when current results are insufficient.\n\n' +
+                '## Citations\n' +
+                'Always cite Zotero sources that inform your response. Adapt format to the output context:\n' +
+                '- **Plain text**: Author-year — e.g., (Smith 2004).\n' +
+                '- **Markdown**: Use the `zotero_uri` from results — e.g., [Smith 2004](zotero://select/library/items/KEY).\n' +
+                '- **LaTeX**: Use the `citation_key` if available — e.g., \\cite{smith2004}.\n' +
+                'Only cite items actually returned by the tools. Never fabricate citations.',
         };
     }
 
