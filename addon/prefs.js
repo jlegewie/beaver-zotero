@@ -63,6 +63,9 @@ pref("deletionJobs", "[]");
 // Items skipped during sync
 pref("skippedItems", "[]")
 
+// MCP server
+pref("mcpServerEnabled", false);
+
 // Flags to show notifications, run consistency check and collection sync on upgrade
 pref("runConsistencyCheck", false);
 pref("runCollectionSync", false);

@@ -2,11 +2,11 @@ import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, CopyIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom } from "../../atoms/profile";
-import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
+import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom } from "../../atoms/profile";
+import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
 import { generatePromptId, CustomPrompt } from "../../types/settings";
 import { customPromptsAtom, saveCustomPromptsAtom, usedShortcutsAtom } from "../../atoms/customPrompts";
@@ -24,6 +24,7 @@ import SyncedLibraries from "../preferences/SyncedLibraries";
 import { ProcessingMode } from "../../types/profile";
 import DeferredToolPreferenceSetting from "../preferences/DeferredToolPreferenceSetting";
 import { BeaverUIFactory } from "../../../src/ui/ui";
+import { copyToClipboard } from "../../utils/clipboard";
 
 /** Section label displayed above a settings group */
 const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -125,6 +126,9 @@ const PreferencePage: React.FC = () => {
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
     const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
     const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
+    const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
+    const isMcpServerSupported = useAtomValue(isMcpServerSupportedAtom);
+    const [mcpCopied, setMcpCopied] = useState(false);
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -406,6 +410,36 @@ const PreferencePage: React.FC = () => {
         setConfirmExternalSearchCosts(newValue);
     }, [confirmExternalSearchCosts]);
 
+    const handleMcpServerToggle = useCallback(() => {
+        if (!isMcpServerSupported) return;
+        const newValue = !mcpServerEnabled;
+        setPref('mcpServerEnabled', newValue);
+        setMcpServerEnabled(newValue);
+    }, [mcpServerEnabled, isMcpServerSupported, setMcpServerEnabled]);
+
+    const mcpServerPort = useMemo(() => {
+        try {
+            return Zotero.Prefs.get('httpServer.port') || 23119;
+        } catch {
+            return 23119;
+        }
+    }, []);
+    const mcpEndpointUrl = `http://localhost:${mcpServerPort}/beaver/mcp`;
+
+    const handleCopyMcpConfig = useCallback(async () => {
+        const config = JSON.stringify({
+            mcpServers: {
+                "beaver-zotero": {
+                    type: "streamable-http",
+                    url: mcpEndpointUrl
+                }
+            }
+        }, null, 2);
+        await copyToClipboard(config);
+        setMcpCopied(true);
+        setTimeout(() => setMcpCopied(false), 2000);
+    }, [mcpEndpointUrl]);
+
     // Helper function to get rebuild index button props
     const getRebuildIndexButtonProps = () => {
         if (isEmbeddingIndexing) {
@@ -498,6 +532,7 @@ const PreferencePage: React.FC = () => {
         { id: 'permissions', label: 'Permissions', icon: LockIcon },
         { id: 'models', label: 'API Keys', icon: KeyIcon },
         { id: 'prompts', label: 'Prompt & Actions', icon: ZapIcon },
+        { id: 'advanced', label: 'Advanced', icon: ToolsIcon },
     ], [isDatabaseSyncSupported]);
 
     // Backward compatibility for existing entry points that still request "account".
@@ -522,8 +557,8 @@ const PreferencePage: React.FC = () => {
             </div>
 
 
-            <div className="display-flex flex-row flex-wrap gap-1 items-center pb-3 mt-2">
-                {tabs.map((tab) => (
+            <div className="display-flex flex-row items-center mb-3 mt-2" style={{ borderRadius: '6px', overflow: 'hidden', border: '1px solid var(--fill-quarternary)', width: 'fit-content' }}>
+                {tabs.map((tab, index) => (
                     <button
                         key={tab.id}
                         type="button"
@@ -532,8 +567,11 @@ const PreferencePage: React.FC = () => {
                         aria-pressed={tab.id === activeTab}
                         className="text-base"
                         style={{
-                            border: '1px solid var(--fill-quarternary)',
-                            borderRadius: '4px',
+                            borderLeft: index > 0 ? '1px solid var(--fill-quarternary)' : 'none',
+                            borderTop: 'none',
+                            borderBottom: 'none',
+                            borderRight: 'none',
+                            borderRadius: 0,
                             background: tab.id === activeTab ? 'var(--fill-quinary)' : 'transparent',
                             color: tab.id === activeTab ? 'var(--fill-primary)' : 'var(--fill-secondary)',
                             padding: '4px 12px',
@@ -544,7 +582,7 @@ const PreferencePage: React.FC = () => {
                             lineHeight: 1.2,
                             gap: '4px',
                             whiteSpace: 'nowrap',
-                            transition: 'background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease'
+                            transition: 'background-color 0.15s ease, color 0.15s ease'
                         }}
                     >
                         <Icon
@@ -1101,6 +1139,64 @@ const PreferencePage: React.FC = () => {
                             </Button>
                         </div> */}
                     </div>
+                </>
+            )}
+
+            {/* ===== ADVANCED TAB ===== */}
+            {activeTab === 'advanced' && (
+                <>
+                    <SectionLabel>MCP Server</SectionLabel>
+                    <SettingsGroup>
+                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
+                            <div className="font-color-secondary text-base">
+                                The MCP server lets AI coding tools like Claude Code, Cursor, and Windsurf search and access your Zotero library.
+                                {' '}See our <DocLink path="mcp-server">MCP server guide</DocLink> for setup instructions.
+                            </div>
+                        </div>
+                    </SettingsGroup>
+                    <SettingsGroup>
+                        <SettingsRow
+                            title="Enable MCP Server"
+                            description={`Endpoint at localhost:${mcpServerPort}`}
+                            onClick={handleMcpServerToggle}
+                            disabled={!isMcpServerSupported}
+                            tooltip={isMcpServerSupported
+                                ? 'Expose your Zotero library to MCP-compatible AI tools'
+                                : 'Only available with Beaver Pro'}
+                            control={
+                                <div className="display-flex flex-row items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={mcpServerEnabled}
+                                        onChange={handleMcpServerToggle}
+                                        onClick={(e) => e.stopPropagation()}
+                                        disabled={!isMcpServerSupported}
+                                        style={{ cursor: isMcpServerSupported ? 'pointer' : 'not-allowed', margin: 0 }}
+                                    />
+                                </div>
+                            }
+                        />
+                        <SettingsRow
+                            title="Client Configuration"
+                            description={
+                                <span className="display-flex flex-row items-center gap-1" style={{ fontFamily: 'monospace', fontSize: '11px', opacity: mcpServerEnabled ? 1 : 0.45 }}>
+                                    {mcpEndpointUrl}
+                                </span>
+                            }
+                            hasBorder
+                            disabled={!mcpServerEnabled}
+                            control={
+                                <Button
+                                    variant="outline"
+                                    icon={mcpCopied ? TickIcon : CopyIcon}
+                                    onClick={handleCopyMcpConfig}
+                                    disabled={!mcpServerEnabled}
+                                >
+                                    {mcpCopied ? 'Copied' : 'Copy Config'}
+                                </Button>
+                            }
+                        />
+                    </SettingsGroup>
                 </>
             )}
 

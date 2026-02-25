@@ -42,6 +42,7 @@ declare namespace _ZoteroTypes {
       "customPromptsLastUsed": string;
       "deletionJobs": string;
       "skippedItems": string;
+      "mcpServerEnabled": boolean;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;
       "runWebDAVSync": boolean;

@@ -18,6 +18,7 @@ import { store } from './store';
 import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
 import { useHttpEndpoints } from './hooks/useHttpEndpoints';
+import { useMcpServer } from './hooks/useMcpServer';
 import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 
 
@@ -56,6 +57,9 @@ const GlobalContextInitializer = () => {
 
     // Register HTTP endpoints for local FrontendCapability (when authenticated)
     useHttpEndpoints();
+
+    // Register MCP server endpoint (when mcpServerEnabled pref is true)
+    useMcpServer();
 
     // Handle zotero://beaver protocol links (thread deep-linking)
     useThreadProtocolHandler();

@@ -208,6 +208,11 @@ export const dataDeletionScheduledForAtom = selectAtom(
     (profile: SafeProfileWithPlan | null) => profile?.data_deletion_scheduled_for || null
 );
 
+export const isMcpServerSupportedAtom = atom<boolean>((get) => {
+    const profile = get(profileWithPlanAtom);
+    return profile?.plan.mcp_server || false;
+});
+
 export const syncWithZoteroAtom = atom<boolean>((get) => {
     const profile = get(profileWithPlanAtom);
     return profile?.use_zotero_sync || false;

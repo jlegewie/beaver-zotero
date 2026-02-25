@@ -2,13 +2,15 @@ import { atom } from 'jotai';
 import { TextSelection } from '../types/attachments/apiTypes';
 import { PopupMessage, PopupMessageType } from '../types/popupMessage';
 import { ExternalReference } from '../types/externalReferences';
+import { getPref } from '../../src/utils/prefs';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
 export const isWebSearchEnabledAtom = atom(false);
-export type PreferencePageTab = 'general' | 'sync' | 'permissions' | 'models' | 'prompts' | 'account';
+export type PreferencePageTab = 'general' | 'sync' | 'permissions' | 'models' | 'prompts' | 'advanced' | 'account';
 export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
 export const isPreferencePageVisibleAtom = atom(false);
+export const mcpServerEnabledAtom = atom(getPref('mcpServerEnabled'));
 export const showFileStatusDetailsAtom = atom(false);
 
 // Error Report Dialog
