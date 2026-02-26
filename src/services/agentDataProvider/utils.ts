@@ -77,6 +77,7 @@ async function checkAttachmentAvailability(
     }
 
     // Check if the file exists locally
+    // getFilePathAsync() resolves the path AND checks OS-level existence in one call
     const filePath = await attachment.getFilePathAsync();
     if (!filePath) {
         const isFileAvailableOnServer = isAttachmentOnServer(attachment);
@@ -94,28 +95,15 @@ async function checkAttachmentAvailability(
             }
         };
     }
-    
-    const fileExists = await attachment.fileExists();
-    if (!fileExists) {
-        return {
-            available: false,
-            status: {
-                is_primary: isPrimary,
-                mime_type: contentType,
-                page_count: null,
-                status: "unavailable",
-                status_reason: 'File is not available',
-            }
-        };
-    }
-    
-    // Check file size limit
+
+    // Check file size limit using IOUtils.stat on the PDF file directly.
+    // This replaces Zotero.Attachments.getTotalFileSize() which iterates the
+    // entire storage directory with OS.File.stat() per entry — very expensive.
     const maxFileSizeMB = getPref('maxFileSizeMB');
-    const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
-    
-    if (fileSize) {
-        const fileSizeInMB = fileSize / 1024 / 1024;
-        
+    try {
+        const stat = await IOUtils.stat(filePath);
+        const fileSizeInMB = (stat.size ?? 0) / 1024 / 1024;
+
         if (fileSizeInMB > maxFileSizeMB) {
             return {
                 available: false,
@@ -128,8 +116,12 @@ async function checkAttachmentAvailability(
                 }
             };
         }
+    } catch (error) {
+        // If stat fails, skip size check and continue — the file was confirmed
+        // to exist by getFilePathAsync() above, so this is a transient issue
+        logger(`checkAttachmentAvailability: IOUtils.stat failed for ${filePath}: ${error}`, 2);
     }
-    
+
     return { available: true, filePath, contentType };
 }
 
