@@ -25,6 +25,7 @@ import { ProcessingMode } from "../../types/profile";
 import DeferredToolPreferenceSetting from "../preferences/DeferredToolPreferenceSetting";
 import { BeaverUIFactory } from "../../../src/ui/ui";
 import { copyToClipboard } from "../../utils/clipboard";
+import { ensureMcpBridgeScript } from "../../hooks/useMcpServer";
 
 /** Section label displayed above a settings group */
 const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -129,6 +130,7 @@ const PreferencePage: React.FC = () => {
     const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
     const isMcpServerSupported = useAtomValue(isMcpServerSupportedAtom);
     const [mcpCopied, setMcpCopied] = useState(false);
+    const [mcpHttpCopied, setMcpHttpCopied] = useState(false);
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -424,9 +426,32 @@ const PreferencePage: React.FC = () => {
             return 23119;
         }
     }, []);
+    const handleCopyMcpConfig = useCallback(async () => {
+        try {
+            const scriptPath = await ensureMcpBridgeScript();
+            const serverConfig: any = {
+                command: "node",
+                args: [scriptPath],
+            };
+            if (mcpServerPort !== 23119) {
+                serverConfig.args.push(String(mcpServerPort));
+            }
+            const config = JSON.stringify({
+                mcpServers: {
+                    "beaver-zotero": serverConfig,
+                }
+            }, null, 2);
+            await copyToClipboard(config);
+            setMcpCopied(true);
+            setTimeout(() => setMcpCopied(false), 2000);
+        } catch (err: any) {
+            logger(`Failed to copy MCP config: ${err?.message}`, 1);
+        }
+    }, [mcpServerPort]);
+
     const mcpEndpointUrl = `http://localhost:${mcpServerPort}/beaver/mcp`;
 
-    const handleCopyMcpConfig = useCallback(async () => {
+    const handleCopyMcpHttpConfig = useCallback(async () => {
         const config = JSON.stringify({
             mcpServers: {
                 "beaver-zotero": {
@@ -436,8 +461,8 @@ const PreferencePage: React.FC = () => {
             }
         }, null, 2);
         await copyToClipboard(config);
-        setMcpCopied(true);
-        setTimeout(() => setMcpCopied(false), 2000);
+        setMcpHttpCopied(true);
+        setTimeout(() => setMcpHttpCopied(false), 2000);
     }, [mcpEndpointUrl]);
 
     // Helper function to get rebuild index button props
@@ -1180,10 +1205,10 @@ const PreferencePage: React.FC = () => {
                             }
                         />
                         <SettingsRow
-                            title="Client Configuration"
+                            title="Config for Claude Desktop"
                             description={
-                                <span className="display-flex flex-row items-center gap-1" style={{ fontFamily: 'monospace', fontSize: '11px', opacity: mcpServerEnabled ? 1 : 0.45 }}>
-                                    {mcpEndpointUrl}
+                                <span style={{ opacity: mcpServerEnabled ? 1 : 0.45 }}>
+                                    For clients that require HTTPS (e.g., Claude Desktop). Requires Node.js.
                                 </span>
                             }
                             hasBorder
@@ -1195,7 +1220,28 @@ const PreferencePage: React.FC = () => {
                                     onClick={handleCopyMcpConfig}
                                     disabled={!mcpServerEnabled}
                                 >
-                                    {mcpCopied ? 'Copied' : 'Copy Config'}
+                                    {mcpCopied ? 'Copied' : 'Copy'}
+                                </Button>
+                            }
+                        />
+                        <SettingsRow
+                            title="Config for Claude Code, Cursor, etc."
+                            description={
+                                <span className="display-flex flex-col gap-05" style={{ opacity: mcpServerEnabled ? 1 : 0.45 }}>
+                                    <span>For clients that support HTTP directly.</span>
+                                    <span style={{ fontFamily: 'monospace', fontSize: '11px' }}>{mcpEndpointUrl}</span>
+                                </span>
+                            }
+                            hasBorder
+                            disabled={!mcpServerEnabled}
+                            control={
+                                <Button
+                                    variant="outline"
+                                    icon={mcpHttpCopied ? TickIcon : CopyIcon}
+                                    onClick={handleCopyMcpHttpConfig}
+                                    disabled={!mcpServerEnabled}
+                                >
+                                    {mcpHttpCopied ? 'Copied' : 'Copy'}
                                 </Button>
                             }
                         />
