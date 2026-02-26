@@ -1205,31 +1205,11 @@ const PreferencePage: React.FC = () => {
                             }
                         />
                         <SettingsRow
-                            title="Config for Claude Desktop"
-                            description={
-                                <span style={{ opacity: mcpServerEnabled ? 1 : 0.45 }}>
-                                    For clients that require HTTPS (e.g., Claude Desktop). Requires Node.js.
-                                </span>
-                            }
-                            hasBorder
-                            disabled={!mcpServerEnabled}
-                            control={
-                                <Button
-                                    variant="outline"
-                                    icon={mcpCopied ? TickIcon : CopyIcon}
-                                    onClick={handleCopyMcpConfig}
-                                    disabled={!mcpServerEnabled}
-                                >
-                                    {mcpCopied ? 'Copied' : 'Copy'}
-                                </Button>
-                            }
-                        />
-                        <SettingsRow
-                            title="Config for Claude Code, Cursor, etc."
+                            title="Config for HTTP Clients"
                             description={
                                 <span className="display-flex flex-col gap-05" style={{ opacity: mcpServerEnabled ? 1 : 0.45 }}>
-                                    <span>For clients that support HTTP directly.</span>
-                                    <span style={{ fontFamily: 'monospace', fontSize: '11px' }}>{mcpEndpointUrl}</span>
+                                    <span>For clients that support HTTP directly (e.g., Claude Code, Cursor).</span>
+                                    {/* <span style={{ fontFamily: 'monospace', fontSize: '11px' }}>{mcpEndpointUrl}</span> */}
                                 </span>
                             }
                             hasBorder
@@ -1242,6 +1222,26 @@ const PreferencePage: React.FC = () => {
                                     disabled={!mcpServerEnabled}
                                 >
                                     {mcpHttpCopied ? 'Copied' : 'Copy'}
+                                </Button>
+                            }
+                        />
+                        <SettingsRow
+                            title="Config for HTTPS-Only Clients"
+                            description={
+                                <span style={{ opacity: mcpServerEnabled ? 1 : 0.45 }}>
+                                    For clients that only connect to HTTPS endpoints (e.g., Claude Desktop). Requires Node.js.
+                                </span>
+                            }
+                            hasBorder
+                            disabled={!mcpServerEnabled}
+                            control={
+                                <Button
+                                    variant="outline"
+                                    icon={mcpCopied ? TickIcon : CopyIcon}
+                                    onClick={handleCopyMcpConfig}
+                                    disabled={!mcpServerEnabled}
+                                >
+                                    {mcpCopied ? 'Copied' : 'Copy'}
                                 </Button>
                             }
                         />
