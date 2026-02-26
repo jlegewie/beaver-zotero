@@ -206,24 +206,30 @@ async function batchFindByIdentifiers(
     }
     
     // Batch ISBN lookup (for items not already found)
-    // Note: We fetch ALL ISBNs from the libraries and normalize them for comparison,
-    // since ISBNs can be stored with various formatting (hyphens, spaces, etc.)
+    // Use LIKE pre-filtering in SQL to avoid fetching ALL ISBNs.
+    // DB values may contain hyphens/spaces (e.g. "978-0-19-022485-1"), so we
+    // strip them with REPLACE() before comparing against cleaned (digits-only) ISBNs.
     if (isbnMap.size > 0 && isbnFieldID) {
+        // Build LIKE conditions stripping hyphens/spaces from DB values before comparison
+        const isbnLikeClauses = Array.from(isbnMap.keys()).map(() => `REPLACE(REPLACE(value, '-', ''), ' ', '') LIKE ?`);
+        const isbnLikeParams = Array.from(isbnMap.keys()).map(isbn => `%${isbn}%`);
+
         const sql = `
-            SELECT itemID, value as isbn 
-            FROM items 
-            JOIN itemData USING (itemID) 
+            SELECT itemID, value as isbn
+            FROM items
+            JOIN itemData USING (itemID)
             JOIN itemDataValues USING (valueID)
-            WHERE libraryID IN (${libraryPlaceholders}) 
-            AND fieldID = ? 
+            WHERE libraryID IN (${libraryPlaceholders})
+            AND fieldID = ?
+            AND (${isbnLikeClauses.join(' OR ')})
             AND itemID NOT IN (SELECT itemID FROM deletedItems)
         `;
-        
+
         try {
-            const params = [...libraryIds, isbnFieldID];
-            
+            const params = [...libraryIds, isbnFieldID, ...isbnLikeParams];
+
             // Use onRow callback to avoid Proxy issues with Zotero.DB.queryAsync
-            // Normalize each DB ISBN and check if it matches any of our requested ISBNs
+            // Verify each pre-filtered ISBN with cleanISBN normalization
             const matchedRows: { itemID: number; cleanISBN: string }[] = [];
             await Zotero.DB.queryAsync(sql, params, {
                 onRow: (row: any) => {
@@ -265,9 +271,38 @@ async function batchFindByIdentifiers(
 }
 
 /**
+ * Extract discriminating keywords from a title for SQL LIKE pre-filtering.
+ * Prefers ASCII-only words — they match reliably across diacritics variants
+ * in LOWER()+LIKE. Non-ASCII words (é, ü, etc.) can mismatch when DB and
+ * input disagree on diacritics (e.g. "etudes" vs "études").
+ *
+ * Falls back to non-ASCII words when not enough ASCII words are available.
+ */
+function extractFilterKeywords(title: string, maxKeywords: number = 2): string[] {
+    const lowered = (title + "")
+        .replace(/[ !-/:-@[-`{-~]+/g, ' ') // Same punctuation → space as normalizeString
+        .trim()
+        .toLowerCase();
+    const words = lowered.split(/\s+/).filter(w => w.length >= 2);
+    // Sort by length descending — longer words are more discriminating
+    words.sort((a, b) => b.length - a.length);
+    // Prefer ASCII-only words — they match reliably across diacritics variants
+    const ascii = words.filter(w => /^[\x20-\x7e]+$/.test(w));
+    const nonAscii = words.filter(w => !/^[\x20-\x7e]+$/.test(w));
+    const result = [...ascii.slice(0, maxKeywords)];
+    if (result.length < maxKeywords) {
+        result.push(...nonAscii.slice(0, maxKeywords - result.length));
+    }
+    return result;
+}
+
+/**
  * Phase 2: Batch title candidate collection
  * Finds all potential title matches across libraries
- * Optimized with date/year filtering when available
+ *
+ * Uses keyword-based LIKE pre-filtering in SQL to avoid fetching all titles.
+ * Only rows whose title contains discriminating keywords from input titles
+ * are returned, then normalized in JS for exact match verification.
  */
 async function batchFindTitleCandidates(
     items: BatchReferenceCheckItem[],
@@ -293,8 +328,7 @@ async function batchFindTitleCandidates(
     const mappedTitleFieldIDs = Zotero.ItemFields.getTypeFieldsFromBase('title');
     const allTitleFieldIDs = [titleFieldID, ...(mappedTitleFieldIDs || [])];
 
-    // Build LIKE conditions for each title
-    // Use normalized titles for matching
+    // Build normalized title map
     const normalizedInputTitles = new Map<string, BatchReferenceCheckItem[]>();
     for (const item of needsMatching) {
         const normalized = normalizeString(item.data.title);
@@ -309,89 +343,56 @@ async function batchFindTitleCandidates(
         return new Map();
     }
 
-    // Log sample of what we're looking for
-    const sampleTitles = Array.from(normalizedInputTitles.keys()).slice(0, 3);
-    logger(`batchFindTitleCandidates: Looking for normalized titles like: ${JSON.stringify(sampleTitles)}`, 1);
-
-    // Extract year ranges from input items for date filtering
-    const yearRanges: { min: number; max: number }[] = [];
-    for (const item of needsMatching) {
-        if (item.data.date) {
-            const parsedDate = Zotero.Date.strToDate(item.data.date);
-            const year = parseYear(parsedDate.year);
-            if (year) {
-                // Use ±1 year tolerance to match fuzzy matching logic
-                yearRanges.push({ min: year - 1, max: year + 1 });
+    // Extract keywords from each title for SQL pre-filtering.
+    // For each title, we require ALL keywords to match (AND), then OR across titles.
+    // extractFilterKeywords prefers ASCII-only words which avoids diacritics
+    // mismatches (e.g. "etudes" vs "études") without needing dual variants.
+    const titleKeywordSets: string[][] = [];
+    for (const titleItems of normalizedInputTitles.values()) {
+        const originalTitle = titleItems[0].data.title;
+        if (originalTitle) {
+            const keywords = extractFilterKeywords(originalTitle);
+            if (keywords.length > 0) {
+                titleKeywordSets.push(keywords);
             }
         }
     }
 
-    // Determine global year range if we have any years
-    // Only apply year filtering when ALL items have years to avoid false negatives
-    const hasYearFilter = yearRanges.length > 0 && yearRanges.length === needsMatching.length;
-    const globalMinYear = hasYearFilter ? Math.min(...yearRanges.map(r => r.min)) : null;
-    const globalMaxYear = hasYearFilter ? Math.max(...yearRanges.map(r => r.max)) : null;
-
-    // Build library placeholders
+    // Build SQL with keyword LIKE pre-filtering
     const libraryPlaceholders = libraryIds.map(() => '?').join(', ');
-
-    // Get all date field IDs (base + mapped fields like dateDecided, issueDate, dateEnacted)
-    const dateFieldID = Zotero.ItemFields.getID('date');
-    const mappedDateFieldIDs = Zotero.ItemFields.getTypeFieldsFromBase('date');
-    const allDateFieldIDs = dateFieldID ? [dateFieldID, ...(mappedDateFieldIDs || [])] : [];
-
-    // Build SQL query with optional date filtering
     const titlePlaceholders = allTitleFieldIDs.map(() => '?').join(', ');
+
     let sql = `
         SELECT DISTINCT i.itemID, title_val.value as title
-    `;
-
-    // Add date value to SELECT if filtering by year (for debugging)
-    const hasDateFields = allDateFieldIDs.length > 0;
-    if (hasYearFilter && hasDateFields && globalMinYear && globalMaxYear) {
-        sql += `, date_val.value as date_value`;
-    }
-
-    sql += `
         FROM items i
         JOIN itemData title_data ON i.itemID = title_data.itemID AND title_data.fieldID IN (${titlePlaceholders})
         JOIN itemDataValues title_val ON title_data.valueID = title_val.valueID
-    `;
-
-    // Add date JOINs if we have year constraints
-    if (hasYearFilter && hasDateFields && globalMinYear && globalMaxYear) {
-        const datePlaceholders = allDateFieldIDs.map(() => '?').join(', ');
-        sql += `
-        LEFT JOIN itemData date_data ON i.itemID = date_data.itemID AND date_data.fieldID IN (${datePlaceholders})
-        LEFT JOIN itemDataValues date_val ON date_data.valueID = date_val.valueID
-        `;
-    }
-
-    sql += `
         WHERE i.libraryID IN (${libraryPlaceholders})
         AND i.itemID NOT IN (SELECT itemID FROM deletedItems)
     `;
 
-    // Add year filter if applicable
-    if (hasYearFilter && hasDateFields && globalMinYear && globalMaxYear) {
-        sql += `
-        AND (date_val.value IS NULL OR
-             CAST(SUBSTR(date_val.value, 1, 4) AS INTEGER) BETWEEN ? AND ?)
-        `;
+    const params: (string | number)[] = [...allTitleFieldIDs, ...libraryIds];
+
+    // Add keyword LIKE filter to avoid scanning all titles
+    if (titleKeywordSets.length > 0) {
+        const orClauses: string[] = [];
+        for (const keywords of titleKeywordSets) {
+            const andParts = keywords.map(kw => {
+                params.push(`%${kw}%`);
+                return `LOWER(title_val.value) LIKE ?`;
+            });
+            orClauses.push(`(${andParts.join(' AND ')})`);
+        }
+        sql += ` AND (${orClauses.join(' OR ')})`;
     }
+
+    logger(`batchFindTitleCandidates: Searching ${normalizedInputTitles.size} titles with ${titleKeywordSets.length} keyword sets across ${libraryIds.length} libraries`, 1);
 
     const candidateItems = new Map<number, { item: Zotero.Item; normalizedTitle: string }>();
 
     try {
-        // Build params array based on whether we have year filtering
-        const params = hasYearFilter && hasDateFields && globalMinYear && globalMaxYear
-            ? [...allTitleFieldIDs, ...allDateFieldIDs, ...libraryIds, globalMinYear, globalMaxYear]
-            : [...allTitleFieldIDs, ...libraryIds];
-
-        logger(`batchFindTitleCandidates: Using year filter: ${hasYearFilter ? `${globalMinYear}-${globalMaxYear}` : 'none'}`, 1);
-
         // Use onRow callback to avoid Proxy issues with Zotero.DB.queryAsync
-        // Filter candidates by normalized title match during iteration
+        // The LIKE filter narrows candidates; normalizeString verifies exact match
         const matchingRows: { itemID: number; title: string; normalizedTitle: string }[] = [];
         let totalRows = 0;
 
@@ -407,14 +408,14 @@ async function batchFindTitleCandidates(
             }
         });
 
-        logger(`batchFindTitleCandidates: SQL returned ${totalRows} rows, found ${matchingRows.length} matching normalized titles`, 1);
+        logger(`batchFindTitleCandidates: SQL returned ${totalRows} pre-filtered rows, found ${matchingRows.length} exact normalized matches`, 1);
 
         if (matchingRows.length > 0) {
             // Load all matching items in batch
             const itemIds = matchingRows.map(row => row.itemID);
             const zoteroItems = await Zotero.Items.getAsync(itemIds);
 
-            // Phase 3: Single batch load of all item data
+            // Single batch load of all item data
             if (zoteroItems.length > 0) {
                 await Zotero.Items.loadDataTypes(zoteroItems, ["itemData", "creators", "childItems"]);
             }
