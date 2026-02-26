@@ -76,6 +76,9 @@ export function useEmbeddingIndex() {
     // Ref to track previous forceReindexCounter for detecting manual reindex requests
     const prevForceReindexCounterRef = useRef<number>(forceReindexCounter);
 
+    // Generation counter to cancel stale async runs when effect re-fires
+    const generationRef = useRef(0);
+
     /**
      * Get the BeaverDB instance from addon
      */
@@ -118,7 +121,7 @@ export function useEmbeddingIndex() {
      * @param libraryIds Array of library IDs to index (from searchableLibraryIds)
      * @param forceFullDiff If true, bypass shouldRunFullDiff and process all libraries
      */
-    const performInitialIndexing = async (libraryIds: number[], forceFullDiff: boolean = false) => {
+    const performInitialIndexing = async (libraryIds: number[], forceFullDiff: boolean = false, isCancelled?: () => boolean) => {
         const startTime = Date.now();
         const indexer = getIndexer();
         if (!indexer) return;
@@ -272,6 +275,11 @@ export function useEmbeddingIndex() {
             const db = getDB();
 
             for (const libraryId of librariesToProcess) {
+                if (isCancelled?.()) {
+                    logger("useEmbeddingIndex: Indexing cancelled (superseded by new run)", 3);
+                    setIndexStatus({ status: 'idle', phase: 'initial' });
+                    return;
+                }
                 const diff = libraryDiffs.get(libraryId);
                 const zoteroState = libraryStates.get(libraryId);
                 if (!diff) continue;
@@ -294,6 +302,7 @@ export function useEmbeddingIndex() {
 
                     const result = await indexer.indexItemIdsBatch(diff.toIndex, {
                         batchSize: INDEX_BATCH_SIZE,
+                        isCancelled,
                         onProgress: (processed, total) => {
                             updateProgress({
                                 indexedItems: processedItems + processed,
@@ -307,6 +316,14 @@ export function useEmbeddingIndex() {
                     totalSkipped += result.skipped;
                     totalFailed += result.failed;
                     logger(`useEmbeddingIndex: Library ${libraryId} complete: ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed`, 3);
+
+                    // If cancelled mid-batch, don't persist state for this library
+                    // (partial scan would be recorded as complete)
+                    if (isCancelled?.()) {
+                        logger("useEmbeddingIndex: Indexing cancelled after partial batch - skipping state save", 3);
+                        setIndexStatus({ status: 'idle', phase: 'initial' });
+                        return;
+                    }
                 }
 
                 // Save the index state for this library (for future quick checks)
@@ -317,11 +334,12 @@ export function useEmbeddingIndex() {
             }
 
             // Fourth pass: process retry items that weren't covered by library diffs
-            if (uniqueRetryItems.length > 0) {
+            if (uniqueRetryItems.length > 0 && !isCancelled?.()) {
                 logger(`useEmbeddingIndex: Processing ${uniqueRetryItems.length} retry items`, 3);
-                
+
                 const result = await indexer.indexItemIdsBatch(uniqueRetryItems, {
                     batchSize: INDEX_BATCH_SIZE,
+                    isCancelled,
                     onProgress: (processed, total) => {
                         updateProgress({
                             indexedItems: processedItems + processed,
@@ -335,6 +353,13 @@ export function useEmbeddingIndex() {
                 totalSkipped += result.skipped;
                 totalFailed += result.failed;
                 logger(`useEmbeddingIndex: Retry items complete: ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed`, 3);
+            }
+
+            // If cancelled during retry pass, still reset status
+            if (isCancelled?.()) {
+                logger("useEmbeddingIndex: Indexing cancelled during retry pass", 3);
+                setIndexStatus({ status: 'idle', phase: 'initial' });
+                return;
             }
 
             // Log final failed stats and update UI
@@ -395,10 +420,22 @@ export function useEmbeddingIndex() {
 
         if (modifiedIds.length === 0 && deletedIds.length === 0) return;
 
-        logger(`useEmbeddingIndex: Processing events: ${modifiedIds.length} modified, ${deletedIds.length} deleted`, 3);
-        setIndexStatus({ status: 'updating', phase: 'incremental' });
+        let filteredModifiedIds = modifiedIds;
 
         try {
+            // Re-check current searchable libraries when draining queued events.
+            // This is important when events were queued before an effect re-fire.
+            if (modifiedIds.length > 0) {
+                const searchableLibrarySet = new Set(searchableLibraryIds);
+                const items = await Zotero.Items.getAsync(modifiedIds);
+                filteredModifiedIds = items
+                    .filter((item): item is Zotero.Item => Boolean(item) && searchableLibrarySet.has(item.libraryID))
+                    .map(item => item.id);
+            }
+
+            logger(`useEmbeddingIndex: Processing events: ${filteredModifiedIds.length} modified, ${deletedIds.length} deleted`, 3);
+            setIndexStatus({ status: 'updating', phase: 'incremental' });
+
             const db = getDB();
 
             // Handle deletions first
@@ -409,8 +446,8 @@ export function useEmbeddingIndex() {
 
             // Handle modifications - indexItemIdsBatch handles per-batch loading
             // skipUnchanged: compare content hashes to avoid unnecessary API calls
-            if (modifiedIds.length > 0) {
-                const result = await indexer.indexItemIdsBatch(modifiedIds, {
+            if (filteredModifiedIds.length > 0) {
+                const result = await indexer.indexItemIdsBatch(filteredModifiedIds, {
                     batchSize: INDEX_BATCH_SIZE,
                     skipUnchanged: true,
                 });
@@ -421,8 +458,8 @@ export function useEmbeddingIndex() {
                 // Only delete embeddings for items that exist but don't meet criteria anymore
                 if (result.skipped > 0 && db) {
                     // Get existing embeddings for these items
-                    const existingEmbeddings = await db.getContentHashes(modifiedIds);
-                    const idsWithEmbeddings = modifiedIds.filter(id => existingEmbeddings.has(id));
+                    const existingEmbeddings = await db.getContentHashes(filteredModifiedIds);
+                    const idsWithEmbeddings = filteredModifiedIds.filter(id => existingEmbeddings.has(id));
                     
                     // Check which of these no longer meet criteria
                     if (idsWithEmbeddings.length > 0) {
@@ -563,6 +600,10 @@ export function useEmbeddingIndex() {
         const isForceReindex = forceReindexCounter !== prevForceReindexCounterRef.current;
         prevForceReindexCounterRef.current = forceReindexCounter;
 
+        // Generation counter: cancel any in-flight indexing from a previous effect run
+        const generation = ++generationRef.current;
+        const isCancelled = () => generationRef.current !== generation;
+
         // Initialize indexing
         const initialize = async () => {
             try {
@@ -570,18 +611,35 @@ export function useEmbeddingIndex() {
                 if (!isForceReindex) {
                     await new Promise(resolve => setTimeout(resolve, 500));
                 }
+                if (isCancelled()) return;
 
                 // Perform initial indexing for searchable libraries only
                 // Pass forceFullDiff=true if user clicked "Rebuild Search Index"
-                await performInitialIndexing(searchableLibraryIds, isForceReindex);
+                await performInitialIndexing(searchableLibraryIds, isForceReindex, isCancelled);
 
                 // Setup observer after initial indexing
-                if (isMounted) setupObserver();
+                if (isMounted && !isCancelled()) {
+                    setupObserver();
+
+                    // If a prior effect run was cleaned up before debounce fired,
+                    // resume processing of the queued IDs in this generation.
+                    if (eventsRef.current.modifiedItemIds.size > 0 || eventsRef.current.deletedItemIds.size > 0) {
+                        logger("useEmbeddingIndex: Rescheduling pending queued events after re-init", 4);
+                        scheduleEventProcessing();
+                    }
+                }
 
             } catch (error) {
+                if (isCancelled()) return;
                 logger(`useEmbeddingIndex: Initialization failed: ${(error as Error).message}`, 1);
                 Zotero.logError(error as Error);
-                if (isMounted) setupObserver(); // Still set up observer even if initial indexing fails
+                if (isMounted && !isCancelled()) {
+                    setupObserver(); // Still set up observer even if initial indexing fails
+                    if (eventsRef.current.modifiedItemIds.size > 0 || eventsRef.current.deletedItemIds.size > 0) {
+                        logger("useEmbeddingIndex: Rescheduling pending queued events after init failure", 4);
+                        scheduleEventProcessing();
+                    }
+                }
             }
         };
 
@@ -590,6 +648,9 @@ export function useEmbeddingIndex() {
         // Cleanup
         return () => {
             isMounted = false;
+            // Bump generation so isCancelled() fires for in-flight performInitialIndexing,
+            // whether this is an effect re-fire or a permanent unmount.
+            generationRef.current++;
             logger("useEmbeddingIndex: Cleaning up embedding index", 3);
 
             // Unregister observer
@@ -604,24 +665,11 @@ export function useEmbeddingIndex() {
                 eventsRef.current.timer = null;
             }
 
-            // Process remaining events in background
-            const hasRemainingEvents = 
-                eventsRef.current.modifiedItemIds.size > 0 || 
-                eventsRef.current.deletedItemIds.size > 0;
-
-            if (hasRemainingEvents) {
-                processEvents().catch(error => {
-                    logger(`useEmbeddingIndex: Error processing remaining events: ${(error as Error).message}`, 1);
-                });
-            }
-
-            // Clear collections
-            eventsRef.current.modifiedItemIds.clear();
-            eventsRef.current.deletedItemIds.clear();
+            // Keep queued IDs across effect re-runs. The next generation re-schedules
+            // processing after initialization, which avoids losing debounced updates.
 
             // Clear indexer reference
             indexerRef.current = null;
         };
     }, [isAuthenticated, isAuthorized, isDeviceAuthorized, processingMode, mcpServerEnabled, searchableLibraryIds, forceReindexCounter]);
 }
-

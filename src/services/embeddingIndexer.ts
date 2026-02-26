@@ -308,9 +308,10 @@ export class EmbeddingIndexer {
             batchSize?: number;         // Items per API batch (default: INDEX_BATCH_SIZE)
             skipUnchanged?: boolean;    // Skip items with unchanged content hash (default: false)
             onProgress?: (indexed: number, total: number) => void;
+            isCancelled?: () => boolean; // Optional cancellation check between batches
         } = {}
     ): Promise<IndexingResult> {
-        const { batchSize = INDEX_BATCH_SIZE, skipUnchanged = false, onProgress } = options;
+        const { batchSize = INDEX_BATCH_SIZE, skipUnchanged = false, onProgress, isCancelled } = options;
 
         const result: IndexingResult = {
             indexed: 0,
@@ -324,8 +325,12 @@ export class EmbeddingIndexer {
 
         // Process in batches
         for (let i = 0; i < itemIds.length; i += batchSize) {
+            if (isCancelled?.()) {
+                logger(`indexItemIdsBatch: Cancelled at batch offset ${i}/${itemIds.length}`, 3);
+                return result;
+            }
             const batchIds = itemIds.slice(i, i + batchSize);
-            
+
             try {
                 // Load items for this batch
                 const items = await Zotero.Items.getAsync(batchIds);
