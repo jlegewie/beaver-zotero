@@ -26,15 +26,16 @@ function withShutdownTimeout<T>(
     promise: Promise<T>,
     label: string,
 ): Promise<T | undefined> {
+    let timeoutId: ReturnType<typeof setTimeout>;
     return Promise.race([
         promise,
-        new Promise<undefined>((resolve) =>
-            setTimeout(() => {
-                ztoolkit.log(`onMainWindowUnload: ${label} timed out after ${SHUTDOWN_TIMEOUT_MS}ms, continuing shutdown`);
+        new Promise<undefined>((resolve) => {
+            timeoutId = setTimeout(() => {
+                Zotero.debug(`[beaver] onMainWindowUnload: ${label} timed out after ${SHUTDOWN_TIMEOUT_MS}ms, continuing shutdown`);
                 resolve(undefined);
-            }, SHUTDOWN_TIMEOUT_MS),
-        ),
-    ]);
+            }, SHUTDOWN_TIMEOUT_MS);
+        }),
+    ]).finally(() => clearTimeout(timeoutId));
 }
 
 let isAppQuitting = false;
