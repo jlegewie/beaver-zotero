@@ -13,6 +13,30 @@ import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUp
 import { disposeMuPDF } from "./utils/mupdf";
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 
+/** Timeout for individual async shutdown operations to prevent hangs. */
+const SHUTDOWN_TIMEOUT_MS = 3000;
+
+/**
+ * Race a promise against a timeout. Returns the promise result if it
+ * settles before the deadline, otherwise resolves with `undefined` and
+ * logs a warning.  Never rejects – callers should still wrap in try/catch
+ * for safety, but a stalled operation will not block shutdown.
+ */
+function withShutdownTimeout<T>(
+    promise: Promise<T>,
+    label: string,
+): Promise<T | undefined> {
+    return Promise.race([
+        promise,
+        new Promise<undefined>((resolve) =>
+            setTimeout(() => {
+                ztoolkit.log(`onMainWindowUnload: ${label} timed out after ${SHUTDOWN_TIMEOUT_MS}ms, continuing shutdown`);
+                resolve(undefined);
+            }, SHUTDOWN_TIMEOUT_MS),
+        ),
+    ]);
+}
+
 let isAppQuitting = false;
 let quitObserverRegistered = false;
 const quitObserver = {
@@ -261,7 +285,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         //    may be unreliable during unload of the last window.
         try {
             if (win?.__beaverDisposeSupabase) {
-                await win.__beaverDisposeSupabase();
+                await withShutdownTimeout(win.__beaverDisposeSupabase(), "disposeSupabase");
                 win.__beaverDisposeSupabase = undefined;
             }
         } catch (e) {
@@ -269,7 +293,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         }
 
         // 2. Dispose MuPDF WASM module to release native resources
-        await disposeMuPDF();
+        await withShutdownTimeout(disposeMuPDF(), "disposeMuPDF");
 
         // 3. Clear attachment file cache
         if (addon.attachmentFileCache) {
@@ -279,7 +303,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
         // 4. Close database connection
         if (addon.db) {
-            await addon.db.closeDatabase();
+            await withShutdownTimeout(addon.db.closeDatabase(), "closeDatabase");
             addon.db = undefined;
         }
 

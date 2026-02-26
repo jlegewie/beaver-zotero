@@ -54,7 +54,7 @@ async function onMainWindowLoad({ window }, reason) {
 }
 
 async function onMainWindowUnload({ window }, reason) {
-  Zotero.__addonInstance__?.hooks.onMainWindowUnload(window);
+  await Zotero.__addonInstance__?.hooks.onMainWindowUnload(window);
 }
 
 async function shutdown({ id, version, resourceURI, rootURI }, reason) {
