@@ -48,6 +48,9 @@ const listeners: Set<TaskListener> = new Set();
 /** How long to keep completed tasks in registry (ms) */
 const TASK_CLEANUP_DELAY = 60000;
 
+/** Active cleanup timers so we can clear them during shutdown */
+const cleanupTimers: Set<ReturnType<typeof setTimeout>> = new Set();
+
 /** Pending sync promises for deduplication, keyed by `libraryId-itemKey` */
 const pendingSyncs: Map<string, Promise<void>> = new Map();
 /** Queued follow-up syncs when a sync is already in flight */
@@ -175,13 +178,15 @@ export function scheduleBackgroundTask(
  * Schedule removal of a task from the registry after a delay.
  */
 function scheduleCleanup(id: string): void {
-    setTimeout(() => {
+    const timerId = setTimeout(() => {
+        cleanupTimers.delete(timerId);
         const state = tasks.get(id);
         if (state) {
             tasks.delete(id);
             notifyListeners(toPublicState(state));
         }
     }, TASK_CLEANUP_DELAY);
+    cleanupTimers.add(timerId);
 }
 
 /**
@@ -339,6 +344,40 @@ export function isPdfFetchInProgress(libraryId: number, itemKey: string): boolea
         }
     }
     return false;
+}
+
+/**
+ * Cancel all active tasks and clear all pending cleanup timers.
+ * Called during shutdown to prevent dangling async operations and
+ * setTimeout callbacks from keeping the process alive.
+ */
+export function cancelAllActiveTasks(): void {
+    // Cancel all pending/running tasks
+    for (const [id, task] of tasks.entries()) {
+        if (task.status === 'pending' || task.status === 'running') {
+            task.abortController.abort();
+            task.status = 'cancelled';
+            task.completedAt = Date.now();
+        }
+    }
+
+    // Clear all cleanup timers to avoid 60-second setTimeout keeping process alive
+    for (const timerId of cleanupTimers) {
+        clearTimeout(timerId);
+    }
+    cleanupTimers.clear();
+
+    // Clear task registry
+    tasks.clear();
+
+    // Clear pending and queued sync promises
+    pendingSyncs.clear();
+    queuedSyncs.clear();
+
+    // Clear listeners
+    listeners.clear();
+
+    logger('backgroundTasks: All active tasks cancelled and timers cleared', 2);
 }
 
 /**

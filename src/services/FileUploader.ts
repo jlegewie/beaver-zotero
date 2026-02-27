@@ -181,7 +181,7 @@ export class FileUploader {
     }
 
     /**
-     * Stops the file uploader gracefully. 
+     * Stops the file uploader gracefully.
      * No new items will be fetched, but in-flight uploads will be allowed to finish.
      */
     public async stop(): Promise<void> {
@@ -210,6 +210,33 @@ export class FileUploader {
     }
 
     /**
+     * Immediately stop the file uploader without waiting for in-flight uploads.
+     * Used during shutdown to prevent async operations from outliving the plugin.
+     */
+    public forceStop(): void {
+        if (!this.isRunning) {
+            return;
+        }
+
+        this.isRunning = false;
+        logger('File Uploader: Force stopping for shutdown', 3);
+
+        // Clear the upload queue without waiting
+        if (this.uploadQueue) {
+            this.uploadQueue.clear();
+        }
+
+        // Clear batch timer
+        if (this.batchTimer) {
+            clearTimeout(this.batchTimer);
+            this.batchTimer = null;
+        }
+
+        this.completionBatch = [];
+        store.set(isFileUploaderRunningAtom, false);
+    }
+
+    /**
      * Main loop that continuously reads items from backend queue and processes them until
      * no more items remain or the uploader is stopped.
      */
@@ -228,6 +255,14 @@ export class FileUploader {
         let lastFetchWasPartial = false;
 
         while (this.isRunning) {
+            // Check for plugin shutdown — bail immediately to avoid
+            // DB/network operations during Zotero's teardown sequence.
+            if (Zotero.__beaverShuttingDown) {
+                logger('File Uploader: Shutdown detected, stopping queue loop', 3);
+                this.isRunning = false;
+                break;
+            }
+
             try {
                 // check authentication status
                 const isAuthenticated = store.get(isAuthenticatedAtom);
@@ -334,15 +369,21 @@ export class FileUploader {
             }
         }
 
-        try {
-            await this.uploadQueue.onIdle();
-        } catch (error: any) {
-            logger('File Uploader Queue: Error while waiting for queue to idle: ' + error.message, 1);
-            Zotero.logError(error);
-        }
+        // During shutdown, skip waiting for in-flight uploads and flushing
+        // completion batches — those would start new network/DB operations
+        // that race with Zotero's teardown.
+        if (Zotero.__beaverShuttingDown) {
+            this.forceStop();
+        } else {
+            try {
+                await this.uploadQueue.onIdle();
+            } catch (error: any) {
+                logger('File Uploader Queue: Error while waiting for queue to idle: ' + error.message, 1);
+                Zotero.logError(error);
+            }
 
-        // Mark all items in the queue as failed
-        await this.flushCompletionBatch();
+            await this.flushCompletionBatch();
+        }
 
         // No more items or we've stopped. Mark as not running.
         this.isRunning = false;

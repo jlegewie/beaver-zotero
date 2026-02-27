@@ -550,6 +550,9 @@ export function useEmbeddingIndex() {
 
             const observer = {
                 notify: async function(event: string, type: string, ids: number[], extraData: any) {
+                    // Skip all processing if shutdown has started
+                    if (Zotero.__beaverShuttingDown) return;
+
                     // Only handle item events
                     if (type !== 'item') return;
 

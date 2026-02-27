@@ -12,6 +12,7 @@ import { addPendingVersionNotification } from "./utils/versionNotificationPrefs"
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
 import { disposeMuPDF } from "./utils/mupdf";
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
+import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 
 /** Timeout for individual async shutdown operations to prevent hangs. */
 const SHUTDOWN_TIMEOUT_MS = 3000;
@@ -246,24 +247,39 @@ async function onMainWindowUnload(win: Window): Promise<void> {
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
     
     try {
-        // Clean up window-specific resources first
-        // These are safe to clean up for any window
-        
+        // Determine cleanup scope BEFORE unmounting React, so we can set
+        // the shutdown flag before React cleanup effects run.
+        const remainingWindows = Zotero.getMainWindows().filter(w => w !== win && !w.closed);
+        const isLastWindow = remainingWindows.length === 0;
+        const isAppShuttingDown = Services?.startup?.shuttingDown ?? false;
+        const shouldRunGlobalCleanup = isLastWindow && (isAppQuitting || isAppShuttingDown);
+
+        // If this is a full shutdown, signal it BEFORE React unmount.
+        // React cleanup effects (useZoteroSync, useEmbeddingIndex, etc.)
+        // check this flag to skip fire-and-forget async operations that
+        // would otherwise outlive the plugin and cause segfaults.
+        if (shouldRunGlobalCleanup) {
+            ztoolkit.log("onMainWindowUnload: Setting shutdown flag and cancelling in-flight operations");
+            Zotero.__beaverShuttingDown = true;
+            addon.data.alive = false;
+
+            // Cancel all background tasks (sync, PDF fetch, metadata enrich)
+            // and clear their 60-second cleanup timers that keep the event loop alive.
+            cancelAllActiveTasks();
+        }
+
+        // Clean up window-specific resources
+
         // Clean up event bus for this window
         if (win.__beaverEventBus) {
             win.__beaverEventBus = null;
         }
 
-        // Remove React components and DOM elements for this window
+        // Remove React components and DOM elements for this window.
+        // React cleanup effects run here — they will see the shutdown
+        // flag and skip any fire-and-forget DB/network operations.
         BeaverUIFactory.removeChatPanel(win);
 
-        // Check if this is the last main window
-        // Only run global cleanup if no other main windows remain
-        const remainingWindows = Zotero.getMainWindows().filter(w => w !== win && !w.closed);
-        const isLastWindow = remainingWindows.length === 0;
-        const isAppShuttingDown = Services?.startup?.shuttingDown ?? false;
-        const shouldRunGlobalCleanup = isLastWindow && (isAppQuitting || isAppShuttingDown);
-        
         if (!isLastWindow) {
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
             return;
@@ -339,9 +355,6 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
         // 12. Unregister protocol handler
         unregisterBeaverProtocolHandler();
-
-        // 13. Mark addon as not alive to prevent any further callbacks
-        addon.data.alive = false;
 
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
     } catch (error: any) {

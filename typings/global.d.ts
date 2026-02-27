@@ -38,6 +38,8 @@ interface ZoteroSearchWritable extends Zotero.Search {
 declare namespace Zotero {
     /** Shared Jotai store for Beaver plugin across all windows */
     let __beaverJotaiStore: any;
+    /** Set to true at the start of shutdown to signal all in-flight operations to bail out */
+    let __beaverShuttingDown: boolean | undefined;
 
     namespace Beaver {
         const pluginVersion: string;
@@ -490,5 +492,7 @@ declare namespace _ZoteroTypes {
     interface Zotero {
         /** Shared Jotai store for Beaver plugin across all windows */
         __beaverJotaiStore?: import('jotai').createStore extends () => infer R ? R : never;
+        /** Set to true at the start of shutdown to signal all in-flight operations to bail out */
+        __beaverShuttingDown?: boolean;
     }
 }
