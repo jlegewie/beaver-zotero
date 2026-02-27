@@ -235,7 +235,7 @@ export async function handleItemSearchByMetadataRequest(
     // Serialize items in parallel in bounded batches (with backfill on failures to ensure limit is reached)
     const targetLimit = request.limit > 0 ? request.limit : items.length;
     const candidates = items.slice(offset).filter(item => syncingItemFilter(item));
-    const BATCH_SIZE = Math.min(targetLimit, 10);
+    const BATCH_SIZE = Math.min(targetLimit, 20);
 
     const resultItems: ItemSearchFrontendResultItem[] = [];
     for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {

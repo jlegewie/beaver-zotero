@@ -313,7 +313,7 @@ export async function handleItemSearchByTopicRequest(
     // Serialize items in parallel in bounded batches (with backfill on failures to ensure limit is reached)
     const targetLimit = request.limit > 0 ? request.limit : filteredItems.length;
     const candidates = filteredItems.slice(offset);
-    const BATCH_SIZE = Math.min(targetLimit, 10);
+    const BATCH_SIZE = Math.min(targetLimit, 20);
 
     const resultItems: ItemSearchFrontendResultItem[] = [];
     for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
