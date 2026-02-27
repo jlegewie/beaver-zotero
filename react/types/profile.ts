@@ -79,7 +79,6 @@ export interface SafeProfileModel {
     // Subscription
     current_plan_id: string;     // UUID
     subscription_status: SubscriptionStatus;
-    subscription_cancel_at_period_end: boolean;
     current_period_start?: Date;
     current_period_end?: Date;
     
