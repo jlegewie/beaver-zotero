@@ -1085,7 +1085,7 @@ async function validateCreateItemAction(
         const batchOutput = await batchFindExistingReferences(batchItems, [targetLibraryId]);
         for (const result of batchOutput.results) {
             if (result.item !== null) {
-                existingItems[result.id] = `${result.item.libraryID}-${result.item.key}`;
+                existingItems[result.id] = `${result.item.library_id}-${result.item.zotero_key}`;
             }
         }
 

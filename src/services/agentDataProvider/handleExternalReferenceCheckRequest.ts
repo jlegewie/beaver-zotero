@@ -22,10 +22,10 @@ import {
  * Handle external_reference_check_request event.
  *
  * Uses batch lookups for optimal performance:
- * - Phase 1: Batch DOI/ISBN lookup across all libraries in 2 queries
- * - Phase 2: Batch title candidate collection in 1 query (with optional date filtering)
- * - Phase 3: Single batch load of all candidate item data
- * - Phase 4: In-memory fuzzy matching
+ * - Phase 1 & 2 run in parallel:
+ *   - Phase 1: Batch DOI/ISBN lookup (DOI + ISBN also parallel, no getAsync needed)
+ *   - Phase 2: Batch title candidate collection with keyword pre-filtering
+ * - Phase 3: In-memory fuzzy matching
  *
  * If library_ids is provided, only search those libraries.
  * If library_ids is not provided or empty, search all accessible libraries.
@@ -79,8 +79,8 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
                 id: result.id,
                 exists: true,
                 item: {
-                    library_id: result.item.libraryID,
-                    zotero_key: result.item.key
+                    library_id: result.item.library_id,
+                    zotero_key: result.item.zotero_key
                 }
             };
         } else {
