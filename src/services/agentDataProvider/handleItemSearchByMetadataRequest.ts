@@ -22,7 +22,7 @@ import {
     FrontendTimingMetadata,
 } from '../agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../react/utils/searchTools';
-import { getCollectionByIdOrName, processAttachmentsParallel } from './utils';
+import { getCollectionByIdOrName, prepareBatchAttachmentData, processAttachmentsWithBatchData } from './utils';
 import { TimingAccumulator } from '../../utils/timing';
 
 
@@ -235,7 +235,10 @@ export async function handleItemSearchByMetadataRequest(
     // Serialize items in parallel in bounded batches (with backfill on failures to ensure limit is reached)
     const targetLimit = request.limit > 0 ? request.limit : items.length;
     const candidates = items.slice(offset).filter(item => syncingItemFilter(item));
-    const BATCH_SIZE = Math.min(targetLimit, 10);
+    const BATCH_SIZE = Math.min(targetLimit, 20);
+
+    // Batch-fetch best attachments and sync dates for all candidate items
+    const batchAttachmentData = await prepareBatchAttachmentData(candidates, attachmentContext, ta);
 
     const resultItems: ItemSearchFrontendResultItem[] = [];
     for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
@@ -246,7 +249,7 @@ export async function handleItemSearchByMetadataRequest(
                 try {
                     const [itemData, attachments] = await Promise.all([
                         ta.track('item_serialization_ms', () => serializeItem(item, undefined, { skipHash: true })),
-                        ta.track('attachment_processing_ms', () => processAttachmentsParallel(item, attachmentContext, { skipHash: true, timing: ta }))
+                        ta.track('attachment_processing_ms', () => processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, { skipHash: true, timing: ta }))
                     ]);
                     return { item: itemData, attachments };
                 } catch (error) {

@@ -13,7 +13,7 @@ import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/ato
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
 import { serializeAttachment, serializeItem } from '../../utils/zoteroSerializers';
-import { computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight } from './utils';
+import { computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight, getBestAttachmentBatch } from './utils';
 import {
     WSZoteroDataRequest,
     WSZoteroDataResponse,
@@ -218,30 +218,23 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
         }
     }
 
-    // Phase 5: Pre-compute primary attachments per parent (cache getBestAttachment)
-    const primaryAttachmentByParentId = new Map<number, Zotero.Item | false>();
-    const parentIdsForPrimaryCheck = [...new Set(
-        attachmentsToSerialize
-            .filter(att => att.parentID)
-            .map(att => att.parentID as number)
-    )];
-    
-    // Batch load parent items and their best attachments
-    if (parentIdsForPrimaryCheck.length > 0) {
-        const parentsForCheck = await Zotero.Items.getAsync(parentIdsForPrimaryCheck);
-        await Promise.all(
-            parentsForCheck.map(async (parentItem) => {
-                if (parentItem) {
-                    const bestAttachment = await parentItem.getBestAttachment();
-                    primaryAttachmentByParentId.set(parentItem.id, bestAttachment || false);
-                }
-            })
-        );
-    }
-
-    // Phase 6: Serialize all items and attachments with status
+    // Phase 5: Determine file status level and pre-compute primary attachments if needed
     // Determine file status level from request (default to 'lightweight' for backward compatibility)
     const fileStatusLevel = request.file_status_level ?? 'lightweight';
+
+    // Pre-compute primary attachments per parent (single batch SQL query)
+    // Skip when file_status_level is 'none' since isPrimary is only used for file status
+    let bestAttachmentMap = new Map<number, number>();
+    if (fileStatusLevel !== 'none') {
+        const parentIdsForPrimaryCheck = [...new Set(
+            attachmentsToSerialize
+                .filter(att => att.parentID)
+                .map(att => att.parentID as number)
+        )];
+        if (parentIdsForPrimaryCheck.length > 0) {
+            bestAttachmentMap = await getBestAttachmentBatch(parentIdsForPrimaryCheck);
+        }
+    }
 
     // Pre-fetch sync dates for all libraries (1 query per unique library instead of per item)
     const allLibraryIds = [...new Set([
@@ -268,11 +261,11 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
             }
             const status = await computeItemStatus(attachment, searchableLibraryIds, syncWithZotero, userId, { syncDateCache });
             
-            // Determine if this is the primary attachment for its parent (using cached data)
+            // Determine if this is the primary attachment for its parent (using batch data)
             let isPrimary = false;
             if (attachment.parentID) {
-                const primaryAttachment = primaryAttachmentByParentId.get(attachment.parentID);
-                isPrimary = primaryAttachment !== false && primaryAttachment !== undefined && attachment.id === primaryAttachment.id;
+                const bestAttachmentId = bestAttachmentMap.get(attachment.parentID);
+                isPrimary = bestAttachmentId !== undefined && attachment.id === bestAttachmentId;
             }
             
             // Get file status based on requested level

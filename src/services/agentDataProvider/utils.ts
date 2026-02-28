@@ -598,6 +598,190 @@ export interface AttachmentProcessingContext {
 }
 
 /**
+ * Batch-fetch the "best attachment" for multiple parent items in a single SQL query.
+ * Replicates Zotero's `getBestAttachment()` ranking:
+ *   1. PDF content type preferred
+ *   2. URL matches parent's URL preferred
+ *   3. Earliest dateAdded wins ties
+ *
+ * Uses `ROW_NUMBER() OVER (PARTITION BY ...)` to pick the best attachment per parent
+ * in one pass instead of N individual queries.
+ *
+ * @param parentItemIds - IDs of regular (parent) items
+ * @returns Map from parentItemID to bestAttachmentItemID
+ */
+export async function getBestAttachmentBatch(
+    parentItemIds: number[]
+): Promise<Map<number, number>> {
+    const result = new Map<number, number>();
+    if (parentItemIds.length === 0) return result;
+
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < parentItemIds.length; i += CHUNK_SIZE) {
+        const chunk = parentItemIds.slice(i, i + CHUNK_SIZE);
+        const placeholders = chunk.map(() => '?').join(',');
+
+        const sql = `
+            WITH ranked AS (
+                SELECT
+                    IA.parentItemID,
+                    IA.itemID AS attachmentItemID,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY IA.parentItemID
+                        ORDER BY
+                            CASE WHEN IA.contentType = 'application/pdf' THEN 0 ELSE 1 END,
+                            CASE WHEN COALESCE(IDV_att.value, '') = COALESCE(IDV_parent.value, '') THEN 0 ELSE 1 END,
+                            I.dateAdded ASC
+                    ) AS rn
+                FROM itemAttachments IA
+                JOIN items I ON I.itemID = IA.itemID
+                LEFT JOIN deletedItems DI ON DI.itemID = IA.itemID
+                LEFT JOIN itemData ID_att ON ID_att.itemID = IA.itemID
+                    AND ID_att.fieldID = (SELECT fieldID FROM fields WHERE fieldName = 'url')
+                LEFT JOIN itemDataValues IDV_att ON IDV_att.valueID = ID_att.valueID
+                LEFT JOIN itemData ID_parent ON ID_parent.itemID = IA.parentItemID
+                    AND ID_parent.fieldID = (SELECT fieldID FROM fields WHERE fieldName = 'url')
+                LEFT JOIN itemDataValues IDV_parent ON IDV_parent.valueID = ID_parent.valueID
+                WHERE IA.parentItemID IN (${placeholders})
+                  AND DI.itemID IS NULL
+                  AND IA.linkMode != ${Zotero.Attachments.LINK_MODE_LINKED_URL}
+            )
+            SELECT parentItemID, attachmentItemID
+            FROM ranked
+            WHERE rn = 1
+        `;
+
+        const rows: { parentItemID: number; attachmentItemID: number }[] = [];
+        await Zotero.DB.queryAsync(sql, chunk, {
+            onRow: (row: any) => {
+                rows.push({
+                    parentItemID: row.getResultByIndex(0),
+                    attachmentItemID: row.getResultByIndex(1),
+                });
+            },
+        });
+
+        for (const row of rows) {
+            result.set(row.parentItemID, row.attachmentItemID);
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Pre-fetched batch data for attachment processing.
+ */
+export interface BatchAttachmentData {
+    bestAttachmentMap: Map<number, number>;
+    syncDateCache: Map<number, string | null>;
+}
+
+/**
+ * Prepare batch attachment data for a set of parent items.
+ * Runs getBestAttachmentBatch + prefetchSyncDates in parallel.
+ */
+export async function prepareBatchAttachmentData(
+    parentItems: Zotero.Item[],
+    context: AttachmentProcessingContext,
+    timing?: TimingAccumulator
+): Promise<BatchAttachmentData> {
+    const parentItemIds = parentItems.map(item => item.id);
+    const libraryIds = [...new Set(parentItems.map(item => item.libraryID))];
+
+    const fn = () => Promise.all([
+        getBestAttachmentBatch(parentItemIds),
+        prefetchSyncDates(libraryIds, context.syncWithZotero, context.userId),
+    ]);
+
+    const [bestAttachmentMap, syncDateCache] = timing
+        ? await timing.track('batch_prefetch_ms', fn)
+        : await fn();
+
+    return { bestAttachmentMap, syncDateCache };
+}
+
+/**
+ * Process attachments for an item using pre-fetched batch data.
+ * Variant of processAttachmentsParallel that avoids per-item DB queries
+ * for getBestAttachment and prefetchSyncDates.
+ *
+ * @param item - Parent Zotero item
+ * @param context - Sync configuration context
+ * @param batchData - Pre-fetched attachment data from prepareBatchAttachmentData
+ * @param options.skipHash - If true, skip SHA-256 hash computation
+ * @param options.timing - Optional timing accumulator
+ * @returns Array of processed attachments with status
+ */
+export async function processAttachmentsWithBatchData(
+    item: Zotero.Item,
+    context: AttachmentProcessingContext,
+    batchData: BatchAttachmentData,
+    options?: { skipHash?: boolean; timing?: TimingAccumulator }
+): Promise<AttachmentDataWithStatus[]> {
+    const skipHash = options?.skipHash ?? false;
+    const ta = options?.timing;
+    const attachmentIds = item.getAttachments();
+    if (attachmentIds.length === 0) {
+        return [];
+    }
+
+    // Fetch attachment items (mostly cache hits in Zotero's item cache)
+    const fetchFn = () => Zotero.Items.getAsync(attachmentIds);
+    const attachmentItems = ta
+        ? await ta.track('att_fetch_ms', fetchFn)
+        : await fetchFn();
+
+    // Load data types for all attachments
+    const loadFn = () => Zotero.Items.loadDataTypes(attachmentItems, ["primaryData", "itemData", "tags", "collections", "relations", "childItems"]);
+    await (ta ? ta.track('att_load_data_ms', loadFn) : loadFn());
+
+    // Use batch data for primary attachment lookup
+    const bestAttachmentId = batchData.bestAttachmentMap.get(item.id);
+
+    // Process all attachments in parallel
+    const attachmentPromises = attachmentItems.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
+        // Validate attachment
+        const isValidAttachment = syncingItemFilter(attachment);
+        if (!isValidAttachment) {
+            return null;
+        }
+
+        // Serialize attachment
+        const serializeFn = () => serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true, skipHash });
+        const attachmentData = ta
+            ? await ta.track('att_serialize_ms', serializeFn)
+            : await serializeFn();
+        if (!attachmentData) {
+            return null;
+        }
+
+        // Use batch data for isPrimary and syncDateCache
+        const isPrimary = bestAttachmentId !== undefined && attachment.id === bestAttachmentId;
+        const statusFn = () => computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId, { syncDateCache: batchData.syncDateCache });
+        const fileStatusFn = () => getAttachmentFileStatusLightweight(attachment, isPrimary);
+
+        const [status, fileStatus] = ta
+            ? await Promise.all([
+                ta.track('att_status_ms', statusFn),
+                ta.track('att_file_status_ms', fileStatusFn),
+            ])
+            : await Promise.all([statusFn(), fileStatusFn()]);
+
+        return {
+            attachment: attachmentData,
+            status,
+            file_status: fileStatus,
+        };
+    });
+
+    const results = await Promise.all(attachmentPromises);
+
+    // Filter out null results (invalid attachments)
+    return results.filter((result): result is AttachmentDataWithStatus => result !== null);
+}
+
+/**
  * Process attachments for an item in parallel.
  * Fetches, validates, and serializes all attachments concurrently.
  * 

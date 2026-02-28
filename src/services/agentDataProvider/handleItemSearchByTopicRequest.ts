@@ -23,7 +23,7 @@ import {
 } from '../agentProtocol';
 import { semanticSearchService, SearchResult } from '../semanticSearchService';
 import { BeaverDB } from '../database';
-import { getCollectionByIdOrName, processAttachmentsParallel } from '../agentDataProvider/utils';
+import { getCollectionByIdOrName, prepareBatchAttachmentData, processAttachmentsWithBatchData } from '../agentDataProvider/utils';
 import { TimingAccumulator } from '../../utils/timing';
 
 
@@ -313,7 +313,11 @@ export async function handleItemSearchByTopicRequest(
     // Serialize items in parallel in bounded batches (with backfill on failures to ensure limit is reached)
     const targetLimit = request.limit > 0 ? request.limit : filteredItems.length;
     const candidates = filteredItems.slice(offset);
-    const BATCH_SIZE = Math.min(targetLimit, 10);
+    const BATCH_SIZE = Math.min(targetLimit, 20);
+
+    // Batch-fetch best attachments and sync dates for all candidate items
+    const candidateItems = candidates.map(c => c.item);
+    const batchAttachmentData = await prepareBatchAttachmentData(candidateItems, attachmentContext, ta);
 
     const resultItems: ItemSearchFrontendResultItem[] = [];
     for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
@@ -324,7 +328,7 @@ export async function handleItemSearchByTopicRequest(
                 try {
                     const [itemData, attachments] = await Promise.all([
                         ta.track('item_serialization_ms', () => serializeItem(item, undefined, { skipHash: true })),
-                        ta.track('attachment_processing_ms', () => processAttachmentsParallel(item, attachmentContext, { skipHash: true, timing: ta }))
+                        ta.track('attachment_processing_ms', () => processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, { skipHash: true, timing: ta }))
                     ]);
                     return { item: itemData, attachments, similarity };
                 } catch (error) {

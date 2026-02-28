@@ -44,8 +44,6 @@ export interface ModelConfig {
     allow_byok: boolean;
     /** Whether this model is available via the app's API key */
     allow_app_key: boolean;
-    /** Whether this model supports usage-based billing */
-    allow_usage_billing?: boolean;
     
     // Model capabilities
     reasoning_model?: boolean;
