@@ -8,6 +8,7 @@ import { syncCollectionsOnly } from '../../src/utils/sync';
 import { version } from '../../package.json';
 import { logger } from '../../src/utils/logger';
 import { addFloatingPopupMessageAtom } from '../atoms/floatingPopup';
+import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { getPendingVersionNotifications, clearPendingVersionNotifications } from '../../src/utils/versionNotificationPrefs';
 import { getVersionUpdateMessageConfig } from '../constants/versionUpdateMessages';
 import { isDatabaseSyncSupportedAtom, profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom } from '../atoms/profile';
@@ -29,6 +30,7 @@ export const useUpgradeHandler = () => {
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const profile = useAtomValue(profileWithPlanAtom);
     const addFloatingPopupMessage = useSetAtom(addFloatingPopupMessageAtom);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     // Run consistency check after upgrade
     useEffect(() => {
@@ -166,7 +168,8 @@ export const useUpgradeHandler = () => {
 
     }, [isAuthenticated, profile, syncedLibraryIds, isDatabaseSyncSupported]);
 
-    // Run version notification popup after upgrade — show only the most recent version
+    // Run version notification popup after upgrade — show the most recent floating
+    // and the most recent in-panel version separately.
     // No auth guard: floating popups are used to re-engage lapsed/unauthenticated users too.
     useEffect(() => {
         const pendingVersions = getPendingVersionNotifications();
@@ -185,36 +188,57 @@ export const useUpgradeHandler = () => {
             return 0;
         });
 
-        const latestVersion = sorted[0];
-        const config = getVersionUpdateMessageConfig(latestVersion);
-
         // Clear all pending notifications regardless
         clearPendingVersionNotifications();
 
-        if (!config) {
-            logger(`useUpgradeHandler: No popup configuration found for version ${latestVersion}. Skipping.`, 2);
-            return;
+        // Resolve configs and split by display mode
+        const configs = sorted
+            .map(v => getVersionUpdateMessageConfig(v))
+            .filter((c): c is NonNullable<typeof c> => !!c)
+            .filter(c => !processedVersionsRef.current.has(c.version));
+
+        const latestFloating = configs.find(c => !c.inPanel);
+        const latestInPanel = configs.find(c => c.inPanel);
+
+        if (latestFloating) {
+            processedVersionsRef.current.add(latestFloating.version);
+            logger(`useUpgradeHandler: Displaying floating release notes popup for version ${latestFloating.version}.`, 3);
+
+            addFloatingPopupMessage({
+                type: 'info',
+                title: latestFloating.title,
+                text: latestFloating.text,
+                featureList: latestFloating.featureList,
+                learnMoreUrl: latestFloating.learnMoreUrl,
+                learnMoreLabel: latestFloating.learnMoreLabel,
+                footer: latestFloating.footer,
+                steps: latestFloating.steps,
+                subtitle: latestFloating.subtitle,
+                expire: false,
+            });
         }
 
-        if (processedVersionsRef.current.has(config.version)) {
-            return;
+        if (latestInPanel) {
+            processedVersionsRef.current.add(latestInPanel.version);
+            logger(`useUpgradeHandler: Displaying in-panel release notes for version ${latestInPanel.version}.`, 3);
+
+            addPopupMessage({
+                type: 'version_update',
+                title: latestInPanel.title,
+                text: latestInPanel.text,
+                featureList: latestInPanel.featureList,
+                learnMoreUrl: latestInPanel.learnMoreUrl,
+                learnMoreLabel: latestInPanel.learnMoreLabel,
+                footer: latestInPanel.footer,
+                steps: latestInPanel.steps,
+                subtitle: latestInPanel.subtitle,
+                expire: false,
+            });
         }
 
-        processedVersionsRef.current.add(config.version);
-        logger(`useUpgradeHandler: Displaying release notes popup for version ${config.version}.`, 3);
+        if (!latestFloating && !latestInPanel && sorted.length > 0) {
+            logger(`useUpgradeHandler: No popup configuration found for pending versions. Skipping.`, 2);
+        }
 
-        addFloatingPopupMessage({
-            type: 'version_update',
-            title: config.title,
-            text: config.text,
-            featureList: config.featureList,
-            learnMoreUrl: config.learnMoreUrl,
-            learnMoreLabel: config.learnMoreLabel,
-            footer: config.footer,
-            steps: config.steps,
-            subtitle: config.subtitle,
-            expire: false,
-        });
-
-    }, [addFloatingPopupMessage]);
+    }, [addFloatingPopupMessage, addPopupMessage]);
 };

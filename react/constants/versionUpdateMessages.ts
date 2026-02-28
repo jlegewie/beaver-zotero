@@ -40,6 +40,8 @@ export interface VersionUpdateMessageConfig {
     learnMoreUrl?: string;
     learnMoreLabel?: string;
     footer?: string;
+    /** When true, display inside the sidebar panel instead of as a floating popup */
+    inPanel?: boolean;
 }
 
 const compareVersions = (v1: string, v2: string): number => {
@@ -311,6 +313,12 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 description: "Export a full conversation as a Zotero note or copy it to the clipboard from the new '...' menu.",
             },
         ],
+    },
+    {
+        version: "0.13.2",
+        title: "Free Credits Update",
+        text: "In an effort to make Beaver more sustainable as a service, free credits are now a one-time allocation rather than a monthly renewal. You can always use your own API key for unlimited usage.",
+        inPanel: true,
     },
 ];
 
