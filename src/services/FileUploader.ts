@@ -27,7 +27,9 @@ import { PlanFeatures } from '../../react/types/profile';
  */
 export class FileUploader {
     private isRunning: boolean = false;
+    private isForceStopping: boolean = false;
     private uploadQueue!: PQueue; // Will be initialized on start
+    private activeUploadControllers: Map<string, AbortController> = new Map();
 
     // upload concurrency
     private readonly MAX_CONCURRENT: number = 5;
@@ -57,6 +59,95 @@ export class FileUploader {
 
     private getRefillThreshold(): number {
         return Math.min(this.BATCH_SIZE, this.MAX_CONCURRENT + this.REFILL_BUFFER);
+    }
+
+    private isCancellationRequested(signal?: AbortSignal): boolean {
+        return Boolean(
+            signal?.aborted ||
+            this.isForceStopping ||
+            Zotero.__beaverShuttingDown,
+        );
+    }
+
+    private isAbortError(error: any): boolean {
+        return Boolean(
+            error?.name === 'AbortError' ||
+            error?.code === 'ABORT_ERR' ||
+            error?.message === 'Upload aborted'
+        );
+    }
+
+    private createAbortError(message: string = 'Upload aborted'): Error {
+        const error = new Error(message);
+        error.name = 'AbortError';
+        return error;
+    }
+
+    private throwIfCancellationRequested(signal?: AbortSignal, message: string = 'Upload aborted'): void {
+        if (this.isCancellationRequested(signal)) {
+            throw this.createAbortError(message);
+        }
+    }
+
+    private async waitForAbortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+        if (this.isCancellationRequested(signal)) {
+            throw this.createAbortError();
+        }
+
+        await new Promise<void>((resolve, reject) => {
+            let timeoutHandle: NodeJS.Timeout | null = null;
+            let cancellationCheckHandle: NodeJS.Timeout | null = null;
+
+            const cleanup = () => {
+                if (timeoutHandle) {
+                    clearTimeout(timeoutHandle);
+                    timeoutHandle = null;
+                }
+                if (cancellationCheckHandle) {
+                    clearInterval(cancellationCheckHandle);
+                    cancellationCheckHandle = null;
+                }
+                signal?.removeEventListener('abort', handleAbort);
+            };
+
+            const handleAbort = () => {
+                cleanup();
+                reject(this.createAbortError());
+            };
+
+            timeoutHandle = setTimeout(() => {
+                cleanup();
+                resolve();
+            }, ms);
+
+            cancellationCheckHandle = setInterval(() => {
+                if (this.isCancellationRequested(signal)) {
+                    handleAbort();
+                }
+            }, Math.min(100, ms));
+
+            signal?.addEventListener('abort', handleAbort, { once: true });
+        });
+    }
+
+    private createUploadAbortController(item: UploadQueueItem): AbortController {
+        const controller = new AbortController();
+        this.activeUploadControllers.set(item.file_hash, controller);
+        return controller;
+    }
+
+    private clearUploadAbortController(item: UploadQueueItem, controller: AbortController): void {
+        const activeController = this.activeUploadControllers.get(item.file_hash);
+        if (activeController === controller) {
+            this.activeUploadControllers.delete(item.file_hash);
+        }
+    }
+
+    private abortActiveUploads(): void {
+        for (const controller of this.activeUploadControllers.values()) {
+            controller.abort();
+        }
+        this.activeUploadControllers.clear();
     }
 
     /**
@@ -91,47 +182,24 @@ export class FileUploader {
         logger(`File Uploader Queue: Waiting for capacity (current: ${currentLoad}, limit: ${limit})`, 4);
         const startTime = Date.now();
 
-        await new Promise<void>((resolve) => {
-            let timeoutHandle: NodeJS.Timeout | null = null;
+        while (this.uploadQueue && this.isRunning) {
+            if (this.isCancellationRequested()) {
+                throw this.createAbortError();
+            }
 
-            const checkCapacity = () => {
-                const load = this.getQueueLoad();
-                // Only log capacity checks if verbose logging is desired
-                // logger(`File Uploader Queue: checking capacity (load: ${load}, limit: ${limit})`, 4);
-                
-                if (!this.isRunning || load < limit) {
-                    logger(`File Uploader Queue: Capacity available after ${Date.now() - startTime}ms`, 4);
-                    cleanup();
-                    resolve();
-                }
-            };
+            const load = this.getQueueLoad();
+            if (load < limit) {
+                logger(`File Uploader Queue: Capacity available after ${Date.now() - startTime}ms`, 4);
+                return;
+            }
 
-            const cleanup = () => {
-                if (timeoutHandle) {
-                    clearTimeout(timeoutHandle);
-                    timeoutHandle = null;
-                }
-                if (!this.uploadQueue) {
-                    return;
-                }
-                this.uploadQueue.off('next', checkCapacity);
-                this.uploadQueue.off('idle', checkCapacity);
-                this.uploadQueue.off('error', checkCapacity);
-            };
-
-            // Set timeout as a safety net
-            timeoutHandle = setTimeout(() => {
-                cleanup();
+            if (Date.now() - startTime >= timeoutMs) {
                 logger(`File Uploader: Queue capacity wait timed out after ${timeoutMs}ms`, 2);
-                resolve();
-            }, timeoutMs);
+                return;
+            }
 
-            this.uploadQueue.on('next', checkCapacity);
-            this.uploadQueue.on('idle', checkCapacity);
-            this.uploadQueue.on('error', checkCapacity);
-
-            checkCapacity();
-        });
+            await this.waitForAbortableDelay(100);
+        }
     }
 
     /**
@@ -158,6 +226,7 @@ export class FileUploader {
             return;
         }
         this.isRunning = true;
+        this.isForceStopping = false;
         
         // Set running state
         store.set(isFileUploaderRunningAtom, true);
@@ -181,7 +250,7 @@ export class FileUploader {
     }
 
     /**
-     * Stops the file uploader gracefully. 
+     * Stops the file uploader gracefully.
      * No new items will be fetched, but in-flight uploads will be allowed to finish.
      */
     public async stop(): Promise<void> {
@@ -210,6 +279,42 @@ export class FileUploader {
     }
 
     /**
+     * Immediately stop the file uploader without waiting for in-flight uploads.
+     * Used during shutdown to prevent async operations from outliving the plugin.
+     */
+    public forceStop(): void {
+        if (
+            !this.isRunning &&
+            this.activeUploadControllers.size === 0 &&
+            this.completionBatch.length === 0 &&
+            !this.batchTimer
+        ) {
+            return;
+        }
+
+        this.isRunning = false;
+        this.isForceStopping = true;
+        logger('File Uploader: Force stopping for shutdown', 3);
+
+        this.abortActiveUploads();
+
+        // Clear the upload queue without waiting
+        if (this.uploadQueue) {
+            this.uploadQueue.clear();
+        }
+
+        // Clear batch timer
+        if (this.batchTimer) {
+            clearTimeout(this.batchTimer);
+            this.batchTimer = null;
+        }
+
+        this.completionBatch = [];
+        store.set(isFileUploaderRunningAtom, false);
+        store.set(fileUploaderBackoffUntilAtom, null);
+    }
+
+    /**
      * Main loop that continuously reads items from backend queue and processes them until
      * no more items remain or the uploader is stopped.
      */
@@ -228,6 +333,14 @@ export class FileUploader {
         let lastFetchWasPartial = false;
 
         while (this.isRunning) {
+            // Check for plugin shutdown — bail immediately to avoid
+            // DB/network operations during Zotero's teardown sequence.
+            if (Zotero.__beaverShuttingDown) {
+                logger('File Uploader: Shutdown detected, stopping queue loop', 3);
+                this.forceStop();
+                break;
+            }
+
             try {
                 // check authentication status
                 const isAuthenticated = store.get(isAuthenticatedAtom);
@@ -243,7 +356,7 @@ export class FileUploader {
                     logger(`File Uploader Queue: Backing off for ${errorBackoffTime}ms after ${consecutiveErrors} consecutive errors`, 3);
                     const nextRetryAt = Date.now() + errorBackoffTime;
                     store.set(fileUploaderBackoffUntilAtom, nextRetryAt);
-                    await new Promise(resolve => setTimeout(resolve, errorBackoffTime));
+                    await this.waitForAbortableDelay(errorBackoffTime);
                     // Exponential backoff with max of 1 minute
                     errorBackoffTime = Math.min(errorBackoffTime * 2, 60000);
                 }
@@ -298,11 +411,11 @@ export class FileUploader {
                     // If queue has items, wait for them to finish before retrying
                     if (currentQueueLoad > 0) {
                         logger(`File Uploader Queue: No new items, waiting for ${currentQueueLoad} in-flight uploads to finish`, 3);
-                        await this.uploadQueue.onIdle();
+                        await this.waitForQueueCapacity(1);
                     }
                     
                     // Small delay before next check
-                    await new Promise(resolve => setTimeout(resolve, this.EMPTY_QUEUE_POLL_DELAY));
+                    await this.waitForAbortableDelay(this.EMPTY_QUEUE_POLL_DELAY);
                     continue;
                 }
 
@@ -318,6 +431,16 @@ export class FileUploader {
                 }
 
             } catch (error: any) {
+                if (this.isAbortError(error) || this.isCancellationRequested()) {
+                    logger('File Uploader Queue: Cancellation detected, stopping queue loop', 3);
+                    if (Zotero.__beaverShuttingDown) {
+                        this.forceStop();
+                    } else {
+                        this.isRunning = false;
+                    }
+                    break;
+                }
+
                 logger('File Uploader Queue: runQueue encountered an error: ' + error.message, 1);
                 Zotero.logError(error);
                 
@@ -330,19 +453,39 @@ export class FileUploader {
                 }
 
                 // Continue with backoff...
-                await new Promise(resolve => setTimeout(resolve, 30000));
+                try {
+                    await this.waitForAbortableDelay(30000);
+                } catch (delayError: any) {
+                    if (this.isAbortError(delayError) || this.isCancellationRequested()) {
+                        logger('File Uploader Queue: Cancellation detected during error backoff', 3);
+                        if (Zotero.__beaverShuttingDown) {
+                            this.forceStop();
+                        } else {
+                            this.isRunning = false;
+                        }
+                        break;
+                    }
+
+                    throw delayError;
+                }
             }
         }
 
-        try {
-            await this.uploadQueue.onIdle();
-        } catch (error: any) {
-            logger('File Uploader Queue: Error while waiting for queue to idle: ' + error.message, 1);
-            Zotero.logError(error);
-        }
+        // During shutdown, skip waiting for in-flight uploads and flushing
+        // completion batches — those would start new network/DB operations
+        // that race with Zotero's teardown.
+        if (Zotero.__beaverShuttingDown) {
+            this.forceStop();
+        } else {
+            try {
+                await this.uploadQueue.onIdle();
+            } catch (error: any) {
+                logger('File Uploader Queue: Error while waiting for queue to idle: ' + error.message, 1);
+                Zotero.logError(error);
+            }
 
-        // Mark all items in the queue as failed
-        await this.flushCompletionBatch();
+            await this.flushCompletionBatch();
+        }
 
         // No more items or we've stopped. Mark as not running.
         this.isRunning = false;
@@ -367,7 +510,13 @@ export class FileUploader {
         return ;
     }
 
-    private async uploadFileToGCS(signedUrl: string, blob: Blob, mimeType: string, metadata: Record<string, string>): Promise<void> {
+    private async uploadFileToGCS(
+        signedUrl: string,
+        blob: Blob,
+        mimeType: string,
+        metadata: Record<string, string>,
+        signal?: AbortSignal,
+    ): Promise<void> {
         const headers = {
             'Content-Type': mimeType,
         };
@@ -380,7 +529,8 @@ export class FileUploader {
         const response = await fetch(signedUrl, {
             method: 'PUT',
             body: blob,
-            headers: headers
+            headers: headers,
+            signal,
         });
 
         if (!response.ok) {
@@ -400,10 +550,13 @@ export class FileUploader {
         context.zotero_key = item.zotero_key;
         context.file_hash = item.file_hash;
         const uploadStartTime = Date.now();
+        const uploadAbortController = this.createUploadAbortController(item);
+        const uploadSignal = uploadAbortController.signal;
 
         try {
             logger(`File Uploader uploadFile ${item.zotero_key}: Starting upload process`, 4);
             logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file`, 3);
+            this.throwIfCancellationRequested(uploadSignal);
 
             // Get the user ID from the store
             const userId = store.get(userIdAtom);
@@ -414,6 +567,7 @@ export class FileUploader {
 
             // Retrieve file path from Zotero
             const attachment = await Zotero.Items.getByLibraryAndKeyAsync(item.library_id, item.zotero_key);
+            this.throwIfCancellationRequested(uploadSignal);
             if (!attachment) {
                 logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Attachment not found`, 1);
                 await this.handleUploadFailure(
@@ -427,10 +581,12 @@ export class FileUploader {
 
             // Check if file exists locally
             const useLocalFile = await safeFileExists(attachment);
+            this.throwIfCancellationRequested(uploadSignal);
             context.useLocalFile = useLocalFile;
             
             // Check if file exists on server
             const validZoteroCredentials = Boolean(Zotero.Users.getCurrentUserID()) && Boolean(await Zotero.Sync.Data.Local.getAPIKey())
+            this.throwIfCancellationRequested(uploadSignal);
             context.validZoteroCredentials = validZoteroCredentials;
             const isServerFile = isAttachmentOnServer(attachment);
             const useServerFile = !useLocalFile && isServerFile && validZoteroCredentials;
@@ -472,6 +628,7 @@ export class FileUploader {
 
                 // Get the file path for the attachment
                 const filePath: string | null = await attachment.getFilePathAsync() || null;
+                this.throwIfCancellationRequested(uploadSignal);
                 context.hasFilePath = Boolean(filePath)
                 
                 // File check: if file path is not found, we can't upload it
@@ -488,6 +645,7 @@ export class FileUploader {
 
                 // Early size check before expensive reads/parsing
                 fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
+                this.throwIfCancellationRequested(uploadSignal);
                 context.fileSize = fileSize;
                 if (fileSize) {
                     const sizeError = this.checkFileSizeLimit(fileSize, planFeatures);
@@ -500,16 +658,23 @@ export class FileUploader {
 
                 // File metadata (after size guard)
                 mimeType = await getMimeType(attachment, filePath);
+                this.throwIfCancellationRequested(uploadSignal);
                 context.mimeType = mimeType;
                 pageCount = mimeType === 'application/pdf' ? await getPDFPageCount(attachment) : null;
+                this.throwIfCancellationRequested(uploadSignal);
                 context.pageCount = pageCount;
 
                 // Read file content
                 try {
                     const readStart = Date.now();
                     fileArrayBuffer = await IOUtils.read(filePath);
+                    this.throwIfCancellationRequested(uploadSignal);
                     logger(`File Uploader uploadFile ${item.zotero_key}: File read completed in ${Date.now() - readStart}ms`, 4);
                 } catch (readError: any) {
+                    if (this.isAbortError(readError) || this.isCancellationRequested(uploadSignal)) {
+                        throw this.createAbortError();
+                    }
+
                     logger(`File Uploader uploadFile ${item.library_id}-${item.zotero_key}: Error reading file`, 1);
                     Zotero.logError(readError);
                     await this.handleUploadFailure(
@@ -541,8 +706,13 @@ export class FileUploader {
                 try {
                     const downloadStart = Date.now();
                     fileArrayBuffer = await getAttachmentDataInMemory(attachment);
+                    this.throwIfCancellationRequested(uploadSignal);
                     logger(`File Uploader uploadFile ${item.zotero_key}: Server download completed in ${Date.now() - downloadStart}ms`, 4);
                 } catch (downloadError: any) {
+                    if (this.isAbortError(downloadError) || this.isCancellationRequested(uploadSignal)) {
+                        throw this.createAbortError();
+                    }
+
                     const errorMessage = `Failed to download from Zotero server: ${downloadError.message || String(downloadError)}`;
                     logger(`File Uploader uploadFile ${item.zotero_key}: ${errorMessage}`, 1);
                     
@@ -577,6 +747,7 @@ export class FileUploader {
                 mimeType = getMimeTypeFromData(attachment, fileArrayBuffer);
                 context.mimeType = mimeType;
                 pageCount = mimeType === 'application/pdf' ? await getPDFPageCountFromData(fileArrayBuffer) : null;
+                this.throwIfCancellationRequested(uploadSignal);
                 context.pageCount = pageCount;
 
             }
@@ -610,6 +781,7 @@ export class FileUploader {
             while (!uploadSuccess && uploadAttempt < maxUploadAttempts) {
                 uploadAttempt++;
                 try {
+                    this.throwIfCancellationRequested(uploadSignal);
                     logger(`File Uploader uploadFile ${item.zotero_key}: Uploading file to ${item.storage_path} (attempt ${uploadAttempt}/${maxUploadAttempts})`, 3);
                     // const storagePath = `${userId}/attachments/${item.file_hash}/original`;
                     // await this.uploadFileToSupabase(storagePath, blob);
@@ -620,7 +792,8 @@ export class FileUploader {
                         filehash: item.file_hash,
                         libraryid: item.library_id.toString(),
                         zoterokey: item.zotero_key
-                    });
+                    }, uploadSignal);
+                    this.throwIfCancellationRequested(uploadSignal);
                     logger(`File Uploader uploadFile ${item.zotero_key}: GCS upload completed in ${Date.now() - gcsUploadStart}ms`, 4);
                     
                     
@@ -628,6 +801,10 @@ export class FileUploader {
                     logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload successful on attempt ${uploadAttempt}. Total time: ${Date.now() - uploadStartTime}ms`, 3);
 
                 } catch (uploadError: any) {
+                    if (this.isAbortError(uploadError) || this.isCancellationRequested(uploadSignal)) {
+                        throw this.createAbortError();
+                    }
+
                     if (uploadError instanceof TypeError) {
                         // Network error, retry with backoff
                         logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload network error on attempt ${uploadAttempt}, will retry: ${uploadError.message}`, 2);
@@ -635,7 +812,7 @@ export class FileUploader {
                         // Other errors, retry with backoff
                         logger(`File Uploader uploadFile ${item.zotero_key}: Storage upload error on attempt ${uploadAttempt}, will retry: ${uploadError.message}`, 2);
                     }
-                    await new Promise(resolve => setTimeout(resolve, 2000 * uploadAttempt)); // Increasing backoff
+                    await this.waitForAbortableDelay(2000 * uploadAttempt, uploadSignal); // Increasing backoff
                 }
             }
             
@@ -645,9 +822,15 @@ export class FileUploader {
             }
 
             // Add to completion batch instead of marking completed directly
+            this.throwIfCancellationRequested(uploadSignal);
             await this.addCompletionToBatch(item, mimeType, fileSize, pageCount, user_id);
 
         } catch (error: any) {
+            if (this.isAbortError(error) || this.isCancellationRequested(uploadSignal)) {
+                logger(`File Uploader uploadFile ${item.zotero_key}: Upload cancelled during shutdown`, 3);
+                return;
+            }
+
             const reason = error instanceof Error ? error.message : String(error) || "Unknown error";
             const contextString = JSON.stringify(context);
             logger(`File Uploader uploadFile ${item.zotero_key}: Error uploading file: ${reason} | context=${contextString}`, 1);
@@ -660,6 +843,8 @@ export class FileUploader {
                 'storage_upload_failed',
                 `${reason} | context=${contextString}`
             );
+        } finally {
+            this.clearUploadAbortController(item, uploadAbortController);
         }
     }
 
@@ -771,6 +956,11 @@ export class FileUploader {
      * Adds a completion to the batch and manages batch sending
      */
     private async addCompletionToBatch(item: UploadQueueItem, mimeType: string, fileSize: number, pageCount: number | null, user_id: string): Promise<void> {
+        if (this.isCancellationRequested()) {
+            logger(`File Uploader: Skipping completion batching for ${item.zotero_key} during shutdown`, 3);
+            return;
+        }
+
         const request: CompleteUploadRequest = {
             storage_path: item.storage_path,
             file_hash: item.file_hash,
@@ -807,6 +997,12 @@ export class FileUploader {
             return;
         }
 
+        if (this.isCancellationRequested()) {
+            logger('File Uploader: Skipping completion batch flush during shutdown', 3);
+            this.completionBatch = [];
+            return;
+        }
+
         // Make a copy of the current batch and clear the original immediately
         // This prevents race conditions if more items are added while the request is in-flight
         const batchToSend = [...this.completionBatch];
@@ -828,6 +1024,11 @@ export class FileUploader {
         const maxBatchAttempts = 3;
 
         while (!batchSuccess && batchAttempt < maxBatchAttempts) {
+            if (this.isCancellationRequested()) {
+                logger('File Uploader: Cancelling completion batch flush during shutdown', 3);
+                return;
+            }
+
             batchAttempt++;
             try {
                 logger(`File Uploader: Attempting to flush batch (attempt ${batchAttempt}/${maxBatchAttempts})`, 3);
@@ -853,15 +1054,34 @@ export class FileUploader {
                 logger(`File Uploader: Batch flush successful on attempt ${batchAttempt}`, 3);
                 
             } catch (batchError: any) {
+                if (this.isAbortError(batchError) || this.isCancellationRequested()) {
+                    logger('File Uploader: Cancelling completion batch flush during shutdown', 3);
+                    return;
+                }
+
                 logger(`File Uploader: Batch flush error on attempt ${batchAttempt}, will retry: ${batchError.message}`, 2);
                 if (batchAttempt < maxBatchAttempts) {
-                    await new Promise(resolve => setTimeout(resolve, 2000 * batchAttempt)); // Increasing backoff
+                    try {
+                        await this.waitForAbortableDelay(2000 * batchAttempt); // Increasing backoff
+                    } catch (delayError: any) {
+                        if (this.isAbortError(delayError) || this.isCancellationRequested()) {
+                            logger('File Uploader: Cancelling completion batch flush during shutdown', 3);
+                            return;
+                        }
+
+                        throw delayError;
+                    }
                 }
             }
         }
 
         // If batch flush failed after all retries, mark all items as temporary failed
         if (!batchSuccess) {
+            if (this.isCancellationRequested()) {
+                logger('File Uploader: Skipping batch failure reporting during shutdown', 3);
+                return;
+            }
+
             logger(`File Uploader: Failed to flush batch after ${maxBatchAttempts} attempts, marking all items as temporary failed`, 1);
             
             // Mark each item in the batch as temporary failed
@@ -892,6 +1112,11 @@ export class FileUploader {
         errorCode: ErrorCode,
         reason?: string
     ): Promise<void> {
+        if (this.isCancellationRequested()) {
+            logger(`File Uploader: Skipping failure report for ${item.zotero_key} during shutdown`, 3);
+            return;
+        }
+
         logger(`File Uploader: Failed upload. Updating status to ${status} for ${item.zotero_key} with error code ${errorCode}: ${reason}`, 1);
         
         try {

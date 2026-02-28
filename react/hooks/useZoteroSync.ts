@@ -206,6 +206,9 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             // Create the notification observer with debouncing
             const observer = {
                 notify: async function(event: string, type: string, ids: number[], extraData: any) {
+                    // Skip all processing if shutdown has started
+                    if (Zotero.__beaverShuttingDown) return;
+
                     // Handle Zotero sync completion (only when syncWithZotero is true)
                     if (syncWithZotero && type === 'sync' && event === 'finish') {
                         const changedLibraries = updateLibraryVersionCache();
@@ -394,7 +397,10 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 
                 // First sync the database
                 await syncZoteroDatabase(syncedLibraryIds, { filterFunction, batchSize: SYNC_BATCH_SIZE_INITIAL });
-                
+
+                // Bail out if shutdown started during the sync
+                if (!isMounted || Zotero.__beaverShuttingDown) return;
+
                 // Update cache after initial sync
                 updateLibraryVersionCache();
                 
@@ -402,10 +408,11 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
                 if (isMounted) setupObserver();
                 
                 // Start file uploader after sync completes
-                if (store.get(planFeaturesAtom)?.uploadFiles) {
+                if (!Zotero.__beaverShuttingDown && store.get(planFeaturesAtom)?.uploadFiles) {
                     await fileUploader.start();
                 }
             } catch (error: any) {
+                if (Zotero.__beaverShuttingDown) return;
                 logger(`useZoteroSync: Error during initial sync: ${error.message}`, 1);
                 Zotero.logError(error);
                 // Still set up the observer even if initial sync fails
@@ -435,7 +442,16 @@ export function useZoteroSync(filterFunction: ItemFilterFunction = syncingItemFi
             
             // Clear the cache
             libraryVersionCacheRef.current.clear();
-            
+
+            // During shutdown, skip fire-and-forget event processing.
+            // These would start new DB/network operations that outlive the
+            // plugin and race with Zotero's internal SQLite teardown.
+            if (Zotero.__beaverShuttingDown) {
+                eventsRef.current.changedLibraries.clear();
+                eventsRef.current.delete.clear();
+                return;
+            }
+
             // Process remaining events asynchronously (fire-and-forget)
             // but clear the collections synchronously to prevent further accumulation
             const hasRemainingEvents = 

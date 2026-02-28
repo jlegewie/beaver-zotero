@@ -12,6 +12,7 @@ import { addPendingVersionNotification } from "./utils/versionNotificationPrefs"
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
 import { disposeMuPDF } from "./utils/mupdf";
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
+import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 
 /** Timeout for individual async shutdown operations to prevent hangs. */
 const SHUTDOWN_TIMEOUT_MS = 3000;
@@ -41,9 +42,23 @@ function withShutdownTimeout<T>(
 let isAppQuitting = false;
 let quitObserverRegistered = false;
 const quitObserver = {
-    observe(subject: any, topic: string) {
-        if (topic === "quit-application" || topic === "quit-application-granted") {
+    observe(_subject: any, topic: string) {
+        if (topic === "quit-application-granted" || topic === "quit-application") {
             isAppQuitting = true;
+            Zotero.__beaverShuttingDown = true;
+        }
+        // Close beaver.sqlite on quit-application, BEFORE the
+        // profile-before-change barrier where Sqlite.sys.mjs waits for
+        // all connections
+        if (topic === "quit-application") {
+            try {
+                if (addon?.db) {
+                    addon.db.closeDatabase().catch(() => {});
+                    addon.db = undefined;
+                }
+            } catch (_) {
+                // Best-effort — process is dying
+            }
         }
     },
 };
@@ -144,7 +159,15 @@ async function onStartup() {
         Zotero.unlockPromise,
         Zotero.uiReadyPromise,
     ]);
-    
+
+    // If the user quit Zotero before plugins finished initializing, the
+    // promises above still resolve but the app is already tearing down.
+    // Bail out to avoid opening resources that can never be cleaned up.
+    if (Services?.startup?.shuttingDown || Zotero.__beaverShuttingDown) {
+        ztoolkit.log("Startup aborted: app is already shutting down");
+        return;
+    }
+
     registerQuitObserver();
     initLocale();
     ztoolkit.log("Startup");
@@ -154,49 +177,74 @@ async function onStartup() {
     ztoolkit.log(`Plugin version: ${version}`);
 
     // -------- Initialize database --------
+    // Wrap in try/catch so that if any later initialization step fails
+    // (e.g. main window already destroyed), we still close the DB
+    // connection.  An unclosed connection triggers a FATAL AsyncShutdown
+    // timeout crash in Mozilla's Sqlite.sys.mjs shutdown blocker.
     const dbConnection = new Zotero.DBConnection("beaver");
     const beaverDB = new BeaverDB(dbConnection);
     addon.db = beaverDB;
 
-    // Test connection and initialize schema
-    await dbConnection.test();
-    await beaverDB.initDatabase(version);
-    
-    // -------- Initialize Attachment File Cache --------
-    const attachmentFileCache = new AttachmentFileCache(beaverDB);
-    await attachmentFileCache.init();
-    await attachmentFileCache.runStartupGC();
-    addon.attachmentFileCache = attachmentFileCache;
-    ztoolkit.log("AttachmentFileCache initialized successfully");
+    try {
+        // Test connection and initialize schema
+        await dbConnection.test();
+        await beaverDB.initDatabase(version);
 
-    // -------- Initialize Citation Service with caching --------
-    const citationService = new CitationService(ztoolkit);
-    addon.citationService = citationService;
-    ztoolkit.log("CitationService initialized successfully");
-    
-    // -------- Register keyboard shortcuts --------
-    BeaverUIFactory.registerShortcuts();
+        // -------- Initialize Attachment File Cache --------
+        const attachmentFileCache = new AttachmentFileCache(beaverDB);
+        await attachmentFileCache.init();
+        await attachmentFileCache.runStartupGC();
+        addon.attachmentFileCache = attachmentFileCache;
+        ztoolkit.log("AttachmentFileCache initialized successfully");
 
-    // -------- Add event bus to window --------
-    Zotero.getMainWindow().__beaverEventBus = eventBus;
+        // -------- Initialize Citation Service with caching --------
+        const citationService = new CitationService(ztoolkit);
+        addon.citationService = citationService;
+        ztoolkit.log("CitationService initialized successfully");
 
-    // -------- Register protocol handler (zotero://beaver) --------
-    registerBeaverProtocolHandler();
+        // -------- Register keyboard shortcuts --------
+        BeaverUIFactory.registerShortcuts();
 
-    // -------- Load UI for all windows --------
-    await Promise.all(
-        Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
-    );
+        // -------- Add event bus to window --------
+        const mainWindow = Zotero.getMainWindow();
+        if (mainWindow) {
+            mainWindow.__beaverEventBus = eventBus;
+        }
 
-    // -------- Handle plugin upgrade --------
-    const lastVersion = getPref('installedVersion');
-    if (lastVersion && lastVersion !== version) {
-        await handleUpgrade(lastVersion, version);
+        // -------- Register protocol handler (zotero://beaver) --------
+        registerBeaverProtocolHandler();
+
+        // -------- Load UI for all windows --------
+        const mainWindows = Zotero.getMainWindows();
+        if (mainWindows.length > 0) {
+            await Promise.all(
+                mainWindows.map((win) => onMainWindowLoad(win)),
+            );
+        }
+
+        // -------- Handle plugin upgrade --------
+        const lastVersion = getPref('installedVersion');
+        if (lastVersion && lastVersion !== version) {
+            await handleUpgrade(lastVersion, version);
+        }
+
+        // -------- Set installed version --------
+        setPref('installedVersion', version);
+        ztoolkit.log(`Installed version: ${getPref('installedVersion')}`);
+    } catch (error) {
+        // If startup fails after opening the DB, close it immediately
+        // to prevent AsyncShutdown timeout → FATAL ERROR crash.
+        ztoolkit.log(`Startup failed, closing database: ${error}`);
+        try {
+            if (addon.db) {
+                await addon.db.closeDatabase();
+                addon.db = undefined;
+            }
+        } catch (closeError) {
+            ztoolkit.log(`Failed to close database during startup error recovery: ${closeError}`);
+        }
+        throw error;
     }
-
-    // -------- Set installed version --------
-    setPref('installedVersion', version);
-    ztoolkit.log(`Installed version: ${getPref('installedVersion')}`);
 }
 
 async function onMainWindowLoad(win: Window): Promise<void> {
@@ -246,24 +294,39 @@ async function onMainWindowUnload(win: Window): Promise<void> {
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
     
     try {
-        // Clean up window-specific resources first
-        // These are safe to clean up for any window
-        
+        // Determine cleanup scope BEFORE unmounting React, so we can set
+        // the shutdown flag before React cleanup effects run.
+        const remainingWindows = Zotero.getMainWindows().filter(w => w !== win && !w.closed);
+        const isLastWindow = remainingWindows.length === 0;
+        const isAppShuttingDown = Services?.startup?.shuttingDown ?? false;
+        const shouldRunGlobalCleanup = isLastWindow && (isAppQuitting || isAppShuttingDown);
+
+        // If this is a full shutdown, signal it BEFORE React unmount.
+        // React cleanup effects (useZoteroSync, useEmbeddingIndex, etc.)
+        // check this flag to skip fire-and-forget async operations that
+        // would otherwise outlive the plugin and cause segfaults.
+        if (shouldRunGlobalCleanup) {
+            ztoolkit.log("onMainWindowUnload: Setting shutdown flag and cancelling in-flight operations");
+            Zotero.__beaverShuttingDown = true;
+            addon.data.alive = false;
+
+            // Cancel all background tasks (sync, PDF fetch, metadata enrich)
+            // and clear their 60-second cleanup timers that keep the event loop alive.
+            cancelAllActiveTasks();
+        }
+
+        // Clean up window-specific resources
+
         // Clean up event bus for this window
         if (win.__beaverEventBus) {
             win.__beaverEventBus = null;
         }
 
-        // Remove React components and DOM elements for this window
+        // Remove React components and DOM elements for this window.
+        // React cleanup effects run here — they will see the shutdown
+        // flag and skip any fire-and-forget DB/network operations.
         BeaverUIFactory.removeChatPanel(win);
 
-        // Check if this is the last main window
-        // Only run global cleanup if no other main windows remain
-        const remainingWindows = Zotero.getMainWindows().filter(w => w !== win && !w.closed);
-        const isLastWindow = remainingWindows.length === 0;
-        const isAppShuttingDown = Services?.startup?.shuttingDown ?? false;
-        const shouldRunGlobalCleanup = isLastWindow && (isAppQuitting || isAppShuttingDown);
-        
         if (!isLastWindow) {
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
             return;
@@ -339,9 +402,6 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
         // 12. Unregister protocol handler
         unregisterBeaverProtocolHandler();
-
-        // 13. Mark addon as not alive to prevent any further callbacks
-        addon.data.alive = false;
 
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
     } catch (error: any) {

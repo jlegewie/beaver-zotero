@@ -263,6 +263,7 @@ export async function syncItemsToBackend(
     onProgress?: (libraryID: number, processed: number, totalForLibrary: number) => void,
     batchSize: number = 100,
 ) {
+    if (Zotero.__beaverShuttingDown) return;
     const userId = store.get(userIdAtom);
     if (!userId) {
         logger('Beaver Sync:   No user found', 1);
@@ -320,6 +321,7 @@ export async function syncItemsToBackend(
 
     // 4. Process each batch
     for (let i = 0; i < itemBatches.length; i++) {
+        if (Zotero.__beaverShuttingDown) return;
         const batchMeta = itemBatches[i];
 
         // Determine the max version and date for this batch
@@ -574,6 +576,7 @@ export async function syncItemsToBackend(
  * @param zoteroKeys Zotero keys of items and/or collections to delete
  */
 export const deleteItems = async (userId: string, libraryID: number, zoteroKeys: string[]) => {
+    if (Zotero.__beaverShuttingDown) return;
     logger(`Beaver Sync: Deleting ${zoteroKeys.length} items/collections from library ${libraryID}`, 3);
 
     // Delete items/collections from backend
@@ -634,6 +637,10 @@ export async function syncZoteroDatabase(
     libraryIds: number[],
     options: SyncZoteroDatabaseOptions = {}
 ): Promise<void> {
+    // Bail out immediately if shutdown is in progress to avoid
+    // DB/network operations that race with Zotero's teardown.
+    if (Zotero.__beaverShuttingDown) return;
+
     const syncSessionId = uuidv4();
 
     const {
@@ -721,6 +728,7 @@ export async function syncZoteroDatabase(
     // Sync each library
     const processedLibraryIDs = new Set<number>();
     for (const library of librariesToSync) {
+        if (Zotero.__beaverShuttingDown) return;
         const libraryID = library.libraryID;
         const libraryName = library.name;
         processedLibraryIDs.add(libraryID);
