@@ -42,9 +42,23 @@ function withShutdownTimeout<T>(
 let isAppQuitting = false;
 let quitObserverRegistered = false;
 const quitObserver = {
-    observe(subject: any, topic: string) {
-        if (topic === "quit-application" || topic === "quit-application-granted") {
+    observe(_subject: any, topic: string) {
+        if (topic === "quit-application-granted" || topic === "quit-application") {
             isAppQuitting = true;
+            Zotero.__beaverShuttingDown = true;
+        }
+        // Close beaver.sqlite on quit-application, BEFORE the
+        // profile-before-change barrier where Sqlite.sys.mjs waits for
+        // all connections
+        if (topic === "quit-application") {
+            try {
+                if (addon?.db) {
+                    addon.db.closeDatabase().catch(() => {});
+                    addon.db = undefined;
+                }
+            } catch (_) {
+                // Best-effort — process is dying
+            }
         }
     },
 };
