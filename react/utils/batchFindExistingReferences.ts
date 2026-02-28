@@ -12,6 +12,20 @@ import { ZoteroItemReference } from '../types/zotero';
 import { logger } from '../../src/utils/logger';
 
 /**
+ * Lightweight representation of a title-matched candidate from Zotero DB.
+ * Replaces full Zotero.Item objects to avoid expensive getAsync/loadDataTypes calls.
+ */
+interface TitleCandidate {
+    libraryID: number;
+    key: string;
+    normalizedTitle: string;
+    doi: string | null;
+    isbn: string | null;
+    date: string | null;
+    creatorLastNames: string[];
+}
+
+/**
  * Input item for batch reference checking
  */
 export interface BatchReferenceCheckItem {
@@ -282,36 +296,15 @@ function extractFilterKeywords(title: string, maxKeywords: number = 2): string[]
 }
 
 /**
- * Phase 2: Batch title candidate collection
- * Finds all potential title matches across libraries
- *
- * Uses keyword-based LIKE pre-filtering in SQL to avoid fetching all titles.
- * Only rows whose title contains discriminating keywords from input titles
- * are returned, then normalized in JS for exact match verification.
- *
- * Runs independently of Phase 1 (no alreadyFound filter) so both phases
- * can execute in parallel.
+ * Shared setup for Phase 2: extracts normalized titles and keyword sets from input items.
+ * Used by both the fast SQL path and the fallback path.
  */
-async function batchFindTitleCandidates(
-    items: BatchReferenceCheckItem[],
-    libraryIds: number[]
-): Promise<Map<number, { item: Zotero.Item; normalizedTitle: string }>> {
-    // Filter to items that have titles
+function prepareTitleSearch(items: BatchReferenceCheckItem[]) {
     const needsMatching = items.filter(item => item.data.title);
 
-    if (needsMatching.length === 0 || libraryIds.length === 0) {
-        return new Map();
-    }
-
-    // Get all title field IDs (base + mapped fields like caseName, subject, nameOfAct)
-    // Zotero item types like case, email, statute store titles in mapped fields.
-    // See Zotero's duplicates.js for the same pattern.
     const titleFieldID = Zotero.ItemFields.getID('title');
-    if (!titleFieldID) {
-        return new Map();
-    }
-    const mappedTitleFieldIDs = Zotero.ItemFields.getTypeFieldsFromBase('title');
-    const allTitleFieldIDs = [titleFieldID, ...(mappedTitleFieldIDs || [])];
+    const mappedTitleFieldIDs = titleFieldID ? Zotero.ItemFields.getTypeFieldsFromBase('title') : [];
+    const allTitleFieldIDs = titleFieldID ? [titleFieldID, ...(mappedTitleFieldIDs || [])] : [];
 
     // Build normalized title map
     const normalizedInputTitles = new Map<string, BatchReferenceCheckItem[]>();
@@ -324,14 +317,7 @@ async function batchFindTitleCandidates(
         }
     }
 
-    if (normalizedInputTitles.size === 0) {
-        return new Map();
-    }
-
-    // Extract keywords from each title for SQL pre-filtering.
-    // For each title, we require ALL keywords to match (AND), then OR across titles.
-    // extractFilterKeywords prefers ASCII-only words which avoids diacritics
-    // mismatches (e.g. "etudes" vs "études") without needing dual variants.
+    // Extract keywords for SQL pre-filtering
     const titleKeywordSets: string[][] = [];
     for (const titleItems of normalizedInputTitles.values()) {
         const originalTitle = titleItems[0].data.title;
@@ -343,21 +329,47 @@ async function batchFindTitleCandidates(
         }
     }
 
-    // Build SQL with keyword LIKE pre-filtering
+    return { needsMatching, titleFieldID, allTitleFieldIDs, normalizedInputTitles, titleKeywordSets };
+}
+
+/**
+ * Build the base title SQL query with keyword LIKE pre-filtering.
+ * Returns { sql, params } for the SELECT clause up to the WHERE conditions.
+ */
+function buildTitleSqlBase(
+    allTitleFieldIDs: number[],
+    libraryIds: number[],
+    titleKeywordSets: string[][],
+    extraSelectColumns: string,
+    extraJoins: string,
+    extraParams: (string | number)[]
+): { sql: string; params: (string | number)[] } {
     const libraryPlaceholders = libraryIds.map(() => '?').join(', ');
     const titlePlaceholders = allTitleFieldIDs.map(() => '?').join(', ');
 
+    // Non-regular item types to exclude: annotation (1), attachment (3), note (28)
+    const noteTypeID = Zotero.ItemTypes.getID('note') || 28;
+    const attachmentTypeID = Zotero.ItemTypes.getID('attachment') || 3;
+    const annotationTypeID = Zotero.ItemTypes.getID('annotation') || 1;
+
     let sql = `
-        SELECT DISTINCT i.itemID, title_val.value as title
+        SELECT DISTINCT i.itemID, i.libraryID, i.key, title_val.value as title${extraSelectColumns}
         FROM items i
         JOIN itemData title_data ON i.itemID = title_data.itemID AND title_data.fieldID IN (${titlePlaceholders})
         JOIN itemDataValues title_val ON title_data.valueID = title_val.valueID
         LEFT JOIN deletedItems di ON i.itemID = di.itemID
+        ${extraJoins}
         WHERE i.libraryID IN (${libraryPlaceholders})
         AND di.itemID IS NULL
+        AND i.itemTypeID NOT IN (?, ?, ?)
     `;
 
-    const params: (string | number)[] = [...allTitleFieldIDs, ...libraryIds];
+    const params: (string | number)[] = [
+        ...allTitleFieldIDs,
+        ...extraParams,
+        ...libraryIds,
+        noteTypeID, attachmentTypeID, annotationTypeID
+    ];
 
     // Add keyword LIKE filter to avoid scanning all titles
     if (titleKeywordSets.length > 0) {
@@ -372,56 +384,250 @@ async function batchFindTitleCandidates(
         sql += ` AND (${orClauses.join(' OR ')})`;
     }
 
-    logger(`batchFindTitleCandidates: Searching ${normalizedInputTitles.size} titles with ${titleKeywordSets.length} keyword sets across ${libraryIds.length} libraries`, 1);
+    return { sql, params };
+}
 
-    const candidateItems = new Map<number, { item: Zotero.Item; normalizedTitle: string }>();
+/**
+ * Fast SQL path for Phase 2: fetches all candidate data via pure SQL.
+ * Avoids Zotero.Items.getAsync() and loadDataTypes() entirely.
+ */
+async function batchFindTitleCandidatesFast(
+    allTitleFieldIDs: number[],
+    libraryIds: number[],
+    normalizedInputTitles: Map<string, BatchReferenceCheckItem[]>,
+    titleKeywordSets: string[][]
+): Promise<Map<number, TitleCandidate>> {
+    // Look up field IDs for DOI, ISBN, date
+    const doiFieldID = Zotero.ItemFields.getID('DOI');
+    const isbnFieldID = Zotero.ItemFields.getID('ISBN');
+    const dateFieldID = Zotero.ItemFields.getID('date');
+    const mappedDateFieldIDs = dateFieldID ? Zotero.ItemFields.getTypeFieldsFromBase('date') : [];
+    const allDateFieldIDs = dateFieldID ? [dateFieldID, ...(mappedDateFieldIDs || [])] : [];
 
-    try {
-        // Use onRow callback to avoid Proxy issues with Zotero.DB.queryAsync
-        // The LIKE filter narrows candidates; normalizeString verifies exact match
-        const matchingRows: { itemID: number; title: string; normalizedTitle: string }[] = [];
-        let totalRows = 0;
+    // Build extra SELECT columns and LEFT JOINs for DOI, ISBN, date
+    let extraSelectColumns = '';
+    let extraJoins = '';
+    const extraParams: (string | number)[] = [];
 
-        await Zotero.DB.queryAsync(sql, params, {
-            onRow: (row: any) => {
-                totalRows++;
-                const itemID = row.getResultByIndex(0);
-                const title = row.getResultByIndex(1);
-                const normalizedDbTitle = normalizeString(title);
-                if (normalizedDbTitle && normalizedInputTitles.has(normalizedDbTitle)) {
-                    matchingRows.push({ itemID, title, normalizedTitle: normalizedDbTitle });
-                }
-            }
-        });
+    if (doiFieldID) {
+        extraSelectColumns += `, doi_val.value as doi`;
+        extraJoins += `
+        LEFT JOIN itemData doi_data ON i.itemID = doi_data.itemID AND doi_data.fieldID = ?
+        LEFT JOIN itemDataValues doi_val ON doi_data.valueID = doi_val.valueID`;
+        extraParams.push(doiFieldID);
+    } else {
+        extraSelectColumns += `, NULL as doi`;
+    }
 
-        logger(`batchFindTitleCandidates: SQL returned ${totalRows} pre-filtered rows, found ${matchingRows.length} exact normalized matches`, 1);
+    if (isbnFieldID) {
+        extraSelectColumns += `, isbn_val.value as isbn`;
+        extraJoins += `
+        LEFT JOIN itemData isbn_data ON i.itemID = isbn_data.itemID AND isbn_data.fieldID = ?
+        LEFT JOIN itemDataValues isbn_val ON isbn_data.valueID = isbn_val.valueID`;
+        extraParams.push(isbnFieldID);
+    } else {
+        extraSelectColumns += `, NULL as isbn`;
+    }
 
-        if (matchingRows.length > 0) {
-            // Load all matching items in batch
-            const itemIds = matchingRows.map(row => row.itemID);
-            const zoteroItems = await Zotero.Items.getAsync(itemIds);
+    if (allDateFieldIDs.length > 0) {
+        const datePlaceholders = allDateFieldIDs.map(() => '?').join(', ');
+        extraSelectColumns += `, date_val.value as date_value`;
+        extraJoins += `
+        LEFT JOIN itemData date_data ON i.itemID = date_data.itemID AND date_data.fieldID IN (${datePlaceholders})
+        LEFT JOIN itemDataValues date_val ON date_data.valueID = date_val.valueID`;
+        extraParams.push(...allDateFieldIDs);
+    } else {
+        extraSelectColumns += `, NULL as date_value`;
+    }
 
-            // Single batch load of all item data
-            if (zoteroItems.length > 0) {
-                await Zotero.Items.loadDataTypes(zoteroItems, ["itemData", "creators"]);
-            }
+    const { sql, params } = buildTitleSqlBase(
+        allTitleFieldIDs, libraryIds, titleKeywordSets,
+        extraSelectColumns, extraJoins, extraParams
+    );
 
-            // Build the candidate map
-            for (let i = 0; i < matchingRows.length; i++) {
-                const zoteroItem = zoteroItems[i];
-                if (zoteroItem && zoteroItem.isRegularItem() && !zoteroItem.deleted) {
-                    candidateItems.set(zoteroItem.id, {
-                        item: zoteroItem,
-                        normalizedTitle: matchingRows[i].normalizedTitle
-                    });
-                }
+    logger(`batchFindTitleCandidatesFast: Searching ${normalizedInputTitles.size} titles with ${titleKeywordSets.length} keyword sets across ${libraryIds.length} libraries`, 1);
+
+    // Query 1: Fetch title candidates with DOI, ISBN, date
+    const matchingRows: {
+        itemID: number; libraryID: number; key: string;
+        normalizedTitle: string; doi: string | null;
+        isbn: string | null; date: string | null;
+    }[] = [];
+    let totalRows = 0;
+
+    await Zotero.DB.queryAsync(sql, params, {
+        onRow: (row: any) => {
+            totalRows++;
+            const itemID = row.getResultByIndex(0);
+            const libraryID = row.getResultByIndex(1);
+            const key = row.getResultByIndex(2);
+            const title = row.getResultByIndex(3);
+            const doi = row.getResultByIndex(4) || null;
+            const isbn = row.getResultByIndex(5) || null;
+            const dateValue = row.getResultByIndex(6) || null;
+            const normalizedDbTitle = normalizeString(title);
+            if (normalizedDbTitle && normalizedInputTitles.has(normalizedDbTitle)) {
+                matchingRows.push({
+                    itemID, libraryID, key, normalizedTitle: normalizedDbTitle,
+                    doi, isbn, date: dateValue
+                });
             }
         }
-    } catch (error) {
-        logger(`batchFindTitleCandidates: Title batch query failed: ${error}`, 1);
+    });
+
+    logger(`batchFindTitleCandidatesFast: SQL returned ${totalRows} pre-filtered rows, found ${matchingRows.length} exact normalized matches`, 1);
+
+    if (matchingRows.length === 0) {
+        return new Map();
+    }
+
+    // Query 2: Fetch creator last names for matched items
+    const matchedItemIDs = matchingRows.map(r => r.itemID);
+    const creatorMap = new Map<number, string[]>();
+
+    // Batch in chunks of 500 to avoid SQLite variable limits
+    for (let i = 0; i < matchedItemIDs.length; i += 500) {
+        const chunk = matchedItemIDs.slice(i, i + 500);
+        const placeholders = chunk.map(() => '?').join(', ');
+        const creatorSql = `
+            SELECT ic.itemID, c.lastName
+            FROM itemCreators ic
+            JOIN creators c ON ic.creatorID = c.creatorID
+            WHERE ic.itemID IN (${placeholders})
+            ORDER BY ic.itemID, ic.orderIndex
+        `;
+
+        await Zotero.DB.queryAsync(creatorSql, chunk, {
+            onRow: (row: any) => {
+                const itemID = row.getResultByIndex(0);
+                const lastName = row.getResultByIndex(1);
+                if (!creatorMap.has(itemID)) {
+                    creatorMap.set(itemID, []);
+                }
+                creatorMap.get(itemID)!.push(lastName || '');
+            }
+        });
+    }
+
+    // Build the candidate map
+    const candidateItems = new Map<number, TitleCandidate>();
+    for (const row of matchingRows) {
+        candidateItems.set(row.itemID, {
+            libraryID: row.libraryID,
+            key: row.key,
+            normalizedTitle: row.normalizedTitle,
+            doi: row.doi,
+            isbn: row.isbn,
+            date: row.date,
+            creatorLastNames: creatorMap.get(row.itemID) || []
+        });
     }
 
     return candidateItems;
+}
+
+/**
+ * Fallback path for Phase 2: uses Zotero.Items.getAsync() + loadDataTypes().
+ * Called when the fast SQL path fails (e.g., if Zotero DB schema changes).
+ */
+async function batchFindTitleCandidatesFallback(
+    allTitleFieldIDs: number[],
+    libraryIds: number[],
+    normalizedInputTitles: Map<string, BatchReferenceCheckItem[]>,
+    titleKeywordSets: string[][]
+): Promise<Map<number, TitleCandidate>> {
+    const { sql, params } = buildTitleSqlBase(
+        allTitleFieldIDs, libraryIds, titleKeywordSets,
+        '', '', []
+    );
+
+    logger(`batchFindTitleCandidatesFallback: Searching ${normalizedInputTitles.size} titles across ${libraryIds.length} libraries`, 1);
+
+    const candidateItems = new Map<number, TitleCandidate>();
+
+    // Use onRow callback to avoid Proxy issues with Zotero.DB.queryAsync
+    const matchingRows: { itemID: number; normalizedTitle: string }[] = [];
+    let totalRows = 0;
+
+    await Zotero.DB.queryAsync(sql, params, {
+        onRow: (row: any) => {
+            totalRows++;
+            const itemID = row.getResultByIndex(0);
+            const title = row.getResultByIndex(3);
+            const normalizedDbTitle = normalizeString(title);
+            if (normalizedDbTitle && normalizedInputTitles.has(normalizedDbTitle)) {
+                matchingRows.push({ itemID, normalizedTitle: normalizedDbTitle });
+            }
+        }
+    });
+
+    logger(`batchFindTitleCandidatesFallback: SQL returned ${totalRows} pre-filtered rows, found ${matchingRows.length} exact normalized matches`, 1);
+
+    if (matchingRows.length > 0) {
+        // Load all matching items in batch via Zotero API
+        const itemIds = matchingRows.map(row => row.itemID);
+        const zoteroItems = await Zotero.Items.getAsync(itemIds);
+
+        if (zoteroItems.length > 0) {
+            await Zotero.Items.loadDataTypes(zoteroItems, ["itemData", "creators"]);
+        }
+
+        // Build the candidate map from Zotero.Item objects
+        for (let i = 0; i < matchingRows.length; i++) {
+            const zoteroItem = zoteroItems[i];
+            if (zoteroItem && zoteroItem.isRegularItem() && !zoteroItem.deleted) {
+                const creators = zoteroItem.getCreators();
+                candidateItems.set(zoteroItem.id, {
+                    libraryID: zoteroItem.libraryID,
+                    key: zoteroItem.key,
+                    normalizedTitle: matchingRows[i].normalizedTitle,
+                    doi: zoteroItem.getField('DOI') || null,
+                    isbn: zoteroItem.getField('ISBN') || null,
+                    date: zoteroItem.getField('date', true, true) || null,
+                    creatorLastNames: creators.map((c: any) => c.lastName || '')
+                });
+            }
+        }
+    }
+
+    return candidateItems;
+}
+
+/**
+ * Phase 2: Batch title candidate collection
+ * Finds all potential title matches across libraries
+ *
+ * Uses keyword-based LIKE pre-filtering in SQL to avoid fetching all titles.
+ * Only rows whose title contains discriminating keywords from input titles
+ * are returned, then normalized in JS for exact match verification.
+ *
+ * Tries an optimized pure-SQL path first (no getAsync/loadDataTypes), falling
+ * back to the Zotero API path if the SQL approach fails.
+ *
+ * Runs independently of Phase 1 (no alreadyFound filter) so both phases
+ * can execute in parallel.
+ */
+async function batchFindTitleCandidates(
+    items: BatchReferenceCheckItem[],
+    libraryIds: number[]
+): Promise<Map<number, TitleCandidate>> {
+    const { needsMatching, titleFieldID, allTitleFieldIDs, normalizedInputTitles, titleKeywordSets } =
+        prepareTitleSearch(items);
+
+    if (needsMatching.length === 0 || libraryIds.length === 0 || !titleFieldID || normalizedInputTitles.size === 0) {
+        return new Map();
+    }
+
+    try {
+        return await batchFindTitleCandidatesFast(
+            allTitleFieldIDs, libraryIds, normalizedInputTitles, titleKeywordSets
+        );
+    } catch (error) {
+        logger(`batchFindTitleCandidates: Fast SQL path failed, falling back to API: ${error}`, 1);
+        return await batchFindTitleCandidatesFallback(
+            allTitleFieldIDs, libraryIds, normalizedInputTitles, titleKeywordSets
+        );
+    }
 }
 
 /**
@@ -429,8 +635,8 @@ async function batchFindTitleCandidates(
  */
 function findMatchInCandidates(
     inputItem: BatchReferenceCheckItem,
-    candidates: Map<number, { item: Zotero.Item; normalizedTitle: string }>
-): Zotero.Item | null {
+    candidates: Map<number, TitleCandidate>
+): TitleCandidate | null {
     const normalizedInputTitle = normalizeString(inputItem.data.title);
     if (!normalizedInputTitle) {
         return null;
@@ -445,31 +651,35 @@ function findMatchInCandidates(
     const inputCreators = inputItem.data.creators || [];
     const cleanInputDOI = inputItem.data.DOI ? Zotero.Utilities.cleanDOI(inputItem.data.DOI) : null;
     const cleanInputISBN = inputItem.data.ISBN ? Zotero.Utilities.cleanISBN(String(inputItem.data.ISBN)) : null;
-    
-    for (const [, { item: candidate, normalizedTitle }] of candidates) {
+
+    for (const [, candidate] of candidates) {
         // A. Title Normalization Check (exact match required on normalized)
-        if (normalizedTitle !== normalizedInputTitle) {
+        if (candidate.normalizedTitle !== normalizedInputTitle) {
             continue;
         }
         
         // B. DOI Conflict Check (if both have DOIs, they must match)
-        const candidateDOI = candidate.getField('DOI') 
-            ? Zotero.Utilities.cleanDOI(candidate.getField('DOI')) 
+        const candidateDOI = candidate.doi
+            ? Zotero.Utilities.cleanDOI(candidate.doi)
             : null;
         if (cleanInputDOI && candidateDOI && cleanInputDOI !== candidateDOI) {
             continue;
         }
         
         // C. ISBN Conflict Check (if both have ISBNs, they must match)
-        const candidateISBN = candidate.getField('ISBN') 
-            ? Zotero.Utilities.cleanISBN(String(candidate.getField('ISBN'))) 
+        const candidateISBN = candidate.isbn
+            ? Zotero.Utilities.cleanISBN(String(candidate.isbn))
             : null;
         if (cleanInputISBN && candidateISBN && cleanInputISBN !== candidateISBN) {
             continue;
         }
         
         // D. Year Check (Tolerance ±1 year)
-        const candidateYear = parseYear(candidate.getField('year'));
+        let candidateYear: number | null = null;
+        if (candidate.date) {
+            const parsedDate = Zotero.Date.strToDate(candidate.date);
+            candidateYear = parseYear(parsedDate.year);
+        }
         if (inputYear && candidateYear) {
             if (Math.abs(inputYear - candidateYear) > 1) {
                 continue;
@@ -477,15 +687,15 @@ function findMatchInCandidates(
         }
         
         // E. Creator Check
-        const candidateCreators = candidate.getCreators();
-        
+        const candidateCreatorLastNames = candidate.creatorLastNames;
+
         // Special case: if BOTH have no creators, consider it a match
-        if (inputCreators.length === 0 && candidateCreators.length === 0) {
+        if (inputCreators.length === 0 && candidateCreatorLastNames.length === 0) {
             return candidate;
         }
         
         // If only one has creators, don't consider it a match
-        if (inputCreators.length === 0 || candidateCreators.length === 0) {
+        if (inputCreators.length === 0 || candidateCreatorLastNames.length === 0) {
             continue;
         }
         
@@ -496,9 +706,9 @@ function findMatchInCandidates(
         for (const inputCreatorLast of inputCreators) {
             const inputLast = normalizeString(inputCreatorLast);
             if (!inputLast) continue;
-            
-            for (const candidateCreator of candidateCreators) {
-                const candLast = normalizeString(candidateCreator.lastName);
+
+            for (const candLastName of candidateCreatorLastNames) {
+                const candLast = normalizeString(candLastName);
                 if (!candLast) continue;
                 
                 if (inputLast === candLast) {
