@@ -145,7 +145,15 @@ async function onStartup() {
         Zotero.unlockPromise,
         Zotero.uiReadyPromise,
     ]);
-    
+
+    // If the user quit Zotero before plugins finished initializing, the
+    // promises above still resolve but the app is already tearing down.
+    // Bail out to avoid opening resources that can never be cleaned up.
+    if (Services?.startup?.shuttingDown || Zotero.__beaverShuttingDown) {
+        ztoolkit.log("Startup aborted: app is already shutting down");
+        return;
+    }
+
     registerQuitObserver();
     initLocale();
     ztoolkit.log("Startup");
@@ -155,49 +163,74 @@ async function onStartup() {
     ztoolkit.log(`Plugin version: ${version}`);
 
     // -------- Initialize database --------
+    // Wrap in try/catch so that if any later initialization step fails
+    // (e.g. main window already destroyed), we still close the DB
+    // connection.  An unclosed connection triggers a FATAL AsyncShutdown
+    // timeout crash in Mozilla's Sqlite.sys.mjs shutdown blocker.
     const dbConnection = new Zotero.DBConnection("beaver");
     const beaverDB = new BeaverDB(dbConnection);
     addon.db = beaverDB;
 
-    // Test connection and initialize schema
-    await dbConnection.test();
-    await beaverDB.initDatabase(version);
-    
-    // -------- Initialize Attachment File Cache --------
-    const attachmentFileCache = new AttachmentFileCache(beaverDB);
-    await attachmentFileCache.init();
-    await attachmentFileCache.runStartupGC();
-    addon.attachmentFileCache = attachmentFileCache;
-    ztoolkit.log("AttachmentFileCache initialized successfully");
+    try {
+        // Test connection and initialize schema
+        await dbConnection.test();
+        await beaverDB.initDatabase(version);
 
-    // -------- Initialize Citation Service with caching --------
-    const citationService = new CitationService(ztoolkit);
-    addon.citationService = citationService;
-    ztoolkit.log("CitationService initialized successfully");
-    
-    // -------- Register keyboard shortcuts --------
-    BeaverUIFactory.registerShortcuts();
+        // -------- Initialize Attachment File Cache --------
+        const attachmentFileCache = new AttachmentFileCache(beaverDB);
+        await attachmentFileCache.init();
+        await attachmentFileCache.runStartupGC();
+        addon.attachmentFileCache = attachmentFileCache;
+        ztoolkit.log("AttachmentFileCache initialized successfully");
 
-    // -------- Add event bus to window --------
-    Zotero.getMainWindow().__beaverEventBus = eventBus;
+        // -------- Initialize Citation Service with caching --------
+        const citationService = new CitationService(ztoolkit);
+        addon.citationService = citationService;
+        ztoolkit.log("CitationService initialized successfully");
 
-    // -------- Register protocol handler (zotero://beaver) --------
-    registerBeaverProtocolHandler();
+        // -------- Register keyboard shortcuts --------
+        BeaverUIFactory.registerShortcuts();
 
-    // -------- Load UI for all windows --------
-    await Promise.all(
-        Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
-    );
+        // -------- Add event bus to window --------
+        const mainWindow = Zotero.getMainWindow();
+        if (mainWindow) {
+            mainWindow.__beaverEventBus = eventBus;
+        }
 
-    // -------- Handle plugin upgrade --------
-    const lastVersion = getPref('installedVersion');
-    if (lastVersion && lastVersion !== version) {
-        await handleUpgrade(lastVersion, version);
+        // -------- Register protocol handler (zotero://beaver) --------
+        registerBeaverProtocolHandler();
+
+        // -------- Load UI for all windows --------
+        const mainWindows = Zotero.getMainWindows();
+        if (mainWindows.length > 0) {
+            await Promise.all(
+                mainWindows.map((win) => onMainWindowLoad(win)),
+            );
+        }
+
+        // -------- Handle plugin upgrade --------
+        const lastVersion = getPref('installedVersion');
+        if (lastVersion && lastVersion !== version) {
+            await handleUpgrade(lastVersion, version);
+        }
+
+        // -------- Set installed version --------
+        setPref('installedVersion', version);
+        ztoolkit.log(`Installed version: ${getPref('installedVersion')}`);
+    } catch (error) {
+        // If startup fails after opening the DB, close it immediately
+        // to prevent AsyncShutdown timeout → FATAL ERROR crash.
+        ztoolkit.log(`Startup failed, closing database: ${error}`);
+        try {
+            if (addon.db) {
+                await addon.db.closeDatabase();
+                addon.db = undefined;
+            }
+        } catch (closeError) {
+            ztoolkit.log(`Failed to close database during startup error recovery: ${closeError}`);
+        }
+        throw error;
     }
-
-    // -------- Set installed version --------
-    setPref('installedVersion', version);
-    ztoolkit.log(`Installed version: ${getPref('installedVersion')}`);
 }
 
 async function onMainWindowLoad(win: Window): Promise<void> {
