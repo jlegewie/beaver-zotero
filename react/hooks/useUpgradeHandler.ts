@@ -205,7 +205,7 @@ export const useUpgradeHandler = () => {
             logger(`useUpgradeHandler: Displaying floating release notes popup for version ${latestFloating.version}.`, 3);
 
             addFloatingPopupMessage({
-                type: 'info',
+                type: 'version_update',
                 title: latestFloating.title,
                 text: latestFloating.text,
                 featureList: latestFloating.featureList,
