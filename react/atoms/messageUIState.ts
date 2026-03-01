@@ -174,18 +174,18 @@ export const setRunErrorVisibilityAtom = atom(
 
 /**
  * Tracks dismissed high token usage warnings by thread ID.
- * Value is the run ID whose warning was dismissed in that thread.
+ * Once dismissed in a thread, the warning stays hidden for that thread's session.
  */
-export const dismissedHighTokenWarningByThreadAtom = atom<Record<string, string>>({});
+export const dismissedHighTokenWarningByThreadAtom = atom<Record<string, boolean>>({});
 
 /**
- * Mark a high token usage warning as dismissed for a specific thread/run pair.
+ * Mark the high token usage warning as dismissed for a thread.
  */
 export const dismissHighTokenWarningForThreadAtom = atom(
     null,
-    (get, set, { threadId, runId }: { threadId: string; runId: string }) => {
+    (get, set, threadId: string) => {
         const current = get(dismissedHighTokenWarningByThreadAtom);
-        set(dismissedHighTokenWarningByThreadAtom, { ...current, [threadId]: runId });
+        set(dismissedHighTokenWarningByThreadAtom, { ...current, [threadId]: true });
     }
 );
 

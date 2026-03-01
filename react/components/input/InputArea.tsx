@@ -49,7 +49,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const allRuns = useAtomValue(allRunsAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
-    const dismissedWarningsByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
+    const dismissedHighTokenByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
     const dismissedSoftCapByThread = useAtomValue(dismissedSoftCapWarningByThreadAtom);
     const dismissSoftCapWarning = useSetAtom(dismissSoftCapWarningForThreadAtom);
@@ -72,7 +72,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const lastRunUsage = lastRun?.total_usage;
     const lastRequestInputTokens = lastRunUsage ? getLastRequestInputTokens(lastRunUsage) : null;
     const warningThreadId = lastRun?.thread_id ?? currentThreadId;
-    const dismissedRunId = warningThreadId ? dismissedWarningsByThread[warningThreadId] : undefined;
+    const isHighTokenDismissed = warningThreadId ? dismissedHighTokenByThread[warningThreadId] : false;
     const dismissedSoftCapRunId = warningThreadId ? dismissedSoftCapByThread[warningThreadId] : undefined;
     const showHighTokenUsageWarningMessage = getPref('showHighTokenUsageWarningMessage');
     const confirmLongRunningAgent = getPref('confirmLongRunningAgent');
@@ -84,7 +84,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         lastRun &&
         warningThreadId &&
         isHighTokenUsage &&
-        dismissedRunId !== lastRun.id
+        !isHighTokenDismissed
     );
     const shouldShowSoftCapWarning = Boolean(
         !isAwaitingApproval &&
@@ -222,11 +222,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const handleDismissHighTokenWarning = (e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        if (!warningThreadId || !lastRun) return;
-        dismissHighTokenWarning({
-            threadId: warningThreadId,
-            runId: lastRun.id,
-        });
+        if (!warningThreadId) return;
+        dismissHighTokenWarning(warningThreadId);
     };
 
     const handleDismissSoftCapWarning = (e: React.MouseEvent) => {
