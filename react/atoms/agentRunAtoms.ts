@@ -92,6 +92,7 @@ import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
+import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
 import { currentThreadNameAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '../agents/toolLabels';
@@ -806,6 +807,14 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
             // Clear retry state when run completes
             set(wsRetryAtom, null);
+
+            // Store transient backend flags (not persisted on AgentRun)
+            if (event.high_token_usage) {
+                set(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [event.run_id]: true }));
+            }
+            if (event.soft_cap_triggered) {
+                set(softCapTriggeredRunsAtom, (prev) => ({ ...prev, [event.run_id]: true }));
+            }
 
             // Process citations from run complete event
             if (event.citations && event.citations.length > 0) {

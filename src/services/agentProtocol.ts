@@ -67,6 +67,10 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     cost: number | null;
     citations: import('../../react/types/citations').CitationMetadata[] | null;
     agent_actions: import('../../react/agents/agentActions').AgentAction[] | null;
+    /** Whether the run had high input token usage (backend-assessed). */
+    high_token_usage?: boolean;
+    /** Whether the soft cap history processor was triggered during this run. */
+    soft_cap_triggered?: boolean;
 }
 
 /** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */

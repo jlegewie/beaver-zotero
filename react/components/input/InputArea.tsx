@@ -19,10 +19,11 @@ import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
+import SoftCapWarningBar from './SoftCapWarningBar';
 import { allRunsAtom } from '../../agents/atoms';
-import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom } from '../../atoms/messageUIState';
+import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, dismissSoftCapWarningForThreadAtom, dismissedSoftCapWarningByThreadAtom, backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
-import { getPref } from '../../../src/utils/prefs';
+import { getPref, setPref } from '../../../src/utils/prefs';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
@@ -50,6 +51,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const dismissedWarningsByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
+    const dismissedSoftCapByThread = useAtomValue(dismissedSoftCapWarningByThreadAtom);
+    const dismissSoftCapWarning = useSetAtom(dismissSoftCapWarningForThreadAtom);
+    const backendHighTokenUsageRuns = useAtomValue(backendHighTokenUsageRunsAtom);
+    const softCapTriggeredRuns = useAtomValue(softCapTriggeredRunsAtom);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -68,15 +73,26 @@ const InputArea: React.FC<InputAreaProps> = ({
     const lastRequestInputTokens = lastRunUsage ? getLastRequestInputTokens(lastRunUsage) : null;
     const warningThreadId = lastRun?.thread_id ?? currentThreadId;
     const dismissedRunId = warningThreadId ? dismissedWarningsByThread[warningThreadId] : undefined;
+    const dismissedSoftCapRunId = warningThreadId ? dismissedSoftCapByThread[warningThreadId] : undefined;
     const showHighTokenUsageWarningMessage = getPref('showHighTokenUsageWarningMessage');
+    const confirmLongRunningAgent = getPref('confirmLongRunningAgent');
+    const isHighTokenUsage = (lastRun && backendHighTokenUsageRuns[lastRun.id])
+        ?? (lastRequestInputTokens !== null && lastRequestInputTokens > HIGH_INPUT_TOKEN_WARNING_THRESHOLD);
     const shouldShowHighTokenWarning = Boolean(
         showHighTokenUsageWarningMessage &&
         !isAwaitingApproval &&
         lastRun &&
         warningThreadId &&
-        lastRequestInputTokens !== null &&
-        lastRequestInputTokens > HIGH_INPUT_TOKEN_WARNING_THRESHOLD &&
+        isHighTokenUsage &&
         dismissedRunId !== lastRun.id
+    );
+    const shouldShowSoftCapWarning = Boolean(
+        !isAwaitingApproval &&
+        lastRun &&
+        warningThreadId &&
+        softCapTriggeredRuns[lastRun.id] &&
+        confirmLongRunningAgent &&
+        dismissedSoftCapRunId !== lastRun.id
     );
 
     // Slash menu hook
@@ -213,6 +229,28 @@ const InputArea: React.FC<InputAreaProps> = ({
         });
     };
 
+    const handleDismissSoftCapWarning = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!warningThreadId || !lastRun) return;
+        dismissSoftCapWarning({
+            threadId: warningThreadId,
+            runId: lastRun.id,
+        });
+    };
+
+    const handleEnableLongRunning = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setPref('confirmLongRunningAgent', false);
+        if (warningThreadId && lastRun) {
+            dismissSoftCapWarning({
+                threadId: warningThreadId,
+                runId: lastRun.id,
+            });
+        }
+    };
+
     return (
         <div
             className="user-message-display shadow-md shadow-md-top"
@@ -221,7 +259,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         >
             {/* Pending actions bar - shown when awaiting approval */}
             <PendingActionsBar />
-            {shouldShowHighTokenWarning && lastRequestInputTokens !== null && (
+            {shouldShowHighTokenWarning && (
                 <HighTokenUsageWarningBar
                     onNewThread={(e) => {
                         e.preventDefault();
@@ -229,6 +267,12 @@ const InputArea: React.FC<InputAreaProps> = ({
                         newThread();
                     }}
                     onDismiss={handleDismissHighTokenWarning}
+                />
+            )}
+            {shouldShowSoftCapWarning && (
+                <SoftCapWarningBar
+                    onEnableLongRunning={handleEnableLongRunning}
+                    onDismiss={handleDismissSoftCapWarning}
                 />
             )}
 
