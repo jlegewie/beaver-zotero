@@ -333,7 +333,11 @@ export const toggleNotePanelVisibilityAtom = atom(
 // ---------------------------------------------------------------------------
 
 /**
- * Reset all UI state (used when starting a new thread)
+ * Reset thread-local UI state when starting a new thread.
+ *
+ * Session-scoped warning state is intentionally preserved so revisiting an
+ * existing thread in the same app session keeps its warning visibility and
+ * dismissal behavior intact.
  */
 export const resetMessageUIStateAtom = atom(
     null,
@@ -342,10 +346,6 @@ export const resetMessageUIStateAtom = atom(
         set(messageSourcesVisibilityAtom, {});
         set(thinkingVisibilityAtom, {});
         set(runErrorVisibilityAtom, {});
-        set(dismissedHighTokenWarningByThreadAtom, {});
-        set(dismissedSoftCapWarningByThreadAtom, {});
-        set(backendHighTokenUsageRunsAtom, {});
-        set(softCapTriggeredRunsAtom, {});
         set(annotationPanelStateAtom, {});
         set(annotationBusyAtom, {});
         set(annotationAttachmentTitlesAtom, {});
