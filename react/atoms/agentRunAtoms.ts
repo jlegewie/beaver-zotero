@@ -803,6 +803,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 cost: event.cost,
                 citationsCount: event.citations?.length ?? 0,
                 actionsCount: event.agent_actions?.length ?? 0,
+                highTokenUsage: event.high_token_usage,
+                softCapTriggered: event.soft_cap_triggered,
             }, 1);
             set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
             // Clear retry state when run completes
