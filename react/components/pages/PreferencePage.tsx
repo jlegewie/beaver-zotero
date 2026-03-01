@@ -941,6 +941,7 @@ const PreferencePage: React.FC = () => {
             {/* ===== PERMISSIONS TAB ===== */}
             {activeTab === 'permissions' && (
                 <>
+                    <SectionLabel>Library Modifications</SectionLabel>
                     <SettingsGroup>
                         <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
                             {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
@@ -977,21 +978,32 @@ const PreferencePage: React.FC = () => {
                         </div>
                     </SettingsGroup>
 
-                    <SectionLabel>Extra Credit Confirmations</SectionLabel>
-                    <SettingsGroup>
-                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
-                            <div className="font-color-secondary text-base">
-                                Choose whether to confirm before operations that use extra credits.
-                                Only relevant when using Beaver credits.
-                                {/* Extraction and external search are not supported when using your own API keys. */}
-                            </div>
-                        </div>
-                    </SettingsGroup>
+                    <SectionLabel>Checkpoints</SectionLabel>
                     <SettingsGroup>
                         <SettingsRow
+                            title="Pause Long-Running Tasks"
+                            description={
+                                <>
+                                    The agent summarizes progress and waits for your input during long running tasks. Unchecking allows uninterrupted runs, which may use more credits. <DocLink path="credits">Learn more</DocLink>
+                                </>
+                            }
+                            onClick={handleConfirmLongRunningAgentToggle}
+                            // tooltip="When enabled, the agent pauses after a set number of steps, reports progress, and asks whether to continue. Disable to let the agent run to completion without interruption."
+                            control={
+                                <input
+                                    type="checkbox"
+                                    checked={confirmLongRunningAgent}
+                                    onChange={handleConfirmLongRunningAgentToggle}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ cursor: 'pointer', margin: 0 }}
+                                />
+                            }
+                        />
+                        <SettingsRow
                             title="Confirm Extraction Costs"
-                            description="Ask before using extra credits for batch extraction"
+                            description="Ask before using extra credits for batch extraction. Only relevant when using Beaver credits."
                             onClick={handleConfirmExtractionCostsToggle}
+                            hasBorder
                             control={
                                 <input
                                     type="checkbox"
@@ -1004,7 +1016,7 @@ const PreferencePage: React.FC = () => {
                         />
                         <SettingsRow
                             title="Confirm External Search Costs"
-                            description="Ask before using extra credits for external literature search"
+                            description="Ask before using extra credits for external literature search. Only relevant when using Beaver credits."
                             onClick={handleConfirmExternalSearchCostsToggle}
                             hasBorder
                             control={
@@ -1012,22 +1024,6 @@ const PreferencePage: React.FC = () => {
                                     type="checkbox"
                                     checked={confirmExternalSearchCosts}
                                     onChange={handleConfirmExternalSearchCostsToggle}
-                                    onClick={(e) => e.stopPropagation()}
-                                    style={{ cursor: 'pointer', margin: 0 }}
-                                />
-                            }
-                        />
-                        <SettingsRow
-                            title="Confirm Long-Running Tasks"
-                            description="Ask before the agent continues past its standard task limit (uses extra credits)"
-                            onClick={handleConfirmLongRunningAgentToggle}
-                            hasBorder
-                            tooltip="When enabled, the agent pauses after a set number of steps, reports progress, and asks whether to continue. Disable to let the agent run to completion without interruption."
-                            control={
-                                <input
-                                    type="checkbox"
-                                    checked={confirmLongRunningAgent}
-                                    onChange={handleConfirmLongRunningAgentToggle}
                                     onClick={(e) => e.stopPropagation()}
                                     style={{ cursor: 'pointer', margin: 0 }}
                                 />
@@ -1052,7 +1048,7 @@ const PreferencePage: React.FC = () => {
                             }
                         />
                         <SettingsRow
-                            title="Auto-Create Notes"
+                            title="Auto-Create Zotero Notes"
                             description="Automatically create Zotero notes when generated by the agent"
                             onClick={handleAutoCreateNotesToggle}
                             hasBorder
