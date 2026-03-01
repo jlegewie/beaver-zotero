@@ -127,6 +127,7 @@ const PreferencePage: React.FC = () => {
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
     const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
     const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
+    const [confirmLongRunningAgent, setConfirmLongRunningAgent] = useState(() => getPref('confirmLongRunningAgent'));
     const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
     const isMcpServerSupported = useAtomValue(isMcpServerSupportedAtom);
     const [mcpCopied, setMcpCopied] = useState(false);
@@ -411,6 +412,12 @@ const PreferencePage: React.FC = () => {
         setPref('confirmExternalSearchCosts', newValue);
         setConfirmExternalSearchCosts(newValue);
     }, [confirmExternalSearchCosts]);
+
+    const handleConfirmLongRunningAgentToggle = useCallback(() => {
+        const newValue = !confirmLongRunningAgent;
+        setPref('confirmLongRunningAgent', newValue);
+        setConfirmLongRunningAgent(newValue);
+    }, [confirmLongRunningAgent]);
 
     const handleMcpServerToggle = useCallback(() => {
         if (!isMcpServerSupported) return;
@@ -999,11 +1006,28 @@ const PreferencePage: React.FC = () => {
                             title="Confirm External Search Costs"
                             description="Ask before using extra credits for external literature search"
                             onClick={handleConfirmExternalSearchCostsToggle}
+                            hasBorder
                             control={
                                 <input
                                     type="checkbox"
                                     checked={confirmExternalSearchCosts}
                                     onChange={handleConfirmExternalSearchCostsToggle}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ cursor: 'pointer', margin: 0 }}
+                                />
+                            }
+                        />
+                        <SettingsRow
+                            title="Confirm Long-Running Tasks"
+                            description="Ask before the agent continues past its standard task limit (uses extra credits)"
+                            onClick={handleConfirmLongRunningAgentToggle}
+                            hasBorder
+                            tooltip="When enabled, the agent pauses after a set number of steps, reports progress, and asks whether to continue. Disable to let the agent run to completion without interruption."
+                            control={
+                                <input
+                                    type="checkbox"
+                                    checked={confirmLongRunningAgent}
+                                    onChange={handleConfirmLongRunningAgentToggle}
                                     onClick={(e) => e.stopPropagation()}
                                     style={{ cursor: 'pointer', margin: 0 }}
                                 />
