@@ -26,6 +26,7 @@ import {
     WSThreadNameEvent,
     CurrentLibrary,
     CurrentCollection,
+    ChargingPermissions,
 } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
@@ -276,6 +277,13 @@ function createAgentRunShell(
     rewriteFromRunId?: string,
 ): { run: AgentRun; request: AgentRunRequest } {
     const runId = uuidv4();
+    
+    // Get user preferences for charging permissions
+    const permissions: ChargingPermissions = {
+        confirm_extraction_costs: getPref('confirmExtractionCosts'),
+        confirm_external_search_costs: getPref('confirmExternalSearchCosts'),
+        confirm_long_running_agent: getPref('confirmLongRunningAgent'),
+    };
 
     // Create the request that will be sent to the backend
     // thread_id is null for new threads - backend generates the ID
@@ -288,6 +296,7 @@ function createAgentRunShell(
             ...userPrompt,
             ...(customInstructions ? { custom_instructions: customInstructions } : {}),
         },
+        permissions: permissions,
         ...(modelSelectionOptions.model_id ? { model_id: modelSelectionOptions.model_id } : {}),
         ...(modelSelectionOptions.api_key ? { api_key: modelSelectionOptions.api_key } : {}),
         ...(customModel ? { custom_model: customModel } : {}),

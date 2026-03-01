@@ -982,6 +982,15 @@ export interface ApplicationStateInput {
     library_selection?: ZoteroItemReference[];
 }
 
+export interface ChargingPermissions {
+    /** Whether to request user confirmation for extraction surcharges */
+    confirm_extraction_costs: boolean;
+    /** Whether to request user confirmation for external search surcharges */
+    confirm_external_search_costs: boolean;
+    /** Whether to apply the soft cap that stops long-running agent turns */
+    confirm_long_running_agent: boolean;
+}
+
 /**
  * Agent run request sent by the client after receiving the 'ready' event.
  * Model selection is included in this request (moved from auth message).
@@ -995,6 +1004,8 @@ export interface AgentRunRequest {
     thread_id: string | null;
     /** The user's message */
     user_prompt: BeaverAgentPrompt;
+    /** Permissions for the agent run */
+    permissions: ChargingPermissions;
     /** UUID of model_configs entry (mutually exclusive with custom_model) */
     model_id?: string;
     /** User's API key for BYOK models */
