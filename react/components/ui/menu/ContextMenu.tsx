@@ -97,6 +97,8 @@ export interface ContextMenuProps {
     };
     /** Whether to show an arrow pointing to the trigger element */
     showArrow?: boolean;
+    /** Optional custom header content to render at the top of the menu */
+    header?: ReactNode;
     /** Optional custom footer content to render at the bottom of the menu */
     footer?: ReactNode;
 }
@@ -118,6 +120,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     usePortal = false,
     positionAdjustment = { x: 0, y: 0 },
     showArrow = false,
+    header,
     footer
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
@@ -363,6 +366,12 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             aria-orientation="vertical"
             onClick={(e) => e.stopPropagation()} // Prevent clicks from propagating
         >
+            {/* Custom header section */}
+            {header && (
+                <div className="mb-1">
+                    {header}
+                </div>
+            )}
             {menuItems.map((item, index) => (
                 <div
                     key={index}

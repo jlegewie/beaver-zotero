@@ -27,6 +27,8 @@ interface MenuButtonProps {
     };
     /** Whether to show an arrow pointing to the button */
     showArrow?: boolean;
+    /** Optional custom header content to render at the top of the menu */
+    header?: ReactNode;
     /** Optional custom footer content to render at the bottom of the menu */
     footer?: ReactNode;
     /** Optional callback to toggle the menu */
@@ -57,6 +59,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     positionAdjustment,
     tooltipContent,
     showArrow = false,
+    header,
     footer,
     toggleCallback,
     onAfterClose,
@@ -148,6 +151,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
                 positionAdjustment={positionAdjustment}
                 showArrow={showArrow}
                 width={width}
+                header={header}
                 footer={footer}
             />
         </>
