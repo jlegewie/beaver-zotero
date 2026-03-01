@@ -1,11 +1,11 @@
 import React from 'react';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
-import { SettingsIcon, UserIcon, LogoutIcon, BugIcon } from '../../icons/icons';
+import { SettingsIcon, UserIcon, LogoutIcon, BugIcon, InformationCircleIcon } from '../../icons/icons';
 import { isErrorReportDialogVisibleAtom } from '../../../atoms/ui';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { hasCompletedOnboardingAtom, updateRequiredAtom } from '../../../atoms/profile';
-import { logoutAtom } from '../../../atoms/auth';
+import { logoutAtom, userAtom } from '../../../atoms/auth';
 import { openPreferencesWindow } from '../../../../src/ui/openPreferencesWindow';
 
 interface UserAccountMenuButtonProps {
@@ -24,6 +24,7 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
     const updateRequired = useAtomValue(updateRequiredAtom);
     const setErrorReportDialogVisible = useSetAtom(isErrorReportDialogVisibleAtom);
     const logout = useSetAtom(logoutAtom);
+    const user = useAtomValue(userAtom);
 
     // Create menu items (filter out settings when update is required)
     const menuItems: MenuItem[] = [
@@ -41,6 +42,12 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
             disabled: false,
         },
         {
+            label: "Get Help",
+            onClick: () => Zotero.launchURL('https://www.beaverapp.ai/docs/getting-started'),
+            icon: InformationCircleIcon,
+            disabled: false,
+        },
+        {
             label: "Report Error",
             onClick: () => setErrorReportDialogVisible(true),
             icon: BugIcon,
@@ -55,6 +62,12 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
         }
     ];
 
+    const emailHeader = user?.email ? (
+        <div className="px-2 pt-15 p-15 border-top-quinary">
+            <span className="text-sm font-color-tertiary block" style={{ userSelect: 'text' }}>{user.email}</span>
+        </div>
+    ) : undefined;
+
     return (
         <MenuButton
             menuItems={menuItems}
@@ -64,6 +77,7 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
             ariaLabel={ariaLabel}
             tooltipContent="User account and settings"
             showArrow={true}
+            // footer={emailHeader}
         />
     );
 };
