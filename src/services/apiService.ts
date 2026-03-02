@@ -26,19 +26,31 @@ export class ApiService {
     * access token is available, automatically handling token refreshes.
     */
     async getAuthHeaders(): Promise<Record<string, string>> {
-        // Get the current session from Supabase, which handles token refreshes
         const { data, error } = await supabase.auth.getSession();
+        let sessionData = data;
 
         if (error) {
             logger(`Error getting session: ${error.message}`, 2);
             throw new ApiError(401, 'Error retrieving user session');
         }
 
-        if (!data.session) {
+        if (!sessionData.session) {
             throw new ApiError(401, 'User not authenticated');
         }
+
+        // Defense-in-depth: refresh if the token expires within 30s
+        const expiresAt = sessionData.session.expires_at;
+        if (expiresAt && expiresAt - Math.floor(Date.now() / 1000) < 30) {
+            logger('Access token expired or near-expiry, refreshing session');
+            const refreshResult = await supabase.auth.refreshSession();
+            if (refreshResult.error || !refreshResult.data.session) {
+                logger(`Session refresh failed: ${refreshResult.error?.message}`, 2);
+                throw new ApiError(401, 'Session expired and refresh failed');
+            }
+            sessionData = refreshResult.data;
+        }
         
-        const token = data.session.access_token;
+        const token = sessionData.session!.access_token;
         if (!token) {
             throw new ApiError(401, 'No access token available');
         }
