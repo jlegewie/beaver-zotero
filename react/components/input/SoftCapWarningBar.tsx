@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertIcon, CancelIcon, Icon } from '../icons/icons';
+import { InformationCircleIcon, CancelIcon, Icon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
 
 interface SoftCapWarningBarProps {
@@ -18,11 +18,10 @@ const SoftCapWarningBar: React.FC<SoftCapWarningBarProps> = ({
     const [isLinkHovered, setIsLinkHovered] = React.useState(false);
 
     return (
-        <div className="high-token-usage-warning-bar display-flex flex-row items-start px-3 py-15 gap-2">
-            <Icon icon={AlertIcon} className="font-color-orange scale-10 mt-010" />
+        <div className="high-token-usage-warning-bar display-flex flex-row items-start px-3 py-2 gap-2">
+            <Icon icon={InformationCircleIcon} className="font-color-secondary scale-10 mt-015" />
             <span className="font-color-secondary text-sm">
-                This task was cut short to save credits.
-                {' '}
+                Beaver paused and summarized its progress.{' '}
                 <a
                     href="#"
                     className={`${isLinkHovered ? 'font-color-primary' : 'font-color-secondary'} transition text-sm text-underline`}
@@ -35,10 +34,9 @@ const SoftCapWarningBar: React.FC<SoftCapWarningBarProps> = ({
                         onEnableLongRunning(e);
                     }}
                 >
-                    Enable long-running tasks
+                    Disable pausing
                 </a>
-                {' '}
-                to let the agent work longer.
+                {' '}to avoid interruptions. Additional costs may apply.
             </span>
             <div className="flex-1" />
             <IconButton

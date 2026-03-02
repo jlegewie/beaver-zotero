@@ -984,7 +984,7 @@ const PreferencePage: React.FC = () => {
                             title="Pause Long-Running Tasks"
                             description={
                                 <>
-                                    The agent summarizes progress and waits for your input during long running tasks. Unchecking allows uninterrupted runs, which may use more credits. <DocLink path="credits">Learn more</DocLink>
+                                    Beaver pauses during long-running tasks to summarize progress and check in. Disabling may use additional credits or increase API costs. <DocLink path="credits">Learn more</DocLink>
                                 </>
                             }
                             onClick={handleConfirmLongRunningAgentToggle}

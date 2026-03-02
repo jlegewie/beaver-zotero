@@ -14,7 +14,7 @@ import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../../utils/prompt
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 import { logger } from '../../../src/utils/logger';
 import { isLibraryTabAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
-import { selectedModelAtom } from '../../atoms/models';
+import { selectedModelAtom, isUsingBeaverCreditsAtom } from '../../atoms/models';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
@@ -39,6 +39,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [currentMessageItems, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
     const sendResolvedPrompt = useSetAtom(sendResolvedPromptAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
+    const isUsingBeaverCredits = useAtomValue(isUsingBeaverCreditsAtom);
     const newThread = useSetAtom(newThreadAtom);
     const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -263,6 +264,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                         newThread();
                     }}
                     onDismiss={handleDismissHighTokenWarning}
+                    isUsingBeaverCredits={isUsingBeaverCredits}
                 />
             )}
             {shouldShowSoftCapWarning && (
