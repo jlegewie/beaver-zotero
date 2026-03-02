@@ -76,7 +76,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const isHighTokenDismissed = warningThreadId ? dismissedHighTokenByThread[warningThreadId] : false;
     const dismissedSoftCapRunId = warningThreadId ? dismissedSoftCapByThread[warningThreadId] : undefined;
     const showHighTokenUsageWarningMessage = getPref('showHighTokenUsageWarningMessage');
-    const confirmLongRunningAgent = getPref('confirmLongRunningAgent');
+    const pauseLongRunningAgent = getPref('pauseLongRunningAgent');
     const threadHasHighTokenUsage = allRuns.some(r => backendHighTokenUsageRuns[r.id])
         || (lastRequestInputTokens !== null && lastRequestInputTokens > HIGH_INPUT_TOKEN_WARNING_THRESHOLD);
     const shouldShowHighTokenWarning = Boolean(
@@ -91,7 +91,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         lastRun &&
         warningThreadId &&
         softCapTriggeredRuns[lastRun.id] &&
-        confirmLongRunningAgent &&
+        pauseLongRunningAgent &&
         dismissedSoftCapRunId !== lastRun.id
     );
 
@@ -239,7 +239,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const handleEnableLongRunning = (e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        setPref('confirmLongRunningAgent', false);
+        setPref('pauseLongRunningAgent', false);
         if (warningThreadId && lastRun) {
             dismissSoftCapWarning({
                 threadId: warningThreadId,

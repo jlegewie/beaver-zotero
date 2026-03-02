@@ -992,7 +992,7 @@ export interface ChargingPermissions {
     /** Whether to request user confirmation for external search surcharges */
     confirm_external_search_costs: boolean;
     /** Whether to apply the soft cap that stops long-running agent turns */
-    confirm_long_running_agent: boolean;
+    pause_long_running_agent: boolean;
 }
 
 /**

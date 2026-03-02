@@ -127,7 +127,7 @@ const PreferencePage: React.FC = () => {
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
     const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
     const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
-    const [confirmLongRunningAgent, setConfirmLongRunningAgent] = useState(() => getPref('confirmLongRunningAgent'));
+    const [pauseLongRunningAgent, setPauseLongRunningAgent] = useState(() => getPref('pauseLongRunningAgent'));
     const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
     const isMcpServerSupported = useAtomValue(isMcpServerSupportedAtom);
     const [mcpCopied, setMcpCopied] = useState(false);
@@ -413,11 +413,11 @@ const PreferencePage: React.FC = () => {
         setConfirmExternalSearchCosts(newValue);
     }, [confirmExternalSearchCosts]);
 
-    const handleConfirmLongRunningAgentToggle = useCallback(() => {
-        const newValue = !confirmLongRunningAgent;
-        setPref('confirmLongRunningAgent', newValue);
-        setConfirmLongRunningAgent(newValue);
-    }, [confirmLongRunningAgent]);
+    const handlePauseLongRunningAgentToggle = useCallback(() => {
+        const newValue = !pauseLongRunningAgent;
+        setPref('pauseLongRunningAgent', newValue);
+        setPauseLongRunningAgent(newValue);
+    }, [pauseLongRunningAgent]);
 
     const handleMcpServerToggle = useCallback(() => {
         if (!isMcpServerSupported) return;
@@ -987,13 +987,13 @@ const PreferencePage: React.FC = () => {
                                     Beaver pauses during long-running tasks to summarize progress and check in. Disabling may use additional credits or increase API costs. <DocLink path="credits">Learn more</DocLink>
                                 </>
                             }
-                            onClick={handleConfirmLongRunningAgentToggle}
+                            onClick={handlePauseLongRunningAgentToggle}
                             // tooltip="When enabled, the agent pauses after a set number of steps, reports progress, and asks whether to continue. Disable to let the agent run to completion without interruption."
                             control={
                                 <input
                                     type="checkbox"
-                                    checked={confirmLongRunningAgent}
-                                    onChange={handleConfirmLongRunningAgentToggle}
+                                    checked={pauseLongRunningAgent}
+                                    onChange={handlePauseLongRunningAgentToggle}
                                     onClick={(e) => e.stopPropagation()}
                                     style={{ cursor: 'pointer', margin: 0 }}
                                 />
