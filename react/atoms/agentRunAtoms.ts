@@ -283,7 +283,7 @@ function createAgentRunShell(
     const permissions: ChargingPermissions = {
         confirm_extraction_costs: getPref('confirmExtractionCosts'),
         confirm_external_search_costs: getPref('confirmExternalSearchCosts'),
-        confirm_long_running_agent: getPref('confirmLongRunningAgent'),
+        pause_long_running_agent: getPref('pauseLongRunningAgent'),
     };
 
     // Create the request that will be sent to the backend
