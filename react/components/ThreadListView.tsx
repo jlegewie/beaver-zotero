@@ -409,7 +409,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                 return (
                                     <div
                                         key={thread.id}
-                                        className={`thread-list-item ${isCurrent ? 'thread-list-item-active' : ''} ${isEditing ? 'thread-list-item-editing' : ''} ${isHovered ? 'thread-list-item-hovered' : ''}`}
+                                        className={`thread-list-item ${isEditing ? 'thread-list-item-editing' : ''} ${isHovered ? 'thread-list-item-hovered' : ''}`}
                                         onClick={() => {
                                             if (!isEditing) {
                                                 handleSelectThread(thread.id, thread.name);
@@ -435,7 +435,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                                 </div>
                                             )}
                                             <div className="thread-list-item-time">
-                                                {formatTimeAgo(thread.updatedAt)}
+                                                {formatTimeAgo(thread.updatedAt)}{isCurrent && ' (current chat)'}
                                             </div>
                                         </div>
                                         <div className="thread-list-item-actions">

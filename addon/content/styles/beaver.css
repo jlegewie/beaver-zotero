@@ -2215,10 +2215,6 @@
     background: var(--fill-senary);
 }
 
-[id^="beaver-pane-"] .thread-list-item-active {
-    background: var(--fill-senary);
-}
-
 [id^="beaver-pane-"] .thread-list-item-name {
     font-size: 0.85rem;
     color: var(--fill-secondary);
