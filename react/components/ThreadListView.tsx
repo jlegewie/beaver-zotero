@@ -265,6 +265,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const handleSelectThread = async (threadId: string, threadName?: string) => {
         if (!user) return;
         setIsThreadListView(false);
+        if (threadId === currentThreadId) return;
         try {
             await loadThread({ user_id: user.id, threadId, threadName });
         } catch (error) {
