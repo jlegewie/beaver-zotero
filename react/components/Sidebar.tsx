@@ -7,7 +7,7 @@ import { allRunsAtom } from '../agents/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
-import { userScrolledAtom, windowUserScrolledAtom, isSkippedFilesDialogVisibleAtom } from '../atoms/ui';
+import { userScrolledAtom, windowUserScrolledAtom, isSkippedFilesDialogVisibleAtom, isThreadListViewAtom } from '../atoms/ui';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import OnboardingRouter from './pages/OnboardingRouter';
@@ -15,6 +15,7 @@ import DeviceAuthorizationPage from './pages/DeviceAuthorizationPage';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
+import ThreadListView from './ThreadListView';
 import UpgradeConsentPage from './pages/UpgradeConsentPage';
 import DowngradeAcknowledgmentPage from './pages/DowngradeAcknowledgmentPage';
 import { store } from '../store';
@@ -57,6 +58,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const isLoadingThread = useAtomValue(isLoadingThreadAtom);
     const isMigratingData = useAtomValue(isMigratingDataAtom);
+    const isThreadListView = useAtomValue(isThreadListViewAtom);
     const pendingUpgradeConsent = useAtomValue(pendingUpgradeConsentAtom);
     const pendingDowngradeAck = useAtomValue(pendingDowngradeAckAtom);
     const updateRequired = useAtomValue(updateRequiredAtom);
@@ -162,6 +164,16 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
             <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
                 <Header isWindow={isWindow} />
                 <DeviceAuthorizationPage />
+                <DialogContainer />
+            </div>
+        );
+    }
+
+    {/* Thread list view */}
+    if (isThreadListView) {
+        return (
+            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                <ThreadListView isWindow={isWindow} />
                 <DialogContainer />
             </div>
         );

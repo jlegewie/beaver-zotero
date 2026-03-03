@@ -2149,3 +2149,112 @@
 [id^="beaver-pane-"] .step-indicator-dot.active {
     background-color: var(--accent-blue);
 }
+
+/* ───── Thread List View ───── */
+
+[id^="beaver-pane-"] .thread-list-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+}
+
+[id^="beaver-pane-"] .thread-search-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+[id^="beaver-pane-"] .thread-search-icon {
+    position: absolute;
+    left: 8px;
+    color: var(--fill-tertiary);
+    pointer-events: none;
+}
+
+[id^="beaver-pane-"] .thread-search-input {
+    width: 100%;
+    padding: 6px 8px 6px 28px;
+    background: var(--fill-senary);
+    border: 1px solid var(--fill-quinary);
+    border-radius: 6px;
+    color: var(--fill-primary);
+    font-size: 0.85rem;
+    outline: none;
+}
+
+[id^="beaver-pane-"] .thread-search-input:focus {
+    border-color: var(--accent-blue);
+}
+
+[id^="beaver-pane-"] .thread-search-input::placeholder {
+    color: var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .thread-group-header {
+    padding: 8px 12px 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .thread-list-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 6px 12px;
+    cursor: pointer;
+    border-radius: 6px;
+    margin: 0 4px;
+}
+
+[id^="beaver-pane-"] .thread-list-item:hover {
+    background: var(--fill-senary);
+}
+
+[id^="beaver-pane-"] .thread-list-item-active {
+    background: var(--fill-senary);
+}
+
+[id^="beaver-pane-"] .thread-list-item-name {
+    font-size: 0.85rem;
+    color: var(--fill-secondary);
+    line-height: 1.3;
+}
+
+[id^="beaver-pane-"] .thread-list-item-time {
+    font-size: 0.75rem;
+    color: var(--fill-tertiary);
+    margin-top: 1px;
+}
+
+[id^="beaver-pane-"] .thread-list-item-actions {
+    display: none;
+    flex-direction: row;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    margin-left: 4px;
+}
+
+[id^="beaver-pane-"] .thread-list-item:hover .thread-list-item-actions {
+    display: flex;
+}
+
+[id^="beaver-pane-"] .thread-list-item:hover .thread-list-item-time {
+    display: none;
+}
+
+[id^="beaver-pane-"] .thread-rename-input {
+    width: 100%;
+    padding: 2px 4px;
+    background: transparent;
+    border: 1px solid var(--accent-blue);
+    border-radius: 4px;
+    color: var(--fill-secondary);
+    font-size: 0.85rem;
+    outline: none;
+}

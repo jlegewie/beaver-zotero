@@ -1,5 +1,5 @@
 import React, { useRef, useCallback } from 'react';
-import { CancelIcon, PlusSignIcon, PictureInPictureIcon } from './icons/icons';
+import { CancelIcon, PlusSignIcon, PictureInPictureIcon, ChattingIcon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
@@ -10,7 +10,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './ui/IconButton';
 import Tooltip from './ui/Tooltip';
 import { isAuthenticatedAtom, isWaitingForProfileAtom } from '../atoms/auth';
-import ThreadsMenu from './ui/menus/ThreadsMenu';
+import { isThreadListViewAtom } from '../atoms/ui';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
 import ThreadMenuButton from './ui/buttons/ThreadMenuButton';
@@ -36,6 +36,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const currentMessageContent = useAtomValue(currentMessageContentAtom);
     const threadId = useAtomValue(currentThreadIdAtom);
+    const setIsThreadListView = useSetAtom(isThreadListViewAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
     const handleNewThread = async () => {
@@ -84,10 +85,14 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                 {/* Chat history and new chat */}
                 {isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                     <>
-                    <ThreadsMenu
-                        className="scale-14"
-                        ariaLabel="Show chat history"
-                    />
+                    <Tooltip content="Chat history" showArrow singleLine>
+                        <IconButton
+                            icon={ChattingIcon}
+                            onClick={() => setIsThreadListView(true)}
+                            className="scale-14"
+                            ariaLabel="Show chat history"
+                        />
+                    </Tooltip>
                     <Tooltip content="New chat" secondaryContent={newChatShortcut} showArrow singleLine>
                         <IconButton
                             icon={PlusSignIcon}
