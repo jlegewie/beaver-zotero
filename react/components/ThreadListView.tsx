@@ -40,7 +40,7 @@ const groupThreadsByDate = (threads: ThreadData[]) => {
     return groups;
 };
 
-const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow = false }) => {
+const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) => {
     const setIsThreadListView = useSetAtom(isThreadListViewAtom);
     const loadThread = useSetAtom(loadThreadAtom);
     const newThread = useSetAtom(newThreadAtom);
@@ -61,6 +61,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow = false }) => 
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
     const [isSavingRename, setIsSavingRename] = useState(false);
+    const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
 
     const statefulChat = getPref('statefulChat');
 
@@ -387,6 +388,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow = false }) => 
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
                         onKeyDown={handleSearchKeyDown}
+                        autoFocus
                     />
                 </div>
             </div>
@@ -402,16 +404,19 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow = false }) => 
                                 const threadName = thread.name || 'Unnamed conversation';
                                 const isCurrent = thread.id === currentThreadId;
                                 const isEditing = editingThreadId === thread.id;
+                                const isHovered = hoveredThreadId === thread.id;
 
                                 return (
                                     <div
                                         key={thread.id}
-                                        className={`thread-list-item ${isCurrent ? 'thread-list-item-active' : ''} ${isEditing ? 'thread-list-item-editing' : ''}`}
+                                        className={`thread-list-item ${isCurrent ? 'thread-list-item-active' : ''} ${isEditing ? 'thread-list-item-editing' : ''} ${isHovered ? 'thread-list-item-hovered' : ''}`}
                                         onClick={() => {
                                             if (!isEditing) {
                                                 handleSelectThread(thread.id, thread.name);
                                             }
                                         }}
+                                        onMouseEnter={() => setHoveredThreadId(thread.id)}
+                                        onMouseLeave={() => setHoveredThreadId(null)}
                                     >
                                         <div className="flex-1 min-w-0">
                                             {isEditing ? (
@@ -441,6 +446,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow = false }) => 
                                                     ) : (
                                                         <IconButton
                                                             icon={TickIcon}
+                                                            variant="ghost-secondary"
                                                             onClick={e => {
                                                                 e.stopPropagation();
                                                                 handleConfirmRename(thread.id);
@@ -451,6 +457,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow = false }) => 
                                                     )}
                                                     <IconButton
                                                         icon={CancelIcon}
+                                                        variant="ghost-secondary"
                                                         onClick={e => {
                                                             e.stopPropagation();
                                                             handleCancelRename();
@@ -463,6 +470,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow = false }) => 
                                                 <>
                                                     <IconButton
                                                         icon={EditIcon}
+                                                        variant="ghost-secondary"
                                                         onClick={e => {
                                                             e.stopPropagation();
                                                             handleStartRename(thread.id, threadName);
@@ -472,6 +480,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow = false }) => 
                                                     />
                                                     <IconButton
                                                         icon={DeleteIcon}
+                                                        variant="ghost-secondary"
                                                         onClick={e => {
                                                             e.stopPropagation();
                                                             handleDelete(thread.id);
