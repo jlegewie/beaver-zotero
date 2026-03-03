@@ -458,7 +458,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                                             e.stopPropagation();
                                                             handleConfirmRename(thread.id);
                                                         }}
-                                                        // className="scale-95"
+                                                        className="scale-95"
                                                         ariaLabel="Confirm rename"
                                                         loading={isSavingRename}
                                                     />
