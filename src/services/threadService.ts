@@ -18,6 +18,15 @@ export interface ThreadModel {
 }
 
 
+/**
+ * Thread+run match from findThreadsByItem.
+ * One per (thread, run_id, match_type); same thread may appear multiple times.
+ */
+export interface ThreadRunMatch extends ThreadModel {
+    run_id: string;
+    match_type: 'user_attachment' | 'citation';
+}
+
 // Based on backend ThreadModel
 export interface PaginatedThreadsResponse {
     data: ThreadModel[];
@@ -72,6 +81,28 @@ export class ThreadService extends ApiService {
      */
     async deleteThread(threadId: string): Promise<void> {
         return this.delete(`/api/v1/threads/${threadId}`);
+    }
+
+    /**
+     * Finds threads where Zotero items appear as user attachments or citations.
+     * @param libraryId Zotero library ID
+     * @param zoteroKeys Zotero item keys to search for
+     * @param mode Search in attachments, citations, or both
+     * @returns List of thread+run matches (thread may appear multiple times)
+     */
+    async findThreadsByItem(
+        libraryId: number,
+        zoteroKeys: string[],
+        mode: 'attachments' | 'citations' | 'both' = 'both'
+    ): Promise<ThreadRunMatch[]> {
+        const params = new URLSearchParams({
+            library_id: String(libraryId),
+            mode,
+        });
+        for (const key of zoteroKeys) {
+            params.append('zotero_keys', key);
+        }
+        return this.get<ThreadRunMatch[]>(`/api/v1/threads/by-item?${params.toString()}`);
     }
 
     /**
