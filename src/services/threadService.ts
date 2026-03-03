@@ -74,6 +74,25 @@ export class ThreadService extends ApiService {
     }
 
     /**
+     * Searches threads by name (case-insensitive).
+     * @param q Search query (matches thread name)
+     * @param limit Maximum number of threads to return (1–50)
+     * @param after Cursor for pagination (thread ID)
+     * @returns Promise with paginated threads data
+     */
+    async searchThreads(
+        q: string,
+        limit: number = 10,
+        after: string | null = null
+    ): Promise<PaginatedThreadsResponse> {
+        const params = new URLSearchParams({ q, limit: String(limit) });
+        if (after) {
+            params.set('after', after);
+        }
+        return this.get<PaginatedThreadsResponse>(`/api/v1/threads/search?${params.toString()}`);
+    }
+
+    /**
      * Fetches paginated threads
      * @param limit Maximum number of threads to return
      * @param after Cursor for pagination (thread ID of the last item from previous page)
