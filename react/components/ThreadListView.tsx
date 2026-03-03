@@ -440,21 +440,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                         </div>
                                         <div className="thread-list-item-actions">
                                             {isEditing ? (
-                                                <>
-                                                    {isSavingRename ? (
-                                                        <Spinner size={14} />
-                                                    ) : (
-                                                        <IconButton
-                                                            icon={TickIcon}
-                                                            variant="ghost-secondary"
-                                                            onClick={e => {
-                                                                e.stopPropagation();
-                                                                handleConfirmRename(thread.id);
-                                                            }}
-                                                            className="scale-85"
-                                                            ariaLabel="Confirm rename"
-                                                        />
-                                                    )}
+                                                <div className="display-flex gap-3">
                                                     <IconButton
                                                         icon={CancelIcon}
                                                         variant="ghost-secondary"
@@ -462,12 +448,23 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                                             e.stopPropagation();
                                                             handleCancelRename();
                                                         }}
-                                                        className="scale-85"
+                                                        className="scale-90"
                                                         ariaLabel="Cancel rename"
                                                     />
-                                                </>
+                                                    <IconButton
+                                                        icon={TickIcon}
+                                                        variant="ghost-secondary"
+                                                        onClick={e => {
+                                                            e.stopPropagation();
+                                                            handleConfirmRename(thread.id);
+                                                        }}
+                                                        // className="scale-95"
+                                                        ariaLabel="Confirm rename"
+                                                        loading={isSavingRename}
+                                                    />
+                                                </div>
                                             ) : (
-                                                <>
+                                                <div className="display-flex gap-3">
                                                     <IconButton
                                                         icon={EditIcon}
                                                         variant="ghost-secondary"
@@ -475,7 +472,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                                             e.stopPropagation();
                                                             handleStartRename(thread.id, threadName);
                                                         }}
-                                                        className="scale-85"
+                                                        className="scale-95"
                                                         ariaLabel="Rename thread"
                                                     />
                                                     <IconButton
@@ -485,10 +482,10 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                                             e.stopPropagation();
                                                             handleDelete(thread.id);
                                                         }}
-                                                        className="scale-85"
+                                                        className="scale-95"
                                                         ariaLabel="Delete thread"
                                                     />
-                                                </>
+                                                </div>
                                             )}
                                         </div>
                                     </div>
