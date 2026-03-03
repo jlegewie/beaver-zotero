@@ -40,10 +40,12 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
     const handleNewThread = async () => {
+        setIsThreadListView(false);
         await newThread();
     }
 
     const handleClose = useCallback(() => {
+        setIsThreadListView(false);
         if (isWindow) {
             // Get the actual window where the button is rendered, not the main window
             const currentWindow = getWindowFromElement(closeButtonRef.current);
@@ -51,7 +53,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
         } else {
             triggerToggleChat(Zotero.getMainWindow());
         }
-    }, [isWindow]);
+    }, [isWindow, setIsThreadListView]);
 
     // Get platform-specific shortcut text
     const keyboardShortcut = getPref("keyboardShortcut").toUpperCase() || "J";
