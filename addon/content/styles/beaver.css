@@ -2189,7 +2189,7 @@
 }
 
 [id^="beaver-pane-"] .thread-search-input::placeholder {
-    color: var(--fill-quarternary);
+    color: var(--fill-tertiary);
 }
 
 [id^="beaver-pane-"] .thread-group-header {

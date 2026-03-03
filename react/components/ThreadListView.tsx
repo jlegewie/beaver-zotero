@@ -386,6 +386,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                         type="text"
                         className="thread-search-input"
                         placeholder="Search chats..."
+                        aria-label="Search chats"
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
                         onKeyDown={handleSearchKeyDown}
