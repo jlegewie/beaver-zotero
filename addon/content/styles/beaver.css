@@ -2152,12 +2152,37 @@
 
 /* ───── Thread List View ───── */
 
-[id^="beaver-pane-"] .thread-list-header {
+[id^="beaver-pane-"] .thread-overlay-container {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+}
+
+[id^="beaver-pane-"] .thread-overlay-backdrop {
+    position: absolute;
+    inset: 0;
+    background: transparent;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .thread-overlay-panel {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 90%;
+    background-color: var(--material-sidepane);
+    box-shadow: -6px 0 26px rgba(0, 0, 0, 0.175);
+    border-left: 1px solid var(--fill-quinary);
     display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
+    flex-direction: column;
+}
+
+[id^="beaver-pane-"] .thread-overlay-title {
+    padding: 10px 12px 4px;
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--fill-primary);
 }
 
 [id^="beaver-pane-"] .thread-search-wrapper {

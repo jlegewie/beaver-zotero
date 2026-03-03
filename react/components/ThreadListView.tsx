@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { ArrowLeftIcon, SearchIcon, EditIcon, DeleteIcon, PlusSignIcon, TickIcon, CancelIcon } from './icons/icons';
+import { SearchIcon, EditIcon, DeleteIcon, TickIcon, CancelIcon } from './icons/icons';
 import Spinner from './icons/Spinner';
 import IconButton from './ui/IconButton';
 import { isThreadListViewAtom } from '../atoms/ui';
@@ -273,15 +273,6 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         }
     };
 
-    const handleNewChat = async () => {
-        setIsThreadListView(false);
-        await newThread();
-    };
-
-    const handleBack = () => {
-        setIsThreadListView(false);
-    };
-
     const handleDelete = async (threadId: string) => {
         try {
             if (statefulChat) {
@@ -351,28 +342,8 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
     return (
         <div className="display-flex flex-col flex-1 min-h-0">
-            {/* Sub-header */}
-            <div className="thread-list-header">
-                <div className="display-flex items-center gap-2">
-                    <IconButton
-                        icon={ArrowLeftIcon}
-                        onClick={handleBack}
-                        className="scale-14"
-                        ariaLabel="Back to chat"
-                    />
-                    <span className="font-bold font-color-primary">Chats</span>
-                </div>
-                <button
-                    className="variant-outline has-text scale-85"
-                    onClick={handleNewChat}
-                    type="button"
-                >
-                    <span className="display-flex items-center gap-1">
-                        <PlusSignIcon width={12} height={12} />
-                        New chat
-                    </span>
-                </button>
-            </div>
+            {/* Title */}
+            <div className="thread-overlay-title">Chats</div>
 
             {/* Search bar */}
             <div className="px-3 pb-2">
