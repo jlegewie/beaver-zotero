@@ -93,7 +93,7 @@ export class ThreadService extends ApiService {
     async findThreadsByItem(
         libraryId: number,
         zoteroKeys: string[],
-        mode: 'attachments' | 'citations' | 'both' = 'both'
+        mode: 'attachments' | 'citations' | 'both' = 'attachments'
     ): Promise<ThreadRunMatch[]> {
         const params = new URLSearchParams({
             library_id: String(libraryId),
