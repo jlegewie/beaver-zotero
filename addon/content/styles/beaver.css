@@ -2185,7 +2185,7 @@
 }
 
 [id^="beaver-pane-"] .thread-search-input:focus {
-    border-color: var(--accent-blue);
+    border-color: var(--fill-tertiary);
 }
 
 [id^="beaver-pane-"] .thread-search-input::placeholder {
