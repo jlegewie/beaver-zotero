@@ -6,7 +6,7 @@ import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
 import { newThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom, runsCountAtom } from '../agents/atoms';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './ui/IconButton';
 import Tooltip from './ui/Tooltip';
 import { isAuthenticatedAtom, isWaitingForProfileAtom } from '../atoms/auth';
@@ -36,7 +36,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const currentMessageContent = useAtomValue(currentMessageContentAtom);
     const threadId = useAtomValue(currentThreadIdAtom);
-    const setIsThreadListView = useSetAtom(isThreadListViewAtom);
+    const [isThreadListView, setIsThreadListView] = useAtom(isThreadListViewAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
     const handleNewThread = async () => {
@@ -88,8 +88,8 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                     <Tooltip content="Chat history" showArrow singleLine>
                         <IconButton
                             icon={ChattingIcon}
-                            onClick={() => setIsThreadListView(true)}
-                            className="scale-14"
+                            onClick={() => setIsThreadListView(!isThreadListView)}
+                            className={`scale-14 ${isThreadListView ? 'thread-list-toggle-active' : ''}`}
                             ariaLabel="Show chat history"
                         />
                     </Tooltip>

@@ -2232,29 +2232,37 @@
 }
 
 [id^="beaver-pane-"] .thread-list-item-actions {
-    display: none;
+    display: flex;
     flex-direction: row;
     align-items: center;
     gap: 2px;
     flex-shrink: 0;
     margin-left: 4px;
+    opacity: 0;
+    pointer-events: none;
 }
 
-[id^="beaver-pane-"] .thread-list-item:hover .thread-list-item-actions {
-    display: flex;
-}
-
-[id^="beaver-pane-"] .thread-list-item:hover .thread-list-item-time {
-    display: none;
+[id^="beaver-pane-"] .thread-list-item:hover .thread-list-item-actions,
+[id^="beaver-pane-"] .thread-list-item-editing .thread-list-item-actions {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 [id^="beaver-pane-"] .thread-rename-input {
     width: 100%;
-    padding: 2px 4px;
+    padding: 0;
+    margin: 0;
     background: transparent;
-    border: 1px solid var(--accent-blue);
-    border-radius: 4px;
+    border: none;
     color: var(--fill-secondary);
     font-size: 0.85rem;
+    line-height: 1.3;
     outline: none;
+    font-family: inherit;
+}
+
+/* Toggle active state for chat history icon */
+[id^="beaver-pane-"] .thread-list-toggle-active {
+    background: var(--fill-quinary);
+    border-radius: 4px;
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { ArrowLeftIcon, SearchIcon, EditIcon, DeleteIcon, PlusSignIcon } from './icons/icons';
+import { ArrowLeftIcon, SearchIcon, EditIcon, DeleteIcon, PlusSignIcon, TickIcon, CancelIcon } from './icons/icons';
 import Spinner from './icons/Spinner';
 import IconButton from './ui/IconButton';
 import { isThreadListViewAtom } from '../atoms/ui';
@@ -304,8 +304,13 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow = false }) => 
         setEditingName(currentName || 'Unnamed conversation');
     };
 
-    const handleRenameComplete = async (threadId: string, newName: string) => {
-        if (!threadId || !newName.trim()) {
+    const handleCancelRename = () => {
+        setEditingThreadId(null);
+    };
+
+    const handleConfirmRename = async (threadId: string) => {
+        const newName = editingName.trim();
+        if (!threadId || !newName) {
             setEditingThreadId(null);
             return;
         }
@@ -333,18 +338,18 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow = false }) => 
         e.stopPropagation();
         if (e.key === 'Enter') {
             e.preventDefault();
-            handleRenameComplete(threadId, editingName);
+            handleConfirmRename(threadId);
         } else if (e.key === 'Escape') {
             e.preventDefault();
-            setEditingThreadId(null);
+            handleCancelRename();
         }
     };
 
     const groupedThreads = groupThreadsByDate(threads);
 
     return (
-        <div className="display-flex flex-col h-full">
-            {/* Header */}
+        <div className="display-flex flex-col flex-1 min-h-0">
+            {/* Sub-header */}
             <div className="thread-list-header">
                 <div className="display-flex items-center gap-2">
                     <IconButton
@@ -401,7 +406,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow = false }) => 
                                 return (
                                     <div
                                         key={thread.id}
-                                        className={`thread-list-item ${isCurrent ? 'thread-list-item-active' : ''}`}
+                                        className={`thread-list-item ${isCurrent ? 'thread-list-item-active' : ''} ${isEditing ? 'thread-list-item-editing' : ''}`}
                                         onClick={() => {
                                             if (!isEditing) {
                                                 handleSelectThread(thread.id, thread.name);
@@ -416,26 +421,46 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow = false }) => 
                                                     value={editingName}
                                                     onChange={e => setEditingName(e.target.value)}
                                                     onKeyDown={e => handleRenameKeyDown(e, thread.id)}
-                                                    onBlur={() => handleRenameComplete(thread.id, editingName)}
                                                     onClick={e => e.stopPropagation()}
                                                     autoFocus
                                                 />
                                             ) : (
-                                                <>
-                                                    <div className="thread-list-item-name truncate">
-                                                        {threadName}
-                                                    </div>
-                                                    <div className="thread-list-item-time">
-                                                        {formatTimeAgo(thread.updatedAt)}
-                                                    </div>
-                                                </>
+                                                <div className="thread-list-item-name truncate">
+                                                    {threadName}
+                                                </div>
                                             )}
+                                            <div className="thread-list-item-time">
+                                                {formatTimeAgo(thread.updatedAt)}
+                                            </div>
                                         </div>
-                                        {!isEditing && (
-                                            <div className="thread-list-item-actions">
-                                                {isSavingRename ? (
-                                                    <Spinner size={14} />
-                                                ) : (
+                                        <div className="thread-list-item-actions">
+                                            {isEditing ? (
+                                                <>
+                                                    {isSavingRename ? (
+                                                        <Spinner size={14} />
+                                                    ) : (
+                                                        <IconButton
+                                                            icon={TickIcon}
+                                                            onClick={e => {
+                                                                e.stopPropagation();
+                                                                handleConfirmRename(thread.id);
+                                                            }}
+                                                            className="scale-85"
+                                                            ariaLabel="Confirm rename"
+                                                        />
+                                                    )}
+                                                    <IconButton
+                                                        icon={CancelIcon}
+                                                        onClick={e => {
+                                                            e.stopPropagation();
+                                                            handleCancelRename();
+                                                        }}
+                                                        className="scale-85"
+                                                        ariaLabel="Cancel rename"
+                                                    />
+                                                </>
+                                            ) : (
+                                                <>
                                                     <IconButton
                                                         icon={EditIcon}
                                                         onClick={e => {
@@ -445,18 +470,18 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow = false }) => 
                                                         className="scale-85"
                                                         ariaLabel="Rename thread"
                                                     />
-                                                )}
-                                                <IconButton
-                                                    icon={DeleteIcon}
-                                                    onClick={e => {
-                                                        e.stopPropagation();
-                                                        handleDelete(thread.id);
-                                                    }}
-                                                    className="scale-85"
-                                                    ariaLabel="Delete thread"
-                                                />
-                                            </div>
-                                        )}
+                                                    <IconButton
+                                                        icon={DeleteIcon}
+                                                        onClick={e => {
+                                                            e.stopPropagation();
+                                                            handleDelete(thread.id);
+                                                        }}
+                                                        className="scale-85"
+                                                        ariaLabel="Delete thread"
+                                                    />
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
                                 );
                             })}

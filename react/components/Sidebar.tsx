@@ -173,6 +173,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     if (isThreadListView) {
         return (
             <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                <Header isWindow={isWindow} />
                 <ThreadListView isWindow={isWindow} />
                 <DialogContainer />
             </div>
