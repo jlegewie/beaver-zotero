@@ -264,17 +264,17 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     // Thread actions
     const handleSelectThread = async (threadId: string, threadName?: string) => {
         if (!user) return;
+        setIsThreadListView(false);
         try {
             await loadThread({ user_id: user.id, threadId, threadName });
-            setIsThreadListView(false);
         } catch (error) {
             console.error('Error loading thread:', error);
         }
     };
 
     const handleNewChat = async () => {
-        await newThread();
         setIsThreadListView(false);
+        await newThread();
     };
 
     const handleBack = () => {
