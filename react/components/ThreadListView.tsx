@@ -185,6 +185,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     }, [searchQuery, activeQuery, fetchThreads]);
 
     const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            setIsThreadListView(false);
+            return;
+        }
         if (e.key === 'Enter') {
             if (debounceRef.current) {
                 clearTimeout(debounceRef.current);
@@ -343,7 +348,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     return (
         <div className="display-flex flex-col flex-1 min-h-0">
             {/* Title */}
-            <div className="thread-overlay-title">Chats</div>
+            <div className="thread-overlay-title mb-1">Chats</div>
 
             {/* Search bar */}
             <div className="px-3 pb-2">
