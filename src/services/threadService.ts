@@ -23,6 +23,7 @@ export interface PaginatedThreadsResponse {
     data: ThreadModel[];
     next_cursor: string | null;
     has_more: boolean;
+    total?: number;
 }
 
 /**
