@@ -13,16 +13,27 @@ export interface ThreadModel {
     id: string;
     user_id: string;
     name?: string;
+    starred?: boolean;
     created_at: string;
     updated_at: string;
 }
 
+
+/**
+ * Thread+run match from findThreadsByItem.
+ * One per (thread, run_id, match_type); same thread may appear multiple times.
+ */
+export interface ThreadRunMatch extends ThreadModel {
+    run_id: string;
+    match_type: 'user_attachment' | 'citation';
+}
 
 // Based on backend ThreadModel
 export interface PaginatedThreadsResponse {
     data: ThreadModel[];
     next_cursor: string | null;
     has_more: boolean;
+    total?: number;
 }
 
 /**
@@ -74,6 +85,47 @@ export class ThreadService extends ApiService {
     }
 
     /**
+     * Finds threads where Zotero items appear as user attachments or citations.
+     * @param libraryId Zotero library ID
+     * @param zoteroKeys Zotero item keys to search for
+     * @param mode Search in attachments, citations, or both
+     * @returns List of thread+run matches (thread may appear multiple times)
+     */
+    async findThreadsByItem(
+        libraryId: number,
+        zoteroKeys: string[],
+        mode: 'attachments' | 'citations' | 'both' = 'attachments'
+    ): Promise<ThreadRunMatch[]> {
+        const params = new URLSearchParams({
+            library_id: String(libraryId),
+            mode,
+        });
+        for (const key of zoteroKeys) {
+            params.append('zotero_keys', key);
+        }
+        return this.get<ThreadRunMatch[]>(`/api/v1/threads/by-item?${params.toString()}`);
+    }
+
+    /**
+     * Searches threads by name (case-insensitive).
+     * @param q Search query (matches thread name)
+     * @param limit Maximum number of threads to return (1–50)
+     * @param after Cursor for pagination (thread ID)
+     * @returns Promise with paginated threads data
+     */
+    async searchThreads(
+        q: string,
+        limit: number = 10,
+        after: string | null = null
+    ): Promise<PaginatedThreadsResponse> {
+        const params = new URLSearchParams({ q, limit: String(limit) });
+        if (after) {
+            params.set('after', after);
+        }
+        return this.get<PaginatedThreadsResponse>(`/api/v1/threads/search?${params.toString()}`);
+    }
+
+    /**
      * Fetches paginated threads
      * @param limit Maximum number of threads to return
      * @param after Cursor for pagination (thread ID of the last item from previous page)
@@ -96,6 +148,32 @@ export class ThreadService extends ApiService {
     async createThread(name?: string): Promise<ThreadModel> {
         const payload = { name: name || null };
         return this.post<ThreadModel>('/api/v1/threads', payload);
+    }
+
+    /**
+     * Fetches all starred threads, sorted by most recently updated
+     * @returns Promise with the list of starred threads
+     */
+    async getStarredThreads(): Promise<ThreadModel[]> {
+        return this.get<ThreadModel[]>('/api/v1/threads/starred');
+    }
+
+    /**
+     * Stars a thread
+     * @param threadId The ID of the thread to star
+     * @returns Promise with the updated thread data
+     */
+    async starThread(threadId: string): Promise<ThreadModel> {
+        return this.patch<ThreadModel>(`/api/v1/threads/${threadId}/star`, {});
+    }
+
+    /**
+     * Unstars a thread
+     * @param threadId The ID of the thread to unstar
+     * @returns Promise with the updated thread data
+     */
+    async unstarThread(threadId: string): Promise<ThreadModel> {
+        return this.patch<ThreadModel>(`/api/v1/threads/${threadId}/unstar`, {});
     }
 }
 

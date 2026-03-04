@@ -21,6 +21,7 @@ import {
 import { getCurrentReaderAndWaitForView } from '../../../utils/readerUtils';
 import { semanticSearchService } from '../../../../src/services/semanticSearchService';
 import { BeaverDB } from '../../../../src/services/database';
+import { threadService } from '../../../../src/services/threadService';
 
 interface DevToolsMenuButtonProps {
     className?: string;
@@ -228,6 +229,58 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         console.log("[PDF Visualizer] Clearing visualization annotations...");
         await clearVisualizationAnnotations();
         console.log("[PDF Visualizer] Annotations cleared");
+    };
+
+    // Find threads by Zotero item (attachments mode)
+    const handleFindThreadsByAttachments = async () => {
+        const selectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
+        if (selectedItems.length === 0) {
+            console.log('[Find Threads by Item] No item selected');
+            return;
+        }
+        const keys = new Set<string>();
+        const first = selectedItems[0];
+        const libraryId = first.libraryID;
+        for (const item of selectedItems) {
+            keys.add(item.key);
+            for (const attId of item.getAttachments()) {
+                const att = Zotero.Items.get(attId);
+                if (att) keys.add(att.key);
+            }
+        }
+        console.log('[Find Threads by Item] attachments mode, libraryId:', libraryId, 'keys:', Array.from(keys));
+        try {
+            const results = await threadService.findThreadsByItem(libraryId, Array.from(keys), 'attachments');
+            console.log('[Find Threads by Item] attachments results:', results);
+        } catch (err) {
+            console.error('[Find Threads by Item] attachments failed:', err);
+        }
+    };
+
+    // Find threads by Zotero item (citations mode)
+    const handleFindThreadsByCitations = async () => {
+        const selectedItems: Zotero.Item[] = Zotero.getActiveZoteroPane().getSelectedItems() || [];
+        if (selectedItems.length === 0) {
+            console.log('[Find Threads by Item] No item selected');
+            return;
+        }
+        const keys = new Set<string>();
+        const first = selectedItems[0];
+        const libraryId = first.libraryID;
+        for (const item of selectedItems) {
+            keys.add(item.key);
+            for (const attId of item.getAttachments()) {
+                const att = Zotero.Items.get(attId);
+                if (att) keys.add(att.key);
+            }
+        }
+        console.log('[Find Threads by Item] citations mode, libraryId:', libraryId, 'keys:', Array.from(keys));
+        try {
+            const results = await threadService.findThreadsByItem(libraryId, Array.from(keys), 'citations');
+            console.log('[Find Threads by Item] citations results:', results);
+        } catch (err) {
+            console.error('[Find Threads by Item] citations failed:', err);
+        }
     };
 
     // Reset embedding index (clear all embedding tables)
@@ -618,6 +671,18 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         {
             label: "Reset Embedding Index",
             onClick: handleResetEmbeddingIndex,
+            icon: SearchIcon,
+            disabled: false,
+        },
+        {
+            label: "Find Threads by Item (attachments)",
+            onClick: handleFindThreadsByAttachments,
+            icon: SearchIcon,
+            disabled: false,
+        },
+        {
+            label: "Find Threads by Item (citations)",
+            onClick: handleFindThreadsByCitations,
             icon: SearchIcon,
             disabled: false,
         }

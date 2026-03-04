@@ -261,6 +261,17 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     }
 });
 
+// Force-start auto-refresh regardless of document.visibilityState.
+//
+// In Zotero's XUL/XHTML environment, document.visibilityState is permanently
+// "hidden". The Supabase SDK stops its auto-refresh ticker when the page is
+// "hidden" (designed for background browser tabs), which means tokens are NEVER
+// proactively refreshed in Zotero. startAutoRefresh() removes the visibility
+// listener and runs the 30-second refresh ticker unconditionally.
+supabase.auth.startAutoRefresh().catch((e) => {
+    logger(`Failed to start Supabase auto-refresh: ${e}`, 2);
+});
+
 // Register cleanup function on the current window so that:
 // 1. Module-level reload cleanup (above) can stop this client's timer
 // 2. hooks.ts (esbuild bundle) can call win.__beaverDisposeSupabase during shutdown
