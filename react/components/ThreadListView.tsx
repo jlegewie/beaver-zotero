@@ -8,7 +8,6 @@ import { ThreadData, loadThreadAtom, newThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom } from '../agents/atoms';
 import { userAtom } from '../atoms/auth';
 import { threadService } from '../../src/services/threadService';
-import { getPref } from '../../src/utils/prefs';
 import { getDateGroup } from '../utils/dateUtils';
 import { formatTimeAgo } from '../utils/formatTimeAgo';
 import Button from './ui/Button';
@@ -21,10 +20,18 @@ interface CacheEntry {
     threads: ThreadData[];
     hasMore: boolean;
     nextCursor: string | null;
-    offset: number;
+    timestamp: number;
 }
 
 const PAGE_SIZE = 15;
+const CACHE_TTL = 60_000; // 1 minute
+
+// Module-level cache: persists across mount/unmount cycles
+const searchCache = new Map<string, CacheEntry>();
+
+export function clearThreadListCache() {
+    searchCache.clear();
+}
 
 const groupThreadsByDate = (threads: ThreadData[]) => {
     const groups: Record<string, ThreadData[]> = {
@@ -52,114 +59,74 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const [isLoading, setIsLoading] = useState(false);
     const [hasMore, setHasMore] = useState(false);
     const [nextCursor, setNextCursor] = useState<string | null>(null);
-    const [offset, setOffset] = useState(0);
 
     const [searchQuery, setSearchQuery] = useState('');
     const [activeQuery, setActiveQuery] = useState('');
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const searchCacheRef = useRef<Map<string, CacheEntry>>(new Map());
 
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
     const [isSavingRename, setIsSavingRename] = useState(false);
     const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
 
-    const statefulChat = getPref('statefulChat');
-
     // Fetch threads (initial load or after search)
     const fetchThreads = useCallback(async (query: string) => {
         if (!user) return;
 
-        // Check cache
-        const cached = searchCacheRef.current.get(query);
-        if (cached) {
+        const cacheKey = `${user.id}:${query}`;
+
+        // Check cache with TTL
+        const cached = searchCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
             setThreads(cached.threads);
             setHasMore(cached.hasMore);
             setNextCursor(cached.nextCursor);
-            setOffset(cached.offset);
             return;
         }
 
         setIsLoading(true);
         try {
             if (query) {
-                // Search mode
-                if (statefulChat) {
-                    const response = await threadService.searchThreads(query, PAGE_SIZE);
-                    const mapped = response.data.map(t => ({
-                        id: t.id,
-                        name: t.name || '',
-                        createdAt: t.created_at,
-                        updatedAt: t.updated_at,
-                    } as ThreadData));
-                    setThreads(mapped);
-                    setNextCursor(response.next_cursor);
-                    setHasMore(response.has_more);
-                    setOffset(0);
-                    searchCacheRef.current.set(query, {
-                        threads: mapped,
-                        hasMore: response.has_more,
-                        nextCursor: response.next_cursor,
-                        offset: 0,
-                    });
-                } else {
-                    // Local DB: fetch all and filter client-side
-                    const response = await Zotero.Beaver.db.getThreadsPaginated(user.id, 200, 0);
-                    const lowerQuery = query.toLowerCase();
-                    const filtered = response.threads.filter(t =>
-                        (t.name || '').toLowerCase().includes(lowerQuery)
-                    );
-                    setThreads(filtered);
-                    setHasMore(false);
-                    setNextCursor(null);
-                    setOffset(0);
-                    searchCacheRef.current.set(query, {
-                        threads: filtered,
-                        hasMore: false,
-                        nextCursor: null,
-                        offset: 0,
-                    });
-                }
+                const response = await threadService.searchThreads(query, PAGE_SIZE);
+                const mapped = response.data.map(t => ({
+                    id: t.id,
+                    name: t.name || '',
+                    createdAt: t.created_at,
+                    updatedAt: t.updated_at,
+                } as ThreadData));
+                setThreads(mapped);
+                setNextCursor(response.next_cursor);
+                setHasMore(response.has_more);
+                searchCache.set(cacheKey, {
+                    threads: mapped,
+                    hasMore: response.has_more,
+                    nextCursor: response.next_cursor,
+                    timestamp: Date.now(),
+                });
             } else {
-                // Normal paginated fetch
-                if (statefulChat) {
-                    const response = await threadService.getPaginatedThreads(PAGE_SIZE);
-                    const mapped = response.data.map(t => ({
-                        id: t.id,
-                        name: t.name || '',
-                        createdAt: t.created_at,
-                        updatedAt: t.updated_at,
-                    } as ThreadData));
-                    setThreads(mapped);
-                    setNextCursor(response.next_cursor);
-                    setHasMore(response.has_more);
-                    setOffset(0);
-                    searchCacheRef.current.set('', {
-                        threads: mapped,
-                        hasMore: response.has_more,
-                        nextCursor: response.next_cursor,
-                        offset: 0,
-                    });
-                } else {
-                    const response = await Zotero.Beaver.db.getThreadsPaginated(user.id, PAGE_SIZE, 0);
-                    setThreads(response.threads);
-                    setHasMore(response.has_more);
-                    setNextCursor(null);
-                    setOffset(PAGE_SIZE);
-                    searchCacheRef.current.set('', {
-                        threads: response.threads,
-                        hasMore: response.has_more,
-                        nextCursor: null,
-                        offset: PAGE_SIZE,
-                    });
-                }
+                const response = await threadService.getPaginatedThreads(PAGE_SIZE);
+                const mapped = response.data.map(t => ({
+                    id: t.id,
+                    name: t.name || '',
+                    createdAt: t.created_at,
+                    updatedAt: t.updated_at,
+                } as ThreadData));
+                setThreads(mapped);
+                setNextCursor(response.next_cursor);
+                setHasMore(response.has_more);
+                searchCache.set(cacheKey, {
+                    threads: mapped,
+                    hasMore: response.has_more,
+                    nextCursor: response.next_cursor,
+                    timestamp: Date.now(),
+                });
             }
         } catch (error) {
             console.error('Error fetching threads:', error);
         } finally {
             setIsLoading(false);
         }
-    }, [user, statefulChat]);
+    }, [user]);
 
     // Initial fetch
     useEffect(() => {
@@ -197,7 +164,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             }
             setActiveQuery(searchQuery);
             // Invalidate cache for this query to get fresh results on Enter
-            searchCacheRef.current.delete(searchQuery);
+            if (user) searchCache.delete(`${user.id}:${searchQuery}`);
             fetchThreads(searchQuery);
         }
     };
@@ -208,58 +175,29 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
         setIsLoading(true);
         try {
-            if (activeQuery && statefulChat) {
-                const response = await threadService.searchThreads(activeQuery, PAGE_SIZE, nextCursor);
-                const mapped = response.data.map(t => ({
-                    id: t.id,
-                    name: t.name || '',
-                    createdAt: t.created_at,
-                    updatedAt: t.updated_at,
-                } as ThreadData));
-                const combined = [...threads, ...mapped];
-                setThreads(combined);
-                setNextCursor(response.next_cursor);
-                setHasMore(response.has_more);
-                searchCacheRef.current.set(activeQuery, {
-                    threads: combined,
-                    hasMore: response.has_more,
-                    nextCursor: response.next_cursor,
-                    offset: 0,
-                });
-            } else if (!activeQuery) {
-                if (statefulChat) {
-                    const response = await threadService.getPaginatedThreads(PAGE_SIZE, nextCursor);
-                    const mapped = response.data.map(t => ({
-                        id: t.id,
-                        name: t.name || '',
-                        createdAt: t.created_at,
-                        updatedAt: t.updated_at,
-                    } as ThreadData));
-                    const combined = [...threads, ...mapped];
-                    setThreads(combined);
-                    setNextCursor(response.next_cursor);
-                    setHasMore(response.has_more);
-                    searchCacheRef.current.set('', {
-                        threads: combined,
-                        hasMore: response.has_more,
-                        nextCursor: response.next_cursor,
-                        offset: 0,
-                    });
-                } else {
-                    const response = await Zotero.Beaver.db.getThreadsPaginated(user.id, PAGE_SIZE, offset);
-                    const combined = [...threads, ...response.threads];
-                    const newOffset = offset + PAGE_SIZE;
-                    setThreads(combined);
-                    setHasMore(response.has_more);
-                    setOffset(newOffset);
-                    searchCacheRef.current.set('', {
-                        threads: combined,
-                        hasMore: response.has_more,
-                        nextCursor: null,
-                        offset: newOffset,
-                    });
-                }
+            const cacheKey = `${user.id}:${activeQuery}`;
+            let response;
+            if (activeQuery) {
+                response = await threadService.searchThreads(activeQuery, PAGE_SIZE, nextCursor);
+            } else {
+                response = await threadService.getPaginatedThreads(PAGE_SIZE, nextCursor);
             }
+            const mapped = response.data.map(t => ({
+                id: t.id,
+                name: t.name || '',
+                createdAt: t.created_at,
+                updatedAt: t.updated_at,
+            } as ThreadData));
+            const combined = [...threads, ...mapped];
+            setThreads(combined);
+            setNextCursor(response.next_cursor);
+            setHasMore(response.has_more);
+            searchCache.set(cacheKey, {
+                threads: combined,
+                hasMore: response.has_more,
+                nextCursor: response.next_cursor,
+                timestamp: Date.now(),
+            });
         } catch (error) {
             console.error('Error loading more threads:', error);
         } finally {
@@ -281,14 +219,10 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
     const handleDelete = async (threadId: string) => {
         try {
-            if (statefulChat) {
-                await threadService.deleteThread(threadId);
-            } else if (user) {
-                await Zotero.Beaver.db.deleteThread(user.id, threadId);
-            }
+            await threadService.deleteThread(threadId);
             setThreads(prev => prev.filter(t => t.id !== threadId));
             // Invalidate cache
-            searchCacheRef.current.clear();
+            searchCache.clear();
             // If deleting the current thread, create a new one
             if (threadId === currentThreadId) {
                 await newThread();
@@ -315,16 +249,12 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         }
         setIsSavingRename(true);
         try {
-            if (statefulChat) {
-                await threadService.renameThread(threadId, newName);
-            } else if (user) {
-                await Zotero.Beaver.db.renameThread(user.id, threadId, newName);
-            }
+            await threadService.renameThread(threadId, newName);
             setThreads(prev => prev.map(t =>
                 t.id === threadId ? { ...t, name: newName } : t
             ));
             // Invalidate cache
-            searchCacheRef.current.clear();
+            searchCache.clear();
         } catch (error) {
             console.error('Error renaming thread:', error);
         } finally {
