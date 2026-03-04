@@ -12,6 +12,7 @@ export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
 export const isPreferencePageVisibleAtom = atom(false);
 export const mcpServerEnabledAtom = atom(getPref('mcpServerEnabled'));
 export const showFileStatusDetailsAtom = atom(false);
+export const isThreadListViewAtom = atom(false);
 
 // Error Report Dialog
 export const isErrorReportDialogVisibleAtom = atom(false);

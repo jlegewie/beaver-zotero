@@ -10,6 +10,7 @@ import { userAtom } from '../../../atoms/auth';
 import Spinner from '../../icons/Spinner';
 import { getDateGroup } from '../../../utils/dateUtils';
 import { getPref } from '../../../../src/utils/prefs';
+import { clearThreadListCache } from '../../ThreadListView';
 
 interface ThreadsMenuProps {
     className?: string;
@@ -157,6 +158,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             }
             // Refresh the threads list
             setThreads((prev) => prev.filter(thread => thread.id !== threadId));
+            clearThreadListCache();
         } catch (error) {
             console.error('Error deleting thread:', error);
         }
@@ -186,9 +188,10 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
                 await threadService.renameThread(threadId, newName);
             }
             // Update local state
-            setThreads(prev => prev.map(thread => 
+            setThreads(prev => prev.map(thread =>
                 thread.id === threadId ? { ...thread, name: newName } : thread
             ));
+            clearThreadListCache();
         } catch (error) {
             console.error('Error renaming thread:', error);
         } finally {

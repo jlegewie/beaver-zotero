@@ -1,16 +1,16 @@
 import React, { useRef, useCallback } from 'react';
-import { CancelIcon, PlusSignIcon, PictureInPictureIcon } from './icons/icons';
+import { CancelIcon, PlusSignIcon, PictureInPictureIcon, ChattingIcon } from './icons/icons';
 import DatabaseStatusButton from './ui/buttons/DatabaseStatusButton';
 import EmbeddingIndexStatusButton from './ui/buttons/EmbeddingIndexStatusButton';
 import { triggerToggleChat } from '../../src/ui/toggleChat';
 import { openBeaverWindow } from '../../src/ui/openBeaverWindow';
 import { newThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom, runsCountAtom } from '../agents/atoms';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import IconButton from './ui/IconButton';
 import Tooltip from './ui/Tooltip';
 import { isAuthenticatedAtom, isWaitingForProfileAtom } from '../atoms/auth';
-import ThreadsMenu from './ui/menus/ThreadsMenu';
+import { isThreadListViewAtom } from '../atoms/ui';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
 import ThreadMenuButton from './ui/buttons/ThreadMenuButton';
@@ -36,13 +36,16 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const currentMessageContent = useAtomValue(currentMessageContentAtom);
     const threadId = useAtomValue(currentThreadIdAtom);
+    const [isThreadListView, setIsThreadListView] = useAtom(isThreadListViewAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
     const handleNewThread = async () => {
+        setIsThreadListView(false);
         await newThread();
     }
 
     const handleClose = useCallback(() => {
+        setIsThreadListView(false);
         if (isWindow) {
             // Get the actual window where the button is rendered, not the main window
             const currentWindow = getWindowFromElement(closeButtonRef.current);
@@ -50,7 +53,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
         } else {
             triggerToggleChat(Zotero.getMainWindow());
         }
-    }, [isWindow]);
+    }, [isWindow, setIsThreadListView]);
 
     // Get platform-specific shortcut text
     const keyboardShortcut = getPref("keyboardShortcut").toUpperCase() || "J";
@@ -84,10 +87,14 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                 {/* Chat history and new chat */}
                 {isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
                     <>
-                    <ThreadsMenu
-                        className="scale-14"
-                        ariaLabel="Show chat history"
-                    />
+                    <Tooltip content="Chat history" showArrow singleLine>
+                        <IconButton
+                            icon={ChattingIcon}
+                            onClick={() => setIsThreadListView(!isThreadListView)}
+                            className={`scale-14 ${isThreadListView ? 'thread-list-toggle-active' : ''}`}
+                            ariaLabel="Show chat history"
+                        />
+                    </Tooltip>
                     <Tooltip content="New chat" secondaryContent={newChatShortcut} showArrow singleLine>
                         <IconButton
                             icon={PlusSignIcon}

@@ -7,7 +7,7 @@ import { allRunsAtom } from '../agents/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
-import { userScrolledAtom, windowUserScrolledAtom, isSkippedFilesDialogVisibleAtom } from '../atoms/ui';
+import { userScrolledAtom, windowUserScrolledAtom, isSkippedFilesDialogVisibleAtom, isThreadListViewAtom } from '../atoms/ui';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import OnboardingRouter from './pages/OnboardingRouter';
@@ -15,6 +15,7 @@ import DeviceAuthorizationPage from './pages/DeviceAuthorizationPage';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
+import ThreadListView from './ThreadListView';
 import UpgradeConsentPage from './pages/UpgradeConsentPage';
 import DowngradeAcknowledgmentPage from './pages/DowngradeAcknowledgmentPage';
 import { store } from '../store';
@@ -57,6 +58,9 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const isProfileLoaded = useAtomValue(isProfileLoadedAtom);
     const isLoadingThread = useAtomValue(isLoadingThreadAtom);
     const isMigratingData = useAtomValue(isMigratingDataAtom);
+    const isThreadListView = useAtomValue(isThreadListViewAtom);
+    const setIsThreadListView = useSetAtom(isThreadListViewAtom);
+
     const pendingUpgradeConsent = useAtomValue(pendingUpgradeConsentAtom);
     const pendingDowngradeAck = useAtomValue(pendingDowngradeAckAtom);
     const updateRequired = useAtomValue(updateRequiredAtom);
@@ -167,27 +171,44 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         );
     }
 
+    const handleCloseThreadList = () => {
+        setIsThreadListView(false);
+    };
+
     {/* Main page */}
     return (
         <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
-            
+
             {/* Header */}
             <Header isWindow={isWindow} />
 
-            {/* Thread view with agent runs */}
-            {runs.length > 0 ? (
-                <ThreadView ref={messagesContainerRef} isWindow={isWindow} />
-            ) : (
-                <HomePage isWindow={isWindow} />
-            )}
+            {/* Content area - relative container for overlay positioning */}
+            <div className="flex-1 min-h-0 display-flex flex-col relative overflow-hidden">
+                {/* Thread view with agent runs */}
+                {runs.length > 0 ? (
+                    <ThreadView ref={messagesContainerRef} isWindow={isWindow} />
+                ) : (
+                    <HomePage isWindow={isWindow} />
+                )}
 
-            {/* Prompt area (footer) with floating elements */}
-            <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
-                <PreviewAndPopupContainer />
-                <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
-                <DragDropWrapper>
-                    <InputArea inputRef={inputRef} />
-                </DragDropWrapper>
+                {/* Prompt area (footer) with floating elements */}
+                <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
+                    <PreviewAndPopupContainer />
+                    <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
+                    <DragDropWrapper>
+                        <InputArea inputRef={inputRef} />
+                    </DragDropWrapper>
+                </div>
+
+                {/* Thread list overlay */}
+                {isThreadListView && (
+                    <div className="thread-overlay-container">
+                        <div className="thread-overlay-backdrop" onClick={handleCloseThreadList} />
+                        <div className="thread-overlay-panel">
+                            <ThreadListView isWindow={isWindow} />
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Dialog Container */}
