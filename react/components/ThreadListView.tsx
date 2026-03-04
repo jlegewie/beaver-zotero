@@ -11,6 +11,7 @@ import { threadService } from '../../src/services/threadService';
 import { getPref } from '../../src/utils/prefs';
 import { getDateGroup } from '../utils/dateUtils';
 import { formatTimeAgo } from '../utils/formatTimeAgo';
+import Button from './ui/Button';
 
 interface ThreadListViewProps {
     isWindow?: boolean;
@@ -23,7 +24,7 @@ interface CacheEntry {
     offset: number;
 }
 
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 4;
 
 const groupThreadsByDate = (threads: ThreadData[]) => {
     const groups: Record<string, ThreadData[]> = {
@@ -491,15 +492,16 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
                 {/* Show more */}
                 {hasMore && (
-                    <div className="display-flex justify-center py-2 pb-3">
-                        <button
-                            className="variant-outline has-text scale-85 display-flex items-center justify-center"
+                    <div className="display-flex justify-start p-2 ml-2 pb-3">
+                        <Button
+                            variant="outline"
                             onClick={loadMoreThreads}
                             disabled={isLoading}
                             type="button"
+                            loading={isLoading}
                         >
-                            {isLoading ? <Spinner size={12} className="mr-1" /> : 'Show more'}
-                        </button>
+                            Show more
+                        </Button>
                     </div>
                 )}
             </div>
