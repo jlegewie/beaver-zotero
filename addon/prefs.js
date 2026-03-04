@@ -28,6 +28,7 @@ pref("autoImportItems", false);
 pref("confirmExtractionCosts", true);
 pref("confirmExternalSearchCosts", true);
 pref("pauseLongRunningAgent", true);
+pref("requestProTools", false);
 
 // Deferred tool preferences: maps tool group to preference (always_ask, always_apply, continue_without_applying)
 // toolToGroup maps tool names to group names (allows renaming tools while preserving preference)

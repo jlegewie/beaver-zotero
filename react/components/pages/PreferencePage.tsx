@@ -128,6 +128,7 @@ const PreferencePage: React.FC = () => {
     const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
     const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
     const [pauseLongRunningAgent, setPauseLongRunningAgent] = useState(() => getPref('pauseLongRunningAgent'));
+    const [requestProTools, setRequestProTools] = useState(() => getPref('requestProTools'));
     const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
     const isMcpServerSupported = useAtomValue(isMcpServerSupportedAtom);
     const [mcpCopied, setMcpCopied] = useState(false);
@@ -418,6 +419,12 @@ const PreferencePage: React.FC = () => {
         setPref('pauseLongRunningAgent', newValue);
         setPauseLongRunningAgent(newValue);
     }, [pauseLongRunningAgent]);
+
+    const handleRequestProToolsToggle = useCallback(() => {
+        const newValue = !requestProTools;
+        setPref('requestProTools', newValue);
+        setRequestProTools(newValue);
+    }, [requestProTools]);
 
     const handleMcpServerToggle = useCallback(() => {
         if (!isMcpServerSupported) return;
@@ -1116,6 +1123,46 @@ const PreferencePage: React.FC = () => {
                                 linkUrl="https://console.anthropic.com/settings/keys"
                             />
                         </div>
+                    </SettingsGroup>
+
+                    <SectionLabel>Pro Tools</SectionLabel>
+                    <SettingsGroup>
+                        {requestProTools ? (
+                            <SettingsRow
+                                title="Pro Tools Enabled"
+                                description={
+                                    <>
+                                        0.25 credits per message + pro tool costs.{' '}
+                                        <DocLink path="credits">Manage credits</DocLink>
+                                    </>
+                                }
+                                control={
+                                    <Button variant="outline" onClick={handleRequestProToolsToggle}>
+                                        Disable
+                                    </Button>
+                                }
+                            />
+                        ) : remainingBeaverCredits > 0 ? (
+                            <SettingsRow
+                                title="Enable Pro Tools"
+                                description="Pro Tools allow you to use advanced features like external search, batch extraction, and AI ranking with your own API key."
+                                control={
+                                    <Button variant="outline" onClick={handleRequestProToolsToggle}>
+                                        Enable
+                                    </Button>
+                                }
+                            />
+                        ) : (
+                            <SettingsRow
+                                title="Enable Pro Tools"
+                                description={
+                                    <>
+                                        Requires Beaver credits.{' '}
+                                        <DocLink path="credits">Get credits</DocLink>
+                                    </>
+                                }
+                            />
+                        )}
                     </SettingsGroup>
 
                     <SectionLabel>Additional Providers</SectionLabel>

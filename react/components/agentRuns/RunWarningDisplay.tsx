@@ -6,9 +6,21 @@ import IconButton from '../ui/IconButton';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { RunWarning, dismissWarningAtom } from '../../atoms/warnings';
 import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
+import { setPref } from '../../../src/utils/prefs';
 
 interface RunWarningDisplayProps {
     warning: RunWarning;
+}
+
+/**
+ * Placeholder for navigating to credit purchase flow.
+ * TODO: Implement as separate window, modal, or external link depending on final UX decision.
+ */
+function openAddCredits(): void {
+    // TODO: Implement credit purchase navigation
+    // This will be used across different parts of the frontend
+    // (separate window, modal, or external link — TBD)
+    openPreferencesWindow('models');
 }
 
 /**
@@ -22,8 +34,14 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
         dismissWarning(warning.id);
     };
 
-    // Determine if settings button should be shown based on warning type
+    const handleDisableProTools = () => {
+        setPref('requestProTools', false);
+        dismissWarning(warning.id);
+    };
+
+    // Determine button layout based on warning type
     const showSettingsButton = warning.type === 'low_credits';
+    const showProToolsDegradedButtons = warning.type === 'pro_tools_degraded';
 
     return (
         <div className="display-flex flex-col p-3 gap-3 rounded-lg bg-quinary">
@@ -54,6 +72,25 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
                         onClick={() => openPreferencesWindow('models')}
                     >
                         Settings
+                    </Button>
+                </div>
+            )}
+            {showProToolsDegradedButtons && (
+                <div className="display-flex flex-row gap-3 items-start mr-1">
+                    <div className="flex-1" />
+                    <Button
+                        variant="outline"
+                        className="scale-90 mt-020"
+                        onClick={openAddCredits}
+                    >
+                        Add Credits
+                    </Button>
+                    <Button
+                        variant="outline"
+                        className="scale-90 mt-020"
+                        onClick={handleDisableProTools}
+                    >
+                        Disable Pro Tools
                     </Button>
                 </div>
             )}

@@ -286,6 +286,10 @@ function createAgentRunShell(
         pause_long_running_agent: getPref('pauseLongRunningAgent'),
     };
 
+    // Send request_pro_tools when pref is enabled and request uses a user API key
+    const usesUserKey = !!modelSelectionOptions.api_key || !!customModel;
+    const requestProTools = getPref('requestProTools') && usesUserKey;
+
     // Create the request that will be sent to the backend
     // thread_id is null for new threads - backend generates the ID
     // Model selection is included in the request (model_id/api_key for backend models, custom_model for custom)
@@ -298,6 +302,7 @@ function createAgentRunShell(
             ...(customInstructions ? { custom_instructions: customInstructions } : {}),
         },
         permissions: permissions,
+        ...(requestProTools ? { request_pro_tools: true } : {}),
         ...(modelSelectionOptions.model_id ? { model_id: modelSelectionOptions.model_id } : {}),
         ...(modelSelectionOptions.api_key ? { api_key: modelSelectionOptions.api_key } : {}),
         ...(customModel ? { custom_model: customModel } : {}),

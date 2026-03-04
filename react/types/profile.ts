@@ -57,7 +57,8 @@ export enum ChargeType {
     SUBSCRIPTION_CREDIT = "subscription_credit",
     USER_API_KEY = "user_api_key",
     USAGE_BASED_BILLING = "usage_based_billing",
-    APP_KEY_FALLBACK = "app_key_fallback"
+    APP_KEY_FALLBACK = "app_key_fallback",
+    BYOK_PRO_TOOLS = "byok_pro_tools"
 }
 
 /**

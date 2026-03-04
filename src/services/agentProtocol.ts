@@ -1010,6 +1010,8 @@ export interface AgentRunRequest {
     user_prompt: BeaverAgentPrompt;
     /** Permissions for the agent run */
     permissions: ChargingPermissions;
+    /** When true and using your own API key, enables pro tools for a reduced credit cost */
+    request_pro_tools?: boolean;
     /** UUID of model_configs entry (mutually exclusive with custom_model) */
     model_id?: string;
     /** User's API key for BYOK models */
