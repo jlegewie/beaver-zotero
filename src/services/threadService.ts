@@ -13,6 +13,7 @@ export interface ThreadModel {
     id: string;
     user_id: string;
     name?: string;
+    starred?: boolean;
     created_at: string;
     updated_at: string;
 }
@@ -147,6 +148,32 @@ export class ThreadService extends ApiService {
     async createThread(name?: string): Promise<ThreadModel> {
         const payload = { name: name || null };
         return this.post<ThreadModel>('/api/v1/threads', payload);
+    }
+
+    /**
+     * Fetches all starred threads, sorted by most recently updated
+     * @returns Promise with the list of starred threads
+     */
+    async getStarredThreads(): Promise<ThreadModel[]> {
+        return this.get<ThreadModel[]>('/api/v1/threads/starred');
+    }
+
+    /**
+     * Stars a thread
+     * @param threadId The ID of the thread to star
+     * @returns Promise with the updated thread data
+     */
+    async starThread(threadId: string): Promise<ThreadModel> {
+        return this.patch<ThreadModel>(`/api/v1/threads/${threadId}/star`, {});
+    }
+
+    /**
+     * Unstars a thread
+     * @param threadId The ID of the thread to unstar
+     * @returns Promise with the updated thread data
+     */
+    async unstarThread(threadId: string): Promise<ThreadModel> {
+        return this.patch<ThreadModel>(`/api/v1/threads/${threadId}/unstar`, {});
     }
 }
 
