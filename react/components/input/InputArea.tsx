@@ -250,6 +250,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     const getPlaceholderText = () => {
         if (isAwaitingApproval) return "Add instructions to reject";
+        if (shouldShowSoftCapWarning && !shouldShowHighTokenWarning) return "Yes to continue, or add instructions to adjust";
         if (isLibraryTab) return "@ to add a source, / for actions";
         return "@ to add a source, / for actions, drag to add annotations";
     }

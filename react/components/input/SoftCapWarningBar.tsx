@@ -16,6 +16,7 @@ const SoftCapWarningBar: React.FC<SoftCapWarningBarProps> = ({
     onDismiss,
 }) => {
     const [isLinkHovered, setIsLinkHovered] = React.useState(false);
+    const [isReadMoreLinkHovered, setIsReadMoreLinkHovered] = React.useState(false);
 
     return (
         <div className="high-token-usage-warning-bar display-flex flex-row items-start px-3 py-2 gap-2">
@@ -36,7 +37,21 @@ const SoftCapWarningBar: React.FC<SoftCapWarningBarProps> = ({
                 >
                     Disable pausing
                 </a>
-                {' '}to avoid interruptions. Additional costs may apply.
+                {' '}to avoid interruptions. Additional costs may apply.{' '}
+                <a
+                    href="#"
+                    className={`${isReadMoreLinkHovered ? 'font-color-primary' : 'font-color-secondary'} transition text-sm text-underline`}
+                    onMouseEnter={() => setIsReadMoreLinkHovered(true)}
+                    onMouseLeave={() => setIsReadMoreLinkHovered(false)}
+                    onFocus={() => setIsReadMoreLinkHovered(true)}
+                    onBlur={() => setIsReadMoreLinkHovered(false)}
+                    onClick={(e) => {
+                        e.preventDefault();
+                        Zotero.launchURL('https://www.beaverapp.ai/docs/credits');
+                    }}
+                >
+                    Learn more
+                </a>
             </span>
             <div className="flex-1" />
             <IconButton
