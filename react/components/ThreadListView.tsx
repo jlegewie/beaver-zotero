@@ -24,7 +24,7 @@ interface CacheEntry {
     offset: number;
 }
 
-const PAGE_SIZE = 4;
+const PAGE_SIZE = 15;
 
 const groupThreadsByDate = (threads: ThreadData[]) => {
     const groups: Record<string, ThreadData[]> = {
