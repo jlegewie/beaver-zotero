@@ -511,21 +511,31 @@ async function executeOrganizeItemsAction(
                     continue;
                 }
 
+                // Skip annotations — they don't support tags or collections
+                if (item.isAnnotation()) {
+                    skippedItems.push(itemId);
+                    continue;
+                }
+
+                const isTopLevel = item.isTopLevelItem();
                 let modified = false;
 
                 // Snapshot in-memory state before modifications for rollback
                 const originalTags = item.getTags();
-                const originalCollections = item.getCollections();
+                const originalCollections = isTopLevel ? item.getCollections() : [];
                 itemSnapshots.set(itemId, { item, tags: originalTags, collections: originalCollections });
 
                 // Get current state for change detection
                 const existingTags = new Set(originalTags.map((t: { tag: string }) => t.tag));
-                const existingCollections = new Set(originalCollections.map((collectionId: number) => {
-                    const collection = Zotero.Collections.get(collectionId);
-                    return collection ? collection.key : null;
-                }).filter(Boolean) as string[]);
+                const existingCollections = isTopLevel
+                    ? new Set(originalCollections.map((collectionId: number) => {
+                        const collection = Zotero.Collections.get(collectionId);
+                        return collection ? collection.key : null;
+                    }).filter(Boolean) as string[])
+                    : new Set<string>();
 
                 // Add tags (only if not already present)
+                // Tags work on regular items, attachments, and notes
                 if (tags?.add && tags.add.length > 0) {
                     for (const tagName of tags.add) {
                         if (!existingTags.has(tagName)) {
@@ -546,8 +556,8 @@ async function executeOrganizeItemsAction(
                     }
                 }
 
-                // Add to collections (only if not already member)
-                if (collections?.add && collections.add.length > 0) {
+                // Add to collections (only for top-level items)
+                if (isTopLevel && collections?.add && collections.add.length > 0) {
                     for (const collKey of collections.add) {
                         if (!existingCollections.has(collKey)) {
                             const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
@@ -560,8 +570,8 @@ async function executeOrganizeItemsAction(
                     }
                 }
 
-                // Remove from collections (only if member)
-                if (collections?.remove && collections.remove.length > 0) {
+                // Remove from collections (only for top-level items)
+                if (isTopLevel && collections?.remove && collections.remove.length > 0) {
                     for (const collKey of collections.remove) {
                         if (existingCollections.has(collKey)) {
                             const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);

@@ -821,24 +821,55 @@ async function validateOrganizeItemsAction(
             };
         }
 
-        // Only regular items can be organized
-        if (!item.isRegularItem()) {
+        // Tags: allowed on regular items, attachments, and notes (mainly excludes annotations)
+        if (hasTagChanges && !item.isRegularItem() && !item.isAttachment() && !item.isNote()) {
+            const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: `Only regular items can be organized. Item ${itemId} is not a regular item.`,
+                error: `Item '${itemId}' is an ${itemType}. Tags can only be added to or removed from regular items, attachments, and notes. Use the parent attachment or top-level item instead.`,
                 error_code: 'item_type_not_supported',
+                preference: 'always_ask',
+            };
+        }
+
+        // Collection: allowed on regular items, attachments, and notes (mainly excludes annotations)
+        if (hasCollectionChanges && !item.isRegularItem() && !item.isAttachment() && !item.isNote()) {
+            const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Item '${itemId}' is an ${itemType}. Collections can only be added to or removed from top-level regular items, attachments or notes. Use the parent item instead.`,
+                error_code: 'item_type_not_supported',
+                preference: 'always_ask',
+            };
+        }
+
+        // Collection changes: only allowed on top-level items
+        if (hasCollectionChanges && !item.isTopLevelItem()) {
+            const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
+            const parentKey = item.parentKey;
+            const parentId = `${libraryId}-${parentKey}`;
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Item '${itemId}' is a child ${itemType} and cannot be added to or removed from collections directly. Only top-level items can be added or removed from collections. Use the parent item '${parentId}' instead.`,
+                error_code: 'item_not_top_level',
                 preference: 'always_ask',
             };
         }
 
         // Collect current state for undo
         const itemTags: string[] = item.getTags().map((t: { tag: string }) => t.tag);
-        const itemCollections: string[] = item.getCollections().map((collectionId: number) => {
-            const collection = Zotero.Collections.get(collectionId);
-            return collection ? collection.key : null;
-        }).filter(Boolean) as string[];
+        const itemCollections: string[] = item.isTopLevelItem()
+            ? item.getCollections().map((collectionId: number) => {
+                const collection = Zotero.Collections.get(collectionId);
+                return collection ? collection.key : null;
+            }).filter(Boolean) as string[]
+            : [];
 
         currentState[itemId] = {
             tags: itemTags,
