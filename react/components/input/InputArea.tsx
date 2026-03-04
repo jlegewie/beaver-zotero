@@ -248,6 +248,12 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
     };
 
+    const getPlaceholderText = () => {
+        if (isAwaitingApproval) return "Add instructions to reject";
+        if (isLibraryTab) return "@ to add a source, / for actions";
+        return "@ to add a source, / for actions, drag to add annotations";
+    }
+
     return (
         <div
             className="user-message-display shadow-md shadow-md-top"
@@ -334,9 +340,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             e.currentTarget.style.height = 'auto';
                             e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
                         }}
-                        placeholder={isAwaitingApproval
-                            ? "Add instructions to reject"
-                            : (isLibraryTab ? "@ to add a source, / for actions" : "@ to add a source, / for actions, drag to add annotations")}
+                        placeholder={getPlaceholderText()}
                         className="chat-input"
                         onKeyDown={(e) => {
                             // When slash menu is open, handle navigation and dismiss keys
