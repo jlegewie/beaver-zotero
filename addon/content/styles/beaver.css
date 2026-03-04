@@ -2210,7 +2210,7 @@
 }
 
 [id^="beaver-pane-"] .thread-search-input:focus {
-    border-color: var(--fill-tertiary);
+    border-color: var(--fill-quarternary);
 }
 
 [id^="beaver-pane-"] .thread-search-input::placeholder {
@@ -2219,7 +2219,7 @@
 
 [id^="beaver-pane-"] .thread-group-header {
     padding: 8px 12px 4px;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -2241,13 +2241,13 @@
 }
 
 [id^="beaver-pane-"] .thread-list-item-name {
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     color: var(--fill-secondary);
     line-height: 1.3;
 }
 
 [id^="beaver-pane-"] .thread-list-item-time {
-    font-size: 0.75rem;
+    font-size: 0.85rem;
     color: var(--fill-tertiary);
     margin-top: 1px;
 }
@@ -2279,7 +2279,7 @@
     border: 0;
     border-width: 0;
     color: var(--fill-secondary);
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     line-height: 1.3;
     outline: none;
     font-family: inherit;
