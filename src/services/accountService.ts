@@ -54,6 +54,24 @@ interface PreferenceRequest {
     value: boolean;
 }
 
+interface CheckoutSessionRequest {
+    sku: string;
+    success_url: string;
+    cancel_url: string;
+}
+
+interface CheckoutSessionResponse {
+    checkout_url: string;
+}
+
+interface PortalSessionRequest {
+    return_url: string;
+}
+
+interface PortalSessionResponse {
+    portal_url: string;
+}
+
 interface ErrorReportRequest {
     message: string;
     jotai_atoms?: Record<string, any>;
@@ -279,6 +297,26 @@ export class AccountService extends ApiService {
      */
     async migrateData(): Promise<MigrationResponse> {
         return this.post<MigrationResponse>('/api/v1/account/migrate-data', {});
+    }
+
+    /**
+     * Creates a Stripe Checkout session for subscribing or purchasing credits
+     */
+    async createCheckoutSession(sku: string, successUrl: string, cancelUrl: string): Promise<CheckoutSessionResponse> {
+        return this.post<CheckoutSessionResponse>('/api/v1/billing/create-checkout-session', {
+            sku,
+            success_url: successUrl,
+            cancel_url: cancelUrl
+        } as CheckoutSessionRequest);
+    }
+
+    /**
+     * Creates a Stripe Customer Portal session for managing subscriptions
+     */
+    async createPortalSession(returnUrl: string): Promise<PortalSessionResponse> {
+        return this.post<PortalSessionResponse>('/api/v1/billing/create-portal-session', {
+            return_url: returnUrl
+        } as PortalSessionRequest);
     }
 
     /**

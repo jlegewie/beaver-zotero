@@ -34,15 +34,21 @@ export interface PlanFeatures {
     maxPageCount: number;
 }
 
+export type CreditPlanStatus = "none" | "active" | "past_due" | "canceled";
+
 export interface ProfileBalance {
     pagesRemaining: number;
     subscriptionChatCreditsRemaining: number;
     purchasedChatCreditsRemaining: number;
     chatCreditsRemaining: number;
+    rolledOverCredits: number;
+    monthlyCredits: number;
+    monthlyCreditsUsed: number;
 }
 
 /**
  * Subscription status enum (based on SubscriptionStatus)
+ * @deprecated Still used by WS protocol in agentProtocol.ts / agentRunAtoms.ts
  */
 export enum SubscriptionStatus {
     FREE = "free",
@@ -79,9 +85,16 @@ export interface SafeProfileModel {
     
     // Subscription
     current_plan_id: string;     // UUID
-    subscription_status: SubscriptionStatus;
-    current_period_start?: Date;
-    current_period_end?: Date;
+
+    // Credit plan (LLM credit subscription)
+    credit_plan: string | null;  // 'basic', 'pro', or null
+    credit_plan_status: CreditPlanStatus;
+    credit_plan_monthly_credits: number;
+    credit_period_start: string | null;
+    credit_period_end: string | null;
+    credit_cancel_at_period_end: boolean;
+    rolled_over_credits: number;
+    purchased_credits_expires_at: string | null;
     
     // Zotero integration and settings
     zotero_user_id: string | null;

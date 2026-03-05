@@ -5,7 +5,7 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, CopyIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom, creditPlanAtom, creditBreakdownAtom, isCreditPlanPastDueAtom, hasCreditPlanAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
 import { generatePromptId, CustomPrompt } from "../../types/settings";
@@ -26,6 +26,7 @@ import DeferredToolPreferenceSetting from "../preferences/DeferredToolPreference
 import { BeaverUIFactory } from "../../../src/ui/ui";
 import { copyToClipboard } from "../../utils/clipboard";
 import { ensureMcpBridgeScript } from "../../hooks/useMcpServer";
+import { useBilling } from "../../hooks/useBilling";
 
 /** Section label displayed above a settings group */
 const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -121,6 +122,11 @@ const PreferencePage: React.FC = () => {
     const profileBalance = useAtomValue(profileBalanceAtom);
     const remainingBeaverCredits = useAtomValue(remainingBeaverCreditsAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
+    const creditPlan = useAtomValue(creditPlanAtom);
+    const creditBreakdown = useAtomValue(creditBreakdownAtom);
+    const isPastDue = useAtomValue(isCreditPlanPastDueAtom);
+    const hasPlan = useAtomValue(hasCreditPlanAtom);
+    const { subscribe, buyCredits, manageSubscription, isLoading: isBillingLoading } = useBilling();
     const processingMode = useAtomValue(processingModeAtom);
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
@@ -665,16 +671,6 @@ const PreferencePage: React.FC = () => {
                                     />
                                 )}
                                 <SettingsRow
-                                    title="Chat Credits"
-                                    description="Remaining Beaver chat credits"
-                                    hasBorder
-                                    control={
-                                        <span className="font-color-primary text-sm font-medium">
-                                            {remainingBeaverCredits.toLocaleString()}
-                                        </span>
-                                    }
-                                />
-                                <SettingsRow
                                     title="Sign Out"
                                     description="End your current session"
                                     hasBorder
@@ -682,6 +678,86 @@ const PreferencePage: React.FC = () => {
                                         <Button variant="outline" icon={LogoutIcon} onClick={logout}>
                                             Logout
                                         </Button>
+                                    }
+                                />
+                            </SettingsGroup>
+
+                            <SectionLabel>Credits &amp; Billing</SectionLabel>
+                            <SettingsGroup>
+                                {isPastDue && (
+                                    <SettingsRow
+                                        title="Payment Failed"
+                                        description="Your payment method needs to be updated to continue your subscription"
+                                        control={
+                                            <Button variant="outline" onClick={manageSubscription} disabled={isBillingLoading}>
+                                                Update Payment
+                                            </Button>
+                                        }
+                                    />
+                                )}
+                                <SettingsRow
+                                    title="Credit Plan"
+                                    description={(() => {
+                                        if (!creditPlan.plan) return 'No active credit plan';
+                                        const name = creditPlan.plan.charAt(0).toUpperCase() + creditPlan.plan.slice(1);
+                                        if (creditPlan.cancelAtPeriodEnd && creditPlan.periodEnd) {
+                                            const endDate = new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                                            return `${name} (cancels ${endDate})`;
+                                        }
+                                        if (creditPlan.status === 'past_due') return `${name} (past due)`;
+                                        return name;
+                                    })()}
+                                    hasBorder={hasPlan}
+                                />
+                                {hasPlan && (
+                                    <SettingsRow
+                                        title="Monthly Credits"
+                                        description={`${creditPlan.monthlyCredits - Math.min(profileBalance.monthlyCreditsUsed, creditPlan.monthlyCredits)} / ${creditPlan.monthlyCredits} remaining this period`}
+                                        hasBorder
+                                    />
+                                )}
+                                {creditBreakdown.rolledOverCredits > 0 && (
+                                    <SettingsRow
+                                        title="Rolled Over"
+                                        description={`${creditBreakdown.rolledOverCredits} rolled over from previous period`}
+                                        hasBorder
+                                    />
+                                )}
+                                {creditBreakdown.purchasedCredits > 0 && (
+                                    <SettingsRow
+                                        title="Purchased Credits"
+                                        description={`${creditBreakdown.purchasedCredits} credits${creditBreakdown.purchasedExpiresAt ? ` (expires ${new Date(creditBreakdown.purchasedExpiresAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })})` : ''}`}
+                                        hasBorder
+                                    />
+                                )}
+                                <SettingsRow
+                                    title="Total Credits"
+                                    description="Total remaining credits"
+                                    hasBorder
+                                    control={
+                                        <span className="font-color-primary text-sm font-bold">
+                                            {creditBreakdown.total.toLocaleString()}
+                                        </span>
+                                    }
+                                />
+                                <SettingsRow
+                                    title=""
+                                    description=""
+                                    control={
+                                        <div className="display-flex flex-row gap-2">
+                                            {hasPlan ? (
+                                                <Button variant="outline" onClick={manageSubscription} disabled={isBillingLoading}>
+                                                    {creditPlan.status === 'canceled' ? 'Resubscribe' : 'Manage Subscription'}
+                                                </Button>
+                                            ) : (
+                                                <Button variant="outline" onClick={() => subscribe()} disabled={isBillingLoading}>
+                                                    Subscribe
+                                                </Button>
+                                            )}
+                                            <Button variant="outline" onClick={buyCredits} disabled={isBillingLoading}>
+                                                Buy Credits
+                                            </Button>
+                                        </div>
                                     }
                                 />
                             </SettingsGroup>
