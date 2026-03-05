@@ -213,8 +213,10 @@ export const validateSelectedModelAtom = atom(
         // 1. Check existence in available models
         // We find the "fresh" definition from the available list to ensure we have latest flags/config
         // This is crucial for migration: if lastUsedModel is stale/legacy, we hydrate it from availableModels
+        // Note: match on id only — access_mode is a frontend-only field not present on backend models.
+        // Access mode validation happens separately in step 3 below.
         const freshModel = selectedModel
-            ? availableModels.find(m => m.id === selectedModel.id && (selectedModel.access_mode === undefined || m.access_mode === selectedModel.access_mode))
+            ? availableModels.find(m => m.id === selectedModel.id)
             : null;
         
         if (!freshModel) {
