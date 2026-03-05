@@ -1270,57 +1270,6 @@ const PreferencePage: React.FC = () => {
                         />
                     </SettingsGroup>
 
-                    {/* --- Section 3: Pro Tools Status (conditional) --- */}
-                    {(geminiKey || openaiKey || anthropicKey) && (
-                        <>
-                            <div className="display-flex flex-row items-center gap-2" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
-                                <div className="text-lg font-color-primary font-bold">Pro Tools</div>
-                                {requestProTools ? (
-                                    <span
-                                        className="text-xs px-15 py-05 rounded-md font-medium"
-                                        style={{ color: 'var(--tag-green-secondary)', border: '1px solid var(--tag-green-tertiary)', background: 'var(--tag-green-quinary)' }}
-                                    >
-                                        Enabled
-                                    </span>
-                                ) : (
-                                    <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">
-                                        Disabled
-                                    </span>
-                                )}
-                            </div>
-                            <SettingsGroup>
-                                <SettingsRow
-                                    // title={requestProTools ? 'Active with Your API Keys' : 'Enable with Your API Keys'}
-                                    title="Pro Tools with Your API Keys"
-                                    description={
-                                        <>
-                                            Enable to use pro tools like external search, batch extraction, and AI ranking with your own API key.
-                                            Costs 0.25 credits per message. Some actions cost extra.
-                                            {' '}<DocLink path="credits">Learn more</DocLink>
-                                        </>
-                                    }
-                                    control={
-                                        <Button variant="outline" onClick={handleRequestProToolsToggle}>
-                                            {requestProTools ? 'Disable' : 'Enable'}
-                                        </Button>
-                                    }
-                                />
-                                <SettingsRow
-                                    title=""
-                                    description={
-                                        <span
-                                            className="text-sm text-link cursor-pointer"
-                                            onClick={() => setActiveTab('models')}
-                                        >
-                                            Configure API keys &rarr;
-                                        </span>
-                                    }
-                                    hasBorder
-                                />
-                            </SettingsGroup>
-                        </>
-                    )}
-
                     {/* --- Section 4: Cross-links --- */}
                     <div className="display-flex flex-col gap-1" style={{ marginTop: '16px', paddingLeft: '2px' }}>
                         <span
@@ -1328,6 +1277,12 @@ const PreferencePage: React.FC = () => {
                             onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/login`)}
                         >
                             Manage account on web &rarr;
+                        </span>
+                        <span
+                            className="text-sm text-link cursor-pointer"
+                            onClick={() => setActiveTab('models')}
+                        >
+                            Use your own API key instead? Configure in API Keys &rarr;
                         </span>
                     </div>
                 </>
@@ -1385,14 +1340,33 @@ const PreferencePage: React.FC = () => {
                         </div>
                     </SettingsGroup>
 
-                    <SectionLabel>Pro Tools</SectionLabel>
+                    <div className="display-flex flex-row gap-2">
+                        <SectionLabel>Pro Tools</SectionLabel>
+                        {requestProTools ? (
+                            <span
+                                className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
+                                style={{ marginTop: '20px', marginBottom: '6px' }}
+                                // style={{ color: 'var(--tag-green-secondary)', border: '1px solid var(--tag-green-tertiary)', background: 'var(--tag-green-quinary)' }}
+                            >
+                                Enabled
+                            </span>
+                        ) : (
+                            <span
+                                className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
+                                style={{ marginTop: '20px', marginBottom: '6px' }}
+                            >
+                                Disabled
+                            </span>
+                        )}
+                    </div>
                     <SettingsGroup>
                         {requestProTools ? (
                             <SettingsRow
-                                title="Pro Tools Enabled"
+                                title="Pro Tools with Your API Keys"
                                 description={
                                     <>
-                                        Enable Pro Tools with your API keys. Uses 0.25 credits per message + pro tool costs.{' '}
+                                        Enable to use pro tools like external search, batch extraction, and AI ranking with your own API key.
+                                        Costs 0.25 credits per message. Some actions cost extra.{' '}
                                         <DocLink path="credits">Learn more</DocLink>
                                     </>
                                 }
@@ -1404,8 +1378,14 @@ const PreferencePage: React.FC = () => {
                             />
                         ) : remainingBeaverCredits > 0 ? (
                             <SettingsRow
-                                title="Enable Pro Tools"
-                                description="Enable Pro Tools with your API keys. Uses 0.25 credits per message + pro tool costs."
+                                title="Pro Tools with Your API Keys"
+                                description={
+                                    <>
+                                        Enable to use pro tools like external search, batch extraction, and AI ranking with your own API key.
+                                        Costs 0.25 credits per message. Some actions cost extra.{' '}
+                                        <DocLink path="credits">Learn more</DocLink>
+                                    </>
+                                }
                                 control={
                                     <Button variant="outline" onClick={handleRequestProToolsToggle}>
                                         Enable
