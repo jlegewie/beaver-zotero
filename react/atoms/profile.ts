@@ -139,7 +139,7 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
 export const remainingBeaverCreditsAtom = atom<number>((get) => {
     const profile = get(profileWithPlanAtom);
     if (!profile) return 0;
-    const subscriptionRemaining = Math.max(0, profile.credit_plan_monthly_credits + profile.rolled_over_credits - profile.chat_credits_used);
+    const subscriptionRemaining = Math.max(0, (profile.credit_plan_monthly_credits || 0) + (profile.rolled_over_credits || 0) - (profile.chat_credits_used || 0));
     const purchasedRemaining = profile.purchased_chat_credits || 0;
     return subscriptionRemaining + purchasedRemaining;
 });
@@ -185,11 +185,11 @@ export const creditPlanAtom = atom((get) => {
 export const creditBreakdownAtom = atom((get) => {
     const profile = get(profileWithPlanAtom);
     if (!profile) return { subscriptionRemaining: 0, rolledOverCredits: 0, purchasedCredits: 0, purchasedExpiresAt: null as string | null, total: 0 };
-    const subscriptionRemaining = Math.max(0, profile.credit_plan_monthly_credits + profile.rolled_over_credits - profile.chat_credits_used);
+    const subscriptionRemaining = Math.max(0, (profile.credit_plan_monthly_credits || 0) + (profile.rolled_over_credits || 0) - (profile.chat_credits_used || 0));
     const purchasedCredits = profile.purchased_chat_credits || 0;
     return {
         subscriptionRemaining,
-        rolledOverCredits: profile.rolled_over_credits,
+        rolledOverCredits: profile.rolled_over_credits || 0,
         purchasedCredits,
         purchasedExpiresAt: profile.purchased_credits_expires_at,
         total: subscriptionRemaining + purchasedCredits,

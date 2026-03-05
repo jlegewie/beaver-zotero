@@ -1273,11 +1273,14 @@ const PreferencePage: React.FC = () => {
                             <SectionLabel>Pro Tools</SectionLabel>
                             <SettingsGroup>
                                 <SettingsRow
-                                    title={requestProTools ? 'Pro Tools Enabled' : 'Pro Tools Disabled'}
+                                    title={requestProTools ? 'Pro Tools: Enabled' : 'Pro Tools: Disabled'}
                                     description={
-                                        requestProTools
-                                            ? '0.25 credits per message + Pro Tool costs.'
-                                            : 'Enable Pro Tools for advanced features like external search and batch extraction.'
+                                        <>
+                                            {requestProTools
+                                                ? 'Pro Tools (external search, batch extraction, AI ranking) are active when using your own API key. Costs 0.25 credits per message + tool costs.'
+                                                : 'When using your own API key, enable Pro Tools for advanced features like external search, batch extraction, and AI ranking. Pro Tools are always available with Beaver models.'}
+                                            {' '}<DocLink path="credits">Learn more</DocLink>
+                                        </>
                                     }
                                     control={
                                         <Button variant="outline" onClick={handleRequestProToolsToggle}>
