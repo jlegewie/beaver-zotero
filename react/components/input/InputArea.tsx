@@ -13,7 +13,7 @@ import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../../utils/promptVariables';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 import { logger } from '../../../src/utils/logger';
-import { isLibraryTabAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
+import { isLibraryTabAtom, isWebSearchEnabledAtom, requestProToolsAtom } from '../../atoms/ui';
 import { selectedModelAtom, isUsingBeaverCreditsAtom } from '../../atoms/models';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
@@ -93,6 +93,11 @@ const InputArea: React.FC<InputAreaProps> = ({
         softCapTriggeredRuns[lastRun.id] &&
         pauseLongRunningAgent &&
         dismissedSoftCapRunId !== lastRun.id
+    );
+
+    const requestProTools = useAtomValue(requestProToolsAtom);
+    const isWebSearchAllowed = Boolean(
+        isUsingBeaverCredits || requestProTools
     );
 
     // Slash menu hook
@@ -363,14 +368,14 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} disabled={isAwaitingApproval} />
                     <div className="flex-1" />
                     <div className="display-flex flex-row items-center gap-4">
-                        <Tooltip content={isWebSearchEnabled ? 'Disable web search' : 'Enable web search'} singleLine>
+                        <Tooltip content={!isWebSearchAllowed ? 'Beaver credits required. Use Beaver model or enable Pro Tools (Settings → API Keys)' : isWebSearchEnabled ? 'Disable web search' : 'Enable web search'} singleLine>
                             <IconButton
                                 icon={GlobalSearchIcon}
                                 variant="ghost-secondary"
                                 className="scale-12 mt-015"
                                 iconClassName={isWebSearchEnabled ? 'font-color-accent-blue stroke-width-2' : ''}
                                 onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
-                                disabled={isAwaitingApproval}
+                                disabled={isAwaitingApproval || !isWebSearchAllowed}
                             />
                         </Tooltip>
                         <Button

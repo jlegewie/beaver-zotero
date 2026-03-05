@@ -6,7 +6,7 @@ import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, Repeat
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom, creditPlanAtom, creditBreakdownAtom, isCreditPlanPastDueAtom, hasCreditPlanAtom } from "../../atoms/profile";
-import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom } from "../../atoms/ui";
+import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom, requestProToolsAtom } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
 import { generatePromptId, CustomPrompt } from "../../types/settings";
 import { customPromptsAtom, saveCustomPromptsAtom, usedShortcutsAtom } from "../../atoms/customPrompts";
@@ -134,7 +134,7 @@ const PreferencePage: React.FC = () => {
     const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
     const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
     const [pauseLongRunningAgent, setPauseLongRunningAgent] = useState(() => getPref('pauseLongRunningAgent'));
-    const [requestProTools, setRequestProTools] = useState(() => getPref('requestProTools'));
+    const [requestProTools, setRequestProTools] = useAtom(requestProToolsAtom);
     const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
     const isMcpServerSupported = useAtomValue(isMcpServerSupportedAtom);
     const [mcpCopied, setMcpCopied] = useState(false);

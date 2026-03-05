@@ -11,6 +11,7 @@ export type PreferencePageTab = 'general' | 'sync' | 'permissions' | 'billing' |
 export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
 export const isPreferencePageVisibleAtom = atom(false);
 export const mcpServerEnabledAtom = atom(getPref('mcpServerEnabled'));
+export const requestProToolsAtom = atom(getPref('requestProTools'));
 export const showFileStatusDetailsAtom = atom(false);
 export const isThreadListViewAtom = atom(false);
 
