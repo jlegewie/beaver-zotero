@@ -44,7 +44,7 @@ import {
     readerTextSelectionAtom,
     currentMessageContentAtom,
 } from './messageComposition';
-import { isSidebarVisibleAtom, isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom } from './ui';
+import { isSidebarVisibleAtom, isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { addFloatingPopupMessageAtom } from './floatingPopup';
 import { BeaverUIFactory } from '../../src/ui/ui';
 import { eventManager } from '../events/eventManager';
@@ -1223,7 +1223,7 @@ export const sendWSMessageAtom = atom(
         };
 
         // Tool requests (web search)
-        const toolRequests = get(isWebSearchEnabledAtom)
+        const toolRequests = get(isWebSearchEnabledAtom) && get(isWebSearchAllowedAtom)
             ? [{ function: "search_external_references", parameters: {} } as ToolRequest]
             : undefined;
 

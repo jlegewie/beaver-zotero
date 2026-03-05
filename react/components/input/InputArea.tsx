@@ -13,7 +13,7 @@ import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../../utils/promptVariables';
 import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 import { logger } from '../../../src/utils/logger';
-import { isLibraryTabAtom, isWebSearchEnabledAtom, requestProToolsAtom } from '../../atoms/ui';
+import { isLibraryTabAtom, isWebSearchAllowedAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { selectedModelAtom, isUsingBeaverCreditsAtom } from '../../atoms/models';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
@@ -56,6 +56,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const dismissSoftCapWarning = useSetAtom(dismissSoftCapWarningForThreadAtom);
     const backendHighTokenUsageRuns = useAtomValue(backendHighTokenUsageRunsAtom);
     const softCapTriggeredRuns = useAtomValue(softCapTriggeredRunsAtom);
+    const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -93,11 +94,6 @@ const InputArea: React.FC<InputAreaProps> = ({
         softCapTriggeredRuns[lastRun.id] &&
         pauseLongRunningAgent &&
         dismissedSoftCapRunId !== lastRun.id
-    );
-
-    const requestProTools = useAtomValue(requestProToolsAtom);
-    const isWebSearchAllowed = Boolean(
-        isUsingBeaverCredits || requestProTools
     );
 
     // Slash menu hook

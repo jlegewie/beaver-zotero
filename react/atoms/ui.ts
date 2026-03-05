@@ -3,6 +3,7 @@ import { TextSelection } from '../types/attachments/apiTypes';
 import { PopupMessage, PopupMessageType } from '../types/popupMessage';
 import { ExternalReference } from '../types/externalReferences';
 import { getPref } from '../../src/utils/prefs';
+import { isUsingBeaverCreditsAtom } from './models';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
@@ -12,6 +13,7 @@ export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
 export const isPreferencePageVisibleAtom = atom(false);
 export const mcpServerEnabledAtom = atom(getPref('mcpServerEnabled'));
 export const requestProToolsAtom = atom(getPref('requestProTools'));
+export const isWebSearchAllowedAtom = atom((get) => Boolean(get(isUsingBeaverCreditsAtom) || get(requestProToolsAtom)));
 export const showFileStatusDetailsAtom = atom(false);
 export const isThreadListViewAtom = atom(false);
 
