@@ -1,13 +1,13 @@
 import React, { useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { Icon, AlertIcon, RepeatIcon, SettingsIcon, ArrowDownIcon, ArrowRightIcon, LinkForwardIcon } from '../icons/icons';
+import { Icon, AlertIcon, RepeatIcon, ArrowDownIcon, ArrowRightIcon, LinkForwardIcon } from '../icons/icons';
 import Button from '../ui/Button';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { regenerateFromRunAtom, resumeFromRunAtom } from '../../atoms/agentRunAtoms';
-import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { runErrorVisibilityAtom, setRunErrorVisibilityAtom } from '../../atoms/messageUIState';
+import { useBilling } from '../../hooks/useBilling';
 
 interface RunError {
     type: string;
@@ -83,6 +83,7 @@ const typeMap: Record<string, string> = {
 export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, isLastRun }) => {
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
     const resumeFromRun = useSetAtom(resumeFromRunAtom);
+    const { subscribe, buyCredits, isLoading: isBillingLoading } = useBilling();
     
     // Visibility state
     const runErrorVisibility = useAtomValue(runErrorVisibilityAtom);
@@ -169,14 +170,34 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
 
                             <div className="display-flex flex-row gap-3 items-center">
                                 <div className="flex-1" />
-                                {error.type === "usage_limit_exceeded" && (
+                                {(error.type === "usage_limit_exceeded" || error.type === "llm_insufficient_credits") && (
+                                    <>
+                                        <Button
+                                            variant="error"
+                                            iconClassName="font-color-red"
+                                            onClick={() => subscribe()}
+                                            disabled={isBillingLoading}
+                                        >
+                                            Subscribe
+                                        </Button>
+                                        <Button
+                                            variant="error"
+                                            iconClassName="font-color-red"
+                                            onClick={buyCredits}
+                                            disabled={isBillingLoading}
+                                        >
+                                            Buy Credits
+                                        </Button>
+                                    </>
+                                )}
+                                {error.type === "inactive_subscription" && (
                                     <Button
                                         variant="error"
                                         iconClassName="font-color-red"
-                                        rightIcon={SettingsIcon}
-                                        onClick={() => openPreferencesWindow('models')}
+                                        onClick={() => subscribe()}
+                                        disabled={isBillingLoading}
                                     >
-                                        Settings
+                                        Subscribe
                                     </Button>
                                 )}
                                 {error.is_resumable && isLastRun && (

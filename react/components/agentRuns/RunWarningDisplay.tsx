@@ -1,26 +1,16 @@
 import React from 'react';
 import { useSetAtom } from 'jotai';
-import { Icon, AlertIcon, CancelIcon, SettingsIcon } from '../icons/icons';
+import { Icon, AlertIcon, CancelIcon } from '../icons/icons';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { RunWarning, dismissWarningAtom } from '../../atoms/warnings';
-import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { setPref } from '../../../src/utils/prefs';
+import { requestProToolsAtom } from '../../atoms/ui';
+import { useBilling } from '../../hooks/useBilling';
 
 interface RunWarningDisplayProps {
     warning: RunWarning;
-}
-
-/**
- * Placeholder for navigating to credit purchase flow.
- * TODO: Implement as separate window, modal, or external link depending on final UX decision.
- */
-function openAddCredits(): void {
-    // TODO: Implement credit purchase navigation
-    // This will be used across different parts of the frontend
-    // (separate window, modal, or external link — TBD)
-    openPreferencesWindow('models');
 }
 
 /**
@@ -29,6 +19,8 @@ function openAddCredits(): void {
  */
 export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning }) => {
     const dismissWarning = useSetAtom(dismissWarningAtom);
+    const setRequestProTools = useSetAtom(requestProToolsAtom);
+    const { subscribe, buyCredits, isLoading } = useBilling();
 
     const handleDismiss = () => {
         dismissWarning(warning.id);
@@ -36,11 +28,11 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
 
     const handleDisableProTools = () => {
         setPref('requestProTools', false);
+        setRequestProTools(false);
         dismissWarning(warning.id);
     };
 
-    // Determine button layout based on warning type
-    const showSettingsButton = warning.type === 'low_credits';
+    const showLowCreditsButtons = warning.type === 'low_credits';
     const showProToolsDegradedButtons = warning.type === 'pro_tools_degraded';
 
     return (
@@ -62,16 +54,24 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
                     </div>
                 </div>
             </div>
-            {showSettingsButton && (
+            {showLowCreditsButtons && (
                 <div className="display-flex flex-row gap-3 items-start mr-1">
                     <div className="flex-1" />
                     <Button
                         variant="outline"
                         className="scale-90 mt-020"
-                        rightIcon={SettingsIcon}
-                        onClick={() => openPreferencesWindow('models')}
+                        onClick={() => subscribe()}
+                        disabled={isLoading}
                     >
-                        Settings
+                        Subscribe
+                    </Button>
+                    <Button
+                        variant="outline"
+                        className="scale-90 mt-020"
+                        onClick={buyCredits}
+                        disabled={isLoading}
+                    >
+                        Buy Credits
                     </Button>
                 </div>
             )}
@@ -81,9 +81,10 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
                     <Button
                         variant="outline"
                         className="scale-90 mt-020"
-                        onClick={openAddCredits}
+                        onClick={buyCredits}
+                        disabled={isLoading}
                     >
-                        Add Credits
+                        Buy Credits
                     </Button>
                     <Button
                         variant="outline"
