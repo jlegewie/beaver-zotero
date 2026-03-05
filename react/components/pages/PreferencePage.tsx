@@ -120,7 +120,7 @@ const PreferencePage: React.FC = () => {
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
     const profileBalance = useAtomValue(profileBalanceAtom);
-    const remainingBeaverCredits = 0;
+    const remainingBeaverCredits = useAtomValue(remainingBeaverCreditsAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const creditPlan = useAtomValue(creditPlanAtom);
     const creditBreakdown = useAtomValue(creditBreakdownAtom);
