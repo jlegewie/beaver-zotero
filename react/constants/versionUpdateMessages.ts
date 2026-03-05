@@ -320,6 +320,22 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         text: "In an effort to make Beaver more sustainable as a service, free credits are now a one-time allocation rather than a monthly renewal. You can always use your own API key for unlimited usage.",
         inPanel: true,
     },
+    {
+        version: "0.13.3",
+        title: "Beaver Version 0.13.3",
+        inPanel: true,
+        featureList: [
+            {
+                title: "Redesigned chat history",
+                description: "Browse, search, rename, and delete past chats from the new chat history panel.",
+            },
+            {
+                title: "Model selector fix",
+                description: "Fixed an issue where the selected model could reset when opening and closing Beaver.",
+            },
+        ],
+    },
+    // footer: `We've updated our <a href="https://www.beaverapp.ai/terms" target='_blank'>Terms of Service</a> and <a href="https://www.beaverapp.ai/privacy-policy" target='_blank'>Privacy Policy</a>, including subscription and billing terms, simplified credit mechanics, and clarified how we use operational log data for service improvement. Effective March 19, 2026.`
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));
