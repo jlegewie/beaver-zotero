@@ -1131,29 +1131,40 @@ const PreferencePage: React.FC = () => {
                             <div className="display-flex flex-col gap-4">
                                 <div className="display-flex flex-row items-center gap-3">
                                     <div className="display-flex flex-col">
-                                        <div className="text-2xl font-color-primary font-bold">
-                                            {creditPlan.plan ? creditPlan.plan.charAt(0).toUpperCase() + creditPlan.plan.slice(1) : ''}
+                                        <div className="display-flex flex-row items-center gap-3">
+                                            <div className="text-2xl font-color-primary font-bold">
+                                                {creditPlan.plan ? creditPlan.plan.charAt(0).toUpperCase() + creditPlan.plan.slice(1) : ''}
+                                            </div>
+                                            {creditPlan.cancelAtPeriodEnd && (
+                                                <span
+                                                    className="text-xs px-15 py-05 rounded-md"
+                                                    style={{ color: 'var(--tag-orange-secondary)', border: '1px solid var(--tag-orange-tertiary)', background: 'var(--tag-orange-quinary)' }}
+                                                >
+                                                    Cancellation pending
+                                                </span>
+                                            )}
+                                            {creditPlan.status === 'past_due' && (
+                                                <span className="text-xs px-15 py-05 rounded-md" style={{ background: 'var(--tag-orange-tertiary)', color: 'var(--tag-orange-quinary)' }}>
+                                                    Past due
+                                                </span>
+                                            )}
                                         </div>
-                                        {creditPlan.periodEnd && (
+                                        {creditPlan.periodEnd && !creditPlan.cancelAtPeriodEnd && (
                                             <span className="text-sm font-color-secondary">
                                                 Renews {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                                                 {' '}({Math.max(0, Math.ceil((new Date(creditPlan.periodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))} days)
                                             </span>
                                         )}
+                                        {creditPlan.cancelAtPeriodEnd && creditPlan.periodEnd && (
+                                            <span className="text-sm font-color-secondary">
+                                                Your plan ends {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                                {' '}({Math.max(0, Math.ceil((new Date(creditPlan.periodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))} days remaining)
+                                            </span>
+                                        )}
                                     </div>
-                                    {creditPlan.cancelAtPeriodEnd && (
-                                        <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">
-                                            Cancels at period end
-                                        </span>
-                                    )}
-                                    {creditPlan.status === 'past_due' && (
-                                        <span className="text-xs px-15 py-05 rounded-md" style={{ background: 'var(--tag-red-quinary)', color: 'var(--tag-red-primary)' }}>
-                                            Past due
-                                        </span>
-                                    )}
                                     <div className="flex-1" />
                                     <Button variant="outline" onClick={manageSubscription} disabled={isBillingLoading}>
-                                        Manage
+                                        {creditPlan.cancelAtPeriodEnd ? 'Resubscribe' : 'Manage'}
                                     </Button>
                                 </div>
 
