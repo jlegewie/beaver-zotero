@@ -33,6 +33,18 @@ export function clearThreadListCache() {
     searchCache.clear();
 }
 
+const highlightMatch = (text: string, query: string): React.ReactNode => {
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return text;
+    return (
+        <>
+            {text.slice(0, idx)}
+            <span className="font-color-accent-blue">{text.slice(idx, idx + query.length)}</span>
+            {text.slice(idx + query.length)}
+        </>
+    );
+};
+
 const groupThreadsByDate = (threads: ThreadData[]) => {
     const groups: Record<string, ThreadData[]> = {
         'Today': [],
@@ -355,7 +367,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                                 />
                                             ) : (
                                                 <div className="thread-list-item-name truncate">
-                                                    {threadName}
+                                                    {activeQuery ? highlightMatch(threadName, activeQuery) : threadName}
                                                 </div>
                                             )}
                                             <div className="thread-list-item-time">
