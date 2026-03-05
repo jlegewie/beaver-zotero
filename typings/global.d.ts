@@ -29,6 +29,7 @@ declare const ZOTERO_CONFIG: {
 
 interface Window {
     __beaverDisposeSupabase?: () => Promise<void>;
+    __beaverDisposeSessionHealth?: () => void;
 }
 
 interface ZoteroSearchWritable extends Zotero.Search {

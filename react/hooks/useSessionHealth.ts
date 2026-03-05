@@ -36,24 +36,22 @@ const EXPIRY_BUFFER_MS = 5 * 60_000; // 5 min — refresh if token expires withi
 const WAKE_DELAY_MS = 3_000; // wait for network after wake
 
 // ---------------------------------------------------------------------------
-// Module-load cleanup: tear down stale state from a previous bundle (plugin
-// reload). The old observer's closure captures the old proactiveSessionRefresh
-// (and thus the old supabase client), so we must unregister it and start fresh.
-// Mirrors the __beaverDisposeSupabase pattern in supabaseClient.ts.
+// Module-load cleanup for THIS window only (plugin reload safety).
+//
+// Important: do not touch Zotero.__beaverSessionHealth directly here. That state
+// is shared across all open windows; clearing it on each module load breaks
+// ref-count invariants in multi-window usage.
 // ---------------------------------------------------------------------------
-if (Zotero.__beaverSessionHealth) {
-    const prev = Zotero.__beaverSessionHealth;
-    if (prev.idleObserverRegistered) {
-        try {
-            const idleService = Cc['@mozilla.org/widget/useridleservice;1']
-                .getService(Ci.nsIUserIdleService);
-            idleService.removeIdleObserver(prev.idleObserver, IDLE_TIMEOUT_S);
-            logger('useSessionHealth: Cleaned up stale idle observer from previous bundle');
-        } catch (err) {
-            logger(`useSessionHealth: Failed to clean up stale idle observer: ${err}`, 2);
-        }
+// eslint-disable-next-line no-restricted-globals -- intentionally using current script window
+const currentWindow: Window | undefined = typeof window !== 'undefined' ? window : undefined;
+if (currentWindow?.__beaverDisposeSessionHealth) {
+    try {
+        currentWindow.__beaverDisposeSessionHealth();
+        currentWindow.__beaverDisposeSessionHealth = undefined;
+        logger('useSessionHealth: Cleaned up stale session-health state from previous bundle');
+    } catch (err) {
+        logger(`useSessionHealth: Failed stale-state cleanup from previous bundle: ${err}`, 2);
     }
-    Zotero.__beaverSessionHealth = undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +69,38 @@ interface SessionHealthState {
     idleObserver: {
         QueryInterface: ReturnType<typeof ChromeUtils.generateQI>;
         observe: (subject: any, topic: string, data: string) => void;
+    };
+}
+
+function disposeSharedState(expectedState: SessionHealthState | undefined, reason: string): void {
+    if (!expectedState) return;
+
+    // Ignore stale disposers from other bundles/windows.
+    if (Zotero.__beaverSessionHealth !== expectedState) {
+        return;
+    }
+
+    if (expectedState.idleObserverRegistered) {
+        try {
+            const idleService = Cc['@mozilla.org/widget/useridleservice;1']
+                .getService(Ci.nsIUserIdleService);
+            idleService.removeIdleObserver(expectedState.idleObserver, IDLE_TIMEOUT_S);
+            logger(`useSessionHealth: Unregistered idle observer (${reason})`);
+        } catch (err) {
+            logger(`useSessionHealth: Failed to unregister idle observer (${reason}): ${err}`, 2);
+        }
+    }
+
+    Zotero.__beaverSessionHealth = undefined;
+}
+
+function registerWindowDisposer(state: SessionHealthState): void {
+    if (!currentWindow) return;
+
+    // Capture this exact shared-state object so stale module disposers cannot
+    // tear down newer state created by another bundle instance.
+    currentWindow.__beaverDisposeSessionHealth = () => {
+        disposeSharedState(state, 'window-dispose');
     };
 }
 
@@ -97,7 +127,9 @@ function getSharedState(): SessionHealthState {
             },
         };
     }
-    return Zotero.__beaverSessionHealth;
+    const state = Zotero.__beaverSessionHealth;
+    registerWindowDisposer(state);
+    return state;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +219,7 @@ export function useSessionHealth() {
             state.refCount--;
             logger(`useSessionHealth: unmounted, refCount=${state.refCount}`);
             if (state.refCount <= 0) {
-                cleanupIdleObserver();
+                cleanupIdleObserver(state);
             }
         };
     }, []);
@@ -219,8 +251,12 @@ export function useSessionHealth() {
 // ---------------------------------------------------------------------------
 // Cleanup helper
 // ---------------------------------------------------------------------------
-function cleanupIdleObserver() {
-    const state = getSharedState();
+function cleanupIdleObserver(state: SessionHealthState) {
+    // Ignore stale teardown from an old state object after replacement.
+    if (Zotero.__beaverSessionHealth !== state) {
+        return;
+    }
+
     if (!state.idleObserverRegistered) return;
     try {
         const idleService = Cc['@mozilla.org/widget/useridleservice;1']

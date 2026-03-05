@@ -356,6 +356,15 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             ztoolkit.log(`disposeSupabase: ${e}`);
         }
 
+        try {
+            if (win?.__beaverDisposeSessionHealth) {
+                await withShutdownTimeout(Promise.resolve(win.__beaverDisposeSessionHealth()), "disposeSessionHealth");
+                win.__beaverDisposeSessionHealth = undefined;
+            }
+        } catch (e) {
+            ztoolkit.log(`disposeSessionHealth: ${e}`);
+        }
+
         // 2. Dispose MuPDF WASM module to release native resources
         await withShutdownTimeout(disposeMuPDF(), "disposeMuPDF");
 
@@ -482,6 +491,10 @@ async function onShutdown(): Promise<void> {
             if (mainWin?.__beaverDisposeSupabase) {
                 await mainWin.__beaverDisposeSupabase();
                 mainWin.__beaverDisposeSupabase = undefined;
+            }
+            if (mainWin?.__beaverDisposeSessionHealth) {
+                await Promise.resolve(mainWin.__beaverDisposeSessionHealth());
+                mainWin.__beaverDisposeSessionHealth = undefined;
             }
         } catch (_e) { /* may not be available during shutdown */ }
         await disposeMuPDF();
