@@ -81,7 +81,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
                 onClick: () => {
                     setIsSlashMenuOpen(false);
                     setSlashSearchQuery('');
-                    openPreferencesWindow('prompts');
+                    openPreferencesWindow('actions');
                 },
             }] : [];
         const enabled = filtered.filter(p => !p.requiresAttachment || hasAttachment);
