@@ -250,6 +250,10 @@ function handleAuthError(error: unknown, lockName: string): void {
     }
 }
 
+// Tracks the last time the Supabase SDK successfully refreshed the token.
+// Used by useSessionHealth diagnostics to detect stale auto-refresh timers.
+export let lastAutoRefreshSuccessMs = 0;
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
         persistSession: true,
@@ -270,6 +274,13 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // listener and runs the 30-second refresh ticker unconditionally.
 supabase.auth.startAutoRefresh().catch((e) => {
     logger(`Failed to start Supabase auto-refresh: ${e}`, 2);
+});
+
+// Track successful token refreshes for session health diagnostics
+supabase.auth.onAuthStateChange((event) => {
+    if (event === 'TOKEN_REFRESHED') {
+        lastAutoRefreshSuccessMs = Date.now();
+    }
 });
 
 // Register cleanup function on the current window so that:

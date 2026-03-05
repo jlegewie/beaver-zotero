@@ -19,6 +19,7 @@ import {
 } from '../atoms/auth';
 import { supabase } from '../../src/services/supabaseClient';
 import { logger } from '../../src/utils/logger';
+import { getSessionHealthDiagnostics } from './useSessionHealth';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { profileWithPlanAtom, isProfileLoadedAtom } from '../atoms/profile';
 import { store } from '../store';
@@ -84,6 +85,22 @@ export function useAuth() {
             (event === 'SIGNED_IN' && currentSession === null) || // Actual sign-in from logged out state
             hasSessionChanged(currentSession, newSession); // Compare session content, not object reference
         
+        // Log diagnostics on unexpected sign-out (had a session, now losing it)
+        if (event === 'SIGNED_OUT' && currentSession !== null) {
+            const diag = getSessionHealthDiagnostics();
+            const expiresAt = currentSession.expires_at ? currentSession.expires_at * 1000 : 0;
+            const expiredSecsAgo = Math.round((Date.now() - expiresAt) / 1000);
+            logger(
+                `auth: Unexpected SIGNED_OUT. ` +
+                `Session expired ${expiredSecsAgo}s ago. ` +
+                `Last refresh attempt: ${diag.lastRefreshAttemptSecsAgo ?? 'never'}s ago. ` +
+                `Last proactive success: ${diag.lastSuccessfulRefreshSecsAgo ?? 'never'}s ago. ` +
+                `Last auto-refresh success: ${diag.lastAutoRefreshSuccessSecsAgo ?? 'never'}s ago. ` +
+                `Idle observer: ${diag.idleObserverRegistered}`,
+                2,
+            );
+        }
+
         if (shouldUpdateSession) {
             logger(`auth: updating session atom for ${event}`);
             setSession(newSession);

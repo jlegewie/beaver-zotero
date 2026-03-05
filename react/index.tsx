@@ -6,6 +6,7 @@ import { useZoteroSync } from './hooks/useZoteroSync';
 import { useEmbeddingIndex } from './hooks/useEmbeddingIndex';
 import { useEmbeddingIndexProgress } from './hooks/useEmbeddingIndexProgress';
 import { useAuth } from './hooks/useAuth';
+import { useSessionHealth } from './hooks/useSessionHealth';
 import ReaderSidebar from './components/ReaderSidebar';
 import WindowSidebar from './components/WindowSidebar';
 import FloatingPopupRoot from './components/FloatingPopupRoot';
@@ -29,6 +30,9 @@ import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 const GlobalContextInitializer = () => {
     // Handle Supabase authentication
     useAuth();
+
+    // Proactive session health: idle/sleep detection + sidebar-open refresh
+    useSessionHealth();
 
     // Handle embedding index
     useEmbeddingIndex();

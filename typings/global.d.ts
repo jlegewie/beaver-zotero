@@ -40,6 +40,8 @@ declare namespace Zotero {
     let __beaverJotaiStore: any;
     /** Set to true at the start of shutdown to signal all in-flight operations to bail out */
     let __beaverShuttingDown: boolean | undefined;
+    /** Cross-window singleton state for session health (idle observer, rate-limit) */
+    let __beaverSessionHealth: any;
 
     namespace Beaver {
         const pluginVersion: string;
@@ -494,5 +496,7 @@ declare namespace _ZoteroTypes {
         __beaverJotaiStore?: import('jotai').createStore extends () => infer R ? R : never;
         /** Set to true at the start of shutdown to signal all in-flight operations to bail out */
         __beaverShuttingDown?: boolean;
+        /** Cross-window singleton state for session health (idle observer, rate-limit) */
+        __beaverSessionHealth?: any;
     }
 }
