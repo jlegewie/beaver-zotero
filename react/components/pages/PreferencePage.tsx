@@ -1107,8 +1107,11 @@ const PreferencePage: React.FC = () => {
 
                         {!hasPlan ? (
                             <>
+                                <div className="text-2xl font-color-primary font-bold">
+                                    No active plan
+                                </div>
                                 <div className="text-base font-color-secondary" style={{ marginBottom: '12px' }}>
-                                    Subscribe to get monthly credits, Pro Tools, and access to Beaver's models.
+                                    Subscribe to get monthly credits and Pro Tools.
                                 </div>
                                 <div className="display-flex flex-row items-center gap-3">
                                     <Button variant="solid" onClick={() => subscribe()} disabled={isBillingLoading}>
@@ -1226,24 +1229,30 @@ const PreferencePage: React.FC = () => {
                         <SettingsRow
                             title="Extra Credits"
                             description={
-                                <span className="font-color-secondary">
-                                    Credits from sign-up bonus and credit packs
-                                    {creditBreakdown.purchasedExpiresAt && (
-                                        <>
-                                            <br />
-                                            Expires: {new Date(creditBreakdown.purchasedExpiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                                        </>
-                                    )}
-                                </span>
+                                (creditBreakdown.purchasedCredits || 0) === 0 && !hasPlan ? (
+                                    <span className="font-color-secondary">No credits remaining</span>
+                                ) : (
+                                    <span className="font-color-secondary">
+                                        Credits from sign-up bonus and credit packs
+                                        {creditBreakdown.purchasedExpiresAt && (
+                                            <>
+                                                <br />
+                                                Expires: {new Date(creditBreakdown.purchasedExpiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                            </>
+                                        )}
+                                    </span>
+                                )
                             }
                             control={
                                 <div className="display-flex flex-row items-center gap-3">
-                                    <span className="font-color-primary text-sm font-bold">
-                                        {(creditBreakdown.purchasedCredits || 0).toLocaleString()}
-                                    </span>
                                     <Button variant="outline" onClick={buyCredits} disabled={isBillingLoading}>
                                         Buy Credits
                                     </Button>
+                                    {(creditBreakdown.purchasedCredits || 0) > 0 && (
+                                        <span className="font-color-primary text-sm font-bold">
+                                            {(creditBreakdown.purchasedCredits || 0).toLocaleString()}
+                                        </span>
+                                    )}
                                 </div>
                             }
                         />
@@ -1252,7 +1261,7 @@ const PreferencePage: React.FC = () => {
                             description={
                                 (creditBreakdown.total || 0) === 0 && !hasPlan ? (
                                     <span className="font-color-secondary">
-                                        Get credits to start using Beaver &rarr;{' '}
+                                        Get more credits:{' '}
                                         <span className="text-link cursor-pointer" onClick={() => subscribe()}>Subscribe</span>
                                         {' '}or{' '}
                                         <span className="text-link cursor-pointer" onClick={buyCredits}>Buy Credits</span>
