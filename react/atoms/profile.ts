@@ -264,6 +264,13 @@ export const syncWithZoteroAtom = atom<boolean>((get) => {
 });
 
 /**
+ * Signal atom: set to true when the preferences window regains focus
+ * (e.g., returning from Stripe checkout). useProfileSync watches this
+ * and forces a profile refresh.
+ */
+export const prefWindowFocusRefreshAtom = atom<boolean>(false);
+
+/**
  * Atom to signal that a sync request was denied due to plan restrictions.
  * When set to true, useProfileSync will force a profile refresh to update
  * the local plan state, which will cause isDatabaseSyncSupportedAtom to

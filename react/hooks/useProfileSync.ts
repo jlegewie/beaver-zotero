@@ -16,7 +16,8 @@ import {
     requiredDataVersionAtom,
     localZoteroLibrariesAtom,
     minimumFrontendVersionAtom,
-    syncDeniedForPlanAtom
+    syncDeniedForPlanAtom,
+    prefWindowFocusRefreshAtom
 } from '../atoms/profile';
 
 // Adaptive refresh intervals based on sidebar visibility
@@ -99,7 +100,7 @@ export const useProfileSync = () => {
             setIsProfileInvalid(false);
             setIsWaitingForProfile(false);
             lastRefreshRef.current = new Date();
-            logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`);
+            logger(`useProfileSync: Successfully fetched profile and plan for ${userId}.`, profileData.profile);
 
             // Populate local Zotero libraries
             try {
@@ -209,6 +210,18 @@ export const useProfileSync = () => {
             refreshProfile(true); // Force refresh when settings page opens
         }
     }, [isAuthenticated, user, isPreferencePageVisible, refreshProfile]);
+
+    // Refresh profile when preferences window regains focus (e.g., returning from Stripe checkout)
+    const prefWindowFocusRefresh = useAtomValue(prefWindowFocusRefreshAtom);
+    const setPrefWindowFocusRefresh = useSetAtom(prefWindowFocusRefreshAtom);
+
+    useEffect(() => {
+        if (prefWindowFocusRefresh && isAuthenticated && user) {
+            logger(`useProfileSync: Preferences window focus - refreshing profile`);
+            setPrefWindowFocusRefresh(false);
+            syncProfileData(user.id);
+        }
+    }, [prefWindowFocusRefresh, isAuthenticated, user, setPrefWindowFocusRefresh, syncProfileData]);
 
     // Listen for sync denied signal and force refresh
     const syncDenied = useAtomValue(syncDeniedForPlanAtom);
