@@ -1101,7 +1101,7 @@ const PreferencePage: React.FC = () => {
                             </div>
                         )}
 
-                        <div className="text-xs font-color-secondary font-bold" style={{ letterSpacing: '0.05em', marginBottom: '8px' }}>
+                        <div className="text-xs font-color-secondary font-bold" style={{ letterSpacing: '0.05em' }}>
                             CURRENT PLAN
                         </div>
 
@@ -1127,13 +1127,13 @@ const PreferencePage: React.FC = () => {
                         ) : (
                             <div className="display-flex flex-col gap-4">
                                 <div className="display-flex flex-row items-center gap-3">
-                                    <div className="display-flex flex-col -mb-1">
+                                    <div className="display-flex flex-col">
                                         <div className="text-2xl font-color-primary font-bold">
                                             {creditPlan.plan ? creditPlan.plan.charAt(0).toUpperCase() + creditPlan.plan.slice(1) : ''}
                                         </div>
                                         {creditPlan.periodEnd && (
                                             <span className="text-sm font-color-secondary">
-                                                Resets {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                                Renews {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                                                 {' '}({Math.max(0, Math.ceil((new Date(creditPlan.periodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))} days)
                                             </span>
                                         )}
@@ -1154,10 +1154,11 @@ const PreferencePage: React.FC = () => {
                                     </Button>
                                 </div>
 
-                                {/* Progress bar */}
+                                {/* Progress bar — single combined pool */}
                                 {(() => {
-                                    const used = Math.min(profileBalance.monthlyCreditsUsed, creditPlan.monthlyCredits);
-                                    const total = creditPlan.monthlyCredits || 1;
+                                    const pool = (creditPlan.monthlyCredits || 0) + (creditBreakdown.rolledOverCredits || 0);
+                                    const used = Math.min(profileBalance.monthlyCreditsUsed, pool);
+                                    const total = pool || 1;
                                     const remaining = total - used;
                                     const usedPct = Math.round((used / total) * 100);
                                     const barColor = usedPct > 90 ? 'var(--tag-red-primary)' : usedPct > 70 ? 'var(--tag-yellow-primary)' : 'var(--color-accent, var(--fill-primary))';
@@ -1191,18 +1192,19 @@ const PreferencePage: React.FC = () => {
                                                     />
                                                 </div>
                                             </div>
-                                            <div className="text-sm font-color-secondary" style={{ marginTop: '4px' }}>
-                                                {remaining} / {total} remaining
+                                            <div className="display-flex flex-col">
+                                                <div className="text-sm font-color-secondary" style={{ marginTop: '4px' }}>
+                                                    {remaining} / {total} remaining
+                                                </div>
+                                                {creditBreakdown.rolledOverCredits > 0 && (
+                                                    <div className="text-sm font-color-tertiary">
+                                                        Includes {creditBreakdown.rolledOverCredits} rolled over credits from last period.
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     );
                                 })()}
-
-                                {creditBreakdown.rolledOverCredits > 0 && (
-                                    <div className="text-sm font-color-secondary" style={{ marginTop: '8px' }}>
-                                        Rollover balance: {creditBreakdown.rolledOverCredits} credits
-                                    </div>
-                                )}
 
                                 {creditPlan.plan === 'basic' && (
                                     <div style={{ marginTop: '8px' }}>
