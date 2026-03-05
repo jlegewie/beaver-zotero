@@ -1125,11 +1125,19 @@ const PreferencePage: React.FC = () => {
                                 </div>
                             </>
                         ) : (
-                            <>
-                                <div className="display-flex flex-row items-center gap-3" style={{ marginBottom: '4px' }}>
-                                    <span className="text-lg font-color-primary font-bold">
-                                        {creditPlan.plan ? creditPlan.plan.charAt(0).toUpperCase() + creditPlan.plan.slice(1) : ''}
-                                    </span>
+                            <div className="display-flex flex-col gap-4">
+                                <div className="display-flex flex-row items-center gap-3">
+                                    <div className="display-flex flex-col -mb-1">
+                                        <div className="text-2xl font-color-primary font-bold">
+                                            {creditPlan.plan ? creditPlan.plan.charAt(0).toUpperCase() + creditPlan.plan.slice(1) : ''}
+                                        </div>
+                                        {creditPlan.periodEnd && (
+                                            <span className="text-sm font-color-secondary">
+                                                Resets {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                                {' '}({Math.max(0, Math.ceil((new Date(creditPlan.periodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))} days)
+                                            </span>
+                                        )}
+                                    </div>
                                     {creditPlan.cancelAtPeriodEnd && (
                                         <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">
                                             Cancels at period end
@@ -1141,12 +1149,6 @@ const PreferencePage: React.FC = () => {
                                         </span>
                                     )}
                                     <div className="flex-1" />
-                                    {creditPlan.periodEnd && (
-                                        <span className="text-sm font-color-secondary">
-                                            Resets {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                                            {' '}({Math.max(0, Math.ceil((new Date(creditPlan.periodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))} days)
-                                        </span>
-                                    )}
                                     <Button variant="outline" onClick={manageSubscription} disabled={isBillingLoading}>
                                         Manage
                                     </Button>
@@ -1157,7 +1159,6 @@ const PreferencePage: React.FC = () => {
                                     const used = Math.min(profileBalance.monthlyCreditsUsed, creditPlan.monthlyCredits);
                                     const total = creditPlan.monthlyCredits || 1;
                                     const remaining = total - used;
-                                    const pct = Math.round((remaining / total) * 100);
                                     const usedPct = Math.round((used / total) * 100);
                                     const barColor = usedPct > 90 ? 'var(--tag-red-primary)' : usedPct > 70 ? 'var(--tag-yellow-primary)' : 'var(--color-accent, var(--fill-primary))';
                                     return (
@@ -1166,10 +1167,10 @@ const PreferencePage: React.FC = () => {
                                                 <span className="text-sm font-color-primary font-medium">Plan Credits</span>
                                                 <div className="flex-1" />
                                                 <span className="text-sm font-color-primary font-medium">
-                                                    {remaining} / {total} remaining
+                                                    {usedPct}% used
                                                 </span>
                                             </div>
-                                            <div className="display-flex flex-row items-center gap-2">
+                                            <div className="display-flex flex-row items-center">
                                                 <div
                                                     style={{
                                                         flex: 1,
@@ -1181,7 +1182,7 @@ const PreferencePage: React.FC = () => {
                                                 >
                                                     <div
                                                         style={{
-                                                            width: `${Math.min(100, 100 - usedPct)}%`,
+                                                            width: `${Math.min(100, usedPct)}%`,
                                                             height: '100%',
                                                             borderRadius: '4px',
                                                             background: barColor,
@@ -1189,9 +1190,9 @@ const PreferencePage: React.FC = () => {
                                                         }}
                                                     />
                                                 </div>
-                                                <span className="text-xs font-color-secondary" style={{ minWidth: '28px', textAlign: 'right' }}>
-                                                    {pct}%
-                                                </span>
+                                            </div>
+                                            <div className="text-sm font-color-secondary" style={{ marginTop: '4px' }}>
+                                                {remaining} / {total} remaining
                                             </div>
                                         </div>
                                     );
@@ -1213,7 +1214,7 @@ const PreferencePage: React.FC = () => {
                                         </span>
                                     </div>
                                 )}
-                            </>
+                            </div>
                         )}
                     </div>
 
