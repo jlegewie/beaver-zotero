@@ -204,7 +204,7 @@ export const isCreditPlanPastDueAtom = atom<boolean>((get) => {
 export const hasCreditPlanAtom = atom<boolean>((get) => {
     const profile = get(profileWithPlanAtom);
     const status = profile?.credit_plan_status;
-    return status === 'active' || status === 'past_due' || status === 'canceled';
+    return status === 'active' || status === 'past_due';
 });
 
 // Onboarding state - separate atoms for pro and free authorization
