@@ -20,7 +20,7 @@ import { PreferencePageTab } from "../../react/atoms/ui";
 const EXTENSION_KEY = "zotero://beaver";
 
 const VALID_PREFERENCE_TABS = new Set<PreferencePageTab>([
-    "general", "sync", "permissions", "models", "prompts", "advanced", "account",
+    "general", "sync", "permissions", "models", "billing", "actions", "advanced", "account",
 ]);
 
 function doAction(uri: any): void {

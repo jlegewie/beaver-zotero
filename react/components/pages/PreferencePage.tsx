@@ -577,7 +577,7 @@ const PreferencePage: React.FC = () => {
         { id: 'permissions', label: 'Permissions', icon: LockIcon },
         { id: 'billing', label: 'Plan & Usage', icon: DollarCircleIcon },
         { id: 'models', label: 'API Keys', icon: KeyIcon },
-        { id: 'prompts', label: 'Prompt & Actions', icon: ZapIcon },
+        { id: 'actions', label: 'Actions', icon: ZapIcon },
         { id: 'advanced', label: 'Advanced', icon: ToolsIcon },
     ], [isDatabaseSyncSupported]);
 
@@ -1468,8 +1468,8 @@ const PreferencePage: React.FC = () => {
                 </>
             )}
 
-            {/* ===== PROMPTS TAB ===== */}
-            {activeTab === 'prompts' && (
+            {/* ===== ACTIONS TAB ===== */}
+            {activeTab === 'actions' && (
                 <>
                     <SectionLabel>Custom Instructions</SectionLabel>
                     <div className="custom-prompt-card" style={{ cursor: 'default' }}>

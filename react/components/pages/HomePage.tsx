@@ -56,7 +56,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                 <div className="display-flex flex-row justify-between items-center mb-2">
                     {/* <div className="font-semibold text-lg mb-1">Custom Prompts</div> */}
                     <div className="text-2xl font-semibold">How can I help you?</div>
-                    <Button variant="outline" className="scale-85 fit-content" onClick={() => openPreferencesWindow('prompts')}> Edit </Button>
+                    <Button variant="outline" className="scale-85 fit-content" onClick={() => openPreferencesWindow('actions')}> Edit </Button>
                 </div>
                 {/* <div className="display-flex flex-col items-start mb-4">
                     <p className="text-base font-color-secondary -mt-2">Beaver will sync your library, upload your PDFs, and index your files for search. This process can take 20-60 min.</p>
