@@ -120,7 +120,7 @@ const PreferencePage: React.FC = () => {
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
     const profileBalance = useAtomValue(profileBalanceAtom);
-    const remainingBeaverCredits = useAtomValue(remainingBeaverCreditsAtom);
+    const remainingBeaverCredits = 0;
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const creditPlan = useAtomValue(creditPlanAtom);
     const creditBreakdown = useAtomValue(creditBreakdownAtom);
@@ -1340,16 +1340,28 @@ const PreferencePage: React.FC = () => {
                         </div>
                     </SettingsGroup>
 
+                    <div className="text-base font-color-secondary ml-1 mt-1 mb-2" style={{ paddingLeft: '2px' }}>
+                        Additional model providers and custom endpoints are supported via <DocLink path="custom-models">custom models</DocLink>.
+                    </div>
+
                     <div className="display-flex flex-row gap-2">
                         <SectionLabel>Pro Tools</SectionLabel>
                         {requestProTools ? (
-                            <span
-                                className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
-                                style={{ marginTop: '20px', marginBottom: '6px' }}
-                                // style={{ color: 'var(--tag-green-secondary)', border: '1px solid var(--tag-green-tertiary)', background: 'var(--tag-green-quinary)' }}
-                            >
-                                Enabled
-                            </span>
+                            remainingBeaverCredits > 0 ? (
+                                <span
+                                    className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
+                                    style={{ marginTop: '20px', marginBottom: '6px' }}
+                                >
+                                    Enabled
+                                </span>
+                            ) : (
+                                <span
+                                    className="text-xs px-15 py-05 rounded-md"
+                                    style={{ marginTop: '20px', marginBottom: '6px', color: 'var(--tag-orange-secondary)', border: '1px solid var(--tag-orange-tertiary)', background: 'var(--tag-orange-quinary)' }}
+                                >
+                                    Paused &middot; No credits
+                                </span>
+                            )
                         ) : (
                             <span
                                 className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
@@ -1360,14 +1372,20 @@ const PreferencePage: React.FC = () => {
                         )}
                     </div>
                     <SettingsGroup>
-                        {requestProTools ? (
+                        {requestProTools && remainingBeaverCredits > 0 ? (
+                            /* State 1: Enabled + has credits */
                             <SettingsRow
-                                title="Pro Tools with Your API Keys"
+                                title="Use Pro Tools with your API key"
                                 description={
                                     <>
                                         Enable to use pro tools like external search, batch extraction, and AI ranking with your own API key.
                                         Costs 0.25 credits per message. Some actions cost extra.{' '}
                                         <DocLink path="credits">Learn more</DocLink>
+                                        <br />
+                                        <br />
+                                        <span className="font-color-secondary">
+                                            You have {remainingBeaverCredits.toLocaleString()} credits available.
+                                        </span>
                                     </>
                                 }
                                 control={
@@ -1376,14 +1394,41 @@ const PreferencePage: React.FC = () => {
                                     </Button>
                                 }
                             />
-                        ) : remainingBeaverCredits > 0 ? (
+                        ) : requestProTools && remainingBeaverCredits <= 0 ? (
+                            /* State 2: Enabled + no credits */
                             <SettingsRow
-                                title="Pro Tools with Your API Keys"
+                                title="Use Pro Tools with your API key"
+                                description={
+                                    <>
+                                        Pro Tools are enabled but can't run without credits.
+                                        Your API key will still work for basic chat.
+                                        <br />
+                                        <br />
+                                        <span className="text-link cursor-pointer" onClick={() => setActiveTab('billing')}>
+                                            Get credits &rarr;
+                                        </span>
+                                    </>
+                                }
+                                control={
+                                    <Button variant="outline" onClick={handleRequestProToolsToggle}>
+                                        Disable
+                                    </Button>
+                                }
+                            />
+                        ) : !requestProTools && remainingBeaverCredits > 0 ? (
+                            /* State 3: Disabled + has credits */
+                            <SettingsRow
+                                title="Use Pro Tools with your API key"
                                 description={
                                     <>
                                         Enable to use pro tools like external search, batch extraction, and AI ranking with your own API key.
                                         Costs 0.25 credits per message. Some actions cost extra.{' '}
                                         <DocLink path="credits">Learn more</DocLink>
+                                        <br />
+                                        <br />
+                                        <span className="font-color-secondary">
+                                            You have {remainingBeaverCredits.toLocaleString()} credits available.
+                                        </span>
                                     </>
                                 }
                                 control={
@@ -1393,26 +1438,24 @@ const PreferencePage: React.FC = () => {
                                 }
                             />
                         ) : (
+                            /* State 4: Disabled + no credits */
                             <SettingsRow
-                                title="Enable Pro Tools"
+                                title="Use Pro Tools with your API key"
                                 description={
                                     <>
+                                        Unlock external search, batch extraction, and AI ranking alongside your API key.
                                         Requires Beaver credits.{' '}
+                                        <DocLink path="credits">Learn more</DocLink>
+                                        <br />
+                                        <br />
                                         <span className="text-link cursor-pointer" onClick={() => setActiveTab('billing')}>
-                                            Manage credits &rarr;
+                                            Get credits &rarr;
                                         </span>
                                     </>
                                 }
                             />
                         )}
                     </SettingsGroup>
-
-                    <SectionLabel>Additional Providers</SectionLabel>
-
-                    <div className="text-base font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
-                        Additional model providers and custom endpoints are supported via <DocLink path="custom-models">custom models</DocLink>.
-                    </div>
-                
                 </>
             )}
 
