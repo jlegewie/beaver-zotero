@@ -309,6 +309,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                         onKeyDown={handleSearchKeyDown}
                         autoFocus
                     />
+                    {isLoading && (
+                        <div className="thread-search-spinner">
+                            <Spinner size={12} />
+                        </div>
+                    )}
                 </div>
             </div>
 
