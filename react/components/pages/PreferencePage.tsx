@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, CopyIcon } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, CopyIcon, DollarCircleIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom, creditPlanAtom, creditBreakdownAtom, isCreditPlanPastDueAtom, hasCreditPlanAtom } from "../../atoms/profile";
@@ -575,6 +575,7 @@ const PreferencePage: React.FC = () => {
         { id: 'general', label: 'General', icon: SettingsIcon },
         { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search', icon: isDatabaseSyncSupported ? SyncIcon : SearchIcon },
         { id: 'permissions', label: 'Permissions', icon: LockIcon },
+        { id: 'billing', label: 'Plan & Usage', icon: DollarCircleIcon },
         { id: 'models', label: 'API Keys', icon: KeyIcon },
         { id: 'prompts', label: 'Prompt & Actions', icon: ZapIcon },
         { id: 'advanced', label: 'Advanced', icon: ToolsIcon },
@@ -678,86 +679,6 @@ const PreferencePage: React.FC = () => {
                                         <Button variant="outline" icon={LogoutIcon} onClick={logout}>
                                             Logout
                                         </Button>
-                                    }
-                                />
-                            </SettingsGroup>
-
-                            <SectionLabel>Credits &amp; Billing</SectionLabel>
-                            <SettingsGroup>
-                                {isPastDue && (
-                                    <SettingsRow
-                                        title="Payment Failed"
-                                        description="Your payment method needs to be updated to continue your subscription"
-                                        control={
-                                            <Button variant="outline" onClick={manageSubscription} disabled={isBillingLoading}>
-                                                Update Payment
-                                            </Button>
-                                        }
-                                    />
-                                )}
-                                <SettingsRow
-                                    title="Credit Plan"
-                                    description={(() => {
-                                        if (!creditPlan.plan) return 'No active credit plan';
-                                        const name = creditPlan.plan.charAt(0).toUpperCase() + creditPlan.plan.slice(1);
-                                        if (creditPlan.cancelAtPeriodEnd && creditPlan.periodEnd) {
-                                            const endDate = new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-                                            return `${name} (cancels ${endDate})`;
-                                        }
-                                        if (creditPlan.status === 'past_due') return `${name} (past due)`;
-                                        return name;
-                                    })()}
-                                    hasBorder={hasPlan}
-                                />
-                                {hasPlan && (
-                                    <SettingsRow
-                                        title="Monthly Credits"
-                                        description={`${creditPlan.monthlyCredits - Math.min(profileBalance.monthlyCreditsUsed, creditPlan.monthlyCredits)} / ${creditPlan.monthlyCredits} remaining this period`}
-                                        hasBorder
-                                    />
-                                )}
-                                {creditBreakdown.rolledOverCredits > 0 && (
-                                    <SettingsRow
-                                        title="Rolled Over"
-                                        description={`${creditBreakdown.rolledOverCredits} rolled over from previous period`}
-                                        hasBorder
-                                    />
-                                )}
-                                {creditBreakdown.purchasedCredits > 0 && (
-                                    <SettingsRow
-                                        title="Purchased Credits"
-                                        description={`${creditBreakdown.purchasedCredits} credits${creditBreakdown.purchasedExpiresAt ? ` (expires ${new Date(creditBreakdown.purchasedExpiresAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })})` : ''}`}
-                                        hasBorder
-                                    />
-                                )}
-                                <SettingsRow
-                                    title="Total Credits"
-                                    description="Total remaining credits"
-                                    hasBorder
-                                    control={
-                                        <span className="font-color-primary text-sm font-bold">
-                                            {creditBreakdown.total.toLocaleString()}
-                                        </span>
-                                    }
-                                />
-                                <SettingsRow
-                                    title=""
-                                    description=""
-                                    control={
-                                        <div className="display-flex flex-row gap-2">
-                                            {hasPlan ? (
-                                                <Button variant="outline" onClick={manageSubscription} disabled={isBillingLoading}>
-                                                    {creditPlan.status === 'canceled' ? 'Resubscribe' : 'Manage Subscription'}
-                                                </Button>
-                                            ) : (
-                                                <Button variant="outline" onClick={() => subscribe()} disabled={isBillingLoading}>
-                                                    Subscribe
-                                                </Button>
-                                            )}
-                                            <Button variant="outline" onClick={buyCredits} disabled={isBillingLoading}>
-                                                Buy Credits
-                                            </Button>
-                                        </div>
                                     }
                                 />
                             </SettingsGroup>
@@ -1149,6 +1070,249 @@ const PreferencePage: React.FC = () => {
                 </>
             )}
 
+            {/* ===== PLAN & USAGE TAB ===== */}
+            {activeTab === 'billing' && (
+                <>
+                    {/* --- Section 1: Plan Card --- */}
+                    <div
+                        className="display-flex flex-col rounded-lg overflow-hidden"
+                        style={{
+                            background: 'var(--fill-senary)',
+                            border: '1px solid var(--fill-quarternary)',
+                            padding: '16px',
+                        }}
+                    >
+                        {isPastDue && (
+                            <div
+                                className="display-flex flex-row items-center gap-3 mb-3 rounded-md"
+                                style={{
+                                    background: 'var(--tag-red-quinary)',
+                                    border: '1px solid var(--tag-red-quarternary)',
+                                    padding: '8px 12px',
+                                }}
+                            >
+                                <span className="font-color-red text-sm font-medium">
+                                    Payment failed &mdash; update your payment method to keep your subscription.
+                                </span>
+                                <div className="flex-1" />
+                                <Button variant="outline" onClick={manageSubscription} disabled={isBillingLoading}>
+                                    Update Payment
+                                </Button>
+                            </div>
+                        )}
+
+                        <div className="text-xs font-color-secondary font-bold" style={{ letterSpacing: '0.05em', marginBottom: '8px' }}>
+                            CURRENT PLAN
+                        </div>
+
+                        {!hasPlan ? (
+                            <>
+                                <div className="text-base font-color-secondary" style={{ marginBottom: '12px' }}>
+                                    Subscribe to get monthly credits, Pro Tools, and access to Beaver's models.
+                                </div>
+                                <div className="display-flex flex-row items-center gap-3">
+                                    <Button variant="solid" onClick={() => subscribe()} disabled={isBillingLoading}>
+                                        Subscribe
+                                    </Button>
+                                </div>
+                                <div style={{ marginTop: '8px' }}>
+                                    <span
+                                        className="text-sm text-link cursor-pointer"
+                                        onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/pricing`)}
+                                    >
+                                        Compare plans &rarr;
+                                    </span>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="display-flex flex-row items-center gap-3" style={{ marginBottom: '4px' }}>
+                                    <span className="text-lg font-color-primary font-bold">
+                                        {creditPlan.plan ? creditPlan.plan.charAt(0).toUpperCase() + creditPlan.plan.slice(1) : ''}
+                                    </span>
+                                    {creditPlan.cancelAtPeriodEnd && (
+                                        <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">
+                                            Cancels at period end
+                                        </span>
+                                    )}
+                                    {creditPlan.status === 'past_due' && (
+                                        <span className="text-xs px-15 py-05 rounded-md" style={{ background: 'var(--tag-red-quinary)', color: 'var(--tag-red-primary)' }}>
+                                            Past due
+                                        </span>
+                                    )}
+                                    <div className="flex-1" />
+                                    {creditPlan.periodEnd && (
+                                        <span className="text-sm font-color-secondary">
+                                            Resets {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                            {' '}({Math.max(0, Math.ceil((new Date(creditPlan.periodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))} days)
+                                        </span>
+                                    )}
+                                    <Button variant="outline" onClick={manageSubscription} disabled={isBillingLoading}>
+                                        Manage
+                                    </Button>
+                                </div>
+
+                                {/* Progress bar */}
+                                {(() => {
+                                    const used = Math.min(profileBalance.monthlyCreditsUsed, creditPlan.monthlyCredits);
+                                    const total = creditPlan.monthlyCredits || 1;
+                                    const remaining = total - used;
+                                    const pct = Math.round((remaining / total) * 100);
+                                    const usedPct = Math.round((used / total) * 100);
+                                    const barColor = usedPct > 90 ? 'var(--tag-red-primary)' : usedPct > 70 ? 'var(--tag-yellow-primary)' : 'var(--color-accent, var(--fill-primary))';
+                                    return (
+                                        <div style={{ marginTop: '12px' }}>
+                                            <div className="display-flex flex-row items-center gap-3" style={{ marginBottom: '4px' }}>
+                                                <span className="text-sm font-color-primary font-medium">Plan Credits</span>
+                                                <div className="flex-1" />
+                                                <span className="text-sm font-color-primary font-medium">
+                                                    {remaining} / {total} remaining
+                                                </span>
+                                            </div>
+                                            <div className="display-flex flex-row items-center gap-2">
+                                                <div
+                                                    style={{
+                                                        flex: 1,
+                                                        height: '7px',
+                                                        borderRadius: '4px',
+                                                        background: 'var(--fill-quarternary)',
+                                                        overflow: 'hidden',
+                                                    }}
+                                                >
+                                                    <div
+                                                        style={{
+                                                            width: `${Math.min(100, 100 - usedPct)}%`,
+                                                            height: '100%',
+                                                            borderRadius: '4px',
+                                                            background: barColor,
+                                                            transition: 'width 0.3s ease',
+                                                        }}
+                                                    />
+                                                </div>
+                                                <span className="text-xs font-color-secondary" style={{ minWidth: '28px', textAlign: 'right' }}>
+                                                    {pct}%
+                                                </span>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+
+                                {creditBreakdown.rolledOverCredits > 0 && (
+                                    <div className="text-sm font-color-secondary" style={{ marginTop: '8px' }}>
+                                        Rollover balance: {creditBreakdown.rolledOverCredits} credits
+                                    </div>
+                                )}
+
+                                {creditPlan.plan === 'basic' && (
+                                    <div style={{ marginTop: '8px' }}>
+                                        <span
+                                            className="text-sm text-link cursor-pointer"
+                                            onClick={() => subscribe('pro_monthly')}
+                                        >
+                                            Upgrade to Pro &rarr;
+                                        </span>
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+
+                    {/* --- Section 2: Credits --- */}
+                    <SectionLabel>Credits</SectionLabel>
+                    <SettingsGroup>
+                        <SettingsRow
+                            title="Extra Credits"
+                            description={
+                                <span className="font-color-secondary">
+                                    Credits from sign-up bonus and credit packs
+                                    {creditBreakdown.purchasedExpiresAt && (
+                                        <>
+                                            <br />
+                                            Expires: {new Date(creditBreakdown.purchasedExpiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                        </>
+                                    )}
+                                </span>
+                            }
+                            control={
+                                <div className="display-flex flex-row items-center gap-3">
+                                    <span className="font-color-primary text-sm font-bold">
+                                        {(creditBreakdown.purchasedCredits || 0).toLocaleString()}
+                                    </span>
+                                    <Button variant="outline" onClick={buyCredits} disabled={isBillingLoading}>
+                                        Buy Credits
+                                    </Button>
+                                </div>
+                            }
+                        />
+                        <SettingsRow
+                            title="Total Available"
+                            description={
+                                (creditBreakdown.total || 0) === 0 && !hasPlan ? (
+                                    <span className="font-color-secondary">
+                                        Get credits to start using Beaver &rarr;{' '}
+                                        <span className="text-link cursor-pointer" onClick={() => subscribe()}>Subscribe</span>
+                                        {' '}or{' '}
+                                        <span className="text-link cursor-pointer" onClick={buyCredits}>Buy Credits</span>
+                                    </span>
+                                ) : (
+                                    <span className="font-color-secondary">Plan credits + Extra Credits</span>
+                                )
+                            }
+                            hasBorder
+                            control={
+                                <span className="font-color-primary text-sm font-bold">
+                                    {(creditBreakdown.total || 0).toLocaleString()}
+                                </span>
+                            }
+                        />
+                    </SettingsGroup>
+
+                    {/* --- Section 3: Pro Tools Status (conditional) --- */}
+                    {(geminiKey || openaiKey || anthropicKey) && (
+                        <>
+                            <SectionLabel>Pro Tools</SectionLabel>
+                            <SettingsGroup>
+                                <SettingsRow
+                                    title={requestProTools ? 'Pro Tools Enabled' : 'Pro Tools Disabled'}
+                                    description={
+                                        requestProTools
+                                            ? '0.25 credits per message + Pro Tool costs.'
+                                            : 'Enable Pro Tools for advanced features like external search and batch extraction.'
+                                    }
+                                    control={
+                                        <Button variant="outline" onClick={handleRequestProToolsToggle}>
+                                            {requestProTools ? 'Disable' : 'Enable'}
+                                        </Button>
+                                    }
+                                />
+                                <SettingsRow
+                                    title=""
+                                    description={
+                                        <span
+                                            className="text-sm text-link cursor-pointer"
+                                            onClick={() => setActiveTab('models')}
+                                        >
+                                            Configure API keys &rarr;
+                                        </span>
+                                    }
+                                    hasBorder
+                                />
+                            </SettingsGroup>
+                        </>
+                    )}
+
+                    {/* --- Section 4: Cross-links --- */}
+                    <div className="display-flex flex-col gap-1" style={{ marginTop: '16px', paddingLeft: '2px' }}>
+                        <span
+                            className="text-sm font-color-secondary text-link cursor-pointer"
+                            onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/login`)}
+                        >
+                            Manage account on web &rarr;
+                        </span>
+                    </div>
+                </>
+            )}
+
             {/* ===== MODELS & API KEYS TAB ===== */}
             {activeTab === 'models' && (
                 <>
@@ -1208,8 +1372,8 @@ const PreferencePage: React.FC = () => {
                                 title="Pro Tools Enabled"
                                 description={
                                     <>
-                                        0.25 credits per message + pro tool costs.{' '}
-                                        <DocLink path="credits">Manage credits</DocLink>
+                                        Enable Pro Tools with your API keys. Uses 0.25 credits per message + pro tool costs.{' '}
+                                        <DocLink path="credits">Learn more</DocLink>
                                     </>
                                 }
                                 control={
@@ -1221,7 +1385,7 @@ const PreferencePage: React.FC = () => {
                         ) : remainingBeaverCredits > 0 ? (
                             <SettingsRow
                                 title="Enable Pro Tools"
-                                description="Pro Tools allow you to use advanced features like external search, batch extraction, and AI ranking with your own API key."
+                                description="Enable Pro Tools with your API keys. Uses 0.25 credits per message + pro tool costs."
                                 control={
                                     <Button variant="outline" onClick={handleRequestProToolsToggle}>
                                         Enable
@@ -1234,7 +1398,9 @@ const PreferencePage: React.FC = () => {
                                 description={
                                     <>
                                         Requires Beaver credits.{' '}
-                                        <DocLink path="credits">Get credits</DocLink>
+                                        <span className="text-link cursor-pointer" onClick={() => setActiveTab('billing')}>
+                                            Manage credits &rarr;
+                                        </span>
                                     </>
                                 }
                             />
