@@ -39,7 +39,7 @@ const ConsentToggles: React.FC<ConsentTogglesProps> = ({
                 title="Terms and Privacy Policy"
                 subtitle="(required)"
                 className="font-medium"
-                description="I agree to the <a href='https://www.beaverapp.ai/terms' target='_blank' rel='noopener noreferrer'>Terms of Service</a> and <a href='https://www.beaverapp.ai/privacy-policy' target='_blank' rel='noopener noreferrer'>Privacy Policy</a>"
+                description={`I agree to the <a href="${process.env.WEBAPP_BASE_URL}/terms" target='_blank' rel='noopener noreferrer'>Terms of Service</a> and <a href="${process.env.WEBAPP_BASE_URL}/privacy-policy" target='_blank' rel='noopener noreferrer'>Privacy Policy</a>`}
             />
             
             <HelpImproveBeaverToggle

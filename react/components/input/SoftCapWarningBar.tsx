@@ -47,7 +47,7 @@ const SoftCapWarningBar: React.FC<SoftCapWarningBarProps> = ({
                     onBlur={() => setIsReadMoreLinkHovered(false)}
                     onClick={(e) => {
                         e.preventDefault();
-                        Zotero.launchURL('https://www.beaverapp.ai/docs/credits');
+                        Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/docs/credits`);
                     }}
                 >
                     Learn more

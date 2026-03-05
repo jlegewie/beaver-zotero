@@ -135,7 +135,7 @@ const UpgradeConsentPage: React.FC = () => {
                             title="I agree to sync my data with Beaver servers"
                             subtitle="(required)"
                             className="font-medium"
-                            description="By continuing, you agree to our <a href='https://www.beaverapp.ai/terms' target='_blank' rel='noopener noreferrer'>Terms of Service</a> and <a href='https://www.beaverapp.ai/privacy-policy' target='_blank' rel='noopener noreferrer'>Privacy Policy</a>"
+                            description={`By continuing, you agree to our <a href="${process.env.WEBAPP_BASE_URL}/terms" target='_blank' rel='noopener noreferrer'>Terms of Service</a> and <a href="${process.env.WEBAPP_BASE_URL}/privacy-policy" target='_blank' rel='noopener noreferrer'>Privacy Policy</a>`}
                         /> */}
                         <PreferenceToggle
                             checked={agreedToSync}
@@ -144,7 +144,7 @@ const UpgradeConsentPage: React.FC = () => {
                             title="Terms and Privacy Policy"
                             subtitle="(required)"
                             className="font-medium"
-                            description="I agree to the <a href='https://www.beaverapp.ai/terms' target='_blank' rel='noopener noreferrer'>Terms of Service</a> and <a href='https://www.beaverapp.ai/privacy-policy' target='_blank' rel='noopener noreferrer'>Privacy Policy</a>"
+                            description={`I agree to the <a href="${process.env.WEBAPP_BASE_URL}/terms" target='_blank' rel='noopener noreferrer'>Terms of Service</a> and <a href="${process.env.WEBAPP_BASE_URL}/privacy-policy" target='_blank' rel='noopener noreferrer'>Privacy Policy</a>`}
                         />
                     </div>
                 </div>
