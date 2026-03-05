@@ -33,6 +33,18 @@ export function clearThreadListCache() {
     searchCache.clear();
 }
 
+const highlightMatch = (text: string, query: string): React.ReactNode => {
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return text;
+    return (
+        <>
+            {text.slice(0, idx)}
+            <span className="font-color-accent-blue">{text.slice(idx, idx + query.length)}</span>
+            {text.slice(idx + query.length)}
+        </>
+    );
+};
+
 const groupThreadsByDate = (threads: ThreadData[]) => {
     const groups: Record<string, ThreadData[]> = {
         'Today': [],
@@ -218,6 +230,16 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     };
 
     const handleDelete = async (threadId: string) => {
+        const buttonIndex = Zotero.Prompt.confirm({
+            window: Zotero.getMainWindow(),
+            title: 'Delete chat?',
+            text: 'Are you sure you want to delete this chat? This action cannot be undone.',
+            button0: Zotero.Prompt.BUTTON_TITLE_YES,
+            button1: Zotero.Prompt.BUTTON_TITLE_NO,
+            defaultButton: 1,
+        });
+        if (buttonIndex !== 0) return;
+
         try {
             await threadService.deleteThread(threadId);
             setThreads(prev => prev.filter(t => t.id !== threadId));
@@ -299,6 +321,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                         onKeyDown={handleSearchKeyDown}
                         autoFocus
                     />
+                    {isLoading && (
+                        <div className="thread-search-spinner">
+                            <Spinner size={12} />
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -340,7 +367,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                                 />
                                             ) : (
                                                 <div className="thread-list-item-name truncate">
-                                                    {threadName}
+                                                    {activeQuery ? highlightMatch(threadName, activeQuery) : threadName}
                                                 </div>
                                             )}
                                             <div className="thread-list-item-time">
