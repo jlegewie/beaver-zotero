@@ -1194,11 +1194,11 @@ const PreferencePage: React.FC = () => {
                                             </div>
                                             <div className="display-flex flex-col">
                                                 <div className="text-sm font-color-secondary" style={{ marginTop: '4px' }}>
-                                                    {remaining} / {total} remaining
+                                                    {used} / {total} used
                                                 </div>
                                                 {creditBreakdown.rolledOverCredits > 0 && (
                                                     <div className="text-sm font-color-tertiary">
-                                                        Includes {creditBreakdown.rolledOverCredits} rolled over credits from last period.
+                                                        Includes {creditBreakdown.rolledOverCredits} rolled over credits from last period
                                                     </div>
                                                 )}
                                             </div>
@@ -1273,15 +1273,29 @@ const PreferencePage: React.FC = () => {
                     {/* --- Section 3: Pro Tools Status (conditional) --- */}
                     {(geminiKey || openaiKey || anthropicKey) && (
                         <>
-                            <SectionLabel>Pro Tools</SectionLabel>
+                            <div className="display-flex flex-row items-center gap-2" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
+                                <div className="text-lg font-color-primary font-bold">Pro Tools</div>
+                                {requestProTools ? (
+                                    <span
+                                        className="text-xs px-15 py-05 rounded-md font-medium"
+                                        style={{ color: 'var(--tag-green-secondary)', border: '1px solid var(--tag-green-tertiary)', background: 'var(--tag-green-quinary)' }}
+                                    >
+                                        Enabled
+                                    </span>
+                                ) : (
+                                    <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">
+                                        Disabled
+                                    </span>
+                                )}
+                            </div>
                             <SettingsGroup>
                                 <SettingsRow
-                                    title={requestProTools ? 'Pro Tools: Enabled' : 'Pro Tools: Disabled'}
+                                    // title={requestProTools ? 'Active with Your API Keys' : 'Enable with Your API Keys'}
+                                    title="Pro Tools with Your API Keys"
                                     description={
                                         <>
-                                            {requestProTools
-                                                ? 'Pro Tools (external search, batch extraction, AI ranking) are active when using your own API key. Costs 0.25 credits per message + tool costs.'
-                                                : 'When using your own API key, enable Pro Tools for advanced features like external search, batch extraction, and AI ranking. Pro Tools are always available with Beaver models.'}
+                                            Enable to use pro tools like external search, batch extraction, and AI ranking with your own API key.
+                                            Costs 0.25 credits per message. Some actions cost extra.
                                             {' '}<DocLink path="credits">Learn more</DocLink>
                                         </>
                                     }
