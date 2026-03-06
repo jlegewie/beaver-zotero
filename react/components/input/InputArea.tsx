@@ -364,7 +364,19 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} disabled={isAwaitingApproval} />
                     <div className="flex-1" />
                     <div className="display-flex flex-row items-center gap-4">
-                        <Tooltip content={!isWebSearchAllowed ? 'Beaver credits required. Use Beaver model or enable Pro Tools (Settings → API Keys)' : isWebSearchEnabled ? 'Disable web search' : 'Enable web search'} singleLine>
+                        <Tooltip
+                            key={String(isWebSearchAllowed)}
+                            content={isWebSearchAllowed ? (isWebSearchEnabled ? 'Disable web search' : 'Enable web search') : 'Web search requires Beaver credits'}
+                            singleLine={isWebSearchAllowed}
+                            padding={isWebSearchAllowed}
+                            width={!isWebSearchAllowed ? '250px' : undefined}
+                            customContent={!isWebSearchAllowed ? (
+                                <div className="px-2 py-1 display-flex flex-col gap-1">
+                                    <span className="text-base font-color-secondary font-semibold">Web search requires Beaver credits</span>
+                                    <span className="text-sm font-color-tertiary">Use a Beaver model, or enable Pro Tools in Settings → API Keys</span>
+                                </div>
+                            ) : undefined}
+                        >
                             <IconButton
                                 icon={GlobalSearchIcon}
                                 variant="ghost-secondary"
