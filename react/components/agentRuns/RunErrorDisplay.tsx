@@ -192,7 +192,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                             </div>
 
                             <div className="display-flex flex-row gap-3 items-center">
-                                {error.has_beaver_fallback && hasCredits && isLastRun && defaultBeaverModel && (
+                                {error.has_beaver_fallback && hasCredits && isLastRun && defaultBeaverModel && error.type !== "usage_limit_exceeded" && (
                                     <Button
                                         variant="error"
                                         iconClassName="font-color-red"
@@ -203,7 +203,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                         Try with Beaver
                                     </Button>
                                 )}
-                                {error.has_beaver_fallback && !hasCredits && (
+                                {(error.has_beaver_fallback || error.type === "usage_limit_exceeded") && !hasCredits && (
                                     <Button
                                         variant="error"
                                         iconClassName="font-color-red"
