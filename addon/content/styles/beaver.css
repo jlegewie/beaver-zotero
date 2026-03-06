@@ -2037,9 +2037,8 @@
 
 [id^="beaver-pane-"] .text-link-red {
     color: var(--tag-red);
-    font-weight: 700;
     opacity: 0.8;
-    text-decoration: none;
+    text-decoration: underline;
     cursor: pointer;
     border: 0px solid transparent;
     box-shadow: none;
@@ -2047,7 +2046,8 @@
 }
 
 [id^="beaver-pane-"] .text-link-red:hover {
-    text-decoration: underline;
+    color: var(--tag-red-primary);
+    opacity: 1;
 }
 
 [id^="beaver-pane-"] .icon-css.icon-tag {

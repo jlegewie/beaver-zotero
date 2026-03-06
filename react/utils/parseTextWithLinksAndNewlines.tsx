@@ -5,7 +5,7 @@ import React from 'react';
  * @param text Text that may contain newlines and <a> tags
  * @returns React elements with proper formatting and clickable links
  */
-export const parseTextWithLinksAndNewlines = (text: string): React.ReactNode => {
+export const parseTextWithLinksAndNewlines = (text: string, linkClassName?: string): React.ReactNode => {
     const htmlLinkRegex = /<a\s+href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi;
     
     return text.split('\n').map((line, lineIndex, lines) => {
@@ -37,7 +37,7 @@ export const parseTextWithLinksAndNewlines = (text: string): React.ReactNode => 
                 <a
                     key={`link-${matchIndex}`}
                     href="#"
-                    className="text-link"
+                    className={`${linkClassName ?? "text-link"}`}
                     onClick={(e) => {
                         e.preventDefault();
                         Zotero.launchURL(url);

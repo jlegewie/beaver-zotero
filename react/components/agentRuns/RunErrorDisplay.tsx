@@ -188,7 +188,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                     <div className="p-3" id={`run-error-content-${runId}`}>
                         <div className="display-flex flex-col gap-4">
                             <div className="text-base font-color-red">
-                                {parseTextWithLinksAndNewlines(displayMessage)}
+                                {parseTextWithLinksAndNewlines(displayMessage, "text-link-red")}
                             </div>
 
                             <div className="display-flex flex-row gap-3 items-center">
