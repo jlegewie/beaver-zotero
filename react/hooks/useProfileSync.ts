@@ -49,7 +49,7 @@ export const useProfileSync = () => {
     const lastRefreshRef = useRef<Date | null>(null);
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
     const isRefreshingRef = useRef<boolean>(false);
-    const syncDeniedPendingRef = useRef<boolean>(false);
+    const forcedRefreshPendingRef = useRef<boolean>(false);
 
     const syncProfileData = useCallback(async (userId: string) => {
         // Prevent concurrent refreshes
@@ -139,9 +139,9 @@ export const useProfileSync = () => {
             }
         } finally {
             isRefreshingRef.current = false;
-            // If a sync-denied refresh was queued while we were busy, run it now
-            if (syncDeniedPendingRef.current) {
-                syncDeniedPendingRef.current = false;
+            // Run one queued forced refresh after the in-flight request completes.
+            if (forcedRefreshPendingRef.current) {
+                forcedRefreshPendingRef.current = false;
                 setTimeout(() => syncProfileData(userId), 0);
             }
         }
@@ -149,6 +149,12 @@ export const useProfileSync = () => {
 
     const refreshProfile = useCallback(async (force = false) => {
         if (!user) return;
+
+        if (force && isRefreshingRef.current) {
+            logger(`useProfileSync: Refresh in progress, queuing forced refresh.`);
+            forcedRefreshPendingRef.current = true;
+            return;
+        }
         
         // Skip if recently refreshed and not forced
         // Use shorter interval check since we want to be responsive when forced
@@ -232,19 +238,11 @@ export const useProfileSync = () => {
         if (syncDenied && isAuthenticated && user) {
             logger(`useProfileSync: Sync denied by backend - forcing profile refresh`);
             setSyncDenied(false);
-            if (isRefreshingRef.current) {
-                // Queue the refresh so it runs after the in-flight one completes
-                logger(`useProfileSync: Refresh in progress, queuing sync-denied refresh.`);
-                syncDeniedPendingRef.current = true;
-            } else {
-                syncProfileData(user.id);
-            }
+            refreshProfile(true);
         }
-    }, [syncDenied, isAuthenticated, user, setSyncDenied, syncProfileData]);
+    }, [syncDenied, isAuthenticated, user, setSyncDenied, refreshProfile]);
 
-    // Refresh profile when error with credit button is displayed (so credit state is fresh).
-    // If a refresh is already in flight, this is silently dropped — that's fine since the
-    // in-flight refresh will return up-to-date credit data anyway.
+    // Refresh profile when error with credit button is displayed so credit state is fresh.
     const errorCreditCheck = useAtomValue(errorCreditCheckAtom);
     const setErrorCreditCheck = useSetAtom(errorCreditCheckAtom);
     useEffect(() => {
