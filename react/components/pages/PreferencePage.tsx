@@ -1073,6 +1073,10 @@ const PreferencePage: React.FC = () => {
             {/* ===== PLAN & USAGE TAB ===== */}
             {activeTab === 'billing' && (
                 <>
+                    <div className="font-color-secondary text-base mb-2 ml-1">
+                        Credits power Beaver's AI. Most messages cost 1 credit. Some actions such as external search or batch extraction cost extra. <DocLink path="credits">Learn more &rarr;</DocLink>
+                    </div>
+
                     {/* --- Section 1: Plan Card --- */}
                     <div
                         className="display-flex flex-col rounded-lg overflow-hidden"
