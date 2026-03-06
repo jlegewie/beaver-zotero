@@ -1118,13 +1118,19 @@ const PreferencePage: React.FC = () => {
                                         Subscribe
                                     </Button>
                                 </div>
-                                <div style={{ marginTop: '8px' }}>
-                                    <span
+                                <div className="display-flex flex-col gap-5 mt-2">
+                                    <div
                                         className="text-sm text-link cursor-pointer"
                                         onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/pricing`)}
                                     >
                                         Compare plans &rarr;
-                                    </span>
+                                    </div>
+                                    <div
+                                        className="text-sm text-link cursor-pointer"
+                                        onClick={buyCredits}
+                                    >
+                                        Not ready to subscribe? Buy a credit pack instead &rarr;
+                                    </div>
                                 </div>
                             </>
                         ) : (
