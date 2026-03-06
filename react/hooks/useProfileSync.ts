@@ -17,7 +17,8 @@ import {
     localZoteroLibrariesAtom,
     minimumFrontendVersionAtom,
     syncDeniedForPlanAtom,
-    prefWindowFocusRefreshAtom
+    prefWindowFocusRefreshAtom,
+    errorCreditCheckAtom
 } from '../atoms/profile';
 
 // Adaptive refresh intervals based on sidebar visibility
@@ -240,6 +241,18 @@ export const useProfileSync = () => {
             }
         }
     }, [syncDenied, isAuthenticated, user, setSyncDenied, syncProfileData]);
+
+    // Refresh profile when error with credit button is displayed (so credit state is fresh).
+    // If a refresh is already in flight, this is silently dropped — that's fine since the
+    // in-flight refresh will return up-to-date credit data anyway.
+    const errorCreditCheck = useAtomValue(errorCreditCheckAtom);
+    const setErrorCreditCheck = useSetAtom(errorCreditCheckAtom);
+    useEffect(() => {
+        if (errorCreditCheck && isAuthenticated && user) {
+            setErrorCreditCheck(false);
+            refreshProfile(true);
+        }
+    }, [errorCreditCheck, isAuthenticated, user, setErrorCreditCheck, refreshProfile]);
 
     return { refreshProfile };
 };

@@ -186,6 +186,17 @@ export const availableModelsAtom = atom(
     }
 );
 
+
+/**
+ * Derived atom that returns the default Beaver model from the available models
+ */
+export const beaverDefaultModelAtom = atom<ModelConfig | null>(
+    get => {
+        const beaverModels = get(availableModelsAtom).filter((m) => m.allow_app_key && !m.is_custom);
+        return beaverModels.find((m) => m.is_default) ?? beaverModels[0] ?? null;
+    }
+);
+
 /**
  * Validation atom that ensures the selected model is still available
  * If current model is invalid, switches to default model or first available model

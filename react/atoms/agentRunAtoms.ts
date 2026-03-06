@@ -918,6 +918,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     is_retryable: event.is_retryable,
                     retry_after: event.retry_after,
                     is_resumable: event.is_resumable,
+                    has_beaver_fallback: event.has_beaver_fallback,
                 }
             } : prev);
             set(isWSChatPendingAtom, false);
@@ -1085,7 +1086,7 @@ async function executeWSRequest(
         const frontendVersion = Zotero.Beaver.pluginVersion || '';
         await agentService.connect(request, callbacks, frontendVersion);
         logger('WS Connection established and ready');
-    } catch (error) {
+    } catch (error: any) {
         logger('WS connection error:', error, 1);
         
         // Check if an error was already set by the onError callback

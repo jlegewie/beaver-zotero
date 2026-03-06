@@ -279,6 +279,12 @@ export const prefWindowFocusRefreshAtom = atom<boolean>(false);
 export const syncDeniedForPlanAtom = atom<boolean>(false);
 
 /**
+ * Signal atom: set to true when an error with has_beaver_fallback is displayed.
+ * useProfileSync watches this and forces a profile refresh so credit state is up to date.
+ */
+export const errorCreditCheckAtom = atom<boolean>(false);
+
+/**
  * Indexing progress atom - returns the current indexing progress (0-100)
  * from files_status realtime subscription, or from profile as fallback.
  */

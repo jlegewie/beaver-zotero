@@ -174,6 +174,7 @@ export interface AgentRun {
         is_retryable?: boolean;
         retry_after?: number;
         is_resumable?: boolean;
+        has_beaver_fallback?: boolean;
     };
 
     /** The model messages (built incrementally during streaming) */

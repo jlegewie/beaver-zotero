@@ -108,6 +108,8 @@ export interface WSErrorEvent extends WSBaseEvent {
     retry_after?: number;
     /** Whether the run can be resumed from the point of failure */
     is_resumable?: boolean;
+    /** show the beaver credits button */
+    has_beaver_fallback?: boolean;
 }
 
 /** Warning event for non-fatal issues */

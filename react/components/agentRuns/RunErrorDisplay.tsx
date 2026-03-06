@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Icon, AlertIcon, RepeatIcon, ArrowDownIcon, ArrowRightIcon, LinkForwardIcon } from '../icons/icons';
 import Button from '../ui/Button';
@@ -7,13 +7,16 @@ import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { regenerateFromRunAtom, resumeFromRunAtom } from '../../atoms/agentRunAtoms';
 import { runErrorVisibilityAtom, setRunErrorVisibilityAtom } from '../../atoms/messageUIState';
-import { useBilling } from '../../hooks/useBilling';
+import { remainingBeaverCreditsAtom, errorCreditCheckAtom } from '../../atoms/profile';
+import { beaverDefaultModelAtom, updateSelectedModelAtom, type ModelConfig } from '../../atoms/models';
+import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 
 interface RunError {
     type: string;
     message: string;
     details?: string;
     is_retryable?: boolean;
+    has_beaver_fallback?: boolean;
     retry_after?: number;
     is_resumable?: boolean;
 }
@@ -83,14 +86,25 @@ const typeMap: Record<string, string> = {
 export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, isLastRun }) => {
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
     const resumeFromRun = useSetAtom(resumeFromRunAtom);
-    const { subscribe, buyCredits, isLoading: isBillingLoading } = useBilling();
-    
+    const updateSelectedModel = useSetAtom(updateSelectedModelAtom);
+    const remainingCredits = useAtomValue(remainingBeaverCreditsAtom);
+    const hasCredits = remainingCredits > 0;
+    const defaultBeaverModel = useAtomValue(beaverDefaultModelAtom);
+    const setErrorCreditCheck = useSetAtom(errorCreditCheckAtom);
+
     // Visibility state
     const runErrorVisibility = useAtomValue(runErrorVisibilityAtom);
     const setVisibility = useSetAtom(setRunErrorVisibilityAtom);
     const isExpanded = runErrorVisibility[runId] ?? isLastRun;
 
     const contentRef = useRef<HTMLDivElement | null>(null);
+
+    // Trigger profile refresh when this error has the credit button so credit state is fresh
+    useEffect(() => {
+        if (error.has_beaver_fallback) {
+            setErrorCreditCheck(true);
+        }
+    }, [error.has_beaver_fallback, setErrorCreditCheck]);
 
     const { 
         isMenuOpen: isSelectionMenuOpen, 
@@ -108,6 +122,12 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
 
     const handleResume = async () => {
         await resumeFromRun(runId);
+    };
+
+    const handleRetryWithBeaver = async () => {
+        if (!defaultBeaverModel) return;
+        updateSelectedModel({ ...defaultBeaverModel, access_mode: 'app_key' });
+        await regenerateFromRun(runId);
     };
 
     const handleToggle = () => {
@@ -163,43 +183,33 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                 {/* Expanded Content */}
                 {isExpanded && (
                     <div className="p-3" id={`run-error-content-${runId}`}>
-                        <div className="display-flex flex-col gap-3">
+                        <div className="display-flex flex-col gap-4">
                             <div className="text-base font-color-red">
                                 {parseTextWithLinksAndNewlines(displayMessage)}
                             </div>
 
                             <div className="display-flex flex-row gap-3 items-center">
-                                <div className="flex-1" />
-                                {(error.type === "usage_limit_exceeded" || error.type === "llm_insufficient_credits") && (
-                                    <>
-                                        <Button
-                                            variant="error"
-                                            iconClassName="font-color-red"
-                                            onClick={() => subscribe()}
-                                            disabled={isBillingLoading}
-                                        >
-                                            Subscribe
-                                        </Button>
-                                        <Button
-                                            variant="error"
-                                            iconClassName="font-color-red"
-                                            onClick={buyCredits}
-                                            disabled={isBillingLoading}
-                                        >
-                                            Buy Credits
-                                        </Button>
-                                    </>
-                                )}
-                                {error.type === "inactive_subscription" && (
+                                {error.has_beaver_fallback && hasCredits && isLastRun && defaultBeaverModel && (
                                     <Button
                                         variant="error"
                                         iconClassName="font-color-red"
-                                        onClick={() => subscribe()}
-                                        disabled={isBillingLoading}
+                                        rightIcon={RepeatIcon}
+                                        onClick={handleRetryWithBeaver}
+                                        disabled={!defaultBeaverModel}
                                     >
-                                        Subscribe
+                                        Retry with Beaver
                                     </Button>
                                 )}
+                                {error.has_beaver_fallback && !hasCredits && (
+                                    <Button
+                                        variant="error"
+                                        iconClassName="font-color-red"
+                                        onClick={() => openPreferencesWindow('billing')}
+                                    >
+                                        Get Beaver Credits
+                                    </Button>
+                                )}
+                                <div className="flex-1" />
                                 {error.is_resumable && isLastRun && (
                                     <Button
                                         variant="error"
