@@ -126,7 +126,7 @@ const PreferencePage: React.FC = () => {
     const creditBreakdown = useAtomValue(creditBreakdownAtom);
     const isPastDue = useAtomValue(isCreditPlanPastDueAtom);
     const hasPlan = useAtomValue(hasCreditPlanAtom);
-    const { subscribe, buyCredits, manageSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
+    const { subscribe, buyCredits, manageSubscription, upgradeSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
     const processingMode = useAtomValue(processingModeAtom);
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
@@ -1285,11 +1285,11 @@ const PreferencePage: React.FC = () => {
                                     );
                                 })()}
 
-                                {creditPlan.plan === 'basic' && (
+                                {creditPlan.plan === 'basic' && !creditPlan.cancelAtPeriodEnd && (
                                     <div style={{ marginTop: '8px' }}>
                                         <span
                                             className="text-sm text-link cursor-pointer"
-                                            onClick={manageSubscription}
+                                            onClick={upgradeSubscription}
                                         >
                                             Upgrade to Pro &rarr;
                                         </span>

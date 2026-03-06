@@ -82,5 +82,21 @@ export function useBilling() {
         }
     }, []);
 
-    return { subscribe, buyCredits, manageSubscription, isLoading, error, plans, plansLoading, plansError, fetchPlans };
+    const upgradeSubscription = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            const { portal_url } = await accountService.createUpgradeSession(
+                `${WEBAPP_BASE_URL}/checkout/return`
+            );
+            Zotero.launchURL(portal_url);
+        } catch (e: any) {
+            logger(`useBilling: upgradeSubscription error - ${e?.message}`, 1);
+            setError(e?.message || 'Failed to open upgrade flow');
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    return { subscribe, buyCredits, manageSubscription, upgradeSubscription, isLoading, error, plans, plansLoading, plansError, fetchPlans };
 }
