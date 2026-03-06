@@ -181,7 +181,7 @@ export const addAPIKeyMessageAtom = atom(
             // Keep existing app key note if present
             const appKeyMatch = existingMessage.text?.match(/The current model \((.+?)\) uses Beaver's key/);
             if (appKeyMatch) {
-                appKeyNote = `\n\nThe current model (${appKeyMatch[1]}) uses Beaver's key. To use your own, pick a model under 'Your API Keys'.`;
+                appKeyNote = `\n\nThe current model (${appKeyMatch[1]}) uses Beaver credits. To use your own, pick a model under 'Your API Keys'.`;
             }
         }
 
@@ -198,7 +198,7 @@ export const addAPIKeyMessageAtom = atom(
 
         // Update app key note with current state
         if (currentModelUsesAppKey && currentModelName) {
-            appKeyNote = `\n\nThe current model (${currentModelName}) uses Beaver's key. To use your own, pick a model under 'Your API Keys'.`;
+            appKeyNote = `\n\nThe current model (${currentModelName}) uses Beaver credits. To use your own, pick a model under 'Your API Keys'.`;
         } else {
             appKeyNote = '';
         }
