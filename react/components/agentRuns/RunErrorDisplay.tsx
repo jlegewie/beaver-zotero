@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { Icon, AlertIcon, RepeatIcon, ArrowDownIcon, ArrowRightIcon, LinkForwardIcon } from '../icons/icons';
+import { Icon, AlertIcon, RepeatIcon, ArrowDownIcon, ArrowRightIcon, LinkForwardIcon, DollarCircleIcon } from '../icons/icons';
 import Button from '../ui/Button';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
@@ -196,11 +196,11 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                                     <Button
                                         variant="error"
                                         iconClassName="font-color-red"
-                                        rightIcon={RepeatIcon}
+                                        rightIcon={DollarCircleIcon}
                                         onClick={handleRetryWithBeaver}
                                         disabled={!defaultBeaverModel}
                                     >
-                                        Retry with Beaver
+                                        Try with Beaver
                                     </Button>
                                 )}
                                 {error.has_beaver_fallback && !hasCredits && (
