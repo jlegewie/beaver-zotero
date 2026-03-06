@@ -192,7 +192,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                 )}
 
                 {/* Prompt area (footer) with floating elements */}
-                <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
+                <div id="beaver-prompt" className="flex-none px-3 pb-25 relative">
                     <PreviewAndPopupContainer />
                     <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
                     <DragDropWrapper>
