@@ -1125,9 +1125,9 @@ const PreferencePage: React.FC = () => {
                                 )}
 
                                 {plansError && (
-                                    <div className="display-flex flex-row items-center gap-3" style={{ padding: '12px 0' }}>
-                                        <span className="font-color-red text-sm">{plansError}</span>
-                                        <Button variant="outline" onClick={fetchPlans}>Retry</Button>
+                                    <div className="display-flex flex-row items-center gap-3 flex-wrap ml-1 -mt-3" style={{ padding: '12px 0' }}>
+                                        <span className="font-color-secondary">{plansError}</span>
+                                        <Button variant="ghost-secondary" onClick={fetchPlans}>Retry</Button>
                                     </div>
                                 )}
 
@@ -1178,9 +1178,11 @@ const PreferencePage: React.FC = () => {
                                         >
                                             Compare plans &rarr;
                                         </div>
-                                        <div className="font-color-tertiary text-sm">
-                                            Unused credits roll over for 1 month
-                                        </div>
+                                        {!plansError && 
+                                            <div className="font-color-tertiary text-sm">
+                                                Unused credits roll over for 1 month
+                                            </div>
+                                        }
                                     </div>
                                     <div
                                         className="text-sm text-link cursor-pointer"

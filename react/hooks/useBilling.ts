@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { accountService, PlanInfo } from '../../src/services/accountService';
+import { ApiError, ServerError } from '../types/apiErrors';
 import { logger } from '../../src/utils/logger';
 
 const WEBAPP_BASE_URL = (process.env.WEBAPP_BASE_URL || '').replace(/\/$/, '');
@@ -20,7 +21,10 @@ export function useBilling() {
             setPlans(fetchedPlans);
         } catch (e: any) {
             logger(`useBilling: fetchPlans error - ${e?.message}`, 1);
-            setPlansError(e?.message || 'Failed to load plans');
+            const message = e instanceof ApiError || e instanceof ServerError
+                ? 'Unable to load plan details'
+                : (e?.message || 'Unable to load plan details');
+            setPlansError(message);
         } finally {
             setPlansLoading(false);
         }
