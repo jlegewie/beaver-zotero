@@ -32,7 +32,7 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
         dismissWarning(warning.id);
     };
 
-    const showLowCreditsButtons = warning.type === 'low_credits';
+    const showLowCreditsButtons = warning.type === 'low_credits' || warning.type === 'critical_credits';
     const showProToolsDegradedButtons = warning.type === 'pro_tools_degraded';
 
     return (

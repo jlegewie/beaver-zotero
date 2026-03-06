@@ -230,6 +230,21 @@
     border-bottom: 1px solid var(--fill-quinary);
 }
 
+/* Credit info bar below composer */
+[id^="beaver-pane-"] .credit-info-bar {
+    margin-top: 0.25rem;
+    padding: 0.15rem 0.25rem;
+    background-color: transparent;
+}
+
+[id^="beaver-pane-"] .credit-info-bar:hover .credit-info-bar-text {
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .credit-info-bar:hover .credit-info-bar-icon {
+    color: var(--fill-secondary);
+}
+
 /* UserRequestView - Clickable user message display */
 [id^="beaver-pane-"] .user-request-view {
     cursor: pointer;
@@ -303,6 +318,10 @@
 
 [id^="beaver-pane-"] .bg-tertiary {
     background-color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .bg-transparent {
+    background-color: transparent;
 }
 
 [id^="beaver-pane-"] .opacity-90 {

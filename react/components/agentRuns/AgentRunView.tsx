@@ -41,7 +41,7 @@ export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(functi
     const isStreaming = run.status === 'in_progress';
     const hasError = run.status === 'error';
     const allWarnings = useAtomValue(threadWarningsAtom);
-    const runWarnings = allWarnings.filter((w) => w.run_id === run.id);
+    const runWarnings = allWarnings.filter((w) => w.run_id === run.id && w.type !== 'credit_info');
     const resumedRunIds = useAtomValue(resumedRunIdsAtom);
     const resultsMap = useAtomValue(toolResultsMapAtom);
     

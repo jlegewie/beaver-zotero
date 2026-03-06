@@ -20,7 +20,9 @@ import Tooltip from '../ui/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import SoftCapWarningBar from './SoftCapWarningBar';
+import CreditInfoBar from './CreditInfoBar';
 import { allRunsAtom } from '../../agents/atoms';
+import { threadWarningsAtom } from '../../atoms/warnings';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, dismissSoftCapWarningForThreadAtom, dismissedSoftCapWarningByThreadAtom, backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
 import { getPref, setPref } from '../../../src/utils/prefs';
@@ -50,6 +52,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const allRuns = useAtomValue(allRunsAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
+    const allWarnings = useAtomValue(threadWarningsAtom);
+    const creditInfoWarning = allWarnings.find((w) => w.type === 'credit_info');
     const dismissedHighTokenByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
     const dismissedSoftCapByThread = useAtomValue(dismissedSoftCapWarningByThreadAtom);
@@ -257,13 +261,14 @@ const InputArea: React.FC<InputAreaProps> = ({
     }
 
     return (
-        <div
-            className="user-message-display shadow-md shadow-md-top"
-            onClick={handleContainerClick}
-            style={{ minHeight: 'fit-content' }}
-        >
-            {/* Pending actions bar - shown when awaiting approval */}
-            <PendingActionsBar />
+        <div className="display-flex flex-col">
+            <div
+                className="user-message-display shadow-sm shadow-sm-top"
+                onClick={handleContainerClick}
+                style={{ minHeight: 'fit-content' }}
+            >
+                {/* Pending actions bar - shown when awaiting approval */}
+                <PendingActionsBar />
             {shouldShowHighTokenWarning && (
                 <HighTokenUsageWarningBar
                     onNewThread={(e) => {
@@ -423,6 +428,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                     </div>
                 </div>
             </form>
+            </div>
+            {creditInfoWarning && <CreditInfoBar warning={creditInfoWarning} />}
         </div>
     );
 };
