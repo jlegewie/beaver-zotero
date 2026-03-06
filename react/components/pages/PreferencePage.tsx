@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
@@ -126,7 +126,7 @@ const PreferencePage: React.FC = () => {
     const creditBreakdown = useAtomValue(creditBreakdownAtom);
     const isPastDue = useAtomValue(isCreditPlanPastDueAtom);
     const hasPlan = useAtomValue(hasCreditPlanAtom);
-    const { subscribe, buyCredits, manageSubscription, isLoading: isBillingLoading } = useBilling();
+    const { subscribe, buyCredits, manageSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
     const processingMode = useAtomValue(processingModeAtom);
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
@@ -146,6 +146,13 @@ const PreferencePage: React.FC = () => {
         setConsentToShare(profileWithPlan?.consent_to_share || false);
         setEmailNotifications(profileWithPlan?.email_notifications || false);
     }, [syncWithZotero, profileWithPlan?.consent_to_share, profileWithPlan?.email_notifications]);
+
+    // Fetch plans when billing tab is active and user has no plan
+    useEffect(() => {
+        if (activeTab === 'billing' && !hasPlan) {
+            fetchPlans();
+        }
+    }, [activeTab, hasPlan, fetchPlans]);
 
     // --- Sync and Verify Status States ---
     const [syncStatus, setSyncStatus] = useState<'idle' | 'running' | 'completed'>('idle');
@@ -1078,14 +1085,7 @@ const PreferencePage: React.FC = () => {
                     </div>
 
                     {/* --- Section 1: Plan Card --- */}
-                    <div
-                        className="display-flex flex-col rounded-lg overflow-hidden"
-                        style={{
-                            background: 'var(--fill-senary)',
-                            border: '1px solid var(--fill-quarternary)',
-                            padding: '16px',
-                        }}
-                    >
+                    <div className="display-flex flex-col rounded-lg overflow-hidden border-popup bg-senary p-5">
                         {isPastDue && (
                             <div
                                 className="display-flex flex-row items-center gap-3 mb-3 rounded-md"
@@ -1115,19 +1115,72 @@ const PreferencePage: React.FC = () => {
                                     No active plan
                                 </div>
                                 <div className="text-base font-color-secondary" style={{ marginBottom: '12px' }}>
-                                    Subscribe to get monthly credits and Pro Tools.
+                                    Subscribe to get monthly credits and Pro Tools (external search, batch extraction, and more).
                                 </div>
-                                <div className="display-flex flex-row items-center gap-3">
-                                    <Button variant="solid" onClick={() => subscribe()} disabled={isBillingLoading}>
-                                        Subscribe
-                                    </Button>
-                                </div>
-                                <div className="display-flex flex-col gap-5 mt-2">
-                                    <div
-                                        className="text-sm text-link cursor-pointer"
-                                        onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/pricing`)}
-                                    >
-                                        Compare plans &rarr;
+
+                                {plansLoading && (
+                                    <div className="display-flex flex-row items-center gap-3" style={{ padding: '12px 0' }}>
+                                        <Spinner size={16} /> <span className="font-color-secondary text-sm">Loading plans...</span>
+                                    </div>
+                                )}
+
+                                {plansError && (
+                                    <div className="display-flex flex-row items-center gap-3" style={{ padding: '12px 0' }}>
+                                        <span className="font-color-red text-sm">{plansError}</span>
+                                        <Button variant="outline" onClick={fetchPlans}>Retry</Button>
+                                    </div>
+                                )}
+
+                                {!plansLoading && !plansError && plans.length > 0 && (
+                                    <div className="display-flex flex-row gap-3" style={{ marginBottom: '12px' }}>
+                                        {plans.map((plan) => {
+                                            const price = new Intl.NumberFormat(undefined, { style: 'currency', currency: plan.currency, minimumFractionDigits: 0 }).format(plan.unit_amount / 100);
+                                            return (
+                                                <div
+                                                    key={plan.sku}
+                                                    className="display-flex flex-1 flex-col rounded-md border-popup bg-senary p-4"
+                                                >
+                                                    <div className="display-flex flex-row items-center gap-2" style={{ marginBottom: '4px' }}>
+                                                        <span className="text-base font-color-primary font-bold">{plan.name}</span>
+                                                        {plan.highlight && (
+                                                            <span className="text-xs px-15 py-05 rounded-md bg-quarternary font-color-secondary">
+                                                                Recommended
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-xl font-color-primary font-bold">
+                                                        {price}<span className="text-sm font-normal font-color-secondary">/{plan.interval || 'mo'}</span>
+                                                    </div>
+                                                    <div className="text-sm font-color-secondary" style={{ marginBottom: '8px' }}>
+                                                        {plan.monthly_credits} credits per month
+                                                    </div>
+                                                    <div style={{ alignSelf: 'flex-start' }}>
+                                                        <Button
+                                                            variant={plan.highlight ? 'solid' : 'surface'}
+                                                            // variant="solid"
+                                                            onClick={() => subscribe(plan.sku)}
+                                                            disabled={isBillingLoading}
+                                                        >
+                                                            Subscribe
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+
+                                <div className="display-flex flex-col gap-5 -mt-2 ml-1">
+                                    <div className="display-flex flex-row gap-2 justify-between">
+                                        <div
+                                            className="text-sm text-link cursor-pointer"
+                                            onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/pricing`)}
+                                        >
+                                            Compare plans &rarr;
+                                        </div>
+                                        <div className="font-color-tertiary text-sm">
+                                            Unused credits roll over for 1 month
+                                        </div>
                                     </div>
                                     <div
                                         className="text-sm text-link cursor-pointer"
@@ -1234,7 +1287,7 @@ const PreferencePage: React.FC = () => {
                                     <div style={{ marginTop: '8px' }}>
                                         <span
                                             className="text-sm text-link cursor-pointer"
-                                            onClick={() => subscribe('pro_monthly')}
+                                            onClick={manageSubscription}
                                         >
                                             Upgrade to Pro &rarr;
                                         </span>
@@ -1255,7 +1308,7 @@ const PreferencePage: React.FC = () => {
                                 ) : (
                                     <span className="font-color-secondary">
                                         Credits from sign-up bonus and credit packs
-                                        {creditBreakdown.purchasedExpiresAt && (
+                                        {creditBreakdown.purchasedExpiresAt && (creditBreakdown.purchasedCredits || 0) > 0 && (
                                             <>
                                                 <br />
                                                 Expires: {new Date(creditBreakdown.purchasedExpiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -1280,16 +1333,7 @@ const PreferencePage: React.FC = () => {
                         <SettingsRow
                             title="Total Available"
                             description={
-                                (creditBreakdown.total || 0) === 0 && !hasPlan ? (
-                                    <span className="font-color-secondary">
-                                        Get more credits:{' '}
-                                        <span className="text-link cursor-pointer" onClick={() => subscribe()}>Subscribe</span>
-                                        {' '}or{' '}
-                                        <span className="text-link cursor-pointer" onClick={buyCredits}>Buy Credits</span>
-                                    </span>
-                                ) : (
-                                    <span className="font-color-secondary">Plan credits + Extra Credits</span>
-                                )
+                                <span className="font-color-secondary">Plan credits + Extra Credits</span>
                             }
                             hasBorder
                             control={
@@ -1451,7 +1495,7 @@ const PreferencePage: React.FC = () => {
                                 title="Use Pro Tools with your API key"
                                 description={
                                     <>
-                                        Enable to use pro tools like external search, batch extraction, and AI ranking with your own API key.
+                                        Unlock external search, batch extraction, and AI ranking alongside your API key.
                                         Costs 0.25 credits per message. Some actions cost extra.{' '}
                                         <DocLink path="credits">Learn more</DocLink>
                                         <br />
@@ -1474,7 +1518,7 @@ const PreferencePage: React.FC = () => {
                                 description={
                                     <>
                                         Unlock external search, batch extraction, and AI ranking alongside your API key.
-                                        Requires Beaver credits.{' '}
+                                        Costs 0.25 credits per message. Some actions cost extra.{' '}
                                         <DocLink path="credits">Learn more</DocLink>
                                         <br />
                                         <br />

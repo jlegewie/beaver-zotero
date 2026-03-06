@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { accountService } from '../../src/services/accountService';
+import { accountService, PlanInfo } from '../../src/services/accountService';
 import { logger } from '../../src/utils/logger';
 
 const WEBAPP_BASE_URL = (process.env.WEBAPP_BASE_URL || '').replace(/\/$/, '');
@@ -7,6 +7,24 @@ const WEBAPP_BASE_URL = (process.env.WEBAPP_BASE_URL || '').replace(/\/$/, '');
 export function useBilling() {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    const [plans, setPlans] = useState<PlanInfo[]>([]);
+    const [plansLoading, setPlansLoading] = useState(false);
+    const [plansError, setPlansError] = useState<string | null>(null);
+
+    const fetchPlans = useCallback(async () => {
+        setPlansLoading(true);
+        setPlansError(null);
+        try {
+            const { plans: fetchedPlans } = await accountService.getPlans();
+            setPlans(fetchedPlans);
+        } catch (e: any) {
+            logger(`useBilling: fetchPlans error - ${e?.message}`, 1);
+            setPlansError(e?.message || 'Failed to load plans');
+        } finally {
+            setPlansLoading(false);
+        }
+    }, []);
 
     const subscribe = useCallback(async (sku = 'basic_monthly') => {
         setIsLoading(true);
@@ -60,5 +78,5 @@ export function useBilling() {
         }
     }, []);
 
-    return { subscribe, buyCredits, manageSubscription, isLoading, error };
+    return { subscribe, buyCredits, manageSubscription, isLoading, error, plans, plansLoading, plansError, fetchPlans };
 }

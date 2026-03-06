@@ -54,6 +54,20 @@ interface PreferenceRequest {
     value: boolean;
 }
 
+export interface PlanInfo {
+    sku: string;
+    name: string;
+    monthly_credits: number;
+    unit_amount: number;   // price in cents
+    currency: string;
+    interval: string | null;
+    highlight: boolean;
+}
+
+interface PlansResponse {
+    plans: PlanInfo[];
+}
+
 interface CheckoutSessionRequest {
     sku: string;
     success_url: string;
@@ -297,6 +311,13 @@ export class AccountService extends ApiService {
      */
     async migrateData(): Promise<MigrationResponse> {
         return this.post<MigrationResponse>('/api/v1/account/migrate-data', {});
+    }
+
+    /**
+     * Fetches available subscription plans with live Stripe pricing
+     */
+    async getPlans(): Promise<PlansResponse> {
+        return this.get<PlansResponse>('/api/v1/billing/plans');
     }
 
     /**
