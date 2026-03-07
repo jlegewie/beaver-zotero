@@ -8,6 +8,7 @@ import { RunWarning, dismissWarningAtom } from '../../atoms/warnings';
 import { setPref } from '../../../src/utils/prefs';
 import { requestProToolsAtom } from '../../atoms/ui';
 import { useBilling } from '../../hooks/useBilling';
+import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 
 interface RunWarningDisplayProps {
     warning: RunWarning;
@@ -59,19 +60,10 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
                     <div className="flex-1" />
                     <Button
                         variant="outline"
-                        className="scale-90 mt-020"
-                        onClick={() => subscribe()}
-                        disabled={isLoading}
+                        className="mt-020"
+                        onClick={() => openPreferencesWindow('billing')}
                     >
-                        Subscribe
-                    </Button>
-                    <Button
-                        variant="outline"
-                        className="scale-90 mt-020"
-                        onClick={buyCredits}
-                        disabled={isLoading}
-                    >
-                        Buy Credits
+                        Get Beaver Credits
                     </Button>
                 </div>
             )}
