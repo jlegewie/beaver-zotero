@@ -53,7 +53,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const allRuns = useAtomValue(allRunsAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const allWarnings = useAtomValue(threadWarningsAtom);
-    const creditInfoWarning = allWarnings.find((w) => w.type === 'credit_info');
+    const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
     const dismissedHighTokenByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
     const dismissedSoftCapByThread = useAtomValue(dismissedSoftCapWarningByThreadAtom);
