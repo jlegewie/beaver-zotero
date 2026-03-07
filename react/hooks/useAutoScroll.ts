@@ -181,15 +181,26 @@ export function useAutoScroll(
                 cumulativeResetTimer.current = null;
             }, 200);
 
-            // If cumulative upward scroll exceeds threshold, mark as user scrolled
-            // This filters out single small layout shifts but catches deliberate scrolling
-            if (cumulativeUpScrollRef.current > 15) { // 15px threshold for high responsiveness
+            // If cumulative upward scroll exceeds threshold, mark as user scrolled.
+            // But only if we're actually far from the bottom — layout shifts (e.g.,
+            // CreditInfoBar dismissal increasing clientHeight) can cause fake upward
+            // scrolls while the user is still at the bottom.
+            if (cumulativeUpScrollRef.current > 15 && distanceFromBottom > threshold) {
                 clearDebounceTimer();
                 if (!lastScrolledStateRef.current) {
                     store.set(scrolledAtom, true);
                     lastScrolledStateRef.current = true;
                 }
                 lastScrollDirectionRef.current = 'up';
+            } else if (distanceFromBottom <= threshold) {
+                // Near bottom despite upward direction — layout shift, not user scroll
+                cumulativeUpScrollRef.current = 0;
+                clearCumulativeResetTimer();
+                clearDebounceTimer();
+                if (lastScrolledStateRef.current) {
+                    store.set(scrolledAtom, false);
+                    lastScrolledStateRef.current = false;
+                }
             }
         } else if (distanceFromBottom > threshold) {
             // Scrolling down or stationary but far from bottom
