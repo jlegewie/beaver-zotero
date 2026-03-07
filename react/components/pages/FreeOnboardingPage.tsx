@@ -95,23 +95,15 @@ const FreeOnboardingPage: React.FC = () => {
 
     const getHeaderMessage = () => {
         return (
-            <div className="display-flex flex-col gap-4 py-2 mt-2">
-                <div>AI research assistant that lives in Zotero. Chat with your entire library, discover new research and much more.</div>
-                <div className="display-flex flex-row gap-3 items-start">
-                    <Icon icon={LockIcon} className="mt-020 scale-11" />
-                    {/* <span className="font-color-secondary">Privacy Notice:</span> */}
-                    {/* Your Zotero library stays local. Chats stored securely and deletable anytime. */}
-                    {/* Privacy-first: Your library data remains local and is never stored on our servers. Metadata is processed temporarily for indexing only.
-                    Chat history is saved securely to your account and is fully deletable at any time. */}
-                    Privacy-first: We never store your library data. Metadata is processed temporarily server-side for local search only.
-                    Chat history is saved to your account and is fully deletable.
-                </div>
+            <div className="display-flex flex-col gap-2 py-2 mt-3">
+                <div className="text-lg font-semibold">Your AI research assistant in Zotero</div>
+                <div>Search across your library, read papers faster, compare findings, and discover relevant new research.</div>
             </div>
         );
     };
 
     // Determine button state
-    const buttonLabel = isAuthorizing ? "Setting up..." : "Get Started";
+    const buttonLabel = isAuthorizing ? "Setting up..." : "Open Beaver";
     const isButtonDisabled = isAuthorizing || !agreedToTerms;
 
     return (
@@ -122,7 +114,7 @@ const FreeOnboardingPage: React.FC = () => {
             {/* Scrollable content area */}
             <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1 display-flex flex-col">
                 {/* Header */}
-                <OnboardingHeader message={getHeaderMessage()} tag="Free"/>
+                <OnboardingHeader message={getHeaderMessage()}/>
 
                 {/* Main content */}
                 <div className="display-flex flex-col gap-4 flex-1">
@@ -130,6 +122,27 @@ const FreeOnboardingPage: React.FC = () => {
                     {/* Spacer with example prompts */}
                     <div className="flex-1 display-flex flex-col mt-2">
                         <ExamplePrompts />
+                    </div>
+
+                    <div className="display-flex flex-row gap-3 items-start bg-quinary p-2 rounded-lg">
+                        <Icon icon={LockIcon} className="mt-020 scale-11" />
+                        {/* Privacy: We never store your library data. Metadata is processed temporarily server-side for local search only.
+                        Chat history is saved to your account and is fully deletable. */}
+                        <span>
+                            Privacy: We do not permanently store your Zotero library or PDF files.
+                            Some metadata and chat content are processed on our servers to power Beaver features.
+                            <a
+                                className="text-link cursor-pointer ml-1"
+                                href={process.env.WEBAPP_BASE_URL + '/docs/free-plan#your-data-stays-private'}
+                                onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/free-plan#your-data-stays-private')}
+                                target='_blank'
+                                rel='noopener noreferrer'
+                            >
+                                Learn more
+                            </a>
+                        </span>
+                        {/* Limited metadata may be processed temporarily to power search.
+                        Chat history is saved to your account and can be deleted at any time. */}
                     </div>
 
                     {/* Consent toggle */}
