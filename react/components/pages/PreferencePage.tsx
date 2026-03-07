@@ -775,7 +775,7 @@ const PreferencePage: React.FC = () => {
                                 />
                                 <SettingsRow
                                     title="Email Notifications"
-                                    description="Receive email notifications with updates and announcements"
+                                    description="Receive email updates about Beaver"
                                     onClick={handleEmailToggle}
                                     hasBorder
                                     control={
