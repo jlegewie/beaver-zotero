@@ -133,8 +133,8 @@ const FreeOnboardingPage: React.FC = () => {
                             Some metadata and chat content are processed on our servers to power Beaver features.
                             <a
                                 className="text-link cursor-pointer ml-1"
-                                href={process.env.WEBAPP_BASE_URL + '/docs/free-plan#your-data-stays-private'}
-                                onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/free-plan#your-data-stays-private')}
+                                href={process.env.WEBAPP_BASE_URL + '/docs/privacy'}
+                                onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/privacy')}
                                 target='_blank'
                                 rel='noopener noreferrer'
                             >

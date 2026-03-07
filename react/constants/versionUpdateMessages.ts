@@ -198,11 +198,11 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         featureList: [
             {
                 title: "Introducing Beaver Free",
-                description: "This new tier supports core features without cloud costs. Going forward, all new users will start on this plan. Read more <a href='https://www.beaverapp.ai/docs/free-plan'>here</a>.",
+                description: "This new tier supports core features without cloud costs. Going forward, all new users will start on this plan.",
             },
             {
                 title: "Impact on existing accounts",
-                description: "Active users remain on Pro (Beta). To manage server costs, only long-term inactive accounts are migrated to the Free plan. Read more <a href='https://www.beaverapp.ai/free-plan#what-does-this-mean-for-current-beta-users'>here</a>.",
+                description: "Active users remain on Pro (Beta). To manage server costs, only long-term inactive accounts are migrated to the Free plan.",
             },
         ]
     },
