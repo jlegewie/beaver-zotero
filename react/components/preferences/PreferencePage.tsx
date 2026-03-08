@@ -218,6 +218,7 @@ const PreferencePage: React.FC = () => {
     const addActionMenuItems: MenuItem[] = useMemo(() => [
         { label: 'Items', onClick: () => handleAddAction('items') },
         { label: 'PDF', onClick: () => handleAddAction('attachment') },
+        // { label: 'Note', onClick: () => handleAddAction('note') },
         { label: 'Collection', onClick: () => handleAddAction('collection') },
         { label: 'Global', onClick: () => handleAddAction('global') },
     ], [handleAddAction]);

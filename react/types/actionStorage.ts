@@ -111,7 +111,7 @@ export const getMergedActions = (): Action[] => {
     for (const builtin of BUILTIN_ACTIONS) {
         const override = c.overrides[builtin.id];
         if (override?.hidden) continue;
-        if (builtin.deprecated) continue;
+        if (builtin.deprecated && !override) continue;
 
         const merged: Action = { ...builtin };
         if (override) {
@@ -139,7 +139,11 @@ export const getMergedActions = (): Action[] => {
     }
 
     // 3. Sort by sortOrder (lower first), then by title as tiebreaker
-    actions.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+    actions.sort((a, b) => {
+        const orderDiff = (a.sortOrder ?? 999) - (b.sortOrder ?? 999);
+        if (orderDiff !== 0) return orderDiff;
+        return a.title.localeCompare(b.title);
+    });
 
     return actions;
 };

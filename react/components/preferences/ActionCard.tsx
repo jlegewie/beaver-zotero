@@ -9,6 +9,7 @@ import { MenuItem } from "../ui/menu/ContextMenu";
 const MAX_TITLE_LENGTH = 45;
 const MAX_PROMPT_TEXT_LENGTH = 2250;
 
+// const TARGET_TYPE_OPTIONS: ActionTargetType[] = ["items", "attachment", "note", "collection", "global"];
 const TARGET_TYPE_OPTIONS: ActionTargetType[] = ["items", "attachment", "collection", "global"];
 
 interface ActionCardProps {
