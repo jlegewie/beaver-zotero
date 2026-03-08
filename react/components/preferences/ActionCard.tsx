@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Action, ActionTargetType, TARGET_TYPE_LABELS } from "../../types/actions";
-import { CancelIcon } from "../icons/icons";
-import IconButton from "../ui/IconButton";
 import Button from "../ui/Button";
 import MenuButton from "../ui/MenuButton";
 import { MenuItem } from "../ui/menu/ContextMenu";
@@ -9,8 +7,7 @@ import { MenuItem } from "../ui/menu/ContextMenu";
 const MAX_TITLE_LENGTH = 45;
 const MAX_PROMPT_TEXT_LENGTH = 2250;
 
-// const TARGET_TYPE_OPTIONS: ActionTargetType[] = ["items", "attachment", "note", "collection", "global"];
-const TARGET_TYPE_OPTIONS: ActionTargetType[] = ["items", "attachment", "collection", "global"];
+const TARGET_TYPE_OPTIONS: ActionTargetType[] = ["items", "attachment", "note", "collection", "global"];
 
 interface ActionCardProps {
     action: Action;
@@ -20,6 +17,7 @@ interface ActionCardProps {
     onResetToDefault?: () => void;
     isBuiltin: boolean;
     isOverridden: boolean;
+    hasBorder?: boolean;
 }
 
 const ActionCard: React.FC<ActionCardProps> = ({
@@ -30,6 +28,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
     onResetToDefault,
     isBuiltin,
     isOverridden,
+    hasBorder = false,
 }) => {
     const [isEditing, setIsEditing] = useState(() => !action.title && !action.text);
     const [editTitle, setEditTitle] = useState(action.title);
@@ -141,23 +140,23 @@ const ActionCard: React.FC<ActionCardProps> = ({
         return (
             <div
                 ref={cardRef}
-                className="custom-prompt-card"
+                className={`action-card ${hasBorder ? 'border-top-quinary' : ''}`}
                 onClick={handleEnterEdit}
             >
-                <div className="display-flex flex-row items-start justify-between gap-2">
-                    <div className="display-flex flex-col flex-1 min-w-0" style={{ gap: '3px' }}>
-                        <div className="display-flex flex-row items-center gap-2">
-                            <div className="font-color-primary text-sm font-medium">
-                                {action.title || <span className="font-color-tertiary">Untitled action</span>}
-                            </div>
-                            <span className="action-target-badge">{TARGET_TYPE_LABELS[action.targetType]}</span>
+                <div className="display-flex flex-col flex-1 min-w-0" style={{ gap: '3px' }}>
+                    <div className="display-flex flex-row items-center gap-2">
+                        <div className="font-color-primary text-sm font-medium">
+                            {action.title || <span className="font-color-tertiary">Untitled action</span>}
                         </div>
-                        {action.text && (
-                            <div className="font-color-secondary text-sm custom-prompt-card-preview">
-                                {action.text}
-                            </div>
-                        )}
+                        <span className="action-target-badge" data-type={action.targetType}>
+                            {TARGET_TYPE_LABELS[action.targetType]}
+                        </span>
                     </div>
+                    {action.text && (
+                        <div className="font-color-secondary text-sm action-card-preview">
+                            {action.text}
+                        </div>
+                    )}
                 </div>
             </div>
         );
@@ -165,40 +164,17 @@ const ActionCard: React.FC<ActionCardProps> = ({
 
     // --- Edit mode ---
     return (
-        <div ref={cardRef} className="custom-prompt-card custom-prompt-card-editing">
-            {/* Title input + remove/hide button */}
-            <div className="display-flex flex-row items-center gap-2 mb-1">
-                <input
-                    ref={titleInputRef}
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    placeholder="Action title..."
-                    maxLength={MAX_TITLE_LENGTH}
-                    className="chat-input text-sm font-medium font-color-primary custom-prompt-edit-title"
-                />
-                {isBuiltin ? (
-                    onHide && (
-                        <Button
-                            variant="ghost-secondary"
-                            style={{ padding: "2px 8px", flexShrink: 0 }}
-                            onClick={(e) => { e.stopPropagation(); onHide(); setIsEditing(false); }}
-                        >
-                            <span className="text-xs">Hide</span>
-                        </Button>
-                    )
-                ) : (
-                    <IconButton
-                        variant="ghost-secondary"
-                        icon={CancelIcon}
-                        onClick={() => { onRemove(); setIsEditing(false); }}
-                        className="scale-90 flex-shrink-0"
-                        ariaLabel="Remove action"
-                    />
-                )}
-            </div>
+        <div ref={cardRef} className={`action-card action-card-editing ${hasBorder ? 'border-top-quinary' : ''}`}>
+            <input
+                ref={titleInputRef}
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                placeholder="Action title..."
+                maxLength={MAX_TITLE_LENGTH}
+                className="chat-input text-sm font-medium font-color-primary action-edit-title"
+            />
 
-            {/* Content textarea */}
             <textarea
                 ref={textareaRef}
                 value={editText}
@@ -207,16 +183,14 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     e.currentTarget.style.height = "auto";
                     e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
                 }}
-                placeholder="Enter prompt text..."
+                placeholder="Enter prompt text... Use {{active_item}}, {{selected_items}}, or {{recent_items}} to insert context."
                 maxLength={MAX_PROMPT_TEXT_LENGTH}
                 className="chat-input custom-prompt-edit-textarea text-sm"
                 rows={2}
             />
 
-            {/* Options and action buttons */}
             <div className="display-flex flex-row items-center justify-between mt-2">
                 <div className="display-flex flex-row items-center gap-3">
-                    <label className="text-sm font-color-secondary">Type</label>
                     <MenuButton
                         menuItems={targetTypeMenuItems}
                         buttonLabel={TARGET_TYPE_LABELS[editTargetType]}
@@ -235,6 +209,25 @@ const ActionCard: React.FC<ActionCardProps> = ({
                 </div>
 
                 <div className="display-flex flex-row items-center gap-3">
+                    {isBuiltin ? (
+                        onHide && (
+                            <Button
+                                variant="ghost-secondary"
+                                style={{ padding: "2px 8px" }}
+                                onClick={(e) => { e.stopPropagation(); onHide(); setIsEditing(false); }}
+                            >
+                                <span className="text-xs font-color-tertiary">Hide</span>
+                            </Button>
+                        )
+                    ) : (
+                        <Button
+                            variant="ghost-secondary"
+                            style={{ padding: "2px 8px" }}
+                            onClick={() => { onRemove(); setIsEditing(false); }}
+                        >
+                            <span className="text-xs font-color-tertiary">Delete</span>
+                        </Button>
+                    )}
                     <Button
                         type="button"
                         variant="ghost-secondary"

@@ -41,6 +41,20 @@
     --tag-red-quinary: #ff66660f;
     --tag-red-senary: #ff666608;
 
+    --tag-green-primary: #22c55ee5;
+    --tag-green-secondary: #22c55e8c;
+    --tag-green-tertiary: #22c55e4d;
+    --tag-green-quarternary: #22c55e1f;
+    --tag-green-quinary: #22c55e0f;
+    --tag-green-senary: #22c55e08;
+
+    --tag-purple-primary: #8b5cf6e5;
+    --tag-purple-secondary: #8b5cf68c;
+    --tag-purple-tertiary: #8b5cf64d;
+    --tag-purple-quarternary: #8b5cf61f;
+    --tag-purple-quinary: #8b5cf60f;
+    --tag-purple-senary: #8b5cf608;
+
     /* Webapp color scheme */
     --webapp-background: #F5F0ED;
     --webapp-foreground: #111729;
@@ -410,7 +424,7 @@
 }
 
 
-/* Custom Prompt Card - View mode */
+/* Custom Prompt Card (custom instructions textarea wrapper) */
 [id^="beaver-pane-"] .custom-prompt-card {
     padding: 10px 12px;
     border: 1px solid var(--fill-quinary);
@@ -423,8 +437,33 @@
     background-color: var(--material-mix-quarternary);
 }
 
+[id^="beaver-pane-"] .custom-prompt-edit-textarea {
+    padding: 4px !important;
+    min-height: 80px;
+    resize: none;
+    overflow-y: auto;
+    box-sizing: border-box !important;
+}
+
+/* Action Card — connected-list row (view mode) */
+[id^="beaver-pane-"] .action-card {
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+[id^="beaver-pane-"] .action-card:hover:not(.action-card-editing) {
+    background-color: var(--material-mix-quarternary);
+}
+
+/* Action Card — edit mode */
+[id^="beaver-pane-"] .action-card-editing {
+    cursor: default;
+    background-color: var(--material-mix-quarternary);
+}
+
 /* Preview text: 2-line clamp */
-[id^="beaver-pane-"] .custom-prompt-card-preview {
+[id^="beaver-pane-"] .action-card-preview {
     display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;
@@ -434,31 +473,20 @@
     word-break: break-word;
 }
 
-/* Custom Prompt Card - Edit mode */
-[id^="beaver-pane-"] .custom-prompt-card-editing {
-    cursor: default;
-    background-color: var(--material-mix-quarternary);
-    border-color: var(--fill-quarternary);
+/* Action edit title — invisible 1px border in both states to prevent layout shift */
+[id^="beaver-pane-"] .action-edit-title {
+    padding: 4px 6px !important;
+    margin: 0 0 4px 0 !important;
+    border: 1px solid transparent !important;
+    border-radius: 4px !important;
+    box-sizing: border-box !important;
 }
 
-[id^="beaver-pane-"] .custom-prompt-edit-title {
-    padding: 2px 4px !important;
-    margin: 0 !important;
-    border-bottom: 1px solid transparent !important;
+[id^="beaver-pane-"] .action-edit-title:focus {
+    border: 1px solid transparent !important;
 }
 
-[id^="beaver-pane-"] .custom-prompt-edit-title:focus {
-    border-bottom: 1px solid var(--fill-quarternary) !important;
-}
-
-[id^="beaver-pane-"] .custom-prompt-edit-textarea {
-    padding: 4px !important;
-    min-height: 80px;
-    resize: none;
-    overflow-y: auto;
-}
-
-/* Action target type badge */
+/* Action target type badge — base */
 [id^="beaver-pane-"] .action-target-badge {
     display: inline-block;
     font-size: 10px;
@@ -470,6 +498,33 @@
     border: 1px solid var(--fill-quinary);
     white-space: nowrap;
     flex-shrink: 0;
+}
+
+/* Color-coded badges by target type */
+[id^="beaver-pane-"] .action-target-badge[data-type="items"] {
+    background-color: var(--tag-blue-quinary);
+    color: var(--tag-blue-secondary);
+    border-color: var(--tag-blue-tertiary);
+}
+[id^="beaver-pane-"] .action-target-badge[data-type="attachment"] {
+    background-color: var(--tag-green-quinary);
+    color: var(--tag-green-secondary);
+    border-color: var(--tag-green-tertiary);
+}
+[id^="beaver-pane-"] .action-target-badge[data-type="note"] {
+    background-color: var(--tag-orange-quinary);
+    color: var(--tag-orange-secondary);
+    border-color: var(--tag-orange-tertiary);
+}
+[id^="beaver-pane-"] .action-target-badge[data-type="collection"] {
+    background-color: var(--tag-yellow-quinary);
+    color: var(--tag-yellow-secondary);
+    border-color: var(--tag-yellow-tertiary);
+}
+[id^="beaver-pane-"] .action-target-badge[data-type="global"] {
+    background-color: var(--tag-purple-quinary);
+    color: var(--tag-purple-secondary);
+    border-color: var(--tag-purple-tertiary);
 }
 
 

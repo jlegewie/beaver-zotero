@@ -3,6 +3,7 @@ import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, CopyIcon } from '../icons/icons';
+import PlusSignIcon from '../icons/PlusSignIcon';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom } from "../../atoms/profile";
@@ -218,11 +219,56 @@ const PreferencePage: React.FC = () => {
     }, [actions, saveActions]);
 
     const addActionMenuItems: MenuItem[] = useMemo(() => [
-        { label: 'Items', onClick: () => handleAddAction('items') },
-        { label: 'PDF', onClick: () => handleAddAction('attachment') },
-        // { label: 'Note', onClick: () => handleAddAction('note') },
-        { label: 'Collection', onClick: () => handleAddAction('collection') },
-        { label: 'Global', onClick: () => handleAddAction('global') },
+        {
+            label: 'Items',
+            onClick: () => handleAddAction('items'),
+            customContent: (
+                <div className="display-flex flex-col">
+                    <span className="text-sm font-color-primary">Items</span>
+                    <span className="text-xs font-color-tertiary">Works with selected library items</span>
+                </div>
+            ),
+        },
+        {
+            label: 'PDF',
+            onClick: () => handleAddAction('attachment'),
+            customContent: (
+                <div className="display-flex flex-col">
+                    <span className="text-sm font-color-primary">PDF</span>
+                    <span className="text-xs font-color-tertiary">Works with the open PDF or attachment</span>
+                </div>
+            ),
+        },
+        {
+            label: 'Note',
+            onClick: () => handleAddAction('note'),
+            customContent: (
+                <div className="display-flex flex-col">
+                    <span className="text-sm font-color-primary">Note</span>
+                    <span className="text-xs font-color-tertiary">Works with the active note</span>
+                </div>
+            ),
+        },
+        {
+            label: 'Collection',
+            onClick: () => handleAddAction('collection'),
+            customContent: (
+                <div className="display-flex flex-col">
+                    <span className="text-sm font-color-primary">Collection</span>
+                    <span className="text-xs font-color-tertiary">Works with a collection</span>
+                </div>
+            ),
+        },
+        {
+            label: 'Global',
+            onClick: () => handleAddAction('global'),
+            customContent: (
+                <div className="display-flex flex-col">
+                    <span className="text-sm font-color-primary">Global</span>
+                    <span className="text-xs font-color-tertiary">Works anywhere, no context needed</span>
+                </div>
+            ),
+        },
     ], [handleAddAction]);
 
     const hiddenBuiltins = useMemo(() => getHiddenBuiltinActions(), [actions]);
@@ -1098,13 +1144,24 @@ const PreferencePage: React.FC = () => {
                             buttonLabel="Add Action"
                             variant="outline"
                             className="text-sm mb-15"
+                            width="220px"
+                            customContent={
+                                <span className="display-flex items-center gap-1">
+                                    <Icon icon={PlusSignIcon} className="scale-80" />
+                                    <span>Add Action</span>
+                                </span>
+                            }
                         />
                     </div>
                     <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
-                        Actions are reusable prompts you define once and trigger anytime.
+                        Reusable prompts you can trigger from the slash menu or homepage.
+                        Use <code className="text-xs" style={{ padding: '1px 4px', borderRadius: '3px', background: 'var(--material-mix-quarternary)' }}>{"{{active_item}}"}</code>,{' '}
+                        <code className="text-xs" style={{ padding: '1px 4px', borderRadius: '3px', background: 'var(--material-mix-quarternary)' }}>{"{{selected_items}}"}</code>, or{' '}
+                        <code className="text-xs" style={{ padding: '1px 4px', borderRadius: '3px', background: 'var(--material-mix-quarternary)' }}>{"{{recent_items}}"}</code> to insert context.
+                        {' '}<DocLink path="actions">Learn more</DocLink>.
                     </div>
-                    <div className="display-flex flex-col gap-4">
-                        {actions.map((action: Action) => {
+                    <SettingsGroup>
+                        {actions.map((action: Action, index: number) => {
                             const builtin = isBuiltinAction(action.id);
                             const overridden = overriddenBuiltinIds.has(action.id);
                             return (
@@ -1117,10 +1174,11 @@ const PreferencePage: React.FC = () => {
                                     onResetToDefault={builtin && overridden ? () => resetActionToDefault(action.id) : undefined}
                                     isBuiltin={builtin}
                                     isOverridden={overridden}
+                                    hasBorder={index > 0}
                                 />
                             );
                         })}
-                    </div>
+                    </SettingsGroup>
 
                     {/* Hidden built-ins restore section */}
                     {hiddenBuiltins.length > 0 && (
