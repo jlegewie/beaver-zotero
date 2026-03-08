@@ -10,7 +10,7 @@ import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom } 
 import { logger } from "../../../src/utils/logger";
 import { Action, ActionTargetType, TARGET_TYPE_LABELS, generateActionId } from "../../types/actions";
 import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom } from "../../atoms/actions";
-import { isBuiltinAction, isBuiltinOverridden, getHiddenBuiltinActions, importFromOldCustomPrompts, hasOldCustomPrompts } from "../../types/actionStorage";
+import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, importFromOldCustomPrompts, hasOldCustomPrompts } from "../../types/actionStorage";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
 import { 
     embeddingIndexStateAtom, 
@@ -208,11 +208,13 @@ const PreferencePage: React.FC = () => {
     }, [actions, saveActions]);
 
     // --- Import from old custom prompts ---
+    const [hasImported, setHasImported] = useState(false);
     const handleImportOldPrompts = useCallback(() => {
         const imported = importFromOldCustomPrompts();
         if (imported.length > 0) {
             saveActions([...actions, ...imported]);
         }
+        setHasImported(true);
     }, [actions, saveActions]);
 
     const addActionMenuItems: MenuItem[] = useMemo(() => [
@@ -224,7 +226,20 @@ const PreferencePage: React.FC = () => {
     ], [handleAddAction]);
 
     const hiddenBuiltins = useMemo(() => getHiddenBuiltinActions(), [actions]);
-    const showImportButton = useMemo(() => hasOldCustomPrompts(), []);
+    const showImportButton = useMemo(() => !hasImported && hasOldCustomPrompts(), [hasImported]);
+
+    // Pre-compute override status for all built-in actions (avoids re-parsing prefs per card)
+    const overriddenBuiltinIds = useMemo(() => {
+        const c = getActionCustomizations();
+        return new Set(
+            Object.entries(c.overrides)
+                .filter(([id, override]) =>
+                    isBuiltinAction(id) &&
+                    Object.keys(override).some(k => k !== 'hidden' && override[k as keyof typeof override] !== undefined)
+                )
+                .map(([id]) => id)
+        );
+    }, [actions]);
 
     // --- Consent Toggle Change Handler ---
     const handleConsentChange = useCallback(async (checked: boolean) => {
@@ -1089,18 +1104,22 @@ const PreferencePage: React.FC = () => {
                         Actions are reusable prompts you define once and trigger anytime.
                     </div>
                     <div className="display-flex flex-col gap-4">
-                        {actions.map((action: Action) => (
-                            <ActionCard
-                                key={action.id}
-                                action={action}
-                                onChange={handleActionChange}
-                                onRemove={() => handleRemoveAction(action.id)}
-                                onHide={isBuiltinAction(action.id) ? () => hideAction(action.id) : undefined}
-                                onResetToDefault={isBuiltinAction(action.id) && isBuiltinOverridden(action.id) ? () => resetActionToDefault(action.id) : undefined}
-                                isBuiltin={isBuiltinAction(action.id)}
-                                isOverridden={isBuiltinOverridden(action.id)}
-                            />
-                        ))}
+                        {actions.map((action: Action) => {
+                            const builtin = isBuiltinAction(action.id);
+                            const overridden = overriddenBuiltinIds.has(action.id);
+                            return (
+                                <ActionCard
+                                    key={action.id}
+                                    action={action}
+                                    onChange={handleActionChange}
+                                    onRemove={() => handleRemoveAction(action.id)}
+                                    onHide={builtin ? () => hideAction(action.id) : undefined}
+                                    onResetToDefault={builtin && overridden ? () => resetActionToDefault(action.id) : undefined}
+                                    isBuiltin={builtin}
+                                    isOverridden={overridden}
+                                />
+                            );
+                        })}
                     </div>
 
                     {/* Hidden built-ins restore section */}
