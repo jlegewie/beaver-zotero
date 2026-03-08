@@ -4,6 +4,7 @@ import { ToolCallPart } from '../../agents/types';
 import { sendWSMessageAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { CancelIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
+import Button from '../ui/Button';
 
 interface Suggestion {
     text: string;
@@ -63,7 +64,7 @@ export const SuggestionsView: React.FC<SuggestionsViewProps> = ({ part, onDismis
         <div className="display-flex flex-col gap-2 pt-3">
             <div className="display-flex flex-row items-center justify-between gap-2">
                 <div className="font-color-tertiary text-xs font-semibold uppercase" style={{ letterSpacing: '0.05em' }}>
-                    Suggestions
+                    Next steps
                 </div>
                 {onDismiss && (
                     <IconButton
@@ -75,17 +76,19 @@ export const SuggestionsView: React.FC<SuggestionsViewProps> = ({ part, onDismis
                     />
                 )}
             </div>
+            {/* items-start */}
             <div className="display-flex flex-col gap-1">
                 {suggestions.map((suggestion, index) => (
-                    <button
+                    <Button
                         key={index}
-                        type="button"
-                        className="suggestion-button"
+                        variant="surface-light"
+                        className="truncate text-left w-full"
+                        style={{ display: 'block' }}
                         onClick={() => handleClick(suggestion)}
                         disabled={isPending}
                     >
                         {suggestion.text}
-                    </button>
+                    </Button>
                 ))}
             </div>
         </div>
