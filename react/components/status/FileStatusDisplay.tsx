@@ -114,7 +114,7 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
     const skippedFilesCount = fileStats.planLimitCount + fileStats.failedUserCount;
 
     return (
-        <div className="display-flex flex-col gap-4 p-3 rounded-md bg-quinary min-w-0">
+        <div className="display-flex flex-col gap-4 p-3 min-w-0">
             <div className="display-flex flex-row gap-4">
                 <div className="mt-1">
                     {getStatusIcon()}

@@ -2,11 +2,11 @@ import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, CopyIcon } from '../icons/icons';
+import { UserIcon, ArrowDownIcon, ArrowRightIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, CopyIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom } from "../../atoms/profile";
-import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom } from "../../atoms/ui";
+import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom, showFileStatusDetailsAtom } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
 import { generatePromptId, CustomPrompt } from "../../types/settings";
 import { customPromptsAtom, saveCustomPromptsAtom, usedShortcutsAtom } from "../../atoms/customPrompts";
@@ -23,10 +23,11 @@ import { accountService } from "../../../src/services/accountService";
 import SyncedLibraries from "./SyncedLibraries";
 import { ProcessingMode } from "../../types/profile";
 import DeferredToolPreferenceSetting from "./DeferredToolPreferenceSetting";
-import { BeaverUIFactory } from "../../../src/ui/ui";
 import { copyToClipboard } from "../../utils/clipboard";
 import { ensureMcpBridgeScript } from "../../hooks/useMcpServer";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
+import FileStatusDisplay from "../status/FileStatusDisplay";
+import { useFileStatus } from "../../hooks/useFileStatus";
 
 
 const PreferencePage: React.FC = () => {
@@ -35,6 +36,9 @@ const PreferencePage: React.FC = () => {
 
     // --- User profile ---
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
+
+    // --- File Status ---
+    const { connectionStatus } = useFileStatus(true);
 
     // --- State for Preferences ---
     const [geminiKey, setGeminiKey] = useState(() => getPref('googleGenerativeAiApiKey'));
@@ -69,6 +73,7 @@ const PreferencePage: React.FC = () => {
     const isMcpServerSupported = useAtomValue(isMcpServerSupportedAtom);
     const [mcpCopied, setMcpCopied] = useState(false);
     const [mcpHttpCopied, setMcpHttpCopied] = useState(false);
+    const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -831,6 +836,14 @@ const PreferencePage: React.FC = () => {
                                     }
                                 />
                             </SettingsGroup>
+
+                            {/* File Processing Status */}
+                            {isDatabaseSyncSupported && (
+                                <div className="display-flex flex-col gap-4 min-w-0 w-full">
+                                    <SectionLabel>File Status</SectionLabel>
+                                    <FileStatusDisplay connectionStatus={connectionStatus}/>
+                                </div>
+                            )}
                         </span>
                     ) : (
                         <SettingsGroup>

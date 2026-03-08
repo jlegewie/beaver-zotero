@@ -188,7 +188,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                 {runs.length > 0 ? (
                     <ThreadView ref={messagesContainerRef} isWindow={isWindow} />
                 ) : (
-                    <HomePage isWindow={isWindow} />
+                    <HomePage />
                 )}
 
                 {/* Prompt area (footer) with floating elements */}

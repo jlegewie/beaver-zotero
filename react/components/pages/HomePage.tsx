@@ -1,10 +1,6 @@
 import React from "react";
 import Button from "../ui/Button";
-import FileStatusButton from "../ui/buttons/FileStatusButton";
-import { ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
-import { useFileStatus } from '../../hooks/useFileStatus';
-import { showFileStatusDetailsAtom } from '../../atoms/ui';
-import { useSetAtom, useAtomValue, useAtom } from 'jotai';
+import { useSetAtom, useAtomValue } from 'jotai';
 import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { isStreamingAtom } from '../../agents/atoms';
 import { isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
@@ -12,26 +8,18 @@ import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atom
 import { CustomPrompt } from "../../types/settings";
 import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom } from "../../atoms/customPrompts";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
-import FileStatusDisplay from "../status/FileStatusDisplay";
-import { isDatabaseSyncSupportedAtom } from "../../atoms/profile";
 
-interface HomePageProps {
-    isWindow?: boolean;
-}
 
-const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
+const HomePage: React.FC = () => {
     const isStreaming = useAtomValue(isStreamingAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
-    const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const sendResolvedPrompt = useSetAtom(sendResolvedPromptAtom);
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
-    const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const prompts = useAtomValue(customPromptsForContextAtom);
     const markPromptUsed = useSetAtom(markPromptUsedAtom);
 
-    // Realtime listening for file status updates (only in sidebar, not in separate windows)
-    const { connectionStatus } = useFileStatus(!isWindow);
+    // Indexing complete message
     useIndexingCompleteMessage();
 
     const handleCustomPrompt = async (prompt: CustomPrompt) => {
@@ -84,30 +72,6 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                 </>
             )}
             
-            {/* File Processing Status */}
-            {isDatabaseSyncSupported && !isWindow && (
-                <div className="display-flex flex-row justify-between items-center mt-5">
-                    <Button
-                        variant="ghost-secondary"
-                        onClick={() => setShowFileStatusDetails(!showFileStatusDetails)}
-                        rightIcon={showFileStatusDetails ? ArrowDownIcon : ArrowRightIcon}
-                        iconClassName="mr-0 scale-14"
-                    >
-                        <span className="font-semibold text-lg mb-1" style={{ marginLeft: '-3px' }}>
-                            File Status
-                        </span>
-                    </Button>
-                    {!showFileStatusDetails && (
-                        <FileStatusButton showFileStatus={showFileStatusDetails} setShowFileStatus={setShowFileStatusDetails}/>
-                    )}
-                </div>
-            )}
-            
-            {isDatabaseSyncSupportedAtom && !isWindow && showFileStatusDetails && (
-                <div className="display-flex flex-col gap-4 min-w-0 w-full">
-                    <FileStatusDisplay connectionStatus={connectionStatus}/>
-                </div>
-            )}
         </div>
     );
 };

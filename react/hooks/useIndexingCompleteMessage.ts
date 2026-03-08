@@ -1,38 +1,44 @@
 import { useAtomValue, useSetAtom } from 'jotai';
-import { fileStatusSummaryAtom } from '../atoms/files';
+import { calculateFileStatusSummary } from '../atoms/files';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
-import { planDisplayNameAtom, planNameAtom } from '../atoms/profile';
+import { planNameAtom } from '../atoms/profile';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { useEffect } from 'react';
 import { logger } from '../../src/utils/logger';
 import { store } from '../store';
+import { userIdAtom } from '../atoms/auth';
+import { fetchFileStatus } from './useFileStatus';
 
 export const useIndexingCompleteMessage = () => {
-    const fileStatusSummary = useAtomValue(fileStatusSummaryAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
-    
+    const userId = useAtomValue(userIdAtom);
+
     useEffect(() => {
         const showMessage = getPref("showIndexingCompleteMessage");
-        if (showMessage && fileStatusSummary.progress >= 100 && fileStatusSummary.fileStatusAvailable) {
-            logger("useIndexingCompleteMessage: Indexing complete message triggered");
-            const planName = store.get(planNameAtom);
-            const planDisplayName = store.get(planDisplayNameAtom);
+        if (!showMessage || !userId) return;
 
-            // Reset the preference immediately to prevent duplicate messages
-            setPref("showIndexingCompleteMessage", false);
+        // Fetch file status directly instead of relying on realtime subscription
+        fetchFileStatus(userId).then((fileStatus) => {
+            const fileStatusSummary = calculateFileStatusSummary(fileStatus);
+            if (fileStatusSummary.progress >= 100 && fileStatusSummary.fileStatusAvailable) {
+                logger("useIndexingCompleteMessage: Indexing complete message triggered");
+                const planName = store.get(planNameAtom);
 
-            // Add the indexing complete message
-            const message = `We completed indexing your files. You can now use all of Beaver's features to search, chat with, and explore your research library.`;
+                // Reset the preference immediately to prevent duplicate messages
+                setPref("showIndexingCompleteMessage", false);
 
-            addPopupMessage({
-                title: "Your library is ready!",
-                text: message,
-                type: "indexing_complete",
-                expire: false,
-                fileStatusSummary: fileStatusSummary,
-                planName: planName
-            });
+                // Add the indexing complete message
+                const message = `We completed indexing your files. You can now use all of Beaver's features to search, chat with, and explore your research library.`;
 
-        }
-    }, [fileStatusSummary.progress, fileStatusSummary.fileStatusAvailable]);
+                addPopupMessage({
+                    title: "Your library is ready!",
+                    text: message,
+                    type: "indexing_complete",
+                    expire: false,
+                    fileStatusSummary: fileStatusSummary,
+                    planName: planName
+                });
+            }
+        });
+    }, [userId]);
 };
