@@ -7,6 +7,7 @@ import {
     selectedZoteroItemCountAtom,
     libraryViewAtom,
     selectedTagsAtom,
+    currentNoteItemAtom,
     recentlyAddedTodayCountAtom,
     LibraryTreeRowType,
 } from '../atoms/zoteroContext';
@@ -14,10 +15,11 @@ import {
 const MAX_SELECTED_ITEMS = 10;
 
 /**
- * Module-level variable to track the Zotero notifier observer ID.
- * Persists across hot-reloads to ensure proper cleanup.
+ * Module-level variables to track Zotero notifier observer IDs.
+ * Persist across hot-reloads to ensure proper cleanup.
  */
 let moduleItemNotifierId: string | null = null;
+let moduleTabNotifierId: string | null = null;
 
 /**
  * Query count of regular items added today (not notes/attachments/annotations/deleted).
@@ -100,6 +102,7 @@ export function useZoteroContext() {
     const setSelectedItemCount = useSetAtom(selectedZoteroItemCountAtom);
     const setLibraryView = useSetAtom(libraryViewAtom);
     const setSelectedTags = useSetAtom(selectedTagsAtom);
+    const setNoteItem = useSetAtom(currentNoteItemAtom);
     const setRecentlyAddedTodayCount = useSetAtom(recentlyAddedTodayCountAtom);
 
     useEffect(() => {
@@ -177,12 +180,55 @@ export function useZoteroContext() {
             },
         };
 
-        const observerId = Zotero.Notifier.registerObserver(
+        const itemObserverId = Zotero.Notifier.registerObserver(
             itemObserver,
             ['item'],
-            'beaver-zoteroContextObserver',
+            'beaver-zoteroContextItemObserver',
         );
-        moduleItemNotifierId = observerId;
+        moduleItemNotifierId = itemObserverId;
+
+        // --- Zotero.Notifier for note tab tracking ---
+        // Needed because isLibraryTab is false for both reader and note tabs,
+        // so switching between them won't re-trigger this effect.
+        if (moduleTabNotifierId) {
+            try {
+                Zotero.Notifier.unregisterObserver(moduleTabNotifierId);
+            } catch {
+                // ignore
+            }
+            moduleTabNotifierId = null;
+        }
+
+        const tabObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
+            notify: async function (
+                event: _ZoteroTypes.Notifier.Event,
+                type: _ZoteroTypes.Notifier.Type,
+                ids: string[] | number[],
+            ) {
+                if (type !== 'tab' || event !== 'select') return;
+                const selectedTab = mainWindow.Zotero_Tabs._tabs.find(
+                    (tab: any) => tab.id === ids[0],
+                );
+                if (!selectedTab) return;
+
+                if (selectedTab.type === 'note' && selectedTab.data?.itemID) {
+                    const item = await Zotero.Items.getAsync(selectedTab.data.itemID);
+                    if (item) {
+                        logger(`useZoteroContext: note tab selected, itemID=${selectedTab.data.itemID}`);
+                        setNoteItem(item);
+                    }
+                } else {
+                    setNoteItem(null);
+                }
+            },
+        };
+
+        const tabObserverId = Zotero.Notifier.registerObserver(
+            tabObserver,
+            ['tab'],
+            'beaver-zoteroContextTabObserver',
+        );
+        moduleTabNotifierId = tabObserverId;
 
         // --- Set initial state ---
         const viewInfo = readLibraryView(zp);
@@ -193,10 +239,22 @@ export function useZoteroContext() {
             setSelectedItemCount(items.length);
             setSelectedItems(items.slice(0, MAX_SELECTED_ITEMS));
             setSelectedTags(readTagSelection(zp));
+            setNoteItem(null);
         } else {
             setSelectedItemCount(0);
             setSelectedItems([]);
             setSelectedTags([]);
+            // Check if current tab is a note tab
+            const currentTab = mainWindow.Zotero_Tabs._tabs.find(
+                (tab: any) => tab.id === mainWindow.Zotero_Tabs.selectedID,
+            );
+            if (currentTab?.type === 'note' && currentTab.data?.itemID) {
+                Zotero.Items.getAsync(currentTab.data.itemID).then((item: Zotero.Item) => {
+                    if (item) setNoteItem(item);
+                });
+            } else {
+                setNoteItem(null);
+            }
         }
 
         queryRecentlyAddedTodayCount().then(setRecentlyAddedTodayCount);
@@ -207,9 +265,13 @@ export function useZoteroContext() {
             cv?.onSelect?.removeListener(handleCollectionSelect);
             iv?.onSelect?.removeListener(handleItemSelect);
             iv?.onRefresh?.removeListener(handleItemsRefresh);
-            if (moduleItemNotifierId === observerId) {
-                Zotero.Notifier.unregisterObserver(observerId);
+            if (moduleItemNotifierId === itemObserverId) {
+                Zotero.Notifier.unregisterObserver(itemObserverId);
                 moduleItemNotifierId = null;
+            }
+            if (moduleTabNotifierId === tabObserverId) {
+                Zotero.Notifier.unregisterObserver(tabObserverId);
+                moduleTabNotifierId = null;
             }
         };
     }, [
@@ -218,6 +280,7 @@ export function useZoteroContext() {
         setSelectedItemCount,
         setLibraryView,
         setSelectedTags,
+        setNoteItem,
         setRecentlyAddedTodayCount,
     ]);
 }

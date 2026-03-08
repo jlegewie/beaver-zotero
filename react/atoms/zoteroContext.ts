@@ -36,12 +36,15 @@ export const libraryViewAtom = atom<LibraryViewInfo>(defaultLibraryView);
 // --- Selected Tags (tag filter in library view) ---
 export const selectedTagsAtom = atom<string[]>([]);
 
+// --- Note Tab (note open in its own tab) ---
+export const currentNoteItemAtom = atom<Zotero.Item | null>(null);
+
 // --- Recently Added Items (today) ---
 export const recentlyAddedTodayCountAtom = atom<number>(0);
 
 // --- Derived Context ---
 export type ZoteroContextType =
-    | 'reader' | 'items_selected' | 'tag_filtered'
+    | 'reader' | 'note' | 'items_selected' | 'tag_filtered'
     | 'collection' | 'special_view' | 'library' | 'idle';
 
 export interface ZoteroContext {
@@ -54,6 +57,8 @@ export interface ZoteroContext {
     selectedTags: string[];
     // Reader view
     readerAttachment: Zotero.Item | null;
+    // Note tab
+    noteItem: Zotero.Item | null;
     // Global
     recentlyAddedTodayCount: number;
 }
@@ -69,12 +74,15 @@ export const zoteroContextAtom = atom<ZoteroContext>((get) => {
     const libraryView = get(libraryViewAtom);
     const selectedTags = get(selectedTagsAtom);
     const readerAttachment = get(currentReaderAttachmentAtom);
+    const noteItem = get(currentNoteItemAtom);
     const recentlyAddedTodayCount = get(recentlyAddedTodayCountAtom);
 
     // Determine context type by priority
     let type: ZoteroContextType = 'idle';
     if (!isLibraryTab && readerAttachment) {
         type = 'reader';
+    } else if (!isLibraryTab && noteItem) {
+        type = 'note';
     } else if (isLibraryTab) {
         if (selectedItemCount > 0) {
             type = 'items_selected';
@@ -97,6 +105,7 @@ export const zoteroContextAtom = atom<ZoteroContext>((get) => {
         libraryView,
         selectedTags,
         readerAttachment,
+        noteItem,
         recentlyAddedTodayCount,
     };
 });

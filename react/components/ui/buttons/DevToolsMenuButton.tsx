@@ -60,6 +60,14 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             readerAttachment: ctx.readerAttachment ? {
                 key: ctx.readerAttachment.key,
                 title: ctx.readerAttachment.getDisplayTitle(),
+                libraryID: ctx.readerAttachment.libraryID,
+            } : null,
+            noteItem: ctx.noteItem ? {
+                key: ctx.noteItem.key,
+                title: ctx.noteItem.getDisplayTitle(),
+                libraryID: ctx.noteItem.libraryID,
+                parentKey: ctx.noteItem.parentItem?.key ?? null,
+                parentTitle: ctx.noteItem.parentItem?.getDisplayTitle() ?? null,
             } : null,
             recentlyAddedTodayCount: ctx.recentlyAddedTodayCount,
         };
