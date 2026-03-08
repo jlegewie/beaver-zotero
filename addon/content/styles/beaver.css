@@ -2303,3 +2303,60 @@
     background: var(--fill-quinary);
     border-radius: 4px;
 }
+
+/* ───── Recent Chats (Home View) ───── */
+
+[id^="beaver-pane-"] .recent-chats {
+    padding: 0 4px;
+}
+
+[id^="beaver-pane-"] .recent-chats-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 8px 4px;
+}
+
+[id^="beaver-pane-"] .recent-chats-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .recent-chats-view-all {
+    font-size: 0.85rem;
+    color: var(--fill-tertiary);
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .recent-chats-view-all:hover {
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .recent-chats-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 8px;
+    cursor: pointer;
+    border-radius: 6px;
+}
+
+[id^="beaver-pane-"] .recent-chats-item:hover {
+    background: var(--fill-senary);
+}
+
+[id^="beaver-pane-"] .recent-chats-item-name {
+    font-size: 0.9rem;
+    color: var(--fill-secondary);
+    flex: 1;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .recent-chats-item-time {
+    font-size: 0.85rem;
+    color: var(--fill-tertiary);
+    flex-shrink: 0;
+    margin-left: 8px;
+}
