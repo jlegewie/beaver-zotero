@@ -73,6 +73,9 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const scrolledAtom = isWindow ? windowUserScrolledAtom : userScrolledAtom;
     const scrollPositionAtom = isWindow ? windowScrollPositionAtom : currentThreadScrollPositionAtom;
 
+    // Determine if we're in the run view (has runs) or home view (no runs)
+    const isThreadView = runs.length > 0;
+
     const handleScrollToBottom = () => {
         if (messagesContainerRef.current) {
             store.set(scrolledAtom, false);
@@ -185,7 +188,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
             {/* Content area - relative container for overlay positioning */}
             <div className="flex-1 min-h-0 display-flex flex-col relative overflow-hidden">
                 {/* Thread view with agent runs */}
-                {runs.length > 0 ? (
+                {isThreadView ? (
                     <ThreadView ref={messagesContainerRef} isWindow={isWindow} />
                 ) : (
                     <HomePage isWindow={isWindow} />
