@@ -7,6 +7,7 @@ import { ThreadData, loadThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom } from '../agents/atoms';
 import { threadService, ThreadRunMatch } from '../../src/services/threadService';
 import { convertUTCToLocal } from '../utils/dateUtils';
+import Spinner from './icons/Spinner';
 
 const MAX_RECENT = 3;
 const CACHE_TTL = 60_000; // 1 minute
@@ -69,6 +70,7 @@ const RecentChats: React.FC = () => {
     const [threads, setThreads] = useState<ThreadData[]>([]);
     const [isContextSpecific, setIsContextSpecific] = useState(false);
     const [isLoaded, setIsLoaded] = useState(false);
+    const [isFetching, setIsFetching] = useState(false);
 
     // Clear cache on mount so returning to home always shows fresh data
     const hasMountedRef = useRef(false);
@@ -106,6 +108,7 @@ const RecentChats: React.FC = () => {
             return;
         }
 
+        setIsFetching(true);
         try {
             let resultThreads: ThreadData[] = [];
             let contextSpecific = false;
@@ -159,6 +162,7 @@ const RecentChats: React.FC = () => {
         } finally {
             if (!isCancelled()) {
                 setIsLoaded(true);
+                setIsFetching(false);
             }
         }
     }, [user, zoteroContext.type, zoteroContext.readerAttachment?.key]);
@@ -184,15 +188,22 @@ const RecentChats: React.FC = () => {
         setIsThreadListView(true);
     };
 
-    // Return null while loading or if there are no chats
-    if (!isLoaded || threads.length === 0) return null;
+    // Return null if we've never loaded and have no threads to show
+    if (!isLoaded && threads.length === 0) return null;
+    // Also return null if we've loaded but there are simply no threads (and not currently fetching)
+    if (isLoaded && threads.length === 0 && !isFetching) return null;
 
     const headerLabel = isContextSpecific ? 'Related to this file' : 'Recent';
 
     return (
         <div className="recent-chats">
             <div className="recent-chats-header">
-                <span className="recent-chats-label">{headerLabel}</span>
+                <span className="recent-chats-label">
+                    {headerLabel}
+                    {isFetching && threads.length > 0 && (
+                        <Spinner size={11} />
+                    )}
+                </span>
                 <span className="recent-chats-view-all" onClick={handleViewAll}>View All</span>
             </div>
             {threads.map(thread => (

@@ -2318,6 +2318,9 @@
 }
 
 [id^="beaver-pane-"] .recent-chats-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: 0.9rem;
     font-weight: 600;
     color: var(--fill-tertiary);
