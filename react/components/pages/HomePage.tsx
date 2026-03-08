@@ -14,6 +14,7 @@ import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import FileStatusDisplay from "../status/FileStatusDisplay";
 import { isDatabaseSyncSupportedAtom } from "../../atoms/profile";
+import RecentChats from "../RecentChats";
 
 interface HomePageProps {
     isWindow?: boolean;
@@ -102,6 +103,8 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                     )}
                 </div>
             )}
+
+            <RecentChats />
             
             {isDatabaseSyncSupportedAtom && !isWindow && showFileStatusDetails && (
                 <div className="display-flex flex-col gap-4 min-w-0 w-full">

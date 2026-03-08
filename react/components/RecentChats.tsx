@@ -73,7 +73,7 @@ const RecentChats: React.FC = () => {
     // Clear cache on mount so returning to home always shows fresh data
     const hasMountedRef = useRef(false);
 
-    const fetchRecentChats = useCallback(async () => {
+    const fetchRecentChats = useCallback(async (isCancelled: () => boolean) => {
         if (!user) return;
 
         const contextType = zoteroContext.type;
@@ -99,6 +99,7 @@ const RecentChats: React.FC = () => {
         // Check cache
         const cached = recentCache.get(cacheKey);
         if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+            if (isCancelled()) return;
             setThreads(cached.threads);
             setIsContextSpecific(cached.isContextSpecific);
             setIsLoaded(true);
@@ -115,12 +116,14 @@ const RecentChats: React.FC = () => {
                     const matches = await threadService.findThreadsByItem(
                         libraryId, [attachmentKey], 'attachments'
                     );
+                    if (isCancelled()) return;
                     const deduped = deduplicateByThread(matches);
                     if (deduped.length > 0) {
                         resultThreads = deduped.slice(0, MAX_RECENT);
                         contextSpecific = true;
                     }
                 } catch (err) {
+                    if (isCancelled()) return;
                     console.error('RecentChats: error fetching attachment threads:', err);
                 }
             }
@@ -131,6 +134,7 @@ const RecentChats: React.FC = () => {
             // Fallback: general recent chats
             if (resultThreads.length === 0) {
                 const response = await threadService.getPaginatedThreads(MAX_RECENT);
+                if (isCancelled()) return;
                 resultThreads = response.data.map(t => ({
                     id: t.id,
                     name: t.name || '',
@@ -140,6 +144,7 @@ const RecentChats: React.FC = () => {
                 contextSpecific = false;
             }
 
+            if (isCancelled()) return;
             setThreads(resultThreads);
             setIsContextSpecific(contextSpecific);
 
@@ -149,15 +154,21 @@ const RecentChats: React.FC = () => {
                 timestamp: Date.now(),
             });
         } catch (error) {
+            if (isCancelled()) return;
             console.error('RecentChats: error fetching threads:', error);
         } finally {
-            setIsLoaded(true);
+            if (!isCancelled()) {
+                setIsLoaded(true);
+            }
         }
     }, [user, zoteroContext.type, zoteroContext.readerAttachment?.key]);
 
     // Fetch on mount and when context changes (e.g. library ↔ reader tab switch)
     useEffect(() => {
-        fetchRecentChats();
+        let cancelled = false;
+        const isCancelled = () => cancelled || !!Zotero.__beaverShuttingDown;
+        fetchRecentChats(isCancelled);
+        return () => { cancelled = true; };
     }, [fetchRecentChats]);
 
     const handleSelectThread = async (threadId: string, threadName?: string) => {
