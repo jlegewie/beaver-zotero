@@ -83,6 +83,8 @@ const RecentChats: React.FC = () => {
         let attachmentKey: string | null = null;
         let libraryId: number | undefined;
 
+        const itemKeys: string[] = [];
+
         if (!isLibraryTab && selectedTabId) {
             try {
                 const reader = Zotero.Reader.getByTabID(selectedTabId);
@@ -91,6 +93,15 @@ const RecentChats: React.FC = () => {
                     if (item) {
                         attachmentKey = item.key;
                         libraryId = item.libraryID;
+                        itemKeys.push(item.key);
+                        // Also include parent item key so we find threads
+                        // associated with either the attachment or its parent
+                        if (item.parentItemID) {
+                            const parent = Zotero.Items.get(item.parentItemID);
+                            if (parent) {
+                                itemKeys.push(parent.key);
+                            }
+                        }
                     }
                 }
             } catch (e) {
@@ -128,10 +139,10 @@ const RecentChats: React.FC = () => {
             let contextSpecific = false;
 
             // Reader context: try attachment-specific threads first
-            if (!isLibraryTab && attachmentKey && libraryId != null) {
+            if (!isLibraryTab && itemKeys.length > 0 && libraryId != null) {
                 try {
                     const matches = await threadService.findThreadsByItem(
-                        libraryId, [attachmentKey], 'attachments'
+                        libraryId, itemKeys, 'both'
                     );
                     if (isCancelled()) return;
                     const deduped = deduplicateByThread(matches);
