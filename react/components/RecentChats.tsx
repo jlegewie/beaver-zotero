@@ -211,9 +211,20 @@ const RecentChats: React.FC = () => {
         setIsThreadListView(true);
     };
 
-    // Return null if we've never loaded and have no threads to show
-    if (!isLoaded && threads.length === 0) return null;
-    // Also return null if we've loaded but there are simply no threads (and not currently fetching)
+    // Still fetching for the first time — show a lightweight loading indicator
+    if (!isLoaded && threads.length === 0) {
+        if (!isFetching) return null; // not yet started
+        return (
+            <div className="recent-chats">
+                <div className="recent-chats-header">
+                    <span className="recent-chats-label">
+                        Recent <Spinner size={11} />
+                    </span>
+                </div>
+            </div>
+        );
+    }
+    // Loaded but no threads exist
     if (isLoaded && threads.length === 0 && !isFetching) return null;
 
     const headerLabel = isContextSpecific ? 'Related to this file' : 'Recent';
