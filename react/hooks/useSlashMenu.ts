@@ -1,23 +1,23 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { PlusSignIcon } from '../components/icons/icons';
-import { currentMessageContentAtom, currentMessageItemsAtom, currentReaderAttachmentAtom } from '../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessageItemsAtom } from '../atoms/messageComposition';
 import { isWSChatPendingAtom } from '../atoms/agentRunAtoms';
-import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom } from '../atoms/customPrompts';
+import { actionsAtom, actionsForContextAtom, markActionUsedAtom, sendResolvedActionAtom } from '../atoms/actions';
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
-import { CustomPrompt } from '../types/settings';
+import { Action } from '../types/actions';
 import { MenuPosition, SearchMenuItem } from '../components/ui/menus/SearchMenu';
 
 export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | null>) {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const [, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
-    const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
-    const customPrompts = useAtomValue(customPromptsForContextAtom);
-    const markPromptUsed = useSetAtom(markPromptUsedAtom);
-    const sendResolvedPrompt = useSetAtom(sendResolvedPromptAtom);
+    const allActions = useAtomValue(actionsAtom);
+    const contextActions = useAtomValue(actionsForContextAtom);
+    const markActionUsed = useSetAtom(markActionUsedAtom);
+    const sendResolvedAction = useSetAtom(sendResolvedActionAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
@@ -25,13 +25,14 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
     const [slashSearchQuery, setSlashSearchQuery] = useState('');
     const preSlashTextRef = useRef('');
 
-    const hasAttachment = useAtomValue(currentMessageItemsAtom).length > 0 || !!currentReaderAttachment;
+    // Set of action IDs visible for current context (used for enabled/disabled split)
+    const contextActionIds = useMemo(() => new Set(contextActions.map(a => a.id)), [contextActions]);
 
-    const handleSlashSelect = useCallback(async (prompt: CustomPrompt) => {
+    const handleSlashSelect = useCallback(async (action: Action) => {
         const pre = preSlashTextRef.current;
         const fullPromptText = pre.length > 0
-            ? `${pre}\n\n${prompt.text}`.trim()
-            : prompt.text.trim();
+            ? `${pre}\n\n${action.text}`.trim()
+            : action.text.trim();
         setIsSlashMenuOpen(false);
         setSlashSearchQuery('');
 
@@ -50,14 +51,14 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
                     return newItems.length > 0 ? [...prev, ...newItems] : prev;
                 });
             }
-            if (prompt.id) markPromptUsed(prompt.id);
+            markActionUsed(action.id);
         } else {
             setMessageContent('');
-            if (prompt.id) markPromptUsed(prompt.id);
-            sendResolvedPrompt(fullPromptText);
+            markActionUsed(action.id);
+            sendResolvedAction(fullPromptText);
         }
         setTimeout(() => inputRef.current?.focus(), 0);
-    }, [isPending, sendResolvedPrompt, markPromptUsed]);
+    }, [isPending, sendResolvedAction, markActionUsed]);
 
     const handleSlashDismiss = useCallback(() => {
         setIsSlashMenuOpen(false);
@@ -68,12 +69,11 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
         const query = slashSearchQuery.toLowerCase();
         const items: SearchMenuItem[] = [];
 
-        const filtered = customPrompts.filter(prompt =>
-            !query || prompt.title.toLowerCase().includes(query)
+        const filtered = allActions.filter(action =>
+            !query || action.title.toLowerCase().includes(query)
         );
 
         // "Create Action" footer (visually at bottom)
-        // Show when: no query (initial menu), or no matching prompts
         const createActionItem: SearchMenuItem[] = !query || filtered.length === 0
             ? [{
                 label: 'Create Action',
@@ -84,10 +84,11 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
                     openPreferencesWindow('prompts');
                 },
             }] : [];
-        const enabled = filtered.filter(p => !p.requiresAttachment || hasAttachment);
-        const disabled = filtered.filter(p => p.requiresAttachment && !hasAttachment);
 
-        const sortByRelevance = (a: CustomPrompt, b: CustomPrompt): number => {
+        const enabled = filtered.filter(a => contextActionIds.has(a.id));
+        const disabled = filtered.filter(a => !contextActionIds.has(a.id));
+
+        const sortByRelevance = (a: Action, b: Action): number => {
             if (query) {
                 const posA = a.title.toLowerCase().indexOf(query);
                 const posB = b.title.toLowerCase().indexOf(query);
@@ -99,7 +100,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
                 const diff = new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime();
                 if (diff !== 0) return diff;
             }
-            return (a.index ?? Infinity) - (b.index ?? Infinity);
+            return (a.sortOrder ?? 999) - (b.sortOrder ?? 999);
         };
         enabled.sort(sortByRelevance);
         disabled.sort(sortByRelevance);
@@ -121,7 +122,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
         }
 
         return [...items.reverse(), ...createActionItem];
-    }, [customPrompts, slashSearchQuery, hasAttachment, handleSlashSelect]);
+    }, [allActions, contextActionIds, slashSearchQuery, handleSlashSelect]);
 
     /** Handle onChange for the textarea when the slash menu is open. Returns true if handled. */
     const handleSlashMenuChange = useCallback((value: string): boolean => {

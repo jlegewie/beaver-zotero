@@ -458,6 +458,20 @@
     overflow-y: auto;
 }
 
+/* Action target type badge */
+[id^="beaver-pane-"] .action-target-badge {
+    display: inline-block;
+    font-size: 10px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background-color: var(--material-mix-quarternary);
+    color: var(--fill-secondary);
+    border: 1px solid var(--fill-quinary);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 
 /* Layout Utilities */
 [id^="beaver-pane-"], [id^="beaver-pane-"] .display-flex { display: flex; }

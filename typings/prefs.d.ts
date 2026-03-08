@@ -40,6 +40,8 @@ declare namespace _ZoteroTypes {
       "citationLocale": string;
       "customPrompts": string;
       "customPromptsLastUsed": string;
+      "actions": string;
+      "actionsLastUsed": string;
       "deletionJobs": string;
       "skippedItems": string;
       "mcpServerEnabled": boolean;

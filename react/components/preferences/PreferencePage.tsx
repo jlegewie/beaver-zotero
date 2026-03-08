@@ -8,8 +8,9 @@ import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
-import { generatePromptId, CustomPrompt } from "../../types/settings";
-import { customPromptsAtom, saveCustomPromptsAtom, usedShortcutsAtom } from "../../atoms/customPrompts";
+import { Action, ActionTargetType, TARGET_TYPE_LABELS, generateActionId } from "../../types/actions";
+import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom } from "../../atoms/actions";
+import { isBuiltinAction, isBuiltinOverridden, getHiddenBuiltinActions, importFromOldCustomPrompts, hasOldCustomPrompts } from "../../types/actionStorage";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
 import { 
     embeddingIndexStateAtom, 
@@ -17,7 +18,9 @@ import {
     isEmbeddingIndexingAtom 
 } from "../../atoms/embeddingIndex";
 import ApiKeyInput from "./ApiKeyInput";
-import CustomPromptCard from "./CustomPromptCard";
+import ActionCard from "./ActionCard";
+import MenuButton from "../ui/MenuButton";
+import { MenuItem } from "../ui/menu/ContextMenu";
 import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { accountService } from "../../../src/services/accountService";
 import SyncedLibraries from "./SyncedLibraries";
@@ -41,9 +44,11 @@ const PreferencePage: React.FC = () => {
     const [openaiKey, setOpenaiKey] = useState(() => getPref('openAiApiKey'));
     const [anthropicKey, setAnthropicKey] = useState(() => getPref('anthropicApiKey'));
     const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
-    const customPrompts = useAtomValue(customPromptsAtom);
-    const saveCustomPrompts = useSetAtom(saveCustomPromptsAtom);
-    const usedShortcuts = useAtomValue(usedShortcutsAtom);
+    const actions = useAtomValue(actionsAtom);
+    const saveActions = useSetAtom(saveActionsAtom);
+    const hideAction = useSetAtom(hideActionAtom);
+    const restoreAction = useSetAtom(restoreActionAtom);
+    const resetActionToDefault = useSetAtom(resetActionToDefaultAtom);
     const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
     const [keyboardShortcut, setKeyboardShortcut] = useState(() => {
@@ -150,24 +155,23 @@ const PreferencePage: React.FC = () => {
         // }
     }, []);
 
-    // --- Custom Prompt Change Handler ---
-    const handleCustomPromptChange = useCallback((index: number, updatedPrompt: CustomPrompt) => {
-        const newPrompts = [...customPrompts];
-        newPrompts[index] = updatedPrompt;
-        saveCustomPrompts(newPrompts);
-    }, [customPrompts, saveCustomPrompts]);
+    // --- Action Change Handler ---
+    const handleActionChange = useCallback((updatedAction: Action) => {
+        const newActions = actions.map(a => a.id === updatedAction.id ? updatedAction : a);
+        saveActions(newActions);
+    }, [actions, saveActions]);
 
-    // --- Add Prompt Handler ---
-    const handleAddPrompt = useCallback(() => {
-        const newPrompt: CustomPrompt = {
-            id: generatePromptId(),
+    // --- Add Action Handler ---
+    const handleAddAction = useCallback((targetType: ActionTargetType) => {
+        const newAction: Action = {
+            id: generateActionId(),
             title: "",
             text: "",
-            requiresAttachment: false
+            targetType,
+            sortOrder: 999,
         };
-
-        saveCustomPrompts([...customPrompts, newPrompt]);
-    }, [customPrompts, saveCustomPrompts]);
+        saveActions([...actions, newAction]);
+    }, [actions, saveActions]);
 
     // --- Verify Sync Handler ---
     const handleVerifySync = useCallback(async () => {
@@ -197,22 +201,29 @@ const PreferencePage: React.FC = () => {
         }
     }, [syncedLibraryIds, verifyStatus]);
 
-    // --- Remove Prompt Handler ---
-    const handleRemovePrompt = useCallback((indexToRemove: number) => {
-        const newPrompts = customPrompts.filter((_, filterIndex) => filterIndex !== indexToRemove);
-        saveCustomPrompts(newPrompts);
-    }, [customPrompts, saveCustomPrompts]);
+    // --- Remove Action Handler ---
+    const handleRemoveAction = useCallback((id: string) => {
+        const newActions = actions.filter(a => a.id !== id);
+        saveActions(newActions);
+    }, [actions, saveActions]);
 
-    const getCustomPromptAvailabilityNote = useCallback((prompt: CustomPrompt): string | undefined => {
-        if (!prompt.requiresDatabaseSync) return undefined;
-        if (!isDatabaseSyncSupported) {
-            return 'Only available with Beaver Pro';
+    // --- Import from old custom prompts ---
+    const handleImportOldPrompts = useCallback(() => {
+        const imported = importFromOldCustomPrompts();
+        if (imported.length > 0) {
+            saveActions([...actions, ...imported]);
         }
-        if (processingMode === ProcessingMode.FRONTEND) {
-            return 'Available after indexing is complete';
-        }
-        return undefined;
-    }, [isDatabaseSyncSupported, processingMode]);
+    }, [actions, saveActions]);
+
+    const addActionMenuItems: MenuItem[] = useMemo(() => [
+        { label: 'Items', onClick: () => handleAddAction('items') },
+        { label: 'PDF', onClick: () => handleAddAction('attachment') },
+        { label: 'Collection', onClick: () => handleAddAction('collection') },
+        { label: 'Global', onClick: () => handleAddAction('global') },
+    ], [handleAddAction]);
+
+    const hiddenBuiltins = useMemo(() => getHiddenBuiltinActions(), [actions]);
+    const showImportButton = useMemo(() => hasOldCustomPrompts(), []);
 
     // --- Consent Toggle Change Handler ---
     const handleConsentChange = useCallback(async (checked: boolean) => {
@@ -1066,42 +1077,66 @@ const PreferencePage: React.FC = () => {
 
                     <div className="display-flex flex-row items-end justify-between">
                         <SectionLabel>Actions</SectionLabel>
-                        <Button
+                        <MenuButton
+                            menuItems={addActionMenuItems}
+                            buttonLabel="Add Action"
                             variant="outline"
-                            onClick={handleAddPrompt}
                             className="text-sm mb-15"
-                        >
-                            Add Action
-                        </Button>
+                        />
                     </div>
                     <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
-                        {/* Actions are reusable prompts you define once and trigger anytime from chat, the right-click menu, or automatically. */}
-                        {/* Actions are reusable prompts that tell the agent what to do with your research. You can trigger them manually with / in chat, from the right-click menu on any item, or set them to run automatically. */}
                         Actions are reusable prompts you define once and trigger anytime.
                     </div>
                     <div className="display-flex flex-col gap-4">
-                        {customPrompts.map((prompt: CustomPrompt, index: number) => (
-                            <CustomPromptCard
-                                key={index}
-                                index={index}
-                                prompt={prompt}
-                                onChange={handleCustomPromptChange}
-                                onRemove={handleRemovePrompt}
-                                availabilityNote={getCustomPromptAvailabilityNote(prompt)}
-                                usedShortcuts={usedShortcuts}
+                        {actions.map((action: Action) => (
+                            <ActionCard
+                                key={action.id}
+                                action={action}
+                                onChange={handleActionChange}
+                                onRemove={() => handleRemoveAction(action.id)}
+                                onHide={isBuiltinAction(action.id) ? () => hideAction(action.id) : undefined}
+                                onResetToDefault={isBuiltinAction(action.id) && isBuiltinOverridden(action.id) ? () => resetActionToDefault(action.id) : undefined}
+                                isBuiltin={isBuiltinAction(action.id)}
+                                isOverridden={isBuiltinOverridden(action.id)}
                             />
                         ))}
-                        {/* <div className="display-flex flex-row items-center justify-start">
+                    </div>
+
+                    {/* Hidden built-ins restore section */}
+                    {hiddenBuiltins.length > 0 && (
+                        <details className="mt-4">
+                            <summary className="text-sm font-color-tertiary cursor-pointer">
+                                Hidden actions ({hiddenBuiltins.length})
+                            </summary>
+                            <div className="display-flex flex-col gap-2 mt-2">
+                                {hiddenBuiltins.map(action => (
+                                    <div key={action.id} className="display-flex flex-row items-center justify-between px-2 py-1">
+                                        <span className="text-sm font-color-secondary">{action.title}</span>
+                                        <Button
+                                            variant="ghost-secondary"
+                                            style={{ padding: "2px 8px" }}
+                                            onClick={() => restoreAction(action.id)}
+                                        >
+                                            <span className="text-xs">Restore</span>
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        </details>
+                    )}
+
+                    {/* Import from old custom prompts */}
+                    {showImportButton && (
+                        <div className="mt-4">
                             <Button
                                 variant="outline"
-                                onClick={handleAddPrompt}
-                                disabled={customPrompts.length >= 9}
+                                onClick={handleImportOldPrompts}
                                 className="text-sm"
                             >
-                                Add Prompt
+                                Import from old Actions
                             </Button>
-                        </div> */}
-                    </div>
+                        </div>
+                    )}
                 </>
             )}
 
