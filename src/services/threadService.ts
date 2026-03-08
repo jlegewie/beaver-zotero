@@ -89,7 +89,8 @@ export class ThreadService extends ApiService {
      * @param libraryId Zotero library ID
      * @param zoteroKeys Zotero item keys to search for
      * @param mode Search in attachments, citations, or both
-     * @returns List of thread+run matches (thread may appear multiple times)
+     * @returns List of thread+run matches (thread may appear multiple times).
+     *   NOTE: No ordering guarantee — callers must sort client-side if order matters.
      */
     async findThreadsByItem(
         libraryId: number,

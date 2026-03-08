@@ -43,11 +43,12 @@ function formatCompactTime(utcDateString: string): string {
     return `${Math.floor(diffDays / 30)}mo`;
 }
 
-/** Deduplicate ThreadRunMatch[] by thread ID, keeping first occurrence (most recent). */
+/** Deduplicate ThreadRunMatch[] by thread ID, keeping the most-recent updated_at per thread, then sort newest-first. */
 function deduplicateByThread(matches: ThreadRunMatch[]): ThreadData[] {
     const seen = new Map<string, ThreadData>();
     for (const m of matches) {
-        if (!seen.has(m.id)) {
+        const existing = seen.get(m.id);
+        if (!existing || m.updated_at > existing.updatedAt) {
             seen.set(m.id, {
                 id: m.id,
                 name: m.name || '',
@@ -56,7 +57,7 @@ function deduplicateByThread(matches: ThreadRunMatch[]): ThreadData[] {
             });
         }
     }
-    return Array.from(seen.values());
+    return Array.from(seen.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 const RecentChats: React.FC = () => {
