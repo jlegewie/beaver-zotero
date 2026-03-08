@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
-import { zoteroContextAtom } from '../atoms/zoteroContext';
-import { isThreadListViewAtom } from '../atoms/ui';
+import { isThreadListViewAtom, isLibraryTabAtom, selectedZoteroTabIdAtom } from '../atoms/ui';
 import { ThreadData, loadThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom } from '../agents/atoms';
 import { threadService, ThreadRunMatch } from '../../src/services/threadService';
@@ -62,7 +61,8 @@ function deduplicateByThread(matches: ThreadRunMatch[]): ThreadData[] {
 
 const RecentChats: React.FC = () => {
     const user = useAtomValue(userAtom);
-    const zoteroContext = useAtomValue(zoteroContextAtom);
+    const isLibraryTab = useAtomValue(isLibraryTabAtom);
+    const selectedTabId = useAtomValue(selectedZoteroTabIdAtom);
     const setIsThreadListView = useSetAtom(isThreadListViewAtom);
     const loadThread = useSetAtom(loadThreadAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
@@ -78,17 +78,31 @@ const RecentChats: React.FC = () => {
     const fetchRecentChats = useCallback(async (isCancelled: () => boolean) => {
         if (!user) return;
 
-        const contextType = zoteroContext.type;
-        const attachment = zoteroContext.readerAttachment;
-        const attachmentKey = attachment?.key || null;
-        const libraryId = attachment?.libraryID;
+        // Read reader attachment info synchronously from Zotero APIs
+        // instead of waiting for the async zoteroContextAtom update chain
+        let attachmentKey: string | null = null;
+        let libraryId: number | undefined;
+
+        if (!isLibraryTab && selectedTabId) {
+            try {
+                const reader = Zotero.Reader.getByTabID(selectedTabId);
+                if (reader && reader.itemID) {
+                    const item = Zotero.Items.get(reader.itemID);
+                    if (item) {
+                        attachmentKey = item.key;
+                        libraryId = item.libraryID;
+                    }
+                }
+            } catch (e) {
+                console.error('RecentChats: error getting reader info:', e);
+            }
+        }
 
         // Cache key: differentiate library vs reader-per-attachment
         let cacheKey: string;
-        if (contextType === 'reader' && attachmentKey) {
+        if (!isLibraryTab && attachmentKey) {
             cacheKey = `${user.id}:reader:${attachmentKey}`;
         } else {
-            // TODO: when note support is added, use `note:${noteKey}` similar to reader
             cacheKey = `${user.id}:library`;
         }
 
@@ -114,7 +128,7 @@ const RecentChats: React.FC = () => {
             let contextSpecific = false;
 
             // Reader context: try attachment-specific threads first
-            if (contextType === 'reader' && attachmentKey && libraryId != null) {
+            if (!isLibraryTab && attachmentKey && libraryId != null) {
                 try {
                     const matches = await threadService.findThreadsByItem(
                         libraryId, [attachmentKey], 'attachments'
@@ -130,9 +144,6 @@ const RecentChats: React.FC = () => {
                     console.error('RecentChats: error fetching attachment threads:', err);
                 }
             }
-
-            // TODO: 'note' context — use findThreadsByItem for the note's parent item
-            // when note support is fully implemented. For now, fall through to general chats.
 
             // Fallback: general recent chats
             if (resultThreads.length === 0) {
@@ -165,7 +176,7 @@ const RecentChats: React.FC = () => {
                 setIsFetching(false);
             }
         }
-    }, [user, zoteroContext.type, zoteroContext.readerAttachment?.key]);
+    }, [user, isLibraryTab, selectedTabId]);
 
     // Fetch on mount and when context changes (e.g. library ↔ reader tab switch)
     useEffect(() => {

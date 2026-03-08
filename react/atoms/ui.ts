@@ -6,6 +6,7 @@ import { getPref } from '../../src/utils/prefs';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
+export const selectedZoteroTabIdAtom = atom<string | null>(null);
 export const isWebSearchEnabledAtom = atom(false);
 export type PreferencePageTab = 'general' | 'sync' | 'permissions' | 'models' | 'prompts' | 'advanced' | 'account';
 export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
