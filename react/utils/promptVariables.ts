@@ -171,10 +171,30 @@ function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeConte
             return { items: regular.slice(0, 10), collection: null };
         }
         case 'attachment': {
+            // Reader context: attachment open in reader
             const readerAttachment = store.get(currentReaderAttachmentAtom);
             if (readerAttachment) {
                 const parent = readerAttachment.parentItem;
                 return { items: parent ? [parent, readerAttachment] : [readerAttachment], collection: null };
+            }
+            // Library context: selected attachments (+ their parents)
+            const selected = store.get(selectedZoteroItemsAtom);
+            const attachments = selected.filter((i: Zotero.Item) => i.isAttachment());
+            if (attachments.length > 0) {
+                const result: Zotero.Item[] = [];
+                const seen = new Set<string>();
+                for (const att of attachments.slice(0, 10)) {
+                    const parent = att.parentItem;
+                    if (parent) {
+                        const parentKey = `${parent.libraryID}-${parent.key}`;
+                        if (!seen.has(parentKey)) {
+                            result.push(parent);
+                            seen.add(parentKey);
+                        }
+                    }
+                    result.push(att);
+                }
+                return { items: result, collection: null };
             }
             return { items: [], collection: null };
         }

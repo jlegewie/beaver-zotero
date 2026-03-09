@@ -21,10 +21,30 @@ function getActiveTargetType(context: ZoteroContext): ActionTargetType | null {
     switch (context.type) {
         case 'reader': return 'attachment';
         case 'note': return 'note';
-        case 'items_selected': return 'items';
+        case 'items_selected': {
+            // If all selected items are attachments, treat as attachment context
+            const items = context.selectedItems;
+            if (items.length > 0 && items.every(i => i.isAttachment())) {
+                return 'attachment';
+            }
+            return 'items';
+        }
         case 'collection': return 'collection';
         default: return null;
     }
+}
+
+/** Display name for any item type — regular items use author/year, others use display title */
+function getItemLabel(item: Zotero.Item): string {
+    if (item.isRegularItem()) {
+        return truncateText(getDisplayNameFromItem(item), MAX_CONTEXT_ITEM_LENGTH);
+    }
+    // Attachments, annotations, etc.: prefer parent's display name, fall back to display title
+    const parent = item.parentItem;
+    if (parent) {
+        return truncateText(getDisplayNameFromItem(parent), MAX_CONTEXT_ITEM_LENGTH);
+    }
+    return truncateText(item.getDisplayTitle(), MAX_CONTEXT_ITEM_LENGTH);
 }
 
 function getContextLabel(context: ZoteroContext): string | null {
@@ -32,7 +52,7 @@ function getContextLabel(context: ZoteroContext): string | null {
         case 'items_selected': {
             const names = context.selectedItems
                 .slice(0, MAX_VISIBLE_ITEMS)
-                .map(i => truncateText(getDisplayNameFromItem(i), MAX_CONTEXT_ITEM_LENGTH));
+                .map(i => getItemLabel(i));
             const remaining = context.selectedItemCount - MAX_VISIBLE_ITEMS;
             if (remaining > 0) names.push(`+${remaining} more`);
             return names.join(', ');
@@ -40,10 +60,7 @@ function getContextLabel(context: ZoteroContext): string | null {
         case 'reader': {
             const att = context.readerAttachment;
             if (!att) return null;
-            const parent = att.parentItem;
-            return parent
-                ? truncateText(getDisplayNameFromItem(parent), MAX_CONTEXT_ITEM_LENGTH)
-                : truncateText(att.getDisplayTitle(), MAX_CONTEXT_ITEM_LENGTH);
+            return getItemLabel(att);
         }
         case 'collection':
             return `Collection "${context.libraryView.collectionName}"`;
@@ -100,6 +117,11 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
 
     return (
         <div className={className} style={style}>
+            {contextLabel && (
+                <div className="text-sm font-color-tertiary font-medium" style={{ padding: '4px 8px 0' }}>
+                    {contextLabel}
+                </div>
+            )}
             {actions.map((action) => (
                 <Button
                     key={action.id}
@@ -115,11 +137,6 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                     </span>
                 </Button>
             ))}
-            {contextLabel && (
-                <div className="text-sm font-color-tertiary" style={{ padding: '4px 8px 0' }}>
-                    For {contextLabel}
-                </div>
-            )}
         </div>
     );
 };
