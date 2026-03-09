@@ -26,10 +26,12 @@ const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
+    verticalPosition?: 'above' | 'below';
 }
 
 const InputArea: React.FC<InputAreaProps> = ({
-    inputRef
+    inputRef,
+    verticalPosition = 'above',
 }) => {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const [currentMessageItems, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
@@ -83,7 +85,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         handleSlashMenuChange,
         handleSlashTrigger,
         handleSlashMenuKeyDown,
-    } = useSlashMenu(inputRef);
+    } = useSlashMenu(inputRef, verticalPosition);
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -197,6 +199,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 setMenuPosition={setMenuPosition}
                 inputRef={inputRef as React.RefObject<HTMLTextAreaElement>}
                 disabled={isAwaitingApproval}
+                verticalPosition={verticalPosition}
             />
 
             {/* Slash command menu */}
@@ -205,7 +208,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 isOpen={isSlashMenuOpen}
                 onClose={handleSlashDismiss}
                 position={slashMenuPosition}
-                verticalPosition="above"
+                verticalPosition={verticalPosition}
                 useFixedPosition={true}
                 width="250px"
                 searchQuery={slashSearchQuery}
@@ -236,9 +239,10 @@ const InputArea: React.FC<InputAreaProps> = ({
                             // Don't open attachment menu when awaiting approval
                             if (e.target.value.endsWith('@') && !isAwaitingApproval) {
                                 const rect = e.currentTarget.getBoundingClientRect();
+                                const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
                                 setMenuPosition({
                                     x: rect.left,
-                                    y: rect.top - 5
+                                    y,
                                 })
                                 setIsAddAttachmentMenuOpen(true);
                             } else {

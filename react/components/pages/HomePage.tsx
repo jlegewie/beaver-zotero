@@ -44,7 +44,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
 
                 {/* Input area */}
                 <DragDropWrapper>
-                    <InputArea inputRef={inputRef} />
+                    <InputArea inputRef={inputRef} verticalPosition="below" />
                 </DragDropWrapper>
 
                 {/* Action suggestions */}

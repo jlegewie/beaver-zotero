@@ -12,7 +12,7 @@ import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
 import { Action, ActionTargetType } from '../types/actions';
 import { MenuPosition, SearchMenuItem } from '../components/ui/menus/SearchMenu';
 
-export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | null>) {
+export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | null>, verticalPosition: 'above' | 'below' = 'above') {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const [, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
@@ -112,55 +112,76 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
         const hasContextGroup = visibleGroups.some(g => g.id !== 'global');
         const showHeaders = hasContextGroup;
 
-        // The slash menu uses verticalPosition="above", so SearchMenu reverses
-        // the array for display. We build in reverse visual order:
-        //   - Groups: most relevant first (ends up at bottom after reverse)
-        //   - Within each group: sorted actions first, then header
-        //     (after reverse: header above its actions)
-        //   - Create Action last (ends up at top after reverse)
         const items: SearchMenuItem[] = [];
-
         let lastHeader: string | null = null;
-        for (const group of visibleGroups) {
-            // Actions first (sorted best-first; after reverse they appear
-            // below header with best at bottom, closest to cursor)
-            for (const action of group.filtered) {
-                items.push({
-                    label: action.title,
-                    onClick: () => handleSlashSelect(action, group.targetType),
-                });
-            }
-            // Header after actions (after reverse, header appears above actions)
-            if (showHeaders && group.label !== lastHeader) {
-                const headerItem: SearchMenuItem = {
-                    label: group.label,
-                    onClick: () => {},
-                    isGroupHeader: true,
-                };
-                if (group.iconInfo) {
-                    headerItem.customContent = (
-                        <span className="display-flex items-center gap-1 truncate">
-                            <span className="scale-80 flex-shrink-0 opacity-50" style={{ filter: 'grayscale(1)' }}>
-                                {group.iconInfo.type === 'item-type'
-                                    ? <CSSItemTypeIcon itemType={group.iconInfo.name} className="icon-16" />
-                                    : <CSSIcon name={group.iconInfo.name} className="icon-16" />}
-                            </span>
-                            <span className="truncate">{group.label}</span>
+
+        const buildHeaderItem = (group: typeof visibleGroups[0]): SearchMenuItem => {
+            const headerItem: SearchMenuItem = {
+                label: group.label,
+                onClick: () => {},
+                isGroupHeader: true,
+            };
+            if (group.iconInfo) {
+                headerItem.customContent = (
+                    <span className="display-flex items-center gap-1 truncate">
+                        <span className="scale-80 flex-shrink-0 opacity-50" style={{ filter: 'grayscale(1)' }}>
+                            {group.iconInfo.type === 'item-type'
+                                ? <CSSItemTypeIcon itemType={group.iconInfo.name} className="icon-16" />
+                                : <CSSIcon name={group.iconInfo.name} className="icon-16" />}
                         </span>
-                    );
+                        <span className="truncate">{group.label}</span>
+                    </span>
+                );
+            }
+            return headerItem;
+        };
+
+        if (verticalPosition === 'above') {
+            // For "above" mode, SearchMenu reverses the array for display.
+            // Build in reverse visual order:
+            //   - Groups: most relevant first (ends up at bottom after reverse)
+            //   - Within each group: actions first, then header
+            //     (after reverse: header above its actions)
+            //   - Create Action last (ends up at top after reverse)
+            for (const group of visibleGroups) {
+                for (const action of group.filtered) {
+                    items.push({
+                        label: action.title,
+                        onClick: () => handleSlashSelect(action, group.targetType),
+                    });
                 }
-                items.push(headerItem);
-                lastHeader = group.label;
+                if (showHeaders && group.label !== lastHeader) {
+                    items.push(buildHeaderItem(group));
+                    lastHeader = group.label;
+                }
+            }
+        } else {
+            // For "below" mode, SearchMenu does NOT reverse.
+            // Build in normal visual order (top-to-bottom):
+            //   - Groups: most relevant first (at top, closest to cursor)
+            //   - Within each group: header first, then actions
+            //   - Create Action last (at bottom)
+            for (const group of visibleGroups) {
+                if (showHeaders && group.label !== lastHeader) {
+                    items.push(buildHeaderItem(group));
+                    lastHeader = group.label;
+                }
+                for (const action of group.filtered) {
+                    items.push({
+                        label: action.title,
+                        onClick: () => handleSlashSelect(action, group.targetType),
+                    });
+                }
             }
         }
 
-        // Create Action at end of array → top of visual menu after reverse
+        // Create Action at end of array (top after reverse for "above", bottom for "below")
         if (!query || items.length === 0) {
             items.push(createActionItem);
         }
 
         return items;
-    }, [allActions, ctx, slashSearchQuery, handleSlashSelect]);
+    }, [allActions, ctx, slashSearchQuery, handleSlashSelect, verticalPosition]);
 
     /** Handle onChange for the textarea when the slash menu is open. Returns true if handled. */
     const handleSlashMenuChange = useCallback((value: string): boolean => {
@@ -185,7 +206,8 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
             const charBefore = value.length > 1 ? value[value.length - 2] : null;
             if (charBefore === null || charBefore === ' ' || charBefore === '\n') {
                 preSlashTextRef.current = value.slice(0, -1);
-                setSlashMenuPosition({ x: rect.left, y: rect.top - 5 });
+                const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
+                setSlashMenuPosition({ x: rect.left, y });
                 setIsSlashMenuOpen(true);
                 setSlashSearchQuery('');
                 setMessageContent(value);
@@ -193,7 +215,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
             }
         }
         return false;
-    }, [setMessageContent]);
+    }, [setMessageContent, verticalPosition]);
 
     /** Handle keydown when the slash menu is open. Returns true if the event was consumed. */
     const handleSlashMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
