@@ -111,8 +111,8 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     if (isReader) {
         const readerParent = readerAtt!.parentItem;
         const label = readerParent
-            ? `For ${truncateText(getDisplayNameFromItem(readerParent), MAX_LABEL_ITEM_LENGTH)}`
-            : `For ${truncateText(readerAtt!.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH)}`;
+            ? `${truncateText(getDisplayNameFromItem(readerParent), MAX_LABEL_ITEM_LENGTH)}`
+            : `${truncateText(readerAtt!.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH)}`;
 
         // Reader supports both attachment and items actions (parent is a regular item)
         const readerActions = allActions.filter(a => {
