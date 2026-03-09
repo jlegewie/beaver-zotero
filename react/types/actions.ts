@@ -62,11 +62,11 @@ export const TARGET_TYPE_LABELS: Record<ActionTargetType, string> = {
 };
 
 export const TARGET_TYPE_DESCRIPTIONS: Record<ActionTargetType, string> = {
-    items: "Requires one or more selected items",
-    attachment: "Requires a PDF attachment",
-    note: "Requires a note to be open",
-    collection: "Requires a collection to be selected",
-    global: "Available everywhere",
+    items: "Works with library items",
+    attachment: "Works with PDF attachments",
+    note: "Works with Zotero notes",
+    collection: "Works with collections",
+    global: "Works anywhere, no context needed",
 };
 
 // ---------------------------------------------------------------------------

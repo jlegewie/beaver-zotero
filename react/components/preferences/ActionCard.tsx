@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Action, ActionTargetType, TARGET_TYPE_LABELS } from "../../types/actions";
+import { Action, ActionTargetType, TARGET_TYPE_LABELS, TARGET_TYPE_DESCRIPTIONS } from "../../types/actions";
 import Button from "../ui/Button";
 import MenuButton from "../ui/MenuButton";
 import { MenuItem } from "../ui/menu/ContextMenu";
@@ -134,6 +134,12 @@ const ActionCard: React.FC<ActionCardProps> = ({
     const targetTypeMenuItems: MenuItem[] = TARGET_TYPE_OPTIONS.map(tt => ({
         label: TARGET_TYPE_LABELS[tt],
         onClick: () => setEditTargetType(tt),
+        customContent: (
+            <div className="display-flex flex-col">
+                <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS[tt]}</span>
+                <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS[tt]}</span>
+            </div>
+        )
     }));
 
     // --- View mode ---
@@ -202,6 +208,9 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         customContent={<span>{TARGET_TYPE_LABELS[editTargetType]}</span>}
                         style={{ padding: '2px 6px', fontSize: '13px' }}
                     />
+                    <span className="text-sm font-color-tertiary">
+                        {TARGET_TYPE_DESCRIPTIONS[editTargetType]}
+                    </span>
                     {isBuiltin && isOverridden && onResetToDefault && (
                         <Button
                             variant="ghost-secondary"

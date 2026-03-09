@@ -4,7 +4,7 @@ import { Icon } from '../icons/icons';
 import PlusSignIcon from '../icons/PlusSignIcon';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { Action, ActionTargetType, generateActionId } from "../../types/actions";
+import { Action, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, TARGET_TYPE_DESCRIPTIONS } from "../../types/actions";
 import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom } from "../../atoms/actions";
 import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, importFromOldCustomPrompts, hasOldCustomPrompts } from "../../types/actionStorage";
 import ActionCard from "./ActionCard";
@@ -75,52 +75,52 @@ const ActionsPreferenceSection: React.FC = () => {
     // --- Add Action Menu Items ---
     const addActionMenuItems: MenuItem[] = useMemo(() => [
         {
-            label: 'Items',
+            label: TARGET_TYPE_LABELS.items,
             onClick: () => handleAddAction('items'),
             customContent: (
                 <div className="display-flex flex-col">
-                    <span className="text-sm font-color-primary">Item</span>
-                    <span className="text-sm font-color-tertiary">Works with library items</span>
+                    <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.items}</span>
+                    <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.items}</span>
                 </div>
             ),
         },
         {
-            label: 'PDF',
+            label: TARGET_TYPE_LABELS.attachment,
             onClick: () => handleAddAction('attachment'),
             customContent: (
                 <div className="display-flex flex-col">
-                    <span className="text-sm font-color-primary">PDF Attachment</span>
-                    <span className="text-sm font-color-tertiary">Works with PDF attachments</span>
+                    <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.attachment}</span>
+                    <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.attachment}</span>
                 </div>
             ),
         },
         // {
-        //     label: 'Note',
+        //     label: TARGET_TYPE_LABELS.note,
         //     onClick: () => handleAddAction('note'),
         //     customContent: (
         //         <div className="display-flex flex-col">
-        //             <span className="text-sm font-color-primary">Note</span>
-        //             <span className="text-sm font-color-tertiary">Works with the Zotero notes</span>
+        //             <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.note}</span>
+        //             <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.note}</span>
         //         </div>
         //     ),
         // },
         {
-            label: 'Collection',
+            label: TARGET_TYPE_LABELS.collection,
             onClick: () => handleAddAction('collection'),
             customContent: (
                 <div className="display-flex flex-col">
-                    <span className="text-sm font-color-primary">Collection</span>
-                    <span className="text-sm font-color-tertiary">Works with collections</span>
+                    <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.collection}</span>
+                    <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.collection}</span>
                 </div>
             ),
         },
         {
-            label: 'Global',
+            label: TARGET_TYPE_LABELS.global,
             onClick: () => handleAddAction('global'),
             customContent: (
                 <div className="display-flex flex-col">
-                    <span className="text-sm font-color-primary">Global</span>
-                    <span className="text-sm font-color-tertiary">Works anywhere, no context needed</span>
+                    <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.global}</span>
+                    <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.global}</span>
                 </div>
             ),
         },
