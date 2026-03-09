@@ -6,6 +6,7 @@ import { isWSChatPendingAtom } from "../atoms/agentRunAtoms";
 import { Action, ActionTargetType } from "../types/actions";
 import { actionsForContextAtom, markActionUsedAtom, sendResolvedActionAtom } from "../atoms/actions";
 import { zoteroContextAtom, ZoteroContext } from "../atoms/zoteroContext";
+import { isSupportedItem } from "../../src/utils/sync";
 import { getDisplayNameFromItem } from "../utils/sourceUtils";
 import { truncateText } from "../utils/stringUtils";
 
@@ -16,15 +17,24 @@ const MAX_VISIBLE_ITEMS = 2;
  * Maps the current Zotero context to the single winning action target type.
  * More specific intent wins: items > collection, reader > library state.
  * Returns null when no specific context is active (global fallback).
+ *
+ * Unsupported items (non-PDF attachments, notes, annotations) are excluded.
+ * When all selected items are unsupported, falls back to null (global actions).
  */
 function getActiveTargetType(context: ZoteroContext): ActionTargetType | null {
     switch (context.type) {
-        case 'reader': return 'attachment';
+        case 'reader': {
+            // Only show attachment actions if the reader item is supported (PDF)
+            const att = context.readerAttachment;
+            return att && isSupportedItem(att) ? 'attachment' : null;
+        }
         case 'note': return 'note';
         case 'items_selected': {
-            // If all selected items are attachments, treat as attachment context
             const items = context.selectedItems;
-            if (items.length > 0 && items.every(i => i.isAttachment())) {
+            // Filter to items Beaver can actually process
+            const supported = items.filter(i => isSupportedItem(i));
+            if (supported.length === 0) return null;
+            if (supported.every(i => i.isAttachment())) {
                 return 'attachment';
             }
             return 'items';
@@ -50,16 +60,19 @@ function getItemLabel(item: Zotero.Item): string {
 function getContextLabel(context: ZoteroContext): string | null {
     switch (context.type) {
         case 'items_selected': {
-            const names = context.selectedItems
+            // Only show supported items in the context label
+            const supported = context.selectedItems.filter(i => isSupportedItem(i));
+            if (supported.length === 0) return null;
+            const names = supported
                 .slice(0, MAX_VISIBLE_ITEMS)
                 .map(i => getItemLabel(i));
-            const remaining = context.selectedItemCount - MAX_VISIBLE_ITEMS;
+            const remaining = supported.length - MAX_VISIBLE_ITEMS;
             if (remaining > 0) names.push(`+${remaining} more`);
             return names.join(', ');
         }
         case 'reader': {
             const att = context.readerAttachment;
-            if (!att) return null;
+            if (!att || !isSupportedItem(att)) return null;
             return getItemLabel(att);
         }
         case 'collection':

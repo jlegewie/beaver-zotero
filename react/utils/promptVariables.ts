@@ -20,6 +20,7 @@
  */
 
 import { logger } from '../../src/utils/logger';
+import { isSupportedItem } from '../../src/utils/sync';
 import { getCurrentReader } from './readerUtils';
 import { store } from '../store';
 import { currentReaderAttachmentAtom } from '../atoms/messageComposition';
@@ -159,27 +160,27 @@ interface TargetTypeContext {
 function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeContext {
     switch (targetType) {
         case 'items': {
-            // Reader context: parent item + attachment
+            // Reader context: parent item + attachment (only if supported)
             const readerAttachment = store.get(currentReaderAttachmentAtom);
-            if (readerAttachment) {
+            if (readerAttachment && isSupportedItem(readerAttachment)) {
                 const parent = readerAttachment.parentItem;
                 return { items: parent ? [parent, readerAttachment] : [readerAttachment], collection: null };
             }
-            // Library context: selected items
+            // Library context: selected supported regular items
             const selected = store.get(selectedZoteroItemsAtom);
             const regular = selected.filter((i: Zotero.Item) => i.isRegularItem());
             return { items: regular.slice(0, 10), collection: null };
         }
         case 'attachment': {
-            // Reader context: attachment open in reader
+            // Reader context: attachment open in reader (only if supported)
             const readerAttachment = store.get(currentReaderAttachmentAtom);
-            if (readerAttachment) {
+            if (readerAttachment && isSupportedItem(readerAttachment)) {
                 const parent = readerAttachment.parentItem;
                 return { items: parent ? [parent, readerAttachment] : [readerAttachment], collection: null };
             }
-            // Library context: selected attachments (+ their parents)
+            // Library context: selected supported attachments (+ their parents)
             const selected = store.get(selectedZoteroItemsAtom);
-            const attachments = selected.filter((i: Zotero.Item) => i.isAttachment());
+            const attachments = selected.filter((i: Zotero.Item) => i.isAttachment() && isSupportedItem(i));
             if (attachments.length > 0) {
                 const result: Zotero.Item[] = [];
                 const seen = new Set<string>();
