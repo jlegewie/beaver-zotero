@@ -74,6 +74,8 @@ const PreferencePage: React.FC = () => {
             const { fileStatus: status, error } = await fetchFileStatusResult(user.id);
             if (error) {
                 logger(`PreferencePage: Manual file status refresh failed: ${error}`, 1);
+                setManualRefreshTime(new Date());
+                setNow(Date.now());
                 return;
             }
 
@@ -82,6 +84,8 @@ const PreferencePage: React.FC = () => {
             setNow(Date.now());
         } catch (error) {
             logger(`PreferencePage: Failed to manually fetch file status: ${error}`, 1);
+            setManualRefreshTime(new Date());
+            setNow(Date.now());
         } finally {
             setIsManualRefreshing(false);
         }
