@@ -145,10 +145,9 @@ const ActionsPreferenceSection: React.FC = () => {
                 />
             </div>
             <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
-                Reusable prompts you can trigger from the slash menu or homepage.
-                Use <code className="text-xs" style={{ padding: '1px 4px', borderRadius: '3px', background: 'var(--material-mix-quarternary)' }}>{"{{active_item}}"}</code>,{' '}
-                <code className="text-xs" style={{ padding: '1px 4px', borderRadius: '3px', background: 'var(--material-mix-quarternary)' }}>{"{{selected_items}}"}</code>, or{' '}
-                <code className="text-xs" style={{ padding: '1px 4px', borderRadius: '3px', background: 'var(--material-mix-quarternary)' }}>{"{{recent_items}}"}</code> to insert context.
+                Actions are reusable prompts for common research tasks.
+                They appear based on what you're doing in Zotero: on the homepage, in the slash menu, and in the right-click menu.
+                Each action targets items, collections, or your whole library, and Beaver shows the relevant ones automatically.
                 {' '}<DocLink path="actions">Learn more</DocLink>.
             </div>
             <SettingsGroup>
