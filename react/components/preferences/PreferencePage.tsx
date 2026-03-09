@@ -3,15 +3,12 @@ import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, CopyIcon } from '../icons/icons';
-import PlusSignIcon from '../icons/PlusSignIcon';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
-import { Action, ActionTargetType, TARGET_TYPE_LABELS, generateActionId } from "../../types/actions";
 import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom } from "../../atoms/actions";
-import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, importFromOldCustomPrompts, hasOldCustomPrompts } from "../../types/actionStorage";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
 import { 
     embeddingIndexStateAtom, 
@@ -19,19 +16,15 @@ import {
     isEmbeddingIndexingAtom 
 } from "../../atoms/embeddingIndex";
 import ApiKeyInput from "./ApiKeyInput";
-import ActionCard from "./ActionCard";
-import MenuButton from "../ui/MenuButton";
-import { MenuItem } from "../ui/menu/ContextMenu";
 import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { accountService } from "../../../src/services/accountService";
 import SyncedLibraries from "./SyncedLibraries";
-import { ProcessingMode } from "../../types/profile";
 import DeferredToolPreferenceSetting from "./DeferredToolPreferenceSetting";
-import { BeaverUIFactory } from "../../../src/ui/ui";
 import { copyToClipboard } from "../../utils/clipboard";
 import { ensureMcpBridgeScript } from "../../hooks/useMcpServer";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
 import ActionsPreferenceSection from "./ActionsPreferenceSection";
+import CustomInstructionsSection from "./CustomInstructionsSection";
 
 
 const PreferencePage: React.FC = () => {
@@ -45,12 +38,6 @@ const PreferencePage: React.FC = () => {
     const [geminiKey, setGeminiKey] = useState(() => getPref('googleGenerativeAiApiKey'));
     const [openaiKey, setOpenaiKey] = useState(() => getPref('openAiApiKey'));
     const [anthropicKey, setAnthropicKey] = useState(() => getPref('anthropicApiKey'));
-    const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
-    const actions = useAtomValue(actionsAtom);
-    const saveActions = useSetAtom(saveActionsAtom);
-    const hideAction = useSetAtom(hideActionAtom);
-    const restoreAction = useSetAtom(restoreActionAtom);
-    const resetActionToDefault = useSetAtom(resetActionToDefaultAtom);
     const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
     const [keyboardShortcut, setKeyboardShortcut] = useState(() => {
@@ -66,7 +53,6 @@ const PreferencePage: React.FC = () => {
     const profileBalance = useAtomValue(profileBalanceAtom);
     const remainingBeaverCredits = useAtomValue(remainingBeaverCreditsAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
-    const processingMode = useAtomValue(processingModeAtom);
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
@@ -135,12 +121,6 @@ const PreferencePage: React.FC = () => {
             setPref(key, value);
             logger(`Saved pref ${key}`);
         }
-    };
-
-    const handleCustomInstructionsChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const newValue = event.target.value;
-        setCustomInstructions(newValue);
-        handlePrefSave('customInstructions', newValue);
     };
 
     const handleKeyboardShortcutChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -1019,21 +999,7 @@ const PreferencePage: React.FC = () => {
             {/* ===== PROMPTS TAB ===== */}
             {activeTab === 'prompts' && (
                 <>
-                    <SectionLabel>Custom Instructions</SectionLabel>
-                    <div className="custom-prompt-card" style={{ cursor: 'default' }}>
-                        <div className="font-color-secondary text-text mb-2">
-                            Custom instructions are added to all chats and help steer responses. (Max ~250 words)
-                        </div>
-                        <textarea
-                            value={customInstructions}
-                            onChange={handleCustomInstructionsChange}
-                            placeholder="Enter custom instructions here..."
-                            rows={5}
-                            className="chat-input custom-prompt-edit-textarea text-base"
-                            style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical' }}
-                            maxLength={1500}
-                        />
-                    </div>
+                    <CustomInstructionsSection />
 
                     <ActionsPreferenceSection />
                 </>
