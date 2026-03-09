@@ -723,6 +723,8 @@
 [id^="beaver-pane-"] .-mr-1 { margin-right: -0.25rem; }
 [id^="beaver-pane-"] .-mr-2 { margin-right: -0.5rem; }
 [id^="beaver-pane-"] .-mr-3 { margin-right: -0.75rem; }
+[id^="beaver-pane-"] .-mx-4 { margin-right: -0.75rem; margin-left: -0.75rem; }
+
 [id^="beaver-pane-"] .inset-x-0 { left: 0; right: 0; }
 [id^="beaver-pane-"] .translate-y-full { transform: translateY(100%); }
 [id^="beaver-pane-"] .-translate-y-full { transform: translateY(-100%); }

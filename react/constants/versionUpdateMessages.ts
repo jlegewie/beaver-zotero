@@ -335,6 +335,24 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
         ],
     },
+    {
+        version: "0.14.0",
+        title: "New in Beaver 0.14",
+        steps: [
+            {
+                title: "Smart homepage",
+                description: "Beaver now suggests actions based on what you're doing in Zotero — select an item, open a collection, or read a paper and the homepage adapts instantly.",
+            },
+            {
+                title: "Customize your workflow",
+                description: "Create your own actions in Preferences → Actions or <a href='https://www.beaverapp.ai/docs/actions'>learn more</a>.",
+            },
+            {
+                title: "Pick up where you left off",
+                description: "Recent chats now appear at the bottom of the homepage. In the reader, you'll see past chats for the paper you're reading.",
+            },
+        ],
+    },
     // footer: `We've updated our <a href="https://www.beaverapp.ai/terms" target='_blank'>Terms of Service</a> and <a href="https://www.beaverapp.ai/privacy-policy" target='_blank'>Privacy Policy</a>, including subscription and billing terms, simplified credit mechanics, and clarified how we use operational log data for service improvement. Effective March 19, 2026.`
 ];
 

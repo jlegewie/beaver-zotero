@@ -48,15 +48,16 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
             {/* Fixed bottom section */}
             <div
                 id="beaver-home-footer"
-                className={`flex-none px-4 relative ${isDatabaseSyncSupported && !isWindow ? '' : 'pb-4'}`}
+                className={`flex-none px-4 ${isDatabaseSyncSupported && !isWindow ? '' : 'pb-4'}`}
             >
-                <PreviewAndPopupContainer />
-
                 <RecentChats />
 
-                {isDatabaseSyncSupported && !isWindow && (
-                    <FileStatusBar />
-                )}
+                <div className="relative -mx-4 px-4">
+                    <PreviewAndPopupContainer />
+                    {isDatabaseSyncSupported && !isWindow && (
+                        <FileStatusBar />
+                    )}
+                </div>
             </div>
         </div>
     );
