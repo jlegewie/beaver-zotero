@@ -132,7 +132,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                     style={{ padding: '6px 8px' }}
                     // title={action.title}
                 >
-                    <span className="text-lg truncate">
+                    <span className="text-base truncate">
                         {action.title}
                     </span>
                 </Button>
