@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { RealtimeChannel, REALTIME_SUBSCRIBE_STATES, REALTIME_CHANNEL_STATES } from "@supabase/supabase-js";
-import { fileStatusAtom } from '../atoms/files';
-import { FileStatus } from '../types/fileStatus';
+import { fileStatusAtom, connectionStatusAtom } from '../atoms/files';
+import { FileStatus, ConnectionStatus } from '../types/fileStatus';
 import { supabase } from '../../src/services/supabaseClient';
 import { isAuthenticatedAtom, userAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
 import { hasAuthorizedProAccessAtom, isDatabaseSyncSupportedAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
-
-export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'polling' | 'error';
 
 export interface FileStatusConnection {
     connectionStatus: ConnectionStatus;
@@ -84,6 +82,7 @@ export const fetchFileStatus = async (userId: string): Promise<FileStatus | null
  */
 export const useFileStatus = (enabled: boolean = true): FileStatusConnection => {
     const setFileStatus = useSetAtom(fileStatusAtom);
+    const setConnectionStatusAtom = useSetAtom(connectionStatusAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
     const hasAuthorizedProAccess = useAtomValue(hasAuthorizedProAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
@@ -300,6 +299,7 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
                 lastError: null,
                 lastDataReceived: undefined
             });
+            setConnectionStatusAtom('idle');
             setFileStatus(null);
         }
     }, [setFileStatus]);
@@ -340,6 +340,11 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
             cleanupConnection();
         };
     }, [enabled, isDatabaseSyncSupported, isAuthenticated, user, hasAuthorizedProAccess, isDeviceAuthorized, setupConnection, cleanupConnection]);
+
+    // Sync local connection status to global atom for cross-window access
+    useEffect(() => {
+        setConnectionStatusAtom(connection.connectionStatus);
+    }, [connection.connectionStatus, setConnectionStatusAtom]);
 
     // Handle auth state changes for token refresh
     useEffect(() => {

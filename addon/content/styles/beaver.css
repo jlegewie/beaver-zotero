@@ -2475,3 +2475,23 @@
     flex-shrink: 0;
     margin-left: 8px;
 }
+
+/* File status bar (homepage footer indicator) */
+[id^="beaver-pane-"] .file-status-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--fill-tertiary);
+    background: transparent;
+    transition: color 0.15s ease;
+    margin-bottom: 4px;
+}
+
+[id^="beaver-pane-"] .file-status-bar:hover {
+    color: var(--fill-secondary);
+}

@@ -24,6 +24,9 @@ import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/Se
 import ActionsPreferenceSection from "./ActionsPreferenceSection";
 import CustomInstructionsSection from "./CustomInstructionsSection";
 import ApiKeysSection from "./ApiKeysSection";
+import FileStatusDisplay from "../status/FileStatusDisplay";
+import { connectionStatusAtom, fileStatusAtom } from "../../atoms/files";
+import { fetchFileStatus } from "../../hooks/useFileStatus";
 
 
 const PreferencePage: React.FC = () => {
@@ -49,7 +52,41 @@ const PreferencePage: React.FC = () => {
     const profileBalance = useAtomValue(profileBalanceAtom);
     const remainingBeaverCredits = useAtomValue(remainingBeaverCreditsAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
+    const connectionStatus = useAtomValue(connectionStatusAtom);
+    const setFileStatus = useSetAtom(fileStatusAtom);
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
+
+    // --- Manual File Status Refresh (when no real-time subscription) ---
+    const [manualRefreshTime, setManualRefreshTime] = useState<Date | null>(null);
+    const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+    const [now, setNow] = useState(Date.now());
+
+    React.useEffect(() => {
+        const interval = setInterval(() => setNow(Date.now()), 10000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const handleManualRefresh = useCallback(async () => {
+        if (!user?.id) return;
+        setIsManualRefreshing(true);
+        logger(`PreferencePage: Manually fetching file status (one-time fetch) for user ${user.id}`, 1);
+        try {
+            const status = await fetchFileStatus(user.id);
+            setFileStatus(status);
+            setManualRefreshTime(new Date());
+            setNow(Date.now());
+        } catch (error) {
+            logger(`PreferencePage: Failed to manually fetch file status: ${error}`, 1);
+        } finally {
+            setIsManualRefreshing(false);
+        }
+    }, [user?.id, setFileStatus]);
+
+    React.useEffect(() => {
+        if (activeTab === 'sync' && connectionStatus === 'idle' && !manualRefreshTime && user?.id && !isManualRefreshing) {
+            handleManualRefresh();
+        }
+    }, [activeTab, connectionStatus, manualRefreshTime, user?.id, isManualRefreshing, handleManualRefresh]);
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
     const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
@@ -804,6 +841,35 @@ const PreferencePage: React.FC = () => {
                                 }
                             />
                         </SettingsGroup>
+                    )}
+
+                    {isDatabaseSyncSupported && (
+                        <>
+                            <SectionLabel>File Processing Status</SectionLabel>
+                            <FileStatusDisplay 
+                                connectionStatus={connectionStatus === 'idle' && manualRefreshTime ? 'connected' : connectionStatus} 
+                                isManualRefresh={connectionStatus === 'idle' && !!manualRefreshTime}
+                            />
+                            
+                            {connectionStatus === 'idle' && manualRefreshTime && (
+                                <div className="display-flex flex-row items-center font-color-secondary text-sm mt-2 ml-1">
+                                    <span>
+                                        Last refreshed {
+                                            Math.floor((now - manualRefreshTime.getTime()) / 60000) === 0 
+                                                ? "just now" 
+                                                : `${Math.floor((now - manualRefreshTime.getTime()) / 60000)} minute${Math.floor((now - manualRefreshTime.getTime()) / 60000) !== 1 ? 's' : ''} ago`
+                                        }.
+                                    </span>
+                                    <button 
+                                        className="text-link-muted scale-80 -ml-2"
+                                        onClick={handleManualRefresh}
+                                        disabled={isManualRefreshing}
+                                    >
+                                        {isManualRefreshing ? 'Refreshing...' : 'Refresh now'}
+                                    </button>
+                                </div>
+                            )}
+                        </>
                     )}
                 </>
             )}

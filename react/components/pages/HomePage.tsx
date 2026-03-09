@@ -1,12 +1,5 @@
 import React from "react";
-import Button from "../ui/Button";
-import FileStatusButton from "../ui/buttons/FileStatusButton";
-import { ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
-import { useFileStatus } from '../../hooks/useFileStatus';
-import { showFileStatusDetailsAtom } from '../../atoms/ui';
-import { useAtomValue, useAtom } from 'jotai';
-import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
-import FileStatusDisplay from "../status/FileStatusDisplay";
+import { useAtomValue } from 'jotai';
 import { isDatabaseSyncSupportedAtom } from "../../atoms/profile";
 import RecentChats from "../RecentChats";
 import ActionSuggestions from "../ActionSuggestions";
@@ -14,6 +7,7 @@ import { actionsForContextAtom } from "../../atoms/actions";
 import InputArea from "../input/InputArea";
 import DragDropWrapper from "../input/DragDropWrapper";
 import PreviewAndPopupContainer from "../PreviewAndPopupContainer";
+import FileStatusBar from "../status/FileStatusBar";
 
 interface HomePageProps {
     isWindow?: boolean;
@@ -21,13 +15,8 @@ interface HomePageProps {
 }
 
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
-    const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const actions = useAtomValue(actionsForContextAtom);
-
-    // Realtime listening for file status updates (only in sidebar, not in separate windows)
-    const { connectionStatus } = useFileStatus(!isWindow);
-    useIndexingCompleteMessage();
 
     return (
         <div
@@ -57,37 +46,17 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
             </div>
 
             {/* Fixed bottom section */}
-            <div id="beaver-home-footer" className="flex-none px-4 pb-4 relative">
+            <div
+                id="beaver-home-footer"
+                className={`flex-none px-4 relative ${isDatabaseSyncSupported && !isWindow ? '' : 'pb-4'}`}
+            >
                 <PreviewAndPopupContainer />
 
-                {/* File Processing Status */}
-                {/* {isDatabaseSyncSupported && !isWindow && (
-                    <>
-                        <div className="display-flex flex-row justify-between items-center">
-                            <Button
-                                variant="ghost-secondary"
-                                onClick={() => setShowFileStatusDetails(!showFileStatusDetails)}
-                                rightIcon={showFileStatusDetails ? ArrowDownIcon : ArrowRightIcon}
-                                iconClassName="mr-0"
-                            >
-                                <span className="font-semibold text-sm mb-1" style={{ marginLeft: '-3px' }}>
-                                    File Status
-                                </span>
-                            </Button>
-                            {!showFileStatusDetails && (
-                                <FileStatusButton showFileStatus={showFileStatusDetails} setShowFileStatus={setShowFileStatusDetails}/>
-                            )}
-                        </div>
-
-                        {showFileStatusDetails && (
-                            <div className="display-flex flex-col gap-4 min-w-0 w-full">
-                                <FileStatusDisplay connectionStatus={connectionStatus}/>
-                            </div>
-                        )}
-                    </>
-                )} */}
-
                 <RecentChats />
+
+                {isDatabaseSyncSupported && !isWindow && (
+                    <FileStatusBar />
+                )}
             </div>
         </div>
     );
