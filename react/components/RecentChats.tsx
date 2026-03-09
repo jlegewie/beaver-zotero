@@ -211,19 +211,8 @@ const RecentChats: React.FC = () => {
         setIsThreadListView(true);
     };
 
-    // Still fetching for the first time — show a lightweight loading indicator
-    if (!isLoaded && threads.length === 0) {
-        if (!isFetching) return null; // not yet started
-        return (
-            <div>
-                <div className="recent-chats-header">
-                    <span className="recent-chats-label">
-                        Recent <Spinner size={11} />
-                    </span>
-                </div>
-            </div>
-        );
-    }
+    // No data yet — render nothing until first load completes
+    if (!isLoaded && threads.length === 0) return null;
     // Loaded but no threads exist
     if (isLoaded && threads.length === 0 && !isFetching) return null;
 
