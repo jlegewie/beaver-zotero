@@ -41,7 +41,7 @@ const FileStatusButton: React.FC<{
     const animationClass = isAnimating ? `${baseClasses} ${flashClasses}` : baseClasses;
 
     // Conditionally apply 'animate-spin' to SyncIcon
-    const syncIconClassName = `scale-125 text-purple-500 ${fileStatusSummary.activeCount > 0 ? 'animate-spin' : ''}`;
+    const syncIconClassName = `scale-90 text-purple-500 ${fileStatusSummary.activeCount > 0 ? 'animate-spin' : ''}`;
 
     return (
         <Button

@@ -92,9 +92,9 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
                         variant="ghost-secondary"
                         onClick={() => setShowFileStatusDetails(!showFileStatusDetails)}
                         rightIcon={showFileStatusDetails ? ArrowDownIcon : ArrowRightIcon}
-                        iconClassName="mr-0 scale-14"
+                        iconClassName="mr-0"
                     >
-                        <span className="font-semibold text-lg mb-1" style={{ marginLeft: '-3px' }}>
+                        <span className="font-semibold text-sm mb-1" style={{ marginLeft: '-3px' }}>
                             File Status
                         </span>
                     </Button>
