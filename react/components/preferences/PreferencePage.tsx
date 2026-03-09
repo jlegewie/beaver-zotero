@@ -224,8 +224,8 @@ const PreferencePage: React.FC = () => {
             onClick: () => handleAddAction('items'),
             customContent: (
                 <div className="display-flex flex-col">
-                    <span className="text-sm font-color-primary">Items</span>
-                    <span className="text-xs font-color-tertiary">Works with selected library items</span>
+                    <span className="text-sm font-color-primary">Item</span>
+                    <span className="text-sm font-color-tertiary">Works with library items</span>
                 </div>
             ),
         },
@@ -234,28 +234,28 @@ const PreferencePage: React.FC = () => {
             onClick: () => handleAddAction('attachment'),
             customContent: (
                 <div className="display-flex flex-col">
-                    <span className="text-sm font-color-primary">PDF</span>
-                    <span className="text-xs font-color-tertiary">Works with the open PDF or attachment</span>
+                    <span className="text-sm font-color-primary">PDF Attachment</span>
+                    <span className="text-sm font-color-tertiary">Works with PDF attachments</span>
                 </div>
             ),
         },
-        {
-            label: 'Note',
-            onClick: () => handleAddAction('note'),
-            customContent: (
-                <div className="display-flex flex-col">
-                    <span className="text-sm font-color-primary">Note</span>
-                    <span className="text-xs font-color-tertiary">Works with the active note</span>
-                </div>
-            ),
-        },
+        // {
+        //     label: 'Note',
+        //     onClick: () => handleAddAction('note'),
+        //     customContent: (
+        //         <div className="display-flex flex-col">
+        //             <span className="text-sm font-color-primary">Note</span>
+        //             <span className="text-sm font-color-tertiary">Works with the Zotero notes</span>
+        //         </div>
+        //     ),
+        // },
         {
             label: 'Collection',
             onClick: () => handleAddAction('collection'),
             customContent: (
                 <div className="display-flex flex-col">
                     <span className="text-sm font-color-primary">Collection</span>
-                    <span className="text-xs font-color-tertiary">Works with a collection</span>
+                    <span className="text-sm font-color-tertiary">Works with collections</span>
                 </div>
             ),
         },
@@ -265,7 +265,7 @@ const PreferencePage: React.FC = () => {
             customContent: (
                 <div className="display-flex flex-col">
                     <span className="text-sm font-color-primary">Global</span>
-                    <span className="text-xs font-color-tertiary">Works anywhere, no context needed</span>
+                    <span className="text-sm font-color-tertiary">Works anywhere, no context needed</span>
                 </div>
             ),
         },
