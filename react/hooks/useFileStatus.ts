@@ -14,6 +14,13 @@ export interface FileStatusConnection {
     lastDataReceived?: Date;
 }
 
+export interface FileStatusFetchResult {
+    fileStatus: FileStatus | null;
+    error: string | null;
+}
+
+let activeUseFileStatusInstances = 0;
+
 const formatStatus = (statusData: any): FileStatus => ({
     user_id: statusData.user_id,
     total_files: Number(statusData.total_files || 0),
@@ -42,9 +49,9 @@ const formatStatus = (statusData: any): FileStatus => ({
 /**
  * Fetches and formats the file status for a given user
  * @param userId The ID of the user
- * @returns The formatted file status, or null if not found or an error occurs
+ * @returns The formatted file status and any fetch error
  */
-export const fetchFileStatus = async (userId: string): Promise<FileStatus | null> => {
+export const fetchFileStatusResult = async (userId: string): Promise<FileStatusFetchResult> => {
     try {
         // Set select string
         const selectString = 'user_id,total_files,upload_not_uploaded,upload_pending,upload_completed,upload_failed,md_queued,md_processing,md_completed,md_failed_upload,md_failed_system,md_failed_user,md_plan_limit,md_unsupported_file,page_balance_exhausted,indexing_complete,indexing_progress,last_updated_at';
@@ -58,15 +65,29 @@ export const fetchFileStatus = async (userId: string): Promise<FileStatus | null
 
         if (error) {
             logger(`useFileStatus: Error fetching file status for user ${userId}: ${error.message}`, 3);
-            return null;
+            return {
+                fileStatus: null,
+                error: error.message,
+            };
         }
 
-        return data ? formatStatus(data) : null;
+        return {
+            fileStatus: data ? formatStatus(data) : null,
+            error: null,
+        };
     } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
         logger(`useFileStatus: Exception fetching file status for user ${userId}: ${errorMessage}`, 3);
-        return null;
+        return {
+            fileStatus: null,
+            error: errorMessage,
+        };
     }
+};
+
+export const fetchFileStatus = async (userId: string): Promise<FileStatus | null> => {
+    const { fileStatus } = await fetchFileStatusResult(userId);
+    return fileStatus;
 };
 
 /**
@@ -140,7 +161,7 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
             }
 
             // Re-fetch initial data
-            const initialStatus = await fetchFileStatus(userId);
+            const { fileStatus: initialStatus } = await fetchFileStatusResult(userId);
             setFileStatus(initialStatus);
 
             // Create new subscription
@@ -234,7 +255,7 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
             }
 
             // Fetch initial data
-            const initialStatus = await fetchFileStatus(userId);
+            const { fileStatus: initialStatus } = await fetchFileStatusResult(userId);
             setFileStatus(initialStatus);
 
             // Set auth for private channels (if needed)
@@ -277,7 +298,7 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
     }, [handleDataChange, handleSubscriptionStatus, setFileStatus]);
 
     // Cleanup connection
-    const cleanupConnection = useCallback(async () => {
+    const cleanupConnection = useCallback(async (resetSharedState: boolean = activeUseFileStatusInstances <= 1) => {
         // Clear any pending reconnection attempts
         if (reconnectTimeoutRef.current) {
             clearTimeout(reconnectTimeoutRef.current);
@@ -299,10 +320,20 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
                 lastError: null,
                 lastDataReceived: undefined
             });
-            setConnectionStatusAtom('idle');
-            setFileStatus(null);
+            if (resetSharedState) {
+                setConnectionStatusAtom('idle');
+                setFileStatus(null);
+            }
         }
-    }, [setFileStatus]);
+    }, [setConnectionStatusAtom, setFileStatus]);
+
+    useEffect(() => {
+        activeUseFileStatusInstances += 1;
+
+        return () => {
+            activeUseFileStatusInstances = Math.max(0, activeUseFileStatusInstances - 1);
+        };
+    }, []);
 
     // Main effect for managing connection lifecycle
     useEffect(() => {
@@ -337,7 +368,7 @@ export const useFileStatus = (enabled: boolean = true): FileStatusConnection => 
 
         // Cleanup on unmount
         return () => {
-            cleanupConnection();
+            cleanupConnection(activeUseFileStatusInstances <= 1);
         };
     }, [enabled, isDatabaseSyncSupported, isAuthenticated, user, hasAuthorizedProAccess, isDeviceAuthorized, setupConnection, cleanupConnection]);
 

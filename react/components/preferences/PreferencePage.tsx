@@ -26,7 +26,7 @@ import CustomInstructionsSection from "./CustomInstructionsSection";
 import ApiKeysSection from "./ApiKeysSection";
 import FileStatusDisplay from "../status/FileStatusDisplay";
 import { connectionStatusAtom, fileStatusAtom } from "../../atoms/files";
-import { fetchFileStatus } from "../../hooks/useFileStatus";
+import { fetchFileStatusResult } from "../../hooks/useFileStatus";
 
 
 const PreferencePage: React.FC = () => {
@@ -71,7 +71,12 @@ const PreferencePage: React.FC = () => {
         setIsManualRefreshing(true);
         logger(`PreferencePage: Manually fetching file status (one-time fetch) for user ${user.id}`, 1);
         try {
-            const status = await fetchFileStatus(user.id);
+            const { fileStatus: status, error } = await fetchFileStatusResult(user.id);
+            if (error) {
+                logger(`PreferencePage: Manual file status refresh failed: ${error}`, 1);
+                return;
+            }
+
             setFileStatus(status);
             setManualRefreshTime(new Date());
             setNow(Date.now());
