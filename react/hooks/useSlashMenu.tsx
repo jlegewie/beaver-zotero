@@ -1,11 +1,12 @@
-import { useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { PlusSignIcon } from '../components/icons/icons';
+import { CSSIcon, CSSItemTypeIcon } from '../components/icons/zotero';
 import { currentMessageContentAtom, currentMessageItemsAtom } from '../atoms/messageComposition';
 import { isWSChatPendingAtom } from '../atoms/agentRunAtoms';
 import { actionsAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom } from '../atoms/actions';
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
-import { computeActionGroups } from '../utils/actionVisibility';
+import { computeActionGroups, GroupIconInfo } from '../utils/actionVisibility';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
 import { Action, ActionTargetType } from '../types/actions';
@@ -131,7 +132,24 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
             }
             // Header after actions (after reverse, header appears above actions)
             if (showHeaders && group.label !== lastHeader) {
-                items.push({ label: group.label, onClick: () => {}, isGroupHeader: true });
+                const headerItem: SearchMenuItem = {
+                    label: group.label,
+                    onClick: () => {},
+                    isGroupHeader: true,
+                };
+                if (group.iconInfo) {
+                    headerItem.customContent = (
+                        <span className="display-flex items-center gap-1 truncate">
+                            <span className="scale-80 flex-shrink-0 opacity-50" style={{ filter: 'grayscale(1)' }}>
+                                {group.iconInfo.type === 'item-type'
+                                    ? <CSSItemTypeIcon itemType={group.iconInfo.name} className="icon-16" />
+                                    : <CSSIcon name={group.iconInfo.name} className="icon-16" />}
+                            </span>
+                            <span className="truncate">{group.label}</span>
+                        </span>
+                    );
+                }
+                items.push(headerItem);
                 lastHeader = group.label;
             }
         }

@@ -8,7 +8,8 @@ import { actionsForContextAtom, actionContextAtom, markActionUsedAtom, sendResol
 import { isSupportedItem } from "../../src/utils/sync";
 import { getDisplayNameFromItem } from "../utils/sourceUtils";
 import { truncateText } from "../utils/stringUtils";
-import { ActionContext } from "../utils/actionVisibility";
+import { ActionContext, GroupIconInfo, getIconInfoForItem } from "../utils/actionVisibility";
+import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
 
 const MAX_CONTEXT_ITEM_LENGTH = 50;
 const MAX_VISIBLE_ITEMS = 2;
@@ -16,6 +17,7 @@ const MAX_VISIBLE_ITEMS = 2;
 interface ActiveTarget {
     targetType: ActionTargetType;
     label: string | null;
+    iconInfo?: GroupIconInfo;
 }
 
 /**
@@ -39,7 +41,7 @@ function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
     if (zotero.type === 'reader') {
         const att = zotero.readerAttachment;
         if (att && isSupportedItem(att)) {
-            return { targetType: 'attachment', label: getItemLabel(att) };
+            return { targetType: 'attachment', label: getItemLabel(att), iconInfo: getIconInfoForItem(att) };
         }
     }
 
@@ -47,9 +49,9 @@ function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
     if (zotero.type === 'note') {
         const noteItem = zotero.noteItem;
         const label = noteItem
-            ? `Note "${truncateText(noteItem.getNoteTitle(), MAX_CONTEXT_ITEM_LENGTH)}"`
+            ? truncateText(noteItem.getNoteTitle(), MAX_CONTEXT_ITEM_LENGTH)
             : null;
-        return { targetType: 'note', label };
+        return { targetType: 'note', label, iconInfo: { type: 'css-icon', name: 'note' } };
     }
 
     // 3. Manual items
@@ -57,7 +59,7 @@ function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
     if (manualSupported.length > 0) {
         const allAttachments = manualSupported.every(i => i.isAttachment());
         const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
-        return { targetType, label: getManualItemsLabel(manualSupported) };
+        return { targetType, label: getManualItemsLabel(manualSupported), iconInfo: getIconInfoForItem(manualSupported[0]) };
     }
 
     // 4. Selected items
@@ -66,7 +68,7 @@ function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
         if (supported.length > 0) {
             const allAttachments = supported.every(i => i.isAttachment());
             const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
-            return { targetType, label: getSelectedItemsLabel(supported) };
+            return { targetType, label: getSelectedItemsLabel(supported), iconInfo: getIconInfoForItem(supported[0]) };
         }
     }
 
@@ -74,7 +76,8 @@ function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
     if (zotero.libraryView.treeRowType === 'collection') {
         return {
             targetType: 'collection',
-            label: `Collection "${zotero.libraryView.collectionName}"`,
+            label: zotero.libraryView.collectionName ?? null,
+            iconInfo: { type: 'css-icon', name: 'collection' },
         };
     }
 
@@ -154,8 +157,15 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     return (
         <div className={className} style={style}>
             {contextLabel && (
-                <div className="text-sm font-color-tertiary font-medium" style={{ padding: '4px 8px 0' }}>
-                    {contextLabel}
+                <div className="text-sm font-color-tertiary font-medium display-flex items-center gap-1" style={{ padding: '4px 8px 0' }}>
+                    {active?.iconInfo && (
+                        <span className="scale-80 flex-shrink-0 opacity-50" style={{ filter: 'grayscale(1)' }}>
+                            {active.iconInfo.type === 'item-type'
+                                ? <CSSItemTypeIcon itemType={active.iconInfo.name} className="icon-16" />
+                                : <CSSIcon name={active.iconInfo.name} className="icon-16" />}
+                        </span>
+                    )}
+                    <span className="truncate">{contextLabel}</span>
                 </div>
             )}
             {actions.map((action) => (

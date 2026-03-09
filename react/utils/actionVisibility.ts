@@ -80,6 +80,12 @@ export function isActionVisible(action: Action, ctx: ActionContext): boolean {
 // Action groups for the slash menu
 // ---------------------------------------------------------------------------
 
+/** Icon info for group headers — rendered by UI components */
+export interface GroupIconInfo {
+    type: 'css-icon' | 'item-type';
+    name: string;
+}
+
 export interface ActionGroup {
     id: string;
     label: string;
@@ -87,6 +93,19 @@ export interface ActionGroup {
     /** When set, resolveTargetTypeContext is called with this type on execution.
      *  When undefined (manual items group), no auto-attach — user's items are already in message. */
     targetType?: ActionTargetType;
+    /** Icon to display in group headers */
+    iconInfo?: GroupIconInfo;
+}
+
+/** Get icon info for an item, following the same parent-resolution as getItemLabel */
+export function getIconInfoForItem(item: Zotero.Item): GroupIconInfo | undefined {
+    try {
+        const target = item.isRegularItem() ? item : (item.parentItem ?? item);
+        const name = target.getItemTypeIconName();
+        return name ? { type: 'item-type', name } : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 /** Check if two item sets are identical by libraryID-key */
@@ -124,7 +143,8 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
         });
 
         if (readerActions.length > 0) {
-            groups.push({ id: 'reader', label, actions: readerActions, targetType: 'attachment' });
+            const iconInfo = getIconInfoForItem(readerParent ?? readerAtt!);
+            groups.push({ id: 'reader', label, actions: readerActions, targetType: 'attachment', iconInfo });
         }
     }
 
@@ -144,8 +164,9 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
 
         if (manualActions.length > 0) {
             const label = getManualLabel(manualSupported);
+            const iconInfo = getIconInfoForItem(manualSupported[0]);
             // targetType undefined → no auto-attach, user's items already in message
-            groups.push({ id: 'manual', label, actions: manualActions, targetType: undefined });
+            groups.push({ id: 'manual', label, actions: manualActions, targetType: undefined, iconInfo });
         }
     }
 
@@ -168,10 +189,11 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
 
                 if (selectedActions.length > 0) {
                     const label = getSelectedLabel(selectedSupported);
+                    const iconInfo = getIconInfoForItem(selectedSupported[0]);
                     // For selected items, figure out the dominant target type
                     const targetType: ActionTargetType = selectedAttachments.length > 0 && selectedRegular.length === 0
                         ? 'attachment' : 'items';
-                    groups.push({ id: 'selected', label, actions: selectedActions, targetType });
+                    groups.push({ id: 'selected', label, actions: selectedActions, targetType, iconInfo });
                 }
             }
         }
@@ -183,9 +205,9 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
         if (noteActions.length > 0) {
             const noteItem = ctx.zotero.noteItem;
             const label = noteItem
-                ? `"${truncateText(noteItem.getNoteTitle(), MAX_LABEL_ITEM_LENGTH)}" (note)`
-                : 'note';
-            groups.push({ id: 'note', label, actions: noteActions, targetType: 'note' });
+                ? truncateText(noteItem.getNoteTitle(), MAX_LABEL_ITEM_LENGTH)
+                : 'Note';
+            groups.push({ id: 'note', label, actions: noteActions, targetType: 'note', iconInfo: { type: 'css-icon', name: 'note' } });
         }
     }
 
@@ -193,12 +215,13 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     if (ctx.zotero.libraryView.treeRowType === 'collection') {
         const collectionActions = allActions.filter(a => a.targetType === 'collection');
         if (collectionActions.length > 0) {
-            const name = ctx.zotero.libraryView.collectionName ?? 'collection';
+            const name = ctx.zotero.libraryView.collectionName ?? 'Collection';
             groups.push({
                 id: 'collection',
-                label: `"${name}" (collection)`,
+                label: name,
                 actions: collectionActions,
                 targetType: 'collection',
+                iconInfo: { type: 'css-icon', name: 'collection' },
             });
         }
     }
