@@ -489,7 +489,7 @@
 /* Action target type badge — base */
 [id^="beaver-pane-"] .action-target-badge {
     display: inline-block;
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1;
     padding: 2px 6px;
     border-radius: 4px;

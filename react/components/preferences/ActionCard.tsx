@@ -141,12 +141,12 @@ const ActionCard: React.FC<ActionCardProps> = ({
         return (
             <div
                 ref={cardRef}
-                className={`action-card ${hasBorder ? 'border-top-quinary' : ''}`}
+                className={`action-card ${hasBorder ? 'border-top-popup' : ''}`}
                 onClick={handleEnterEdit}
             >
                 <div className="display-flex flex-col flex-1 min-w-0" style={{ gap: '3px' }}>
-                    <div className="display-flex flex-row items-center gap-2">
-                        <div className="font-color-primary text-sm font-medium">
+                    <div className="display-flex flex-row items-center gap-3">
+                        <div className="font-color-primary text-base font-medium">
                             {action.title || <span className="font-color-tertiary">Untitled action</span>}
                         </div>
                         <span className="action-target-badge" data-type={action.targetType}>
@@ -154,7 +154,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         </span>
                     </div>
                     {action.text && (
-                        <div className="font-color-secondary text-sm action-card-preview">
+                        <div className="font-color-secondary text-base action-card-preview">
                             {action.text}
                         </div>
                     )}
@@ -165,7 +165,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
 
     // --- Edit mode ---
     return (
-        <div ref={cardRef} className={`action-card action-card-editing ${hasBorder ? 'border-top-quinary' : ''}`}>
+        <div ref={cardRef} className={`action-card action-card-editing ${hasBorder ? 'border-top-popup' : ''}`}>
             <input
                 ref={titleInputRef}
                 type="text"
@@ -173,7 +173,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                 onChange={(e) => setEditTitle(e.target.value)}
                 placeholder="Action title..."
                 maxLength={MAX_TITLE_LENGTH}
-                className="chat-input text-sm font-medium font-color-primary action-edit-title"
+                className="chat-input text-base font-medium font-color-primary action-edit-title font-medium"
             />
 
             <textarea
@@ -186,7 +186,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                 }}
                 placeholder="Enter prompt text... Use {{active_item}}, {{selected_items}}, or {{recent_items}} to insert context."
                 maxLength={MAX_PROMPT_TEXT_LENGTH}
-                className="chat-input custom-prompt-edit-textarea text-sm"
+                className="chat-input custom-prompt-edit-textarea text-base"
                 rows={2}
             />
 
@@ -200,7 +200,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         className="action-target-badge"
                         dataType={editTargetType}
                         customContent={<span>{TARGET_TYPE_LABELS[editTargetType]}</span>}
-                        style={{ padding: '2px 6px', fontSize: '12px' }}
+                        style={{ padding: '2px 6px', fontSize: '13px' }}
                     />
                     {isBuiltin && isOverridden && onResetToDefault && (
                         <Button
