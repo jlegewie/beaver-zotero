@@ -183,8 +183,8 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
         if (noteActions.length > 0) {
             const noteItem = ctx.zotero.noteItem;
             const label = noteItem
-                ? `For "${truncateText(noteItem.getNoteTitle(), MAX_LABEL_ITEM_LENGTH)}" (note)`
-                : 'For note';
+                ? `"${truncateText(noteItem.getNoteTitle(), MAX_LABEL_ITEM_LENGTH)}" (note)`
+                : 'note';
             groups.push({ id: 'note', label, actions: noteActions, targetType: 'note' });
         }
     }
@@ -196,7 +196,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
             const name = ctx.zotero.libraryView.collectionName ?? 'collection';
             groups.push({
                 id: 'collection',
-                label: `For "${name}" (collection)`,
+                label: `"${name}" (collection)`,
                 actions: collectionActions,
                 targetType: 'collection',
             });
@@ -219,17 +219,17 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
 function getManualLabel(items: Zotero.Item[]): string {
     if (items.length <= MAX_LABEL_ITEMS) {
         const names = items.map(i => getItemLabel(i));
-        return `For ${names.join(', ')} (attached)`;
+        return `${names.join(', ')} (attached)`;
     }
-    return `For ${items.length} attached items`;
+    return `${items.length} attached items`;
 }
 
 function getSelectedLabel(items: Zotero.Item[]): string {
     if (items.length <= MAX_LABEL_ITEMS) {
         const names = items.map(i => getItemLabel(i));
-        return `For ${names.join(', ')}`;
+        return `${names.join(', ')}`;
     }
-    return `For ${items.length} selected items`;
+    return `${items.length} selected items`;
 }
 
 function getItemLabel(item: Zotero.Item): string {
