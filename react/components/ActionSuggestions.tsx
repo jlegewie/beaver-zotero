@@ -3,7 +3,7 @@ import Button from "./ui/Button";
 import { useAtomValue, useSetAtom } from "jotai";
 import { isStreamingAtom } from "../agents/atoms";
 import { isWSChatPendingAtom } from "../atoms/agentRunAtoms";
-import { Action } from "../types/actions";
+import { Action, ActionTargetType } from "../types/actions";
 import { actionsForContextAtom, markActionUsedAtom, sendResolvedActionAtom } from "../atoms/actions";
 import { zoteroContextAtom, ZoteroContext } from "../atoms/zoteroContext";
 import { getDisplayNameFromItem } from "../utils/sourceUtils";
@@ -11,6 +11,21 @@ import { truncateText } from "../utils/stringUtils";
 
 const MAX_CONTEXT_ITEM_LENGTH = 50;
 const MAX_VISIBLE_ITEMS = 2;
+
+/**
+ * Maps the current Zotero context to the single winning action target type.
+ * More specific intent wins: items > collection, reader > library state.
+ * Returns null when no specific context is active (global fallback).
+ */
+function getActiveTargetType(context: ZoteroContext): ActionTargetType | null {
+    switch (context.type) {
+        case 'reader': return 'attachment';
+        case 'note': return 'note';
+        case 'items_selected': return 'items';
+        case 'collection': return 'collection';
+        default: return null;
+    }
+}
 
 function getContextLabel(context: ZoteroContext): string | null {
     switch (context.type) {
@@ -56,10 +71,21 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     const markActionUsed = useSetAtom(markActionUsedAtom);
     const context = useAtomValue(zoteroContextAtom);
 
-    const contextActions = allActions.filter(a => a.targetType !== "global");
-    const actions = showGlobal
-        ? allActions
-        : contextActions.length > 0 ? contextActions : allActions;
+    // Determine the single winning target type — never mix types
+    const activeTarget = getActiveTargetType(context);
+    const targetActions = activeTarget
+        ? allActions.filter(a => a.targetType === activeTarget)
+        : [];
+    const globalActions = allActions.filter(a => a.targetType === 'global');
+
+    let actions: Action[];
+    if (targetActions.length > 0) {
+        // Context-specific actions found — add globals based on showGlobal
+        actions = showGlobal ? [...targetActions, ...globalActions] : targetActions;
+    } else {
+        // No context-specific actions (or no active context) — fall back to global
+        actions = globalActions;
+    }
 
     const handleAction = async (action: Action) => {
         if (isPending || isStreaming || action.text.length === 0) return;
@@ -70,7 +96,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     if (actions.length === 0) return null;
 
     // Only show context label when context-specific actions are displayed
-    const contextLabel = contextActions.length > 0 ? getContextLabel(context) : null;
+    const contextLabel = targetActions.length > 0 ? getContextLabel(context) : null;
 
     return (
         <div className={className} style={style}>
