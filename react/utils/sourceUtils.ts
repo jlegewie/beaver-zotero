@@ -34,7 +34,7 @@ export function getDisplayNameFromItem(item: Zotero.Item, count: number | null =
     } else if(item.isAttachment() && !item.parentItem) {
         displayName = item.getField('title') || '';
     } else {
-        const firstCreator = item.firstCreator || 'Unknown Author';
+        const firstCreator = item.firstCreator || item.getField('title') || 'Unknown Author';
         const year = item.getField('date')?.match(/\d{4}/)?.[0] || '';
         displayName = `${firstCreator}${year ? ` ${year}` : ''}`;
     }

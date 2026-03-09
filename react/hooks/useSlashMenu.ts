@@ -3,11 +3,12 @@ import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { PlusSignIcon } from '../components/icons/icons';
 import { currentMessageContentAtom, currentMessageItemsAtom } from '../atoms/messageComposition';
 import { isWSChatPendingAtom } from '../atoms/agentRunAtoms';
-import { actionsAtom, actionsForContextAtom, markActionUsedAtom, sendResolvedActionAtom } from '../atoms/actions';
+import { actionsAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom } from '../atoms/actions';
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
+import { computeActionGroups } from '../utils/actionVisibility';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
-import { Action } from '../types/actions';
+import { Action, ActionTargetType } from '../types/actions';
 import { MenuPosition, SearchMenuItem } from '../components/ui/menus/SearchMenu';
 
 export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | null>) {
@@ -15,7 +16,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
     const [, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
     const allActions = useAtomValue(actionsAtom);
-    const contextActions = useAtomValue(actionsForContextAtom);
+    const ctx = useAtomValue(actionContextAtom);
     const markActionUsed = useSetAtom(markActionUsedAtom);
     const sendResolvedAction = useSetAtom(sendResolvedActionAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
@@ -25,10 +26,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
     const [slashSearchQuery, setSlashSearchQuery] = useState('');
     const preSlashTextRef = useRef('');
 
-    // Set of action IDs visible for current context (used for enabled/disabled split)
-    const contextActionIds = useMemo(() => new Set(contextActions.map(a => a.id)), [contextActions]);
-
-    const handleSlashSelect = useCallback(async (action: Action) => {
+    const handleSlashSelect = useCallback(async (action: Action, groupTargetType?: ActionTargetType) => {
         const pre = preSlashTextRef.current;
         const fullPromptText = pre.length > 0
             ? `${pre}\n\n${action.text}`.trim()
@@ -37,7 +35,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
         setSlashSearchQuery('');
 
         if (isPending) {
-            const { text: resolvedText, items, emptyItemVariables } = await resolvePromptVariables(fullPromptText, action.targetType);
+            const { text: resolvedText, items, emptyItemVariables } = await resolvePromptVariables(fullPromptText, groupTargetType);
             if (emptyItemVariables.length > 0) {
                 addPopupMessage({ type: 'warning', title: 'Action skipped', text: EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.', expire: true, duration: 4000 });
                 setTimeout(() => inputRef.current?.focus(), 0);
@@ -55,7 +53,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
         } else {
             setMessageContent('');
             markActionUsed(action.id);
-            sendResolvedAction({ text: fullPromptText, targetType: action.targetType });
+            sendResolvedAction({ text: fullPromptText, targetType: groupTargetType });
         }
         setTimeout(() => inputRef.current?.focus(), 0);
     }, [isPending, sendResolvedAction, markActionUsed]);
@@ -67,62 +65,84 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
 
     const slashMenuItems = useMemo<SearchMenuItem[]>(() => {
         const query = slashSearchQuery.toLowerCase();
+        const groups = computeActionGroups(allActions, ctx);
+
+        // "Create Action" footer
+        const createActionItem: SearchMenuItem = {
+            label: 'Create Action',
+            icon: PlusSignIcon,
+            onClick: () => {
+                setIsSlashMenuOpen(false);
+                setSlashSearchQuery('');
+                openPreferencesWindow('prompts');
+            },
+        };
+
+        const sortByRelevance = (actions: Action[]): Action[] => {
+            return [...actions].sort((a, b) => {
+                if (query) {
+                    const posA = a.title.toLowerCase().indexOf(query);
+                    const posB = b.title.toLowerCase().indexOf(query);
+                    if (posA !== posB) return posA - posB;
+                }
+                if (a.lastUsed && !b.lastUsed) return -1;
+                if (!a.lastUsed && b.lastUsed) return 1;
+                if (a.lastUsed && b.lastUsed) {
+                    const diff = new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime();
+                    if (diff !== 0) return diff;
+                }
+                return (a.sortOrder ?? 999) - (b.sortOrder ?? 999);
+            });
+        };
+
+        // Filter each group's actions by query, sort, and drop empty groups
+        const visibleGroups = groups
+            .map(g => ({
+                ...g,
+                filtered: sortByRelevance(
+                    query
+                        ? g.actions.filter(a => a.title.toLowerCase().includes(query))
+                        : g.actions
+                ),
+            }))
+            .filter(g => g.filtered.length > 0);
+
+        // Always show headers when there are context-specific groups (non-global)
+        const hasContextGroup = visibleGroups.some(g => g.id !== 'global');
+        const showHeaders = hasContextGroup;
+
+        // The slash menu uses verticalPosition="above", so SearchMenu reverses
+        // the array for display. We build in reverse visual order:
+        //   - Groups: most relevant first (ends up at bottom after reverse)
+        //   - Within each group: sorted actions first, then header
+        //     (after reverse: header above its actions)
+        //   - Create Action last (ends up at top after reverse)
         const items: SearchMenuItem[] = [];
 
-        const filtered = allActions.filter(action =>
-            !query || action.title.toLowerCase().includes(query)
-        );
-
-        // "Create Action" footer (visually at bottom)
-        const createActionItem: SearchMenuItem[] = !query || filtered.length === 0
-            ? [{
-                label: 'Create Action',
-                icon: PlusSignIcon,
-                onClick: () => {
-                    setIsSlashMenuOpen(false);
-                    setSlashSearchQuery('');
-                    openPreferencesWindow('prompts');
-                },
-            }] : [];
-
-        const enabled = filtered.filter(a => contextActionIds.has(a.id));
-        const disabled = filtered.filter(a => !contextActionIds.has(a.id));
-
-        const sortByRelevance = (a: Action, b: Action): number => {
-            if (query) {
-                const posA = a.title.toLowerCase().indexOf(query);
-                const posB = b.title.toLowerCase().indexOf(query);
-                if (posA !== posB) return posA - posB;
+        let lastHeader: string | null = null;
+        for (const group of visibleGroups) {
+            // Actions first (sorted best-first; after reverse they appear
+            // below header with best at bottom, closest to cursor)
+            for (const action of group.filtered) {
+                items.push({
+                    label: action.title,
+                    onClick: () => handleSlashSelect(action, group.targetType),
+                });
             }
-            if (a.lastUsed && !b.lastUsed) return -1;
-            if (!a.lastUsed && b.lastUsed) return 1;
-            if (a.lastUsed && b.lastUsed) {
-                const diff = new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime();
-                if (diff !== 0) return diff;
+            // Header after actions (after reverse, header appears above actions)
+            if (showHeaders && group.label !== lastHeader) {
+                items.push({ label: group.label, onClick: () => {}, isGroupHeader: true });
+                lastHeader = group.label;
             }
-            return (a.sortOrder ?? 999) - (b.sortOrder ?? 999);
-        };
-        enabled.sort(sortByRelevance);
-        disabled.sort(sortByRelevance);
-
-        // Disabled items go first in array (visually at bottom after reverse)
-        for (let i = disabled.length - 1; i >= 0; i--) {
-            items.push({
-                label: disabled[i].title,
-                onClick: () => handleSlashSelect(disabled[i]),
-                disabled: true,
-            });
-        }
-        // Enabled items go after (visually above disabled after reverse)
-        for (let i = enabled.length - 1; i >= 0; i--) {
-            items.push({
-                label: enabled[i].title,
-                onClick: () => handleSlashSelect(enabled[i]),
-            });
         }
 
-        return [...items.reverse(), ...createActionItem];
-    }, [allActions, contextActionIds, slashSearchQuery, handleSlashSelect]);
+        // Create Action at end of array → top of visual menu after reverse
+        if (!query || items.length === 0) {
+            items.push(createActionItem);
+        }
+
+        return items;
+    }, [allActions, ctx, slashSearchQuery, handleSlashSelect]);
 
     /** Handle onChange for the textarea when the slash menu is open. Returns true if handled. */
     const handleSlashMenuChange = useCallback((value: string): boolean => {

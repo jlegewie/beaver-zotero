@@ -4,52 +4,89 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { isStreamingAtom } from "../agents/atoms";
 import { isWSChatPendingAtom } from "../atoms/agentRunAtoms";
 import { Action, ActionTargetType } from "../types/actions";
-import { actionsForContextAtom, markActionUsedAtom, sendResolvedActionAtom } from "../atoms/actions";
-import { zoteroContextAtom, ZoteroContext } from "../atoms/zoteroContext";
+import { actionsForContextAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom } from "../atoms/actions";
 import { isSupportedItem } from "../../src/utils/sync";
 import { getDisplayNameFromItem } from "../utils/sourceUtils";
 import { truncateText } from "../utils/stringUtils";
+import { ActionContext } from "../utils/actionVisibility";
 
 const MAX_CONTEXT_ITEM_LENGTH = 50;
 const MAX_VISIBLE_ITEMS = 2;
 
-/**
- * Maps the current Zotero context to the single winning action target type.
- * More specific intent wins: items > collection, reader > library state.
- * Returns null when no specific context is active (global fallback).
- *
- * Unsupported items (non-PDF attachments, notes, annotations) are excluded.
- * When all selected items are unsupported, falls back to null (global actions).
- */
-function getActiveTargetType(context: ZoteroContext): ActionTargetType | null {
-    switch (context.type) {
-        case 'reader': {
-            // Only show attachment actions if the reader item is supported (PDF)
-            const att = context.readerAttachment;
-            return att && isSupportedItem(att) ? 'attachment' : null;
-        }
-        case 'note': return 'note';
-        case 'items_selected': {
-            const items = context.selectedItems;
-            // Filter to items Beaver can actually process
-            const supported = items.filter(i => isSupportedItem(i));
-            if (supported.length === 0) return null;
-            if (supported.every(i => i.isAttachment())) {
-                return 'attachment';
-            }
-            return 'items';
-        }
-        case 'collection': return 'collection';
-        default: return null;
-    }
+interface ActiveTarget {
+    targetType: ActionTargetType;
+    label: string | null;
 }
 
-/** Display name for any item type — regular items use author/year, others use display title */
+/**
+ * Priority chain for determining the single winning action target type.
+ *
+ * 1. Reader (non-library tab + supported PDF) → 'attachment'
+ * 2. Note (non-library tab + note) → 'note'
+ * 3. Manual items (currentMessageItemsAtom has supported items):
+ *    - All attachments → 'attachment'
+ *    - Has regular items → 'items'
+ * 4. Selected items (items_selected context with supported items):
+ *    - All attachments → 'attachment'
+ *    - Has regular items → 'items'
+ * 5. Collection (treeRowType === 'collection') → 'collection'
+ * 6. Fallback → null (global only)
+ */
+function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
+    const { zotero, manualItems } = ctx;
+
+    // 1. Reader
+    if (zotero.type === 'reader') {
+        const att = zotero.readerAttachment;
+        if (att && isSupportedItem(att)) {
+            return { targetType: 'attachment', label: getItemLabel(att) };
+        }
+    }
+
+    // 2. Note
+    if (zotero.type === 'note') {
+        const noteItem = zotero.noteItem;
+        const label = noteItem
+            ? `Note "${truncateText(noteItem.getNoteTitle(), MAX_CONTEXT_ITEM_LENGTH)}"`
+            : null;
+        return { targetType: 'note', label };
+    }
+
+    // 3. Manual items
+    const manualSupported = manualItems.filter(i => isSupportedItem(i));
+    if (manualSupported.length > 0) {
+        const allAttachments = manualSupported.every(i => i.isAttachment());
+        const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
+        return { targetType, label: getManualItemsLabel(manualSupported) };
+    }
+
+    // 4. Selected items
+    if (zotero.type === 'items_selected') {
+        const supported = zotero.selectedItems.filter(i => isSupportedItem(i));
+        if (supported.length > 0) {
+            const allAttachments = supported.every(i => i.isAttachment());
+            const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
+            return { targetType, label: getSelectedItemsLabel(supported) };
+        }
+    }
+
+    // 5. Collection
+    if (zotero.libraryView.treeRowType === 'collection') {
+        return {
+            targetType: 'collection',
+            label: `Collection "${zotero.libraryView.collectionName}"`,
+        };
+    }
+
+    // 6. No specific context
+    return null;
+}
+
+/** Display name for any item type — regular items use author/year, others use parent or display title */
 function getItemLabel(item: Zotero.Item): string {
     if (item.isRegularItem()) {
         return truncateText(getDisplayNameFromItem(item), MAX_CONTEXT_ITEM_LENGTH);
     }
-    // Attachments, annotations, etc.: prefer parent's display name, fall back to display title
     const parent = item.parentItem;
     if (parent) {
         return truncateText(getDisplayNameFromItem(parent), MAX_CONTEXT_ITEM_LENGTH);
@@ -57,33 +94,21 @@ function getItemLabel(item: Zotero.Item): string {
     return truncateText(item.getDisplayTitle(), MAX_CONTEXT_ITEM_LENGTH);
 }
 
-function getContextLabel(context: ZoteroContext): string | null {
-    switch (context.type) {
-        case 'items_selected': {
-            // Only show supported items in the context label
-            const supported = context.selectedItems.filter(i => isSupportedItem(i));
-            if (supported.length === 0) return null;
-            const names = supported
-                .slice(0, MAX_VISIBLE_ITEMS)
-                .map(i => getItemLabel(i));
-            const remaining = supported.length - MAX_VISIBLE_ITEMS;
-            if (remaining > 0) names.push(`+${remaining} more`);
-            return names.join(', ');
-        }
-        case 'reader': {
-            const att = context.readerAttachment;
-            if (!att || !isSupportedItem(att)) return null;
-            return getItemLabel(att);
-        }
-        case 'collection':
-            return `Collection "${context.libraryView.collectionName}"`;
-        case 'note': {
-            if (!context.noteItem) return null;
-            return `Note "${truncateText(context.noteItem.getNoteTitle(), MAX_CONTEXT_ITEM_LENGTH)}"`;
-        }
-        default:
-            return null;
-    }
+function formatItemNames(items: Zotero.Item[]): string {
+    const names = items
+        .slice(0, MAX_VISIBLE_ITEMS)
+        .map(i => getItemLabel(i));
+    const remaining = items.length - MAX_VISIBLE_ITEMS;
+    if (remaining > 0) names.push(`+${remaining} more`);
+    return names.join(', ');
+}
+
+function getManualItemsLabel(items: Zotero.Item[]): string {
+    return `${formatItemNames(items)} (attached)`;
+}
+
+function getSelectedItemsLabel(items: Zotero.Item[]): string {
+    return formatItemNames(items);
 }
 
 interface ActionSuggestionsProps {
@@ -99,21 +124,19 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     const allActions = useAtomValue(actionsForContextAtom);
     const sendResolvedAction = useSetAtom(sendResolvedActionAtom);
     const markActionUsed = useSetAtom(markActionUsedAtom);
-    const context = useAtomValue(zoteroContextAtom);
+    const ctx = useAtomValue(actionContextAtom);
 
     // Determine the single winning target type — never mix types
-    const activeTarget = getActiveTargetType(context);
-    const targetActions = activeTarget
-        ? allActions.filter(a => a.targetType === activeTarget)
+    const active = getActiveTarget(ctx);
+    const targetActions = active
+        ? allActions.filter(a => a.targetType === active.targetType)
         : [];
     const globalActions = allActions.filter(a => a.targetType === 'global');
 
     let actions: Action[];
     if (targetActions.length > 0) {
-        // Context-specific actions found — add globals based on showGlobal
         actions = showGlobal ? [...targetActions, ...globalActions] : targetActions;
     } else {
-        // No context-specific actions (or no active context) — fall back to global
         actions = globalActions;
     }
 
@@ -126,7 +149,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     if (actions.length === 0) return null;
 
     // Only show context label when context-specific actions are displayed
-    const contextLabel = targetActions.length > 0 ? getContextLabel(context) : null;
+    const contextLabel = targetActions.length > 0 ? active?.label ?? null : null;
 
     return (
         <div className={className} style={style}>
@@ -143,7 +166,6 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                     disabled={isPending || isStreaming}
                     className="w-full justify-between"
                     style={{ padding: '6px 8px' }}
-                    // title={action.title}
                 >
                     <span className="text-base truncate">
                         {action.title}

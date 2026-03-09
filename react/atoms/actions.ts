@@ -15,7 +15,7 @@ import {
     isBuiltinAction,
 } from '../types/actionStorage';
 import { zoteroContextAtom } from './zoteroContext';
-import { isActionVisible } from '../utils/actionVisibility';
+import { isActionVisible, ActionContext } from '../utils/actionVisibility';
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { currentMessageItemsAtom } from './messageComposition';
@@ -151,13 +151,22 @@ export const markActionUsedAtom = atom(
 );
 
 // ---------------------------------------------------------------------------
+// Derived: action context (Zotero state + manually attached items)
+// ---------------------------------------------------------------------------
+
+export const actionContextAtom = atom<ActionContext>((get) => ({
+    zotero: get(zoteroContextAtom),
+    manualItems: get(currentMessageItemsAtom),
+}));
+
+// ---------------------------------------------------------------------------
 // Derived: context-filtered actions
 // ---------------------------------------------------------------------------
 
 export const actionsForContextAtom = atom<Action[]>((get) => {
     const actions = get(actionsAtom);
-    const context = get(zoteroContextAtom);
-    return actions.filter(a => isActionVisible(a, context));
+    const ctx = get(actionContextAtom);
+    return actions.filter(a => isActionVisible(a, ctx));
 });
 
 // ---------------------------------------------------------------------------
