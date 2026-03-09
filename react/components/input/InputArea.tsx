@@ -172,7 +172,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     return (
         <div
-            className="user-message-display shadow-md shadow-md-top"
+            className="user-message-display"
             onClick={handleContainerClick}
             style={{ minHeight: 'fit-content' }}
         >

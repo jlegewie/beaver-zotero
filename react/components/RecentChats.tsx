@@ -215,7 +215,7 @@ const RecentChats: React.FC = () => {
     if (!isLoaded && threads.length === 0) {
         if (!isFetching) return null; // not yet started
         return (
-            <div className="recent-chats">
+            <div>
                 <div className="recent-chats-header">
                     <span className="recent-chats-label">
                         Recent <Spinner size={11} />

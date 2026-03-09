@@ -10,6 +10,10 @@ import { getDisplayNameFromItem } from "../utils/sourceUtils";
 import { truncateText } from "../utils/stringUtils";
 import { ActionContext, GroupIconInfo, getIconInfoForItem } from "../utils/actionVisibility";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
+import Icon from "./icons/Icon";
+import { SettingsIcon, ZapIcon } from './icons/icons';
+import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
+import IconButton from "./ui/IconButton";
 
 const MAX_CONTEXT_ITEM_LENGTH = 50;
 const MAX_VISIBLE_ITEMS = 2;
@@ -107,7 +111,7 @@ function formatItemNames(items: Zotero.Item[]): string {
 }
 
 function getManualItemsLabel(items: Zotero.Item[]): string {
-    return `${formatItemNames(items)} (attached)`;
+    return formatItemNames(items);
 }
 
 function getSelectedItemsLabel(items: Zotero.Item[]): string {
@@ -117,11 +121,11 @@ function getSelectedItemsLabel(items: Zotero.Item[]): string {
 interface ActionSuggestionsProps {
     /** When true, global actions are always shown. When false, global actions only appear if no context-specific actions match. */
     showGlobal?: boolean;
-    className?: string;
     style?: React.CSSProperties;
 }
 
-const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true, className, style }) => {
+
+const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true, style }) => {
     const isStreaming = useAtomValue(isStreamingAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
     const allActions = useAtomValue(actionsForContextAtom);
@@ -154,20 +158,49 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     // Only show context label when context-specific actions are displayed
     const contextLabel = targetActions.length > 0 ? active?.label ?? null : null;
 
-    return (
-        <div className={className} style={style}>
-            {contextLabel && (
-                <div className="text-sm font-color-tertiary font-medium display-flex items-center gap-1" style={{ padding: '4px 8px 0' }}>
-                    {active?.iconInfo && (
-                        <span className="scale-80 flex-shrink-0 opacity-50" style={{ filter: 'grayscale(1)' }}>
-                            {active.iconInfo.type === 'item-type'
-                                ? <CSSItemTypeIcon itemType={active.iconInfo.name} className="icon-16" />
-                                : <CSSIcon name={active.iconInfo.name} className="icon-16" />}
-                        </span>
-                    )}
-                    <span className="truncate">{contextLabel}</span>
-                </div>
+
+    const contextLabelElement = contextLabel ? (
+        <div className="text-sm font-color-tertiary font-medium display-flex items-center gap-1 min-w-0">
+            {active?.iconInfo && (
+                <span className="scale-80 flex-shrink-0 opacity-50" style={{ filter: 'grayscale(1)' }}>
+                    {active.iconInfo.type === 'item-type'
+                        ? <CSSItemTypeIcon itemType={active.iconInfo.name} className="icon-16" />
+                        : <CSSIcon name={active.iconInfo.name} className="icon-16" />}
+                </span>
             )}
+            {/* <span className="font-semibold truncate">{truncateText(contextLabel, 40)}</span> */}
+            <span className="font-semibold truncate">{contextLabel}</span>
+        </div>
+    ) : null;
+
+    return (
+        <div className="display-flex flex-col gap-05 mt-3 " style={style}>
+            <div className="display-flex flex-row gap-1 items-center mb-1 font-color-tertiary" style={style}>
+                <Icon icon={ZapIcon} />
+                {/* <div className="text-base font-medium"> */}
+                {/* <div className="font-color-tertiary text-sm font-semibold uppercase" style={{ letterSpacing: '0.05em' }}>
+                    Suggestions
+                </div> */}
+                <div className="display-flex flex-row gap-1 items-center min-w-0">
+                    <div className="font-color-tertiary text-sm font-semibold flex-shrink-0" style={{ whiteSpace: 'nowrap' }}>
+                        Actions {contextLabel ? `for` : ''}
+                    </div>
+                    {contextLabelElement}
+                </div>
+                
+                <div className="flex-1" />
+                {/* <Button variant="ghost-tertiary" onClick={() => openPreferencesWindow('prompts')}>
+                    <span className="text-sm font-medium">
+                        Edit
+                    </span>
+                </Button> */}
+                <IconButton
+                    variant="ghost-tertiary"
+                    onClick={() => openPreferencesWindow('prompts')}
+                    icon={SettingsIcon}
+                />
+                
+            </div>
             {actions.map((action) => (
                 <Button
                     key={action.id}
@@ -175,7 +208,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                     onClick={() => handleAction(action)}
                     disabled={isPending || isStreaming}
                     className="w-full justify-between"
-                    style={{ padding: '6px 8px' }}
+                    style={{ padding: '6px 6px' }}
                 >
                     <span className="text-base truncate">
                         {action.title}

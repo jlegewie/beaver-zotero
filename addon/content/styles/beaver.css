@@ -2422,10 +2422,6 @@
 
 /* ───── Recent Chats (Home View) ───── */
 
-[id^="beaver-pane-"] .recent-chats {
-    padding: 0 4px;
-}
-
 [id^="beaver-pane-"] .recent-chats-header {
     display: flex;
     justify-content: space-between;

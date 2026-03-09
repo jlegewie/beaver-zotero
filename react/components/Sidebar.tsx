@@ -191,17 +191,19 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                 {isThreadView ? (
                     <ThreadView ref={messagesContainerRef} isWindow={isWindow} />
                 ) : (
-                    <HomePage isWindow={isWindow} />
+                    <HomePage isWindow={isWindow} inputRef={inputRef} />
                 )}
 
-                {/* Prompt area (footer) with floating elements */}
-                <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
-                    <PreviewAndPopupContainer />
-                    <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
-                    <DragDropWrapper>
-                        <InputArea inputRef={inputRef} />
-                    </DragDropWrapper>
-                </div>
+                {/* Prompt area (footer) - only in thread view */}
+                {isThreadView && (
+                    <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
+                        <PreviewAndPopupContainer />
+                        <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
+                        <DragDropWrapper>
+                            <InputArea inputRef={inputRef} />
+                        </DragDropWrapper>
+                    </div>
+                )}
 
                 {/* Thread list overlay */}
                 {isThreadListView && (
