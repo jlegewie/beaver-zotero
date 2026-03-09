@@ -127,13 +127,13 @@ export const BUILTIN_ACTIONS: Action[] = [
         sortOrder: 170,
     },
 
-    {
-        id: 'builtin-critique',
-        title: 'Critique methodology',
-        text: 'Provide a critical analysis of this paper\'s methodology. Assess the research design, sample/data selection, analytical approach, and validity of conclusions. Identify specific strengths and weaknesses. Note any potential confounders, biases, or limitations the authors may have underaddressed.',
-        targetType: 'items',
-        sortOrder: 180,
-    },
+    // {
+    //     id: 'builtin-critique',
+    //     title: 'Critique methodology',
+    //     text: 'Provide a critical analysis of this paper\'s methodology. Assess the research design, sample/data selection, analytical approach, and validity of conclusions. Identify specific strengths and weaknesses. Note any potential confounders, biases, or limitations the authors may have underaddressed.',
+    //     targetType: 'items',
+    //     sortOrder: 180,
+    // },
 
     // ═══════════════════════════════════════════════════════════════════
     // TARGET TYPE: attachment (PDF open in reader)
