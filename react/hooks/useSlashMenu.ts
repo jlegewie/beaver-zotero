@@ -37,7 +37,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
         setSlashSearchQuery('');
 
         if (isPending) {
-            const { text: resolvedText, items, emptyItemVariables } = await resolvePromptVariables(fullPromptText);
+            const { text: resolvedText, items, emptyItemVariables } = await resolvePromptVariables(fullPromptText, action.targetType);
             if (emptyItemVariables.length > 0) {
                 addPopupMessage({ type: 'warning', title: 'Action skipped', text: EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.', expire: true, duration: 4000 });
                 setTimeout(() => inputRef.current?.focus(), 0);
@@ -55,7 +55,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
         } else {
             setMessageContent('');
             markActionUsed(action.id);
-            sendResolvedAction(fullPromptText);
+            sendResolvedAction({ text: fullPromptText, targetType: action.targetType });
         }
         setTimeout(() => inputRef.current?.focus(), 0);
     }, [isPending, sendResolvedAction, markActionUsed]);

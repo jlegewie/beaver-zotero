@@ -5,7 +5,7 @@
  */
 
 import { atom } from 'jotai';
-import { Action, ActionOverride } from '../types/actions';
+import { Action, ActionOverride, ActionTargetType } from '../types/actions';
 import { BUILTIN_ACTIONS } from '../types/builtinActions';
 import {
     getMergedActions,
@@ -166,8 +166,10 @@ export const actionsForContextAtom = atom<Action[]>((get) => {
 
 export const sendResolvedActionAtom = atom(
     null,
-    async (get, set, promptText: string) => {
-        const { text, items, emptyItemVariables } = await resolvePromptVariables(promptText);
+    async (get, set, payload: { text: string; targetType?: ActionTargetType }) => {
+        const { text, items, emptyItemVariables } = await resolvePromptVariables(
+            payload.text, payload.targetType
+        );
 
         if (emptyItemVariables.length > 0) {
             const hint = EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.';

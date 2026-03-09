@@ -90,7 +90,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     const handleAction = async (action: Action) => {
         if (isPending || isStreaming || action.text.length === 0) return;
         markActionUsed(action.id);
-        await sendResolvedAction(action.text);
+        await sendResolvedAction({ text: action.text, targetType: action.targetType });
     };
 
     if (actions.length === 0) return null;
