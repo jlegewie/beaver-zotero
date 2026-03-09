@@ -517,9 +517,9 @@
     border-color: var(--tag-orange-tertiary);
 }
 [id^="beaver-pane-"] .action-target-badge[data-type="collection"] {
-    background-color: var(--tag-yellow-quinary);
-    color: var(--tag-yellow-secondary);
-    border-color: var(--tag-yellow-tertiary);
+    background-color: var(--tag-red-quinary);
+    color: var(--tag-red-secondary);
+    border-color: var(--tag-red-tertiary);
 }
 [id^="beaver-pane-"] .action-target-badge[data-type="global"] {
     background-color: var(--tag-purple-quinary);
@@ -1407,6 +1407,53 @@
     width: 1em;
     height: 1em;
     flex-shrink: 0;
+}
+
+/* Surface button with action-target-badge: use tag colors by data-type */
+[id^="beaver-pane-"] button.variant-surface.action-target-badge[data-type="items"] {
+    background-color: var(--tag-blue-quinary);
+    color: var(--tag-blue-secondary);
+    border-color: var(--tag-blue-tertiary);
+}
+[id^="beaver-pane-"] button.variant-surface.action-target-badge[data-type="items"]:hover {
+    background-color: var(--tag-blue-quarternary);
+    color: var(--tag-blue-primary);
+}
+[id^="beaver-pane-"] button.variant-surface.action-target-badge[data-type="attachment"] {
+    background-color: var(--tag-green-quinary);
+    color: var(--tag-green-secondary);
+    border-color: var(--tag-green-tertiary);
+}
+[id^="beaver-pane-"] button.variant-surface.action-target-badge[data-type="attachment"]:hover {
+    background-color: var(--tag-green-quarternary);
+    color: var(--tag-green-primary);
+}
+[id^="beaver-pane-"] button.variant-surface.action-target-badge[data-type="note"] {
+    background-color: var(--tag-orange-quinary);
+    color: var(--tag-orange-secondary);
+    border-color: var(--tag-orange-tertiary);
+}
+[id^="beaver-pane-"] button.variant-surface.action-target-badge[data-type="note"]:hover {
+    background-color: var(--tag-orange-quarternary);
+    color: var(--tag-orange-primary);
+}
+[id^="beaver-pane-"] button.variant-surface.action-target-badge[data-type="collection"] {
+    background-color: var(--tag-red-quinary);
+    color: var(--tag-red-secondary);
+    border-color: var(--tag-red-tertiary);
+}
+[id^="beaver-pane-"] button.variant-surface.action-target-badge[data-type="collection"]:hover {
+    background-color: var(--tag-red-quarternary);
+    color: var(--tag-red-primary);
+}
+[id^="beaver-pane-"] button.variant-surface.action-target-badge[data-type="global"] {
+    background-color: var(--tag-purple-quinary);
+    color: var(--tag-purple-secondary);
+    border-color: var(--tag-purple-tertiary);
+}
+[id^="beaver-pane-"] button.variant-surface.action-target-badge[data-type="global"]:hover {
+    background-color: var(--tag-purple-quarternary);
+    color: var(--tag-purple-primary);
 }
 
 

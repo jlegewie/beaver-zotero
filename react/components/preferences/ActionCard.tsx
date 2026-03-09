@@ -3,6 +3,7 @@ import { Action, ActionTargetType, TARGET_TYPE_LABELS } from "../../types/action
 import Button from "../ui/Button";
 import MenuButton from "../ui/MenuButton";
 import { MenuItem } from "../ui/menu/ContextMenu";
+import { ArrowDownIcon } from "../icons/icons";
 
 const MAX_TITLE_LENGTH = 45;
 const MAX_PROMPT_TEXT_LENGTH = 2250;
@@ -195,7 +196,11 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         menuItems={targetTypeMenuItems}
                         buttonLabel={TARGET_TYPE_LABELS[editTargetType]}
                         variant="surface"
-                        style={{ padding: '1px 8px', minWidth: '70px' }}
+                        rightIcon={ArrowDownIcon}
+                        className="action-target-badge"
+                        dataType={editTargetType}
+                        customContent={<span>{TARGET_TYPE_LABELS[editTargetType]}</span>}
+                        style={{ padding: '2px 6px', fontSize: '12px' }}
                     />
                     {isBuiltin && isOverridden && onResetToDefault && (
                         <Button
@@ -203,7 +208,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                             style={{ padding: "2px 8px" }}
                             onClick={(e) => { e.stopPropagation(); onResetToDefault(); setIsEditing(false); }}
                         >
-                            <span className="text-xs font-color-tertiary">Reset to Default</span>
+                            <span className="text-xs">Reset to Default</span>
                         </Button>
                     )}
                 </div>
@@ -216,7 +221,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                                 style={{ padding: "2px 8px" }}
                                 onClick={(e) => { e.stopPropagation(); onHide(); setIsEditing(false); }}
                             >
-                                <span className="text-xs font-color-tertiary">Hide</span>
+                                <span className="text-xs">Hide</span>
                             </Button>
                         )
                     ) : (
@@ -225,7 +230,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                             style={{ padding: "2px 8px" }}
                             onClick={() => { onRemove(); setIsEditing(false); }}
                         >
-                            <span className="text-xs font-color-tertiary">Delete</span>
+                            <span className="text-xs">Delete</span>
                         </Button>
                     )}
                     <Button
