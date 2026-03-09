@@ -5,28 +5,25 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, CopyIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
-import { generatePromptId, CustomPrompt } from "../../types/settings";
-import { customPromptsAtom, saveCustomPromptsAtom, usedShortcutsAtom } from "../../atoms/customPrompts";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
 import { 
     embeddingIndexStateAtom, 
     forceReindexAtom, 
     isEmbeddingIndexingAtom 
 } from "../../atoms/embeddingIndex";
-import ApiKeyInput from "./ApiKeyInput";
-import CustomPromptCard from "./CustomPromptCard";
 import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { accountService } from "../../../src/services/accountService";
 import SyncedLibraries from "./SyncedLibraries";
-import { ProcessingMode } from "../../types/profile";
 import DeferredToolPreferenceSetting from "./DeferredToolPreferenceSetting";
-import { BeaverUIFactory } from "../../../src/ui/ui";
 import { copyToClipboard } from "../../utils/clipboard";
 import { ensureMcpBridgeScript } from "../../hooks/useMcpServer";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
+import ActionsPreferenceSection from "./ActionsPreferenceSection";
+import CustomInstructionsSection from "./CustomInstructionsSection";
+import ApiKeysSection from "./ApiKeysSection";
 
 
 const PreferencePage: React.FC = () => {
@@ -37,13 +34,6 @@ const PreferencePage: React.FC = () => {
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
 
     // --- State for Preferences ---
-    const [geminiKey, setGeminiKey] = useState(() => getPref('googleGenerativeAiApiKey'));
-    const [openaiKey, setOpenaiKey] = useState(() => getPref('openAiApiKey'));
-    const [anthropicKey, setAnthropicKey] = useState(() => getPref('anthropicApiKey'));
-    const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
-    const customPrompts = useAtomValue(customPromptsAtom);
-    const saveCustomPrompts = useSetAtom(saveCustomPromptsAtom);
-    const usedShortcuts = useAtomValue(usedShortcutsAtom);
     const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
     const [keyboardShortcut, setKeyboardShortcut] = useState(() => {
@@ -59,7 +49,6 @@ const PreferencePage: React.FC = () => {
     const profileBalance = useAtomValue(profileBalanceAtom);
     const remainingBeaverCredits = useAtomValue(remainingBeaverCreditsAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
-    const processingMode = useAtomValue(processingModeAtom);
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
@@ -122,20 +111,6 @@ const PreferencePage: React.FC = () => {
         loadLastSynced();
     }, [loadLastSynced]);
 
-    // --- Save Preferences ---
-    const handlePrefSave = (key: "googleGenerativeAiApiKey" | "openAiApiKey" | "anthropicApiKey" | "customInstructions", value: string) => {
-        if (value !== getPref(key)) {
-            setPref(key, value);
-            logger(`Saved pref ${key}`);
-        }
-    };
-
-    const handleCustomInstructionsChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const newValue = event.target.value;
-        setCustomInstructions(newValue);
-        handlePrefSave('customInstructions', newValue);
-    };
-
     const handleKeyboardShortcutChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
         const nextShortcut = event.target.value.toLowerCase();
         if (!/^[a-z]$/.test(nextShortcut)) {
@@ -149,25 +124,6 @@ const PreferencePage: React.FC = () => {
         //     logger(`Updated keyboard shortcut to ${nextShortcut.toUpperCase()}`);
         // }
     }, []);
-
-    // --- Custom Prompt Change Handler ---
-    const handleCustomPromptChange = useCallback((index: number, updatedPrompt: CustomPrompt) => {
-        const newPrompts = [...customPrompts];
-        newPrompts[index] = updatedPrompt;
-        saveCustomPrompts(newPrompts);
-    }, [customPrompts, saveCustomPrompts]);
-
-    // --- Add Prompt Handler ---
-    const handleAddPrompt = useCallback(() => {
-        const newPrompt: CustomPrompt = {
-            id: generatePromptId(),
-            title: "",
-            text: "",
-            requiresAttachment: false
-        };
-
-        saveCustomPrompts([...customPrompts, newPrompt]);
-    }, [customPrompts, saveCustomPrompts]);
 
     // --- Verify Sync Handler ---
     const handleVerifySync = useCallback(async () => {
@@ -196,23 +152,6 @@ const PreferencePage: React.FC = () => {
             setVerifyStatus('idle');
         }
     }, [syncedLibraryIds, verifyStatus]);
-
-    // --- Remove Prompt Handler ---
-    const handleRemovePrompt = useCallback((indexToRemove: number) => {
-        const newPrompts = customPrompts.filter((_, filterIndex) => filterIndex !== indexToRemove);
-        saveCustomPrompts(newPrompts);
-    }, [customPrompts, saveCustomPrompts]);
-
-    const getCustomPromptAvailabilityNote = useCallback((prompt: CustomPrompt): string | undefined => {
-        if (!prompt.requiresDatabaseSync) return undefined;
-        if (!isDatabaseSyncSupported) {
-            return 'Only available with Beaver Pro';
-        }
-        if (processingMode === ProcessingMode.FRONTEND) {
-            return 'Available after indexing is complete';
-        }
-        return undefined;
-    }, [isDatabaseSyncSupported, processingMode]);
 
     // --- Consent Toggle Change Handler ---
     const handleConsentChange = useCallback(async (checked: boolean) => {
@@ -986,122 +925,15 @@ const PreferencePage: React.FC = () => {
 
             {/* ===== MODELS & API KEYS TAB ===== */}
             {activeTab === 'models' && (
-                <>
-                    <SettingsGroup>
-                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
-                            {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
-                            <div className="font-color-secondary text-base">
-                                Beaver supports multiple model providers. Connect your API keys to use Gemini, Claude, or OpenAI models.
-                                See our <DocLink path="api-key">API key guide</DocLink> or learn about <DocLink path="custom-models">additional providers and custom endpoints</DocLink>.
-                            </div>
-                        </div>
-                    </SettingsGroup>
-
-                    <SettingsGroup>
-                        <div style={{ padding: '8px 12px' }}>
-                            <ApiKeyInput
-                                id="gemini-key"
-                                label="Google API Key"
-                                provider="google"
-                                value={geminiKey}
-                                onChange={setGeminiKey}
-                                savePref={(newValue) => handlePrefSave('googleGenerativeAiApiKey', newValue)}
-                                placeholder="Enter your Google AI Studio API Key"
-                                linkUrl="https://aistudio.google.com/app/apikey"
-                            />
-                        </div>
-                        <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
-                            <ApiKeyInput
-                                id="openai-key"
-                                label="OpenAI API Key"
-                                provider="openai"
-                                value={openaiKey}
-                                onChange={setOpenaiKey}
-                                savePref={(newValue) => handlePrefSave('openAiApiKey', newValue)}
-                                placeholder="Enter your OpenAI API Key"
-                                linkUrl="https://platform.openai.com/api-keys"
-                            />
-                        </div>
-                        <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
-                            <ApiKeyInput
-                                id="anthropic-key"
-                                label="Anthropic API Key"
-                                provider="anthropic"
-                                value={anthropicKey}
-                                onChange={setAnthropicKey}
-                                savePref={(newValue) => handlePrefSave('anthropicApiKey', newValue)}
-                                placeholder="Enter your Anthropic API Key"
-                                linkUrl="https://console.anthropic.com/settings/keys"
-                            />
-                        </div>
-                    </SettingsGroup>
-
-                    <SectionLabel>Additional Providers</SectionLabel>
-
-                    <div className="text-base font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
-                        Additional model providers and custom endpoints are supported via <DocLink path="custom-models">custom models</DocLink>.
-                    </div>
-                
-                </>
+                <ApiKeysSection />
             )}
 
             {/* ===== PROMPTS TAB ===== */}
             {activeTab === 'prompts' && (
                 <>
-                    <SectionLabel>Custom Instructions</SectionLabel>
-                    <div className="custom-prompt-card" style={{ cursor: 'default' }}>
-                        <div className="font-color-secondary text-text mb-2">
-                            Custom instructions are added to all chats and help steer responses. (Max ~250 words)
-                        </div>
-                        <textarea
-                            value={customInstructions}
-                            onChange={handleCustomInstructionsChange}
-                            placeholder="Enter custom instructions here..."
-                            rows={5}
-                            className="chat-input custom-prompt-edit-textarea text-base"
-                            style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical' }}
-                            maxLength={1500}
-                        />
-                    </div>
+                    <CustomInstructionsSection />
 
-                    <div className="display-flex flex-row items-end justify-between">
-                        <SectionLabel>Actions</SectionLabel>
-                        <Button
-                            variant="outline"
-                            onClick={handleAddPrompt}
-                            className="text-sm mb-15"
-                        >
-                            Add Action
-                        </Button>
-                    </div>
-                    <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
-                        {/* Actions are reusable prompts you define once and trigger anytime from chat, the right-click menu, or automatically. */}
-                        {/* Actions are reusable prompts that tell the agent what to do with your research. You can trigger them manually with / in chat, from the right-click menu on any item, or set them to run automatically. */}
-                        Actions are reusable prompts you define once and trigger anytime.
-                    </div>
-                    <div className="display-flex flex-col gap-4">
-                        {customPrompts.map((prompt: CustomPrompt, index: number) => (
-                            <CustomPromptCard
-                                key={index}
-                                index={index}
-                                prompt={prompt}
-                                onChange={handleCustomPromptChange}
-                                onRemove={handleRemovePrompt}
-                                availabilityNote={getCustomPromptAvailabilityNote(prompt)}
-                                usedShortcuts={usedShortcuts}
-                            />
-                        ))}
-                        {/* <div className="display-flex flex-row items-center justify-start">
-                            <Button
-                                variant="outline"
-                                onClick={handleAddPrompt}
-                                disabled={customPrompts.length >= 9}
-                                className="text-sm"
-                            >
-                                Add Prompt
-                            </Button>
-                        </div> */}
-                    </div>
+                    <ActionsPreferenceSection />
                 </>
             )}
 

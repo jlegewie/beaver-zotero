@@ -35,6 +35,8 @@ interface MenuButtonProps {
     toggleCallback?: (isOpen: boolean) => void;
     /** Optional callback to execute after the menu closes */
     onAfterClose?: () => void;
+    /** Optional data-type attribute (e.g. for badge styling) */
+    dataType?: string;
 }
 
 /**
@@ -63,6 +65,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     footer,
     toggleCallback,
     onAfterClose,
+    dataType,
 }) => {
     const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -111,6 +114,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
             aria-haspopup="menu"
             aria-expanded={isMenuOpen}
             disabled={disabled}
+            {...(dataType !== undefined && { 'data-type': dataType })}
         >
             {customContent ?
                 customContent

@@ -20,7 +20,12 @@
  */
 
 import { logger } from '../../src/utils/logger';
+import { isSupportedItem } from '../../src/utils/sync';
 import { getCurrentReader } from './readerUtils';
+import { store } from '../store';
+import { currentReaderAttachmentAtom } from '../atoms/messageComposition';
+import { selectedZoteroItemsAtom } from '../atoms/zoteroContext';
+import { ActionTargetType } from '../types/actions';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -45,12 +50,22 @@ export const PROMPT_VARIABLES: { name: string; description: string }[] = [
     { name: 'current_collection', description: 'Currently selected collection' },
 ];
 
+/** Collection context resolved from targetType */
+export interface CollectionContext {
+    key: string;
+    name: string;
+    libraryID: number;
+    parentKey: string | null;
+}
+
 /** Result of resolving prompt variables */
 export interface PromptResolution {
     /** The prompt text with placeholders replaced (item placeholders removed) */
     text: string;
     /** Zotero items to add as message attachments */
     items: Zotero.Item[];
+    /** Collection context when targetType is 'collection' */
+    collection: CollectionContext | null;
     /** Item variable names that were present but resolved to zero items */
     emptyItemVariables: string[];
 }
@@ -58,11 +73,22 @@ export interface PromptResolution {
 /**
  * Resolve {{variable}} placeholders in prompt text.
  * Returns the resolved text and any Zotero items that should be added as attachments.
+ *
+ * When `targetType` is provided, auto-attaches context items based on the target type
+ * (e.g., selected items for "items", reader attachment for "attachment").
+ * These are merged with any variable-resolved items, deduplicated by libraryID-key.
  */
-export async function resolvePromptVariables(text: string): Promise<PromptResolution> {
+export async function resolvePromptVariables(
+    text: string,
+    targetType?: ActionTargetType,
+): Promise<PromptResolution> {
     const pattern = /\{\{(\w+)\}\}/g;
     const matches = [...text.matchAll(pattern)];
-    if (matches.length === 0) return { text, items: [], emptyItemVariables: [] };
+
+    // Fast path: no variables and no targetType context
+    if (matches.length === 0 && !targetType) {
+        return { text, items: [], collection: null, emptyItemVariables: [] };
+    }
 
     // Resolve all unique variables in parallel
     const uniqueVars = [...new Set(matches.map(m => m[1]))];
@@ -95,13 +121,99 @@ export async function resolvePromptVariables(text: string): Promise<PromptResolu
         return resolution.text;
     });
 
-    // Clean up formatting artifacts from empty resolutions
-    result = result
-        .replace(/[ \t]{2,}/g, ' ')     // Collapse multiple spaces
-        .replace(/\n{3,}/g, '\n\n')     // Collapse 3+ newlines to 2
-        .trim();
+    // Auto-attach context based on targetType (dedup items with variable-resolved ones)
+    let collection: CollectionContext | null = null;
+    if (targetType) {
+        const context = resolveTargetTypeContext(targetType);
+        if (context.items.length > 0) {
+            const existingKeys = new Set(allItems.map(i => `${i.libraryID}-${i.key}`));
+            for (const item of context.items) {
+                if (!existingKeys.has(`${item.libraryID}-${item.key}`)) {
+                    allItems.push(item);
+                    existingKeys.add(`${item.libraryID}-${item.key}`);
+                }
+            }
+        }
+        collection = context.collection;
+    }
 
-    return { text: result, items: allItems, emptyItemVariables };
+    // Clean up formatting artifacts from empty resolutions
+    if (matches.length > 0) {
+        result = result
+            .replace(/[ \t]{2,}/g, ' ')     // Collapse multiple spaces
+            .replace(/\n{3,}/g, '\n\n')     // Collapse 3+ newlines to 2
+            .trim();
+    }
+
+    return { text: result, items: allItems, collection, emptyItemVariables };
+}
+
+// ---------------------------------------------------------------------------
+// Target-type context resolution (synchronous — reads from Jotai store)
+// ---------------------------------------------------------------------------
+
+interface TargetTypeContext {
+    items: Zotero.Item[];
+    collection: CollectionContext | null;
+}
+
+function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeContext {
+    switch (targetType) {
+        case 'items': {
+            // Reader context: parent item + attachment (only if supported)
+            const readerAttachment = store.get(currentReaderAttachmentAtom);
+            if (readerAttachment && isSupportedItem(readerAttachment)) {
+                const parent = readerAttachment.parentItem;
+                return { items: parent ? [parent, readerAttachment] : [readerAttachment], collection: null };
+            }
+            // Library context: selected supported regular items
+            const selected = store.get(selectedZoteroItemsAtom);
+            const regular = selected.filter((i: Zotero.Item) => i.isRegularItem());
+            return { items: regular.slice(0, 10), collection: null };
+        }
+        case 'attachment': {
+            // Reader context: attachment open in reader (only if supported)
+            const readerAttachment = store.get(currentReaderAttachmentAtom);
+            if (readerAttachment && isSupportedItem(readerAttachment)) {
+                const parent = readerAttachment.parentItem;
+                return { items: parent ? [parent, readerAttachment] : [readerAttachment], collection: null };
+            }
+            // Library context: selected supported attachments (+ their parents)
+            const selected = store.get(selectedZoteroItemsAtom);
+            const attachments = selected.filter((i: Zotero.Item) => i.isAttachment() && isSupportedItem(i));
+            if (attachments.length > 0) {
+                const result: Zotero.Item[] = [];
+                const seen = new Set<string>();
+                for (const att of attachments.slice(0, 10)) {
+                    const parent = att.parentItem;
+                    if (parent) {
+                        const parentKey = `${parent.libraryID}-${parent.key}`;
+                        if (!seen.has(parentKey)) {
+                            result.push(parent);
+                            seen.add(parentKey);
+                        }
+                    }
+                    result.push(att);
+                }
+                return { items: result, collection: null };
+            }
+            return { items: [], collection: null };
+        }
+        case 'collection': {
+            const zp = Zotero.getActiveZoteroPane?.();
+            const col = zp?.getSelectedCollection?.();
+            const collection = col ? {
+                key: col.key,
+                name: col.name,
+                libraryID: col.libraryID,
+                parentKey: col.parentKey || null,
+            } : null;
+            return { items: [], collection };
+        }
+        case 'note':
+        case 'global':
+            return { items: [], collection: null };
+    }
 }
 
 // ---------------------------------------------------------------------------
