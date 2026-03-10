@@ -160,9 +160,12 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
 
 
     const contextLabelElement = contextLabel ? (
-        <div className="text-sm font-color-tertiary font-medium display-flex items-center gap-1 min-w-0">
+        <div
+            className="font-color-tertiary font-medium display-flex items-center gap-1 min-w-0"
+            style={{ fontSize: '0.925rem' }}
+        >
             {active?.iconInfo && (
-                <span className="scale-80 flex-shrink-0 opacity-50" style={{ filter: 'grayscale(1)' }}>
+                <span className="scale-80 flex-shrink-0 opacity-70" style={{ filter: 'grayscale(1)' }}>
                     {active.iconInfo.type === 'item-type'
                         ? <CSSItemTypeIcon itemType={active.iconInfo.name} className="icon-16" />
                         : <CSSIcon name={active.iconInfo.name} className="icon-16" />}
@@ -182,7 +185,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                     Suggestions
                 </div> */}
                 <div className="display-flex flex-row gap-1 items-center min-w-0">
-                    <div className="font-color-tertiary text-sm font-semibold flex-shrink-0" style={{ whiteSpace: 'nowrap' }}>
+                    <div className="font-color-tertiary font-semibold flex-shrink-0" style={{ whiteSpace: 'nowrap', fontSize: '0.925rem' }}>
                         Actions {contextLabel ? `for` : ''}
                     </div>
                     {contextLabelElement}
