@@ -63,18 +63,9 @@ export const syncedLibraryIdsAtom = selectAtom(
     (a, b) => a.length === b.length && a.every((v, i) => v === b[i])
 );
 
-// Searchable library IDs (for embedding index, search filtering)
-// Free: all local libraries, Pro: synced only
+// Searchable library IDs: All local libraries are searchable
 export const searchableLibraryIdsAtom = atom<number[]>((get) => {
-    const isDatabaseSyncSupported = get(isDatabaseSyncSupportedAtom);
-    
-    if (isDatabaseSyncSupported) {
-        // Pro: only synced libraries are searchable
-        return get(syncedLibrariesAtom).map(lib => lib.library_id);
-    } else {
-        // Free: all local libraries are searchable
-        return get(localZoteroLibrariesAtom).map(lib => lib.library_id);
-    }
+    return get(localZoteroLibrariesAtom).map(lib => lib.library_id);
 });
 
 // Plan data
