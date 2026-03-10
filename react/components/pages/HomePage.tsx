@@ -52,11 +52,13 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
             >
                 <RecentChats />
 
-                <div className="relative -mx-4 px-4">
-                    <PreviewAndPopupContainer />
-                    {isDatabaseSyncSupported && !isWindow && (
+                {isDatabaseSyncSupported && !isWindow && (
                         <FileStatusBar />
                     )}
+
+                <div className="relative -mx-4 px-4">
+                    <PreviewAndPopupContainer />
+                    
                 </div>
             </div>
         </div>

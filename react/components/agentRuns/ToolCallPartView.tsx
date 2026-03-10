@@ -148,6 +148,8 @@ interface ToolCallPartViewProps {
     part: ToolCallPart;
     /** Run ID for global UI state management */
     runId: string;
+    /** Index of the parent response message within the run (for unique expansion keys) */
+    responseIndex: number;
     /** Run status */
     runStatus: AgentRunStatus;
 }
@@ -158,7 +160,7 @@ interface ToolCallPartViewProps {
  * Visibility state is managed globally via searchToolVisibilityAtom.
  * Shows AgentActionView for tools with agent actions (e.g., edit_metadata).
  */
-export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId, runStatus }) => {
+export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId, responseIndex, runStatus }) => {
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const result = resultsMap.get(part.tool_call_id);
     const hasResult = result !== undefined;
@@ -221,7 +223,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             : baseLabel;
 
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
-    const expansionKey = `${runId}:${part.tool_call_id}`;
+    const expansionKey = `${runId}:${responseIndex}:${part.tool_call_id}`;
     const expansionState = useAtomValue(toolExpandedAtom);
     const toggleExpanded = useSetAtom(toggleToolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
