@@ -111,9 +111,10 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
                         // Default view for other tools
                         return (
                             <ToolCallPartView
-                                key={`tool-${part.tool_call_id}`}
+                                key={`tool-${responseIndex}-${part.tool_call_id}`}
                                 part={part}
                                 runId={runId}
+                                responseIndex={responseIndex}
                                 runStatus={runStatus}
                             />
                         );
