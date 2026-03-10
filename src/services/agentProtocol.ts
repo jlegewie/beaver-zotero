@@ -949,8 +949,6 @@ export interface CurrentLibrary {
     is_group: boolean;
     /** Whether the library data is read-only (not editable) */
     read_only: boolean;
-    /** Whether the library is synced with Beaver (Pro feature) */
-    is_synced: boolean;
 }
 
 /** Current collection context for application state */

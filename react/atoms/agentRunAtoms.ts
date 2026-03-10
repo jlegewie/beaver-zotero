@@ -1206,7 +1206,6 @@ export const sendWSMessageAtom = atom(
         let currentLibrary: CurrentLibrary | undefined = undefined;
         let currentCollection: CurrentCollection | undefined = undefined;
         
-        const searchableLibraryIds = get(searchableLibraryIdsAtom);
         const currentView: 'library' | 'file_reader' = get(isLibraryTabAtom) ? 'library' : 'file_reader';
         
         if (currentView === 'file_reader' && readerState) {
@@ -1218,7 +1217,6 @@ export const sendWSMessageAtom = atom(
                     name: library.name,
                     is_group: library.isGroup,
                     read_only: !library.editable,
-                    is_synced: searchableLibraryIds.includes(library.libraryID),
                 };
             }
         } else if (currentView === 'library') {
@@ -1233,7 +1231,6 @@ export const sendWSMessageAtom = atom(
                         name: library.name,
                         is_group: library.isGroup,
                         read_only: !library.editable,
-                        is_synced: searchableLibraryIds.includes(library.libraryID),
                     };
                 }
                 
