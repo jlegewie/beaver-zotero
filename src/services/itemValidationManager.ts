@@ -78,8 +78,8 @@ class ItemValidationManager {
     private pendingValidations = new Map<string, Promise<ItemValidationResult>>();
     
     // Cache settings
-    // private readonly CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
-    private readonly CACHE_DURATION_MS = 100;
+    // private readonly CACHE_DURATION_MS = 100;
+    private readonly CACHE_DURATION_MS = 1 * 60 * 1000; // 1 minutes
     private readonly MAX_CACHE_SIZE = 1000;
 
     /**
