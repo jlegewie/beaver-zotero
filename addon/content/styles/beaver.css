@@ -2323,7 +2323,7 @@
     border: 1px solid var(--fill-quinary);
     border-radius: 6px;
     color: var(--fill-primary);
-    font-size: 0.9rem;
+    font-size: 1rem;
     outline: none;
 }
 
@@ -2347,7 +2347,7 @@
 
 [id^="beaver-pane-"] .thread-group-header {
     padding: 8px 12px 4px;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -2369,13 +2369,13 @@
 }
 
 [id^="beaver-pane-"] .thread-list-item-name {
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     color: var(--fill-secondary);
     line-height: 1.3;
 }
 
 [id^="beaver-pane-"] .thread-list-item-time {
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     color: var(--fill-tertiary);
     margin-top: 1px;
 }
