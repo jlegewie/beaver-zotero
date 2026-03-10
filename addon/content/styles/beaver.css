@@ -2478,6 +2478,14 @@
     margin-left: 8px;
 }
 
+[id^="beaver-pane-"] .recent-chats {
+    transition: opacity 0.2s ease;
+}
+
+[id^="beaver-pane-"] .recent-chats-faded {
+    opacity: 0.5;
+}
+
 /* File status bar (homepage footer indicator) */
 [id^="beaver-pane-"] .file-status-bar {
     display: flex;
