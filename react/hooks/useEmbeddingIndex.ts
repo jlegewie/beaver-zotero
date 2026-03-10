@@ -517,9 +517,6 @@ export function useEmbeddingIndex() {
         if (!isAuthenticated) return;
         if (!isAuthorized) return;
         if (!isDeviceAuthorized) return;
-        // Skip frontend indexing in BACKEND mode unless MCP server is enabled
-        // (MCP search_by_topic tool requires local embeddings)
-        if (processingMode === ProcessingMode.BACKEND && !mcpServerEnabled) return;
 
         logger("useEmbeddingIndex: Setting up embedding index", 3);
 
