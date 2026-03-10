@@ -59,6 +59,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     search_in_documents: TextAlignLeftIcon,
     search_in_attachment: SearchIcon,
     read_pages: TextAlignLeftIcon,
+    read_attachment: TextAlignLeftIcon,
     view_page_images: ViewIcon,
     view_pages: ViewIcon,
 
