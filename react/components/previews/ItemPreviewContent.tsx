@@ -88,7 +88,7 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
             );
         }
         
-        if (validation?.backendChecked && validation.isValid) {
+        if (validation && validation.isValid && !validation.isValidating) {
             return <CSSIcon name="checkmark" className="icon-12 text-green" />;
         }
         

@@ -169,8 +169,8 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 return `${baseClasses} border-red`;
             }
             
-            // Valid and backend checked
-            if (validation?.backendChecked && validation.isValid) {
+            // Valid and done validating
+            if (validation && validation.isValid && !validation.isValidating) {
                 return `${baseClasses} border-green`;
             }
             
@@ -212,7 +212,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 )}
                 
                 {/* Validation status indicator */}
-                {validation?.backendChecked && showInvalid && (
+                {validation && !validation.isValidating && showInvalid && (
                     <span className="validation-indicator">
                         {validation.isValid ? (
                             <CSSIcon name="checkmark" className="icon-12 text-green" />
