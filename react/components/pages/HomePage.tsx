@@ -56,7 +56,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                         <FileStatusBar />
                     )}
 
-                <div className="relative -mx-4 px-4">
+                <div className="relative -mx-4 px-4 mb-3">
                     <PreviewAndPopupContainer />
                     
                 </div>
