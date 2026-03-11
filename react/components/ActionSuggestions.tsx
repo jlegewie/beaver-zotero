@@ -5,13 +5,13 @@ import { isStreamingAtom } from "../agents/atoms";
 import { isWSChatPendingAtom } from "../atoms/agentRunAtoms";
 import { Action, ActionTargetType } from "../types/actions";
 import { actionsForContextAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom } from "../atoms/actions";
-import { isSupportedItem } from "../../src/utils/sync";
 import { getDisplayNameFromItem } from "../utils/sourceUtils";
 import { truncateText } from "../utils/stringUtils";
-import { ActionContext, GroupIconInfo, getIconInfoForItem } from "../utils/actionVisibility";
+import { ActionContext, GroupIconInfo, getIconInfoForItem, isActionableItem } from "../utils/actionVisibility";
+import { searchableLibraryIdsAtom } from "../atoms/profile";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
 import Icon from "./icons/Icon";
-import { SettingsIcon, ZapIcon } from './icons/icons';
+import { AlertIcon, SettingsIcon, ZapIcon } from './icons/icons';
 import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
 import IconButton from "./ui/IconButton";
 
@@ -44,7 +44,7 @@ function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
     // 1. Reader
     if (zotero.type === 'reader') {
         const att = zotero.readerAttachment;
-        if (att && isSupportedItem(att)) {
+        if (att && isActionableItem(att)) {
             return { targetType: 'attachment', label: getItemLabel(att), iconInfo: getIconInfoForItem(att) };
         }
     }
@@ -59,7 +59,7 @@ function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
     }
 
     // 3. Manual items
-    const manualSupported = manualItems.filter(i => isSupportedItem(i));
+    const manualSupported = manualItems.filter(i => isActionableItem(i));
     if (manualSupported.length > 0) {
         const allAttachments = manualSupported.every(i => i.isAttachment());
         const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
@@ -68,7 +68,7 @@ function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
 
     // 4. Selected items
     if (zotero.type === 'items_selected') {
-        const supported = zotero.selectedItems.filter(i => isSupportedItem(i));
+        const supported = zotero.selectedItems.filter(i => isActionableItem(i));
         if (supported.length > 0) {
             const allAttachments = supported.every(i => i.isAttachment());
             const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
@@ -132,6 +132,13 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     const sendResolvedAction = useSetAtom(sendResolvedActionAtom);
     const markActionUsed = useSetAtom(markActionUsedAtom);
     const ctx = useAtomValue(actionContextAtom);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+
+    // Check if the current library is supported
+    const currentLibraryId = ctx.zotero.isLibraryTab
+        ? ctx.zotero.libraryView.libraryId
+        : ctx.zotero.readerAttachment?.libraryID ?? null;
+    const isLibrarySupported = currentLibraryId && searchableLibraryIds.includes(currentLibraryId);
 
     // Determine the single winning target type — never mix types
     const active = getActiveTarget(ctx);
@@ -209,7 +216,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                     key={action.id}
                     variant="ghost"
                     onClick={() => handleAction(action)}
-                    disabled={isPending || isStreaming}
+                    disabled={isPending || isStreaming || !isLibrarySupported}
                     className="w-full justify-between"
                     style={{ padding: '6px 6px' }}
                 >
@@ -218,6 +225,14 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                     </span>
                 </Button>
             ))}
+            {!isLibrarySupported && (
+                <div className="display-flex flex-row gap-1 items-start font-color-tertiary mt-3">
+                    <Icon icon={AlertIcon} className="mt-010" />
+                    <div className="text-sm">
+                        This library is not synced with Beaver
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
