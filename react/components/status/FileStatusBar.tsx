@@ -1,7 +1,7 @@
 import React from "react";
 import { useAtomValue } from "jotai";
 import { fileStatusSummaryAtom, connectionStatusAtom } from "../../atoms/files";
-import { Spinner, SyncIcon, Icon, AlertIcon } from "../icons/icons";
+import { Spinner, SyncIcon, Icon, AlertIcon, TickIcon } from "../icons/icons";
 import { openPreferencesWindow } from "../../../src/ui/openPreferencesWindow";
 import { useFileStatus } from "../../hooks/useFileStatus";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
@@ -40,6 +40,8 @@ const FileStatusBar: React.FC = () => {
         icon = <Spinner size={11} />;
     } else if (isError || hasFailed) {
         icon = <Icon icon={AlertIcon} className="scale-90 font-color-yellow" />;
+    } else if (isFullyComplete) {
+        icon = <Icon icon={TickIcon} />;
     } else {
         icon = <Icon icon={SyncIcon} className="scale-90" />;
     }
@@ -54,13 +56,15 @@ const FileStatusBar: React.FC = () => {
         text = `Processing files... ${summary.indexingProgress}%`;
     } else if (hasFailed) {
         text = `${summary.failedCount} file${summary.failedCount !== 1 ? 's' : ''} failed`;
+    } else if (isFullyComplete) {
+        text = "File processing complete. Check status";
     } else {
         text = "File processing";
     }
 
     return (
         <div
-            className="file-status-bar mt-2"
+            className="file-status-bar mt-2 -mb-1"
             onClick={() => openPreferencesWindow('sync')}
             role="button"
             tabIndex={0}
