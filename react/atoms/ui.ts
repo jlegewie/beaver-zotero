@@ -69,6 +69,13 @@ export const activePreviewAtom = atom<ActivePreview>(null);
 // Popup Messages
 export const popupMessagesAtom = atom<PopupMessage[]>([]);
 
+// Has popups or previews
+export const hasPopupsOrPreviewsAtom = atom(get => {
+    const hasPopupMessages = get(popupMessagesAtom).length > 0;
+    const hasActivePreview = get(activePreviewAtom) !== null;
+    return hasPopupMessages || hasActivePreview;
+});
+
 // Remove popup messages by type
 export const removePopupMessagesByTypeAtom = atom(
     null,
