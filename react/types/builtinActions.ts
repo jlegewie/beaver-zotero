@@ -76,31 +76,6 @@ export const BUILTIN_ACTIONS: Action[] = [
         sortOrder: 150,
     },
 
-    // {
-    //     id: 'builtin-fix-metadata',
-    //     title: 'Check and fix metadata',
-    //     text: 'Review the metadata for these items. Check for: missing DOIs, incomplete author names, missing abstracts, incorrect publication dates, missing journal/publisher info. For each issue found, propose a correction. Show all proposed changes for approval.',
-    //     targetType: 'items',
-    //     sortOrder: 160,
-    // },
-
-    // {
-    //     id: 'builtin-compare-papers',
-    //     title: 'Compare these papers',
-    //     text: 'Compare these papers side by side. Create a structured comparison covering: research questions, methodology, key findings, limitations, and how they relate to each other. Present the comparison as a table where possible. Save as a Zotero note.',
-    //     targetType: 'items',
-    //     minItems: 2,
-    //     sortOrder: 170,
-    // },
-
-    // {
-    //     id: 'builtin-critique',
-    //     title: 'Critique methodology',
-    //     text: 'Provide a critical analysis of this paper\'s methodology. Assess the research design, sample/data selection, analytical approach, and validity of conclusions. Identify specific strengths and weaknesses. Note any potential confounders, biases, or limitations the authors may have underaddressed.',
-    //     targetType: 'items',
-    //     sortOrder: 180,
-    // },
-
     // ═══════════════════════════════════════════════════════════════════
     // TARGET TYPE: attachment (PDF open in reader)
     // ═══════════════════════════════════════════════════════════════════
