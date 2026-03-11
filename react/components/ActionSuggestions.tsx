@@ -16,7 +16,7 @@ import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
 import IconButton from "./ui/IconButton";
 
 const MAX_CONTEXT_ITEM_LENGTH = 50;
-const MAX_VISIBLE_ITEMS = 2;
+const MAX_VISIBLE_ITEMS = 1;
 
 interface ActiveTarget {
     targetType: ActionTargetType;
@@ -63,7 +63,11 @@ function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
     if (manualSupported.length > 0) {
         const allAttachments = manualSupported.every(i => i.isAttachment());
         const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
-        return { targetType, label: getManualItemsLabel(manualSupported), iconInfo: getIconInfoForItem(manualSupported[0]) };
+        const labelItems = targetType === 'attachment'
+            ? manualSupported.filter(i => i.isAttachment())
+            : manualSupported.filter(i => i.isRegularItem());
+        const displayItems = labelItems.length > 0 ? labelItems : manualSupported;
+        return { targetType, label: getManualItemsLabel(displayItems), iconInfo: getIconInfoForItem(displayItems[0]) };
     }
 
     // 4. Selected items
@@ -72,7 +76,11 @@ function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
         if (supported.length > 0) {
             const allAttachments = supported.every(i => i.isAttachment());
             const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
-            return { targetType, label: getSelectedItemsLabel(supported), iconInfo: getIconInfoForItem(supported[0]) };
+            const labelItems = targetType === 'attachment'
+                ? supported.filter(i => i.isAttachment())
+                : supported.filter(i => i.isRegularItem());
+            const displayItems = labelItems.length > 0 ? labelItems : supported;
+            return { targetType, label: getSelectedItemsLabel(displayItems), iconInfo: getIconInfoForItem(displayItems[0]) };
         }
     }
 
@@ -97,7 +105,17 @@ function getItemLabel(item: Zotero.Item): string {
     return truncateText(item.getDisplayTitle(), MAX_CONTEXT_ITEM_LENGTH);
 }
 
-function formatItemNames(items: Zotero.Item[]): string {
+function formatItemNames(items: Zotero.Item[], source: 'selected' | 'attached'): string {
+    const prefix = source === 'selected' ? 'selected' : 'attached';
+    if (items.length > MAX_VISIBLE_ITEMS) {
+        if (items.every(i => i.isAttachment())) {
+            return `${items.length} ${prefix} attachments`;
+        }
+        if (items.every(i => i.isNote())) {
+            return `${items.length} ${prefix} notes`;
+        }
+        return `${items.length} ${prefix} items`;
+    }
     const names = items
         .slice(0, MAX_VISIBLE_ITEMS)
         .map(i => getItemLabel(i));
@@ -107,11 +125,11 @@ function formatItemNames(items: Zotero.Item[]): string {
 }
 
 function getManualItemsLabel(items: Zotero.Item[]): string {
-    return formatItemNames(items);
+    return formatItemNames(items, 'attached');
 }
 
 function getSelectedItemsLabel(items: Zotero.Item[]): string {
-    return formatItemNames(items);
+    return formatItemNames(items, 'selected');
 }
 
 interface ActionSuggestionsProps {
