@@ -180,29 +180,12 @@ function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeConte
             // Reader context: attachment open in reader (only if supported)
             const readerAttachment = store.get(currentReaderAttachmentAtom);
             if (readerAttachment && isActionableItem(readerAttachment)) {
-                const parent = readerAttachment.parentItem;
-                return { items: parent ? [parent, readerAttachment] : [readerAttachment], collection: null };
+                return { items: [readerAttachment], collection: null };
             }
-            // Library context: selected actionable attachments (+ their parents)
+            // Library context: selected actionable attachments
             const selected = store.get(selectedZoteroItemsAtom);
             const attachments = selected.filter((i: Zotero.Item) => i.isAttachment() && isActionableItem(i));
-            if (attachments.length > 0) {
-                const result: Zotero.Item[] = [];
-                const seen = new Set<string>();
-                for (const att of attachments.slice(0, 10)) {
-                    const parent = att.parentItem;
-                    if (parent) {
-                        const parentKey = `${parent.libraryID}-${parent.key}`;
-                        if (!seen.has(parentKey)) {
-                            result.push(parent);
-                            seen.add(parentKey);
-                        }
-                    }
-                    result.push(att);
-                }
-                return { items: result, collection: null };
-            }
-            return { items: [], collection: null };
+            return { items: attachments.slice(0, 10), collection: null };
         }
         case 'collection': {
             const zp = Zotero.getActiveZoteroPane?.();
