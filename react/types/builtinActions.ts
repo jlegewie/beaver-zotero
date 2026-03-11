@@ -160,14 +160,14 @@ export const BUILTIN_ACTIONS: Action[] = [
         sortOrder: 400,
     },
 
-    {
-        id: 'builtin-collection-review',
-        title: 'Literature review outline',
-        text: 'Create a literature review outline based on the papers in this collection. Organize the papers thematically (not chronologically), identify the key debates, areas of consensus, and open questions. Avoid bullet points and numbered lists. For each section of the outline, cite relevant papers from the collection that belong there. Use a note for the literature review outline.',
-        // Save as a Zotero note in this collection.
-        targetType: 'collection',
-        sortOrder: 410,
-    },
+    // {
+    //     id: 'builtin-collection-review',
+    //     title: 'Literature review outline',
+    //     text: 'Create a literature review outline based on the papers in this collection. Organize the papers thematically (not chronologically), identify the key debates, areas of consensus, and open questions. Avoid bullet points and numbered lists. For each section of the outline, cite relevant papers from the collection that belong there. Use a note for the literature review outline.',
+    //     // Save as a Zotero note in this collection.
+    //     targetType: 'collection',
+    //     sortOrder: 410,
+    // },
 
     {
         id: 'builtin-collection-summarize',
