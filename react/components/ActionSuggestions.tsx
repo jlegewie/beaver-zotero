@@ -184,7 +184,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     ) : null;
 
     return (
-        <div className="display-flex flex-col gap-05 mt-3 " style={style}>
+        <div className="display-flex flex-col gap-05 mt-3 ml-1" style={style}>
             <div className="display-flex flex-row gap-1 items-center mb-1 font-color-tertiary" style={style}>
                 <Icon icon={ZapIcon} />
                 {/* <div className="text-base font-medium"> */}
