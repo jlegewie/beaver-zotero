@@ -63,11 +63,7 @@ function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
     if (manualSupported.length > 0) {
         const allAttachments = manualSupported.every(i => i.isAttachment());
         const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
-        const labelItems = targetType === 'attachment'
-            ? manualSupported.filter(i => i.isAttachment())
-            : manualSupported.filter(i => i.isRegularItem());
-        const displayItems = labelItems.length > 0 ? labelItems : manualSupported;
-        return { targetType, label: getManualItemsLabel(displayItems), iconInfo: getIconInfoForItem(displayItems[0]) };
+        return { targetType, label: getManualItemsLabel(manualSupported), iconInfo: getIconInfoForItem(manualSupported[0]) };
     }
 
     // 4. Selected items
@@ -108,6 +104,9 @@ function getItemLabel(item: Zotero.Item): string {
 function formatItemNames(items: Zotero.Item[], source: 'selected' | 'attached'): string {
     const prefix = source === 'selected' ? 'selected' : 'attached';
     if (items.length > MAX_VISIBLE_ITEMS) {
+        if (source === 'attached' && items.some(i => i.isAttachment()) && items.some(i => i.isRegularItem())) {
+            return `${items.length} ${prefix} items and attachments`;
+        }
         if (items.every(i => i.isAttachment())) {
             return `${items.length} ${prefix} attachments`;
         }
