@@ -10,6 +10,7 @@ import { ZoteroContext } from '../atoms/zoteroContext';
 import { isSupportedItem } from '../../src/utils/sync';
 import { getDisplayNameFromItem } from './sourceUtils';
 import { truncateText } from './stringUtils';
+import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 
 // ---------------------------------------------------------------------------
 // ActionContext — combines Zotero state with manually-attached message items
@@ -28,6 +29,18 @@ const MAX_LABEL_ITEM_LENGTH = 50;
 const MAX_LABEL_ITEMS = 2;
 
 // ---------------------------------------------------------------------------
+// isActionableItem — enhanced item check for action visibility
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns `true` when an item is both supported and actionable.
+ * Adds a trash check on top of `isSupportedItem` (type-only).
+ */
+export function isActionableItem(item: Zotero.Item): boolean {
+    return isSupportedItem(item) && !safeIsInTrash(item);
+}
+
+// ---------------------------------------------------------------------------
 // isActionVisible — each source checked independently (no mixing)
 // ---------------------------------------------------------------------------
 
@@ -44,27 +57,29 @@ export function isActionVisible(action: Action, ctx: ActionContext): boolean {
             const min = action.minItems ?? 1;
             // Reader: parent item counts as 1 regular item
             if (ctx.zotero.type === 'reader' && ctx.zotero.readerAttachment) {
-                const parent = ctx.zotero.readerAttachment.parentItem;
-                if (parent?.isRegularItem() && min <= 1) return true;
+                if (!safeIsInTrash(ctx.zotero.readerAttachment)) {
+                    const parent = ctx.zotero.readerAttachment.parentItem;
+                    if (parent?.isRegularItem() && min <= 1) return true;
+                }
             }
             // Manual items (standalone source)
-            const manualRegular = ctx.manualItems.filter(i => i.isRegularItem()).length;
+            const manualRegular = ctx.manualItems.filter(i => i.isRegularItem() && !safeIsInTrash(i)).length;
             if (manualRegular >= min) return true;
             // Selected items (standalone source)
             if (ctx.zotero.type === 'items_selected') {
-                const selectedRegular = ctx.zotero.selectedItems.filter(i => i.isRegularItem()).length;
+                const selectedRegular = ctx.zotero.selectedItems.filter(i => i.isRegularItem() && !safeIsInTrash(i)).length;
                 if (selectedRegular >= min) return true;
             }
             return false;
         }
         case 'attachment':
             // Reader
-            if (ctx.zotero.readerAttachment && isSupportedItem(ctx.zotero.readerAttachment)) return true;
+            if (ctx.zotero.readerAttachment && isActionableItem(ctx.zotero.readerAttachment)) return true;
             // Manual items
-            if (ctx.manualItems.some(i => i.isAttachment() && isSupportedItem(i))) return true;
+            if (ctx.manualItems.some(i => i.isAttachment() && isActionableItem(i))) return true;
             // Selected items
             if (ctx.zotero.type === 'items_selected') {
-                if (ctx.zotero.selectedItems.some(i => i.isAttachment() && isSupportedItem(i))) return true;
+                if (ctx.zotero.selectedItems.some(i => i.isAttachment() && isActionableItem(i))) return true;
             }
             return false;
         case 'note':
@@ -124,7 +139,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     const groups: ActionGroup[] = [];
 
     const readerAtt = ctx.zotero.readerAttachment;
-    const isReader = ctx.zotero.type === 'reader' && readerAtt && isSupportedItem(readerAtt);
+    const isReader = ctx.zotero.type === 'reader' && readerAtt && isActionableItem(readerAtt);
 
     // --- 1. Reader group ---
     if (isReader) {
@@ -149,7 +164,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     }
 
     // --- 2. Manual items group ---
-    const manualSupported = ctx.manualItems.filter(i => isSupportedItem(i));
+    const manualSupported = ctx.manualItems.filter(i => isActionableItem(i));
     if (manualSupported.length > 0) {
         const manualAttachments = manualSupported.filter(i => i.isAttachment());
         const manualRegular = manualSupported.filter(i => i.isRegularItem());
@@ -172,7 +187,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
 
     // --- 3. Selected items group ---
     if (ctx.zotero.type === 'items_selected') {
-        const selectedSupported = ctx.zotero.selectedItems.filter(i => isSupportedItem(i));
+        const selectedSupported = ctx.zotero.selectedItems.filter(i => isActionableItem(i));
         if (selectedSupported.length > 0) {
             // Skip if identical to manual items
             if (manualSupported.length === 0 || !sameItemSet(manualSupported, selectedSupported)) {

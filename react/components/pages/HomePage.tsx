@@ -24,7 +24,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
             className="display-flex flex-col flex-1 min-h-0"
         >
             {/* Scrollable top section */}
-            <div className="display-flex flex-col flex-1 overflow-y-auto scrollbar px-4 pt-4 gap-4">
+            <div className="display-flex flex-col flex-1 overflow-y-auto scrollbar px-3 pt-4 gap-4">
                 {/* Top spacer */}
                 <div className="flex-1" style={{ minHeight: '2vh', maxHeight: '4vh' }} />
 
@@ -48,7 +48,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
             {/* Fixed bottom section */}
             <div
                 id="beaver-home-footer"
-                className={`flex-none px-4 ${isDatabaseSyncSupported && !isWindow ? '' : 'pb-4'}`}
+                className={`flex-none px-25 ${isDatabaseSyncSupported && !isWindow ? '' : 'pb-4'}`}
             >
                 <RecentChats />
 
@@ -56,7 +56,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                         <FileStatusBar />
                     )}
 
-                <div className="relative -mx-4 px-4">
+                <div className="relative -mx-4 px-4 mb-3">
                     <PreviewAndPopupContainer />
                     
                 </div>

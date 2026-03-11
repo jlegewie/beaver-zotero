@@ -128,9 +128,14 @@ function getToolIcon(part: ToolCallPart): IconComponent {
     
     // Special handling for read_file - check file type
     if (toolName === 'read_file') {
-        const args = typeof part.args === 'string' 
-            ? JSON.parse(part.args) 
-            : (part.args as Record<string, unknown>);
+        let args: Record<string, unknown> | undefined;
+        try {
+            args = typeof part.args === 'string'
+                ? JSON.parse(part.args)
+                : (part.args as Record<string, unknown>);
+        } catch {
+            // args may be incomplete while streaming
+        }
         const path = args?.path as string | undefined;
         
         if (path) {

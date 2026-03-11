@@ -20,6 +20,7 @@ import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVar
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { currentMessageItemsAtom } from './messageComposition';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
+import { itemValidationResultsAtom } from './itemValidation';
 
 // ---------------------------------------------------------------------------
 // Base atom — initialised once from prefs + built-ins
@@ -190,6 +191,25 @@ export const sendResolvedActionAtom = atom(
                 duration: 4000,
             });
             return;
+        }
+
+        // Check cached validation results — warn if any resolved item is known to be invalid
+        if (items.length > 0) {
+            const validationResults = get(itemValidationResultsAtom);
+            for (const item of items) {
+                const key   = `${item.libraryID}-${item.key}`;
+                const cached = validationResults.get(key);
+                if (cached && !cached.isValidating && !cached.isValid) {
+                    set(addPopupMessageAtom, {
+                        type: 'error',
+                        title: 'Action skipped',
+                        text: cached.reason || 'One or more items failed validation.',
+                        expire: true,
+                        duration: 4000,
+                    });
+                    return;
+                }
+            }
         }
 
         if (items.length > 0) {

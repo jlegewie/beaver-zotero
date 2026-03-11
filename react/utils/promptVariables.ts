@@ -21,6 +21,7 @@
 
 import { logger } from '../../src/utils/logger';
 import { isSupportedItem } from '../../src/utils/sync';
+import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { getCurrentReader } from './readerUtils';
 import { store } from '../store';
 import { currentReaderAttachmentAtom } from '../atoms/messageComposition';
@@ -157,30 +158,34 @@ interface TargetTypeContext {
     collection: CollectionContext | null;
 }
 
+function isActionableItem(item: Zotero.Item): boolean {
+    return isSupportedItem(item) && !safeIsInTrash(item);
+}
+
 function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeContext {
     switch (targetType) {
         case 'items': {
             // Reader context: parent item + attachment (only if supported)
             const readerAttachment = store.get(currentReaderAttachmentAtom);
-            if (readerAttachment && isSupportedItem(readerAttachment)) {
+            if (readerAttachment && isActionableItem(readerAttachment)) {
                 const parent = readerAttachment.parentItem;
                 return { items: parent ? [parent, readerAttachment] : [readerAttachment], collection: null };
             }
-            // Library context: selected supported regular items
+            // Library context: selected actionable regular items
             const selected = store.get(selectedZoteroItemsAtom);
-            const regular = selected.filter((i: Zotero.Item) => i.isRegularItem());
+            const regular = selected.filter((i: Zotero.Item) => i.isRegularItem() && isActionableItem(i));
             return { items: regular.slice(0, 10), collection: null };
         }
         case 'attachment': {
             // Reader context: attachment open in reader (only if supported)
             const readerAttachment = store.get(currentReaderAttachmentAtom);
-            if (readerAttachment && isSupportedItem(readerAttachment)) {
+            if (readerAttachment && isActionableItem(readerAttachment)) {
                 const parent = readerAttachment.parentItem;
                 return { items: parent ? [parent, readerAttachment] : [readerAttachment], collection: null };
             }
-            // Library context: selected supported attachments (+ their parents)
+            // Library context: selected actionable attachments (+ their parents)
             const selected = store.get(selectedZoteroItemsAtom);
-            const attachments = selected.filter((i: Zotero.Item) => i.isAttachment() && isSupportedItem(i));
+            const attachments = selected.filter((i: Zotero.Item) => i.isAttachment() && isActionableItem(i));
             if (attachments.length > 0) {
                 const result: Zotero.Item[] = [];
                 const seen = new Set<string>();
@@ -258,7 +263,7 @@ async function resolveSelectedItems(): Promise<ResolvedVariable> {
         if (!zp) return { text: '', items: [] };
 
         const selectedItems: Zotero.Item[] = zp.getSelectedItems?.() || [];
-        const regularItems = selectedItems.filter((item: Zotero.Item) => item.isRegularItem());
+        const regularItems = selectedItems.filter((item: Zotero.Item) => item.isRegularItem() && isActionableItem(item));
         return { text: '', items: regularItems.slice(0, 10) };
     } catch (e) {
         logger(`promptVariables: resolveSelectedItems error: ${e}`, 1);
@@ -299,7 +304,7 @@ async function resolveActiveItem(): Promise<ResolvedVariable> {
         const zp = Zotero.getActiveZoteroPane?.();
         if (zp) {
             const selectedItems: Zotero.Item[] = zp.getSelectedItems?.() || [];
-            const regularItems = selectedItems.filter((item: Zotero.Item) => item.isRegularItem());
+            const regularItems = selectedItems.filter((item: Zotero.Item) => item.isRegularItem() && isActionableItem(item));
             if (regularItems.length > 0) {
                 return { text: '', items: regularItems.slice(0, 10) };
             }
