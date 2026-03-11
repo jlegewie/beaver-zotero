@@ -201,7 +201,7 @@ export const sendResolvedActionAtom = atom(
                 const cached = validationResults.get(key);
                 if (cached && !cached.isValidating && !cached.isValid) {
                     set(addPopupMessageAtom, {
-                        type: 'warning',
+                        type: 'error',
                         title: 'Action skipped',
                         text: cached.reason || 'One or more items failed validation.',
                         expire: true,
