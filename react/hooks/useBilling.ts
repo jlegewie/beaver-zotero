@@ -30,7 +30,7 @@ export function useBilling() {
         }
     }, []);
 
-    const subscribe = useCallback(async (sku = 'basic_monthly') => {
+    const subscribe = useCallback(async (sku = 'plus_monthly') => {
         setIsLoading(true);
         setError(null);
         try {

@@ -87,7 +87,7 @@ export interface SafeProfileModel {
     current_plan_id: string;     // UUID
 
     // Credit plan (LLM credit subscription)
-    credit_plan: string | null;  // 'basic', 'pro', or null
+    credit_plan: string | null;  // 'plus' (or null if no active credit plan)
     credit_plan_status: CreditPlanStatus;
     credit_plan_monthly_credits: number;
     credit_period_start: string | null;

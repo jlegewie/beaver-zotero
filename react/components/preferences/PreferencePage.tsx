@@ -56,7 +56,7 @@ const PreferencePage: React.FC = () => {
     const creditBreakdown = useAtomValue(creditBreakdownAtom);
     const isPastDue = useAtomValue(isCreditPlanPastDueAtom);
     const hasPlan = useAtomValue(hasCreditPlanAtom);
-    const { subscribe, buyCredits, manageSubscription, upgradeSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
+    const { subscribe, buyCredits, manageSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
     const connectionStatus = useAtomValue(connectionStatusAtom);
     const setFileStatus = useSetAtom(fileStatusAtom);
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
@@ -1086,11 +1086,11 @@ const PreferencePage: React.FC = () => {
                                                 >
                                                     <div className="display-flex flex-row items-center gap-2" style={{ marginBottom: '4px' }}>
                                                         <span className="text-base font-color-primary font-bold">{plan.name}</span>
-                                                        {plan.highlight && (
+                                                        {/* {plan.highlight && (
                                                             <span className="text-xs px-15 py-05 rounded-md bg-quarternary font-color-secondary">
                                                                 Recommended
                                                             </span>
-                                                        )}
+                                                        )} */}
                                                     </div>
                                                     <div className="text-xl font-color-primary font-bold">
                                                         {price}<span className="text-sm font-normal font-color-secondary">/{plan.interval || 'mo'}</span>
@@ -1229,16 +1229,6 @@ const PreferencePage: React.FC = () => {
                                     );
                                 })()}
 
-                                {creditPlan.plan === 'basic' && !creditPlan.cancelAtPeriodEnd && (
-                                    <div style={{ marginTop: '8px' }}>
-                                        <span
-                                            className="text-sm text-link cursor-pointer"
-                                            onClick={upgradeSubscription}
-                                        >
-                                            Upgrade to Pro &rarr;
-                                        </span>
-                                    </div>
-                                )}
                             </div>
                         )}
                     </div>
