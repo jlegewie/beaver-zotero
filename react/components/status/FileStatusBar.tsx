@@ -80,7 +80,7 @@ const FileStatusBar: React.FC = () => {
     if (isConnecting) {
         text = "Connecting...";
     } else if (isError) {
-        text = "File sync issue";
+        text = "Unable to connect";
     } else if (isActivelyProcessing) {
         text = `Processing files... ${summary.indexingProgress}%`;
     } else if (showComplete) {
