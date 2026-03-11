@@ -28,7 +28,7 @@ declare namespace _ZoteroTypes {
       "confirmExtractionCosts": boolean;
       "confirmExternalSearchCosts": boolean;
       "pauseLongRunningAgent": boolean;
-      "requestProTools": boolean;
+      "requestPlusTools": boolean;
       "deferredToolPreferences": string;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;

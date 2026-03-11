@@ -334,7 +334,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             customContent={!isWebSearchAllowed ? (
                                 <div className="px-2 py-1 display-flex flex-col gap-1">
                                     <span className="text-base font-color-secondary font-semibold">Web search requires Beaver credits</span>
-                                    <span className="text-sm font-color-tertiary">Use a Beaver model, or enable Pro Tools in Settings → API Keys</span>
+                                    <span className="text-sm font-color-tertiary">Use a Beaver model, or enable Plus Tools in Settings → API Keys</span>
                                 </div>
                             ) : undefined}
                         >

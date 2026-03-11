@@ -4,7 +4,7 @@ import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/Se
 import ApiKeyInput from "./ApiKeyInput";
 import { getPref, setPref } from "../../../src/utils/prefs";
 import { handlePrefSave } from "./utils";
-import { activePreferencePageTabAtom, requestProToolsAtom } from "../../atoms/ui";
+import { activePreferencePageTabAtom, requestPlusToolsAtom } from "../../atoms/ui";
 import { remainingBeaverCreditsAtom } from "../../atoms/profile";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 
@@ -17,16 +17,16 @@ const ApiKeysSection: React.FC = () => {
     const [openaiKey, setOpenaiKey] = useState(() => getPref('openAiApiKey'));
     const [anthropicKey, setAnthropicKey] = useState(() => getPref('anthropicApiKey'));
 
-    // --- Atoms: Request Pro Tools ---
-    const [requestProTools, setRequestProTools] = useAtom(requestProToolsAtom);
+    // --- Atoms: Request Plus Tools ---
+    const [requestPlusTools, setRequestPlusTools] = useAtom(requestPlusToolsAtom);
     const remainingBeaverCredits = useAtomValue(remainingBeaverCreditsAtom);
 
-    // --- Handlers: Toggle Request Pro Tools ---
-    const handleRequestProToolsToggle = useCallback(() => {
-        const newValue = !requestProTools;
-        setPref('requestProTools', newValue);
-        setRequestProTools(newValue);
-    }, [requestProTools]);
+    // --- Handlers: Toggle Request Plus Tools ---
+    const handleRequestPlusToolsToggle = useCallback(() => {
+        const newValue = !requestPlusTools;
+        setPref('requestPlusTools', newValue);
+        setRequestPlusTools(newValue);
+    }, [requestPlusTools]);
 
     return (
         <>
@@ -86,8 +86,8 @@ const ApiKeysSection: React.FC = () => {
             </div>
 
             <div className="display-flex flex-row gap-2">
-                <SectionLabel>Pro Tools</SectionLabel>
-                {requestProTools ? (
+                <SectionLabel>Plus Tools</SectionLabel>
+                {requestPlusTools ? (
                     remainingBeaverCredits > 0 ? (
                         <span
                             className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
@@ -113,13 +113,13 @@ const ApiKeysSection: React.FC = () => {
                 )}
             </div>
             <SettingsGroup>
-                {requestProTools && remainingBeaverCredits > 0 ? (
+                {requestPlusTools && remainingBeaverCredits > 0 ? (
                     /* State 1: Enabled + has credits */
                     <SettingsRow
-                        title="Use Pro Tools with your API key"
+                        title="Use Plus Tools with your API key"
                         description={
                             <>
-                                Enable to use pro tools like external search, batch extraction, and AI ranking with your own API key.
+                                Enable to use Plus Tools like external search, batch extraction, and AI ranking with your own API key.
                                 Costs 0.25 credits per message. Some actions cost extra.{' '}
                                 <DocLink path="credits">Learn more</DocLink>
                                 <br />
@@ -130,18 +130,18 @@ const ApiKeysSection: React.FC = () => {
                             </>
                         }
                         control={
-                            <Button variant="outline" onClick={handleRequestProToolsToggle}>
+                            <Button variant="outline" onClick={handleRequestPlusToolsToggle}>
                                 Disable
                             </Button>
                         }
                     />
-                ) : requestProTools && remainingBeaverCredits <= 0 ? (
+                ) : requestPlusTools && remainingBeaverCredits <= 0 ? (
                     /* State 2: Enabled + no credits */
                     <SettingsRow
-                        title="Use Pro Tools with your API key"
+                        title="Use Plus Tools with your API key"
                         description={
                             <>
-                                Pro Tools are enabled but can't run without credits.
+                                Plus Tools are enabled but can't run without credits.
                                 Your API key will still work for basic chat.
                                 <br />
                                 <br />
@@ -151,15 +151,15 @@ const ApiKeysSection: React.FC = () => {
                             </>
                         }
                         control={
-                            <Button variant="outline" onClick={handleRequestProToolsToggle}>
+                            <Button variant="outline" onClick={handleRequestPlusToolsToggle}>
                                 Disable
                             </Button>
                         }
                     />
-                ) : !requestProTools && remainingBeaverCredits > 0 ? (
+                ) : !requestPlusTools && remainingBeaverCredits > 0 ? (
                     /* State 3: Disabled + has credits */
                     <SettingsRow
-                        title="Use Pro Tools with your API key"
+                        title="Use Plus Tools with your API key"
                         description={
                             <>
                                 Unlock external search, batch extraction, and AI ranking alongside your API key.
@@ -173,7 +173,7 @@ const ApiKeysSection: React.FC = () => {
                             </>
                         }
                         control={
-                            <Button variant="outline" onClick={handleRequestProToolsToggle}>
+                            <Button variant="outline" onClick={handleRequestPlusToolsToggle}>
                                 Enable
                             </Button>
                         }
@@ -181,7 +181,7 @@ const ApiKeysSection: React.FC = () => {
                 ) : (
                     /* State 4: Disabled + no credits */
                     <SettingsRow
-                        title="Use Pro Tools with your API key"
+                        title="Use Plus Tools with your API key"
                         description={
                             <>
                                 Unlock external search, batch extraction, and AI ranking alongside your API key.

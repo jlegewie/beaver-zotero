@@ -1059,7 +1059,7 @@ const PreferencePage: React.FC = () => {
                                     No active plan
                                 </div>
                                 <div className="text-base font-color-secondary" style={{ marginBottom: '12px' }}>
-                                    Subscribe to get monthly credits and Pro Tools (external search, batch extraction, and more).
+                                    Subscribe to get monthly credits and Plus Tools (external search, batch extraction, and more).
                                 </div>
 
                                 {plansLoading && (

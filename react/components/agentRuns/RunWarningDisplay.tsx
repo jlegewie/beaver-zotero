@@ -6,7 +6,7 @@ import IconButton from '../ui/IconButton';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { RunWarning, dismissWarningAtom } from '../../atoms/warnings';
 import { setPref } from '../../../src/utils/prefs';
-import { requestProToolsAtom } from '../../atoms/ui';
+import { requestPlusToolsAtom } from '../../atoms/ui';
 import { useBilling } from '../../hooks/useBilling';
 import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 
@@ -20,21 +20,21 @@ interface RunWarningDisplayProps {
  */
 export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning }) => {
     const dismissWarning = useSetAtom(dismissWarningAtom);
-    const setRequestProTools = useSetAtom(requestProToolsAtom);
+    const setRequestPlusTools = useSetAtom(requestPlusToolsAtom);
     const { subscribe, buyCredits, isLoading } = useBilling();
 
     const handleDismiss = () => {
         dismissWarning(warning.id);
     };
 
-    const handleDisableProTools = () => {
-        setPref('requestProTools', false);
-        setRequestProTools(false);
+    const handleDisablePlusTools = () => {
+        setPref('requestPlusTools', false);
+        setRequestPlusTools(false);
         dismissWarning(warning.id);
     };
 
     const showLowCreditsButtons = warning.type === 'low_credits';
-    const showProToolsDegradedButtons = warning.type === 'pro_tools_degraded';
+    const showPlusToolsDegradedButtons = warning.type === 'plus_tools_degraded';
 
     return (
         <div className="display-flex flex-col p-3 gap-3 rounded-lg bg-quinary">
@@ -67,7 +67,7 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
                     </Button>
                 </div>
             )}
-            {showProToolsDegradedButtons && (
+            {showPlusToolsDegradedButtons && (
                 <div className="display-flex flex-row gap-3 items-start mr-1">
                     <div className="flex-1" />
                     <Button
@@ -81,9 +81,9 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
                     <Button
                         variant="outline"
                         className="scale-90 mt-020"
-                        onClick={handleDisableProTools}
+                        onClick={handleDisablePlusTools}
                     >
-                        Disable Pro Tools
+                        Disable Plus Tools
                     </Button>
                 </div>
             )}
