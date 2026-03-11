@@ -42,6 +42,7 @@ declare namespace _ZoteroTypes {
       "customPromptsLastUsed": string;
       "actions": string;
       "actionsLastUsed": string;
+      "legacyPromptsImported": boolean;
       "deletionJobs": string;
       "skippedItems": string;
       "mcpServerEnabled": boolean;
