@@ -10,6 +10,7 @@ import { ZoteroContext } from '../atoms/zoteroContext';
 import { isSupportedItem } from '../../src/utils/sync';
 import { getDisplayNameFromItem } from './sourceUtils';
 import { truncateText } from './stringUtils';
+import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 
 // ---------------------------------------------------------------------------
 // ActionContext — combines Zotero state with manually-attached message items
@@ -36,7 +37,7 @@ const MAX_LABEL_ITEMS = 2;
  * Adds a trash check on top of `isSupportedItem` (type-only).
  */
 export function isActionableItem(item: Zotero.Item): boolean {
-    return isSupportedItem(item) && !item.isInTrash();
+    return isSupportedItem(item) && !safeIsInTrash(item);
 }
 
 // ---------------------------------------------------------------------------
@@ -56,17 +57,17 @@ export function isActionVisible(action: Action, ctx: ActionContext): boolean {
             const min = action.minItems ?? 1;
             // Reader: parent item counts as 1 regular item
             if (ctx.zotero.type === 'reader' && ctx.zotero.readerAttachment) {
-                if (!ctx.zotero.readerAttachment.isInTrash()) {
+                if (!safeIsInTrash(ctx.zotero.readerAttachment)) {
                     const parent = ctx.zotero.readerAttachment.parentItem;
                     if (parent?.isRegularItem() && min <= 1) return true;
                 }
             }
             // Manual items (standalone source)
-            const manualRegular = ctx.manualItems.filter(i => i.isRegularItem() && !i.isInTrash()).length;
+            const manualRegular = ctx.manualItems.filter(i => i.isRegularItem() && !safeIsInTrash(i)).length;
             if (manualRegular >= min) return true;
             // Selected items (standalone source)
             if (ctx.zotero.type === 'items_selected') {
-                const selectedRegular = ctx.zotero.selectedItems.filter(i => i.isRegularItem() && !i.isInTrash()).length;
+                const selectedRegular = ctx.zotero.selectedItems.filter(i => i.isRegularItem() && !safeIsInTrash(i)).length;
                 if (selectedRegular >= min) return true;
             }
             return false;
