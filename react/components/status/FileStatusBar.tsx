@@ -1,19 +1,20 @@
-import React from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { useAtomValue } from "jotai";
 import { fileStatusSummaryAtom, connectionStatusAtom } from "../../atoms/files";
-import { Spinner, SyncIcon, Icon, AlertIcon, TickIcon } from "../icons/icons";
+import { Spinner, Icon, AlertIcon, TickIcon } from "../icons/icons";
 import { openPreferencesWindow } from "../../../src/ui/openPreferencesWindow";
 import { useFileStatus } from "../../hooks/useFileStatus";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import { hasPopupsOrPreviewsAtom } from "../../atoms/ui";
 
+const COMPLETION_DISPLAY_MS = 15_000;
+
 /**
  * Minimal one-line file processing status indicator for the homepage footer.
- * Visible during active processing, when there are errors, or during connection issues.
+ * Shows during active processing and briefly after completion, then hides.
  * Clicking opens the preferences window on the sync tab.
  */
 const FileStatusBar: React.FC = () => {
-    // Realtime listening for file status updates
     useFileStatus(true);
     useIndexingCompleteMessage();
 
@@ -21,34 +22,60 @@ const FileStatusBar: React.FC = () => {
     const connectionStatus = useAtomValue(connectionStatusAtom);
     const hasPopupsOrPreviews = useAtomValue(hasPopupsOrPreviewsAtom);
 
-    // Determine visibility
     const isConnecting = connectionStatus === 'connecting' || connectionStatus === 'reconnecting';
     const isError = connectionStatus === 'error' || connectionStatus === 'disconnected';
     const isConnected = connectionStatus === 'connected';
 
     const hasFiles = summary.fileStatusAvailable && summary.totalFiles > 0;
     const isActivelyProcessing = hasFiles && (summary.activeCount > 0 || summary.queuedProcessingCount > 0);
-    const hasFailed = hasFiles && summary.failedCount > 0;
-    const isFullyComplete = hasFiles && !isActivelyProcessing && !hasFailed;
+    const isFullyComplete = hasFiles && !isActivelyProcessing;
 
-    // Hidden when: no files exist, or everything is fully complete with no errors, or idle
+    // Track processing→complete transition for auto-hide
+    const wasProcessingRef = useRef(false);
+    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [showComplete, setShowComplete] = useState(false);
+
+    useEffect(() => {
+        if (isActivelyProcessing) {
+            wasProcessingRef.current = true;
+            // Cancel any pending completion timer
+            if (timerRef.current) {
+                clearTimeout(timerRef.current);
+                timerRef.current = null;
+            }
+            setShowComplete(false);
+        } else if (wasProcessingRef.current && isFullyComplete) {
+            // Processing just finished — show completion briefly
+            setShowComplete(true);
+            timerRef.current = setTimeout(() => {
+                setShowComplete(false);
+                timerRef.current = null;
+            }, COMPLETION_DISPLAY_MS);
+        }
+        return () => {
+            if (timerRef.current) clearTimeout(timerRef.current);
+        };
+    }, [isActivelyProcessing, isFullyComplete]);
+
+    // Visibility
     if (connectionStatus === 'idle') return null;
     if (isConnected && !hasFiles) return null;
-    if (isConnected && isFullyComplete) return null;
+    if (isConnected && isFullyComplete && !showComplete) return null;
+    if (isConnected && !isActivelyProcessing && !isFullyComplete && !isConnecting && !isError) return null;
 
-    // Determine icon
+    // Icon
     let icon: React.ReactNode;
     if (isConnecting || isActivelyProcessing) {
         icon = <Spinner size={11} />;
-    } else if (isError || hasFailed) {
+    } else if (isError) {
         icon = <Icon icon={AlertIcon} className="scale-90 font-color-yellow" />;
-    } else if (isFullyComplete) {
+    } else if (showComplete) {
         icon = <Icon icon={TickIcon} />;
     } else {
-        icon = <Icon icon={SyncIcon} className="scale-90" />;
+        icon = <Spinner size={11} />;
     }
 
-    // Determine text
+    // Text
     let text: string;
     if (isConnecting) {
         text = "Connecting...";
@@ -56,10 +83,8 @@ const FileStatusBar: React.FC = () => {
         text = "File sync issue";
     } else if (isActivelyProcessing) {
         text = `Processing files... ${summary.indexingProgress}%`;
-    } else if (hasFailed) {
-        text = `${summary.failedCount} file${summary.failedCount !== 1 ? 's' : ''} failed`;
-    } else if (isFullyComplete) {
-        text = "File processing complete. Check status";
+    } else if (showComplete) {
+        text = "Processing complete. View status.";
     } else {
         text = "File processing";
     }
