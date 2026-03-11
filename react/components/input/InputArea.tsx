@@ -9,9 +9,6 @@ import Button from '../ui/Button';
 import SearchMenu, { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
-import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom } from '../../atoms/customPrompts';
-import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../../utils/promptVariables';
-import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 import { logger } from '../../../src/utils/logger';
 import { isLibraryTabAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { selectedModelAtom } from '../../atoms/models';
@@ -29,23 +26,21 @@ const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
 
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
+    verticalPosition?: 'above' | 'below';
 }
 
 const InputArea: React.FC<InputAreaProps> = ({
-    inputRef
+    inputRef,
+    verticalPosition = 'above',
 }) => {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const [currentMessageItems, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
-    const sendResolvedPrompt = useSetAtom(sendResolvedPromptAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
     const newThread = useSetAtom(newThreadAtom);
     const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
-    const customPrompts = useAtomValue(customPromptsForContextAtom);
-    const markPromptUsed = useSetAtom(markPromptUsedAtom);
-    const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const allRuns = useAtomValue(allRunsAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
     const dismissedWarningsByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
@@ -90,7 +85,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         handleSlashMenuChange,
         handleSlashTrigger,
         handleSlashMenuKeyDown,
-    } = useSlashMenu(inputRef);
+    } = useSlashMenu(inputRef, verticalPosition);
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -155,43 +150,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.preventDefault();
             newThread();
         }
-
-        // Handle ⌘^1-9 (Mac) or Ctrl+Win+1-9 (Windows/Linux) for custom prompt
-        for (let i = 1; i <= 9; i++) {
-            if (e.key === i.toString() && ((Zotero.isMac && e.metaKey && e.ctrlKey) || (!Zotero.isMac && e.ctrlKey && e.metaKey))) {
-                e.preventDefault();
-                handleCustomPrompt(i);
-            }
-        }
     };
-
-    const handleCustomPrompt = async (i: number) => {
-        const customPrompt = customPrompts.find(p => p.shortcut === i);
-        if (!customPrompt) return;
-        logger(`Custom prompt: ${i} ${customPrompt.text} ${currentMessageItems.length}`);
-        if (!customPrompt.requiresAttachment || currentMessageItems.length > 0) {
-            if (isPending) {
-                // During streaming: resolve variables and insert into textarea without sending
-                const { text: resolvedText, items, emptyItemVariables } = await resolvePromptVariables(customPrompt.text);
-                if (emptyItemVariables.length > 0) {
-                    addPopupMessage({ type: 'warning', title: 'Action skipped', text: EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.', expire: true, duration: 4000 });
-                    return;
-                }
-                setMessageContent(resolvedText);
-                if (items.length > 0) {
-                    setCurrentMessageItems(prev => {
-                        const existingKeys = new Set(prev.map(item => `${item.libraryID}-${item.key}`));
-                        const newItems = items.filter(item => !existingKeys.has(`${item.libraryID}-${item.key}`));
-                        return newItems.length > 0 ? [...prev, ...newItems] : prev;
-                    });
-                }
-                if (customPrompt.id) markPromptUsed(customPrompt.id);
-            } else {
-                if (customPrompt.id) markPromptUsed(customPrompt.id);
-                sendResolvedPrompt(customPrompt.text);
-            }
-        }
-    }
 
     const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
         // Check if the click target is a button or within a button
@@ -215,7 +174,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     return (
         <div
-            className="user-message-display shadow-md shadow-md-top"
+            className="user-message-display"
             onClick={handleContainerClick}
             style={{ minHeight: 'fit-content' }}
         >
@@ -240,6 +199,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 setMenuPosition={setMenuPosition}
                 inputRef={inputRef as React.RefObject<HTMLTextAreaElement>}
                 disabled={isAwaitingApproval}
+                verticalPosition={verticalPosition}
             />
 
             {/* Slash command menu */}
@@ -248,7 +208,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 isOpen={isSlashMenuOpen}
                 onClose={handleSlashDismiss}
                 position={slashMenuPosition}
-                verticalPosition="above"
+                verticalPosition={verticalPosition}
                 useFixedPosition={true}
                 width="250px"
                 searchQuery={slashSearchQuery}
@@ -279,9 +239,10 @@ const InputArea: React.FC<InputAreaProps> = ({
                             // Don't open attachment menu when awaiting approval
                             if (e.target.value.endsWith('@') && !isAwaitingApproval) {
                                 const rect = e.currentTarget.getBoundingClientRect();
+                                const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
                                 setMenuPosition({
                                     x: rect.left,
-                                    y: rect.top - 5
+                                    y,
                                 })
                                 setIsAddAttachmentMenuOpen(true);
                             } else {

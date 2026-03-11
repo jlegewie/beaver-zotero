@@ -39,7 +39,7 @@ const FileStatusIcons: React.FC<{
     className?: string,
     textClassName?: string
     iconScale?: string;
-}> = ({ className = '', textClassName = 'text-lg', iconScale = 'scale-115' }) => {
+}> = ({ className = '', textClassName = 'text-sm', iconScale = 'scale-90' }) => {
 
     const [fileStatusSummary] = useAtom(fileStatusSummaryAtom);
     const [isAnimating, setIsAnimating] = useState(false);
@@ -68,7 +68,7 @@ const FileStatusIcons: React.FC<{
     const animationClass = isAnimating ? `${baseClasses} ${flashClasses}` : baseClasses;
 
     // Conditionally apply 'animate-spin' to SyncIcon
-    const syncIconClassName = `scale-125 text-purple-500 ${fileStatusSummary.activeCount > 0 ? 'animate-spin' : ''}`;
+    const syncIconClassName = `scale-90 text-purple-500 ${fileStatusSummary.activeCount > 0 ? 'animate-spin' : ''}`;
 
     return (
         <div className={`display-flex flex-row gap-4 ${animationClass} ${className}`}>

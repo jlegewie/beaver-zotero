@@ -11,6 +11,7 @@ import { threadService } from '../../src/services/threadService';
 import { getDateGroup } from '../utils/dateUtils';
 import { formatTimeAgo } from '../utils/formatTimeAgo';
 import Button from './ui/Button';
+import { clearRecentChatsCache } from './RecentChats';
 
 interface ThreadListViewProps {
     isWindow?: boolean;
@@ -243,8 +244,9 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         try {
             await threadService.deleteThread(threadId);
             setThreads(prev => prev.filter(t => t.id !== threadId));
-            // Invalidate cache
+            // Invalidate caches
             searchCache.clear();
+            clearRecentChatsCache();
             // If deleting the current thread, create a new one
             if (threadId === currentThreadId) {
                 await newThread();
@@ -275,8 +277,9 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             setThreads(prev => prev.map(t =>
                 t.id === threadId ? { ...t, name: newName } : t
             ));
-            // Invalidate cache
+            // Invalidate caches
             searchCache.clear();
+            clearRecentChatsCache();
         } catch (error) {
             console.error('Error renaming thread:', error);
         } finally {

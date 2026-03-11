@@ -1,113 +1,66 @@
 import React from "react";
-import Button from "../ui/Button";
-import FileStatusButton from "../ui/buttons/FileStatusButton";
-import { ArrowDownIcon, ArrowRightIcon } from '../icons/icons';
-import { useFileStatus } from '../../hooks/useFileStatus';
-import { showFileStatusDetailsAtom } from '../../atoms/ui';
-import { useSetAtom, useAtomValue, useAtom } from 'jotai';
-import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
-import { isStreamingAtom } from '../../agents/atoms';
-import { isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
-import { currentMessageItemsAtom, currentReaderAttachmentAtom } from "../../atoms/messageComposition";
-import { CustomPrompt } from "../../types/settings";
-import { customPromptsForContextAtom, markPromptUsedAtom, sendResolvedPromptAtom } from "../../atoms/customPrompts";
-import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
-import FileStatusDisplay from "../status/FileStatusDisplay";
+import { useAtomValue } from 'jotai';
 import { isDatabaseSyncSupportedAtom } from "../../atoms/profile";
+import RecentChats from "../RecentChats";
+import ActionSuggestions from "../ActionSuggestions";
+import { actionsForContextAtom } from "../../atoms/actions";
+import InputArea from "../input/InputArea";
+import DragDropWrapper from "../input/DragDropWrapper";
+import PreviewAndPopupContainer from "../PreviewAndPopupContainer";
+import FileStatusBar from "../status/FileStatusBar";
 
 interface HomePageProps {
     isWindow?: boolean;
+    inputRef: React.RefObject<HTMLTextAreaElement | null>;
 }
 
-const HomePage: React.FC<HomePageProps> = ({ isWindow = false }) => {
-    const isStreaming = useAtomValue(isStreamingAtom);
-    const isPending = useAtomValue(isWSChatPendingAtom);
-    const [showFileStatusDetails, setShowFileStatusDetails] = useAtom(showFileStatusDetailsAtom);
-    const currentMessageItems = useAtomValue(currentMessageItemsAtom);
-    const sendResolvedPrompt = useSetAtom(sendResolvedPromptAtom);
-    const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
+const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
-    const prompts = useAtomValue(customPromptsForContextAtom);
-    const markPromptUsed = useSetAtom(markPromptUsedAtom);
-
-    // Realtime listening for file status updates (only in sidebar, not in separate windows)
-    const { connectionStatus } = useFileStatus(!isWindow);
-    useIndexingCompleteMessage();
-
-    const handleCustomPrompt = async (prompt: CustomPrompt) => {
-        if (isPending || isStreaming || prompt.text.length === 0) return;
-        if (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment) return;
-        if (prompt.id) markPromptUsed(prompt.id);
-        await sendResolvedPrompt(prompt.text);
-    };
-    const shortcutKey = Zotero.isMac ? '⌘^' : 'Ctrl+Win+';
+    const actions = useAtomValue(actionsForContextAtom);
 
     return (
-        <div 
+        <div
             id="welcome-page"
-            className="display-flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar min-w-0 p-4"
+            className="display-flex flex-col flex-1 min-h-0"
         >
-            {/* Top spacing */}
-            <div style={{ height: prompts.length > 0 ? '5vh' : '0vh' }}></div>
+            {/* Scrollable top section */}
+            <div className="display-flex flex-col flex-1 overflow-y-auto scrollbar px-3 pt-4 gap-4">
+                {/* Top spacer */}
+                <div className="flex-1" style={{ minHeight: '2vh', maxHeight: '4vh' }} />
 
-            {/* Custom Prompt */}
-            {prompts.length > 0 && (
-                <>
-                <div className="display-flex flex-row justify-between items-center mb-2">
-                    {/* <div className="font-semibold text-lg mb-1">Custom Prompts</div> */}
-                    <div className="text-2xl font-semibold">How can I help you?</div>
-                    <Button variant="outline" className="scale-85 fit-content" onClick={() => openPreferencesWindow('prompts')}> Edit </Button>
-                </div>
-                {/* <div className="display-flex flex-col items-start mb-4">
-                    <p className="text-base font-color-secondary -mt-2">Beaver will sync your library, upload your PDFs, and index your files for search. This process can take 20-60 min.</p>
-                </div> */}
-                {prompts.map((prompt) => (
-                    <Button
-                        key={prompt.id || prompt.index}
-                        variant="ghost"
-                        onClick={() => handleCustomPrompt(prompt)}
-                        disabled={isPending || (prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment)}
-                        className="w-full justify-between"
-                        style={{ padding: '6px 8px' }}
-                        title={(prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment && !currentReaderAttachment) ? 'Requires attachments' : 'Run action'}
-                    >
-                        <span className="text-lg truncate">
-                            {prompt.title}
-                        </span>
-                        {prompt.shortcut != null && (
-                            <span className={`text-sm ml-2 flex-shrink-0 ${prompt.requiresAttachment && currentMessageItems.length === 0 && !currentReaderAttachment ? 'font-color-quarternary' : 'font-color-tertiary'}`}>
-                                {`${shortcutKey}${prompt.shortcut}`}
-                            </span>
-                        )}
-                    </Button>
-                ))}
-                </>
-            )}
-            
-            {/* File Processing Status */}
-            {isDatabaseSyncSupported && !isWindow && (
-                <div className="display-flex flex-row justify-between items-center mt-5">
-                    <Button
-                        variant="ghost-secondary"
-                        onClick={() => setShowFileStatusDetails(!showFileStatusDetails)}
-                        rightIcon={showFileStatusDetails ? ArrowDownIcon : ArrowRightIcon}
-                        iconClassName="mr-0 scale-14"
-                    >
-                        <span className="font-semibold text-lg mb-1" style={{ marginLeft: '-3px' }}>
-                            File Status
-                        </span>
-                    </Button>
-                    {!showFileStatusDetails && (
-                        <FileStatusButton showFileStatus={showFileStatusDetails} setShowFileStatus={setShowFileStatusDetails}/>
+                {/* Greeting */}
+                <div className="text-2xl font-semibold text-center p-2">How can I help you?</div>
+
+                {/* Input area */}
+                <DragDropWrapper>
+                    <InputArea inputRef={inputRef} verticalPosition="below" />
+                </DragDropWrapper>
+
+                {/* Action suggestions */}
+                {actions.length > 0 && (
+                    <ActionSuggestions showGlobal={false} />
+                )}
+
+                {/* Bottom spacer */}
+                <div className="flex-1" />
+            </div>
+
+            {/* Fixed bottom section */}
+            <div
+                id="beaver-home-footer"
+                className={`flex-none px-25 ${isDatabaseSyncSupported && !isWindow ? '' : 'pb-4'}`}
+            >
+                <RecentChats />
+
+                {isDatabaseSyncSupported && !isWindow && (
+                        <FileStatusBar />
                     )}
+
+                <div className="relative -mx-4 px-4 mb-3">
+                    <PreviewAndPopupContainer />
+                    
                 </div>
-            )}
-            
-            {isDatabaseSyncSupportedAtom && !isWindow && showFileStatusDetails && (
-                <div className="display-flex flex-col gap-4 min-w-0 w-full">
-                    <FileStatusDisplay connectionStatus={connectionStatus}/>
-                </div>
-            )}
+            </div>
         </div>
     );
 };

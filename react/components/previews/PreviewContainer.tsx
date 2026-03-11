@@ -42,8 +42,8 @@ const PreviewContainer: React.FC<PreviewContainerProps> = ({ className, hasAbove
         const calculateAvailableSpace = () => {
             try {
                 const header = doc.getElementById('beaver-header');
-                const prompt = doc.getElementById('beaver-prompt');
-                
+                const prompt = doc.getElementById('beaver-prompt') || doc.getElementById('beaver-home-footer');
+
                 if (header && prompt) {
                     const headerRect = header.getBoundingClientRect();
                     const promptRect = prompt.getBoundingClientRect();

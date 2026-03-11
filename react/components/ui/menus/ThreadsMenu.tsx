@@ -11,6 +11,7 @@ import Spinner from '../../icons/Spinner';
 import { getDateGroup } from '../../../utils/dateUtils';
 import { getPref } from '../../../../src/utils/prefs';
 import { clearThreadListCache } from '../../ThreadListView';
+import { clearRecentChatsCache } from '../../RecentChats';
 
 interface ThreadsMenuProps {
     className?: string;
@@ -159,6 +160,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             // Refresh the threads list
             setThreads((prev) => prev.filter(thread => thread.id !== threadId));
             clearThreadListCache();
+            clearRecentChatsCache();
         } catch (error) {
             console.error('Error deleting thread:', error);
         }
@@ -192,6 +194,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
                 thread.id === threadId ? { ...thread, name: newName } : thread
             ));
             clearThreadListCache();
+            clearRecentChatsCache();
         } catch (error) {
             console.error('Error renaming thread:', error);
         } finally {

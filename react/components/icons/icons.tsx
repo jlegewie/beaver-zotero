@@ -24,6 +24,7 @@ export { default as PdfIcon } from './PdfIcon';
 export { default as TagIcon } from './TagIcon';
 export { default as HighlighterIcon } from './HighlighterIcon';
 export { default as PinIcon } from './PinIcon';
+export { default as PinOffIcon } from './PinOffIcon';
 export { default as DollarCircleIcon } from './DollarCircleIcon';
 export { default as DocumentValidationIcon } from './DocumentValidationIcon';
 export { default as DownloadIcon } from './DownloadIcon';
