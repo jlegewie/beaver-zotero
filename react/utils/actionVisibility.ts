@@ -115,8 +115,7 @@ export interface ActionGroup {
 /** Get icon info for an item, following the same parent-resolution as getItemLabel */
 export function getIconInfoForItem(item: Zotero.Item): GroupIconInfo | undefined {
     try {
-        const target = item.isRegularItem() ? item : (item.parentItem ?? item);
-        const name = target.getItemTypeIconName();
+        const name = item.getItemTypeIconName();
         return name ? { type: 'item-type', name } : undefined;
     } catch {
         return undefined;
@@ -144,9 +143,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     // --- 1. Reader group ---
     if (isReader) {
         const readerParent = readerAtt!.parentItem;
-        const label = readerParent
-            ? `${truncateText(getDisplayNameFromItem(readerParent), MAX_LABEL_ITEM_LENGTH)}`
-            : `${truncateText(readerAtt!.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH)}`;
+        const label = truncateText(readerAtt!.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH);
 
         // Reader supports both attachment and items actions (parent is a regular item)
         const readerActions = allActions.filter(a => {
@@ -158,7 +155,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
         });
 
         if (readerActions.length > 0) {
-            const iconInfo = getIconInfoForItem(readerParent ?? readerAtt!);
+            const iconInfo = getIconInfoForItem(readerAtt!);
             groups.push({ id: 'reader', label, actions: readerActions, targetType: 'attachment', iconInfo });
         }
     }
@@ -273,10 +270,6 @@ function getSelectedLabel(items: Zotero.Item[]): string {
 function getItemLabel(item: Zotero.Item): string {
     if (item.isRegularItem()) {
         return truncateText(getDisplayNameFromItem(item), MAX_LABEL_ITEM_LENGTH);
-    }
-    const parent = item.parentItem;
-    if (parent) {
-        return truncateText(getDisplayNameFromItem(parent), MAX_LABEL_ITEM_LENGTH);
     }
     return truncateText(item.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH);
 }

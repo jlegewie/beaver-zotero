@@ -94,10 +94,6 @@ function getItemLabel(item: Zotero.Item): string {
     if (item.isRegularItem()) {
         return truncateText(getDisplayNameFromItem(item), MAX_CONTEXT_ITEM_LENGTH);
     }
-    const parent = item.parentItem;
-    if (parent) {
-        return truncateText(getDisplayNameFromItem(parent), MAX_CONTEXT_ITEM_LENGTH);
-    }
     return truncateText(item.getDisplayTitle(), MAX_CONTEXT_ITEM_LENGTH);
 }
 
@@ -179,7 +175,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                 </span>
             )}
             {/* <span className="font-semibold truncate">{truncateText(contextLabel, 40)}</span> */}
-            <span className="font-semibold truncate">{contextLabel}</span>
+            <span className="font-medium truncate">{contextLabel}</span>
         </div>
     ) : null;
 
