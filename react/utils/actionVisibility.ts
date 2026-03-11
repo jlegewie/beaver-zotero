@@ -26,7 +26,7 @@ export interface ActionContext {
 // ---------------------------------------------------------------------------
 
 const MAX_LABEL_ITEM_LENGTH = 50;
-const MAX_LABEL_ITEMS = 2;
+const MAX_LABEL_ITEMS = 1;
 
 // ---------------------------------------------------------------------------
 // isActionableItem — enhanced item check for action visibility
@@ -115,8 +115,7 @@ export interface ActionGroup {
 /** Get icon info for an item, following the same parent-resolution as getItemLabel */
 export function getIconInfoForItem(item: Zotero.Item): GroupIconInfo | undefined {
     try {
-        const target = item.isRegularItem() ? item : (item.parentItem ?? item);
-        const name = target.getItemTypeIconName();
+        const name = item.getItemTypeIconName();
         return name ? { type: 'item-type', name } : undefined;
     } catch {
         return undefined;
@@ -144,9 +143,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     // --- 1. Reader group ---
     if (isReader) {
         const readerParent = readerAtt!.parentItem;
-        const label = readerParent
-            ? `${truncateText(getDisplayNameFromItem(readerParent), MAX_LABEL_ITEM_LENGTH)}`
-            : `${truncateText(readerAtt!.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH)}`;
+        const label = truncateText(readerAtt!.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH);
 
         // Reader supports both attachment and items actions (parent is a regular item)
         const readerActions = allActions.filter(a => {
@@ -158,7 +155,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
         });
 
         if (readerActions.length > 0) {
-            const iconInfo = getIconInfoForItem(readerParent ?? readerAtt!);
+            const iconInfo = getIconInfoForItem(readerAtt!);
             groups.push({ id: 'reader', label, actions: readerActions, targetType: 'attachment', iconInfo });
         }
     }
@@ -185,7 +182,9 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
         }
     }
 
-    // --- 3. Selected items group ---
+    // --- 3. Selected items group(s) ---
+    // When the selection contains both regular items and attachments, create
+    // separate groups so each group's targetType matches its actions exactly.
     if (ctx.zotero.type === 'items_selected') {
         const selectedSupported = ctx.zotero.selectedItems.filter(i => isActionableItem(i));
         if (selectedSupported.length > 0) {
@@ -194,21 +193,34 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
                 const selectedAttachments = selectedSupported.filter(i => i.isAttachment());
                 const selectedRegular = selectedSupported.filter(i => i.isRegularItem());
 
-                const selectedActions = allActions.filter(a => {
-                    if (a.targetType === 'attachment' && selectedAttachments.length > 0) return true;
-                    if (a.targetType === 'items' && selectedRegular.length > 0) {
-                        return selectedRegular.length >= (a.minItems ?? 1);
+                // Items group
+                if (selectedRegular.length > 0) {
+                    const itemActions = allActions.filter(a =>
+                        a.targetType === 'items' && selectedRegular.length >= (a.minItems ?? 1)
+                    );
+                    if (itemActions.length > 0) {
+                        groups.push({
+                            id: 'selected-items',
+                            label: getSelectedLabel(selectedRegular),
+                            actions: itemActions,
+                            targetType: 'items',
+                            iconInfo: getIconInfoForItem(selectedRegular[0]),
+                        });
                     }
-                    return false;
-                });
+                }
 
-                if (selectedActions.length > 0) {
-                    const label = getSelectedLabel(selectedSupported);
-                    const iconInfo = getIconInfoForItem(selectedSupported[0]);
-                    // For selected items, figure out the dominant target type
-                    const targetType: ActionTargetType = selectedAttachments.length > 0 && selectedRegular.length === 0
-                        ? 'attachment' : 'items';
-                    groups.push({ id: 'selected', label, actions: selectedActions, targetType, iconInfo });
+                // Attachments group
+                if (selectedAttachments.length > 0) {
+                    const attachmentActions = allActions.filter(a => a.targetType === 'attachment');
+                    if (attachmentActions.length > 0) {
+                        groups.push({
+                            id: 'selected-attachments',
+                            label: getSelectedLabel(selectedAttachments),
+                            actions: attachmentActions,
+                            targetType: 'attachment',
+                            iconInfo: getIconInfoForItem(selectedAttachments[0]),
+                        });
+                    }
                 }
             }
         }
@@ -259,7 +271,10 @@ function getManualLabel(items: Zotero.Item[]): string {
         const names = items.map(i => getItemLabel(i));
         return `${names.join(', ')} (attached)`;
     }
-    return `${items.length} attached items`;
+    if (items.every(i => i.isAttachment())) return `${items.length} attached attachments`;
+    if (items.every(i => i.isRegularItem())) return `${items.length} attached items`;
+    if (items.every(i => i.isNote())) return `${items.length} attached notes`;
+    return `${items.length} attached items and attachments`;
 }
 
 function getSelectedLabel(items: Zotero.Item[]): string {
@@ -267,16 +282,14 @@ function getSelectedLabel(items: Zotero.Item[]): string {
         const names = items.map(i => getItemLabel(i));
         return `${names.join(', ')}`;
     }
+    if (items.every(i => i.isAttachment())) return `${items.length} selected attachments`;
+    if (items.every(i => i.isRegularItem())) return `${items.length} selected items`;
     return `${items.length} selected items`;
 }
 
 function getItemLabel(item: Zotero.Item): string {
     if (item.isRegularItem()) {
         return truncateText(getDisplayNameFromItem(item), MAX_LABEL_ITEM_LENGTH);
-    }
-    const parent = item.parentItem;
-    if (parent) {
-        return truncateText(getDisplayNameFromItem(parent), MAX_LABEL_ITEM_LENGTH);
     }
     return truncateText(item.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH);
 }

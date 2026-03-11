@@ -16,7 +16,7 @@ import { openPreferencesWindow } from "../../src/ui/openPreferencesWindow";
 import IconButton from "./ui/IconButton";
 
 const MAX_CONTEXT_ITEM_LENGTH = 50;
-const MAX_VISIBLE_ITEMS = 2;
+const MAX_VISIBLE_ITEMS = 1;
 
 interface ActiveTarget {
     targetType: ActionTargetType;
@@ -72,7 +72,11 @@ function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
         if (supported.length > 0) {
             const allAttachments = supported.every(i => i.isAttachment());
             const targetType: ActionTargetType = allAttachments ? 'attachment' : 'items';
-            return { targetType, label: getSelectedItemsLabel(supported), iconInfo: getIconInfoForItem(supported[0]) };
+            const labelItems = targetType === 'attachment'
+                ? supported.filter(i => i.isAttachment())
+                : supported.filter(i => i.isRegularItem());
+            const displayItems = labelItems.length > 0 ? labelItems : supported;
+            return { targetType, label: getSelectedItemsLabel(displayItems), iconInfo: getIconInfoForItem(displayItems[0]) };
         }
     }
 
@@ -94,14 +98,23 @@ function getItemLabel(item: Zotero.Item): string {
     if (item.isRegularItem()) {
         return truncateText(getDisplayNameFromItem(item), MAX_CONTEXT_ITEM_LENGTH);
     }
-    const parent = item.parentItem;
-    if (parent) {
-        return truncateText(getDisplayNameFromItem(parent), MAX_CONTEXT_ITEM_LENGTH);
-    }
     return truncateText(item.getDisplayTitle(), MAX_CONTEXT_ITEM_LENGTH);
 }
 
-function formatItemNames(items: Zotero.Item[]): string {
+function formatItemNames(items: Zotero.Item[], source: 'selected' | 'attached'): string {
+    const prefix = source === 'selected' ? 'selected' : 'attached';
+    if (items.length > MAX_VISIBLE_ITEMS) {
+        if (source === 'attached' && items.some(i => i.isAttachment()) && items.some(i => i.isRegularItem())) {
+            return `${items.length} ${prefix} items and attachments`;
+        }
+        if (items.every(i => i.isAttachment())) {
+            return `${items.length} ${prefix} attachments`;
+        }
+        if (items.every(i => i.isNote())) {
+            return `${items.length} ${prefix} notes`;
+        }
+        return `${items.length} ${prefix} items`;
+    }
     const names = items
         .slice(0, MAX_VISIBLE_ITEMS)
         .map(i => getItemLabel(i));
@@ -111,11 +124,11 @@ function formatItemNames(items: Zotero.Item[]): string {
 }
 
 function getManualItemsLabel(items: Zotero.Item[]): string {
-    return formatItemNames(items);
+    return formatItemNames(items, 'attached');
 }
 
 function getSelectedItemsLabel(items: Zotero.Item[]): string {
-    return formatItemNames(items);
+    return formatItemNames(items, 'selected');
 }
 
 interface ActionSuggestionsProps {
@@ -179,7 +192,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                 </span>
             )}
             {/* <span className="font-semibold truncate">{truncateText(contextLabel, 40)}</span> */}
-            <span className="font-semibold truncate">{contextLabel}</span>
+            <span className="font-medium truncate">{contextLabel}</span>
         </div>
     ) : null;
 

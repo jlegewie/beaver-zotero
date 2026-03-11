@@ -60,17 +60,16 @@ const ActionsPreferenceSection: React.FC = () => {
     }, [actions]);
 
     // --- Import from old custom prompts ---
-    const [hasImported, setHasImported] = useState(false);
+    const [showImportButton, setShowImportButton] = useState(() => hasOldCustomPrompts());
     const handleImportOldPrompts = useCallback(() => {
         const imported = importFromOldCustomPrompts();
         if (imported.length > 0) {
             saveActions([...actions, ...imported]);
         }
-        setHasImported(true);
+        setShowImportButton(false);
     }, [actions, saveActions]);
 
     const hiddenBuiltins = useMemo(() => getHiddenBuiltinActions(), [actions]);
-    const showImportButton = useMemo(() => !hasImported && hasOldCustomPrompts(), [hasImported]);
 
     // --- Add Action Menu Items ---
     const addActionMenuItems: MenuItem[] = useMemo(() => [
