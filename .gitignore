@@ -10,6 +10,7 @@ yarn.lock
 .env
 .env.production
 .env.staging
+.env.development
 .scaffold
 build
 logs
@@ -17,11 +18,11 @@ logs
 .cursor/*
 CLAUDE.local.md
 archive
+.vscode/
 
 # compiled files
 reactBundle.js
 reactBundle.js.map
-
 
 # Build files
 /build
