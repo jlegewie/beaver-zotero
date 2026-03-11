@@ -17,9 +17,7 @@ import Tooltip from '../ui/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import SoftCapWarningBar from './SoftCapWarningBar';
-import CreditInfoBar from './CreditInfoBar';
 import { allRunsAtom } from '../../agents/atoms';
-import { threadWarningsAtom } from '../../atoms/warnings';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, dismissSoftCapWarningForThreadAtom, dismissedSoftCapWarningByThreadAtom, backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
 import { getPref, setPref } from '../../../src/utils/prefs';
@@ -47,8 +45,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
     const allRuns = useAtomValue(allRunsAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
-    const allWarnings = useAtomValue(threadWarningsAtom);
-    const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
     const dismissedHighTokenByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
     const dismissedSoftCapByThread = useAtomValue(dismissedSoftCapWarningByThreadAtom);
@@ -389,8 +385,6 @@ const InputArea: React.FC<InputAreaProps> = ({
                 </div>
             </form>
         </div>
-        //     {creditInfoWarning && <CreditInfoBar warning={creditInfoWarning} />}
-        // </div>
     );
 };
 

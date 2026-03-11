@@ -8,6 +8,7 @@ import InputArea from "../input/InputArea";
 import DragDropWrapper from "../input/DragDropWrapper";
 import PreviewAndPopupContainer from "../PreviewAndPopupContainer";
 import FileStatusBar from "../status/FileStatusBar";
+import { threadWarningsAtom } from "../../atoms/warnings";
 
 interface HomePageProps {
     isWindow?: boolean;
@@ -17,6 +18,8 @@ interface HomePageProps {
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const actions = useAtomValue(actionsForContextAtom);
+    const allWarnings = useAtomValue(threadWarningsAtom);
+    const hasCreditInfoWarning = allWarnings.some((w) => w.type === 'credit_info');
 
     return (
         <div
@@ -52,7 +55,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
             >
                 <RecentChats />
 
-                {isDatabaseSyncSupported && !isWindow && (
+                {isDatabaseSyncSupported && !isWindow && !hasCreditInfoWarning && (
                         <FileStatusBar />
                     )}
 
