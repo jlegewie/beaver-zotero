@@ -1,15 +1,16 @@
 import { atom } from 'jotai';
-import { FileStatus, FileStatusSummary } from '../types/fileStatus';
+import { FileStatus, FileStatusSummary, ConnectionStatus } from '../types/fileStatus';
 import { ErrorCodeStats } from 'src/services/attachmentsService';
 import { errorMapping } from './errors';
 
 // File upload status
 // export const fileUploadStatusAtom = atom<SyncStatus>('idle');
-// export const fileUploadTotalAtom = atom<number>(0); 
+// export const fileUploadTotalAtom = atom<number>(0);
 // export const fileUploadCurrentAtom = atom<number>(0);
 
 // File processing status summary
 export const fileStatusAtom = atom<FileStatus | null>(null);
+export const connectionStatusAtom = atom<ConnectionStatus>('idle');
 export const errorCodeStatsAtom = atom<ErrorCodeStats[] | null>(null);
 export const errorCodeStatsIsLoadingAtom = atom<boolean>(false);
 export const errorCodeStatsErrorAtom = atom<string | null>(null);

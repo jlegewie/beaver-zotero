@@ -59,6 +59,11 @@ pref("customPrompts", '{ "version": 2, "prompts": [ { "id": "default-fit-researc
 // Kept outside customPrompts so using a prompt doesn't dirty the main pref default
 pref("customPromptsLastUsed", "{}");
 
+// Actions V2 — two-layer architecture: built-in actions (in code) + user overrides/custom
+pref("actions", '{"version":1,"overrides":{},"custom":[]}');
+pref("actionsLastUsed", "{}");
+pref("legacyPromptsImported", false);
+
 // Deletion jobs
 pref("deletionJobs", "[]");
 

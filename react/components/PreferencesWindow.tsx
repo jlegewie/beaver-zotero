@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useSetAtom } from 'jotai';
 import { isPreferencePageVisibleAtom, activePreferencePageTabAtom, PreferencePageTab } from '../atoms/ui';
 import { prefWindowFocusRefreshAtom } from '../atoms/profile';
-import PreferencePage from './pages/PreferencePage';
+import PreferencePage from './preferences/PreferencePage';
 import DialogContainer from './dialog/DialogContainer';
 
 interface PreferencesWindowProps {

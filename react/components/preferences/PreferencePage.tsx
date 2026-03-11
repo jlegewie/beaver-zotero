@@ -5,92 +5,30 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, CopyIcon, DollarCircleIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, processingModeAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom, creditPlanAtom, creditBreakdownAtom, isCreditPlanPastDueAtom, hasCreditPlanAtom } from "../../atoms/profile";
-import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom, requestProToolsAtom } from "../../atoms/ui";
+import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, isMcpServerSupportedAtom, creditPlanAtom, creditBreakdownAtom, isCreditPlanPastDueAtom, hasCreditPlanAtom } from "../../atoms/profile";
+import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
-import { generatePromptId, CustomPrompt } from "../../types/settings";
-import { customPromptsAtom, saveCustomPromptsAtom, usedShortcutsAtom } from "../../atoms/customPrompts";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
 import { 
     embeddingIndexStateAtom, 
     forceReindexAtom, 
     isEmbeddingIndexingAtom 
 } from "../../atoms/embeddingIndex";
-import ApiKeyInput from "../preferences/ApiKeyInput";
-import CustomPromptCard from "../preferences/CustomPromptCard";
 import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { accountService } from "../../../src/services/accountService";
-import SyncedLibraries from "../preferences/SyncedLibraries";
-import { ProcessingMode } from "../../types/profile";
-import DeferredToolPreferenceSetting from "../preferences/DeferredToolPreferenceSetting";
-import { BeaverUIFactory } from "../../../src/ui/ui";
+import SyncedLibraries from "./SyncedLibraries";
+import DeferredToolPreferenceSetting from "./DeferredToolPreferenceSetting";
 import { copyToClipboard } from "../../utils/clipboard";
 import { ensureMcpBridgeScript } from "../../hooks/useMcpServer";
 import { useBilling } from "../../hooks/useBilling";
+import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
+import ActionsPreferenceSection from "./ActionsPreferenceSection";
+import CustomInstructionsSection from "./CustomInstructionsSection";
+import ApiKeysSection from "./ApiKeysSection";
+import FileStatusDisplay from "../status/FileStatusDisplay";
+import { connectionStatusAtom, fileStatusAtom } from "../../atoms/files";
+import { fetchFileStatusResult } from "../../hooks/useFileStatus";
 
-/** Section label displayed above a settings group */
-const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    <div className="text-lg font-color-primary font-bold" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
-        {children}
-    </div>
-);
-
-/** Card container for grouping related settings */
-const SettingsGroup: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
-    <div className={`display-flex flex-col rounded-lg border-quinary overflow-hidden ${className}`}>
-        {children}
-    </div>
-);
-
-interface SettingsRowProps {
-    title: string;
-    description?: React.ReactNode;
-    control?: React.ReactNode;
-    onClick?: () => void;
-    disabled?: boolean;
-    tooltip?: string;
-    hasBorder?: boolean;
-}
-
-/** Individual setting row with title, description, and optional control */
-const SettingsRow: React.FC<SettingsRowProps> = ({
-    title, description, control, onClick, disabled, tooltip, hasBorder = false
-}) => (
-    <div
-        className={`display-flex flex-row items-center justify-between gap-4 ${hasBorder ? 'border-top-quinary' : ''} ${onClick && !disabled ? 'cursor-pointer' : ''} ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
-        style={{ padding: '8px 12px', minHeight: '38px' }}
-        onClick={(e) => {
-            if (disabled || !onClick) return;
-            const target = e.target as HTMLElement;
-            if (target.tagName === 'A' || target.closest('a')) return;
-            onClick();
-        }}
-        title={tooltip}
-    >
-        <div className="display-flex flex-col gap-05 flex-1 min-w-0">
-            <div className="font-color-primary text-base font-medium">{title}</div>
-            {description && (
-                <div className="font-color-secondary text-base">{description}</div>
-            )}
-        </div>
-        {control && (
-            <div className="display-flex flex-row items-center flex-shrink-0">
-                {control}
-            </div>
-        )}
-    </div>
-);
-
-const DocLink: React.FC<{ path: string; children: React.ReactNode }> = ({ path, children }) => (
-    <a
-        onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/docs/${path}`)}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-link"
-    >
-        {children}
-    </a>
-);
 
 const PreferencePage: React.FC = () => {
     const [user] = useAtom(userAtom);
@@ -100,13 +38,6 @@ const PreferencePage: React.FC = () => {
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
 
     // --- State for Preferences ---
-    const [geminiKey, setGeminiKey] = useState(() => getPref('googleGenerativeAiApiKey'));
-    const [openaiKey, setOpenaiKey] = useState(() => getPref('openAiApiKey'));
-    const [anthropicKey, setAnthropicKey] = useState(() => getPref('anthropicApiKey'));
-    const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
-    const customPrompts = useAtomValue(customPromptsAtom);
-    const saveCustomPrompts = useSetAtom(saveCustomPromptsAtom);
-    const usedShortcuts = useAtomValue(usedShortcutsAtom);
     const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
     const [keyboardShortcut, setKeyboardShortcut] = useState(() => {
@@ -120,21 +51,61 @@ const PreferencePage: React.FC = () => {
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
     const profileBalance = useAtomValue(profileBalanceAtom);
-    const remainingBeaverCredits = useAtomValue(remainingBeaverCreditsAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const creditPlan = useAtomValue(creditPlanAtom);
     const creditBreakdown = useAtomValue(creditBreakdownAtom);
     const isPastDue = useAtomValue(isCreditPlanPastDueAtom);
     const hasPlan = useAtomValue(hasCreditPlanAtom);
     const { subscribe, buyCredits, manageSubscription, upgradeSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
-    const processingMode = useAtomValue(processingModeAtom);
+    const connectionStatus = useAtomValue(connectionStatusAtom);
+    const setFileStatus = useSetAtom(fileStatusAtom);
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
+
+    // --- Manual File Status Refresh (when no real-time subscription) ---
+    const [manualRefreshTime, setManualRefreshTime] = useState<Date | null>(null);
+    const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+    const [now, setNow] = useState(Date.now());
+
+    React.useEffect(() => {
+        const interval = setInterval(() => setNow(Date.now()), 10000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const handleManualRefresh = useCallback(async () => {
+        if (!user?.id) return;
+        setIsManualRefreshing(true);
+        logger(`PreferencePage: Manually fetching file status (one-time fetch) for user ${user.id}`, 1);
+        try {
+            const { fileStatus: status, error } = await fetchFileStatusResult(user.id);
+            if (error) {
+                logger(`PreferencePage: Manual file status refresh failed: ${error}`, 1);
+                setManualRefreshTime(new Date());
+                setNow(Date.now());
+                return;
+            }
+
+            setFileStatus(status);
+            setManualRefreshTime(new Date());
+            setNow(Date.now());
+        } catch (error) {
+            logger(`PreferencePage: Failed to manually fetch file status: ${error}`, 1);
+            setManualRefreshTime(new Date());
+            setNow(Date.now());
+        } finally {
+            setIsManualRefreshing(false);
+        }
+    }, [user?.id, setFileStatus]);
+
+    React.useEffect(() => {
+        if (activeTab === 'sync' && connectionStatus === 'idle' && !manualRefreshTime && user?.id && !isManualRefreshing) {
+            handleManualRefresh();
+        }
+    }, [activeTab, connectionStatus, manualRefreshTime, user?.id, isManualRefreshing, handleManualRefresh]);
     const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
     const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
     const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
     const [pauseLongRunningAgent, setPauseLongRunningAgent] = useState(() => getPref('pauseLongRunningAgent'));
-    const [requestProTools, setRequestProTools] = useAtom(requestProToolsAtom);
     const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
     const isMcpServerSupported = useAtomValue(isMcpServerSupportedAtom);
     const [mcpCopied, setMcpCopied] = useState(false);
@@ -199,20 +170,6 @@ const PreferencePage: React.FC = () => {
         loadLastSynced();
     }, [loadLastSynced]);
 
-    // --- Save Preferences ---
-    const handlePrefSave = (key: "googleGenerativeAiApiKey" | "openAiApiKey" | "anthropicApiKey" | "customInstructions", value: string) => {
-        if (value !== getPref(key)) {
-            setPref(key, value);
-            logger(`Saved pref ${key}`);
-        }
-    };
-
-    const handleCustomInstructionsChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const newValue = event.target.value;
-        setCustomInstructions(newValue);
-        handlePrefSave('customInstructions', newValue);
-    };
-
     const handleKeyboardShortcutChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
         const nextShortcut = event.target.value.toLowerCase();
         if (!/^[a-z]$/.test(nextShortcut)) {
@@ -226,25 +183,6 @@ const PreferencePage: React.FC = () => {
         //     logger(`Updated keyboard shortcut to ${nextShortcut.toUpperCase()}`);
         // }
     }, []);
-
-    // --- Custom Prompt Change Handler ---
-    const handleCustomPromptChange = useCallback((index: number, updatedPrompt: CustomPrompt) => {
-        const newPrompts = [...customPrompts];
-        newPrompts[index] = updatedPrompt;
-        saveCustomPrompts(newPrompts);
-    }, [customPrompts, saveCustomPrompts]);
-
-    // --- Add Prompt Handler ---
-    const handleAddPrompt = useCallback(() => {
-        const newPrompt: CustomPrompt = {
-            id: generatePromptId(),
-            title: "",
-            text: "",
-            requiresAttachment: false
-        };
-
-        saveCustomPrompts([...customPrompts, newPrompt]);
-    }, [customPrompts, saveCustomPrompts]);
 
     // --- Verify Sync Handler ---
     const handleVerifySync = useCallback(async () => {
@@ -273,23 +211,6 @@ const PreferencePage: React.FC = () => {
             setVerifyStatus('idle');
         }
     }, [syncedLibraryIds, verifyStatus]);
-
-    // --- Remove Prompt Handler ---
-    const handleRemovePrompt = useCallback((indexToRemove: number) => {
-        const newPrompts = customPrompts.filter((_, filterIndex) => filterIndex !== indexToRemove);
-        saveCustomPrompts(newPrompts);
-    }, [customPrompts, saveCustomPrompts]);
-
-    const getCustomPromptAvailabilityNote = useCallback((prompt: CustomPrompt): string | undefined => {
-        if (!prompt.requiresDatabaseSync) return undefined;
-        if (!isDatabaseSyncSupported) {
-            return 'Only available with Beaver Pro';
-        }
-        if (processingMode === ProcessingMode.FRONTEND) {
-            return 'Available after indexing is complete';
-        }
-        return undefined;
-    }, [isDatabaseSyncSupported, processingMode]);
 
     // --- Consent Toggle Change Handler ---
     const handleConsentChange = useCallback(async (checked: boolean) => {
@@ -432,12 +353,6 @@ const PreferencePage: React.FC = () => {
         setPref('pauseLongRunningAgent', newValue);
         setPauseLongRunningAgent(newValue);
     }, [pauseLongRunningAgent]);
-
-    const handleRequestProToolsToggle = useCallback(() => {
-        const newValue = !requestProTools;
-        setPref('requestProTools', newValue);
-        setRequestProTools(newValue);
-    }, [requestProTools]);
 
     const handleMcpServerToggle = useCallback(() => {
         if (!isMcpServerSupported) return;
@@ -946,6 +861,35 @@ const PreferencePage: React.FC = () => {
                             />
                         </SettingsGroup>
                     )}
+
+                    {isDatabaseSyncSupported && (
+                        <>
+                            <SectionLabel>File Processing Status</SectionLabel>
+                            <FileStatusDisplay 
+                                connectionStatus={connectionStatus === 'idle' && manualRefreshTime ? 'connected' : connectionStatus} 
+                                isManualRefresh={connectionStatus === 'idle' && !!manualRefreshTime}
+                            />
+                            
+                            {connectionStatus === 'idle' && manualRefreshTime && (
+                                <div className="display-flex flex-row items-center font-color-secondary text-sm mt-2 ml-1">
+                                    <span>
+                                        Last refreshed {
+                                            Math.floor((now - manualRefreshTime.getTime()) / 60000) === 0 
+                                                ? "just now" 
+                                                : `${Math.floor((now - manualRefreshTime.getTime()) / 60000)} minute${Math.floor((now - manualRefreshTime.getTime()) / 60000) !== 1 ? 's' : ''} ago`
+                                        }.
+                                    </span>
+                                    <button 
+                                        className="text-link-muted scale-80 -ml-2"
+                                        onClick={handleManualRefresh}
+                                        disabled={isManualRefreshing}
+                                    >
+                                        {isManualRefreshing ? 'Refreshing...' : 'Refresh now'}
+                                    </button>
+                                </div>
+                            )}
+                        </>
+                    )}
                 </>
             )}
 
@@ -1366,232 +1310,15 @@ const PreferencePage: React.FC = () => {
 
             {/* ===== MODELS & API KEYS TAB ===== */}
             {activeTab === 'models' && (
-                <>
-                    <SettingsGroup>
-                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
-                            {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
-                            <div className="font-color-secondary text-base">
-                                Beaver supports multiple model providers. Connect your API keys to use Gemini, Claude, or OpenAI models.
-                                See our <DocLink path="api-key">API key guide</DocLink> or learn about <DocLink path="custom-models">additional providers and custom endpoints</DocLink>.
-                            </div>
-                        </div>
-                    </SettingsGroup>
-
-                    <SettingsGroup>
-                        <div style={{ padding: '8px 12px' }}>
-                            <ApiKeyInput
-                                id="gemini-key"
-                                label="Google API Key"
-                                provider="google"
-                                value={geminiKey}
-                                onChange={setGeminiKey}
-                                savePref={(newValue) => handlePrefSave('googleGenerativeAiApiKey', newValue)}
-                                placeholder="Enter your Google AI Studio API Key"
-                                linkUrl="https://aistudio.google.com/app/apikey"
-                            />
-                        </div>
-                        <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
-                            <ApiKeyInput
-                                id="openai-key"
-                                label="OpenAI API Key"
-                                provider="openai"
-                                value={openaiKey}
-                                onChange={setOpenaiKey}
-                                savePref={(newValue) => handlePrefSave('openAiApiKey', newValue)}
-                                placeholder="Enter your OpenAI API Key"
-                                linkUrl="https://platform.openai.com/api-keys"
-                            />
-                        </div>
-                        <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
-                            <ApiKeyInput
-                                id="anthropic-key"
-                                label="Anthropic API Key"
-                                provider="anthropic"
-                                value={anthropicKey}
-                                onChange={setAnthropicKey}
-                                savePref={(newValue) => handlePrefSave('anthropicApiKey', newValue)}
-                                placeholder="Enter your Anthropic API Key"
-                                linkUrl="https://console.anthropic.com/settings/keys"
-                            />
-                        </div>
-                    </SettingsGroup>
-
-                    <div className="text-base font-color-secondary ml-1 mt-1 mb-2" style={{ paddingLeft: '2px' }}>
-                        Additional model providers and custom endpoints are supported via <DocLink path="custom-models">custom models</DocLink>.
-                    </div>
-
-                    <div className="display-flex flex-row gap-2">
-                        <SectionLabel>Pro Tools</SectionLabel>
-                        {requestProTools ? (
-                            remainingBeaverCredits > 0 ? (
-                                <span
-                                    className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
-                                    style={{ marginTop: '20px', marginBottom: '6px' }}
-                                >
-                                    Enabled
-                                </span>
-                            ) : (
-                                <span
-                                    className="text-xs px-15 py-05 rounded-md"
-                                    style={{ marginTop: '20px', marginBottom: '6px', color: 'var(--tag-orange-secondary)', border: '1px solid var(--tag-orange-tertiary)', background: 'var(--tag-orange-quinary)' }}
-                                >
-                                    Paused &middot; No credits
-                                </span>
-                            )
-                        ) : (
-                            <span
-                                className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
-                                style={{ marginTop: '20px', marginBottom: '6px' }}
-                            >
-                                Disabled
-                            </span>
-                        )}
-                    </div>
-                    <SettingsGroup>
-                        {requestProTools && remainingBeaverCredits > 0 ? (
-                            /* State 1: Enabled + has credits */
-                            <SettingsRow
-                                title="Use Pro Tools with your API key"
-                                description={
-                                    <>
-                                        Enable to use pro tools like external search, batch extraction, and AI ranking with your own API key.
-                                        Costs 0.25 credits per message. Some actions cost extra.{' '}
-                                        <DocLink path="credits">Learn more</DocLink>
-                                        <br />
-                                        <br />
-                                        <span className="font-color-secondary">
-                                            You have {remainingBeaverCredits.toLocaleString()} credits available.
-                                        </span>
-                                    </>
-                                }
-                                control={
-                                    <Button variant="outline" onClick={handleRequestProToolsToggle}>
-                                        Disable
-                                    </Button>
-                                }
-                            />
-                        ) : requestProTools && remainingBeaverCredits <= 0 ? (
-                            /* State 2: Enabled + no credits */
-                            <SettingsRow
-                                title="Use Pro Tools with your API key"
-                                description={
-                                    <>
-                                        Pro Tools are enabled but can't run without credits.
-                                        Your API key will still work for basic chat.
-                                        <br />
-                                        <br />
-                                        <span className="text-link cursor-pointer" onClick={() => setActiveTab('billing')}>
-                                            Get credits &rarr;
-                                        </span>
-                                    </>
-                                }
-                                control={
-                                    <Button variant="outline" onClick={handleRequestProToolsToggle}>
-                                        Disable
-                                    </Button>
-                                }
-                            />
-                        ) : !requestProTools && remainingBeaverCredits > 0 ? (
-                            /* State 3: Disabled + has credits */
-                            <SettingsRow
-                                title="Use Pro Tools with your API key"
-                                description={
-                                    <>
-                                        Unlock external search, batch extraction, and AI ranking alongside your API key.
-                                        Costs 0.25 credits per message. Some actions cost extra.{' '}
-                                        <DocLink path="credits">Learn more</DocLink>
-                                        <br />
-                                        <br />
-                                        <span className="font-color-secondary">
-                                            You have {remainingBeaverCredits.toLocaleString()} credits available.
-                                        </span>
-                                    </>
-                                }
-                                control={
-                                    <Button variant="outline" onClick={handleRequestProToolsToggle}>
-                                        Enable
-                                    </Button>
-                                }
-                            />
-                        ) : (
-                            /* State 4: Disabled + no credits */
-                            <SettingsRow
-                                title="Use Pro Tools with your API key"
-                                description={
-                                    <>
-                                        Unlock external search, batch extraction, and AI ranking alongside your API key.
-                                        Costs 0.25 credits per message. Some actions cost extra.{' '}
-                                        <DocLink path="credits">Learn more</DocLink>
-                                        <br />
-                                        <br />
-                                        <span className="text-link cursor-pointer" onClick={() => setActiveTab('billing')}>
-                                            Get credits &rarr;
-                                        </span>
-                                    </>
-                                }
-                            />
-                        )}
-                    </SettingsGroup>
-                </>
+                <ApiKeysSection />
             )}
 
             {/* ===== ACTIONS TAB ===== */}
             {activeTab === 'actions' && (
                 <>
-                    <SectionLabel>Custom Instructions</SectionLabel>
-                    <div className="custom-prompt-card" style={{ cursor: 'default' }}>
-                        <div className="font-color-secondary text-text mb-2">
-                            Custom instructions are added to all chats and help steer responses. (Max ~250 words)
-                        </div>
-                        <textarea
-                            value={customInstructions}
-                            onChange={handleCustomInstructionsChange}
-                            placeholder="Enter custom instructions here..."
-                            rows={5}
-                            className="chat-input custom-prompt-edit-textarea text-base"
-                            style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical' }}
-                            maxLength={1500}
-                        />
-                    </div>
+                    <CustomInstructionsSection />
 
-                    <div className="display-flex flex-row items-end justify-between">
-                        <SectionLabel>Actions</SectionLabel>
-                        <Button
-                            variant="outline"
-                            onClick={handleAddPrompt}
-                            className="text-sm mb-15"
-                        >
-                            Add Action
-                        </Button>
-                    </div>
-                    <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
-                        {/* Actions are reusable prompts you define once and trigger anytime from chat, the right-click menu, or automatically. */}
-                        {/* Actions are reusable prompts that tell the agent what to do with your research. You can trigger them manually with / in chat, from the right-click menu on any item, or set them to run automatically. */}
-                        Actions are reusable prompts you define once and trigger anytime.
-                    </div>
-                    <div className="display-flex flex-col gap-4">
-                        {customPrompts.map((prompt: CustomPrompt, index: number) => (
-                            <CustomPromptCard
-                                key={index}
-                                index={index}
-                                prompt={prompt}
-                                onChange={handleCustomPromptChange}
-                                onRemove={handleRemovePrompt}
-                                availabilityNote={getCustomPromptAvailabilityNote(prompt)}
-                                usedShortcuts={usedShortcuts}
-                            />
-                        ))}
-                        {/* <div className="display-flex flex-row items-center justify-start">
-                            <Button
-                                variant="outline"
-                                onClick={handleAddPrompt}
-                                disabled={customPrompts.length >= 9}
-                                className="text-sm"
-                            >
-                                Add Prompt
-                            </Button>
-                        </div> */}
-                    </div>
+                    <ActionsPreferenceSection />
                 </>
             )}
 

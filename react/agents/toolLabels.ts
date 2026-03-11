@@ -110,6 +110,7 @@ const TOOL_BASE_LABELS: Record<string, string> = {
 
     // Reading tools
     read_pages: 'Reading',
+    read_attachment: 'Reading',
     search_in_documents: 'Search in documents',
     search_in_attachment: 'Search in attachment',
     search_in_attachments: 'Search in attachments',
@@ -449,6 +450,7 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
         }
 
+        case 'read_attachment':
         case 'read_pages': {
             const attachmentId = args.attachment_id as string | undefined;
             const startPage = args.start_page as number | undefined;

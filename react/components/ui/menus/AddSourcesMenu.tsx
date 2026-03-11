@@ -85,8 +85,9 @@ const AddSourcesMenu: React.FC<{
     isMenuOpen: boolean,
     menuPosition: MenuPosition,
     setMenuPosition: (position: MenuPosition) => void,
-    disabled?: boolean
-}> = ({ showText, onClose, onOpen, isMenuOpen, menuPosition, setMenuPosition, disabled = false }) => {
+    disabled?: boolean,
+    verticalPosition?: 'above' | 'below'
+}> = ({ showText, onClose, onOpen, isMenuOpen, menuPosition, setMenuPosition, disabled = false, verticalPosition = 'above' }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
@@ -331,9 +332,10 @@ const AddSourcesMenu: React.FC<{
         // Get button position
         if (buttonRef.current) {
             const rect = buttonRef.current.getBoundingClientRect();
-            setMenuPosition({ 
+            const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
+            setMenuPosition({
                 x: rect.left,
-                y: rect.top - 5
+                y,
             });
             setMenuMode('sources');
             onOpen();
@@ -396,7 +398,7 @@ const AddSourcesMenu: React.FC<{
                 onClose={handleOnClose}
                 position={menuPosition}
                 useFixedPosition={true}
-                verticalPosition="above"
+                verticalPosition={verticalPosition}
                 width="250px"
                 onSearch={menuMode === 'sources' ? handleSearch : () => {}}
                 noResultsText={noResultsText}

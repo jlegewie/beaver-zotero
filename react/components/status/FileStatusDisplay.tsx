@@ -8,12 +8,13 @@ import { fileUploaderBackoffUntilAtom } from "../../atoms/sync";
 import { FailedProcessingTooltipContent } from "./FailedProcessingTooltipContent";
 import PaginatedFailedProcessingList from "./PaginatedFailedProcessingList";
 import { SkippedFilesSummary } from "./SkippedFilesSummary";
-import { ConnectionStatus } from "../../hooks/useFileStatus";
+import { ConnectionStatus } from "../../types/fileStatus";
 import Button from "../ui/Button";
 import { zoteroServerCredentialsErrorAtom, zoteroServerDownloadErrorAtom } from "../../atoms/ui";
 
 interface FileStatusDisplayProps {
     connectionStatus: ConnectionStatus;
+    isManualRefresh?: boolean;
 }
 
 const useTimeRemaining = (targetTime: number | null) => {
@@ -51,7 +52,7 @@ const useTimeRemaining = (targetTime: number | null) => {
 };
 
 
-const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus }) => {
+const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus, isManualRefresh = false }) => {
     const fileStats = useAtomValue(fileStatusSummaryAtom);
     const backoffUntil = useAtomValue(fileUploaderBackoffUntilAtom);
     const timeRemaining = useTimeRemaining(backoffUntil);
@@ -59,7 +60,10 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
     const zoteroServerCredentialsError = useAtomValue(zoteroServerCredentialsErrorAtom);
     const [showSkippedFiles, setShowSkippedFiles] = useState(false);
 
-    if (connectionStatus == 'connected' && (!fileStats || !fileStats.fileStatusAvailable)) connectionStatus='connecting';
+    let displayConnectionStatus = connectionStatus;
+    if (displayConnectionStatus === 'connected' && !isManualRefresh && (!fileStats || !fileStats.fileStatusAvailable)) {
+        displayConnectionStatus = 'connecting';
+    }
 
     // // Overall progress calculation
     const fullyCompleteFiles = fileStats.unsupportedFileCount + fileStats.completedFiles;
@@ -68,8 +72,8 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
     
     // Determine icon
     const getStatusIcon = (): React.ReactNode => {
-        if (connectionStatus === 'connecting' || connectionStatus === 'reconnecting' || connectionStatus === 'polling') return SpinnerIcon;
-        if (connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') return AlertIconIcon;
+        if (displayConnectionStatus === 'connecting' || displayConnectionStatus === 'reconnecting' || displayConnectionStatus === 'polling') return SpinnerIcon;
+        if (displayConnectionStatus === 'error' || displayConnectionStatus === 'idle' || displayConnectionStatus === 'disconnected') return AlertIconIcon;
         if (fileStats.totalFiles === 0) return CheckmarkIconGrey;
         if (isComplete) return CheckmarkIcon;
         return SpinnerIcon;
@@ -104,8 +108,8 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
     };
 
     const getTitle = (): string => {
-        if (connectionStatus === 'connecting' || connectionStatus === 'reconnecting') return "Connecting...";
-        if (connectionStatus === 'error' || connectionStatus === 'idle' || connectionStatus === 'disconnected') return "Unable to connect...";
+        if (displayConnectionStatus === 'connecting' || displayConnectionStatus === 'reconnecting') return "Connecting...";
+        if (displayConnectionStatus === 'error' || displayConnectionStatus === 'idle' || displayConnectionStatus === 'disconnected') return "Unable to connect...";
         if (fileStats.totalFiles === 0) return "No files to process";
         return "File Processing";
     };
@@ -122,17 +126,17 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
                 <div className="display-flex flex-col gap-3 items-start flex-1">
                     {/* Title */}
                     <div className="display-flex flex-row items-center gap-3 w-full min-w-0">
-                        <div className={`${connectionStatus === 'connected' ? 'font-color-secondary' : 'font-color-tertiary'} text-lg`}>
+                        <div className={`${displayConnectionStatus === 'connected' ? 'font-color-secondary' : 'font-color-tertiary'} text-lg`}>
                             {getTitle()}
                         </div>
                         <div className="flex-1"/>
                         <div className="font-color-tertiary text-base">
-                            {connectionStatus === 'connected' && `${fileStats.totalFiles.toLocaleString()} Files`}
+                            {displayConnectionStatus === 'connected' && `${fileStats.totalFiles.toLocaleString()} Files`}
                         </div>
                     </div>
 
                     {/* Progress bar and text */}
-                    {fileStats.totalFiles > 0 && connectionStatus === 'connected' && (
+                    {fileStats.totalFiles > 0 && displayConnectionStatus === 'connected' && (
                         <div className="w-full">
                             <ProgressBar progress={fileStats.indexingProgress} />
                             <div className="display-flex flex-row gap-4">
@@ -156,7 +160,7 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
             </div>
 
             {/* File upload and processing errors */}
-            {connectionStatus === 'connected' && (
+            {displayConnectionStatus === 'connected' && (
                 <div className="display-flex flex-col gap-3">
 
                     {/* Category 1: Temporary upload error */}
@@ -233,7 +237,7 @@ const FileStatusDisplay: React.FC<FileStatusDisplayProps> = ({ connectionStatus 
             )}
 
             {/* Page balance warning */}
-            {connectionStatus === 'connected' && fileStats.pageBalanceExhausted && (
+            {displayConnectionStatus === 'connected' && fileStats.pageBalanceExhausted && (
                 <div className="font-color-tertiary display-flex flex-row gap-3 items-start">
                     <Icon icon={AlertIcon} className="scale-11 mt-020" />
                     <div className="items-start display-flex flex-col gap-2">

@@ -207,6 +207,7 @@ const FULLTEXT_SEARCH_TOOL_NAMES: readonly string[] = [
 /** Valid tool names for chunk-based fulltext retrieval results */
 const READ_PAGES_TOOL_NAMES: readonly string[] = [
     'read_pages',
+    'read_attachment',
 ] as const;
 
 /** Valid tool names for chunk-based fulltext retrieval results */

@@ -335,7 +335,25 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
         ],
     },
-    // footer: `We've updated our <a href="https://www.beaverapp.ai/terms" target='_blank'>Terms of Service</a> and <a href="https://www.beaverapp.ai/privacy-policy" target='_blank'>Privacy Policy</a>, including subscription and billing terms, simplified credit mechanics, and clarified how we use operational log data for service improvement. Effective March 19, 2026.`
+    {
+        version: "0.14.0",
+        title: "New in Beaver 0.14",
+        steps: [
+            {
+                title: "Smart homepage",
+                description: "Select an item, open a collection, or read a paper and Beaver suggests actions based on what you're doing in Zotero. ",
+            },
+            {
+                title: "Customize your workflow",
+                description: "Create your own actions in Preferences → Actions. <a href='https://www.beaverapp.ai/docs/actions'>Learn more</a>.",
+            },
+            {
+                title: "Pick up where you left off",
+                description: "Recent chats now appear on the homepage and give you quick access to past conversations.",
+            },
+        ],
+        // footer: `We've updated our <a href="https://www.beaverapp.ai/terms" target='_blank'>Terms of Service</a> and <a href="https://www.beaverapp.ai/privacy-policy" target='_blank'>Privacy Policy</a>, including subscription and billing terms, simplified credit mechanics, and clarified how we use operational log data for service improvement. Effective March 26, 2026.`
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));

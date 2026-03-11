@@ -26,7 +26,7 @@ const getPluginPreferences = () => {
         'statefulChat', 'addSelectedItemsOnOpen', 'addSelectedItemsOnNewThread',
         'customInstructions', 'googleGenerativeAiApiKey',
         'openAiApiKey', 'anthropicApiKey', 'lastUsedModel', 'recentItems',
-        'citationFormat', 'citationStyle', 'citationLocale', 'customPrompts'
+        'citationFormat', 'citationStyle', 'citationLocale', 'customPrompts', 'actions'
     ] as const;
     
     prefKeys.forEach(key => {
