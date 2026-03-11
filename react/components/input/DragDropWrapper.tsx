@@ -410,7 +410,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             className="relative"
-            style={{ height: '100%', width: '100%' }}
+            style={{ width: '100%' }}
         >
             {/* Drag overlay - always render but control visibility with opacity/transform */}
             <div

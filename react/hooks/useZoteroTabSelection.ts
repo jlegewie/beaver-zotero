@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useSetAtom } from "jotai";
 import { logger } from "../../src/utils/logger";
-import { isLibraryTabAtom } from "../atoms/ui";
+import { isLibraryTabAtom, selectedZoteroTabIdAtom } from "../atoms/ui";
 import { uiManager } from '../ui/UIManager';
 
 /**
@@ -18,15 +18,17 @@ let moduleTabNotifierId: string | null = null;
  */
 export function useZoteroTabSelection() {
     const setIsLibraryTab = useSetAtom(isLibraryTabAtom);
-    
+    const setSelectedTabId = useSetAtom(selectedZoteroTabIdAtom);
+
     // define main window
     const window = Zotero.getMainWindow();
-    
+
     useEffect(() => {
         logger("useZoteroTabSelection: initializing tab selection hook");
         // Set initial state
         const initialIsLibrary = window.Zotero_Tabs.selectedType === 'library';
         setIsLibraryTab(initialIsLibrary);
+        setSelectedTabId(window.Zotero_Tabs.selectedID);
 
         // Handler for tab selection changes
         const tabObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
@@ -39,6 +41,7 @@ export function useZoteroTabSelection() {
                     const isLibrary = selectedTab.type === 'library';
                     logger(`useZoteroTabSelection: tab changed to ${selectedTab.type}`);
                     setIsLibraryTab(isLibrary);
+                    setSelectedTabId(selectedTab.id);
 
                     // Update UI through UIManager if sidebar is visible
                     const isVisible = window.document.querySelector("#zotero-beaver-tb-chat-toggle")?.hasAttribute("selected");
@@ -83,5 +86,5 @@ export function useZoteroTabSelection() {
                 moduleTabNotifierId = null;
             }
         };
-    }, [setIsLibraryTab, window]);
+    }, [setIsLibraryTab, setSelectedTabId, window]);
 } 

@@ -22,6 +22,9 @@ import { getCurrentReaderAndWaitForView } from '../../../utils/readerUtils';
 import { semanticSearchService } from '../../../../src/services/semanticSearchService';
 import { BeaverDB } from '../../../../src/services/database';
 import { threadService } from '../../../../src/services/threadService';
+import { useAtomValue } from 'jotai';
+import { zoteroContextAtom } from '../../../atoms/zoteroContext';
+import { logger } from '../../../../src/utils/logger';
 
 interface DevToolsMenuButtonProps {
     className?: string;
@@ -38,6 +41,39 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
     ariaLabel = 'Dev Tools Menu',
     currentMessageContent = '',
 }) => {
+    const zoteroContext = useAtomValue(zoteroContextAtom);
+
+    // Log Zotero context state
+    const handleLogZoteroContext = () => {
+        const ctx = zoteroContext;
+        const data = {
+            type: ctx.type,
+            isLibraryTab: ctx.isLibraryTab,
+            selectedItemCount: ctx.selectedItemCount,
+            selectedItems: ctx.selectedItems.map(i => ({
+                key: i.key,
+                title: i.getDisplayTitle(),
+                type: i.itemType,
+            })),
+            libraryView: ctx.libraryView,
+            selectedTags: ctx.selectedTags,
+            readerAttachment: ctx.readerAttachment ? {
+                key: ctx.readerAttachment.key,
+                title: ctx.readerAttachment.getDisplayTitle(),
+                libraryID: ctx.readerAttachment.libraryID,
+            } : null,
+            noteItem: ctx.noteItem ? {
+                key: ctx.noteItem.key,
+                title: ctx.noteItem.getDisplayTitle(),
+                libraryID: ctx.noteItem.libraryID,
+                parentKey: ctx.noteItem.parentItem?.key ?? null,
+                parentTitle: ctx.noteItem.parentItem?.getDisplayTitle() ?? null,
+            } : null,
+            recentlyAddedTodayCount: ctx.recentlyAddedTodayCount,
+        };
+        logger('[Zotero Context]', data);
+    };
+
     // Test semantic search
     const handleTestSemanticSearch = async () => {
         try {
@@ -614,6 +650,12 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
 
     // Create menu items for dev testing functions
     const menuItems: MenuItem[] = [
+        {
+            label: "Log Zotero Context",
+            onClick: handleLogZoteroContext,
+            icon: SearchIcon,
+            disabled: false,
+        },
         {
             label: "Test Semantic Search",
             onClick: handleTestSemanticSearch,

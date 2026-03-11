@@ -12,6 +12,7 @@ import FloatingPopupRoot from './components/FloatingPopupRoot';
 import PreferencesWindow from './components/PreferencesWindow';
 import { PreferencePageTab } from './atoms/ui';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
+import { useZoteroContext } from './hooks/useZoteroContext';
 import { useProfileSync } from './hooks/useProfileSync';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { store } from './store';
@@ -44,6 +45,9 @@ const GlobalContextInitializer = () => {
 
     // Handle Zotero tab selection
     useZoteroTabSelection();
+
+    // Track Zotero application state (selected items, collection, tags, etc.)
+    useZoteroContext();
 
     // Realtime listener for user profile
     useProfileSync();

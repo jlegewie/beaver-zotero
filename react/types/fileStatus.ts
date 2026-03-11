@@ -1,3 +1,4 @@
+export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'polling' | 'error';
 
 /**
  * Represents the processing status summary for a user's files.

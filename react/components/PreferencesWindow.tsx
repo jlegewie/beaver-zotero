@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { isPreferencePageVisibleAtom, activePreferencePageTabAtom, PreferencePageTab } from '../atoms/ui';
-import PreferencePage from './pages/PreferencePage';
+import PreferencePage from './preferences/PreferencePage';
 import DialogContainer from './dialog/DialogContainer';
 
 interface PreferencesWindowProps {

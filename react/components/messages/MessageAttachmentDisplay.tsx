@@ -19,7 +19,8 @@ const MessageAttachmentDisplay = ({
     menuPosition,
     setMenuPosition,
     inputRef,
-    disabled = false
+    disabled = false,
+    verticalPosition = 'above',
 }: {
     isAddAttachmentMenuOpen: boolean;
     setIsAddAttachmentMenuOpen: (isAddAttachmentMenuOpen: boolean) => void;
@@ -27,6 +28,7 @@ const MessageAttachmentDisplay = ({
     setMenuPosition: (menuPosition: { x: number; y: number }) => void;
     inputRef: React.RefObject<HTMLTextAreaElement>;
     disabled?: boolean;
+    verticalPosition?: 'above' | 'below';
 }) => {
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
@@ -76,6 +78,7 @@ const MessageAttachmentDisplay = ({
                 menuPosition={menuPosition}
                 setMenuPosition={setMenuPosition}
                 disabled={disabled}
+                verticalPosition={verticalPosition}
             />
 
             {/* Selected Libraries */}

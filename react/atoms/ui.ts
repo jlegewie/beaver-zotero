@@ -6,6 +6,7 @@ import { getPref } from '../../src/utils/prefs';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
+export const selectedZoteroTabIdAtom = atom<string | null>(null);
 export const isWebSearchEnabledAtom = atom(false);
 export type PreferencePageTab = 'general' | 'sync' | 'permissions' | 'models' | 'prompts' | 'advanced' | 'account';
 export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
@@ -67,6 +68,13 @@ export const activePreviewAtom = atom<ActivePreview>(null);
 
 // Popup Messages
 export const popupMessagesAtom = atom<PopupMessage[]>([]);
+
+// Has popups or previews
+export const hasPopupsOrPreviewsAtom = atom(get => {
+    const hasPopupMessages = get(popupMessagesAtom).length > 0;
+    const hasActivePreview = get(activePreviewAtom) !== null;
+    return hasPopupMessages || hasActivePreview;
+});
 
 // Remove popup messages by type
 export const removePopupMessagesByTypeAtom = atom(
