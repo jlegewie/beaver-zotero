@@ -246,7 +246,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             setThreads(prev => prev.filter(t => t.id !== threadId));
             // Invalidate caches
             searchCache.clear();
-            clearRecentChatsCache();
+            clearRecentChatsCache(threadId);
             // If deleting the current thread, create a new one
             if (threadId === currentThreadId) {
                 await newThread();
