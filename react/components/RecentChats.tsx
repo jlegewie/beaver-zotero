@@ -7,6 +7,7 @@ import { currentThreadIdAtom } from '../agents/atoms';
 import { threadService, ThreadRunMatch } from '../../src/services/threadService';
 import { convertUTCToLocal } from '../utils/dateUtils';
 import Spinner from './icons/Spinner';
+import { logger } from '../../src/utils/logger';
 
 const MAX_RECENT = 3;
 const CACHE_TTL = 60_000; // 1 minute
@@ -22,18 +23,34 @@ const recentCache = new Map<string, CacheEntry>();
 
 /**
  * Clear cache and optionally remove a specific thread from mounted RecentChats.
- * When `deletedThreadId` is provided the component filters it out immediately
- * so the user sees the change without waiting for a re-fetch.
+ * When `deletedThreadId` is provided each mounted instance filters it out
+ * immediately so the user sees the change without waiting for a re-fetch.
  */
-let _removeThread: ((id: string) => void) | null = null;
-export function registerRecentChatsRemover(fn: ((id: string) => void) | null) {
-    _removeThread = fn;
+const recentChatsRemovers = new Set<(id: string) => void>();
+export function registerRecentChatsRemover(fn: (id: string) => void) {
+    recentChatsRemovers.add(fn);
+    return () => {
+        recentChatsRemovers.delete(fn);
+    };
 }
 
 export function clearRecentChatsCache(deletedThreadId?: string) {
-    recentCache.clear();
-    if (deletedThreadId && _removeThread) {
-        _removeThread(deletedThreadId);
+    if (deletedThreadId) {
+        for (const [cacheKey, entry] of recentCache.entries()) {
+            recentCache.set(cacheKey, {
+                ...entry,
+                threads: entry.threads.filter(thread => thread.id !== deletedThreadId),
+            });
+        }
+        for (const removeThread of recentChatsRemovers) {
+            try { 
+                removeThread(deletedThreadId); 
+            } catch (e) { 
+                logger(`RecentChats: error removing thread from local state: ${e}`, 1);
+            }
+        }
+    } else {
+        recentCache.clear();
     }
 }
 
@@ -215,10 +232,10 @@ const RecentChats: React.FC = () => {
     // Register callback so external callers (ThreadListView, ThreadsMenu) can
     // remove a deleted thread from our local state without a full re-fetch.
     useEffect(() => {
-        registerRecentChatsRemover((id: string) => {
+        const unregister = registerRecentChatsRemover((id: string) => {
             setThreads(prev => prev.filter(t => t.id !== id));
         });
-        return () => registerRecentChatsRemover(null);
+        return unregister;
     }, []);
 
     const handleSelectThread = async (threadId: string, threadName?: string) => {
