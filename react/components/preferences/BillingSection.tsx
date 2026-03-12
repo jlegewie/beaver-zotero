@@ -79,66 +79,82 @@ const BillingSection: React.FC = () => {
                             </div>
                         )}
 
-                        {!plansLoading && !plansError && plans.length > 0 && (
-                            <div className="display-flex flex-row gap-3" style={{ marginBottom: '12px' }}>
-                                {plans.map((plan) => {
-                                    const price = new Intl.NumberFormat(undefined, { style: 'currency', currency: plan.currency, minimumFractionDigits: 0 }).format(plan.unit_amount / 100);
-                                    return (
-                                        <div
-                                            key={plan.sku}
-                                            className="display-flex flex-1 flex-col rounded-md border-popup bg-senary p-4"
-                                        >
-                                            <div className="display-flex flex-row items-center gap-2" style={{ marginBottom: '4px' }}>
-                                                <span className="text-base font-color-primary font-bold">{plan.name}</span>
-                                                {/* {plan.highlight && (
-                                                    <span className="text-xs px-15 py-05 rounded-md bg-quarternary font-color-secondary">
-                                                        Recommended
+                        {!plansLoading && !plansError && plans.length > 0 && (() => {
+                            const subscriptionPlans = plans.filter(p => p.interval);
+                            const creditPacks = plans.filter(p => !p.interval);
+                            return (
+                                <div className="display-flex flex-col gap-3">
+                                    {/* Subscription plan cards (primary) */}
+                                    <div className="display-flex flex-row gap-3">
+                                        {subscriptionPlans.map((plan) => {
+                                            const price = new Intl.NumberFormat(undefined, { style: 'currency', currency: plan.currency, minimumFractionDigits: 0 }).format(plan.unit_amount / 100);
+                                            return (
+                                                <div
+                                                    key={plan.sku}
+                                                    className="display-flex flex-1 flex-col rounded-md border-popup bg-senary p-4"
+                                                >
+                                                    <div className="display-flex flex-row items-center gap-2" style={{ marginBottom: '4px' }}>
+                                                        <span className="text-base font-color-primary font-bold">{plan.name}</span>
+                                                    </div>
+                                                    <div className="text-xl font-color-primary font-bold">
+                                                        {price}<span className="text-sm font-normal font-color-secondary">/{plan.interval || 'mo'}</span>
+                                                    </div>
+                                                    <div className="text-sm font-color-secondary" style={{ marginBottom: '8px' }}>
+                                                        {plan.monthly_credits} credits per month
+                                                    </div>
+                                                    <div style={{ alignSelf: 'flex-start' }}>
+                                                        <Button
+                                                            variant={plan.highlight ? 'solid' : 'surface'}
+                                                            onClick={() => subscribe(plan.sku)}
+                                                            disabled={isBillingLoading}
+                                                        >
+                                                            Subscribe
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    <div className="display-flex flex-row justify-end -mt-1 ml-1">
+                                        <div className="font-color-tertiary text-sm">
+                                            Unused credits roll over for 1 month
+                                        </div>
+                                    </div>
+
+                                    {/* Credit pack card (secondary) */}
+                                    {creditPacks.length > 0 && (() => {
+                                        const pack = creditPacks[0];
+                                        const packPrice = new Intl.NumberFormat(undefined, { style: 'currency', currency: pack.currency, minimumFractionDigits: 0 }).format(pack.unit_amount / 100);
+                                        return (
+                                            <div
+                                                className="display-flex flex-row items-center rounded-md p-1"
+                                                style={{
+                                                    border: '1px dashed var(--border-quarternary)',
+                                                }}
+                                            >
+                                                <div className="display-flex flex-col" style={{ minWidth: 0 }}>
+                                                    <span className="text-sm font-color-secondary">
+                                                        Not ready to subscribe?
                                                     </span>
-                                                )} */}
-                                            </div>
-                                            <div className="text-xl font-color-primary font-bold">
-                                                {price}<span className="text-sm font-normal font-color-secondary">/{plan.interval || 'mo'}</span>
-                                            </div>
-                                            <div className="text-sm font-color-secondary" style={{ marginBottom: '8px' }}>
-                                                {plan.monthly_credits} credits per month
-                                            </div>
-                                            <div style={{ alignSelf: 'flex-start' }}>
+                                                    <span className="text-base font-color-primary font-medium">
+                                                        Credit Pack &mdash; {pack.monthly_credits} credits for {packPrice}
+                                                    </span>
+                                                </div>
+                                                <div className="flex-1" />
                                                 <Button
-                                                    variant={plan.highlight ? 'solid' : 'surface'}
-                                                    // variant="solid"
-                                                    onClick={() => subscribe(plan.sku)}
+                                                    variant="outline"
+                                                    onClick={buyCredits}
                                                     disabled={isBillingLoading}
                                                 >
-                                                    Subscribe
+                                                    Buy Pack
                                                 </Button>
                                             </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-
-                        <div className="display-flex flex-col gap-5 -mt-2 ml-1">
-                            <div className="display-flex flex-row gap-2 justify-between">
-                                <div
-                                    className="text-sm text-link cursor-pointer"
-                                    onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/pricing`)}
-                                >
-                                    Compare plans &rarr;
+                                        );
+                                    })()}
                                 </div>
-                                {!plansError && 
-                                    <div className="font-color-tertiary text-sm">
-                                        Unused credits roll over for 1 month
-                                    </div>
-                                }
-                            </div>
-                            <div
-                                className="text-sm text-link cursor-pointer"
-                                onClick={buyCredits}
-                            >
-                                Not ready to subscribe? Buy a credit pack instead &rarr;
-                            </div>
-                        </div>
+                            );
+                        })()}
                     </>
                 ) : (
                     <div className="display-flex flex-col gap-4">
@@ -237,6 +253,18 @@ const BillingSection: React.FC = () => {
                 )}
             </div>
 
+            {/* --- Link to plan details --- */}
+            {!hasPlan && (
+                <div className="display-flex flex-row ml-1">
+                    <div
+                        className="text-sm text-link cursor-pointer"
+                        onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/pricing`)}
+                    >
+                        View plan details &rarr;
+                    </div>
+                </div>
+            )}
+
             {/* --- Section 2: Credits --- */}
             <SectionLabel>Credits</SectionLabel>
             <SettingsGroup>
@@ -262,11 +290,9 @@ const BillingSection: React.FC = () => {
                             <Button variant="outline" onClick={buyCredits} disabled={isBillingLoading}>
                                 Buy Credits
                             </Button>
-                            {(creditBreakdown.purchasedCredits || 0) > 0 && (
-                                <span className="font-color-primary text-sm font-bold">
-                                    {(creditBreakdown.purchasedCredits || 0).toLocaleString()}
-                                </span>
-                            )}
+                            <span className="font-color-primary text-sm font-bold">
+                                {(creditBreakdown.purchasedCredits || 0).toLocaleString()}
+                            </span>
                         </div>
                     }
                 />
