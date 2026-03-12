@@ -7,6 +7,7 @@ import { currentThreadIdAtom } from '../agents/atoms';
 import { threadService, ThreadRunMatch } from '../../src/services/threadService';
 import { convertUTCToLocal } from '../utils/dateUtils';
 import Spinner from './icons/Spinner';
+import { logger } from '../../src/utils/logger';
 
 const MAX_RECENT = 3;
 const CACHE_TTL = 60_000; // 1 minute
@@ -42,7 +43,11 @@ export function clearRecentChatsCache(deletedThreadId?: string) {
             });
         }
         for (const removeThread of recentChatsRemovers) {
-            removeThread(deletedThreadId);
+            try { 
+                removeThread(deletedThreadId); 
+            } catch (e) { 
+                logger(`RecentChats: error removing thread from local state: ${e}`, 1);
+            }
         }
     } else {
         recentCache.clear();
