@@ -20,8 +20,21 @@ interface CacheEntry {
 // Module-level cache persists across mount/unmount cycles
 const recentCache = new Map<string, CacheEntry>();
 
-export function clearRecentChatsCache() {
+/**
+ * Clear cache and optionally remove a specific thread from mounted RecentChats.
+ * When `deletedThreadId` is provided the component filters it out immediately
+ * so the user sees the change without waiting for a re-fetch.
+ */
+let _removeThread: ((id: string) => void) | null = null;
+export function registerRecentChatsRemover(fn: ((id: string) => void) | null) {
+    _removeThread = fn;
+}
+
+export function clearRecentChatsCache(deletedThreadId?: string) {
     recentCache.clear();
+    if (deletedThreadId && _removeThread) {
+        _removeThread(deletedThreadId);
+    }
 }
 
 /**
@@ -198,6 +211,15 @@ const RecentChats: React.FC = () => {
         fetchRecentChats(isCancelled);
         return () => { cancelled = true; };
     }, [fetchRecentChats]);
+
+    // Register callback so external callers (ThreadListView, ThreadsMenu) can
+    // remove a deleted thread from our local state without a full re-fetch.
+    useEffect(() => {
+        registerRecentChatsRemover((id: string) => {
+            setThreads(prev => prev.filter(t => t.id !== id));
+        });
+        return () => registerRecentChatsRemover(null);
+    }, []);
 
     const handleSelectThread = async (threadId: string, threadName?: string) => {
         if (!user || threadId === currentThreadId) return;

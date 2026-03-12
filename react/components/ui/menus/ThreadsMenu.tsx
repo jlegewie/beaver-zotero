@@ -160,7 +160,7 @@ const ThreadsMenu: React.FC<ThreadsMenuProps> = ({
             // Refresh the threads list
             setThreads((prev) => prev.filter(thread => thread.id !== threadId));
             clearThreadListCache();
-            clearRecentChatsCache();
+            clearRecentChatsCache(threadId);
         } catch (error) {
             console.error('Error deleting thread:', error);
         }
