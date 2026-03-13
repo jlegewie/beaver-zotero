@@ -251,9 +251,18 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     // Create ztoolkit for every window
     addon.data.ztoolkit = createZToolkit();
 
-    win.MozXULElement.insertFTLIfNeeded(
-        `${addon.data.config.addonRef}-mainWindow.ftl`,
-    );
+    // Use optional flag to prevent breaking non-English Zotero UI.
+    // insertFTLIfNeeded adds FTL as a required resource, which causes the
+    // entire locale bundle to fail if the plugin only ships en-US, forcing
+    // all Zotero strings to fall back to English.
+    const ftlPath = `${addon.data.config.addonRef}-mainWindow.ftl`;
+    if (win.document.l10n) {
+        win.document.l10n.addResourceIds([
+            { path: ftlPath, optional: true },
+        ]);
+    } else {
+        win.MozXULElement.insertFTLIfNeeded(ftlPath);
+    }
 
     // Wait for the UI to be ready
     await Promise.all([
