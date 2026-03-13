@@ -53,8 +53,8 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                 <RecentChats />
 
                 {isDatabaseSyncSupported && !isWindow && (
-                        <FileStatusBar />
-                    )}
+                    <FileStatusBar />
+                )}
 
                 <div className="relative -mx-4 px-4 mb-3">
                     <PreviewAndPopupContainer />
