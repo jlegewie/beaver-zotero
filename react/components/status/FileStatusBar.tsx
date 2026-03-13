@@ -1,18 +1,16 @@
-import React, { useRef, useState, useEffect } from "react";
+import React from "react";
 import { useAtomValue } from "jotai";
 import { fileStatusSummaryAtom, connectionStatusAtom } from "../../atoms/files";
-import { Spinner, Icon, AlertIcon, TickIcon } from "../icons/icons";
+import { Spinner, Icon, AlertIcon, TickIcon, InformationCircleIcon } from "../icons/icons";
 import { openPreferencesWindow } from "../../../src/ui/openPreferencesWindow";
 import { useFileStatus } from "../../hooks/useFileStatus";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
 import { hasPopupsOrPreviewsAtom } from "../../atoms/ui";
 
-const COMPLETION_DISPLAY_MS = 15_000;
-
 /**
  * Minimal one-line file processing status indicator for the homepage footer.
- * Shows during active processing and briefly after completion, then hides.
- * Clicking opens the preferences window on the sync tab.
+ * Always visible once a connection has been attempted. Clicking opens the
+ * preferences window on the sync tab.
  */
 const FileStatusBar: React.FC = () => {
     useFileStatus(true);
@@ -28,40 +26,9 @@ const FileStatusBar: React.FC = () => {
 
     const hasFiles = summary.fileStatusAvailable && summary.totalFiles > 0;
     const isActivelyProcessing = hasFiles && (summary.activeCount > 0 || summary.queuedProcessingCount > 0);
-    const isFullyComplete = hasFiles && !isActivelyProcessing;
 
-    // Track processing→complete transition for auto-hide
-    const wasProcessingRef = useRef(false);
-    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [showComplete, setShowComplete] = useState(false);
-
-    useEffect(() => {
-        if (isActivelyProcessing) {
-            wasProcessingRef.current = true;
-            // Cancel any pending completion timer
-            if (timerRef.current) {
-                clearTimeout(timerRef.current);
-                timerRef.current = null;
-            }
-            setShowComplete(false);
-        } else if (wasProcessingRef.current && isFullyComplete) {
-            // Processing just finished — show completion briefly
-            setShowComplete(true);
-            timerRef.current = setTimeout(() => {
-                setShowComplete(false);
-                timerRef.current = null;
-            }, COMPLETION_DISPLAY_MS);
-        }
-        return () => {
-            if (timerRef.current) clearTimeout(timerRef.current);
-        };
-    }, [isActivelyProcessing, isFullyComplete]);
-
-    // Visibility
+    // Hidden only before any connection attempt
     if (connectionStatus === 'idle') return null;
-    if (isConnected && !hasFiles) return null;
-    if (isConnected && isFullyComplete && !showComplete) return null;
-    if (isConnected && !isActivelyProcessing && !isFullyComplete && !isConnecting && !isError) return null;
 
     // Icon
     let icon: React.ReactNode;
@@ -69,10 +36,10 @@ const FileStatusBar: React.FC = () => {
         icon = <Spinner size={11} />;
     } else if (isError) {
         icon = <Icon icon={AlertIcon} className="scale-90 font-color-yellow" />;
-    } else if (showComplete) {
+    } else if (isConnected) {
         icon = <Icon icon={TickIcon} />;
     } else {
-        icon = <Spinner size={11} />;
+        icon = <Icon icon={InformationCircleIcon} />;
     }
 
     // Text
@@ -83,10 +50,10 @@ const FileStatusBar: React.FC = () => {
         text = "Unable to connect";
     } else if (isActivelyProcessing) {
         text = `Processing files... ${summary.indexingProgress}%`;
-    } else if (showComplete) {
-        text = "Processing complete. View status.";
+    } else if (isConnected) {
+        text = "File processing complete. View status.";
     } else {
-        text = "File processing";
+        text = "View file processing status";
     }
 
     return (
