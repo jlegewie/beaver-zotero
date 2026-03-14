@@ -29,6 +29,7 @@ import {
     handleGetMetadataRequest,
     handleAgentActionValidateRequest,
     handleAgentActionExecuteRequest,
+    handleReadNoteRequest,
 } from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
 import {
@@ -627,6 +628,22 @@ export class AgentService {
                                 total_count: 0,
                                 error: String(err),
                                 error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                // Note tools
+                case 'read_note_request':
+                    logger("AgentService: Received read_note_request", event, 1);
+                    handleReadNoteRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: read_note_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'read_note',
+                                request_id: event.request_id,
+                                success: false,
+                                error: String(err),
                             });
                         });
                     break;

@@ -579,6 +579,40 @@ export interface WSZoteroAttachmentSearchResponse {
 }
 
 // =============================================================================
+// Read Note Tool (Request/Response)
+// =============================================================================
+
+/** Request from backend to read a Zotero note's content */
+export interface WSReadNoteRequest extends WSBaseEvent {
+    event: 'read_note_request';
+    request_id: string;
+    /** Note identifier: "{libraryID}-{itemKey}" */
+    note_id: string;
+    /** Optional: start line (1-indexed). Omit to read from beginning. */
+    offset?: number;
+    /** Optional: max lines to return. Omit to read entire note. */
+    limit?: number;
+}
+
+/** Response to read_note request */
+export interface WSReadNoteResponse {
+    type: 'read_note';
+    request_id: string;
+    success: boolean;
+    /** Error message if success is false */
+    error?: string;
+    /** Note metadata */
+    note_id?: string;
+    title?: string;
+    parent_item_id?: string;
+    parent_title?: string;
+    /** Total line count of the simplified HTML */
+    total_lines?: number;
+    /** The simplified HTML content with line numbers (format: "  N|content") */
+    content?: string;
+}
+
+// =============================================================================
 // Library Management Tools (Request/Response)
 // =============================================================================
 
@@ -917,6 +951,8 @@ export type WSEvent =
     | WSListTagsRequest
     | WSGetMetadataRequest
     | WSListLibrariesRequest
+    // Note tools
+    | WSReadNoteRequest
     // Deferred tool events
     | WSAgentActionValidateRequest
     | WSAgentActionExecuteRequest
