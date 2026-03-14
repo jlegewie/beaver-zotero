@@ -33,6 +33,8 @@ import {
     handleAgentActionExecuteRequest,
     // Utility
     handleDeleteItemsRequest,
+    // Notes
+    handleReadNoteRequest,
 } from '../../src/services/agentDataProvider';
 import type {
     WSZoteroDataRequest,
@@ -52,6 +54,8 @@ import type {
     // Deferred tools
     WSAgentActionValidateRequest,
     WSAgentActionExecuteRequest,
+    // Notes
+    WSReadNoteRequest,
 } from '../../src/services/agentProtocol';
 
 
@@ -95,6 +99,8 @@ const ENDPOINT_PATHS = [
     // Utility
     '/beaver/user-info',
     '/beaver/delete-items',
+    // Notes
+    '/beaver/note/read',
     // Test-only endpoints (cache inspection/manipulation)
     '/beaver/test/ping',
     '/beaver/test/cache-metadata',
@@ -485,6 +491,18 @@ async function handleDeleteItemsHttpRequest(request: any) {
     });
 }
 
+async function handleReadNoteHttpRequest(request: any) {
+    const wsRequest: WSReadNoteRequest = {
+        event: 'read_note_request',
+        request_id: generateRequestId(),
+        note_id: request.note_id,
+        offset: request.offset,
+        limit: request.limit,
+    };
+
+    return await handleReadNoteRequest(wsRequest);
+}
+
 
 // =============================================================================
 // Test-Only HTTP Handlers (cache inspection / manipulation)
@@ -637,6 +655,10 @@ function registerEndpoints(): boolean {
 
     Zotero.Server.Endpoints['/beaver/delete-items'] =
         createEndpoint(handleDeleteItemsHttpRequest);
+
+    // Note endpoints
+    Zotero.Server.Endpoints['/beaver/note/read'] =
+        createEndpoint(handleReadNoteHttpRequest);
 
     // Test-only endpoints (cache inspection/manipulation) — dev builds only
     if (Zotero.Beaver?.data?.env === 'development') {
