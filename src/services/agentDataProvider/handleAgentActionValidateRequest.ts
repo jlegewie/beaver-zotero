@@ -2,6 +2,7 @@ import { logger } from '../../utils/logger';
 import { canSetField, SETTABLE_PRIMARY_FIELDS } from '../../utils/zoteroUtils';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import type { MetadataEdit } from '../../../react/types/agentActions/base';
+import type { EditNoteProposedData } from '../../../react/types/agentActions/editNote';
 import { batchFindExistingReferences, BatchReferenceCheckItem } from '../../../react/utils/batchFindExistingReferences';
 
 import { store } from '../../../react/store';
@@ -10,6 +11,15 @@ import {
     WSAgentActionValidateResponse,
 } from '../agentProtocol';
 import { getDeferredToolPreference } from './utils';
+import {
+    getOrSimplify,
+    expandToRawHtml,
+    stripDataCitationItems,
+    countOccurrences,
+    isNoteInEditor,
+    validateNewString,
+    findFuzzyMatch,
+} from '../../utils/noteHtmlSimplifier';
 
 
 /**
@@ -37,6 +47,10 @@ export async function handleAgentActionValidateRequest(
 
         if (request.action_type === 'create_item') {
             return await validateCreateItemAction(request);
+        }
+
+        if (request.action_type === 'edit_note') {
+            return await validateEditNoteAction(request);
         }
 
         // Unsupported action type.
@@ -1140,6 +1154,202 @@ async function validateCreateItemAction(
             existing_items: existingItems,
             resolved_collections: resolvedCollections,
             tags: tags || [],
+        },
+        preference,
+    };
+}
+
+/**
+ * Validate an edit_note action.
+ * Checks the note exists, is editable, not in editor, and performs a dry-run
+ * expansion + match to verify the replacement will succeed.
+ */
+async function validateEditNoteAction(
+    request: WSAgentActionValidateRequest
+): Promise<WSAgentActionValidateResponse> {
+    const { library_id, zotero_key, old_string, new_string, replace_all } = request.action_data as EditNoteProposedData;
+
+    // 1. Validate library exists
+    const library = Zotero.Libraries.get(library_id);
+    if (!library) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library not found: ${library_id}`,
+            error_code: 'library_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    // 2. Check library is searchable
+    const searchableIds = store.get(searchableLibraryIdsAtom);
+    if (!searchableIds.includes(library_id)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library exists but is not synced with Beaver. The user can update this setting in Beaver Preferences. Library: ${library.name} (ID: ${library_id})`,
+            error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
+
+    // 3. Item exists
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Item not found: ${library_id}-${zotero_key}`,
+            error_code: 'item_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    // 4. Item is a note
+    if (!item.isNote()) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Item ${library_id}-${zotero_key} is not a note`,
+            error_code: 'not_a_note',
+            preference: 'always_ask',
+        };
+    }
+
+    // 5. Check library is editable (after item type, matching edit_metadata ordering)
+    if (!library.editable) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library '${library.name}' is read-only and cannot be edited`,
+            error_code: 'library_not_editable',
+            preference: 'always_ask',
+        };
+    }
+
+    // 6. Load note data
+    await item.loadDataType('note');
+    const rawHtml = item.getNote();
+
+    // 7. Note not empty
+    if (!rawHtml || rawHtml.trim() === '') {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Note ${library_id}-${zotero_key} is empty`,
+            error_code: 'empty_note',
+            preference: 'always_ask',
+        };
+    }
+
+    // 8. Editor conflict
+    if (isNoteInEditor(item.id)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'This note is currently open in the Zotero editor. Close the editor tab before making programmatic edits.',
+            error_code: 'note_in_editor',
+            preference: 'always_ask',
+        };
+    }
+
+    // 9. Strings different
+    if (old_string === new_string) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'old_string and new_string are identical.',
+            error_code: 'no_changes',
+            preference: 'always_ask',
+        };
+    }
+
+    // 10. Simplify note
+    const { simplified, metadata } = getOrSimplify(`${library_id}-${zotero_key}`, rawHtml, library_id);
+
+    // 11. Validate new_string tags
+    const validationError = validateNewString(new_string, metadata);
+    if (validationError) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: validationError,
+            error_code: 'invalid_new_string',
+            preference: 'always_ask',
+        };
+    }
+
+    // 12. Dry-run expansion
+    let expandedOld: string;
+    let expandedNew: string;
+    try {
+        expandedOld = expandToRawHtml(old_string, metadata, 'old');
+        expandedNew = expandToRawHtml(new_string, metadata, 'new');
+    } catch (e: any) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: e.message || String(e),
+            error_code: 'expansion_failed',
+            preference: 'always_ask',
+        };
+    }
+
+    // 13. Strip data-citation-items from raw HTML and count occurrences
+    const strippedHtml = stripDataCitationItems(rawHtml);
+    const matchCount = countOccurrences(strippedHtml, expandedOld);
+
+    // 14. Zero matches — fuzzy match on simplified HTML
+    if (matchCount === 0) {
+        const fuzzy = findFuzzyMatch(simplified, old_string);
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'The string to replace was not found in the note.'
+                + (fuzzy ? ` Found a possible fuzzy match:\n${fuzzy}` : ''),
+            error_code: 'old_string_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    // 15. Multiple matches without replace_all
+    if (matchCount > 1 && !replace_all) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `The string to replace was found ${matchCount} times in the note. `
+                + 'Use replace_all to replace all occurrences, or include more context to make the match unique.',
+            error_code: 'ambiguous_match',
+            preference: 'always_ask',
+        };
+    }
+
+    // 16. Valid — return current value
+    const noteTitle = item.getNoteTitle() || '(untitled)';
+    const totalLines = simplified.split('\n').length;
+
+    const preference = getDeferredToolPreference('edit_note');
+
+    return {
+        type: 'agent_action_validate_response',
+        request_id: request.request_id,
+        valid: true,
+        current_value: {
+            note_title: noteTitle,
+            total_lines: totalLines,
+            match_count: matchCount,
         },
         preference,
     };

@@ -3,7 +3,19 @@ import { sanitizeCreators } from '../../utils/zoteroUtils';
 import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '../agentProtocol';
 import type { MetadataEdit } from '../../../react/types/agentActions/base';
 import type { CreateItemProposedData, CreateItemResultData } from '../../../react/types/agentActions/items';
+import type { EditNoteProposedData } from '../../../react/types/agentActions/editNote';
 import { applyCreateItemData } from '../../../react/utils/addItemActions';
+import {
+    getOrSimplify,
+    expandToRawHtml,
+    stripDataCitationItems,
+    rebuildDataCitationItems,
+    countOccurrences,
+    isNoteInEditor,
+    invalidateSimplificationCache,
+    checkDuplicateCitations,
+    findFuzzyMatch,
+} from '../../utils/noteHtmlSimplifier';
 
 
 /** Default timeout in seconds if not specified by backend */
@@ -128,6 +140,8 @@ export async function handleAgentActionExecuteRequest(
             result = await executeOrganizeItemsAction(request, ctx);
         } else if (request.action_type === 'create_item') {
             result = await executeCreateItemAction(request, ctx);
+        } else if (request.action_type === 'edit_note') {
+            result = await executeEditNoteAction(request, ctx);
         } else {
             return {
                 type: 'agent_action_execute_response',
@@ -726,4 +740,165 @@ async function executeCreateItemAction(
             error_code: 'create_failed',
         };
     }
+}
+
+/**
+ * Execute an edit_note action.
+ * Performs the string replacement on the note's raw HTML via the simplified format.
+ */
+async function executeEditNoteAction(
+    request: WSAgentActionExecuteRequest,
+    ctx: TimeoutContext,
+): Promise<WSAgentActionExecuteResponse> {
+    const { library_id, zotero_key, old_string, new_string, replace_all } = request.action_data as EditNoteProposedData;
+
+    // 1. Load item
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: `Item not found: ${library_id}-${zotero_key}`,
+            error_code: 'item_not_found',
+        };
+    }
+
+    // 2. Load note
+    await item.loadDataType('note');
+
+    // 3. Snapshot for undo
+    const oldHtml = item.getNote();
+
+    // 4. Re-check editor conflict
+    if (isNoteInEditor(item.id)) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: 'This note is currently open in the Zotero editor. Close the editor tab before making programmatic edits.',
+            error_code: 'note_in_editor',
+        };
+    }
+
+    // 5. Get metadata from cache or re-simplify
+    const noteId = `${library_id}-${zotero_key}`;
+    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
+
+    // 6. Expand old_string and new_string to raw HTML
+    let expandedOld: string;
+    let expandedNew: string;
+    try {
+        expandedOld = expandToRawHtml(old_string, metadata, 'old');
+        expandedNew = expandToRawHtml(new_string, metadata, 'new');
+    } catch (e: any) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: e.message || String(e),
+            error_code: 'expansion_failed',
+        };
+    }
+
+    // 7. Strip data-citation-items from raw HTML for matching
+    const strippedHtml = stripDataCitationItems(oldHtml);
+
+    // 8. Count occurrences
+    const matchCount = countOccurrences(strippedHtml, expandedOld);
+
+    // 9. Zero matches
+    if (matchCount === 0) {
+        const fuzzy = findFuzzyMatch(simplified, old_string);
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: 'The string to replace was not found in the note.'
+                + (fuzzy ? ` Found a possible fuzzy match:\n${fuzzy}` : ''),
+            error_code: 'old_string_not_found',
+        };
+    }
+
+    // 10. Multiple matches without replace_all
+    if (matchCount > 1 && !replace_all) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: `The string to replace was found ${matchCount} times in the note. `
+                + 'Use replace_all to replace all occurrences, or include more context.',
+            error_code: 'ambiguous_match',
+        };
+    }
+
+    // 11. Perform replacement
+    let newHtml: string;
+    if (replace_all) {
+        newHtml = strippedHtml.split(expandedOld).join(expandedNew);
+    } else {
+        const idx = strippedHtml.indexOf(expandedOld);
+        newHtml = strippedHtml.substring(0, idx) + expandedNew
+            + strippedHtml.substring(idx + expandedOld.length);
+    }
+
+    // 12. Rebuild data-citation-items
+    newHtml = rebuildDataCitationItems(newHtml);
+
+    // 13. Wrapper div protection
+    if (!newHtml.includes('data-schema-version=')) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: 'The note wrapper <div data-schema-version="..."> must not be removed.',
+            error_code: 'wrapper_removed',
+        };
+    }
+
+    // 14. Checkpoint before save
+    checkAborted(ctx, 'edit_note:before_save');
+
+    // 15. Save
+    try {
+        item.setNote(newHtml);
+        await item.saveTx();
+        logger(`executeEditNoteAction: Saved note edit to ${noteId} (${matchCount} occurrence(s) replaced)`, 1);
+    } catch (error) {
+        // Restore in-memory state on save failure
+        try {
+            item.setNote(oldHtml);
+        } catch (_) {
+            // Best-effort restoration
+        }
+        if (error instanceof TimeoutError) throw error;
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: `Failed to save note: ${error}`,
+            error_code: 'save_failed',
+        };
+    }
+
+    // 16. Invalidate cache
+    invalidateSimplificationCache(noteId);
+
+    // 17. Check for duplicate citation warnings
+    const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+    const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+
+    return {
+        type: 'agent_action_execute_response',
+        request_id: request.request_id,
+        success: true,
+        result_data: {
+            library_id,
+            zotero_key,
+            old_html: oldHtml,
+            new_html: newHtml,
+            occurrences_replaced: matchCount,
+            warnings,
+        },
+    };
 }
