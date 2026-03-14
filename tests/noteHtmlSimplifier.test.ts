@@ -259,6 +259,7 @@ describe('expandToRawHtml', () => {
         const metadata: SimplificationMetadata = {
             elements: new Map([
                 ['c_EX1_0', { rawHtml: rawCit, type: 'citation' as const, originalAttrs: { item_id: '1-EX1' } }],
+                ['c_EX1_1', { rawHtml: rawCitation('EX1', 1, '10'), type: 'citation' as const, originalAttrs: { item_id: '1-EX1', page: '10' } }],
                 ['c_K1+K2_0', { rawHtml: rawCompoundCitation(['K1', 'K2']), type: 'compound-citation' as const, isCompound: true }],
                 ['a_EA1', { rawHtml: rawAnnot, type: 'annotation' as const, originalText: 'text here' }],
                 ['ai_EAI1', { rawHtml: rawAI, type: 'annotation-image' as const }],
@@ -269,17 +270,32 @@ describe('expandToRawHtml', () => {
         return { metadata, rawCit, rawAnnot, rawAI, rawImg };
     }
 
+    // ---- Existing citation: unchanged ----
+
     it('restores existing citation with unchanged attrs', () => {
         const { metadata, rawCit } = makeMetadata();
         const input = '<citation id="c_EX1_0" item_id="1-EX1" label="Author, 2024"/>';
         expect(expandToRawHtml(input, metadata, 'old')).toBe(rawCit);
     });
 
-    it('rebuilds existing citation when page changes', () => {
+    it('restores existing citation without item_id (just id)', () => {
+        const { metadata, rawCit } = makeMetadata();
+        const input = '<citation id="c_EX1_0" label="Author, 2024"/>';
+        expect(expandToRawHtml(input, metadata, 'old')).toBe(rawCit);
+    });
+
+    it('restores existing citation in new context too', () => {
+        const { metadata, rawCit } = makeMetadata();
+        const input = '<citation id="c_EX1_0" item_id="1-EX1" label="Author, 2024"/>';
+        expect(expandToRawHtml(input, metadata, 'new')).toBe(rawCit);
+    });
+
+    // ---- Existing citation: page locator update ----
+
+    it('rebuilds existing citation when page is added', () => {
         const { metadata } = makeMetadata();
         const input = '<citation id="c_EX1_0" item_id="1-EX1" page="99" label="Author, 2024"/>';
         const result = expandToRawHtml(input, metadata, 'old');
-        // Should have called createCitationHTML with page=99
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'EX1' }),
             '99'
@@ -287,35 +303,113 @@ describe('expandToRawHtml', () => {
         expect(result).toContain('data-citation=');
     });
 
+    it('rebuilds existing citation when page locator changes', () => {
+        const { metadata } = makeMetadata();
+        // c_EX1_1 originally has page="10" — change to "25"
+        const input = '<citation id="c_EX1_1" item_id="1-EX1" page="25" label="Author, 2024, p. 10"/>';
+        expandToRawHtml(input, metadata, 'old');
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'EX1' }),
+            '25'
+        );
+    });
+
+    it('rebuilds existing citation when page locator is removed', () => {
+        const { metadata } = makeMetadata();
+        // c_EX1_1 originally has page="10" — remove page attr
+        const input = '<citation id="c_EX1_1" item_id="1-EX1" label="Author, 2024, p. 10"/>';
+        expandToRawHtml(input, metadata, 'old');
+        // page is now undefined vs original "10" → attrs changed → rebuild
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'EX1' }),
+            undefined
+        );
+    });
+
+    it('does not rebuild when page locator is unchanged', () => {
+        const { metadata } = makeMetadata();
+        const input = '<citation id="c_EX1_1" item_id="1-EX1" page="10" label="Author, 2024"/>';
+        expandToRawHtml(input, metadata, 'old');
+        expect(createCitationHTML).not.toHaveBeenCalled();
+    });
+
+    // ---- Compound citation ----
+
     it('restores compound citation (always immutable)', () => {
         const { metadata } = makeMetadata();
         const input = '<citation id="c_K1+K2_0" items="1-K1, 1-K2" label="Author1; Author2"/>';
         const result = expandToRawHtml(input, metadata, 'old');
         expect(result).toContain('data-citation=');
-        // Should NOT call createCitationHTML — compound citations use stored rawHtml
         expect(createCitationHTML).not.toHaveBeenCalled();
     });
 
-    it('new citation with item_id: extractAttr("id") matches "id" inside "item_id"', () => {
-        // Note: extractAttr uses regex `id="..."` which matches within `item_id="..."`.
-        // This means new citations (without explicit id=) are treated as having an id,
-        // causing them to hit the "existing citation" lookup path and fail.
-        const input = '<citation item_id="1-NEW1" label="New Ref"/>';
-        const metadata: SimplificationMetadata = { elements: new Map() };
-        expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/Unknown citation id/);
+    it('compound citation ignores attribute changes (immutable)', () => {
+        const { metadata } = makeMetadata();
+        // Even with altered label, compound uses stored rawHtml
+        const input = '<citation id="c_K1+K2_0" items="1-K1, 1-K2" label="CHANGED"/>';
+        const result = expandToRawHtml(input, metadata, 'new');
+        expect(result).toContain('data-citation=');
+        expect(createCitationHTML).not.toHaveBeenCalled();
     });
 
-    it('new citation with item_id in old context: same extractAttr issue', () => {
-        const input = '<citation item_id="1-NEW1" label="New Ref"/>';
+    // ---- New citation: item_id ----
+
+    it('creates new citation from item_id in new context', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
-        expect(() => expandToRawHtml(input, metadata, 'old')).toThrow(/Unknown citation id/);
+        const input = '<citation item_id="1-NEW1" label="New Ref"/>';
+        const result = expandToRawHtml(input, metadata, 'new');
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'NEW1' }),
+            undefined
+        );
+        expect(result).toContain('data-citation=');
     });
 
-    it('new citation with att_id: extractAttr("id") matches "id" inside "att_id"', () => {
+    it('creates new citation from item_id with page', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation item_id="1-NEW1" page="42" label="New Ref, p. 42"/>';
+        expandToRawHtml(input, metadata, 'new');
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'NEW1' }),
+            '42'
+        );
+    });
+
+    it('throws for new citation with item_id in old context', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation item_id="1-NEW1" label="New Ref"/>';
+        expect(() => expandToRawHtml(input, metadata, 'old')).toThrow(/old_string/);
+    });
+
+    // ---- New citation: att_id ----
+
+    it('creates new citation from att_id in new context', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
         const input = '<citation att_id="1-ATT1" label="From Attachment"/>';
-        const metadata: SimplificationMetadata = { elements: new Map() };
-        expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/Unknown citation id/);
+        expandToRawHtml(input, metadata, 'new');
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'ATT1' }),
+            undefined
+        );
     });
+
+    it('creates new citation from att_id with page', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation att_id="1-ATT1" page="7" label="From Attachment"/>';
+        expandToRawHtml(input, metadata, 'new');
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'ATT1' }),
+            '7'
+        );
+    });
+
+    it('throws for new citation with att_id in old context', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation att_id="1-ATT1" label="From Attachment"/>';
+        expect(() => expandToRawHtml(input, metadata, 'old')).toThrow(/old_string/);
+    });
+
+    // ---- New citation: error cases ----
 
     it('throws for unknown citation id', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
@@ -323,7 +417,7 @@ describe('expandToRawHtml', () => {
         expect(() => expandToRawHtml(input, metadata, 'old')).toThrow(/Unknown citation id/);
     });
 
-    it('throws for new compound citation', () => {
+    it('throws for new compound citation (items without id)', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
         const input = '<citation items="1-A, 1-B" label="Multi"/>';
         expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/compound/i);
@@ -334,6 +428,53 @@ describe('expandToRawHtml', () => {
         const input = '<citation label="Nothing"/>';
         expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/item_id or att_id/);
     });
+
+    it('throws when item not found for new citation via item_id', () => {
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => null);
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation item_id="1-MISSING" label="Missing"/>';
+        expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/Item not found/);
+    });
+
+    it('throws when attachment not found for new citation via att_id', () => {
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => null);
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation att_id="1-MISSING" label="Missing"/>';
+        expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/Attachment not found/);
+    });
+
+    // ---- extractAttr word-boundary correctness ----
+
+    it('extractAttr distinguishes id from item_id (no false match)', () => {
+        // With the word-boundary fix, extractAttr('id') should NOT match inside 'item_id'
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation item_id="1-ONLY" label="Only item_id"/>';
+        // id should be undefined → new citation path → builds from item_id
+        const result = expandToRawHtml(input, metadata, 'new');
+        expect(createCitationHTML).toHaveBeenCalled();
+        expect(result).toContain('data-citation=');
+    });
+
+    it('extractAttr distinguishes id from att_id (no false match)', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation att_id="1-ONLY" label="Only att_id"/>';
+        expandToRawHtml(input, metadata, 'new');
+        expect(createCitationHTML).toHaveBeenCalled();
+    });
+
+    // ---- Multiple citations in one string ----
+
+    it('expands multiple citations in a single string', () => {
+        const { metadata, rawCit } = makeMetadata();
+        const input = 'See <citation id="c_EX1_0" item_id="1-EX1" label="A"/> and <citation item_id="1-NEW2" label="B"/>.';
+        const result = expandToRawHtml(input, metadata, 'new');
+        // First citation restored from metadata
+        expect(result).toContain(rawCit);
+        // Second citation built fresh
+        expect(createCitationHTML).toHaveBeenCalled();
+    });
+
+    // ---- Annotations ----
 
     it('restores existing annotation unchanged', () => {
         const { metadata, rawAnnot } = makeMetadata();
@@ -353,7 +494,6 @@ describe('expandToRawHtml', () => {
                 ['a_WS1', { rawHtml: rawAnnotation('WS1', 'some  text'), type: 'annotation', originalText: 'some  text' }],
             ]),
         };
-        // Whitespace-normalized text matches
         const input = '<annotation id="a_WS1" key="WS1">some text</annotation>';
         expect(expandToRawHtml(input, metadata, 'old')).toBe(rawAnnotation('WS1', 'some  text'));
     });
@@ -364,27 +504,18 @@ describe('expandToRawHtml', () => {
         expect(() => expandToRawHtml(input, metadata, 'old')).toThrow(/Unknown annotation id/);
     });
 
-    it('throws for unknown annotation-image id', () => {
-        const metadata: SimplificationMetadata = { elements: new Map() };
-        const input = '<annotation-image id="ai_NOPE" key="NOPE" attachment="X" />';
-        expect(() => expandToRawHtml(input, metadata, 'old')).toThrow(/Unknown annotation-image id/);
-    });
-
-    it('throws for unknown image id', () => {
-        const metadata: SimplificationMetadata = { elements: new Map() };
-        const input = '<image id="i_NOPE" attachment="X" />';
-        expect(() => expandToRawHtml(input, metadata, 'old')).toThrow(/Unknown image id/);
-    });
-
-    it('passes through plain text unchanged', () => {
-        const { metadata } = makeMetadata();
-        expect(expandToRawHtml('Just plain text.', metadata, 'old')).toBe('Just plain text.');
-    });
+    // ---- Annotation-images & images ----
 
     it('restores annotation-image from metadata', () => {
         const { metadata, rawAI } = makeMetadata();
         const input = '<annotation-image id="ai_EAI1" key="EAI1" attachment="EATT1" />';
         expect(expandToRawHtml(input, metadata, 'old')).toBe(rawAI);
+    });
+
+    it('throws for unknown annotation-image id', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<annotation-image id="ai_NOPE" key="NOPE" attachment="X" />';
+        expect(() => expandToRawHtml(input, metadata, 'old')).toThrow(/Unknown annotation-image id/);
     });
 
     it('restores regular image from metadata', () => {
@@ -393,12 +524,132 @@ describe('expandToRawHtml', () => {
         expect(expandToRawHtml(input, metadata, 'old')).toBe(rawImg);
     });
 
-    it('throws when item not found for new citation (extractAttr issue)', () => {
-        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => null);
+    it('throws for unknown image id', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
-        const input = '<citation item_id="1-MISSING" label="Missing"/>';
-        // Due to extractAttr regex, "id" is extracted from "item_id" as "1-MISSING"
-        expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/Unknown citation id/);
+        const input = '<image id="i_NOPE" attachment="X" />';
+        expect(() => expandToRawHtml(input, metadata, 'old')).toThrow(/Unknown image id/);
+    });
+
+    // ---- Plain text passthrough ----
+
+    it('passes through plain text unchanged', () => {
+        const { metadata } = makeMetadata();
+        expect(expandToRawHtml('Just plain text.', metadata, 'old')).toBe('Just plain text.');
+    });
+});
+
+
+// =============================================================================
+// Citation Round-Trips: simplify → expand
+// =============================================================================
+
+describe('citation round-trips', () => {
+    it('single citation: simplify then expand restores original raw HTML', () => {
+        const raw = rawCitation('RT1', 1, '', 'Smith, 2020');
+        const html = wrap(`<p>See ${raw} for details.</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        // Simplified form should have the clean tag
+        expect(simplified).toContain('<citation id="c_RT1_0"');
+        expect(simplified).not.toContain('data-citation=');
+
+        // Expanding old_string with the simplified citation should restore the raw HTML
+        const citationTag = simplified.match(/<citation [^/]*\/>/)?.[0];
+        expect(citationTag).toBeTruthy();
+        const expanded = expandToRawHtml(citationTag!, metadata, 'old');
+        expect(expanded).toBe(raw);
+    });
+
+    it('single citation with page: round-trip preserves page locator', () => {
+        const raw = rawCitation('RT2', 1, '42', 'Jones, 2021, p. 42');
+        const html = wrap(`<p>${raw}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        expect(simplified).toContain('page="42"');
+        const citationTag = simplified.match(/<citation [^/]*\/>/)?.[0];
+        const expanded = expandToRawHtml(citationTag!, metadata, 'old');
+        expect(expanded).toBe(raw);
+    });
+
+    it('compound citation: round-trip restores original', () => {
+        const raw = rawCompoundCitation(['C1', 'C2'], 1, 'Author1; Author2');
+        const html = wrap(`<p>${raw}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        expect(simplified).toContain('<citation id="c_C1+C2_0"');
+        expect(simplified).toContain('items=');
+        const citationTag = simplified.match(/<citation [^/]*\/>/)?.[0];
+        const expanded = expandToRawHtml(citationTag!, metadata, 'old');
+        expect(expanded).toBe(raw);
+    });
+
+    it('duplicate citations: each gets unique id and round-trips correctly', () => {
+        const raw = rawCitation('DRT', 1, '', 'Same, 2024');
+        const html = wrap(`<p>${raw}</p><p>${raw}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        // Two distinct ids
+        expect(simplified).toContain('c_DRT_0');
+        expect(simplified).toContain('c_DRT_1');
+
+        // Both expand back to the same raw HTML
+        const tags = [...simplified.matchAll(/<citation [^/]*\/>/g)].map(m => m[0]);
+        expect(tags).toHaveLength(2);
+        expect(expandToRawHtml(tags[0], metadata, 'old')).toBe(raw);
+        expect(expandToRawHtml(tags[1], metadata, 'old')).toBe(raw);
+    });
+
+    it('updating page locator: simplify then expand with changed page rebuilds', () => {
+        const raw = rawCitation('PU1', 1, '10', 'Author, 2024, p. 10');
+        const html = wrap(`<p>${raw}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        // Change page from 10 to 99 in the simplified tag
+        const modified = simplified.replace('page="10"', 'page="99"');
+        const citationTag = modified.match(/<citation [^/]*\/>/)?.[0];
+        const expanded = expandToRawHtml(citationTag!, metadata, 'old');
+        // Should have called createCitationHTML with the new page
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'PU1' }),
+            '99'
+        );
+        expect(expanded).toContain('data-citation=');
+    });
+
+    it('mixed content: citations + annotations + text all round-trip', () => {
+        const cit = rawCitation('MIX1', 1, '', 'Ref');
+        const ann = rawAnnotation('MIXANN', 'highlight');
+        const html = wrap(`<p>Before ${cit} middle ${ann} after</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        // Both should be simplified
+        expect(simplified).toContain('<citation id="c_MIX1_0"');
+        expect(simplified).toContain('<annotation id="a_MIXANN"');
+
+        // Expanding the full simplified string should restore all raw elements
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toContain(cit);
+        expect(expanded).toContain(ann);
+        expect(expanded).toContain('Before');
+        expect(expanded).toContain('after');
+    });
+
+    it('new citation inserted alongside existing ones in new_string context', () => {
+        const existingRaw = rawCitation('EXI1', 1, '', 'Existing');
+        const html = wrap(`<p>${existingRaw}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        // Build a new_string that keeps the existing citation and adds a new one
+        const existingTag = simplified.match(/<citation [^/]*\/>/)?.[0];
+        const newString = `${existingTag} and <citation item_id="1-BRAND" label="Brand New"/>`;
+        const expanded = expandToRawHtml(newString, metadata, 'new');
+        // Existing citation restored from metadata
+        expect(expanded).toContain(existingRaw);
+        // New citation built via createCitationHTML
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'BRAND' }),
+            undefined
+        );
     });
 });
 

@@ -320,7 +320,7 @@ function normalizeWS(s: string): string {
 
 /** Extract a named attribute value from an attribute string */
 function extractAttr(attrStr: string, name: string): string | undefined {
-    const match = attrStr.match(new RegExp(`${name}="([^"]*)"`));
+    const match = attrStr.match(new RegExp(`(?<![\\w])${name}="([^"]*)"`));
     return match ? unescapeAttr(match[1]) : undefined;
 }
 
