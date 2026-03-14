@@ -214,8 +214,11 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
     );
 
     // 5. Replace citations (span.citation with data-citation)
+    // Regex handles nested <span class="citation-item"> tags inside citations.
+    // Zotero's formatCitation() wraps each item: (<span class="citation-item">Author, 2024</span>)
+    // The content group matches: non-< chars, or nested <span>...</span> pairs (one level deep).
     simplified = simplified.replace(
-        /<span\s+class="citation"\s+data-citation="([^"]*)">([\s\S]*?)<\/span>/g,
+        /<span\s+class="citation"\s+data-citation="([^"]*)">((?:[^<]*(?:<span\b[^>]*>[^<]*<\/span>)?)*)<\/span>/g,
         (match, encodedCitation, visibleContent) => {
             try {
                 const citationData = JSON.parse(decodeURIComponent(encodedCitation));
@@ -304,6 +307,11 @@ function escapeAttr(s: string): string {
 /** Unescape HTML attribute value */
 function unescapeAttr(s: string): string {
     return s.replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+}
+
+/** Normalize whitespace: collapse runs to single space and trim */
+function normalizeWS(s: string): string {
+    return s.replace(/\s+/g, ' ').trim();
 }
 
 // =============================================================================
@@ -441,7 +449,6 @@ export function expandToRawHtml(
                 throw new Error(`Unknown annotation id="${id}".`);
             }
             // Verify content wasn't modified
-            const normalizeWS = (s: string) => s.replace(/\s+/g, ' ').trim();
             if (normalizeWS(innerText) !== normalizeWS(stored.originalText ?? '')) {
                 throw new Error(
                     'Error: Annotation content cannot be modified. You can move or delete annotations but not edit their text.'
@@ -607,8 +614,6 @@ export function validateNewString(
  * Used to provide hints when exact matching fails.
  */
 export function findFuzzyMatch(simplified: string, searchStr: string): string | null {
-    const normalizeWS = (s: string) => s.replace(/\s+/g, ' ').trim();
-
     // 1. Try whitespace-relaxed exact match
     const normSearch = normalizeWS(searchStr);
     const normHtml = normalizeWS(simplified);

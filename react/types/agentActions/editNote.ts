@@ -3,6 +3,8 @@
  * Uses StrReplace pattern on Zotero note HTML via simplified HTML intermediate format.
  */
 
+import type { ProposedAction } from './base';
+
 /**
  * Proposed data for editing a note via string replacement.
  * Strings use the simplified HTML format (with <citation/>, <annotation/>, etc. tags).
@@ -38,3 +40,10 @@ export interface EditNoteResultData {
     /** Warnings (e.g., duplicate citation) */
     warnings?: string[];
 }
+
+/** Typed proposed action for edit_note */
+export type EditNoteProposedAction = ProposedAction & {
+    action_type: 'edit_note';
+    proposed_data: EditNoteProposedData;
+    result_data?: EditNoteResultData;
+};
