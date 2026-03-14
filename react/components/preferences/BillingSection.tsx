@@ -102,7 +102,7 @@ const BillingSection: React.FC = () => {
                                                     <div className="text-sm font-color-secondary" style={{ marginBottom: '8px' }}>
                                                         {plan.monthly_credits} credits per month
                                                     </div>
-                                                    <div style={{ alignSelf: 'flex-start' }}>
+                                                    <div className="display-flex flex-col items-start gap-1">
                                                         <Button
                                                             variant={plan.highlight ? 'solid' : 'surface'}
                                                             onClick={() => subscribe(plan.sku)}
@@ -253,6 +253,31 @@ const BillingSection: React.FC = () => {
                 )}
             </div>
 
+            {!hasPlan && (
+                <div className="text-sm font-color-secondary ml-1">
+                    By subscribing or buying credits, you agree to the{' '}
+                    <a
+                        onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/terms`)}
+                        href="https://www.beaverapp.ai/terms"
+                        className="text-sm text-link cursor-pointer"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        Terms of Service
+                    </a>
+                    {' '}and{' '}
+                    <a
+                        onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/privacy`)}
+                        href="https://www.beaverapp.ai/privacy"
+                        className="text-sm text-link cursor-pointer"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        Privacy Policy
+                    </a>.
+                </div>
+            )}
+
             {/* --- Link to plan details --- */}
             {!hasPlan && (
                 <div className="display-flex flex-row ml-1">
@@ -287,9 +312,9 @@ const BillingSection: React.FC = () => {
                     }
                     control={
                         <div className="display-flex flex-row items-center gap-3">
-                            <Button variant="outline" onClick={buyCredits} disabled={isBillingLoading}>
+                            {/* <Button variant="outline" onClick={buyCredits} disabled={isBillingLoading}>
                                 Buy Credits
-                            </Button>
+                            </Button> */}
                             <span className="font-color-primary text-sm font-bold">
                                 {(creditBreakdown.purchasedCredits || 0).toLocaleString()}
                             </span>
