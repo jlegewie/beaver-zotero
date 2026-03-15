@@ -72,7 +72,12 @@ export function useAuth() {
         const currentUser = userRef.current;
         const newUserId = newSession?.user?.id ?? null;
         const currentUserId = currentUser?.id ?? null;
-        
+
+        // --- Deduplicate SIGNED_OUT events ---
+        if (event === 'SIGNED_OUT' && currentSession === null && currentUser === null) {
+            return;
+        }
+
         // --- Determine if Session Atom should be updated ---
         const shouldUpdateSession =
             event === 'INITIAL_SESSION' ||
