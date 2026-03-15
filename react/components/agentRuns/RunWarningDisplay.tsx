@@ -7,7 +7,6 @@ import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAnd
 import { RunWarning, dismissWarningAtom } from '../../atoms/warnings';
 import { setPref } from '../../../src/utils/prefs';
 import { requestPlusToolsAtom } from '../../atoms/ui';
-import { useBilling } from '../../hooks/useBilling';
 import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 
 interface RunWarningDisplayProps {
@@ -21,7 +20,6 @@ interface RunWarningDisplayProps {
 export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning }) => {
     const dismissWarning = useSetAtom(dismissWarningAtom);
     const setRequestPlusTools = useSetAtom(requestPlusToolsAtom);
-    const { subscribe, buyCredits, isLoading } = useBilling();
 
     const handleDismiss = () => {
         dismissWarning(warning.id);
@@ -55,7 +53,7 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
                     </div>
                 </div>
             </div>
-            {showLowCreditsButtons && (
+            {showLowCreditsButtons && !showPlusToolsDegradedButtons && (
                 <div className="display-flex flex-row gap-3 items-start mr-1">
                     <div className="flex-1" />
                     <Button
@@ -73,10 +71,9 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
                     <Button
                         variant="outline"
                         className="scale-90 mt-020"
-                        onClick={buyCredits}
-                        disabled={isLoading}
+                        onClick={() => openPreferencesWindow('billing')}
                     >
-                        Buy Credits
+                        Get Beaver Credits
                     </Button>
                     <Button
                         variant="outline"
