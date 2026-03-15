@@ -3,6 +3,7 @@ import Button from "../ui/Button";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
 import { Spinner } from '../icons/icons';
 import { activePreferencePageTabAtom } from "../../atoms/ui";
+import { userAtom } from "../../atoms/auth";
 import { creditBreakdownAtom, creditPlanAtom, hasCreditPlanAtom, isCreditPlanPastDueAtom, profileBalanceAtom } from "../../atoms/profile";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useBilling } from "../../hooks/useBilling";
@@ -159,6 +160,7 @@ const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promi
 
 const BillingSection: React.FC = () => {
     const setActiveTab = useSetAtom(activePreferencePageTabAtom);
+    const user = useAtomValue(userAtom);
 
     // --- Atoms: Plan and credits ---
     const creditPlan = useAtomValue(creditPlanAtom);
@@ -377,7 +379,7 @@ const BillingSection: React.FC = () => {
             <div className="display-flex flex-col gap-1" style={{ marginTop: '16px', paddingLeft: '2px' }}>
                 <span
                     className="text-sm font-color-secondary text-link cursor-pointer"
-                    onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/login`)}
+                    onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/login${user?.email ? `?email=${encodeURIComponent(user.email)}` : ''}`)}
                 >
                     Manage account on web &rarr;
                 </span>
