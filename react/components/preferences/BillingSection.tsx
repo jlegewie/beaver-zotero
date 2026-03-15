@@ -6,6 +6,38 @@ import { activePreferencePageTabAtom } from "../../atoms/ui";
 import { creditBreakdownAtom, creditPlanAtom, hasCreditPlanAtom, isCreditPlanPastDueAtom, profileBalanceAtom } from "../../atoms/profile";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useBilling } from "../../hooks/useBilling";
+import { PlanInfo } from "../../../src/services/accountService";
+
+
+const CreditPackCard: React.FC<{ pack: PlanInfo, buyCredits: () => Promise<void>, isBillingLoading: boolean }> = (props) => {
+    const { pack, buyCredits, isBillingLoading } = props;
+    const packPrice = new Intl.NumberFormat(undefined, { style: 'currency', currency: pack.currency, minimumFractionDigits: 0 }).format(pack.unit_amount / 100);
+    return (
+        <div
+            className="display-flex flex-row items-center rounded-md p-1"
+            style={{
+                border: '1px dashed var(--border-quarternary)',
+            }}
+        >
+            <div className="display-flex flex-col" style={{ minWidth: 0 }}>
+                <span className="text-sm font-color-secondary">
+                    Not ready to subscribe?
+                </span>
+                <span className="text-base font-color-primary font-medium">
+                    Credit Pack &mdash; {pack.monthly_credits} credits for {packPrice}
+                </span>
+            </div>
+            <div className="flex-1" />
+            <Button
+                variant="outline"
+                onClick={() => buyCredits()}
+                disabled={isBillingLoading}
+            >
+                Buy Pack
+            </Button>
+        </div>
+    );
+};
 
 
 const BillingSection: React.FC = () => {
@@ -123,35 +155,13 @@ const BillingSection: React.FC = () => {
                                     </div>
 
                                     {/* Credit pack card (secondary) */}
-                                    {creditPacks.length > 0 && (() => {
-                                        const pack = creditPacks[0];
-                                        const packPrice = new Intl.NumberFormat(undefined, { style: 'currency', currency: pack.currency, minimumFractionDigits: 0 }).format(pack.unit_amount / 100);
-                                        return (
-                                            <div
-                                                className="display-flex flex-row items-center rounded-md p-1"
-                                                style={{
-                                                    border: '1px dashed var(--border-quarternary)',
-                                                }}
-                                            >
-                                                <div className="display-flex flex-col" style={{ minWidth: 0 }}>
-                                                    <span className="text-sm font-color-secondary">
-                                                        Not ready to subscribe?
-                                                    </span>
-                                                    <span className="text-base font-color-primary font-medium">
-                                                        Credit Pack &mdash; {pack.monthly_credits} credits for {packPrice}
-                                                    </span>
-                                                </div>
-                                                <div className="flex-1" />
-                                                <Button
-                                                    variant="outline"
-                                                    onClick={buyCredits}
-                                                    disabled={isBillingLoading}
-                                                >
-                                                    Buy Pack
-                                                </Button>
-                                            </div>
-                                        );
-                                    })()}
+                                    {creditPacks.length > 0 && 
+                                        <CreditPackCard
+                                            pack={creditPacks[0]}
+                                            buyCredits={buyCredits}
+                                            isBillingLoading={isBillingLoading}
+                                        />
+                                    }
                                 </div>
                             );
                         })()}
