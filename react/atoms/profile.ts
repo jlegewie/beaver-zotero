@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { selectAtom } from 'jotai/utils';
-import { SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode, CreditPlanStatus } from "../types/profile";
+import { SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode, CreditPlanStatus, CreditBreakdown, CreditPlan } from "../types/profile";
 import { getZoteroUserIdentifier } from "../../src/utils/zoteroUtils";
 import { ZoteroLibrary } from "../types/zotero";
 import { fileStatusAtom } from "./files";
@@ -171,7 +171,7 @@ export const profileBalanceAtom = atom<ProfileBalance>((get) => {
 
 // --- Credit plan atoms ---
 
-export const creditPlanAtom = atom((get) => {
+export const creditPlanAtom = atom<CreditPlan>((get) => {
     const profile = get(profileWithPlanAtom);
     return {
         plan: profile?.credit_plan || null,
@@ -182,7 +182,7 @@ export const creditPlanAtom = atom((get) => {
     };
 });
 
-export const creditBreakdownAtom = atom((get) => {
+export const creditBreakdownAtom = atom<CreditBreakdown>((get) => {
     const profile = get(profileWithPlanAtom);
     if (!profile) return { subscriptionRemaining: 0, rolledOverCredits: 0, purchasedCredits: 0, purchasedExpiresAt: null as string | null, total: 0 };
     const subscriptionRemaining = Math.max(0, (profile.credit_plan_monthly_credits || 0) + (profile.rolled_over_credits || 0) - (profile.chat_credits_used || 0));

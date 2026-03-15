@@ -68,6 +68,28 @@ export enum ChargeType {
 }
 
 /**
+ * Credit breakdown for the profile
+ */
+export interface CreditBreakdown {
+    subscriptionRemaining: number;
+    rolledOverCredits: number;
+    purchasedCredits: number;
+    purchasedExpiresAt: string | null;
+    total: number;
+}
+
+/**
+ * Credit plan for the profile
+ */
+export interface CreditPlan {
+    plan: string | null;
+    status: CreditPlanStatus;
+    monthlyCredits: number; // monthly credits for the plan
+    periodEnd: string | null; // period end date
+    cancelAtPeriodEnd: boolean; // whether to cancel at period end
+}
+
+/**
  * Processing mode determines where document processing happens
  * - FRONTEND: Documents processed client-side (free users, paid users before indexing)
  * - BACKEND: Pre-indexed server-side data (paid users after indexing complete)

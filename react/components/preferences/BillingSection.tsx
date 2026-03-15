@@ -7,6 +7,7 @@ import { creditBreakdownAtom, creditPlanAtom, hasCreditPlanAtom, isCreditPlanPas
 import { useAtomValue, useSetAtom } from "jotai";
 import { useBilling } from "../../hooks/useBilling";
 import { PlanInfo } from "../../../src/services/accountService";
+import { CreditBreakdown, ProfileBalance, CreditPlan } from "../../types/profile";
 
 
 const CreditPackCard: React.FC<{ pack: PlanInfo, buyCredits: () => Promise<void>, isBillingLoading: boolean }> = (props) => {
@@ -39,6 +40,57 @@ const CreditPackCard: React.FC<{ pack: PlanInfo, buyCredits: () => Promise<void>
     );
 };
 
+const ProgressBar: React.FC<{ creditPlan: CreditPlan, creditBreakdown: CreditBreakdown, profileBalance: ProfileBalance }> = (props) => {
+    const { creditPlan, creditBreakdown, profileBalance } = props;
+    const pool = (creditPlan.monthlyCredits || 0) + (creditBreakdown.rolledOverCredits || 0);
+    const used = Math.min(profileBalance.monthlyCreditsUsed, pool);
+    const total = pool || 1;
+    const remaining = total - used;
+    const usedPct = Math.round((used / total) * 100);
+    const barColor = usedPct > 90 ? 'var(--tag-red-primary)' : usedPct > 70 ? 'var(--tag-yellow-primary)' : 'var(--color-accent, var(--fill-primary))';
+    return (
+        <div style={{ marginTop: '12px' }}>
+            <div className="display-flex flex-row items-center gap-3" style={{ marginBottom: '4px' }}>
+                <span className="text-sm font-color-primary font-medium">Plan Credits</span>
+                <div className="flex-1" />
+                <span className="text-sm font-color-primary font-medium">
+                    {usedPct}% used
+                </span>
+            </div>
+            <div className="display-flex flex-row items-center">
+                <div
+                    style={{
+                        flex: 1,
+                        height: '7px',
+                        borderRadius: '4px',
+                        background: 'var(--fill-quarternary)',
+                        overflow: 'hidden',
+                    }}
+                >
+                    <div
+                        style={{
+                            width: `${Math.min(100, usedPct)}%`,
+                            height: '100%',
+                            borderRadius: '4px',
+                            background: barColor,
+                            transition: 'width 0.3s ease',
+                        }}
+                    />
+                </div>
+            </div>
+            <div className="display-flex flex-col">
+                <div className="text-sm font-color-secondary" style={{ marginTop: '4px' }}>
+                    {used} / {total} used
+                </div>
+                {creditBreakdown.rolledOverCredits > 0 && (
+                    <div className="text-sm font-color-tertiary">
+                        Includes {creditBreakdown.rolledOverCredits} rolled over credits from last period
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
 
 const BillingSection: React.FC = () => {
     const setActiveTab = useSetAtom(activePreferencePageTabAtom);
@@ -207,57 +259,8 @@ const BillingSection: React.FC = () => {
                             </Button>
                         </div>
 
-                        {/* Progress bar — single combined pool */}
-                        {(() => {
-                            const pool = (creditPlan.monthlyCredits || 0) + (creditBreakdown.rolledOverCredits || 0);
-                            const used = Math.min(profileBalance.monthlyCreditsUsed, pool);
-                            const total = pool || 1;
-                            const remaining = total - used;
-                            const usedPct = Math.round((used / total) * 100);
-                            const barColor = usedPct > 90 ? 'var(--tag-red-primary)' : usedPct > 70 ? 'var(--tag-yellow-primary)' : 'var(--color-accent, var(--fill-primary))';
-                            return (
-                                <div style={{ marginTop: '12px' }}>
-                                    <div className="display-flex flex-row items-center gap-3" style={{ marginBottom: '4px' }}>
-                                        <span className="text-sm font-color-primary font-medium">Plan Credits</span>
-                                        <div className="flex-1" />
-                                        <span className="text-sm font-color-primary font-medium">
-                                            {usedPct}% used
-                                        </span>
-                                    </div>
-                                    <div className="display-flex flex-row items-center">
-                                        <div
-                                            style={{
-                                                flex: 1,
-                                                height: '7px',
-                                                borderRadius: '4px',
-                                                background: 'var(--fill-quarternary)',
-                                                overflow: 'hidden',
-                                            }}
-                                        >
-                                            <div
-                                                style={{
-                                                    width: `${Math.min(100, usedPct)}%`,
-                                                    height: '100%',
-                                                    borderRadius: '4px',
-                                                    background: barColor,
-                                                    transition: 'width 0.3s ease',
-                                                }}
-                                            />
-                                        </div>
-                                    </div>
-                                    <div className="display-flex flex-col">
-                                        <div className="text-sm font-color-secondary" style={{ marginTop: '4px' }}>
-                                            {used} / {total} used
-                                        </div>
-                                        {creditBreakdown.rolledOverCredits > 0 && (
-                                            <div className="text-sm font-color-tertiary">
-                                                Includes {creditBreakdown.rolledOverCredits} rolled over credits from last period
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        })()}
+                        {/* Progress bar (subscription + rollover credits) */}
+                        <ProgressBar creditPlan={creditPlan} creditBreakdown={creditBreakdown} profileBalance={profileBalance} />
 
                     </div>
                 )}
