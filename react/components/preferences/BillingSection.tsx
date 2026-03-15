@@ -10,9 +10,17 @@ import { PlanInfo } from "../../../src/services/accountService";
 import { CreditBreakdown, ProfileBalance, CreditPlan } from "../../types/profile";
 
 
-const CreditPackCard: React.FC<{ pack: PlanInfo, buyCredits: () => Promise<void>, isBillingLoading: boolean }> = (props) => {
-    const { pack, buyCredits, isBillingLoading } = props;
-    const packPrice = new Intl.NumberFormat(undefined, { style: 'currency', currency: pack.currency, minimumFractionDigits: 0 }).format(pack.unit_amount / 100);
+const getPackPrice = (pack: PlanInfo) => {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: pack.currency, minimumFractionDigits: 0 }).format(pack.unit_amount / 100);
+};
+
+const CreditPackCard: React.FC<{
+    pack: PlanInfo,
+    buyCredits: (sku: string) => Promise<void>,
+    isBillingLoading: boolean,
+    label: string
+}> = (props) => {
+    const { pack, buyCredits, isBillingLoading, label } = props;
     return (
         <div
             className="display-flex flex-row items-center rounded-md p-1"
@@ -22,16 +30,16 @@ const CreditPackCard: React.FC<{ pack: PlanInfo, buyCredits: () => Promise<void>
         >
             <div className="display-flex flex-col" style={{ minWidth: 0 }}>
                 <span className="text-sm font-color-secondary">
-                    Not ready to subscribe?
+                    {label}
                 </span>
                 <span className="text-base font-color-primary font-medium">
-                    Credit Pack &mdash; {pack.monthly_credits} credits for {packPrice}
+                    Credit Pack &mdash; {pack.monthly_credits} credits for {getPackPrice(pack)}
                 </span>
             </div>
             <div className="flex-1" />
             <Button
                 variant="outline"
-                onClick={() => buyCredits()}
+                onClick={() => buyCredits(pack.sku)}
                 disabled={isBillingLoading}
             >
                 Buy Pack
@@ -92,7 +100,7 @@ const ProgressBar: React.FC<{ creditPlan: CreditPlan, creditBreakdown: CreditBre
     );
 };
 
-const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promise<void>, buyCredits: () => Promise<void>, isBillingLoading: boolean }> = (props) => {
+const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promise<void>, buyCredits: (sku: string) => Promise<void>, isBillingLoading: boolean }> = (props) => {
     const { plans, subscribe, buyCredits, isBillingLoading } = props;
     const subscriptionPlans = plans.filter(p => p.interval);
     const creditPacks = plans.filter(p => !p.interval);
@@ -142,6 +150,7 @@ const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promi
                     pack={creditPacks[0]}
                     buyCredits={buyCredits}
                     isBillingLoading={isBillingLoading}
+                    label="Not ready to subscribe?"
                 />
             }
         </div>
@@ -158,13 +167,12 @@ const BillingSection: React.FC = () => {
     const isPastDue = useAtomValue(isCreditPlanPastDueAtom);
     const hasPlan = useAtomValue(hasCreditPlanAtom);
     const { subscribe, buyCredits, manageSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
+    const creditPacks = plans.filter(p => !p.interval);
 
     // --- Fetch plans when billing tab is active and user has no plan ---
     useEffect(() => {
-        if (!hasPlan) {
-            fetchPlans();
-        }
-    }, [hasPlan, fetchPlans]);
+        fetchPlans();
+    }, [fetchPlans]);
 
     return (
         <>
@@ -329,14 +337,9 @@ const BillingSection: React.FC = () => {
                         )
                     }
                     control={
-                        <div className="display-flex flex-row items-center gap-3">
-                            {/* <Button variant="outline" onClick={buyCredits} disabled={isBillingLoading}>
-                                Buy Credits
-                            </Button> */}
-                            <span className="font-color-primary text-sm font-bold">
-                                {(creditBreakdown.purchasedCredits || 0).toLocaleString()}
-                            </span>
-                        </div>
+                        <span className="font-color-primary text-sm font-bold">
+                            {(creditBreakdown.purchasedCredits || 0).toLocaleString()}
+                        </span>
                     }
                 />
                 <SettingsRow
@@ -351,6 +354,23 @@ const BillingSection: React.FC = () => {
                         </span>
                     }
                 />
+                {hasPlan && (
+                    <SettingsRow
+                        className="bg-senary"
+                        title="Get additional credits"
+                        description={
+                            <span>
+                                {creditPacks.length > 0
+                                    ? <>Credit Pack &mdash; {creditPacks[0].monthly_credits} credits for {getPackPrice(creditPacks[0])}</>
+                                    : plansLoading ? 'Loading...' : ''}
+                            </span>
+                        }
+                        hasBorder
+                        control={
+                            <Button variant="outline" onClick={() => buyCredits(creditPacks[0]?.sku)} loading={isBillingLoading} disabled={creditPacks.length === 0}>Buy Credits</Button>
+                        }
+                    />
+                )}
             </SettingsGroup>
 
             {/* --- Section 4: Cross-links --- */}

@@ -48,12 +48,12 @@ export function useBilling() {
         }
     }, []);
 
-    const buyCredits = useCallback(async () => {
+    const buyCredits = useCallback(async (sku = 'pack_50') => {
         setIsLoading(true);
         setError(null);
         try {
             const { checkout_url } = await accountService.createCheckoutSession(
-                'pack_50',
+                sku,
                 `${WEBAPP_BASE_URL}/checkout/success`,
                 `${WEBAPP_BASE_URL}/checkout/cancel`
             );
