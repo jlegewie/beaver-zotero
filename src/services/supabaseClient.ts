@@ -38,22 +38,29 @@ const zoteroStorage = {
 
             return data;
         } catch (error) {
-            console.error('Error getting auth from encrypted storage:', error);
+            logger(`zoteroStorage: Error getting auth from encrypted storage: ${error}`, 2);
             return null;
         }
     },
     setItem: async (key: string, value: string) => {
-        try {
-            await encryptedStorage.setItem(key, value);
-        } catch (error) {
-            console.error('Error setting auth in encrypted storage:', error);
+        // Retry once on failure — if the new token isn't persisted, the old
+        // (now server-invalidated) refresh token will cause a logout on restart.
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                await encryptedStorage.setItem(key, value);
+                return;
+            } catch (error) {
+                logger(`zoteroStorage: Failed to persist auth token (attempt ${attempt + 1}/2): ${error}`, 2);
+            }
         }
+        logger('zoteroStorage: Auth token could NOT be persisted after 2 attempts. '
+            + 'Session will work in memory but a restart will require re-login.', 2);
     },
     removeItem: async (key: string) => {
         try {
             await encryptedStorage.removeItem(key);
         } catch (error) {
-            console.error('Error removing auth from encrypted storage:', error);
+            logger(`zoteroStorage: Error removing auth from encrypted storage: ${error}`, 2);
         }
     }
 };
