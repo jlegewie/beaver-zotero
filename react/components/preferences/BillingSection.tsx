@@ -92,6 +92,62 @@ const ProgressBar: React.FC<{ creditPlan: CreditPlan, creditBreakdown: CreditBre
     );
 };
 
+const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promise<void>, buyCredits: () => Promise<void>, isBillingLoading: boolean }> = (props) => {
+    const { plans, subscribe, buyCredits, isBillingLoading } = props;
+    const subscriptionPlans = plans.filter(p => p.interval);
+    const creditPacks = plans.filter(p => !p.interval);
+    return (
+        <div className="display-flex flex-col gap-3">
+            {/* Subscription plan cards (primary) */}
+            <div className="display-flex flex-row gap-3">
+                {subscriptionPlans.map((plan) => {
+                    const price = new Intl.NumberFormat(undefined, { style: 'currency', currency: plan.currency, minimumFractionDigits: 0 }).format(plan.unit_amount / 100);
+                    return (
+                        <div
+                            key={plan.sku}
+                            className="display-flex flex-1 flex-col rounded-md border-popup bg-senary p-4"
+                        >
+                            <div className="display-flex flex-row items-center gap-2" style={{ marginBottom: '4px' }}>
+                                <span className="text-base font-color-primary font-bold">{plan.name}</span>
+                            </div>
+                            <div className="text-xl font-color-primary font-bold">
+                                {price}<span className="text-sm font-normal font-color-secondary">/{plan.interval || 'mo'}</span>
+                            </div>
+                            <div className="text-sm font-color-secondary" style={{ marginBottom: '8px' }}>
+                                {plan.monthly_credits} credits per month
+                            </div>
+                            <div className="display-flex flex-col items-start gap-1">
+                                <Button
+                                    variant={plan.highlight ? 'solid' : 'surface'}
+                                    onClick={() => subscribe(plan.sku)}
+                                    disabled={isBillingLoading}
+                                >
+                                    Subscribe
+                                </Button>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            <div className="display-flex flex-row justify-end -mt-1 ml-1">
+                <div className="font-color-tertiary text-sm">
+                    Unused credits roll over for 1 month
+                </div>
+            </div>
+
+            {/* Credit pack card (secondary) */}
+            {creditPacks.length > 0 && 
+                <CreditPackCard
+                    pack={creditPacks[0]}
+                    buyCredits={buyCredits}
+                    isBillingLoading={isBillingLoading}
+                />
+            }
+        </div>
+    );
+};
+
 const BillingSection: React.FC = () => {
     const setActiveTab = useSetAtom(activePreferencePageTabAtom);
 
@@ -163,60 +219,9 @@ const BillingSection: React.FC = () => {
                             </div>
                         )}
 
-                        {!plansLoading && !plansError && plans.length > 0 && (() => {
-                            const subscriptionPlans = plans.filter(p => p.interval);
-                            const creditPacks = plans.filter(p => !p.interval);
-                            return (
-                                <div className="display-flex flex-col gap-3">
-                                    {/* Subscription plan cards (primary) */}
-                                    <div className="display-flex flex-row gap-3">
-                                        {subscriptionPlans.map((plan) => {
-                                            const price = new Intl.NumberFormat(undefined, { style: 'currency', currency: plan.currency, minimumFractionDigits: 0 }).format(plan.unit_amount / 100);
-                                            return (
-                                                <div
-                                                    key={plan.sku}
-                                                    className="display-flex flex-1 flex-col rounded-md border-popup bg-senary p-4"
-                                                >
-                                                    <div className="display-flex flex-row items-center gap-2" style={{ marginBottom: '4px' }}>
-                                                        <span className="text-base font-color-primary font-bold">{plan.name}</span>
-                                                    </div>
-                                                    <div className="text-xl font-color-primary font-bold">
-                                                        {price}<span className="text-sm font-normal font-color-secondary">/{plan.interval || 'mo'}</span>
-                                                    </div>
-                                                    <div className="text-sm font-color-secondary" style={{ marginBottom: '8px' }}>
-                                                        {plan.monthly_credits} credits per month
-                                                    </div>
-                                                    <div className="display-flex flex-col items-start gap-1">
-                                                        <Button
-                                                            variant={plan.highlight ? 'solid' : 'surface'}
-                                                            onClick={() => subscribe(plan.sku)}
-                                                            disabled={isBillingLoading}
-                                                        >
-                                                            Subscribe
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-
-                                    <div className="display-flex flex-row justify-end -mt-1 ml-1">
-                                        <div className="font-color-tertiary text-sm">
-                                            Unused credits roll over for 1 month
-                                        </div>
-                                    </div>
-
-                                    {/* Credit pack card (secondary) */}
-                                    {creditPacks.length > 0 && 
-                                        <CreditPackCard
-                                            pack={creditPacks[0]}
-                                            buyCredits={buyCredits}
-                                            isBillingLoading={isBillingLoading}
-                                        />
-                                    }
-                                </div>
-                            );
-                        })()}
+                        {!plansLoading && !plansError && plans.length > 0 && 
+                            <PlanCards plans={plans} subscribe={subscribe} buyCredits={buyCredits} isBillingLoading={isBillingLoading} />
+                        }
                     </>
                 ) : (
                     <div className="display-flex flex-col gap-4">
