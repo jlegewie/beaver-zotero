@@ -402,7 +402,8 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
  */
 export async function getAttachmentFileStatusLightweight(
     attachment: Zotero.Item,
-    isPrimary: boolean
+    isPrimary: boolean,
+    options?: { skipWorkerFallback?: boolean }
 ): Promise<FrontendFileStatus> {
     // Check basic availability (PDF type, file exists, size limits)
     const availabilityCheck = await checkAttachmentAvailability(attachment, isPrimary);
@@ -429,14 +430,25 @@ export async function getAttachmentFileStatusLightweight(
     // First try fulltext index (instant database query)
     let pageCount = await getPDFPageCountFromFulltext(attachment);
 
-    // Fallback to PDFWorker if not indexed (reads minimal data)
-    if (pageCount === null) {
+    // Fallback to PDFWorker if not indexed (reads minimal data).
+    // In batch/search contexts, skip the worker to avoid queue contention —
+    // many concurrent calls serialize on the single PDFWorker and cause timeouts.
+    if (pageCount === null && !options?.skipWorkerFallback) {
         pageCount = await getPDFPageCountFromWorker(attachment);
     }
 
-    // If both page count methods failed, the PDF is likely problematic
-    // (encrypted, corrupted, or unparseable)
     if (pageCount === null) {
+        if (options?.skipWorkerFallback) {
+            // Optimistic: file passed availability checks (exists, correct type, within size limit).
+            // Page count is unknown but the PDF is likely usable — just not yet fulltext-indexed.
+            return {
+                is_primary: isPrimary,
+                mime_type: contentType,
+                page_count: null,
+                status: "available",
+            };
+        }
+        // Both methods failed — PDF is likely problematic (encrypted, corrupted, or unparseable)
         return {
             is_primary: isPrimary,
             mime_type: contentType,
@@ -717,9 +729,10 @@ export async function processAttachmentsWithBatchData(
     item: Zotero.Item,
     context: AttachmentProcessingContext,
     batchData: BatchAttachmentData,
-    options?: { skipHash?: boolean; timing?: TimingAccumulator }
+    options?: { skipHash?: boolean; skipWorkerFallback?: boolean; timing?: TimingAccumulator }
 ): Promise<AttachmentDataWithStatus[]> {
     const skipHash = options?.skipHash ?? false;
+    const skipWorkerFallback = options?.skipWorkerFallback ?? false;
     const ta = options?.timing;
     const attachmentIds = item.getAttachments();
     if (attachmentIds.length === 0) {
@@ -759,7 +772,7 @@ export async function processAttachmentsWithBatchData(
         // Use batch data for isPrimary and syncDateCache
         const isPrimary = bestAttachmentId !== undefined && attachment.id === bestAttachmentId;
         const statusFn = () => computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId, { syncDateCache: batchData.syncDateCache });
-        const fileStatusFn = () => getAttachmentFileStatusLightweight(attachment, isPrimary);
+        const fileStatusFn = () => getAttachmentFileStatusLightweight(attachment, isPrimary, { skipWorkerFallback });
 
         const [status, fileStatus] = ta
             ? await Promise.all([
