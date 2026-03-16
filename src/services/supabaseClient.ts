@@ -268,15 +268,45 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     }
 });
 
-// Force-start auto-refresh regardless of document.visibilityState.
+// Force-start auto-refresh and remove the visibility-change listener.
 //
-// In Zotero's XUL/XHTML environment, document.visibilityState is permanently
-// "hidden". The Supabase SDK stops its auto-refresh ticker when the page is
-// "hidden" (designed for background browser tabs), which means tokens are NEVER
-// proactively refreshed in Zotero. startAutoRefresh() removes the visibility
-// listener and runs the 30-second refresh ticker unconditionally.
-supabase.auth.startAutoRefresh().catch((e) => {
-    logger(`Failed to start Supabase auto-refresh: ${e}`, 2);
+// The Supabase SDK registers a `visibilitychange` listener during
+// _initialize() (inside _handleVisibilityChange, in the `finally` block).
+// That listener stops the auto-refresh ticker when the document becomes
+// "hidden" and calls _recoverAndRefresh() when it becomes "visible" again.
+// In Zotero this is harmful: if the window is briefly obscured the ticker
+// stops, the access token can expire, and _recoverAndRefresh may hit a
+// stale refresh token → "Invalid Refresh Token" → unexpected logout.
+//
+// startAutoRefresh() removes the visibility listener and runs the ticker
+// unconditionally.  We must call it AFTER initialize() resolves, because
+// _initialize()'s finally block re-registers the listener.  Calling it
+// before (as was done previously) is a no-op — the listener doesn't exist
+// yet and gets registered right after.
+// Guard: if the client is disposed (plugin reload / shutdown) before
+// initialize() resolves, skip startAutoRefresh() so we don't resurrect
+// the old client's ticker alongside the new one.
+let disposed = false;
+
+async function stopDisposedSupabaseClient(): Promise<void> {
+    // initialize() always re-runs _handleVisibilityChange() in its finally
+    // block, so a disposed client must stop auto-refresh again after
+    // initialize() settles to remove any re-registered SDK listener.
+    await supabase.auth.stopAutoRefresh();
+}
+
+supabase.auth.initialize().then(async () => {
+    if (disposed) {
+        await stopDisposedSupabaseClient();
+        return;
+    }
+    await supabase.auth.startAutoRefresh();
+}).catch(async (e) => {
+    if (disposed) {
+        await stopDisposedSupabaseClient();
+        return;
+    }
+    logger(`Failed to initialize/start Supabase auto-refresh: ${e}`, 2);
 });
 
 // Register cleanup function on the current window so that:
@@ -286,6 +316,7 @@ supabase.auth.startAutoRefresh().catch((e) => {
 // so multi-window scenarios don't interfere with each other.
 if (currentWindow) {
     currentWindow.__beaverDisposeSupabase = async () => {
-        await supabase.auth.stopAutoRefresh();
+        disposed = true;
+        await stopDisposedSupabaseClient();
     };
 }
