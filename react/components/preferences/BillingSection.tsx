@@ -194,7 +194,7 @@ const BillingSection: React.FC = () => {
                         }}
                     >
                         <span className="font-color-red text-sm font-medium">
-                            Payment failed &mdash; update your payment method to keep your subscription.
+                            Payment failed. Update your payment method to keep your subscription.
                         </span>
                         <div className="flex-1" />
                         <Button variant="outline" onClick={manageSubscription} disabled={isBillingLoading}>
@@ -250,7 +250,10 @@ const BillingSection: React.FC = () => {
                                         </span>
                                     )}
                                     {creditPlan.status === 'past_due' && (
-                                        <span className="text-xs px-15 py-05 rounded-md" style={{ background: 'var(--tag-orange-tertiary)', color: 'var(--tag-orange-quinary)' }}>
+                                        <span
+                                            className="text-xs px-15 py-05 rounded-md"
+                                            style={{ color: 'var(--tag-orange-secondary)', border: '1px solid var(--tag-orange-tertiary)', background: 'var(--tag-orange-quinary)' }}
+                                        >
                                             Past due
                                         </span>
                                     )}
