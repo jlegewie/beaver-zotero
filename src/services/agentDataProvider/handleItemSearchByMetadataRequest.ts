@@ -249,7 +249,7 @@ export async function handleItemSearchByMetadataRequest(
                 try {
                     const [itemData, attachments] = await Promise.all([
                         ta.track('item_serialization_ms', () => serializeItem(item, undefined, { skipHash: true })),
-                        ta.track('attachment_processing_ms', () => processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, { skipHash: true, timing: ta }))
+                        ta.track('attachment_processing_ms', () => processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, { skipHash: true, skipWorkerFallback: true, timing: ta }))
                     ]);
                     return { item: itemData, attachments };
                 } catch (error) {
