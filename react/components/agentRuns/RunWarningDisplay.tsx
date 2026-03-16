@@ -66,19 +66,19 @@ export const RunWarningDisplay: React.FC<RunWarningDisplayProps> = ({ warning })
                 </div>
             )}
             {showPlusToolsDegradedButtons && (
-                <div className="display-flex flex-row gap-3 items-start mr-1">
+                <div className="display-flex flex-row gap-15 items-start mr-1">
                     <div className="flex-1" />
                     <Button
                         variant="outline"
-                        className="scale-90 mt-020"
+                        className="mt-020"
                         onClick={() => openPreferencesWindow('billing')}
                     >
                         Get Beaver Credits
                     </Button>
                     <Button
                         variant="outline"
-                        className="scale-90 mt-020"
-                        onClick={handleDisablePlusTools}
+                        className="mt-020"
+                        onClick={() => openPreferencesWindow('models')}
                     >
                         Disable Plus Tools
                     </Button>
