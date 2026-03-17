@@ -294,28 +294,32 @@ const AddSourcesMenu: React.FC<{
         onNavigateToCollections: handleNavigateToCollections,
         onNavigateToTags: handleNavigateToTags,
         getRecentItems,
-        recentItemsLimit: RECENT_ITEMS_LIMIT
+        recentItemsLimit: RECENT_ITEMS_LIMIT,
+        verticalPosition
     });
 
     const librariesMenu = useLibrariesMenu({
         isActive: isMenuOpen && menuMode === 'libraries',
         searchQuery,
         searchableLibraryIds,
-        libraryMenuItemContext
+        libraryMenuItemContext,
+        verticalPosition
     });
 
     const collectionsMenu = useCollectionsMenu({
         isActive: isMenuOpen && menuMode === 'collections',
         searchQuery,
         searchableLibraryIds,
-        collectionMenuItemContext
+        collectionMenuItemContext,
+        verticalPosition
     });
 
     const tagsMenu = useTagsMenu({
         isActive: isMenuOpen && menuMode === 'tags',
         searchQuery,
         searchableLibraryIds,
-        tagMenuItemContext
+        tagMenuItemContext,
+        verticalPosition
     });
 
     const menuItems = menuMode === 'sources'
