@@ -13,7 +13,7 @@ import {
     WSListCollectionsResponse,
     CollectionInfo,
 } from '../agentProtocol';
-import { getCollectionByIdOrName, validateLibraryAccess } from './utils';
+import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries } from './utils';
 
 
 /**
@@ -39,7 +39,45 @@ export async function handleListCollectionsRequest(
                 available_libraries: validation.available_libraries,
             };
         }
-        const library = validation.library!;
+        let library = validation.library!;
+        
+        // Resolve parent collection if specified, potentially updating library scope
+        let parentCollectionId: number | null = null;
+        if (request.parent_collection_key) {
+            const result = getCollectionByIdOrName(request.parent_collection_key, library.libraryID);
+            
+            if (!result) {
+                return {
+                    type: 'list_collections',
+                    request_id: request.request_id,
+                    collections: [],
+                    total_count: 0,
+                    library_name: library.name,
+                    error: `Parent collection not found: ${request.parent_collection_key}`,
+                    error_code: 'collection_not_found',
+                };
+            }
+            
+            // Update library scope if collection was found in a different library
+            if (result.libraryID !== library.libraryID) {
+                const resolvedLib = Zotero.Libraries.get(result.libraryID);
+                if (!resolvedLib || !isLibrarySearchable(result.libraryID)) {
+                    return {
+                        type: 'list_collections',
+                        request_id: request.request_id,
+                        collections: [],
+                        total_count: 0,
+                        error: `Collection "${result.collection.name}" is in library "${(resolvedLib && resolvedLib.name) || result.libraryID}" which is not synced with Beaver.`,
+                        error_code: 'library_not_searchable',
+                        available_libraries: getSearchableLibraries(),
+                    };
+                }
+                library = resolvedLib;
+            }
+            
+            parentCollectionId = result.collection.id;
+        }
+        
         const libraryName = library.name;
         
         // Get all collections from the library (excluding deleted)
@@ -48,22 +86,8 @@ export async function handleListCollectionsRequest(
         // Filter by parent collection if specified
         let filteredCollections: any[];
         
-        if (request.parent_collection_key) {
-            const parentCollection = getCollectionByIdOrName(request.parent_collection_key, library.libraryID);
-            
-            if (!parentCollection) {
-                return {
-                    type: 'list_collections',
-                    request_id: request.request_id,
-                    collections: [],
-                    total_count: 0,
-                    library_name: libraryName,
-                    error: `Parent collection not found: ${request.parent_collection_key}`,
-                    error_code: 'collection_not_found',
-                };
-            }
-            
-            filteredCollections = allCollections.filter((c: any) => c.parentID === parentCollection.id);
+        if (parentCollectionId !== null) {
+            filteredCollections = allCollections.filter((c: any) => c.parentID === parentCollectionId);
         } else {
             filteredCollections = allCollections.filter((c: any) => !c.parentID);
         }

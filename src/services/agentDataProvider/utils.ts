@@ -932,6 +932,14 @@ export function getLibraryByIdOrName(libraryIdOrName: number | string | null | u
 }
 
 /**
+ * Result of collection lookup, including the library where the collection was found.
+ */
+export interface CollectionLookupResult {
+    collection: Zotero.Collection;
+    libraryID: number;
+}
+
+/**
  * Get collection by ID, key, or name.
  * 
  * Supports:
@@ -939,61 +947,88 @@ export function getLibraryByIdOrName(libraryIdOrName: number | string | null | u
  * - String: Checks for a key (8 alphanumeric chars), then numeric ID (digits only), then searches by name
  * - null/undefined: Returns null
  * 
+ * When libraryId is provided, does a full lookup (key + name) in that library first.
+ * Cross-library fallback only applies when the input looks like a Zotero key (8 alphanumeric
+ * chars). Name-based lookups stay scoped to the requested
+ * library to avoid returning a same-named collection from the wrong library.
+ * 
  * @param collectionIdOrName - Collection ID, key, or name
- * @param libraryId - Optional library ID to narrow the search (recommended for better performance)
- * @returns Collection object or null if not found
+ * @param libraryId - Optional library ID to search first (falls back to other libraries)
+ * @returns Collection and its library ID, or null if not found
  */
 export function getCollectionByIdOrName(
     collectionIdOrName: number | string | null | undefined,
     libraryId?: number
-): Zotero.Collection | null {
+): CollectionLookupResult | null {
     if (collectionIdOrName == null) {
         return null;
     }
     
     // If it's a number, look up by ID
     if (typeof collectionIdOrName === 'number') {
-        return Zotero.Collections.get(collectionIdOrName) || null;
+        const collection = Zotero.Collections.get(collectionIdOrName);
+        return collection ? { collection, libraryID: collection.libraryID } : null;
     }
     
-    // It's a string - try different approaches
-    
-    // Check if it looks like a Zotero key (8 alphanumeric characters)
-    if (/^[A-Z0-9]{8}$/i.test(collectionIdOrName)) {
-        // If we have a library ID, use it
-        if (libraryId !== undefined) {
-            const collection = Zotero.Collections.getByLibraryAndKey(libraryId, collectionIdOrName);
-            if (collection) return collection;
-        } else {
-            // Search across all libraries
-            const allLibraries = Zotero.Libraries.getAll();
-            for (const lib of allLibraries) {
-                const collection = Zotero.Collections.getByLibraryAndKey(lib.libraryID, collectionIdOrName);
-                if (collection) return collection;
-            }
-        }
+    const isKeyLike = Zotero.Utilities.isValidObjectKey(collectionIdOrName);
+    const hasLibraryId = libraryId !== undefined && Number.isFinite(libraryId);
+
+    // If libraryId provided, do full lookup (key + name) there first
+    if (hasLibraryId) {
+        const found = findCollectionInLibrary(collectionIdOrName, libraryId, isKeyLike);
+        if (found) return found;
     }
 
-    // If it's a purely numeric string, try to parse as collection ID
+    // Try numeric collection ID
     if (/^\d+$/.test(collectionIdOrName)) {
         const parsedId = parseInt(collectionIdOrName, 10);
         const collection = Zotero.Collections.get(parsedId);
-        if (collection) return collection;
+        if (collection) return { collection, libraryID: collection.libraryID };
     }
     
-    // Look up by name
-    const librariesToSearch = libraryId !== undefined 
-        ? [libraryId] 
-        : Zotero.Libraries.getAll().map(lib => lib.libraryID);
-    
-    const collectionNameLower = collectionIdOrName.toLowerCase();
-    for (const libId of librariesToSearch) {
-        const collections = Zotero.Collections.getByLibrary(libId, true);
-        const collectionByName = collections.find(
-            (c: Zotero.Collection) => c.name.toLowerCase() === collectionNameLower
-        );
-        if (collectionByName) return collectionByName;
+    // Cross-library fallback: only for key-like inputs.
+    // Name-based lookups stay scoped to the requested library since names like
+    // "Inbox" are commonly duplicated across libraries.
+    if (!isKeyLike && hasLibraryId) {
+        return null;
     }
+
+    const searchableIds = getSearchableLibraryIds();
+    const otherLibraryIds = Zotero.Libraries.getAll()
+        .map((lib: any) => lib.libraryID as number)
+        .filter((id: number) => !hasLibraryId || id !== libraryId);
+    const sortedLibraryIds = [
+        ...otherLibraryIds.filter(id => searchableIds.includes(id)),
+        ...otherLibraryIds.filter(id => !searchableIds.includes(id)),
+    ];
+
+    for (const libId of sortedLibraryIds) {
+        const found = findCollectionInLibrary(collectionIdOrName, libId, isKeyLike);
+        if (found) return found;
+    }
+    
+    return null;
+}
+
+/**
+ * Try to find a collection in a single library by key, then by name.
+ */
+function findCollectionInLibrary(
+    input: string,
+    libraryId: number,
+    isKeyLike: boolean
+): CollectionLookupResult | null {
+    if (isKeyLike) {
+        const collection = Zotero.Collections.getByLibraryAndKey(libraryId, input);
+        if (collection) return { collection, libraryID: collection.libraryID };
+    }
+    
+    const collections = Zotero.Collections.getByLibrary(libraryId, true);
+    const inputLower = input.toLowerCase();
+    const byName = collections.find(
+        (c: Zotero.Collection) => c.name.toLowerCase() === inputLower
+    );
+    if (byName) return { collection: byName, libraryID: byName.libraryID };
     
     return null;
 }

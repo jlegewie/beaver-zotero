@@ -13,7 +13,7 @@ import {
     WSListItemsResponse,
     ListItemsResultItem,
 } from '../agentProtocol';
-import { getCollectionByIdOrName, validateLibraryAccess, extractYear, formatCreatorsString } from './utils';
+import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, extractYear, formatCreatorsString } from './utils';
 
 
 /**
@@ -39,26 +39,15 @@ export async function handleListItemsRequest(
                 available_libraries: validation.available_libraries,
             };
         }
-        const library = validation.library!;
-        const libraryName = library.name;
+        let library = validation.library!;
         let collectionName: string | null = null;
+        let resolvedCollectionId: number | null = null;
         
-        // Build search to list items
-        const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
-        search.libraryID = library.libraryID || Zotero.Libraries.userLibraryID;
-        
-        // Add collection filter if specified (supports both key and name)
+        // Resolve collection if specified (supports both key and name)
         if (request.collection_key) {
-            const collection = getCollectionByIdOrName(request.collection_key, library.libraryID);
+            const result = getCollectionByIdOrName(request.collection_key, library.libraryID);
             
-            if (collection) {
-                collectionName = collection.name;
-                search.addCondition('collectionID', 'is', String(collection.id));
-                // Use recursive parameter from request (default true)
-                if (request.recursive !== false) {
-                    search.addCondition('recursive', 'true', '');
-                }
-            } else {
+            if (!result) {
                 return {
                     type: 'list_items',
                     request_id: request.request_id,
@@ -67,6 +56,40 @@ export async function handleListItemsRequest(
                     error: `Collection not found: ${request.collection_key}`,
                     error_code: 'collection_not_found',
                 };
+            }
+            
+            // Update library scope if collection was found in a different library
+            if (result.libraryID !== library.libraryID) {
+                const resolvedLib = Zotero.Libraries.get(result.libraryID);
+                if (!resolvedLib || !isLibrarySearchable(result.libraryID)) {
+                    return {
+                        type: 'list_items',
+                        request_id: request.request_id,
+                        items: [],
+                        total_count: 0,
+                        error: `Collection "${result.collection.name}" is in library "${(resolvedLib && resolvedLib.name) || result.libraryID}" which is not synced with Beaver.`,
+                        error_code: 'library_not_searchable',
+                        available_libraries: getSearchableLibraries(),
+                    };
+                }
+                library = resolvedLib;
+            }
+            
+            collectionName = result.collection.name;
+            resolvedCollectionId = result.collection.id;
+        }
+        
+        const libraryName = library.name;
+        
+        // Build search to list items
+        const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
+        search.libraryID = library.libraryID || Zotero.Libraries.userLibraryID;
+        
+        // Apply collection filter to search
+        if (resolvedCollectionId !== null) {
+            search.addCondition('collectionID', 'is', String(resolvedCollectionId));
+            if (request.recursive !== false) {
+                search.addCondition('recursive', 'true', '');
             }
         }
         
