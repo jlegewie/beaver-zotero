@@ -162,11 +162,18 @@ export async function handleZoteroAttachmentPagesRequest(
             }
         }
 
-        // 7. Validate page range (1-indexed)
+        // 7. Validate and clamp page range (1-indexed)
         const startPage = start_page ?? 1;
-        const endPage = end_page ?? totalPages;
 
-        if (startPage < 1 || startPage > totalPages) {
+        if (startPage < 1) {
+            return errorResponse(
+                `Start page ${startPage} is invalid (must be >= 1)`,
+                'page_out_of_range',
+                totalPages
+            );
+        }
+
+        if (startPage > totalPages) {
             return errorResponse(
                 `Start page ${startPage} is out of range (document has ${totalPages} pages)`,
                 'page_out_of_range',
@@ -174,13 +181,8 @@ export async function handleZoteroAttachmentPagesRequest(
             );
         }
 
-        if (endPage < startPage || endPage > totalPages) {
-            return errorResponse(
-                `End page ${endPage} is out of range (document has ${totalPages} pages)`,
-                'page_out_of_range',
-                totalPages
-            );
-        }
+        // Clamp end_page to document bounds
+        const endPage = Math.min(end_page ?? totalPages, totalPages);
 
         // 7b. Try content cache for requested page range (0-indexed)
         const startIdx = startPage - 1;

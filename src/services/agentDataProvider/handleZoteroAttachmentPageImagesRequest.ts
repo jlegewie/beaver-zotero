@@ -160,19 +160,19 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // 7. Determine which pages to render
         let pageIndices: number[];
         if (pages && pages.length > 0) {
-            // Convert 1-indexed page numbers to 0-indexed
-            pageIndices = pages.map(p => p - 1);
+            // Filter out invalid pages: keep only pages in [1, totalPages]
+            const validPages = pages.filter(p => p >= 1 && p <= totalPages);
 
-            // Validate page numbers are in range
-            for (const pageNum of pages) {
-                if (pageNum < 1 || pageNum > totalPages) {
-                    return errorResponse(
-                        `Page ${pageNum} is out of range (document has ${totalPages} pages)`,
-                        'page_out_of_range',
-                        totalPages
-                    );
-                }
+            if (validPages.length === 0) {
+                return errorResponse(
+                    `All requested pages are out of range (document has ${totalPages} pages)`,
+                    'page_out_of_range',
+                    totalPages
+                );
             }
+
+            // Convert 1-indexed page numbers to 0-indexed
+            pageIndices = validPages.map(p => p - 1);
         } else {
             // Default to all pages
             pageIndices = Array.from({ length: totalPages }, (_, i) => i);

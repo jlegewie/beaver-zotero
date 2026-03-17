@@ -662,14 +662,7 @@ async function handleReadAttachment(args: any): Promise<any> {
         end_page: endPage,
     };
 
-    let response: WSZoteroAttachmentPagesResponse = await handleZoteroAttachmentPagesRequest(wsRequest);
-
-    // If our defaulted end_page exceeds the document length, retry with the actual total
-    if (response.error_code === 'page_out_of_range' && response.total_pages != null && args.end_page == null) {
-        wsRequest.end_page = Math.min(response.total_pages, startPage + MAX_PAGES - 1);
-        wsRequest.request_id = generateRequestId();
-        response = await handleZoteroAttachmentPagesRequest(wsRequest);
-    }
+    const response: WSZoteroAttachmentPagesResponse = await handleZoteroAttachmentPagesRequest(wsRequest);
 
     if (response.error) {
         return mcpError(response.error);
