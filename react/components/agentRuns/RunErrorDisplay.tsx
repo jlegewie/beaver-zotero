@@ -1,19 +1,22 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { Icon, AlertIcon, RepeatIcon, SettingsIcon, ArrowDownIcon, ArrowRightIcon, LinkForwardIcon } from '../icons/icons';
+import { Icon, AlertIcon, RepeatIcon, ArrowDownIcon, ArrowRightIcon, LinkForwardIcon, DollarCircleIcon } from '../icons/icons';
 import Button from '../ui/Button';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAndNewlines';
 import { regenerateFromRunAtom, resumeFromRunAtom } from '../../atoms/agentRunAtoms';
-import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 import { runErrorVisibilityAtom, setRunErrorVisibilityAtom } from '../../atoms/messageUIState';
+import { remainingBeaverCreditsAtom, errorCreditCheckAtom } from '../../atoms/profile';
+import { beaverDefaultModelAtom, updateSelectedModelAtom, type ModelConfig } from '../../atoms/models';
+import { openPreferencesWindow } from '../../../src/ui/openPreferencesWindow';
 
 interface RunError {
     type: string;
     message: string;
     details?: string;
     is_retryable?: boolean;
+    has_beaver_fallback?: boolean;
     retry_after?: number;
     is_resumable?: boolean;
 }
@@ -66,6 +69,9 @@ const typeMap: Record<string, string> = {
     llm_data_policy_error: 'Request Problem',
     llm_encoding_error: 'Request Problem',
 
+    // Connection
+    connection_error: 'Connection Failed',
+
     // System Errors
     frontend_version_error: 'Update Required',
     internal_error: 'System Error',
@@ -83,13 +89,25 @@ const typeMap: Record<string, string> = {
 export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, isLastRun }) => {
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
     const resumeFromRun = useSetAtom(resumeFromRunAtom);
-    
+    const updateSelectedModel = useSetAtom(updateSelectedModelAtom);
+    const remainingCredits = useAtomValue(remainingBeaverCreditsAtom);
+    const hasCredits = remainingCredits > 0;
+    const defaultBeaverModel = useAtomValue(beaverDefaultModelAtom);
+    const setErrorCreditCheck = useSetAtom(errorCreditCheckAtom);
+
     // Visibility state
     const runErrorVisibility = useAtomValue(runErrorVisibilityAtom);
     const setVisibility = useSetAtom(setRunErrorVisibilityAtom);
     const isExpanded = runErrorVisibility[runId] ?? isLastRun;
 
     const contentRef = useRef<HTMLDivElement | null>(null);
+
+    // Trigger profile refresh when this error has the credit button so credit state is fresh
+    useEffect(() => {
+        if (error.has_beaver_fallback) {
+            setErrorCreditCheck(true);
+        }
+    }, [error.has_beaver_fallback, setErrorCreditCheck]);
 
     const { 
         isMenuOpen: isSelectionMenuOpen, 
@@ -107,6 +125,12 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
 
     const handleResume = async () => {
         await resumeFromRun(runId);
+    };
+
+    const handleRetryWithBeaver = async () => {
+        if (!defaultBeaverModel) return;
+        updateSelectedModel({ ...defaultBeaverModel, access_mode: 'app_key' });
+        await regenerateFromRun(runId);
     };
 
     const handleToggle = () => {
@@ -162,23 +186,33 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                 {/* Expanded Content */}
                 {isExpanded && (
                     <div className="p-3" id={`run-error-content-${runId}`}>
-                        <div className="display-flex flex-col gap-3">
+                        <div className="display-flex flex-col gap-4">
                             <div className="text-base font-color-red">
-                                {parseTextWithLinksAndNewlines(displayMessage)}
+                                {parseTextWithLinksAndNewlines(displayMessage, "text-link-red")}
                             </div>
 
                             <div className="display-flex flex-row gap-3 items-center">
-                                <div className="flex-1" />
-                                {error.type === "usage_limit_exceeded" && (
+                                {error.has_beaver_fallback && hasCredits && isLastRun && defaultBeaverModel && error.type !== "usage_limit_exceeded" && (
                                     <Button
                                         variant="error"
                                         iconClassName="font-color-red"
-                                        rightIcon={SettingsIcon}
-                                        onClick={() => openPreferencesWindow('models')}
+                                        rightIcon={DollarCircleIcon}
+                                        onClick={handleRetryWithBeaver}
+                                        disabled={!defaultBeaverModel}
                                     >
-                                        Settings
+                                        Try with Beaver
                                     </Button>
                                 )}
+                                {(error.has_beaver_fallback || error.type === "usage_limit_exceeded") && !hasCredits && (
+                                    <Button
+                                        variant="error"
+                                        iconClassName="font-color-red"
+                                        onClick={() => openPreferencesWindow('billing')}
+                                    >
+                                        Get Beaver Credits
+                                    </Button>
+                                )}
+                                <div className="flex-1" />
                                 {error.is_resumable && isLastRun && (
                                     <Button
                                         variant="error"

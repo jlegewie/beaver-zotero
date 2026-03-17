@@ -54,6 +54,42 @@ interface PreferenceRequest {
     value: boolean;
 }
 
+export interface PlanInfo {
+    sku: string;
+    name: string;
+    monthly_credits: number;
+    unit_amount: number;   // price in cents
+    currency: string;
+    interval: string | null;
+    highlight: boolean;
+}
+
+interface PlansResponse {
+    plans: PlanInfo[];
+}
+
+interface CheckoutSessionRequest {
+    sku: string;
+    success_url: string;
+    cancel_url: string;
+}
+
+interface CheckoutSessionResponse {
+    checkout_url: string;
+}
+
+interface PortalSessionRequest {
+    return_url: string;
+}
+
+interface PortalSessionResponse {
+    portal_url: string;
+}
+
+interface UpgradeSessionResponse {
+    portal_url: string;
+}
+
 interface ErrorReportRequest {
     message: string;
     jotai_atoms?: Record<string, any>;
@@ -279,6 +315,42 @@ export class AccountService extends ApiService {
      */
     async migrateData(): Promise<MigrationResponse> {
         return this.post<MigrationResponse>('/api/v1/account/migrate-data', {});
+    }
+
+    /**
+     * Fetches available subscription plans with live Stripe pricing
+     */
+    async getPlans(): Promise<PlansResponse> {
+        return this.get<PlansResponse>('/api/v1/billing/plans');
+    }
+
+    /**
+     * Creates a Stripe Checkout session for subscribing or purchasing credits
+     */
+    async createCheckoutSession(sku: string, successUrl: string, cancelUrl: string): Promise<CheckoutSessionResponse> {
+        return this.post<CheckoutSessionResponse>('/api/v1/billing/create-checkout-session', {
+            sku,
+            success_url: successUrl,
+            cancel_url: cancelUrl
+        } as CheckoutSessionRequest);
+    }
+
+    /**
+     * Creates a Stripe Customer Portal session for managing subscriptions
+     */
+    async createPortalSession(returnUrl: string): Promise<PortalSessionResponse> {
+        return this.post<PortalSessionResponse>('/api/v1/billing/create-portal-session', {
+            return_url: returnUrl
+        } as PortalSessionRequest);
+    }
+
+    /**
+     * Creates a Stripe Customer Portal deep link for upgrading an existing subscription.
+     */
+    async createUpgradeSession(returnUrl: string): Promise<UpgradeSessionResponse> {
+        return this.post<UpgradeSessionResponse>('/api/v1/billing/create-upgrade-session', {
+            return_url: returnUrl
+        } as PortalSessionRequest);
     }
 
     /**

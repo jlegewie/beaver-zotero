@@ -219,7 +219,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                 </Button> */}
                 <IconButton
                     variant="ghost-tertiary"
-                    onClick={() => openPreferencesWindow('prompts')}
+                    onClick={() => openPreferencesWindow('actions')}
                     icon={SettingsIcon}
                 />
                 

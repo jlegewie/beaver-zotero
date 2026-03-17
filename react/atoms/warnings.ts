@@ -19,6 +19,7 @@ export interface LowCreditsWarningData {
     remaining_credits: number;
     limit: number;
     remaining_percentage: number;
+    purchased_credits: number;
 }
 
 /** Union of all warning data types */

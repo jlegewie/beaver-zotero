@@ -174,18 +174,42 @@ export const setRunErrorVisibilityAtom = atom(
 
 /**
  * Tracks dismissed high token usage warnings by thread ID.
- * Value is the run ID whose warning was dismissed in that thread.
+ * Once dismissed in a thread, the warning stays hidden for that thread's session.
  */
-export const dismissedHighTokenWarningByThreadAtom = atom<Record<string, string>>({});
+export const dismissedHighTokenWarningByThreadAtom = atom<Record<string, boolean>>({});
 
 /**
- * Mark a high token usage warning as dismissed for a specific thread/run pair.
+ * Mark the high token usage warning as dismissed for a thread.
  */
 export const dismissHighTokenWarningForThreadAtom = atom(
     null,
-    (get, set, { threadId, runId }: { threadId: string; runId: string }) => {
+    (get, set, threadId: string) => {
         const current = get(dismissedHighTokenWarningByThreadAtom);
-        set(dismissedHighTokenWarningByThreadAtom, { ...current, [threadId]: runId });
+        set(dismissedHighTokenWarningByThreadAtom, { ...current, [threadId]: true });
+    }
+);
+
+/**
+ * Transient backend flags from WSRunCompleteEvent, keyed by run ID.
+ * These are NOT persisted -- they only live for the current session.
+ */
+export const backendHighTokenUsageRunsAtom = atom<Record<string, boolean>>({});
+export const softCapTriggeredRunsAtom = atom<Record<string, boolean>>({});
+
+/**
+ * Tracks dismissed soft cap warnings by thread ID.
+ * Value is the run ID whose warning was dismissed in that thread.
+ */
+export const dismissedSoftCapWarningByThreadAtom = atom<Record<string, string>>({});
+
+/**
+ * Mark a soft cap warning as dismissed for a specific thread/run pair.
+ */
+export const dismissSoftCapWarningForThreadAtom = atom(
+    null,
+    (get, set, { threadId, runId }: { threadId: string; runId: string }) => {
+        const current = get(dismissedSoftCapWarningByThreadAtom);
+        set(dismissedSoftCapWarningByThreadAtom, { ...current, [threadId]: runId });
     }
 );
 
@@ -309,7 +333,11 @@ export const toggleNotePanelVisibilityAtom = atom(
 // ---------------------------------------------------------------------------
 
 /**
- * Reset all UI state (used when starting a new thread)
+ * Reset thread-local UI state when starting a new thread.
+ *
+ * Session-scoped warning state is intentionally preserved so revisiting an
+ * existing thread in the same app session keeps its warning visibility and
+ * dismissal behavior intact.
  */
 export const resetMessageUIStateAtom = atom(
     null,

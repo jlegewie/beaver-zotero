@@ -5,6 +5,7 @@ import IconButton from '../ui/IconButton';
 interface HighTokenUsageWarningBarProps {
     onNewThread: (e: React.MouseEvent) => void;
     onDismiss: (e: React.MouseEvent) => void;
+    isUsingBeaverCredits: boolean;
 }
 
 /**
@@ -14,6 +15,7 @@ interface HighTokenUsageWarningBarProps {
 const HighTokenUsageWarningBar: React.FC<HighTokenUsageWarningBarProps> = ({
     onNewThread,
     onDismiss,
+    isUsingBeaverCredits,
 }) => {
     const [isNewThreadLinkHovered, setIsNewThreadLinkHovered] = React.useState(false);
 
@@ -38,7 +40,9 @@ const HighTokenUsageWarningBar: React.FC<HighTokenUsageWarningBarProps> = ({
                     Start a new thread
                 </a>
                 {' '}
-                to reduce cost and improve response quality.
+                {isUsingBeaverCredits
+                    ? 'to save credits and improve response quality.'
+                    : 'to reduce costs and improve response quality.'}
             </span>
             <div className="flex-1" />
             <IconButton

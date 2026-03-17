@@ -16,11 +16,13 @@ import { isAuthenticatedAtom } from '../atoms/auth';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
 import ThreadListView from './ThreadListView';
+import CreditInfoBar from './input/CreditInfoBar';
 import UpgradeConsentPage from './pages/UpgradeConsentPage';
 import DowngradeAcknowledgmentPage from './pages/DowngradeAcknowledgmentPage';
 import { store } from '../store';
 import { isLoadingThreadAtom } from '../atoms/threads';
 import { Spinner } from './icons/icons';
+import { threadWarningsAtom } from '../atoms/warnings';
 import PreviewAndPopupContainer from './PreviewAndPopupContainer';
 import {
     hasAuthorizedFreeAccessAtom,
@@ -64,6 +66,8 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const pendingUpgradeConsent = useAtomValue(pendingUpgradeConsentAtom);
     const pendingDowngradeAck = useAtomValue(pendingDowngradeAckAtom);
     const updateRequired = useAtomValue(updateRequiredAtom);
+    const allWarnings = useAtomValue(threadWarningsAtom);
+    const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -215,6 +219,13 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                     </div>
                 )}
             </div>
+
+            {/* Credit info bar - always visible at bottom */}
+            {creditInfoWarning && (
+                <div className="flex-none px-2 pb-1 -mt-3">
+                    <CreditInfoBar warning={creditInfoWarning} />
+                </div>
+            )}
 
             {/* Dialog Container */}
             <DialogContainer />

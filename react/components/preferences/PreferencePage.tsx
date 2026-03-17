@@ -2,11 +2,11 @@ import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, CopyIcon } from '../icons/icons';
+import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, DollarCircleIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, remainingBeaverCreditsAtom, isMcpServerSupportedAtom } from "../../atoms/profile";
-import { activePreferencePageTabAtom, PreferencePageTab, mcpServerEnabledAtom } from "../../atoms/ui";
+import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom } from "../../atoms/profile";
+import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
 import { 
@@ -17,16 +17,16 @@ import {
 import { isLibrarySynced } from "../../../src/utils/zoteroUtils";
 import { accountService } from "../../../src/services/accountService";
 import SyncedLibraries from "./SyncedLibraries";
-import DeferredToolPreferenceSetting from "./DeferredToolPreferenceSetting";
-import { copyToClipboard } from "../../utils/clipboard";
-import { ensureMcpBridgeScript } from "../../hooks/useMcpServer";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
-import ActionsPreferenceSection from "./ActionsPreferenceSection";
-import CustomInstructionsSection from "./CustomInstructionsSection";
-import ApiKeysSection from "./ApiKeysSection";
 import FileStatusDisplay from "../status/FileStatusDisplay";
 import { connectionStatusAtom, fileStatusAtom } from "../../atoms/files";
 import { fetchFileStatusResult } from "../../hooks/useFileStatus";
+import ActionsPreferenceSection from "./ActionsPreferenceSection";
+import CustomInstructionsSection from "./CustomInstructionsSection";
+import BillingSection from "./BillingSection";
+import ApiKeysSection from "./ApiKeysSection";
+import AdvancedSection from "./AdvancedSection";
+import PermissionsSection from "./PermissionsSection";
 
 
 const PreferencePage: React.FC = () => {
@@ -50,7 +50,6 @@ const PreferencePage: React.FC = () => {
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
     const profileBalance = useAtomValue(profileBalanceAtom);
-    const remainingBeaverCredits = useAtomValue(remainingBeaverCreditsAtom);
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const connectionStatus = useAtomValue(connectionStatusAtom);
     const setFileStatus = useSetAtom(fileStatusAtom);
@@ -96,14 +95,6 @@ const PreferencePage: React.FC = () => {
             handleManualRefresh();
         }
     }, [activeTab, connectionStatus, manualRefreshTime, user?.id, isManualRefreshing, handleManualRefresh]);
-    const [autoApplyAnnotations, setAutoApplyAnnotations] = useState(() => getPref('autoApplyAnnotations'));
-    const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
-    const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
-    const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
-    const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
-    const isMcpServerSupported = useAtomValue(isMcpServerSupportedAtom);
-    const [mcpCopied, setMcpCopied] = useState(false);
-    const [mcpHttpCopied, setMcpHttpCopied] = useState(false);
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -311,83 +302,6 @@ const PreferencePage: React.FC = () => {
         handleEmailNotificationsChange(!emailNotifications);
     }, [emailNotifications, handleEmailNotificationsChange]);
 
-    const handleAutoApplyAnnotationsToggle = useCallback(() => {
-        const newValue = !autoApplyAnnotations;
-        setPref('autoApplyAnnotations', newValue);
-        setAutoApplyAnnotations(newValue);
-    }, [autoApplyAnnotations]);
-
-    const handleAutoCreateNotesToggle = useCallback(() => {
-        const newValue = !autoCreateNotes;
-        setPref('autoCreateNotes', newValue);
-        setAutoCreateNotes(newValue);
-    }, [autoCreateNotes]);
-
-    const handleConfirmExtractionCostsToggle = useCallback(() => {
-        const newValue = !confirmExtractionCosts;
-        setPref('confirmExtractionCosts', newValue);
-        setConfirmExtractionCosts(newValue);
-    }, [confirmExtractionCosts]);
-
-    const handleConfirmExternalSearchCostsToggle = useCallback(() => {
-        const newValue = !confirmExternalSearchCosts;
-        setPref('confirmExternalSearchCosts', newValue);
-        setConfirmExternalSearchCosts(newValue);
-    }, [confirmExternalSearchCosts]);
-
-    const handleMcpServerToggle = useCallback(() => {
-        if (!isMcpServerSupported) return;
-        const newValue = !mcpServerEnabled;
-        setPref('mcpServerEnabled', newValue);
-        setMcpServerEnabled(newValue);
-    }, [mcpServerEnabled, isMcpServerSupported, setMcpServerEnabled]);
-
-    const mcpServerPort = useMemo(() => {
-        try {
-            return Zotero.Prefs.get('httpServer.port') || 23119;
-        } catch {
-            return 23119;
-        }
-    }, []);
-    const handleCopyMcpConfig = useCallback(async () => {
-        try {
-            const scriptPath = await ensureMcpBridgeScript();
-            const serverConfig: any = {
-                command: "node",
-                args: [scriptPath],
-            };
-            if (mcpServerPort !== 23119) {
-                serverConfig.args.push(String(mcpServerPort));
-            }
-            const config = JSON.stringify({
-                mcpServers: {
-                    "beaver-zotero": serverConfig,
-                }
-            }, null, 2);
-            await copyToClipboard(config);
-            setMcpCopied(true);
-            setTimeout(() => setMcpCopied(false), 2000);
-        } catch (err: any) {
-            logger(`Failed to copy MCP config: ${err?.message}`, 1);
-        }
-    }, [mcpServerPort]);
-
-    const mcpEndpointUrl = `http://localhost:${mcpServerPort}/beaver/mcp`;
-
-    const handleCopyMcpHttpConfig = useCallback(async () => {
-        const config = JSON.stringify({
-            mcpServers: {
-                "beaver-zotero": {
-                    type: "streamable-http",
-                    url: mcpEndpointUrl
-                }
-            }
-        }, null, 2);
-        await copyToClipboard(config);
-        setMcpHttpCopied(true);
-        setTimeout(() => setMcpHttpCopied(false), 2000);
-    }, [mcpEndpointUrl]);
-
     // Helper function to get rebuild index button props
     const getRebuildIndexButtonProps = () => {
         if (isEmbeddingIndexing) {
@@ -478,8 +392,9 @@ const PreferencePage: React.FC = () => {
         { id: 'general', label: 'General', icon: SettingsIcon },
         { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search', icon: isDatabaseSyncSupported ? SyncIcon : SearchIcon },
         { id: 'permissions', label: 'Permissions', icon: LockIcon },
+        { id: 'billing', label: 'Plan & Usage', icon: DollarCircleIcon },
         { id: 'models', label: 'API Keys', icon: KeyIcon },
-        { id: 'prompts', label: 'Prompt & Actions', icon: ZapIcon },
+        { id: 'actions', label: 'Actions', icon: ZapIcon },
         { id: 'advanced', label: 'Advanced', icon: ToolsIcon },
     ], [isDatabaseSyncSupported]);
 
@@ -573,16 +488,6 @@ const PreferencePage: React.FC = () => {
                                         }
                                     />
                                 )}
-                                <SettingsRow
-                                    title="Chat Credits"
-                                    description="Remaining Beaver chat credits"
-                                    hasBorder
-                                    control={
-                                        <span className="font-color-primary text-sm font-medium">
-                                            {remainingBeaverCredits.toLocaleString()}
-                                        </span>
-                                    }
-                                />
                                 <SettingsRow
                                     title="Sign Out"
                                     description="End your current session"
@@ -680,7 +585,7 @@ const PreferencePage: React.FC = () => {
                                 />
                                 <SettingsRow
                                     title="Email Notifications"
-                                    description="Receive email notifications with updates and announcements"
+                                    description="Receive email updates about Beaver"
                                     onClick={handleEmailToggle}
                                     hasBorder
                                     control={
@@ -885,117 +790,12 @@ const PreferencePage: React.FC = () => {
 
             {/* ===== PERMISSIONS TAB ===== */}
             {activeTab === 'permissions' && (
-                <>
-                    <SettingsGroup>
-                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
-                            {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
-                            <div className="font-color-secondary text-base">
-                                When Beaver modifies your library, all changes require your approval by default.
-                                You can change this behavior here. Be careful, Beaver might make changes you didn't expect.
-                            
-                                For more details, see documentation on <DocLink path="editing-metadata">editing metadata</DocLink> and <DocLink path="library-management">organizing your library items</DocLink>.
+                <PermissionsSection />
+            )}
 
-                            </div>
-                        </div>
-                    </SettingsGroup>
-                    <SettingsGroup>
-                        <div style={{ padding: '8px 12px' }}>
-                            <DeferredToolPreferenceSetting
-                                toolName="edit_metadata"
-                                label="Metadata Edits"
-                                description="Changes to item titles, authors, abstracts, and other metadata"
-                            />
-                        </div>
-                        <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
-                            <DeferredToolPreferenceSetting
-                                toolName="create_items"
-                                label="Item Imports"
-                                description="Importing new items from external sources"
-                            />
-                        </div>
-                        <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
-                            <DeferredToolPreferenceSetting
-                                toolName="create_collection"
-                                label="Library Organization"
-                                description="Creating collections and organizing items into collections and by tags"
-                            />
-                        </div>
-                    </SettingsGroup>
-
-                    <SectionLabel>Extra Credit Confirmations</SectionLabel>
-                    <SettingsGroup>
-                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
-                            <div className="font-color-secondary text-base">
-                                Choose whether to confirm before operations that use extra credits.
-                                Only relevant when using Beaver credits.
-                                {/* Extraction and external search are not supported when using your own API keys. */}
-                            </div>
-                        </div>
-                    </SettingsGroup>
-                    <SettingsGroup>
-                        <SettingsRow
-                            title="Confirm Extraction Costs"
-                            description="Ask before using extra credits for batch extraction"
-                            onClick={handleConfirmExtractionCostsToggle}
-                            control={
-                                <input
-                                    type="checkbox"
-                                    checked={confirmExtractionCosts}
-                                    onChange={handleConfirmExtractionCostsToggle}
-                                    onClick={(e) => e.stopPropagation()}
-                                    style={{ cursor: 'pointer', margin: 0 }}
-                                />
-                            }
-                        />
-                        <SettingsRow
-                            title="Confirm External Search Costs"
-                            description="Ask before using extra credits for external literature search"
-                            onClick={handleConfirmExternalSearchCostsToggle}
-                            control={
-                                <input
-                                    type="checkbox"
-                                    checked={confirmExternalSearchCosts}
-                                    onChange={handleConfirmExternalSearchCostsToggle}
-                                    onClick={(e) => e.stopPropagation()}
-                                    style={{ cursor: 'pointer', margin: 0 }}
-                                />
-                            }
-                        />
-                    </SettingsGroup>
-
-                    <SectionLabel>Auto-Apply</SectionLabel>
-                    <SettingsGroup>
-                        <SettingsRow
-                            title="Auto-Apply Annotations"
-                            description="Automatically apply annotations to PDFs when created by the agent (only when PDF is open)"
-                            onClick={handleAutoApplyAnnotationsToggle}
-                            control={
-                                <input
-                                    type="checkbox"
-                                    checked={autoApplyAnnotations}
-                                    onChange={handleAutoApplyAnnotationsToggle}
-                                    onClick={(e) => e.stopPropagation()}
-                                    style={{ cursor: 'pointer', margin: 0 }}
-                                />
-                            }
-                        />
-                        <SettingsRow
-                            title="Auto-Create Notes"
-                            description="Automatically create Zotero notes when generated by the agent"
-                            onClick={handleAutoCreateNotesToggle}
-                            hasBorder
-                            control={
-                                <input
-                                    type="checkbox"
-                                    checked={autoCreateNotes}
-                                    onChange={handleAutoCreateNotesToggle}
-                                    onClick={(e) => e.stopPropagation()}
-                                    style={{ cursor: 'pointer', margin: 0 }}
-                                />
-                            }
-                        />
-                    </SettingsGroup>
-                </>
+            {/* ===== PLAN & USAGE TAB ===== */}
+            {activeTab === 'billing' && (
+                <BillingSection />
             )}
 
             {/* ===== MODELS & API KEYS TAB ===== */}
@@ -1003,8 +803,8 @@ const PreferencePage: React.FC = () => {
                 <ApiKeysSection />
             )}
 
-            {/* ===== PROMPTS TAB ===== */}
-            {activeTab === 'prompts' && (
+            {/* ===== ACTIONS TAB ===== */}
+            {activeTab === 'actions' && (
                 <>
                     <CustomInstructionsSection />
 
@@ -1014,84 +814,7 @@ const PreferencePage: React.FC = () => {
 
             {/* ===== ADVANCED TAB ===== */}
             {activeTab === 'advanced' && (
-                <>
-                    <div className="display-flex flex-row items-center gap-2" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
-                        <div className="text-lg font-color-primary font-bold">MCP Server</div>
-                        <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">Experimental</span>
-                    </div>
-                    <SettingsGroup>
-                        <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
-                            <div className="font-color-secondary text-base">
-                                The MCP server lets AI coding tools like Claude Code, Cursor, and Windsurf search and access your Zotero library.
-                                {' '}See our <DocLink path="mcp-server">MCP server guide</DocLink> for setup instructions.
-                            </div>
-                        </div>
-                    </SettingsGroup>
-                    <SettingsGroup>
-                        <SettingsRow
-                            title="Enable MCP Server"
-                            description={`Endpoint at localhost:${mcpServerPort}`}
-                            onClick={handleMcpServerToggle}
-                            disabled={!isMcpServerSupported}
-                            tooltip={isMcpServerSupported
-                                ? 'Expose your Zotero library to MCP-compatible AI tools'
-                                : 'Only available with Beaver Pro'}
-                            control={
-                                <div className="display-flex flex-row items-center gap-2">
-                                    <input
-                                        type="checkbox"
-                                        checked={mcpServerEnabled}
-                                        onChange={handleMcpServerToggle}
-                                        onClick={(e) => e.stopPropagation()}
-                                        disabled={!isMcpServerSupported}
-                                        style={{ cursor: isMcpServerSupported ? 'pointer' : 'not-allowed', margin: 0 }}
-                                    />
-                                </div>
-                            }
-                        />
-                        <SettingsRow
-                            title="Config for HTTP Clients"
-                            description={
-                                <span className="display-flex flex-col gap-05" style={{ opacity: mcpServerEnabled ? 1 : 0.45 }}>
-                                    <span>For clients that support HTTP directly (e.g., Claude Code, Cursor).</span>
-                                    {/* <span style={{ fontFamily: 'monospace', fontSize: '11px' }}>{mcpEndpointUrl}</span> */}
-                                </span>
-                            }
-                            hasBorder
-                            disabled={!mcpServerEnabled}
-                            control={
-                                <Button
-                                    variant="outline"
-                                    icon={mcpHttpCopied ? TickIcon : CopyIcon}
-                                    onClick={handleCopyMcpHttpConfig}
-                                    disabled={!mcpServerEnabled}
-                                >
-                                    {mcpHttpCopied ? 'Copied' : 'Copy'}
-                                </Button>
-                            }
-                        />
-                        <SettingsRow
-                            title="Config for HTTPS-Only Clients"
-                            description={
-                                <span style={{ opacity: mcpServerEnabled ? 1 : 0.45 }}>
-                                    For clients that only connect to HTTPS endpoints (e.g., Claude Desktop). Requires Node.js.
-                                </span>
-                            }
-                            hasBorder
-                            disabled={!mcpServerEnabled}
-                            control={
-                                <Button
-                                    variant="outline"
-                                    icon={mcpCopied ? TickIcon : CopyIcon}
-                                    onClick={handleCopyMcpConfig}
-                                    disabled={!mcpServerEnabled}
-                                >
-                                    {mcpCopied ? 'Copied' : 'Copy'}
-                                </Button>
-                            }
-                        />
-                    </SettingsGroup>
-                </>
+                <AdvancedSection />
             )}
 
             {/* Spacer at the bottom */}

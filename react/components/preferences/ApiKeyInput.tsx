@@ -196,6 +196,21 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                         Free Gemini API keys will fail due to severe rate limits. Use a paid key for reliable performance.
                     </div>
                 )}
+                {provider.toLowerCase() === 'anthropic' && (
+                    <div className="text-sm font-color-secondary display-flex flex-row items-start gap-1">
+                        <Icon icon={InformationCircleIcon} className="scale-90 mt-015 font-color-secondary" />
+                        Anthropic API keys require Tier 2 for reliable performance.{' '}
+                        <a
+                            href="https://platform.claude.com/docs/en/api/rate-limits#rate-limits"
+                            onClick={() => Zotero.getActiveZoteroPane().loadURI("https://platform.claude.com/docs/en/api/rate-limits#rate-limits")}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-color-link underline"
+                        >
+                            Learn more
+                        </a>
+                    </div>
+                )}
                 {verificationStatus === 'error' && verificationMessage && (
                     <div className="text-sm font-color-error" role="alert">
                         {verificationMessage}

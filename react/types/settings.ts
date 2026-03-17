@@ -90,7 +90,7 @@ export const getCustomChatModelsFromPreferences = (): CustomChatModel[] => {
                 title: 'Custom Models Configuration Error',
                 text: 'Failed to parse custom models configuration. Please check that beaver.customChatModels contains valid JSON.',
                 expire: false,
-                learnMoreUrl: 'https://www.beaverapp.ai/docs/custom-models',
+                learnMoreUrl: `${process.env.WEBAPP_BASE_URL}/docs/custom-models`,
                 learnMoreLabel: 'Configuration Guide'
             });
         }

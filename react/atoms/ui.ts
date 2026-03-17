@@ -3,15 +3,18 @@ import { TextSelection } from '../types/attachments/apiTypes';
 import { PopupMessage, PopupMessageType } from '../types/popupMessage';
 import { ExternalReference } from '../types/externalReferences';
 import { getPref } from '../../src/utils/prefs';
+import { isUsingBeaverCreditsAtom } from './models';
 
 export const isSidebarVisibleAtom = atom(false);
 export const isLibraryTabAtom = atom(false);
 export const selectedZoteroTabIdAtom = atom<string | null>(null);
 export const isWebSearchEnabledAtom = atom(false);
-export type PreferencePageTab = 'general' | 'sync' | 'permissions' | 'models' | 'prompts' | 'advanced' | 'account';
+export type PreferencePageTab = 'general' | 'sync' | 'permissions' | 'billing' | 'models' | 'actions' | 'advanced' | 'account';
 export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
 export const isPreferencePageVisibleAtom = atom(false);
 export const mcpServerEnabledAtom = atom(getPref('mcpServerEnabled'));
+export const requestPlusToolsAtom = atom(getPref('requestPlusTools'));
+export const isWebSearchAllowedAtom = atom((get) => Boolean(get(isUsingBeaverCreditsAtom) || get(requestPlusToolsAtom)));
 export const showFileStatusDetailsAtom = atom(false);
 export const isThreadListViewAtom = atom(false);
 

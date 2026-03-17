@@ -289,7 +289,7 @@ export class EncryptedStorage {
             this.cache.set(key, value);
             this.clearPreferenceKey(key);
         } catch (error) {
-            logger(`Encryption failed: ${error}`);
+            logger(`Encryption/persistence failed: ${error}`);
             throw error;
         }
     }

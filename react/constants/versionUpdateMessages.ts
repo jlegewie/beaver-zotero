@@ -198,11 +198,11 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         featureList: [
             {
                 title: "Introducing Beaver Free",
-                description: "This new tier supports core features without cloud costs. Going forward, all new users will start on this plan. Read more <a href='https://www.beaverapp.ai/docs/free-plan'>here</a>.",
+                description: "This new tier supports core features without cloud costs. Going forward, all new users will start on this plan.",
             },
             {
                 title: "Impact on existing accounts",
-                description: "Active users remain on Pro (Beta). To manage server costs, only long-term inactive accounts are migrated to the Free plan. Read more <a href='https://www.beaverapp.ai/free-plan#what-does-this-mean-for-current-beta-users'>here</a>.",
+                description: "Active users remain on Pro (Beta). To manage server costs, only long-term inactive accounts are migrated to the Free plan.",
             },
         ]
     },
@@ -353,6 +353,21 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
         ],
         // footer: `We've updated our <a href="https://www.beaverapp.ai/terms" target='_blank'>Terms of Service</a> and <a href="https://www.beaverapp.ai/privacy-policy" target='_blank'>Privacy Policy</a>, including subscription and billing terms, simplified credit mechanics, and clarified how we use operational log data for service improvement. Effective March 26, 2026.`
+    },
+    {
+        version: "0.15.0",
+        title: "New in Beaver 0.15",
+        steps: [
+            {
+                title: "Introducing Beaver Plus",
+                description: "Subscribe for $10/month to get 100 credits and Plus Tools (Discover New Research, Batch Processing, AI-Ranking). Or grab a one-time credit pack.",
+            },
+            {
+                title: "Free with your own API key",
+                description: "Beaver remains free and unlimited with your own API key. Discover New Research is now a Plus Tool due to server costs.",
+            },
+        ],
+        footer: `Read full <a href="https://www.beaverapp.ai/changelog/v0.15" target='_blank'>announcement</a>`
     },
 ];
 

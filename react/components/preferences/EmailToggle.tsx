@@ -13,9 +13,9 @@ const EmailToggle: React.FC<EmailToggleProps> = ({ checked, onChange, disabled }
             checked={checked}
             onChange={onChange}
             disabled={disabled}
-            title="Email Notifications"
+            title="Email updates about Beaver"
             subtitle="(optional)"
-            description="Receive email notifications with updates and important announcements."
+            // description="Receive email updates about Beaver"
             // tooltip="When enabled, you will receive email notifications for updates and important announcements."
         />
     );
