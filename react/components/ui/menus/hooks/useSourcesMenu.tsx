@@ -185,7 +185,7 @@ export const useSourcesMenu = ({
             const recentlyModifiedItemsFiltered = recentlyModifiedItems
                 .map((item) => (item.parentItem ? item.parentItem : item))
                 .filter((item): item is Zotero.Item => Boolean(item))
-                .filter((item) => item.isRegularItem() || item.isAttachment());
+                .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote());
 
             const combinedItems = [...recentItems, ...recentlyModifiedItemsFiltered]
                 .filter((item, index, self) => index === self.findIndex((candidate) => candidate.id === item.id))
