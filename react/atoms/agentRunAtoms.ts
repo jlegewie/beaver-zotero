@@ -1173,6 +1173,13 @@ export const sendWSMessageAtom = atom(
 
         // Build attachments from current message items
         const selectedItems = get(currentMessageItemsAtom);
+
+        // Load note data for any note items (getNoteTitle() requires 'note' data type)
+        const noteItems = selectedItems.filter(item => item.isNote());
+        if (noteItems.length > 0) {
+            await Promise.all(noteItems.map(item => item.loadDataType('note')));
+        }
+
         let attachments: MessageAttachment[] =
             selectedItems
                 .map(item => toMessageAttachment(item))

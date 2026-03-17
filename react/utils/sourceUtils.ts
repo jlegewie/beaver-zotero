@@ -243,7 +243,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
     // ------- Notes -------
     else if (item.isNote()) {
-        return {valid: false, error: "Notes not supported"};
+        if (item.isInTrash()) return {valid: false, error: "Note is in trash"};
+        return {valid: true};
     }
 
     return {valid: false, error: "Invalid item type"};

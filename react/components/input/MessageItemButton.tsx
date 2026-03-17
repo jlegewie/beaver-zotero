@@ -80,8 +80,8 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // Determine display name based on item type
         const displayName = isAnnotation && annotation
             ? ANNOTATION_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation'
-            : item.isRegularItem() 
-                ? truncateText(getDisplayNameFromItem(item), MAX_ITEM_TEXT_LENGTH)
+            : (item.isRegularItem() || item.isNote())
+                ? item.isRegularItem() ? truncateText(getDisplayNameFromItem(item), MAX_ITEM_TEXT_LENGTH) : getDisplayNameFromItem(item)
                 : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH);
 
         // Handle remove
@@ -102,7 +102,17 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 navigateToAnnotation(item);
                 return;
             }
-            
+
+            // For notes, open the note window
+            if (item.isNote()) {
+                try {
+                    Zotero.getActiveZoteroPane().openNoteWindow(item.id);
+                } catch (error) {
+                    console.error('Failed to open note:', error);
+                }
+                return;
+            }
+
             // For regular items, select in Zotero
             try {
                 // If a collection key is provided, reveal in that collection

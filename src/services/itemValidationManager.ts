@@ -448,9 +448,12 @@ class ItemValidationManager {
             return { isValid: true };
         }
 
-        // Notes not supported
+        // Notes: check trash
         if (item.isNote()) {
-            return { isValid: false, reason: 'Notes not supported' };
+            if (item.isInTrash()) {
+                return { isValid: false, reason: 'Note is in trash' };
+            }
+            return { isValid: true };
         }
 
         return { isValid: false, reason: 'Invalid item type' };
