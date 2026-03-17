@@ -54,9 +54,9 @@ export interface AnnotationAttachment extends BaseMessageAttachment {
 // "note" type attachment (Zotero note item)
 export interface NoteAttachment extends BaseMessageAttachment {
     type: "note";
-    parent_key?: string;
-    note_content: string;
-    date_modified?: string; // ISO string
+    parent_key?: string;      // Optional - standalone notes have no parent
+    title?: string;            // Derived from note content (getNoteTitle())
+    date_modified?: string;    // ISO string
 }
 
 /**
