@@ -167,14 +167,16 @@ describe('Pages handler', () => {
         expect(meta!.needs_ocr).toBeTruthy();
     });
 
-    it('#88 page range validation: out of range errors', async () => {
-        // start_page=0 (1-indexed, so 0 is invalid)
+    it('#88 page range validation: out of range errors and clamping', async () => {
+        // start_page=0 (1-indexed, so 0 is invalid) — still an error
         const r1 = await fetchPages(NORMAL_PDF, { start_page: 0, end_page: 3 });
         expect(r1.error_code).toBe('page_out_of_range');
 
-        // end_page far exceeds total
+        // end_page far exceeds total — now clamped, should succeed
         const r2 = await fetchPages(NORMAL_PDF, { start_page: 1, end_page: 999 });
-        expect(r2.error_code).toBe('page_out_of_range');
+        expect(r2.error_code).toBeFalsy();
+        expect(r2.total_pages).toBeGreaterThan(0);
+        expect(r2.pages.length).toBe(r2.total_pages);
     });
 
     it('#89 skip_local_limits: large PDF succeeds with flag', async () => {
@@ -292,9 +294,16 @@ describe('Page images handler', () => {
         expect(res.pages[0].image_data).toBeTruthy();
     });
 
-    it('page images range validation: out of range returns page_out_of_range', async () => {
-        const res = await fetchPageImages(SMALL_PDF, { pages: [99] });
-        expect(res.error_code).toBe('page_out_of_range');
+    it('page images range validation: all out of range returns error, partial valid succeeds', async () => {
+        // All pages out of range — still an error
+        const r1 = await fetchPageImages(SMALL_PDF, { pages: [99] });
+        expect(r1.error_code).toBe('page_out_of_range');
+
+        // Mix of valid and invalid — succeeds with only valid pages
+        const r2 = await fetchPageImages(SMALL_PDF, { pages: [1, 99] });
+        expect(r2.error_code).toBeFalsy();
+        expect(r2.pages).toHaveLength(1);
+        expect(r2.pages[0].page_number).toBe(1);
     });
 
     it('OCR PDF: image rendering still succeeds', async () => {
