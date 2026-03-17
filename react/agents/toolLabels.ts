@@ -374,11 +374,11 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                 : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
             
             // Handle collection parameter
-            const collectionParam = args.collection_key as string | undefined;
+            const collectionParam = (args.collection_key as string) || (args.collection as string) || undefined;
             if (collectionParam) {
-                const collection = getCollectionByIdOrName(collectionParam, libraryId);
-                if (collection) {
-                    parts.push(`"${collection.name}"`);
+                const result = getCollectionByIdOrName(collectionParam, libraryId);
+                if (result) {
+                    parts.push(`"${result.collection.name}"`);
                 }
             }
             
@@ -601,9 +601,9 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             
             const parentKey = args.parent_collection as string | undefined;
             if (parentKey) {
-                const collection = getCollectionByIdOrName(parentKey, libraryId);
-                if (collection) {
-                    return `${baseLabel} in "${collection.name}"`;
+                const result = getCollectionByIdOrName(parentKey, libraryId);
+                if (result) {
+                    return `${baseLabel} in "${result.collection.name}"`;
                 }
                 return `${baseLabel}: subcollections`;
             }
@@ -628,9 +628,9 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             
             const collectionKey = args.collection_key as string | undefined;
             if (collectionKey) {
-                const collection = getCollectionByIdOrName(collectionKey, libraryId);
-                if (collection) {
-                    return `${baseLabel} in "${collection.name}"`;
+                const result = getCollectionByIdOrName(collectionKey, libraryId);
+                if (result) {
+                    return `${baseLabel} in "${result.collection.name}"`;
                 }
                 return `${baseLabel} in collection`;
             }

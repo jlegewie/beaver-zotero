@@ -13,7 +13,7 @@ import {
     WSListTagsResponse,
     TagInfo,
 } from '../agentProtocol';
-import { getCollectionByIdOrName, validateLibraryAccess } from './utils';
+import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries } from './utils';
 
 
 /**
@@ -39,7 +39,46 @@ export async function handleListTagsRequest(
                 available_libraries: validation.available_libraries,
             };
         }
-        const library = validation.library!;
+        let library = validation.library!;
+        let resolvedCollection: Zotero.Collection | null = null;
+        
+        // Resolve collection if specified, potentially updating library scope
+        if (request.collection_key) {
+            const result = getCollectionByIdOrName(request.collection_key, library.libraryID);
+            
+            if (!result) {
+                return {
+                    type: 'list_tags',
+                    request_id: request.request_id,
+                    tags: [],
+                    total_count: 0,
+                    library_id: library.libraryID,
+                    library_name: library.name,
+                    error: `Collection not found: ${request.collection_key}`,
+                    error_code: 'collection_not_found',
+                };
+            }
+            
+            // Update library scope if collection was found in a different library
+            if (result.libraryID !== library.libraryID) {
+                const resolvedLib = Zotero.Libraries.get(result.libraryID);
+                if (!resolvedLib || !isLibrarySearchable(result.libraryID)) {
+                    return {
+                        type: 'list_tags',
+                        request_id: request.request_id,
+                        tags: [],
+                        total_count: 0,
+                        error: `Collection "${result.collection.name}" is in library "${(resolvedLib && resolvedLib.name) || result.libraryID}" which is not synced with Beaver.`,
+                        error_code: 'library_not_searchable',
+                        available_libraries: getSearchableLibraries(),
+                    };
+                }
+                library = resolvedLib;
+            }
+            
+            resolvedCollection = result.collection;
+        }
+        
         const libraryName = library.name;
         
         // Get tag colors (this is a sync operation from cache)
@@ -48,22 +87,8 @@ export async function handleListTagsRequest(
         // Build tag info with item counts using efficient SQL
         const tagMap: Map<string, { count: number; type: number }> = new Map();
         
-        if (request.collection_key) {
-            // Find collection by key or name
-            const collection = getCollectionByIdOrName(request.collection_key, library.libraryID);
-            
-            if (!collection) {
-                return {
-                    type: 'list_tags',
-                    request_id: request.request_id,
-                    tags: [],
-                    total_count: 0,
-                    library_id: library.libraryID,
-                    library_name: libraryName,
-                    error: `Collection not found: ${request.collection_key}`,
-                    error_code: 'collection_not_found',
-                };
-            }
+        if (resolvedCollection) {
+            const collection = resolvedCollection;
             
             // Get all descendant collection IDs (including the collection itself)
             const allDescendants = collection.getDescendents(false, 'collection', false);

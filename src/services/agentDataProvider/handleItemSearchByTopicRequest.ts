@@ -128,15 +128,15 @@ export async function handleItemSearchByTopicRequest(
             // String filter: search within each library
             if (libraryIds.length > 0) {
                 for (const libId of libraryIds) {
-                    const collection = getCollectionByIdOrName(collectionFilter, libId);
-                    if (collection) {
-                        collectionKeysSet.add(collection.key);
+                    const result = getCollectionByIdOrName(collectionFilter, libId);
+                    if (result) {
+                        collectionKeysSet.add(result.collection.key);
                     }
                 }
             } else {
-                const collection = getCollectionByIdOrName(collectionFilter);
-                if (collection) {
-                    collectionKeysSet.add(collection.key);
+                const result = getCollectionByIdOrName(collectionFilter);
+                if (result) {
+                    collectionKeysSet.add(result.collection.key);
                 }
             }
         }
