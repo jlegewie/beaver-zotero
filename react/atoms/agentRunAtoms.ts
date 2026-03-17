@@ -26,6 +26,7 @@ import {
     WSThreadNameEvent,
     CurrentLibrary,
     CurrentCollection,
+    ChargingPermissions,
 } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
@@ -43,7 +44,7 @@ import {
     readerTextSelectionAtom,
     currentMessageContentAtom,
 } from './messageComposition';
-import { isSidebarVisibleAtom, isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom } from './ui';
+import { isSidebarVisibleAtom, isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { addFloatingPopupMessageAtom } from './floatingPopup';
 import { BeaverUIFactory } from '../../src/ui/ui';
 import { eventManager } from '../events/eventManager';
@@ -91,6 +92,7 @@ import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
+import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
 import { currentThreadNameAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '../agents/toolLabels';
@@ -276,6 +278,17 @@ function createAgentRunShell(
     rewriteFromRunId?: string,
 ): { run: AgentRun; request: AgentRunRequest } {
     const runId = uuidv4();
+    
+    // Get user preferences for charging permissions
+    const permissions: ChargingPermissions = {
+        confirm_extraction_costs: getPref('confirmExtractionCosts'),
+        confirm_external_search_costs: getPref('confirmExternalSearchCosts'),
+        pause_long_running_agent: getPref('pauseLongRunningAgent'),
+    };
+
+    // Send request_plus_tools when pref is enabled and request uses a user API key
+    const usesUserKey = !!modelSelectionOptions.api_key || !!customModel;
+    const requestPlusTools = getPref('requestPlusTools') && usesUserKey;
 
     // Create the request that will be sent to the backend
     // thread_id is null for new threads - backend generates the ID
@@ -288,6 +301,8 @@ function createAgentRunShell(
             ...userPrompt,
             ...(customInstructions ? { custom_instructions: customInstructions } : {}),
         },
+        permissions: permissions,
+        ...(requestPlusTools ? { request_plus_tools: true } : {}),
         ...(modelSelectionOptions.model_id ? { model_id: modelSelectionOptions.model_id } : {}),
         ...(modelSelectionOptions.api_key ? { api_key: modelSelectionOptions.api_key } : {}),
         ...(customModel ? { custom_model: customModel } : {}),
@@ -793,10 +808,20 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 cost: event.cost,
                 citationsCount: event.citations?.length ?? 0,
                 actionsCount: event.agent_actions?.length ?? 0,
+                highTokenUsage: event.high_token_usage,
+                softCapTriggered: event.soft_cap_triggered,
             }, 1);
             set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
             // Clear retry state when run completes
             set(wsRetryAtom, null);
+
+            // Store transient backend flags (not persisted on AgentRun)
+            if (event.high_token_usage) {
+                set(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [event.run_id]: true }));
+            }
+            if (event.soft_cap_triggered) {
+                set(softCapTriggeredRunsAtom, (prev) => ({ ...prev, [event.run_id]: true }));
+            }
 
             // Process citations from run complete event
             if (event.citations && event.citations.length > 0) {
@@ -893,6 +918,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     is_retryable: event.is_retryable,
                     retry_after: event.retry_after,
                     is_resumable: event.is_resumable,
+                    has_beaver_fallback: event.has_beaver_fallback,
                 }
             } : prev);
             set(isWSChatPendingAtom, false);
@@ -1060,7 +1086,7 @@ async function executeWSRequest(
         const frontendVersion = Zotero.Beaver.pluginVersion || '';
         await agentService.connect(request, callbacks, frontendVersion);
         logger('WS Connection established and ready');
-    } catch (error) {
+    } catch (error: any) {
         logger('WS connection error:', error, 1);
         
         // Check if an error was already set by the onError callback
@@ -1074,7 +1100,7 @@ async function executeWSRequest(
         }
         
         // No error was set yet, so set a generic connection error
-        const errorMessage = error instanceof Error ? error.message : 'Connection failed';
+        const errorMessage = 'Could not connect to Beaver. Please check your internet connection and try again.';
         set(wsErrorAtom, {
             event: 'error',
             type: 'connection_error',
@@ -1198,7 +1224,7 @@ export const sendWSMessageAtom = atom(
         };
 
         // Tool requests (web search)
-        const toolRequests = get(isWebSearchEnabledAtom)
+        const toolRequests = get(isWebSearchEnabledAtom) && get(isWebSearchAllowedAtom)
             ? [{ function: "search_external_references", parameters: {} } as ToolRequest]
             : undefined;
 

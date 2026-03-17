@@ -148,6 +148,17 @@ export const selectedModelAtom = atom<ModelConfig | null>(lastUsedModel);
 export const isAppKeyModelAtom = atom((get) => get(selectedModelAtom)?.allow_app_key || false);
 
 /**
+ * Derived atom that indicates if the user is consuming Beaver credits (app_key)
+ * vs their own API costs (byok/custom). Based on the actual selected access_mode,
+ * not just model capability.
+ */
+export const isUsingBeaverCreditsAtom = atom((get) => {
+    const model = get(selectedModelAtom);
+    if (!model) return true;
+    return model.access_mode === 'app_key' || (!model.access_mode && model.allow_app_key);
+});
+
+/**
  * Derived atom that filters supported models based on available API keys
  * Models are available if they:
  * 1. Are custom models (always available)
@@ -172,6 +183,17 @@ export const availableModelsAtom = atom(
             if (model.allow_byok && model.provider === 'anthropic' && apiKeys.anthropic) return true;
             return false;
         });
+    }
+);
+
+
+/**
+ * Derived atom that returns the default Beaver model from the available models
+ */
+export const beaverDefaultModelAtom = atom<ModelConfig | null>(
+    get => {
+        const beaverModels = get(availableModelsAtom).filter((m) => m.allow_app_key && !m.is_custom);
+        return beaverModels.find((m) => m.is_default) ?? beaverModels[0] ?? null;
     }
 );
 

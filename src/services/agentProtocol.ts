@@ -67,6 +67,10 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     cost: number | null;
     citations: import('../../react/types/citations').CitationMetadata[] | null;
     agent_actions: import('../../react/agents/agentActions').AgentAction[] | null;
+    /** Whether the run had high input token usage (backend-assessed). */
+    high_token_usage?: boolean;
+    /** Whether the soft cap history processor was triggered during this run. */
+    soft_cap_triggered?: boolean;
 }
 
 /** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */
@@ -104,6 +108,8 @@ export interface WSErrorEvent extends WSBaseEvent {
     retry_after?: number;
     /** Whether the run can be resumed from the point of failure */
     is_resumable?: boolean;
+    /** show the beaver credits button */
+    has_beaver_fallback?: boolean;
 }
 
 /** Warning event for non-fatal issues */
@@ -982,6 +988,15 @@ export interface ApplicationStateInput {
     library_selection?: ZoteroItemReference[];
 }
 
+export interface ChargingPermissions {
+    /** Whether to request user confirmation for extraction surcharges */
+    confirm_extraction_costs: boolean;
+    /** Whether to request user confirmation for external search surcharges */
+    confirm_external_search_costs: boolean;
+    /** Whether to apply the soft cap that stops long-running agent turns */
+    pause_long_running_agent: boolean;
+}
+
 /**
  * Agent run request sent by the client after receiving the 'ready' event.
  * Model selection is included in this request (moved from auth message).
@@ -995,6 +1010,10 @@ export interface AgentRunRequest {
     thread_id: string | null;
     /** The user's message */
     user_prompt: BeaverAgentPrompt;
+    /** Permissions for the agent run */
+    permissions: ChargingPermissions;
+    /** When true and using your own API key, enables plus tools for a reduced credit cost */
+    request_plus_tools?: boolean;
     /** UUID of model_configs entry (mutually exclusive with custom_model) */
     model_id?: string;
     /** User's API key for BYOK models */

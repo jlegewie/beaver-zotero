@@ -10,16 +10,17 @@ import SearchMenu, { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
 import { logger } from '../../../src/utils/logger';
-import { isLibraryTabAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
-import { selectedModelAtom } from '../../atoms/models';
+import { isLibraryTabAtom, isWebSearchAllowedAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
+import { selectedModelAtom, isUsingBeaverCreditsAtom } from '../../atoms/models';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
+import SoftCapWarningBar from './SoftCapWarningBar';
 import { allRunsAtom } from '../../agents/atoms';
-import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom } from '../../atoms/messageUIState';
+import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, dismissSoftCapWarningForThreadAtom, dismissedSoftCapWarningByThreadAtom, backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
-import { getPref } from '../../../src/utils/prefs';
+import { getPref, setPref } from '../../../src/utils/prefs';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
@@ -36,6 +37,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const [currentMessageItems, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
+    const isUsingBeaverCredits = useAtomValue(isUsingBeaverCreditsAtom);
     const newThread = useSetAtom(newThreadAtom);
     const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -43,8 +45,13 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
     const allRuns = useAtomValue(allRunsAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
-    const dismissedWarningsByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
+    const dismissedHighTokenByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
+    const dismissedSoftCapByThread = useAtomValue(dismissedSoftCapWarningByThreadAtom);
+    const dismissSoftCapWarning = useSetAtom(dismissSoftCapWarningForThreadAtom);
+    const backendHighTokenUsageRuns = useAtomValue(backendHighTokenUsageRunsAtom);
+    const softCapTriggeredRuns = useAtomValue(softCapTriggeredRunsAtom);
+    const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -62,16 +69,26 @@ const InputArea: React.FC<InputAreaProps> = ({
     const lastRunUsage = lastRun?.total_usage;
     const lastRequestInputTokens = lastRunUsage ? getLastRequestInputTokens(lastRunUsage) : null;
     const warningThreadId = lastRun?.thread_id ?? currentThreadId;
-    const dismissedRunId = warningThreadId ? dismissedWarningsByThread[warningThreadId] : undefined;
+    const isHighTokenDismissed = warningThreadId ? dismissedHighTokenByThread[warningThreadId] : false;
+    const dismissedSoftCapRunId = warningThreadId ? dismissedSoftCapByThread[warningThreadId] : undefined;
     const showHighTokenUsageWarningMessage = getPref('showHighTokenUsageWarningMessage');
+    const pauseLongRunningAgent = getPref('pauseLongRunningAgent');
+    const threadHasHighTokenUsage = allRuns.some(r => backendHighTokenUsageRuns[r.id])
+        || (lastRequestInputTokens !== null && lastRequestInputTokens > HIGH_INPUT_TOKEN_WARNING_THRESHOLD);
     const shouldShowHighTokenWarning = Boolean(
         showHighTokenUsageWarningMessage &&
         !isAwaitingApproval &&
+        warningThreadId &&
+        threadHasHighTokenUsage &&
+        !isHighTokenDismissed
+    );
+    const shouldShowSoftCapWarning = Boolean(
+        !isAwaitingApproval &&
         lastRun &&
         warningThreadId &&
-        lastRequestInputTokens !== null &&
-        lastRequestInputTokens > HIGH_INPUT_TOKEN_WARNING_THRESHOLD &&
-        dismissedRunId !== lastRun.id
+        softCapTriggeredRuns[lastRun.id] &&
+        pauseLongRunningAgent &&
+        dismissedSoftCapRunId !== lastRun.id
     );
 
     // Slash menu hook
@@ -165,12 +182,38 @@ const InputArea: React.FC<InputAreaProps> = ({
     const handleDismissHighTokenWarning = (e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
+        if (!warningThreadId) return;
+        dismissHighTokenWarning(warningThreadId);
+    };
+
+    const handleDismissSoftCapWarning = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
         if (!warningThreadId || !lastRun) return;
-        dismissHighTokenWarning({
+        dismissSoftCapWarning({
             threadId: warningThreadId,
             runId: lastRun.id,
         });
     };
+
+    const handleEnableLongRunning = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setPref('pauseLongRunningAgent', false);
+        if (warningThreadId && lastRun) {
+            dismissSoftCapWarning({
+                threadId: warningThreadId,
+                runId: lastRun.id,
+            });
+        }
+    };
+
+    const getPlaceholderText = () => {
+        if (isAwaitingApproval) return "Add instructions to reject";
+        if (shouldShowSoftCapWarning && !shouldShowHighTokenWarning) return "Yes to continue, or add instructions to adjust";
+        if (isLibraryTab) return "@ to add a source, / for actions";
+        return "@ to add a source, / for actions, drag to add annotations";
+    }
 
     return (
         <div
@@ -188,6 +231,13 @@ const InputArea: React.FC<InputAreaProps> = ({
                         newThread();
                     }}
                     onDismiss={handleDismissHighTokenWarning}
+                    isUsingBeaverCredits={isUsingBeaverCredits}
+                />
+            )}
+            {shouldShowSoftCapWarning && (
+                <SoftCapWarningBar
+                    onEnableLongRunning={handleEnableLongRunning}
+                    onDismiss={handleDismissSoftCapWarning}
                 />
             )}
 
@@ -253,9 +303,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             e.currentTarget.style.height = 'auto';
                             e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
                         }}
-                        placeholder={isAwaitingApproval
-                            ? "Add instructions to reject"
-                            : (isLibraryTab ? "@ to add a source, / for actions" : "@ to add a source, / for actions, drag to add annotations")}
+                        placeholder={getPlaceholderText()}
                         className="chat-input"
                         onKeyDown={(e) => {
                             // When slash menu is open, handle navigation and dismiss keys
@@ -277,14 +325,26 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} disabled={isAwaitingApproval} />
                     <div className="flex-1" />
                     <div className="display-flex flex-row items-center gap-4">
-                        <Tooltip content={isWebSearchEnabled ? 'Disable web search' : 'Enable web search'} singleLine>
+                        <Tooltip
+                            key={String(isWebSearchAllowed)}
+                            content={isWebSearchAllowed ? (isWebSearchEnabled ? 'Disable web search' : 'Enable web search') : 'Web search requires Beaver credits'}
+                            singleLine={isWebSearchAllowed}
+                            padding={isWebSearchAllowed}
+                            width={!isWebSearchAllowed ? '250px' : undefined}
+                            customContent={!isWebSearchAllowed ? (
+                                <div className="px-2 py-1 display-flex flex-col gap-1">
+                                    <span className="text-base font-color-secondary font-semibold">Web search requires Beaver credits</span>
+                                    <span className="text-sm font-color-tertiary">Use a Beaver model, or enable Plus Tools in Settings → API Keys</span>
+                                </div>
+                            ) : undefined}
+                        >
                             <IconButton
                                 icon={GlobalSearchIcon}
                                 variant="ghost-secondary"
                                 className="scale-12 mt-015"
                                 iconClassName={isWebSearchEnabled ? 'font-color-accent-blue stroke-width-2' : ''}
                                 onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
-                                disabled={isAwaitingApproval}
+                                disabled={isAwaitingApproval || !isWebSearchAllowed}
                             />
                         </Tooltip>
                         <Button

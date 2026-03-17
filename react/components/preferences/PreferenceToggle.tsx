@@ -10,7 +10,7 @@ interface PreferenceToggleProps {
     title: string;
     subtitle?: string;
     className?: string;
-    description: string;
+    description?: string;
     tooltip?: string;
     disabledTooltip?: string;
     errorTooltip?: string;
@@ -94,10 +94,12 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
                                 </div>
                             )}
                         </div>
-                        <div className="font-color-secondary text-sm">
-                            {parseTextWithLinksAndNewlines(description)}
-                            {tooltip && <Icon icon={InformationCircleIcon} className="font-color-primary ml-05 mt-1 inline-flex" />}
-                        </div>
+                        {description && (
+                            <div className="font-color-secondary text-sm">
+                                {parseTextWithLinksAndNewlines(description)}
+                                {tooltip && <Icon icon={InformationCircleIcon} className="font-color-primary ml-05 mt-1 inline-flex" />}
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

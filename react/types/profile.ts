@@ -34,15 +34,21 @@ export interface PlanFeatures {
     maxPageCount: number;
 }
 
+export type CreditPlanStatus = "none" | "active" | "past_due" | "canceled";
+
 export interface ProfileBalance {
     pagesRemaining: number;
     subscriptionChatCreditsRemaining: number;
     purchasedChatCreditsRemaining: number;
     chatCreditsRemaining: number;
+    rolledOverCredits: number;
+    monthlyCredits: number;
+    monthlyCreditsUsed: number;
 }
 
 /**
  * Subscription status enum (based on SubscriptionStatus)
+ * @deprecated Still used by WS protocol in agentProtocol.ts / agentRunAtoms.ts
  */
 export enum SubscriptionStatus {
     FREE = "free",
@@ -57,7 +63,30 @@ export enum ChargeType {
     SUBSCRIPTION_CREDIT = "subscription_credit",
     USER_API_KEY = "user_api_key",
     USAGE_BASED_BILLING = "usage_based_billing",
-    APP_KEY_FALLBACK = "app_key_fallback"
+    APP_KEY_FALLBACK = "app_key_fallback",
+    BYOK_PLUS_TOOLS = "byok_plus_tools"
+}
+
+/**
+ * Credit breakdown for the profile
+ */
+export interface CreditBreakdown {
+    subscriptionRemaining: number;
+    rolledOverCredits: number;
+    purchasedCredits: number;
+    purchasedExpiresAt: string | null;
+    total: number;
+}
+
+/**
+ * Credit plan for the profile
+ */
+export interface CreditPlan {
+    plan: string | null;
+    status: CreditPlanStatus;
+    monthlyCredits: number; // monthly credits for the plan
+    periodEnd: string | null; // period end date
+    cancelAtPeriodEnd: boolean; // whether to cancel at period end
 }
 
 /**
@@ -78,9 +107,16 @@ export interface SafeProfileModel {
     
     // Subscription
     current_plan_id: string;     // UUID
-    subscription_status: SubscriptionStatus;
-    current_period_start?: Date;
-    current_period_end?: Date;
+
+    // Credit plan (LLM credit subscription)
+    credit_plan: string | null;  // 'plus' (or null if no active credit plan)
+    credit_plan_status: CreditPlanStatus;
+    credit_plan_monthly_credits: number;
+    credit_period_start: string | null;
+    credit_period_end: string | null;
+    credit_cancel_at_period_end: boolean;
+    rolled_over_credits: number;
+    purchased_credits_expires_at: string | null;
     
     // Zotero integration and settings
     zotero_user_id: string | null;

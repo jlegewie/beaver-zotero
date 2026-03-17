@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { selectAtom } from 'jotai/utils';
-import { SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode } from "../types/profile";
+import { SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode, CreditPlanStatus, CreditBreakdown, CreditPlan } from "../types/profile";
 import { getZoteroUserIdentifier } from "../../src/utils/zoteroUtils";
 import { ZoteroLibrary } from "../types/zotero";
 import { fileStatusAtom } from "./files";
@@ -138,9 +138,10 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
 
 export const remainingBeaverCreditsAtom = atom<number>((get) => {
     const profile = get(profileWithPlanAtom);
-    const subscriptionChatCreditsRemaining = profile ? Math.max(0, profile.plan.monthly_chat_credits - profile.chat_credits_used) : 0;
-    const purchasedChatCreditsRemaining = profile && profile.purchased_chat_credits ? profile.purchased_chat_credits : 0;
-    return subscriptionChatCreditsRemaining + purchasedChatCreditsRemaining;
+    if (!profile) return 0;
+    const subscriptionRemaining = Math.max(0, (profile.credit_plan_monthly_credits || 0) + (profile.rolled_over_credits || 0) - (profile.chat_credits_used || 0));
+    const purchasedRemaining = profile.purchased_chat_credits || 0;
+    return subscriptionRemaining + purchasedRemaining;
 });
 
 export const profileBalanceAtom = atom<ProfileBalance>((get) => {
@@ -149,17 +150,61 @@ export const profileBalanceAtom = atom<ProfileBalance>((get) => {
     // Page balance
     const pagesRemaining = profile ? profile.standard_page_balance + profile.purchased_standard_page_balance : 0;
 
-    // Chat credits remaining
-    const subscriptionChatCreditsRemaining = profile ? Math.max(0, profile.plan.monthly_chat_credits - profile.chat_credits_used) : 0;
-    const purchasedChatCreditsRemaining = profile && profile.purchased_chat_credits ? profile.purchased_chat_credits : 0;
+    // Chat credits remaining (new formula with rolled-over credits)
+    const monthlyCredits = profile?.credit_plan_monthly_credits || 0;
+    const rolledOverCredits = profile?.rolled_over_credits || 0;
+    const monthlyCreditsUsed = profile?.chat_credits_used || 0;
+    const subscriptionChatCreditsRemaining = Math.max(0, monthlyCredits + rolledOverCredits - monthlyCreditsUsed);
+    const purchasedChatCreditsRemaining = profile?.purchased_chat_credits || 0;
     const chatCreditsRemaining = subscriptionChatCreditsRemaining + purchasedChatCreditsRemaining;
 
     return {
-        pagesRemaining: pagesRemaining,
-        subscriptionChatCreditsRemaining: subscriptionChatCreditsRemaining,
-        purchasedChatCreditsRemaining: purchasedChatCreditsRemaining,
-        chatCreditsRemaining: chatCreditsRemaining
-    } as ProfileBalance;
+        pagesRemaining,
+        subscriptionChatCreditsRemaining,
+        purchasedChatCreditsRemaining,
+        chatCreditsRemaining,
+        rolledOverCredits,
+        monthlyCredits,
+        monthlyCreditsUsed,
+    };
+});
+
+// --- Credit plan atoms ---
+
+export const creditPlanAtom = atom<CreditPlan>((get) => {
+    const profile = get(profileWithPlanAtom);
+    return {
+        plan: profile?.credit_plan || null,
+        status: (profile?.credit_plan_status || 'none') as CreditPlanStatus,
+        monthlyCredits: profile?.credit_plan_monthly_credits || 0,
+        periodEnd: profile?.credit_period_end || null,
+        cancelAtPeriodEnd: profile?.credit_cancel_at_period_end || false,
+    };
+});
+
+export const creditBreakdownAtom = atom<CreditBreakdown>((get) => {
+    const profile = get(profileWithPlanAtom);
+    if (!profile) return { subscriptionRemaining: 0, rolledOverCredits: 0, purchasedCredits: 0, purchasedExpiresAt: null as string | null, total: 0 };
+    const subscriptionRemaining = Math.max(0, (profile.credit_plan_monthly_credits || 0) + (profile.rolled_over_credits || 0) - (profile.chat_credits_used || 0));
+    const purchasedCredits = profile.purchased_chat_credits || 0;
+    return {
+        subscriptionRemaining,
+        rolledOverCredits: profile.rolled_over_credits || 0,
+        purchasedCredits,
+        purchasedExpiresAt: profile.purchased_credits_expires_at,
+        total: subscriptionRemaining + purchasedCredits,
+    };
+});
+
+export const isCreditPlanPastDueAtom = atom<boolean>((get) => {
+    const profile = get(profileWithPlanAtom);
+    return profile?.credit_plan_status === 'past_due';
+});
+
+export const hasCreditPlanAtom = atom<boolean>((get) => {
+    const profile = get(profileWithPlanAtom);
+    const status = profile?.credit_plan_status;
+    return status === 'active' || status === 'past_due';
 });
 
 // Onboarding state - separate atoms for pro and free authorization
@@ -219,12 +264,25 @@ export const syncWithZoteroAtom = atom<boolean>((get) => {
 });
 
 /**
+ * Signal atom: set to true when the preferences window regains focus
+ * (e.g., returning from Stripe checkout). useProfileSync watches this
+ * and forces a profile refresh.
+ */
+export const prefWindowFocusRefreshAtom = atom<boolean>(false);
+
+/**
  * Atom to signal that a sync request was denied due to plan restrictions.
  * When set to true, useProfileSync will force a profile refresh to update
  * the local plan state, which will cause isDatabaseSyncSupportedAtom to
  * update and useZoteroSync to unregister its observer.
  */
 export const syncDeniedForPlanAtom = atom<boolean>(false);
+
+/**
+ * Signal atom: set to true when an error with has_beaver_fallback is displayed.
+ * useProfileSync watches this and forces a profile refresh so credit state is up to date.
+ */
+export const errorCreditCheckAtom = atom<boolean>(false);
 
 /**
  * Indexing progress atom - returns the current indexing progress (0-100)
