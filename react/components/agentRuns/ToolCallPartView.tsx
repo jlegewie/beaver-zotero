@@ -63,6 +63,10 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     view_page_images: ViewIcon,
     view_pages: ViewIcon,
 
+    // Note tools
+    read_note: TextAlignLeftIcon,
+    edit_note: PropertyEditIcon,
+
     // Extract tool
     extract: TaskDailyIcon,
 
@@ -187,7 +191,8 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         part.tool_name === 'edit_metadata' ||
         part.tool_name === 'create_collection' ||
         part.tool_name === 'organize_items' ||
-        part.tool_name === 'create_items';
+        part.tool_name === 'create_items' ||
+        part.tool_name === 'edit_note';
     const isExtractConfirmApproval =
         part.tool_name === 'extract' &&
         pendingApproval?.actionType === 'confirm_extraction';

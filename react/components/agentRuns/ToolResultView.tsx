@@ -31,6 +31,8 @@ import {
     extractGetMetadataData,
     isExtractResult,
     extractExtractData,
+    isReadNoteResult,
+    extractReadNoteData,
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
@@ -40,6 +42,7 @@ import { ExternalSearchResultView } from './ExternalSearchResultView';
 import { ListCollectionsResultView } from './ListCollectionsResultView';
 import { ListTagsResultView } from './ListTagsResultView';
 import { ExtractResultView } from './ExtractResultView';
+import { ReadNoteResultView } from './ReadNoteResultView';
 
 interface ToolResultViewProps {
     toolcall: ToolCallPart;
@@ -192,6 +195,22 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         const data = extractExtractData(content, metadata);
         if (data) {
             return <ExtractResultView items={data.items} />;
+        }
+    }
+
+    // Read note results (read_note)
+    if (isReadNoteResult(toolName, content, metadata)) {
+        const data = extractReadNoteData(content, metadata);
+        if (data) {
+            return (
+                <ReadNoteResultView
+                    noteReference={data.noteReference}
+                    parentReference={data.parentReference}
+                    title={data.title}
+                    totalLines={data.totalLines}
+                    linesReturned={data.linesReturned}
+                />
+            );
         }
     }
 
