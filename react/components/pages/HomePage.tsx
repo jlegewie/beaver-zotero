@@ -51,7 +51,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
             {/* Fixed bottom section */}
             <div
                 id="beaver-home-footer"
-                className={`flex-none px-25 ${isDatabaseSyncSupported && !isWindow ? '' : 'pb-4'}`}
+                className="flex-none px-25"
             >
                 <RecentChats />
 
