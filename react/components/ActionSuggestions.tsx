@@ -4,7 +4,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { isStreamingAtom } from "../agents/atoms";
 import { isWSChatPendingAtom } from "../atoms/agentRunAtoms";
 import { Action, ActionTargetType } from "../types/actions";
-import { actionsForContextAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom } from "../atoms/actions";
+import { actionsForContextAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom, actionsAtom } from "../atoms/actions";
 import { getDisplayNameFromItem } from "../utils/sourceUtils";
 import { truncateText } from "../utils/stringUtils";
 import { ActionContext, GroupIconInfo, getIconInfoForItem, isActionableItem } from "../utils/actionVisibility";
@@ -80,6 +80,17 @@ function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
         }
     }
 
+    // 4b. Selected notes (when no actionable items found in step 4)
+    if (zotero.type === 'items_selected') {
+        const selectedNotes = zotero.selectedItems.filter(i => i.isNote());
+        if (selectedNotes.length > 0) {
+            const label = selectedNotes.length === 1
+                ? truncateText(selectedNotes[0].getNoteTitle(), MAX_CONTEXT_ITEM_LENGTH)
+                : `${selectedNotes.length} selected notes`;
+            return { targetType: 'note', label, iconInfo: { type: 'css-icon', name: 'note' } };
+        }
+    }
+
     // 5. Collection
     if (zotero.libraryView.treeRowType === 'collection') {
         return {
@@ -141,7 +152,8 @@ interface ActionSuggestionsProps {
 const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true, style }) => {
     const isStreaming = useAtomValue(isStreamingAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
-    const allActions = useAtomValue(actionsForContextAtom);
+    const contextActions = useAtomValue(actionsForContextAtom);
+    const allActionsUnfiltered = useAtomValue(actionsAtom);
     const sendResolvedAction = useSetAtom(sendResolvedActionAtom);
     const markActionUsed = useSetAtom(markActionUsedAtom);
     const ctx = useAtomValue(actionContextAtom);
@@ -150,15 +162,20 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     // Check if the current library is supported
     const currentLibraryId = ctx.zotero.isLibraryTab
         ? ctx.zotero.libraryView.libraryId
-        : ctx.zotero.readerAttachment?.libraryID ?? null;
+        : ctx.zotero.readerAttachment?.libraryID ?? ctx.zotero.noteItem?.libraryID ?? null;
     const isLibrarySupported = currentLibraryId && searchableLibraryIds.includes(currentLibraryId);
 
     // Determine the single winning target type — never mix types
     const active = getActiveTarget(ctx);
+    const isNoteContext = active?.targetType === 'note';
+
+    // For note context, pull note actions from unfiltered list (they may be excluded by isActionVisible)
     const targetActions = active
-        ? allActions.filter(a => a.targetType === active.targetType)
+        ? (isNoteContext
+            ? allActionsUnfiltered.filter(a => a.targetType === 'note')
+            : contextActions.filter(a => a.targetType === active.targetType))
         : [];
-    const globalActions = allActions.filter(a => a.targetType === 'global');
+    const globalActions = contextActions.filter(a => a.targetType === 'global');
 
     let actions: Action[];
     if (targetActions.length > 0) {
@@ -229,7 +246,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                     key={action.id}
                     variant="ghost"
                     onClick={() => handleAction(action)}
-                    disabled={isPending || isStreaming || !isLibrarySupported}
+                    disabled={isPending || isStreaming || !isLibrarySupported || isNoteContext}
                     className="w-full justify-between"
                     style={{ padding: '6px 6px' }}
                 >
@@ -238,7 +255,15 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                     </span>
                 </Button>
             ))}
-            {!isLibrarySupported && (
+            {isNoteContext && (
+                <div className="display-flex flex-row gap-1 items-start font-color-tertiary mt-3">
+                    <Icon icon={AlertIcon} className="mt-010" />
+                    <div className="text-sm">
+                        Note actions are not yet supported
+                    </div>
+                </div>
+            )}
+            {!isNoteContext && !isLibrarySupported && (
                 <div className="display-flex flex-row gap-1 items-start font-color-tertiary mt-3">
                     <Icon icon={AlertIcon} className="mt-010" />
                     <div className="text-sm">
