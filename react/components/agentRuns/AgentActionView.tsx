@@ -304,7 +304,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
             if (item) {
-                const title = await shortItemTitle(item);
+                let title: string;
+                if (toolName === 'edit_note' && item.isNote?.()) {
+                    title = item.getNoteTitle?.() || '(untitled)';
+                } else {
+                    title = await shortItemTitle(item);
+                }
                 setItemTitle({ key: toolcallId, title });
             }
         };
