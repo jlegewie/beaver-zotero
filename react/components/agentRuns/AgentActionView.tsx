@@ -663,10 +663,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         >
                             <span className="font-color-primary font-medium">{getActionLabel(toolName)}</span>
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
-                            {action?.proposed_data?.library_id && action?.proposed_data?.zotero_key && (
-                                <Tooltip content={toolName === 'edit_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
+                            {action?.proposed_data?.library_id && action?.proposed_data?.zotero_key && (<>{'\u00A0'}<Tooltip content={toolName === 'edit_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
                                     <span
-                                        className="font-color-secondary ml-15 scale-11"
+                                        className="font-color-secondary scale-11"
                                         style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
                                         role="button"
                                         onClick={(e) => {
@@ -681,7 +680,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     >
                                         <Icon icon={ArrowUpRightIcon} />
                                     </span>
-                                </Tooltip>
+                                </Tooltip></>
                             )}
                         </div>
                     </div>
