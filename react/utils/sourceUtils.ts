@@ -30,7 +30,7 @@ export function getDisplayNameFromItem(item: Zotero.Item, count: number | null =
     let displayName: string;
     
     if (item.isNote()) {
-        displayName = `Note: "${truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH)}"`;
+        displayName = truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH);
     } else if(item.isAttachment() && !item.parentItem) {
         displayName = item.getField('title') || '';
     } else {

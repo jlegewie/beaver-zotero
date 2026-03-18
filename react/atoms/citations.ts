@@ -299,8 +299,8 @@ export const updateCitationDataAtom = atom(
                     type: item.isRegularItem() ? "item" : item.isAttachment() ? "attachment" : item.isNote() ? "note" : item.isAnnotation() ? "annotation" : "external",
                     parentKey: parentItem?.key || null,
                     icon: item.getItemTypeIconName(),
-                    name: getDisplayNameFromItem(itemToCite),
-                    citation: getDisplayNameFromItem(itemToCite),
+                    name: item.isNote() ? `Note: ${getDisplayNameFromItem(itemToCite)}` : getDisplayNameFromItem(itemToCite),
+                    citation: item.isNote() ? `Note: ${getDisplayNameFromItem(itemToCite)}` : getDisplayNameFromItem(itemToCite),
                     formatted_citation: getReferenceFromItem(itemToCite),
                     url: createZoteroURI(item),
                     numericCitation
