@@ -6,7 +6,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
+import { getOrSimplify, getLatestNoteHtml } from '../../utils/noteHtmlSimplifier';
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,
@@ -73,8 +73,8 @@ export async function handleReadNoteRequest(
         // 4. Load note data
         await item.loadDataType('note');
 
-        // 5. Get raw HTML
-        const rawHtml = item.getNote();
+        // 5. Get raw HTML (reads from open editor if available, to capture unsaved changes)
+        const rawHtml = getLatestNoteHtml(item);
         if (!rawHtml || rawHtml.trim() === '') {
             return {
                 type: 'read_note',

@@ -25,6 +25,7 @@ import {
     countOccurrences,
     checkDuplicateCitations,
     isNoteInEditor,
+    getLatestNoteHtml,
     SimplificationMetadata,
 } from '../src/utils/noteHtmlSimplifier';
 import { createCitationHTML } from '../src/utils/zoteroUtils';
@@ -954,5 +955,109 @@ describe('isNoteInEditor', () => {
         };
         (globalThis as any).Zotero.Notes._editorInstances = [instance];
         expect(isNoteInEditor(42)).toBe(false);
+    });
+});
+
+
+// =============================================================================
+// getLatestNoteHtml
+// =============================================================================
+
+describe('getLatestNoteHtml', () => {
+    const mockItem = (id: number, noteHtml: string) => ({
+        id,
+        getNote: vi.fn(() => noteHtml),
+    });
+
+    it('returns editor HTML when note is open in a connected editor', () => {
+        const item = mockItem(42, '<p>saved version</p>');
+        const editorHtml = '<p>editor version with unsaved changes</p>';
+        (globalThis as any).Zotero.Notes._editorInstances = [{
+            _item: { id: 42 },
+            _iframeWindow: {
+                frameElement: { isConnected: true },
+                wrappedJSObject: {
+                    getDataSync: vi.fn(() => ({ html: editorHtml })),
+                },
+            },
+        }];
+        expect(getLatestNoteHtml(item)).toBe(editorHtml);
+    });
+
+    it('falls back to item.getNote() when note is not in any editor', () => {
+        const item = mockItem(42, '<p>saved version</p>');
+        (globalThis as any).Zotero.Notes._editorInstances = [{
+            _item: { id: 99 },
+            _iframeWindow: {
+                frameElement: { isConnected: true },
+                wrappedJSObject: {
+                    getDataSync: vi.fn(() => ({ html: '<p>other note</p>' })),
+                },
+            },
+        }];
+        expect(getLatestNoteHtml(item)).toBe('<p>saved version</p>');
+    });
+
+    it('falls back to item.getNote() when editor instances is empty', () => {
+        const item = mockItem(42, '<p>saved version</p>');
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+        expect(getLatestNoteHtml(item)).toBe('<p>saved version</p>');
+    });
+
+    it('falls back to item.getNote() when _editorInstances is undefined', () => {
+        const item = mockItem(42, '<p>saved version</p>');
+        (globalThis as any).Zotero.Notes._editorInstances = undefined;
+        expect(getLatestNoteHtml(item)).toBe('<p>saved version</p>');
+    });
+
+    it('falls back to item.getNote() when iframe is disconnected (dead wrapper)', () => {
+        const item = mockItem(42, '<p>saved version</p>');
+        (globalThis as any).Zotero.Notes._editorInstances = [{
+            _item: { id: 42 },
+            _iframeWindow: {
+                frameElement: { isConnected: false },
+                wrappedJSObject: {
+                    getDataSync: vi.fn(() => ({ html: '<p>stale</p>' })),
+                },
+            },
+        }];
+        expect(getLatestNoteHtml(item)).toBe('<p>saved version</p>');
+    });
+
+    it('falls back to item.getNote() when getDataSync returns null', () => {
+        const item = mockItem(42, '<p>saved version</p>');
+        (globalThis as any).Zotero.Notes._editorInstances = [{
+            _item: { id: 42 },
+            _iframeWindow: {
+                frameElement: { isConnected: true },
+                wrappedJSObject: {
+                    getDataSync: vi.fn(() => null),
+                },
+            },
+        }];
+        expect(getLatestNoteHtml(item)).toBe('<p>saved version</p>');
+    });
+
+    it('falls back to item.getNote() when getDataSync throws', () => {
+        const item = mockItem(42, '<p>saved version</p>');
+        (globalThis as any).Zotero.Notes._editorInstances = [{
+            _item: { id: 42 },
+            _iframeWindow: {
+                frameElement: { isConnected: true },
+                wrappedJSObject: {
+                    getDataSync: vi.fn(() => { throw new Error('dead object'); }),
+                },
+            },
+        }];
+        expect(getLatestNoteHtml(item)).toBe('<p>saved version</p>');
+    });
+
+    it('falls back to item.getNote() when _iframeWindow access throws', () => {
+        const item = mockItem(42, '<p>saved version</p>');
+        (globalThis as any).Zotero.Notes._editorInstances = [{
+            _item: { id: 42 },
+            get _iframeWindow() { throw new Error('dead object'); },
+        }];
+        expect(getLatestNoteHtml(item)).toBe('<p>saved version</p>');
     });
 });

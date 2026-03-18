@@ -20,7 +20,7 @@ vi.mock('../src/utils/noteHtmlSimplifier', () => ({
         while ((pos = haystack.indexOf(needle, pos)) !== -1) { count++; pos += needle.length; }
         return count;
     }),
-    isNoteInEditor: vi.fn(() => false),
+    getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
     validateNewString: vi.fn(() => null),
     findFuzzyMatch: vi.fn(() => null),
     invalidateSimplificationCache: vi.fn(),
@@ -73,7 +73,7 @@ import {
     expandToRawHtml,
     stripDataCitationItems,
     countOccurrences,
-    isNoteInEditor,
+    getLatestNoteHtml,
     validateNewString,
     findFuzzyMatch,
     invalidateSimplificationCache,
@@ -182,7 +182,7 @@ beforeEach(() => {
         while ((pos = haystack.indexOf(needle, pos)) !== -1) { count++; pos += needle.length; }
         return count;
     });
-    vi.mocked(isNoteInEditor).mockReturnValue(false);
+    vi.mocked(getLatestNoteHtml).mockImplementation((item: any) => item.getNote());
     vi.mocked(validateNewString).mockReturnValue(null);
     vi.mocked(findFuzzyMatch).mockReturnValue(null);
     vi.mocked(getDeferredToolPreference).mockReturnValue('always_ask');
@@ -278,13 +278,6 @@ describe('validateEditNoteAction — failures', () => {
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
         expect(response.valid).toBe(false);
         expect(response.error_code).toBe('empty_note');
-    });
-
-    it('note_in_editor', async () => {
-        vi.mocked(isNoteInEditor).mockReturnValueOnce(true);
-        const response = await handleAgentActionValidateRequest(makeValidateRequest());
-        expect(response.valid).toBe(false);
-        expect(response.error_code).toBe('note_in_editor');
     });
 
     it('no_changes (old_string === new_string)', async () => {
@@ -405,13 +398,6 @@ describe('executeEditNoteAction — failures', () => {
         const response = await handleAgentActionExecuteRequest(makeExecuteRequest());
         expect(response.success).toBe(false);
         expect(response.error_code).toBe('item_not_found');
-    });
-
-    it('note_in_editor', async () => {
-        vi.mocked(isNoteInEditor).mockReturnValueOnce(true);
-        const response = await handleAgentActionExecuteRequest(makeExecuteRequest());
-        expect(response.success).toBe(false);
-        expect(response.error_code).toBe('note_in_editor');
     });
 
     it('expansion_failed', async () => {

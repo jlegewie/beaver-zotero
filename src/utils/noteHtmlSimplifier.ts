@@ -545,6 +545,38 @@ export function rebuildDataCitationItems(html: string): string {
 // =============================================================================
 
 /**
+ * Get the latest note HTML, reading from any open editor to capture
+ * unsaved changes. Falls back to item.getNote() if the note is not
+ * open or if reading from the editor fails.
+ */
+export function getLatestNoteHtml(item: any): string {
+    try {
+        const instances = (Zotero as any).Notes._editorInstances;
+        if (!Array.isArray(instances)) return item.getNote();
+        for (const instance of instances) {
+            if (!instance._item || instance._item.id !== item.id) continue;
+            try {
+                const frameElement = instance._iframeWindow?.frameElement;
+                if (frameElement?.isConnected !== true) continue;
+                let noteData = instance._iframeWindow.wrappedJSObject.getDataSync(true);
+                if (noteData) {
+                    // Clone out of XPCOM sandbox wrapper
+                    noteData = JSON.parse(JSON.stringify(noteData));
+                }
+                if (typeof noteData?.html === 'string') {
+                    return noteData.html;
+                }
+            } catch {
+                continue;
+            }
+        }
+    } catch {
+        // Fall through
+    }
+    return item.getNote();
+}
+
+/**
  * Check if a note is currently open in the Zotero editor.
  *
  * Zotero's `_editorInstances` array can contain stale entries: when a note tab

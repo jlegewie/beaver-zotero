@@ -11,7 +11,7 @@ import {
     stripDataCitationItems,
     rebuildDataCitationItems,
     countOccurrences,
-    isNoteInEditor,
+    getLatestNoteHtml,
     invalidateSimplificationCache,
     checkDuplicateCitations,
     findFuzzyMatch,
@@ -768,24 +768,13 @@ async function executeEditNoteAction(
     await item.loadDataType('note');
 
     // 3. Snapshot for undo
-    const oldHtml = item.getNote();
+    const oldHtml = getLatestNoteHtml(item);
 
-    // 4. Re-check editor conflict
-    if (isNoteInEditor(item.id)) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: 'This note is currently open in the Zotero editor. Close the editor tab before making programmatic edits.',
-            error_code: 'note_in_editor',
-        };
-    }
-
-    // 5. Get metadata from cache or re-simplify
+    // 4. Get metadata from cache or re-simplify
     const noteId = `${library_id}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
 
-    // 6. Expand old_string and new_string to raw HTML
+    // 5. Expand old_string and new_string to raw HTML
     let expandedOld: string;
     let expandedNew: string;
     try {
@@ -801,13 +790,13 @@ async function executeEditNoteAction(
         };
     }
 
-    // 7. Strip data-citation-items from raw HTML for matching
+    // 6. Strip data-citation-items from raw HTML for matching
     const strippedHtml = stripDataCitationItems(oldHtml);
 
-    // 8. Count occurrences
+    // 7. Count occurrences
     const matchCount = countOccurrences(strippedHtml, expandedOld);
 
-    // 9. Zero matches
+    // 8. Zero matches
     if (matchCount === 0) {
         const fuzzy = findFuzzyMatch(simplified, old_string);
         return {
@@ -820,7 +809,7 @@ async function executeEditNoteAction(
         };
     }
 
-    // 10. Multiple matches without replace_all
+    // 9. Multiple matches without replace_all
     if (matchCount > 1 && !replace_all) {
         return {
             type: 'agent_action_execute_response',
@@ -832,7 +821,7 @@ async function executeEditNoteAction(
         };
     }
 
-    // 11. Perform replacement
+    // 10. Perform replacement
     let newHtml: string;
     if (replace_all) {
         newHtml = strippedHtml.split(expandedOld).join(expandedNew);
@@ -842,10 +831,10 @@ async function executeEditNoteAction(
             + strippedHtml.substring(idx + expandedOld.length);
     }
 
-    // 12. Rebuild data-citation-items
+    // 11. Rebuild data-citation-items
     newHtml = rebuildDataCitationItems(newHtml);
 
-    // 13. Wrapper div protection
+    // 12. Wrapper div protection
     if (!newHtml.includes('data-schema-version=')) {
         return {
             type: 'agent_action_execute_response',
@@ -856,10 +845,10 @@ async function executeEditNoteAction(
         };
     }
 
-    // 14. Checkpoint before save
+    // 13. Checkpoint before save
     checkAborted(ctx, 'edit_note:before_save');
 
-    // 15. Save
+    // 14. Save
     try {
         item.setNote(newHtml);
         await item.saveTx();
@@ -881,7 +870,7 @@ async function executeEditNoteAction(
         };
     }
 
-    // 16. Invalidate cache
+    // 15. Invalidate cache
     invalidateSimplificationCache(noteId);
 
     // 17. Check for duplicate citation warnings

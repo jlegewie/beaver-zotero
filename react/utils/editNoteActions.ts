@@ -12,7 +12,7 @@ import {
     stripDataCitationItems,
     rebuildDataCitationItems,
     countOccurrences,
-    isNoteInEditor,
+    getLatestNoteHtml,
     invalidateSimplificationCache,
     checkDuplicateCitations,
     findFuzzyMatch,
@@ -44,18 +44,13 @@ export async function executeEditNoteAction(
     await item.loadDataType('note');
 
     // 3. Snapshot for undo
-    const oldHtml = item.getNote();
+    const oldHtml = getLatestNoteHtml(item);
 
-    // 4. Check editor conflict
-    if (isNoteInEditor(item.id)) {
-        throw new Error('This note is currently open in the Zotero editor. Close the editor tab before making programmatic edits.');
-    }
-
-    // 5. Get metadata from cache or re-simplify
+    // 4. Get metadata from cache or re-simplify
     const noteId = `${library_id}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
 
-    // 6. Expand old_string and new_string to raw HTML
+    // 5. Expand old_string and new_string to raw HTML
     let expandedOld: string;
     let expandedNew: string;
     try {
@@ -65,13 +60,13 @@ export async function executeEditNoteAction(
         throw new Error(e.message || String(e));
     }
 
-    // 7. Strip data-citation-items from raw HTML for matching
+    // 6. Strip data-citation-items from raw HTML for matching
     const strippedHtml = stripDataCitationItems(oldHtml);
 
-    // 8. Count occurrences
+    // 7. Count occurrences
     const matchCount = countOccurrences(strippedHtml, expandedOld);
 
-    // 9. Zero matches
+    // 8. Zero matches
     if (matchCount === 0) {
         const fuzzy = findFuzzyMatch(simplified, old_string);
         throw new Error(
@@ -80,7 +75,7 @@ export async function executeEditNoteAction(
         );
     }
 
-    // 10. Multiple matches without replace_all
+    // 9. Multiple matches without replace_all
     if (matchCount > 1 && !replace_all) {
         throw new Error(
             `The string to replace was found ${matchCount} times in the note. `
@@ -88,7 +83,7 @@ export async function executeEditNoteAction(
         );
     }
 
-    // 11. Perform replacement
+    // 10. Perform replacement
     let newHtml: string;
     if (replace_all) {
         newHtml = strippedHtml.split(expandedOld).join(expandedNew);
@@ -98,15 +93,15 @@ export async function executeEditNoteAction(
             + strippedHtml.substring(idx + expandedOld.length);
     }
 
-    // 12. Rebuild data-citation-items
+    // 11. Rebuild data-citation-items
     newHtml = rebuildDataCitationItems(newHtml);
 
-    // 13. Wrapper div protection
+    // 12. Wrapper div protection
     if (!newHtml.includes('data-schema-version=')) {
         throw new Error('The note wrapper <div data-schema-version="..."> must not be removed.');
     }
 
-    // 14. Save
+    // 13. Save
     try {
         item.setNote(newHtml);
         await item.saveTx();
@@ -121,10 +116,10 @@ export async function executeEditNoteAction(
         throw new Error(`Failed to save note: ${error}`);
     }
 
-    // 15. Invalidate cache
+    // 14. Invalidate cache
     invalidateSimplificationCache(noteId);
 
-    // 16. Check for duplicate citation warnings
+    // 15. Check for duplicate citation warnings
     const duplicateWarning = checkDuplicateCitations(new_string, metadata);
     const warnings = duplicateWarning ? [duplicateWarning] : undefined;
 
@@ -166,12 +161,7 @@ export async function undoEditNoteAction(
     // 2. Load note data
     await item.loadDataType('note');
 
-    // 3. Check editor conflict
-    if (isNoteInEditor(item.id)) {
-        throw new Error('This note is currently open in the Zotero editor. Close the editor tab before undoing edits.');
-    }
-
-    // 4. Restore old HTML
+    // 3. Restore old HTML
     try {
         item.setNote(resultData.old_html);
         await item.saveTx();
@@ -180,7 +170,7 @@ export async function undoEditNoteAction(
         throw new Error(`Failed to save note after undo: ${error}`);
     }
 
-    // 5. Invalidate simplification cache
+    // 4. Invalidate simplification cache
     const noteId = `${library_id}-${zotero_key}`;
     invalidateSimplificationCache(noteId);
 }

@@ -16,7 +16,7 @@ import {
     expandToRawHtml,
     stripDataCitationItems,
     countOccurrences,
-    isNoteInEditor,
+    getLatestNoteHtml,
     validateNewString,
     findFuzzyMatch,
 } from '../../utils/noteHtmlSimplifier';
@@ -1234,7 +1234,7 @@ async function validateEditNoteAction(
 
     // 6. Load note data
     await item.loadDataType('note');
-    const rawHtml = item.getNote();
+    const rawHtml = getLatestNoteHtml(item);
 
     // 7. Note not empty
     if (!rawHtml || rawHtml.trim() === '') {
@@ -1248,19 +1248,7 @@ async function validateEditNoteAction(
         };
     }
 
-    // 8. Editor conflict
-    if (isNoteInEditor(item.id)) {
-        return {
-            type: 'agent_action_validate_response',
-            request_id: request.request_id,
-            valid: false,
-            error: 'This note is currently open in the Zotero editor. Close the editor tab before making programmatic edits.',
-            error_code: 'note_in_editor',
-            preference: 'always_ask',
-        };
-    }
-
-    // 9. Strings different
+    // 8. Strings different
     if (old_string === new_string) {
         return {
             type: 'agent_action_validate_response',
@@ -1272,10 +1260,10 @@ async function validateEditNoteAction(
         };
     }
 
-    // 10. Simplify note
+    // 9. Simplify note
     const { simplified, metadata } = getOrSimplify(`${library_id}-${zotero_key}`, rawHtml, library_id);
 
-    // 11. Validate new_string tags
+    // 10. Validate new_string tags
     const validationError = validateNewString(new_string, metadata);
     if (validationError) {
         return {
@@ -1288,7 +1276,7 @@ async function validateEditNoteAction(
         };
     }
 
-    // 12. Dry-run expansion
+    // 11. Dry-run expansion
     let expandedOld: string;
     let expandedNew: string;
     try {
@@ -1305,11 +1293,11 @@ async function validateEditNoteAction(
         };
     }
 
-    // 13. Strip data-citation-items from raw HTML and count occurrences
+    // 12. Strip data-citation-items from raw HTML and count occurrences
     const strippedHtml = stripDataCitationItems(rawHtml);
     const matchCount = countOccurrences(strippedHtml, expandedOld);
 
-    // 14. Zero matches — fuzzy match on simplified HTML
+    // 13. Zero matches — fuzzy match on simplified HTML
     if (matchCount === 0) {
         const fuzzy = findFuzzyMatch(simplified, old_string);
         return {
@@ -1323,7 +1311,7 @@ async function validateEditNoteAction(
         };
     }
 
-    // 15. Multiple matches without replace_all
+    // 14. Multiple matches without replace_all
     if (matchCount > 1 && !replace_all) {
         return {
             type: 'agent_action_validate_response',
@@ -1336,7 +1324,7 @@ async function validateEditNoteAction(
         };
     }
 
-    // 16. Valid — return current value
+    // 15. Valid — return current value
     const noteTitle = item.getNoteTitle() || '(untitled)';
     const totalLines = simplified.split('\n').length;
 
