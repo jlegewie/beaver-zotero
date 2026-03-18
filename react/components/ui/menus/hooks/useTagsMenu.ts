@@ -100,7 +100,8 @@ export const useTagsMenu = ({
                         
                         // Fourth priority: sort by name
                         return a.tag.localeCompare(b.tag, undefined, { sensitivity: 'base' });
-                    });
+                    })
+                    .reverse();
 
                 if (!isCancelled) {
                     setTags(availableTags);
@@ -143,7 +144,7 @@ export const useTagsMenu = ({
         if (verticalPosition === 'above') {
             setMenuItems([...items.reverse(), header]);
         } else {
-            setMenuItems([header, ...items]);
+            setMenuItems([header, ...[...items].reverse()]);
         }
     }, [isActive, searchQuery, tags, tagMenuItemContext, activeLibraryId, verticalPosition]);
 

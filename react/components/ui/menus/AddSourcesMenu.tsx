@@ -336,7 +336,7 @@ const AddSourcesMenu: React.FC<{
         // Get button position
         if (buttonRef.current) {
             const rect = buttonRef.current.getBoundingClientRect();
-            const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
+            const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom;
             setMenuPosition({
                 x: rect.left,
                 y,
