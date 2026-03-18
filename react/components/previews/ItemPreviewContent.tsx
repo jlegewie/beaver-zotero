@@ -145,22 +145,19 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
             try {
                 const noteContent = item.getNote();
                 const plainText = noteContent.replace(/<[^>]*>/g, '').substring(0, 200);
-                
+
                 return (
-                    <div className="space-y-2">
-                        <div className="display-flex items-start gap-2">
-                            <span className="mt-1">
-                                <CSSItemTypeIcon itemType={item.getItemTypeIconName()} />
-                            </span>
-                            <div className="min-w-0 flex-1">
-                                <div className="font-weight-medium">Note</div>
-                                <div className="text-sm font-color-secondary mt-1">{plainText}...</div>
-                            </div>
-                        </div>
+                    <div className="p-3 display-flex flex-col items-start gap-2">
+                        <PopupMessageHeader
+                            icon={createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() })}
+                            title={getDisplayNameFromItem(item)}
+                            handleDismiss={() => setActivePreview(null)}
+                        />
+                        <div className="text-sm font-color-secondary ml-15">{plainText}{plainText.length >= 200 ? '...' : ''}</div>
                     </div>
                 );
             } catch (error) {
-                return <div className="font-color-secondary">Unable to load note</div>;
+                return <div className="p-3 font-color-secondary">Unable to load note</div>;
             }
         }
         
