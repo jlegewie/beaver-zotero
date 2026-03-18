@@ -11,7 +11,7 @@ import { addPopupMessageAtom } from '../../react/utils/popupMessageUtils';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import { SettingsIcon } from '../../react/components/icons/icons';
 import { syncWithZoteroAtom, isDatabaseSyncSupportedAtom, syncDeniedForPlanAtom } from '../../react/atoms/profile';
-import { ApiError } from '../../react/types/apiErrors';
+import { ApiError, SessionExpiredError } from '../../react/types/apiErrors';
 import { SyncMethod } from '../../react/atoms/sync';
 import { SyncLogsRecord } from '../services/database';
 import { isAttachmentOnServer } from './webAPI';
@@ -510,6 +510,9 @@ export async function syncItemsToBackend(
                     logger(`Beaver Sync '${syncSessionId}':     Batch result: ${JSON.stringify(batchResult)}`, 4);
                     break;
                 } catch (retryError) {
+                    if (retryError instanceof SessionExpiredError) {
+                        throw retryError;
+                    }
                     attempts++;
                     if (attempts >= maxAttempts) {
                         throw retryError;
@@ -932,6 +935,19 @@ export async function syncZoteroDatabase(
                         updateSyncStatus(remainingLib.libraryID, {
                             status: 'failed',
                             error: 'Sync not available on current plan'
+                        });
+                    }
+                }
+                return;
+            }
+
+            if (error instanceof SessionExpiredError) {
+                logger(`Beaver Sync '${syncSessionId}': Aborting sync - session expired`, 2);
+                for (const remainingLib of librariesToSync) {
+                    if (!processedLibraryIDs.has(remainingLib.libraryID)) {
+                        updateSyncStatus(remainingLib.libraryID, {
+                            status: 'failed',
+                            error: 'Session expired. Please sign in again.'
                         });
                     }
                 }

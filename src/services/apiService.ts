@@ -61,6 +61,8 @@ export class ApiService {
             return this.createSessionRefreshError(error.message, error.status);
         }
 
+        // Defense-in-depth for auth errors that may lose their prototype
+        // across boundaries and arrive as plain Error-like objects.
         if (
             typeof error === 'object' &&
             error !== null &&
@@ -77,13 +79,13 @@ export class ApiService {
     private async refreshAccessToken(context: string): Promise<string> {
         try {
             const refreshResult = await supabase.auth.refreshSession();
-            const token = refreshResult.data.session?.access_token;
 
             if (refreshResult.error) {
                 logger(`${context}: session refresh failed: ${refreshResult.error?.message}`, 2);
                 throw this.classifyRefreshError(refreshResult.error);
             }
 
+            const token = refreshResult.data.session?.access_token;
             if (!token) {
                 logger(`${context}: session refresh returned no access token`, 2);
                 throw new SessionExpiredError('Session expired and refresh failed');
@@ -266,11 +268,7 @@ export class ApiService {
     * Performs a DELETE request
     */
     async delete(endpoint: string): Promise<void> {
-        const response = await this.request(endpoint, 'DELETE');
-        if (!response.ok) {
-            await this.handleApiError(response);
-        }
-
+        await this.request(endpoint, 'DELETE');
         return;
     }
 }
