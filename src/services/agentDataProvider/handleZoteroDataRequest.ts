@@ -259,27 +259,32 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
                 });
                 return null;
             }
-            const status = await computeItemStatus(attachment, searchableLibraryIds, syncWithZotero, userId, { syncDateCache });
-            
             // Determine if this is the primary attachment for its parent (using batch data)
             let isPrimary = false;
             if (attachment.parentID) {
                 const bestAttachmentId = bestAttachmentMap.get(attachment.parentID);
                 isPrimary = bestAttachmentId !== undefined && attachment.id === bestAttachmentId;
             }
-            
+
             // Get file status based on requested level
             // - 'none': skip file status entirely (fastest, for metadata-only lookups)
             // - 'lightweight': fast checks without reading full PDF (default)
             // - 'full': full analysis including OCR detection (slowest)
+            // Run file status first when lightweight to extract fileExistsLocally hint,
+            // avoiding redundant filesystem I/O in computeItemStatus
             let fileStatus = undefined;
-            if (fileStatusLevel === 'full') {
+            let fileExistsLocally: boolean | undefined;
+            if (fileStatusLevel === 'lightweight') {
+                const result = await getAttachmentFileStatusLightweight(attachment, isPrimary);
+                fileStatus = result.fileStatus;
+                fileExistsLocally = result.fileExistsLocally;
+            } else if (fileStatusLevel === 'full') {
                 fileStatus = await getAttachmentFileStatus(attachment, isPrimary);
-            } else if (fileStatusLevel === 'lightweight') {
-                fileStatus = await getAttachmentFileStatusLightweight(attachment, isPrimary);
             }
             // else: fileStatusLevel === 'none', skip file status
-            
+
+            const status = await computeItemStatus(attachment, searchableLibraryIds, syncWithZotero, userId, { syncDateCache, fileExistsLocally });
+
             return { attachment: serialized, status, file_status: fileStatus };
         }))
     ]);
