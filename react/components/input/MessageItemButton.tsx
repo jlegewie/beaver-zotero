@@ -10,6 +10,7 @@ import { navigateToAnnotation } from '../../utils/readerUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { toAnnotation } from '../../types/attachments/converters';
 import { selectItemById } from '../../../src/utils/selectItem';
+import { openNoteById } from '../../utils/sourceUtils';
 
 const MAX_ITEM_TEXT_LENGTH = 30;
 
@@ -103,13 +104,9 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 return;
             }
 
-            // For notes, open the note window
+            // For notes, open the note in editor (tab or window per user preference)
             if (item.isNote()) {
-                try {
-                    Zotero.getActiveZoteroPane().openNoteWindow(item.id);
-                } catch (error) {
-                    console.error('Failed to open note:', error);
-                }
+                openNoteById(item.id);
                 return;
             }
 
