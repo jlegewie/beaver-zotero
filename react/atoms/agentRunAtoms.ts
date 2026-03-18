@@ -31,7 +31,7 @@ import {
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
-import { MessageAttachment, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
+import { MessageAttachment, NoteState, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '../types/profile';
@@ -45,6 +45,7 @@ import {
     currentMessageContentAtom,
 } from './messageComposition';
 import { isSidebarVisibleAtom, isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
+import { currentNoteItemAtom } from './zoteroContext';
 import { addFloatingPopupMessageAtom } from './floatingPopup';
 import { BeaverUIFactory } from '../../src/ui/ui';
 import { eventManager } from '../events/eventManager';
@@ -260,6 +261,20 @@ function getReaderState(get: Getter): ReaderState | null {
         current_page: getCurrentPage() || null,
         ...(currentTextSelection && { text_selection: currentTextSelection })
     } as ReaderState;
+}
+
+/**
+ * Build note state for the current note tab item.
+ */
+function getNoteState(get: Getter): NoteState | null {
+    const noteItem = get(currentNoteItemAtom);
+    if (!noteItem) return null;
+    return {
+        library_id: noteItem.libraryID,
+        zotero_key: noteItem.key,
+        ...(noteItem.parentKey && { parent_key: noteItem.parentKey }),
+        ...(noteItem.getNoteTitle?.() && { title: noteItem.getNoteTitle() }),
+    };
 }
 
 /**
@@ -1175,9 +1190,13 @@ export const sendWSMessageAtom = atom(
         const selectedItems = get(currentMessageItemsAtom);
 
         // Load note data for any note items (getNoteTitle() requires 'note' data type)
+        const currentNoteTabItem = get(currentNoteItemAtom);
         const noteItems = selectedItems.filter(item => item.isNote());
-        if (noteItems.length > 0) {
-            await Promise.all(noteItems.map(item => item.loadDataType('note')));
+        const allNoteItems = currentNoteTabItem
+            ? [...noteItems, currentNoteTabItem]
+            : noteItems;
+        if (allNoteItems.length > 0) {
+            await Promise.all(allNoteItems.map(item => item.loadDataType('note')));
         }
 
         let attachments: MessageAttachment[] =
@@ -1207,6 +1226,22 @@ export const sendWSMessageAtom = atom(
                 } as SourceAttachment);
             } else {
                 logger(`sendWSMessageAtom: Handeling reader attachment - Skipping reader attachment: ${readerKey}`, 1);
+            }
+        }
+
+        // Add current note tab item as note attachment if not already present
+        if (currentNoteTabItem) {
+            const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
+            const existingKeys = new Set([
+                ...attachments.map(att => `${att.library_id}-${att.zotero_key}`),
+                ...allUserAttachmentKeys
+            ]);
+            const noteKey = `${currentNoteTabItem.libraryID}-${currentNoteTabItem.key}`;
+            if (!existingKeys.has(noteKey)) {
+                const noteAttachment = toMessageAttachment(currentNoteTabItem);
+                if (noteAttachment) {
+                    attachments.push(noteAttachment);
+                }
             }
         }
 
@@ -1240,11 +1275,24 @@ export const sendWSMessageAtom = atom(
         let currentCollection: CurrentCollection | undefined = undefined;
         
         const searchableLibraryIds = get(searchableLibraryIdsAtom);
-        const currentView: 'library' | 'file_reader' = get(isLibraryTabAtom) ? 'library' : 'file_reader';
-        
+        const noteState = getNoteState(get);
+        const currentView: 'library' | 'file_reader' | 'note_editor' = get(isLibraryTabAtom) ? 'library' : noteState ? 'note_editor' : 'file_reader';
+
         if (currentView === 'file_reader' && readerState) {
             // In reader view, use the library from the reader attachment
             const library = Zotero.Libraries.get(readerState.library_id);
+            if (library) {
+                currentLibrary = {
+                    library_id: library.libraryID,
+                    name: library.name,
+                    is_group: library.isGroup,
+                    read_only: !library.editable,
+                    is_synced: searchableLibraryIds.includes(library.libraryID),
+                };
+            }
+        } else if (currentView === 'note_editor' && noteState) {
+            // In note editor view, use the library from the note item
+            const library = Zotero.Libraries.get(noteState.library_id);
             if (library) {
                 currentLibrary = {
                     library_id: library.libraryID,
@@ -1286,6 +1334,7 @@ export const sendWSMessageAtom = atom(
         const applicationState = {
             current_view: currentView,
             ...(readerState ? { reader_state: readerState } : {}),
+            ...(noteState ? { note_state: noteState } : {}),
             ...(currentLibrary ? { current_library: currentLibrary } : {}),
             ...(currentCollection ? { current_collection: currentCollection } : {}),
         };
