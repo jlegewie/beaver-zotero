@@ -44,8 +44,8 @@ export function validateZoteroItemReference(ref: ZoteroItemReference): string | 
  * Result of attachment availability check.
  * Either an early-exit status (if unavailable) or file info to continue processing.
  */
-type AttachmentAvailabilityResult = 
-    | { available: false; status: FrontendFileStatus }
+type AttachmentAvailabilityResult =
+    | { available: false; status: FrontendFileStatus; fileExistsLocally?: boolean }
     | { available: true; filePath: string; contentType: string };
 
 /**
@@ -86,6 +86,7 @@ async function checkAttachmentAvailability(
             : 'File is not available locally';
         return {
             available: false,
+            fileExistsLocally: false,
             status: {
                 is_primary: isPrimary,
                 mime_type: contentType,
@@ -107,6 +108,7 @@ async function checkAttachmentAvailability(
         if (fileSizeInMB > maxFileSizeMB) {
             return {
                 available: false,
+                fileExistsLocally: true,
                 status: {
                     is_primary: isPrimary,
                     mime_type: contentType,
@@ -404,14 +406,19 @@ export async function getAttachmentFileStatusLightweight(
     attachment: Zotero.Item,
     isPrimary: boolean,
     options?: { skipWorkerFallback?: boolean }
-): Promise<FrontendFileStatus> {
+): Promise<{ fileStatus: FrontendFileStatus; fileExistsLocally: boolean | undefined }> {
     // Check basic availability (PDF type, file exists, size limits)
     const availabilityCheck = await checkAttachmentAvailability(attachment, isPrimary);
     if (!availabilityCheck.available) {
-        return availabilityCheck.status;
+        // fileExistsLocally is set by checkAttachmentAvailability:
+        // - undefined for non-PDF (not checked), false for missing file, true for file-too-large
+        return { fileStatus: availabilityCheck.status, fileExistsLocally: availabilityCheck.fileExistsLocally };
     }
 
     const { filePath, contentType } = availabilityCheck;
+
+    // File passed getFilePathAsync() — it exists locally
+    const fileExistsLocally = true;
 
     // Cache-first: all writers produce complete records, so any hit is usable.
     const cache = Zotero.Beaver?.attachmentFileCache;
@@ -419,7 +426,7 @@ export async function getAttachmentFileStatusLightweight(
         try {
             const cached = await cache.getMetadata(attachment.id, filePath);
             if (cached) {
-                return fileStatusFromCache(cached, isPrimary);
+                return { fileStatus: fileStatusFromCache(cached, isPrimary), fileExistsLocally };
             }
         } catch (error) {
             logger(`getAttachmentFileStatusLightweight: cache read error: ${error}`, 1);
@@ -441,43 +448,43 @@ export async function getAttachmentFileStatusLightweight(
         if (options?.skipWorkerFallback) {
             // Optimistic: file passed availability checks (exists, correct type, within size limit).
             // Page count is unknown but the PDF is likely usable — just not yet fulltext-indexed.
-            return {
+            return { fileStatus: {
                 is_primary: isPrimary,
                 mime_type: contentType,
                 page_count: null,
                 status: "available",
-            };
+            }, fileExistsLocally };
         }
         // Both methods failed — PDF is likely problematic (encrypted, corrupted, or unparseable)
-        return {
+        return { fileStatus: {
             is_primary: isPrimary,
             mime_type: contentType,
             page_count: null,
             status: "unavailable",
             status_reason: 'Unable to read PDF - file may be encrypted, corrupted, or invalid',
-        };
+        }, fileExistsLocally };
     }
 
     // Check page count limit
     const maxPageCount = getPref('maxPageCount');
 
     if (pageCount > maxPageCount) {
-        return {
+        return { fileStatus: {
             is_primary: isPrimary,
             mime_type: contentType,
             page_count: pageCount,
             status: "unavailable",
             status_reason: `PDF has ${pageCount} pages, which exceeds the ${maxPageCount}-page limit`,
-        };
+        }, fileExistsLocally };
     }
 
     // All checks passed - file is available
-    return {
+    return { fileStatus: {
         is_primary: isPrimary,
         mime_type: contentType,
         page_count: pageCount,
         status: "available",
-    };
+    }, fileExistsLocally };
 }
 
 /**
@@ -540,7 +547,7 @@ export async function computeItemStatus(
     syncedLibraryIds: number[],
     syncWithZotero: any,
     userId: string | null,
-    options?: { syncDateCache?: Map<number, string | null> }
+    options?: { syncDateCache?: Map<number, string | null>; fileExistsLocally?: boolean }
 ): Promise<ZoteroItemStatus> {
     const isSyncedLibrary = syncedLibraryIds.includes(item.libraryID);
     const trashState = safeIsInTrash(item);
@@ -557,6 +564,11 @@ export async function computeItemStatus(
             // Skip safeFileExists() and syncingItemFilterAsync() which are not applicable
             availableLocallyOrOnServer = true;
             passesSyncFilters = false;
+        } else if (options?.fileExistsLocally !== undefined) {
+            // File existence already determined by caller (e.g. getAttachmentFileStatusLightweight)
+            // — skip redundant safeFileExists() and syncingItemFilterAsync() I/O
+            availableLocallyOrOnServer = options.fileExistsLocally || isAttachmentOnServer(item);
+            passesSyncFilters = syncingItemFilter(item) && availableLocallyOrOnServer;
         } else {
             // For file attachments, check if file exists locally or on server
             availableLocallyOrOnServer = (await safeFileExists(item)) || isAttachmentOnServer(item);
@@ -771,15 +783,18 @@ export async function processAttachmentsWithBatchData(
 
         // Use batch data for isPrimary and syncDateCache
         const isPrimary = bestAttachmentId !== undefined && attachment.id === bestAttachmentId;
-        const statusFn = () => computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId, { syncDateCache: batchData.syncDateCache });
-        const fileStatusFn = () => getAttachmentFileStatusLightweight(attachment, isPrimary, { skipWorkerFallback });
 
-        const [status, fileStatus] = ta
-            ? await Promise.all([
-                ta.track('att_status_ms', statusFn),
-                ta.track('att_file_status_ms', fileStatusFn),
-            ])
-            : await Promise.all([statusFn(), fileStatusFn()]);
+        // Run file status first to determine file existence, then pass the hint
+        // to computeItemStatus to avoid redundant filesystem I/O
+        const fileStatusFn = () => getAttachmentFileStatusLightweight(attachment, isPrimary, { skipWorkerFallback });
+        const { fileStatus, fileExistsLocally } = ta
+            ? await ta.track('att_file_status_ms', fileStatusFn)
+            : await fileStatusFn();
+
+        const statusFn = () => computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId, { syncDateCache: batchData.syncDateCache, fileExistsLocally });
+        const status = ta
+            ? await ta.track('att_status_ms', statusFn)
+            : await statusFn();
 
         return {
             attachment: attachmentData,
@@ -849,18 +864,18 @@ export async function processAttachmentsParallel(
             return null;
         }
 
-        // Compute status and file status in parallel
-        // Use lightweight file status to avoid reading full PDFs
+        // Run file status first, then pass file-existence hint to computeItemStatus
+        // to avoid redundant filesystem I/O (getFilePathAsync / fileExists)
         const isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
-        const statusFn = () => computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId, { syncDateCache });
         const fileStatusFn = () => getAttachmentFileStatusLightweight(attachment, isPrimary);
+        const { fileStatus, fileExistsLocally } = ta
+            ? await ta.track('att_file_status_ms', fileStatusFn)
+            : await fileStatusFn();
 
-        const [status, fileStatus] = ta
-            ? await Promise.all([
-                ta.track('att_status_ms', statusFn),
-                ta.track('att_file_status_ms', fileStatusFn),
-            ])
-            : await Promise.all([statusFn(), fileStatusFn()]);
+        const statusFn = () => computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId, { syncDateCache, fileExistsLocally });
+        const status = ta
+            ? await ta.track('att_status_ms', statusFn)
+            : await statusFn();
 
         return {
             attachment: attachmentData,
