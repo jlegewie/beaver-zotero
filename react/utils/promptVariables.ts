@@ -25,7 +25,7 @@ import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { getCurrentReader } from './readerUtils';
 import { store } from '../store';
 import { currentReaderAttachmentAtom } from '../atoms/messageComposition';
-import { selectedZoteroItemsAtom } from '../atoms/zoteroContext';
+import { selectedZoteroItemsAtom, currentNoteItemAtom } from '../atoms/zoteroContext';
 import { ActionTargetType } from '../types/actions';
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,7 @@ export const EMPTY_VARIABLE_HINTS: Record<string, string> = {
     recent_item:     'No recently added item found in your library.',
     selected_items:  'No items are selected in the library view.',
     open_attachment: 'No attachment is open in the reader.',
+    open_note:       'No note is open in a tab.',
     active_item:     'No active item found. Try opening a PDF or selecting an item.',
 };
 
@@ -47,6 +48,7 @@ export const PROMPT_VARIABLES: { name: string; description: string }[] = [
     { name: 'recent_item',       description: 'Most recently added item' },
     { name: 'selected_items',     description: 'Currently selected items' },
     { name: 'open_attachment',    description: 'Attachment open in the reader' },
+    { name: 'open_note',          description: 'Note open in a tab' },
     { name: 'active_item',        description: 'Active item (open file → selected → recent)' },
     { name: 'current_collection', description: 'Currently selected collection' },
 ];
@@ -198,7 +200,10 @@ function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeConte
             } : null;
             return { items: [], collection };
         }
-        case 'note':
+        case 'note': {
+            const noteItem = store.get(currentNoteItemAtom);
+            return { items: noteItem ? [noteItem] : [], collection: null };
+        }
         case 'global':
             return { items: [], collection: null };
     }
@@ -222,6 +227,7 @@ const RESOLVERS: Record<string, VariableResolver> = {
     recent_item:        resolveRecentPaper,
     selected_items:     resolveSelectedItems,
     open_attachment:    resolveOpenAttachment,
+    open_note:          resolveOpenNote,
     active_item:        resolveActiveItem,
     current_collection: resolveCurrentCollection,
 };
@@ -265,11 +271,23 @@ async function resolveOpenAttachment(): Promise<ResolvedVariable> {
     }
 }
 
+/** Returns the note item currently open in a tab, or empty */
+async function resolveOpenNote(): Promise<ResolvedVariable> {
+    try {
+        const noteItem = store.get(currentNoteItemAtom);
+        return { text: '', items: noteItem ? [noteItem] : [] };
+    } catch (e) {
+        logger(`promptVariables: resolveOpenNote error: ${e}`, 1);
+        return { text: '', items: [] };
+    }
+}
+
 /**
  * Active context item with fallback:
  *   1. Parent item of open attachment (+ the attachment), or just the attachment
- *   2. Selected items in library view
- *   3. Most recently added item
+ *   2. Note item open in a tab
+ *   3. Selected items in library view
+ *   4. Most recently added item
  */
 async function resolveActiveItem(): Promise<ResolvedVariable> {
     try {
@@ -283,7 +301,13 @@ async function resolveActiveItem(): Promise<ResolvedVariable> {
             return { text: '', items: [attachment] };
         }
 
-        // 2. Selected items in library view
+        // 2. Note open in a tab
+        const noteItem = store.get(currentNoteItemAtom);
+        if (noteItem) {
+            return { text: '', items: [noteItem] };
+        }
+
+        // 3. Selected items in library view
         const zp = Zotero.getActiveZoteroPane?.();
         if (zp) {
             const selectedItems: Zotero.Item[] = zp.getSelectedItems?.() || [];

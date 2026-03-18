@@ -2,7 +2,7 @@ import { SubscriptionStatus, ProcessingMode, ChargeType } from '../../react/type
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../../react/agents/types';
 import { ZoteroItemReference } from '../../react/types/zotero';
 import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../react/types/zotero';
-import { ReaderState } from '../../react/types/attachments/apiTypes';
+import { ReaderState, NoteState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
 import { AttachmentData, ItemData } from '../../react/types/zotero';
@@ -1012,10 +1012,12 @@ export interface CurrentCollection {
  * Contains current view state and reader state if in reader view.
  */
 export interface ApplicationStateInput {
-    /** Current application view ('library' or 'file_reader') */
-    current_view: 'library' | 'file_reader';
+    /** Current application view ('library', 'file_reader', or 'note_editor') */
+    current_view: 'library' | 'file_reader' | 'note_editor';
     /** Reader state when in reader view */
     reader_state?: ReaderState;
+    /** Note state when in note editor view */
+    note_state?: NoteState;
     /** Current library context */
     current_library?: CurrentLibrary;
     /** Current collection context */

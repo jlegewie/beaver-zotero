@@ -34,7 +34,7 @@ interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
     canEdit?: boolean;
     disabled?: boolean;
     onRemove?: (item: Zotero.Item) => void;
-    isReaderAttachment?: boolean;
+    tabContextType?: 'reader' | 'note';
     showInvalid?: boolean;
     /** Optional collection key to reveal the item within when clicked */
     revealInCollectionKey?: string;
@@ -53,7 +53,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             disabled = false,
             canEdit = true,
             onRemove,
-            isReaderAttachment = false,
+            tabContextType,
             showInvalid = true,
             revealInCollectionKey,
             ...rest
@@ -208,9 +208,11 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             >
                 {getIconElement()}
                 <span className={`truncate ${validation && !validation.isValid ? 'font-color-red' : ''}`}>
-                    {isReaderAttachment
+                    {tabContextType === 'reader'
                         ? (validation && !validation.isValid && showInvalid) ? 'Invalid File' : 'Current File'
-                        : displayName || '...'}
+                        : tabContextType === 'note'
+                            ? 'Current Note'
+                            : displayName || '...'}
                 </span>
                 
                 {/* Show arrow icon for annotations not in current reader */}

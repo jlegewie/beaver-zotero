@@ -13,6 +13,7 @@ import { TextSelection } from "../types/attachments/apiTypes";
 import { ZoteroTag } from "../types/zotero";
 import { processingModeAtom } from "./profile";
 import { ProcessingMode } from "../types/profile";
+import { currentNoteItemAtom } from "./zoteroContext";
 
 
 /**
@@ -105,6 +106,14 @@ export const currentReaderAttachmentAtom = atom<Zotero.Item | null>(null);
 */
 export const currentReaderAttachmentKeyAtom = atom<string | null>((get) => {
     const item = get(currentReaderAttachmentAtom);
+    return item?.key || null;
+});
+
+/**
+* Current note tab item key (note open in its own tab)
+*/
+export const currentNoteTabItemKeyAtom = atom<string | null>((get) => {
+    const item = get(currentNoteItemAtom);
     return item?.key || null;
 });
 

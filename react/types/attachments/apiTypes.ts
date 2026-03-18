@@ -74,6 +74,13 @@ export interface ReaderState {
     annotations?: Annotation[];
 }    
 
+export interface NoteState {
+    library_id: number;
+    zotero_key: string;
+    parent_key?: string;
+    title?: string;
+}
+
 /**
  * TextSelection represents a text selection in a reader.
  * 
