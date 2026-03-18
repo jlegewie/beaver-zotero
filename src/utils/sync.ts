@@ -1,7 +1,7 @@
 import { syncService, DeleteLibraryTask } from '../services/syncService';
 import { fileUploader } from '../services/FileUploader';
 import { logger } from './logger';
-import { userIdAtom } from "../../react/atoms/auth";
+import { logoutAtom, userIdAtom } from "../../react/atoms/auth";
 import { store } from "../../react/store";
 import { syncStatusAtom, LibrarySyncStatus, SyncStatus, SyncType } from '../../react/atoms/sync';
 import { ItemData, DeleteData, AttachmentDataWithMimeType, ZoteroItemReference, ZoteroCollection } from '../../react/types/zotero';
@@ -951,6 +951,7 @@ export async function syncZoteroDatabase(
                         });
                     }
                 }
+                await store.set(logoutAtom);
                 return;
             }
             // Continue with next library for other types of errors

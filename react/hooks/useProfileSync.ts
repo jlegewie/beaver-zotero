@@ -85,6 +85,9 @@ export const useProfileSync = () => {
                     setProfileWithPlan(updatedProfileData.profile);
                     setModels(updatedProfileData.model_configs);
                 } catch (migrationError: any) {
+                    if (migrationError instanceof SessionExpiredError || migrationError instanceof ZoteroInstanceMismatchError) {
+                        throw migrationError;
+                    }
                     logger(`useProfileSync: Migration failed: ${migrationError?.message}`, 3);
                     // Continue with original profile data even if migration fails
                     setProfileWithPlan(profileData.profile);
