@@ -294,28 +294,32 @@ const AddSourcesMenu: React.FC<{
         onNavigateToCollections: handleNavigateToCollections,
         onNavigateToTags: handleNavigateToTags,
         getRecentItems,
-        recentItemsLimit: RECENT_ITEMS_LIMIT
+        recentItemsLimit: RECENT_ITEMS_LIMIT,
+        verticalPosition
     });
 
     const librariesMenu = useLibrariesMenu({
         isActive: isMenuOpen && menuMode === 'libraries',
         searchQuery,
         searchableLibraryIds,
-        libraryMenuItemContext
+        libraryMenuItemContext,
+        verticalPosition
     });
 
     const collectionsMenu = useCollectionsMenu({
         isActive: isMenuOpen && menuMode === 'collections',
         searchQuery,
         searchableLibraryIds,
-        collectionMenuItemContext
+        collectionMenuItemContext,
+        verticalPosition
     });
 
     const tagsMenu = useTagsMenu({
         isActive: isMenuOpen && menuMode === 'tags',
         searchQuery,
         searchableLibraryIds,
-        tagMenuItemContext
+        tagMenuItemContext,
+        verticalPosition
     });
 
     const menuItems = menuMode === 'sources'
@@ -332,7 +336,7 @@ const AddSourcesMenu: React.FC<{
         // Get button position
         if (buttonRef.current) {
             const rect = buttonRef.current.getBoundingClientRect();
-            const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
+            const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom;
             setMenuPosition({
                 x: rect.left,
                 y,
@@ -400,6 +404,7 @@ const AddSourcesMenu: React.FC<{
                 useFixedPosition={true}
                 verticalPosition={verticalPosition}
                 width="250px"
+                maxHeight="300px"
                 onSearch={menuMode === 'sources' ? handleSearch : () => {}}
                 noResultsText={noResultsText}
                 placeholder={placeholderText}

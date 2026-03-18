@@ -4,7 +4,7 @@ import { fileUploader } from '../../src/services/FileUploader';
 import { isAuthenticatedAtom, logoutAtom, userAtom, isWaitingForProfileAtom } from '../atoms/auth';
 import { accountService } from '../../src/services/accountService';
 import { logger } from '../../src/utils/logger';
-import { ZoteroInstanceMismatchError, ServerError } from '../../react/types/apiErrors';
+import { SessionExpiredError, ZoteroInstanceMismatchError, ServerError } from '../../react/types/apiErrors';
 import { setModelsAtom } from '../atoms/models';
 import { isSidebarVisibleAtom, isPreferencePageVisibleAtom } from '../atoms/ui';
 import { serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
@@ -85,6 +85,9 @@ export const useProfileSync = () => {
                     setProfileWithPlan(updatedProfileData.profile);
                     setModels(updatedProfileData.model_configs);
                 } catch (migrationError: any) {
+                    if (migrationError instanceof SessionExpiredError || migrationError instanceof ZoteroInstanceMismatchError) {
+                        throw migrationError;
+                    }
                     logger(`useProfileSync: Migration failed: ${migrationError?.message}`, 3);
                     // Continue with original profile data even if migration fails
                     setProfileWithPlan(profileData.profile);
@@ -126,7 +129,11 @@ export const useProfileSync = () => {
             if (error instanceof ZoteroInstanceMismatchError) {
                 logger(`useProfileSync: Zotero instance mismatch for ${userId}. Signing out user.`, 2);
                 setIsProfileInvalid(true);
-                logout();
+                await logout();
+                return;
+            } else if (error instanceof SessionExpiredError) {
+                logger(`useProfileSync: Session expired during profile fetch for ${userId}. Signing out user.`, 2);
+                await logout();
                 return;
             } else if (error instanceof ServerError) {
                 logger(`useProfileSync: Server error during fetch for ${userId}: ${error.message}`, 3);

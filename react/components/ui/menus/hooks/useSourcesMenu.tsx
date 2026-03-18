@@ -16,6 +16,7 @@ interface UseSourcesMenuOptions {
     onNavigateToTags: (libraryId: number) => void;
     getRecentItems: () => Promise<Zotero.Item[]>;
     recentItemsLimit: number;
+    verticalPosition?: 'above' | 'below';
 }
 
 interface UseSourcesMenuResult {
@@ -32,7 +33,8 @@ export const useSourcesMenu = ({
     onNavigateToCollections,
     onNavigateToTags,
     getRecentItems,
-    recentItemsLimit
+    recentItemsLimit,
+    verticalPosition = 'above'
 }: UseSourcesMenuOptions): UseSourcesMenuResult => {
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
 
@@ -198,11 +200,17 @@ export const useSourcesMenu = ({
                 combinedItems.map(async (item) => await createSourceMenuItem(item, sourceMenuItemContext))
             );
 
-            const sections: SearchMenuItem[] = [
-                ...(filterItems.length > 1 ? filterItems : []),
-                ...(menuItemsCurrentItems.length > 0 ? [...menuItemsCurrentItems, currentItemsHeader] : []),
-                ...(menuItemsRecentItems.length > 0 ? [...menuItemsRecentItems, recentlyUsedHeader] : [])
-            ];
+            const sections: SearchMenuItem[] = verticalPosition === 'above'
+                ? [
+                    ...(filterItems.length > 1 ? filterItems : []),
+                    ...(menuItemsCurrentItems.length > 0 ? [...menuItemsCurrentItems, currentItemsHeader] : []),
+                    ...(menuItemsRecentItems.length > 0 ? [...menuItemsRecentItems, recentlyUsedHeader] : [])
+                ]
+                : [
+                    ...(filterItems.length > 1 ? [...filterItems].reverse() : []),
+                    ...(menuItemsCurrentItems.length > 0 ? [currentItemsHeader, ...menuItemsCurrentItems] : []),
+                    ...(menuItemsRecentItems.length > 0 ? [recentlyUsedHeader, ...menuItemsRecentItems] : [])
+                ];
 
             if (!isCancelled) {
                 setMenuItems(sections);
@@ -223,7 +231,8 @@ export const useSourcesMenu = ({
         onNavigateToCollections,
         onNavigateToTags,
         getRecentItems,
-        recentItemsLimit
+        recentItemsLimit,
+        verticalPosition
     ]);
 
     useEffect(() => {
@@ -247,7 +256,14 @@ export const useSourcesMenu = ({
             }
 
             if (!isCancelled) {
-                setMenuItems(items.length > 0 ? [...items, searchResultsHeader] : []);
+                if (items.length > 0) {
+                    setMenuItems(verticalPosition === 'above'
+                        ? [...items, searchResultsHeader]
+                        : [searchResultsHeader, ...items]
+                    );
+                } else {
+                    setMenuItems([]);
+                }
             }
         };
 
@@ -256,7 +272,7 @@ export const useSourcesMenu = ({
         return () => {
             isCancelled = true;
         };
-    }, [isActive, searchResults, sourceMenuItemContext]);
+    }, [isActive, searchResults, sourceMenuItemContext, verticalPosition]);
 
     return { menuItems };
 };

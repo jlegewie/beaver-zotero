@@ -8,6 +8,7 @@ interface UseCollectionsMenuOptions {
     searchQuery: string;
     searchableLibraryIds: number[];
     collectionMenuItemContext: CollectionMenuItemContext;
+    verticalPosition?: 'above' | 'below';
 }
 
 interface UseCollectionsMenuResult {
@@ -18,7 +19,8 @@ export const useCollectionsMenu = ({
     isActive,
     searchQuery,
     searchableLibraryIds,
-    collectionMenuItemContext
+    collectionMenuItemContext,
+    verticalPosition = 'above'
 }: UseCollectionsMenuOptions): UseCollectionsMenuResult => {
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
     const [collections, setCollections] = useState<Zotero.Collection[]>([]);
@@ -106,8 +108,12 @@ export const useCollectionsMenu = ({
             headerLabel = library ? `Collections in ${library.name}` : headerLabel;
         }
         const header: SearchMenuItem = { label: headerLabel, isGroupHeader: true, onClick: () => {} };
-        setMenuItems([...items.reverse(), header]);
-    }, [isActive, searchQuery, collections, collectionMenuItemContext, activeLibraryId]);
+        if (verticalPosition === 'above') {
+            setMenuItems([...items.reverse(), header]);
+        } else {
+            setMenuItems([header, ...items]);
+        }
+    }, [isActive, searchQuery, collections, collectionMenuItemContext, activeLibraryId, verticalPosition]);
 
     return { menuItems };
 };

@@ -9,6 +9,7 @@ interface UseTagsMenuOptions {
     searchQuery: string;
     searchableLibraryIds: number[];
     tagMenuItemContext: TagMenuItemContext;
+    verticalPosition?: 'above' | 'below';
 }
 
 interface UseTagsMenuResult {
@@ -19,7 +20,8 @@ export const useTagsMenu = ({
     isActive,
     searchQuery,
     searchableLibraryIds,
-    tagMenuItemContext
+    tagMenuItemContext,
+    verticalPosition = 'above'
 }: UseTagsMenuOptions): UseTagsMenuResult => {
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
     const [tags, setTags] = useState<ZoteroTag[]>([]);
@@ -139,8 +141,12 @@ export const useTagsMenu = ({
         }
 
         const header: SearchMenuItem = { label: headerLabel, isGroupHeader: true, onClick: () => {} };
-        setMenuItems([...items.reverse(), header]);
-    }, [isActive, searchQuery, tags, tagMenuItemContext, activeLibraryId]);
+        if (verticalPosition === 'above') {
+            setMenuItems([...items.reverse(), header]);
+        } else {
+            setMenuItems([header, ...[...items].reverse()]);
+        }
+    }, [isActive, searchQuery, tags, tagMenuItemContext, activeLibraryId, verticalPosition]);
 
     return { menuItems };
 };
