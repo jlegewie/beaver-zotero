@@ -663,28 +663,30 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         >
                             <span className="font-color-primary font-medium">{getActionLabel(toolName)}</span>
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
+                            {action?.proposed_data?.library_id && action?.proposed_data?.zotero_key && (
+                                <Tooltip content={toolName === 'edit_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
+                                    <span
+                                        className="font-color-secondary ml-15 scale-11"
+                                        style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
+                                        role="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            if (toolName === 'edit_note') {
+                                                openNoteByKey(action?.proposed_data?.library_id, action?.proposed_data?.zotero_key);
+                                            } else {
+                                                revealSource({ library_id: action?.proposed_data?.library_id, zotero_key: action?.proposed_data?.zotero_key });
+                                            }
+                                        }}
+                                    >
+                                        <Icon icon={ArrowUpRightIcon} />
+                                    </span>
+                                </Tooltip>
+                            )}
                         </div>
                     </div>
-                    
+
                 </button>
-            
-                {/* Reveal button */}
-                {action?.proposed_data?.library_id && action?.proposed_data?.zotero_key && (
-                    <Tooltip content={toolName === 'edit_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
-                        <IconButton
-                            variant="ghost-secondary"
-                            icon={ArrowUpRightIcon}
-                            className="font-color-secondary ml-2 mt-015 scale-11"
-                            onClick={() => {
-                                if (toolName === 'edit_note') {
-                                    openNoteByKey(action?.proposed_data?.library_id, action?.proposed_data?.zotero_key);
-                                } else {
-                                    revealSource({ library_id: action?.proposed_data?.library_id, zotero_key: action?.proposed_data?.zotero_key });
-                                }
-                            }}
-                        />
-                    </Tooltip>
-                )}
 
                 <div className="flex-1" />
 
@@ -1087,6 +1089,8 @@ const ActionPreview: React.FC<{
                 occurrencesReplaced={occurrencesReplaced}
                 warnings={warnings}
                 status={status}
+                libraryId={previewData.actionData.library_id}
+                zoteroKey={previewData.actionData.zotero_key}
             />
         );
     }
