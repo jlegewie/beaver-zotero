@@ -175,4 +175,19 @@ describe('ApiService authentication recovery', () => {
 
         expect(fetchMock).not.toHaveBeenCalled();
     });
+
+    it('throws SessionExpiredError when getSession surfaces a non-retryable auth failure', async () => {
+        mockSupabase.auth.getSession.mockResolvedValue({
+            data: {
+                session: null,
+            },
+            error: new AuthApiError('Invalid Refresh Token: Already Used', 400, 'refresh_token_not_found'),
+        });
+
+        await expect(service.post('/api/v1/account/profile', {
+            zotero_local_id: 'local-id',
+        })).rejects.toBeInstanceOf(SessionExpiredError);
+
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
 });

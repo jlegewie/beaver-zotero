@@ -159,7 +159,7 @@ export class ApiService {
 
         if (error) {
             logger(`Error getting session: ${error.message}`, 2);
-            throw this.createSessionRefreshError('Error retrieving user session');
+            throw this.classifyRefreshError(error);
         }
 
         if (!data.session) {
