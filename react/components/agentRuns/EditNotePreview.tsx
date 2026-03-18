@@ -190,13 +190,11 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
                 const newHasHighlight = newSegs.some(s => s.highlighted);
 
                 if (!oldHasHighlight && newHasHighlight) {
-                    // Pure addition within line: old text is just context, show only the added part
-                    diffLines.push({ type: 'context', text: deletions[k] });
+                    // Pure addition within line: show only the addition with truncated context prefix
                     diffLines.push({ type: 'addition', text: additions[k], segments: truncateSegments(newSegs) });
                 } else if (oldHasHighlight && !newHasHighlight) {
-                    // Pure deletion within line: new text is just context, show only the removed part
+                    // Pure deletion within line: show only the deletion with truncated context suffix
                     diffLines.push({ type: 'deletion', text: deletions[k], segments: truncateSegments(oldSegs) });
-                    diffLines.push({ type: 'context', text: additions[k] });
                 } else {
                     // Regular modification: show both deletion and addition with highlights
                     diffLines.push({ type: 'deletion', text: deletions[k], segments: truncateSegments(oldSegs) });
