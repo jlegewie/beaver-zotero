@@ -54,7 +54,7 @@ import {
     DollarCircleIcon,
     GlobalSearchIcon,
 } from '../icons/icons';
-import { revealSource } from '../../utils/sourceUtils';
+import { revealSource, openNoteByKey } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
@@ -200,16 +200,30 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     toolcallId,
     toolName,
     runId,
-    pendingApproval,
+    pendingApproval: pendingApprovalProp,
 }) => {
-    const isAwaitingApproval = pendingApproval !== null;
     const [isHovered, setIsHovered] = useState(false);
+
+    // Get agent actions for this tool call, scoped to this run
+    // (tool_call_ids can collide across runs, so we filter by run_id)
+    const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
+    const actions = getAgentActionsByToolcall(toolcallId, a => a.run_id === runId);
+
+    // Primary action for backward compatibility (used for single-action tools)
+    const action = actions.length > 0 ? actions[0] : null;
+
+    // Guard against cross-run tool_call_id collision:
+    // If this run already has an action in a final state (applied/rejected/undone/error),
+    // ignore any pending approval (it belongs to a different run with the same tool_call_id)
+    const actionInFinalState = action && action.status !== 'pending';
+    const pendingApproval = actionInFinalState ? null : pendingApprovalProp;
+    const isAwaitingApproval = pendingApproval !== null;
 
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
     const expansionKey = `${runId}:${toolcallId}`;
     const expansionState = useAtomValue(toolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
-    
+
     // Check if state exists at render time (not in effect) to avoid dependency on entire expansionState
     const hasExistingState = expansionState[expansionKey] !== undefined;
     const isExpanded = expansionState[expansionKey] ?? isAwaitingApproval;
@@ -228,7 +242,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             }
             return;
         }
-        
+
         // After first mount, sync when isAwaitingApproval actually changes
         if (prevAwaitingRef.current !== isAwaitingApproval) {
             setExpanded({ key: expansionKey, expanded: isAwaitingApproval });
@@ -249,18 +263,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Track previous pending approval to detect external removals
     const prevPendingApprovalRef = useRef<PendingApproval | null>(pendingApproval);
 
-    // Get agent actions for this tool call
-    const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
-    const actions = getAgentActionsByToolcall(toolcallId);
-    
     // Track if the run is still pending (needed to detect cancel vs external approval)
     const isRunPending = useAtomValue(isWSChatPendingAtom);
-    
+
     // Determine if this is a multi-action tool call (create_items with multiple items)
     const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
-    
-    // Primary action for backward compatibility (used for single-action tools)
-    const action = actions.length > 0 ? actions[0] : null;
 
     // Atoms for state management
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
@@ -657,12 +664,18 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             
                 {/* Reveal button */}
                 {action?.proposed_data?.library_id && action?.proposed_data?.zotero_key && (
-                    <Tooltip content='Reveal in Zotero' singleLine>
+                    <Tooltip content={toolName === 'edit_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
                         <IconButton
                             variant="ghost-secondary"
                             icon={ArrowUpRightIcon}
                             className="font-color-secondary ml-2 mt-015 scale-11"
-                            onClick={() => revealSource({ library_id: action?.proposed_data?.library_id, zotero_key: action?.proposed_data?.zotero_key })}
+                            onClick={() => {
+                                if (toolName === 'edit_note') {
+                                    openNoteByKey(action?.proposed_data?.library_id, action?.proposed_data?.zotero_key);
+                                } else {
+                                    revealSource({ library_id: action?.proposed_data?.library_id, zotero_key: action?.proposed_data?.zotero_key });
+                                }
+                            }}
                         />
                     </Tooltip>
                 )}

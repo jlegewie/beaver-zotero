@@ -290,7 +290,29 @@ export async function openSource(source: SourceAttachment | CitationData) {
 
     // Notes
     if (item.isNote()) {
-        // @ts-ignore selectItem exists
-        await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
+        await openNoteById(item.id);
+    }
+}
+
+/**
+ * Open a note in the Zotero editor (tab or window based on user preference).
+ * Uses Zotero.Notes.open() which respects the `extensions.zotero.openNoteInNewWindow` setting.
+ */
+export async function openNoteById(itemId: number): Promise<void> {
+    try {
+        await (Zotero as any).Notes.open(itemId);
+    } catch {
+        // Fallback for older Zotero versions without Notes.open
+        Zotero.getActiveZoteroPane()?.openNoteWindow?.(itemId);
+    }
+}
+
+/**
+ * Open a note by library ID and zotero key.
+ */
+export async function openNoteByKey(libraryId: number, zoteroKey: string): Promise<void> {
+    const itemId = Zotero.Items.getIDFromLibraryAndKey(libraryId, zoteroKey);
+    if (itemId) {
+        await openNoteById(itemId);
     }
 }

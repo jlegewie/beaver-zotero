@@ -186,8 +186,22 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
             const pairCount = Math.min(deletions.length, additions.length);
             for (let k = 0; k < pairCount; k++) {
                 const [oldSegs, newSegs] = computeCharDiff(deletions[k], additions[k]);
-                diffLines.push({ type: 'deletion', text: deletions[k], segments: truncateSegments(oldSegs) });
-                diffLines.push({ type: 'addition', text: additions[k], segments: truncateSegments(newSegs) });
+                const oldHasHighlight = oldSegs.some(s => s.highlighted);
+                const newHasHighlight = newSegs.some(s => s.highlighted);
+
+                if (!oldHasHighlight && newHasHighlight) {
+                    // Pure addition within line: old text is just context, show only the added part
+                    diffLines.push({ type: 'context', text: deletions[k] });
+                    diffLines.push({ type: 'addition', text: additions[k], segments: truncateSegments(newSegs) });
+                } else if (oldHasHighlight && !newHasHighlight) {
+                    // Pure deletion within line: new text is just context, show only the removed part
+                    diffLines.push({ type: 'deletion', text: deletions[k], segments: truncateSegments(oldSegs) });
+                    diffLines.push({ type: 'context', text: additions[k] });
+                } else {
+                    // Regular modification: show both deletion and addition with highlights
+                    diffLines.push({ type: 'deletion', text: deletions[k], segments: truncateSegments(oldSegs) });
+                    diffLines.push({ type: 'addition', text: additions[k], segments: truncateSegments(newSegs) });
+                }
             }
             // Remaining unpaired lines
             for (let k = pairCount; k < deletions.length; k++) {

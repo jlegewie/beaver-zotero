@@ -517,7 +517,19 @@ export const upsertAgentActionsAtom = atom(
                 const update = newActionsById.get(existing.id);
                 if (update) {
                     newActionsById.delete(existing.id); // Mark as processed
-                    return { ...existing, ...update };
+                    const merged = { ...existing, ...update };
+                    // Preserve existing proposed_data when update has empty proposed_data
+                    // (backend may send status updates without full proposed_data)
+                    if (existing.proposed_data && Object.keys(existing.proposed_data).length > 0 &&
+                        (!update.proposed_data || Object.keys(update.proposed_data).length === 0)) {
+                        merged.proposed_data = existing.proposed_data;
+                    }
+                    // Same for result_data
+                    if (existing.result_data && Object.keys(existing.result_data).length > 0 &&
+                        (!update.result_data || Object.keys(update.result_data).length === 0)) {
+                        merged.result_data = existing.result_data;
+                    }
+                    return merged;
                 }
                 return existing;
             });
