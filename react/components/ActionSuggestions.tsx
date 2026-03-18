@@ -150,7 +150,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     // Check if the current library is supported
     const currentLibraryId = ctx.zotero.isLibraryTab
         ? ctx.zotero.libraryView.libraryId
-        : ctx.zotero.readerAttachment?.libraryID ?? null;
+        : ctx.zotero.readerAttachment?.libraryID ?? ctx.zotero.noteItem?.libraryID ?? null;
     const isLibrarySupported = currentLibraryId && searchableLibraryIds.includes(currentLibraryId);
 
     // Determine the single winning target type — never mix types
