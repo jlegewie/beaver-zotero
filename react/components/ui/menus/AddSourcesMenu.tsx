@@ -404,6 +404,7 @@ const AddSourcesMenu: React.FC<{
                 useFixedPosition={true}
                 verticalPosition={verticalPosition}
                 width="250px"
+                maxHeight="300px"
                 onSearch={menuMode === 'sources' ? handleSearch : () => {}}
                 noResultsText={noResultsText}
                 placeholder={placeholderText}
