@@ -66,13 +66,16 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
         <div className="edit-note-preview">
             <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1">
-                    <div className="text-sm font-color-primary font-medium px-3 py-1">
-                        {isDelete ? 'Delete' : 'Replace'}
-                        {replaceAll ? ' (all occurrences)' : ''}
-                        {occurrencesReplaced != null && occurrencesReplaced > 0
-                            ? ` — ${occurrencesReplaced} occurrence${occurrencesReplaced === 1 ? '' : 's'}`
-                            : ''}
-                    </div>
+                    {/* Only show header when replace_all is true (with occurrence count) */}
+                    {replaceAll && (
+                        <div className="text-sm font-color-primary font-medium px-3 py-1">
+                            {isDelete ? 'Delete' : 'Replace'}
+                            {' (all occurrences)'}
+                            {occurrencesReplaced != null && occurrencesReplaced > 0
+                                ? ` — ${occurrencesReplaced} occurrence${occurrencesReplaced === 1 ? '' : 's'}`
+                                : ''}
+                        </div>
+                    )}
                     <div className="diff-container">
                         {diffLines.map((line, i) => (
                             <div key={i} className={`diff-line ${getLineClass(line.type)}`}>
