@@ -23,10 +23,12 @@ import { OrganizeItemsPreview } from './OrganizeItemsPreview';
 import { CreateItemsPreview } from './CreateItemsPreview';
 import { ConfirmExtractionPreview } from './ConfirmExtractionPreview';
 import { ConfirmExternalSearchPreview } from './ConfirmExternalSearchPreview';
+import { EditNotePreview } from './EditNotePreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
 import { executeCreateItemActions, undoCreateItemActions } from '../../utils/createItemActions';
+import { executeEditNoteAction, undoEditNoteAction } from '../../utils/editNoteActions';
 import type { CreateItemProposedData } from '../../types/agentActions/items';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
@@ -278,7 +280,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Determine if this action type has an associated item
     const hasAssociatedItem =
         toolName === 'edit_metadata' ||
-        toolName === 'edit_item';
+        toolName === 'edit_item' ||
+        toolName === 'edit_note';
 
     // Fetch item title for actions that have specific items
     useEffect(() => {
@@ -402,6 +405,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     result_data: result,
                 }]);
                 logger(`AgentActionView: Applied organize_items action ${action!.id}`, 1);
+            } else if (toolName === 'edit_note') {
+                const result = await executeEditNoteAction(action!);
+                await ackAgentActions(runId, [{
+                    action_id: action!.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied edit_note action ${action!.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
                 // Handle batch operations for multiple items
                 const actionsToApply = actions.filter(a => a.status !== 'applied');
@@ -511,11 +521,15 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 await undoOrganizeItemsAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone organize_items action ${action.id}`, 1);
+            } else if (toolName === 'edit_note') {
+                await undoEditNoteAction(action);
+                undoAgentAction(action.id);
+                logger(`AgentActionView: Undone edit_note action ${action.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
                 // Handle batch undo for multiple items
                 const actionsToUndo = actions.filter(a => a.status === 'applied');
                 if (actionsToUndo.length === 0) return;
-                
+
                 const batchResult = await undoCreateItemActions(actionsToUndo);
                 
                 // Mark successfully undone actions and clear external reference mapping
@@ -572,6 +586,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         const getToolIcon = () => {
             if (toolName === 'edit_metadata') return PropertyEditIcon;
             if (toolName === 'edit_item') return PropertyEditIcon;
+            if (toolName === 'edit_note') return PropertyEditIcon;
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
             if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
@@ -810,6 +825,8 @@ function getActionLabel(toolName: string): string {
         case 'edit_metadata':
         case 'edit_item':
             return 'Edit';
+        case 'edit_note':
+            return 'Edit Note';
         case 'create_item':
         case 'create_items':
             return 'Import';
@@ -835,6 +852,7 @@ function getActionTitle(
     switch (toolName) {
         case 'edit_metadata':
         case 'edit_item':
+        case 'edit_note':
             return itemTitle ? itemTitle : null;
         case 'create_collection':
             return actionData?.name ?? actionData?.proposed_data?.name ?? null;
@@ -1026,10 +1044,29 @@ const ActionPreview: React.FC<{
                 </div>
             );
         }
-        
+
         return (
             <CreateItemsPreview
                 actions={actions}
+                status={status}
+            />
+        );
+    }
+
+    if (toolName === 'edit_note' || previewData.actionType === 'edit_note') {
+        const oldString = previewData.actionData.old_string || '';
+        const newString = previewData.actionData.new_string || '';
+        const replaceAll = previewData.actionData.replace_all ?? false;
+        const occurrencesReplaced = previewData.resultData?.occurrences_replaced;
+        const warnings = previewData.resultData?.warnings;
+
+        return (
+            <EditNotePreview
+                oldString={oldString}
+                newString={newString}
+                replaceAll={replaceAll}
+                occurrencesReplaced={occurrencesReplaced}
+                warnings={warnings}
                 status={status}
             />
         );

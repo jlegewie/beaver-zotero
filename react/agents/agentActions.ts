@@ -857,6 +857,9 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
     } else if (actionType === 'confirm_external_search') {
         // No Zotero data fetching needed — cost info is entirely in proposed_data
         currentValue = undefined;
+    } else if (actionType === 'edit_note') {
+        // No extra Zotero data fetching needed — old_string/new_string are in proposed_data
+        currentValue = undefined;
     }
 
     return {

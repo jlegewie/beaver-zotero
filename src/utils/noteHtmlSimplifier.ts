@@ -546,11 +546,26 @@ export function rebuildDataCitationItems(html: string): string {
 
 /**
  * Check if a note is currently open in the Zotero editor.
+ *
+ * Zotero's `_editorInstances` array can contain stale entries: when a note tab
+ * is closed, `disconnectedCallback` → `destroy()` runs but never calls
+ * `EditorInstance.uninit()`, so the instance stays in the array. We guard
+ * against this by also checking that the editor's iframe is still connected
+ * to the DOM.
  */
 export function isNoteInEditor(itemId: number): boolean {
     try {
         return (Zotero as any).Notes._editorInstances.some(
-            (instance: any) => instance._item && instance._item.id === itemId
+            (instance: any) => {
+                if (!instance._item || instance._item.id !== itemId) return false;
+                // Verify the editor is still alive (iframe attached to the DOM)
+                try {
+                    const frameElement = instance._iframeWindow?.frameElement;
+                    return frameElement?.isConnected === true;
+                } catch {
+                    return false;
+                }
+            }
         );
     } catch {
         return false;

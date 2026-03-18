@@ -898,17 +898,23 @@ describe('checkDuplicateCitations', () => {
 // =============================================================================
 
 describe('isNoteInEditor', () => {
-    it('returns true when note is in editor', () => {
-        (globalThis as any).Zotero.Notes._editorInstances = [
-            { _item: { id: 42 } },
-        ];
+    const connectedInstance = (id: number) => ({
+        _item: { id },
+        _iframeWindow: { frameElement: { isConnected: true } },
+    });
+
+    const disconnectedInstance = (id: number) => ({
+        _item: { id },
+        _iframeWindow: { frameElement: { isConnected: false } },
+    });
+
+    it('returns true when note is in a connected editor', () => {
+        (globalThis as any).Zotero.Notes._editorInstances = [connectedInstance(42)];
         expect(isNoteInEditor(42)).toBe(true);
     });
 
     it('returns false when note is not in editor', () => {
-        (globalThis as any).Zotero.Notes._editorInstances = [
-            { _item: { id: 99 } },
-        ];
+        (globalThis as any).Zotero.Notes._editorInstances = [connectedInstance(99)];
         expect(isNoteInEditor(42)).toBe(false);
     });
 
@@ -919,7 +925,34 @@ describe('isNoteInEditor', () => {
 
     it('returns false when _editorInstances is undefined', () => {
         (globalThis as any).Zotero.Notes._editorInstances = undefined;
-        // Should not throw, returns false
+        expect(isNoteInEditor(42)).toBe(false);
+    });
+
+    it('returns false for stale instance (iframe disconnected from DOM)', () => {
+        (globalThis as any).Zotero.Notes._editorInstances = [disconnectedInstance(42)];
+        expect(isNoteInEditor(42)).toBe(false);
+    });
+
+    it('returns false when _iframeWindow is null (destroyed editor)', () => {
+        (globalThis as any).Zotero.Notes._editorInstances = [
+            { _item: { id: 42 }, _iframeWindow: null },
+        ];
+        expect(isNoteInEditor(42)).toBe(false);
+    });
+
+    it('returns false when frameElement is missing', () => {
+        (globalThis as any).Zotero.Notes._editorInstances = [
+            { _item: { id: 42 }, _iframeWindow: {} },
+        ];
+        expect(isNoteInEditor(42)).toBe(false);
+    });
+
+    it('returns false when accessing _iframeWindow throws', () => {
+        const instance = {
+            _item: { id: 42 },
+            get _iframeWindow() { throw new Error('dead object'); },
+        };
+        (globalThis as any).Zotero.Notes._editorInstances = [instance];
         expect(isNoteInEditor(42)).toBe(false);
     });
 });
