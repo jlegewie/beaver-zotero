@@ -17,10 +17,21 @@ interface EditNotePreviewProps {
     status?: ActionStatus;
 }
 
-/**
- * Preview component for edit_note actions.
- * Shows a diff-style before/after comparison of the string replacement.
- */
+// ---- Diff types ----
+
+interface DiffSegment {
+    text: string;
+    highlighted: boolean;
+}
+
+interface DiffLine {
+    type: 'context' | 'addition' | 'deletion' | 'separator';
+    text: string;
+    segments?: DiffSegment[];
+}
+
+// ---- Component ----
+
 export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     oldString,
     newString,
@@ -34,10 +45,26 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     const isError = status === 'error';
     const isDelete = newString === '';
 
+    const strippedOld = stripHtmlTags(oldString);
+    const strippedNew = stripHtmlTags(newString);
+    const diffLines = computeDiff(strippedOld, strippedNew);
+
+    function getLineClass(type: DiffLine['type']): string {
+        switch (type) {
+            case 'deletion':
+                return isApplied ? 'diff-deletion' : isRejectedOrUndone ? 'diff-neutral' : 'diff-deletion';
+            case 'addition':
+                return isApplied ? 'diff-addition-applied' : isRejectedOrUndone ? 'diff-ghosted' : isError ? 'diff-error' : 'diff-addition';
+            case 'context':
+                return 'diff-context';
+            case 'separator':
+                return 'diff-separator';
+        }
+    }
+
     return (
         <div className="edit-note-preview">
             <div className="flex flex-col gap-3">
-                {/* String replacement diff */}
                 <div className="flex flex-col gap-1">
                     <div className="text-sm font-color-primary font-medium px-3 py-1">
                         {isDelete ? 'Delete' : 'Replace'}
@@ -47,20 +74,17 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                             : ''}
                     </div>
                     <div className="diff-container">
-                        {/* Old string - deletion style */}
-                        <div className={`diff-line ${isApplied ? 'diff-deletion' : isRejectedOrUndone ? 'diff-neutral' : 'diff-deletion'}`}>
-                            <span className="diff-content">
-                                {truncateValue(stripHtmlTags(oldString))}
-                            </span>
-                        </div>
-                        {/* New string - addition style (skip if delete) */}
-                        {!isDelete && (
-                            <div className={`diff-line ${isApplied ? 'diff-addition-applied' : isRejectedOrUndone ? 'diff-ghosted' : isError ? 'diff-error' : 'diff-addition'}`}>
+                        {diffLines.map((line, i) => (
+                            <div key={i} className={`diff-line ${getLineClass(line.type)}`}>
                                 <span className="diff-content">
-                                    {truncateValue(stripHtmlTags(newString))}
+                                    {line.type === 'separator'
+                                        ? line.text
+                                        : line.segments
+                                            ? renderSegments(line.segments, line.type)
+                                            : line.text}
                                 </span>
                             </div>
-                        )}
+                        ))}
                     </div>
                 </div>
 
@@ -79,29 +103,242 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     );
 };
 
+// ---- Rendering helpers ----
+
+function renderSegments(segments: DiffSegment[], lineType: DiffLine['type']): React.ReactNode {
+    return segments.map((seg, i) => {
+        if (seg.highlighted) {
+            const className = lineType === 'deletion' ? 'diff-char-del' : 'diff-char-add';
+            return <span key={i} className={className}>{seg.text}</span>;
+        }
+        return <React.Fragment key={i}>{seg.text}</React.Fragment>;
+    });
+}
+
+// ---- Diff computation ----
+
+/**
+ * Compute a line-level diff with character-level highlighting for modified lines.
+ * Shows limited context around changes.
+ */
+function computeDiff(oldText: string, newText: string): DiffLine[] {
+    // Edge cases
+    if (oldText === newText) {
+        return [{ type: 'context', text: truncateContext(oldText) }];
+    }
+    if (newText === '') {
+        return oldText.split('\n').map(line => ({ type: 'deletion' as const, text: line }));
+    }
+    if (oldText === '') {
+        return newText.split('\n').map(line => ({ type: 'addition' as const, text: line }));
+    }
+
+    const oldLines = oldText.split('\n');
+    const newLines = newText.split('\n');
+
+    // LCS table for line-level diff
+    const m = oldLines.length;
+    const n = newLines.length;
+    const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            if (oldLines[i - 1] === newLines[j - 1]) {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+                dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+            }
+        }
+    }
+
+    // Backtrack to get raw diff operations
+    const rawOps: Array<{ type: 'context' | 'addition' | 'deletion'; text: string }> = [];
+    let i = m, j = n;
+    while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+            rawOps.unshift({ type: 'context', text: oldLines[i - 1] });
+            i--; j--;
+        } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+            rawOps.unshift({ type: 'addition', text: newLines[j - 1] });
+            j--;
+        } else {
+            rawOps.unshift({ type: 'deletion', text: oldLines[i - 1] });
+            i--;
+        }
+    }
+
+    // Pair consecutive deletion+addition blocks for character-level diff
+    const diffLines: DiffLine[] = [];
+    let idx = 0;
+    while (idx < rawOps.length) {
+        if (rawOps[idx].type === 'deletion') {
+            const deletions: string[] = [];
+            while (idx < rawOps.length && rawOps[idx].type === 'deletion') {
+                deletions.push(rawOps[idx].text);
+                idx++;
+            }
+            const additions: string[] = [];
+            while (idx < rawOps.length && rawOps[idx].type === 'addition') {
+                additions.push(rawOps[idx].text);
+                idx++;
+            }
+            // Pair up for char-level diff
+            const pairCount = Math.min(deletions.length, additions.length);
+            for (let k = 0; k < pairCount; k++) {
+                const [oldSegs, newSegs] = computeCharDiff(deletions[k], additions[k]);
+                diffLines.push({ type: 'deletion', text: deletions[k], segments: truncateSegments(oldSegs) });
+                diffLines.push({ type: 'addition', text: additions[k], segments: truncateSegments(newSegs) });
+            }
+            // Remaining unpaired lines
+            for (let k = pairCount; k < deletions.length; k++) {
+                diffLines.push({ type: 'deletion', text: deletions[k] });
+            }
+            for (let k = pairCount; k < additions.length; k++) {
+                diffLines.push({ type: 'addition', text: additions[k] });
+            }
+        } else {
+            diffLines.push({ type: rawOps[idx].type, text: rawOps[idx].text });
+            idx++;
+        }
+    }
+
+    return filterContext(diffLines, 1);
+}
+
+/**
+ * Compute character-level diff between two lines.
+ * Finds the common prefix and suffix, highlights only the changed middle.
+ */
+function computeCharDiff(oldLine: string, newLine: string): [DiffSegment[], DiffSegment[]] {
+    // Find common prefix
+    let prefixLen = 0;
+    while (prefixLen < oldLine.length && prefixLen < newLine.length && oldLine[prefixLen] === newLine[prefixLen]) {
+        prefixLen++;
+    }
+
+    // Find common suffix (not overlapping with prefix)
+    let suffixLen = 0;
+    while (
+        suffixLen < oldLine.length - prefixLen &&
+        suffixLen < newLine.length - prefixLen &&
+        oldLine[oldLine.length - 1 - suffixLen] === newLine[newLine.length - 1 - suffixLen]
+    ) {
+        suffixLen++;
+    }
+
+    const prefix = oldLine.substring(0, prefixLen);
+    const oldMiddle = oldLine.substring(prefixLen, oldLine.length - suffixLen);
+    const newMiddle = newLine.substring(prefixLen, newLine.length - suffixLen);
+    const suffix = oldLine.substring(oldLine.length - suffixLen);
+
+    const oldSegments: DiffSegment[] = [];
+    const newSegments: DiffSegment[] = [];
+
+    if (prefix) {
+        oldSegments.push({ text: prefix, highlighted: false });
+        newSegments.push({ text: prefix, highlighted: false });
+    }
+    if (oldMiddle) oldSegments.push({ text: oldMiddle, highlighted: true });
+    if (newMiddle) newSegments.push({ text: newMiddle, highlighted: true });
+    if (suffix) {
+        oldSegments.push({ text: suffix, highlighted: false });
+        newSegments.push({ text: suffix, highlighted: false });
+    }
+
+    // Fallback: if no segments produced, highlight the whole line
+    if (oldSegments.length === 0) oldSegments.push({ text: oldLine || ' ', highlighted: true });
+    if (newSegments.length === 0) newSegments.push({ text: newLine || ' ', highlighted: true });
+
+    return [oldSegments, newSegments];
+}
+
+/**
+ * Truncate long unchanged segments around the highlighted change.
+ * Keeps up to maxContext chars of prefix/suffix for readability.
+ */
+function truncateSegments(segments: DiffSegment[], maxContext: number = 50): DiffSegment[] {
+    if (segments.length <= 1) return segments;
+
+    return segments.map((seg, i) => {
+        if (seg.highlighted) return seg;
+
+        // First segment (prefix): show the end portion
+        if (i === 0 && seg.text.length > maxContext) {
+            return { ...seg, text: '…' + seg.text.slice(-maxContext) };
+        }
+        // Last segment (suffix): show the start portion
+        if (i === segments.length - 1 && seg.text.length > maxContext) {
+            return { ...seg, text: seg.text.slice(0, maxContext) + '…' };
+        }
+        // Middle non-highlighted segment: truncate both ends
+        if (seg.text.length > maxContext * 2) {
+            return { ...seg, text: seg.text.slice(0, maxContext) + '…' + seg.text.slice(-maxContext) };
+        }
+        return seg;
+    });
+}
+
+/**
+ * Filter context lines: keep only `contextSize` lines around changes.
+ * Insert separators where context was skipped.
+ */
+function filterContext(lines: DiffLine[], contextSize: number): DiffLine[] {
+    const isChange = lines.map(l => l.type !== 'context');
+
+    // If everything is a change (no context to filter), return as-is
+    if (lines.length === 0 || isChange.every(Boolean)) return lines;
+
+    // Mark which lines to keep (changes + adjacent context)
+    const keep = new Array(lines.length).fill(false);
+    for (let i = 0; i < lines.length; i++) {
+        if (isChange[i]) {
+            keep[i] = true;
+            for (let j = 1; j <= contextSize && i - j >= 0; j++) keep[i - j] = true;
+            for (let j = 1; j <= contextSize && i + j < lines.length; j++) keep[i + j] = true;
+        }
+    }
+
+    const result: DiffLine[] = [];
+    let skippedSinceLastKept = false;
+
+    for (let i = 0; i < lines.length; i++) {
+        if (keep[i]) {
+            if (skippedSinceLastKept) {
+                result.push({ type: 'separator', text: '⋯' });
+                skippedSinceLastKept = false;
+            }
+            if (lines[i].type === 'context') {
+                result.push({ ...lines[i], text: truncateContext(lines[i].text) });
+            } else {
+                result.push(lines[i]);
+            }
+        } else {
+            skippedSinceLastKept = true;
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Truncate context lines to a reasonable length.
+ */
+function truncateContext(text: string, maxLength: number = 80): string {
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '…';
+}
+
 /**
  * Strip HTML tags for display, keeping just the text content.
  * Preserves self-closing tags like <citation/> as-is since they're meaningful.
  */
 function stripHtmlTags(html: string): string {
-    // Keep simplified tags like <citation/>, <annotation/>, <image/> as-is
-    // Only strip standard HTML tags like <p>, <strong>, <em>, etc.
     return html
         .replace(/<\/(p|div|h[1-6]|li|tr|blockquote)>/gi, '\n')
         .replace(/<(br|hr)\s*\/?>/gi, '\n')
         .replace(/<(?!\/?(?:citation|annotation|image)\b)[^>]+>/g, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
-}
-
-/**
- * Truncate long values for display
- */
-function truncateValue(value: string, maxLength: number = 300): string {
-    if (value.length <= maxLength) {
-        return value;
-    }
-    return value.substring(0, maxLength) + '...';
 }
 
 export default EditNotePreview;

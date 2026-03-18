@@ -2247,6 +2247,38 @@
     white-space: pre-wrap;
 }
 
+/* Context lines in diff - very subtle, no colored border */
+[id^="beaver-pane-"] .diff-context {
+    background-color: rgba(128, 128, 128, 0.04);
+    border-left-color: transparent !important;
+    color: var(--fill-secondary);
+    opacity: 0.7;
+}
+
+/* Separator between non-adjacent hunks */
+[id^="beaver-pane-"] .diff-separator {
+    background-color: transparent;
+    border-left-color: transparent !important;
+    color: var(--fill-tertiary);
+    opacity: 0.5;
+    font-size: 0.75rem;
+    padding: 1px 8px;
+}
+
+/* Character-level highlight for changed chars within deletion lines */
+[id^="beaver-pane-"] .diff-char-del {
+    background-color: rgba(186, 42, 41, 0.35);
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+/* Character-level highlight for changed chars within addition lines */
+[id^="beaver-pane-"] .diff-char-add {
+    background-color: rgba(20, 135, 85, 0.35);
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
 /* Feature Tour Styles */
 [id^="beaver-pane-"] .feature-tour-content {
     max-width: 100%;
