@@ -341,14 +341,27 @@ function truncateContext(text: string, maxLength: number = 80): string {
 }
 
 /**
- * Strip HTML tags for display, keeping just the text content.
- * Preserves self-closing tags like <citation/> as-is since they're meaningful.
+ * Strip HTML tags for display, converting special elements to readable text.
+ * - Citations: <citation ... label="(Author, 2020)"/> → (Author, 2020)
+ * - Annotations: <annotation ...>highlighted text</annotation> → highlighted text
+ * - Images: <annotation-image .../> or <image .../> → [image]
+ * - Standard HTML tags are stripped, block elements add newlines.
  */
 function stripHtmlTags(html: string): string {
     return html
+        // Convert citation tags to their label text
+        .replace(/<citation\b[^>]*\blabel="([^"]*)"[^>]*\/>/gi, '$1')
+        // Remove citation tags without a label (fallback)
+        .replace(/<citation\b[^>]*\/>/gi, '[citation]')
+        // Convert annotation tags to their inner text
+        .replace(/<annotation\b[^>]*>([\s\S]*?)<\/annotation>/gi, '$1')
+        // Convert image tags to placeholder
+        .replace(/<(?:annotation-image|image)\b[^>]*\/>/gi, '[image]')
+        // Block elements → newlines
         .replace(/<\/(p|div|h[1-6]|li|tr|blockquote)>/gi, '\n')
         .replace(/<(br|hr)\s*\/?>/gi, '\n')
-        .replace(/<(?!\/?(?:citation|annotation|image)\b)[^>]+>/g, '')
+        // Strip all remaining HTML tags
+        .replace(/<[^>]+>/g, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
 }
