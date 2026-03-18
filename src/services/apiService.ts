@@ -1,6 +1,9 @@
-import { ApiError, ServerError } from '../../react/types/apiErrors';
+import { AuthApiError, AuthError, AuthSessionMissingError, isAuthRetryableFetchError } from '@supabase/supabase-js';
+import { ApiError, ServerError, SessionExpiredError, SessionRefreshError } from '../../react/types/apiErrors';
 import { logger } from '../utils/logger';
 import { supabase } from './supabaseClient';
+
+type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
 /**
 * Base API service that handles authentication and common HTTP methods
@@ -19,6 +22,132 @@ export class ApiService {
     setBaseUrl(baseUrl: string): void {
         this.baseUrl = baseUrl;
     }
+
+    private buildAuthHeaders(token: string): Record<string, string> {
+        return {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            ...this.getVersionHeaders()
+        };
+    }
+
+    private createSessionRefreshError(message?: string, status?: number): SessionRefreshError {
+        const normalizedStatus = status && status > 0 ? status : 503;
+        const statusText = normalizedStatus === 429
+            ? 'Too Many Requests'
+            : 'Service Unavailable';
+
+        return new SessionRefreshError(message, normalizedStatus, statusText);
+    }
+
+    private classifyRefreshError(error: unknown): SessionExpiredError | SessionRefreshError {
+        if (isAuthRetryableFetchError(error)) {
+            return this.createSessionRefreshError(error.message, error.status);
+        }
+
+        if (error instanceof AuthSessionMissingError) {
+            return new SessionExpiredError('User not authenticated');
+        }
+
+        if (error instanceof AuthApiError) {
+            if (error.status === 429 || error.status >= 500) {
+                return this.createSessionRefreshError(error.message, error.status);
+            }
+
+            return new SessionExpiredError('Session expired and refresh failed');
+        }
+
+        if (error instanceof AuthError) {
+            return this.createSessionRefreshError(error.message, error.status);
+        }
+
+        // Defense-in-depth for auth errors that may lose their prototype
+        // across boundaries and arrive as plain Error-like objects.
+        if (
+            typeof error === 'object' &&
+            error !== null &&
+            'message' in error &&
+            typeof error.message === 'string' &&
+            error.message.includes('Invalid Refresh Token')
+        ) {
+            return new SessionExpiredError('Session expired and refresh failed');
+        }
+
+        return this.createSessionRefreshError('Session refresh failed');
+    }
+
+    private async refreshAccessToken(context: string): Promise<string> {
+        try {
+            const refreshResult = await supabase.auth.refreshSession();
+
+            if (refreshResult.error) {
+                logger(`${context}: session refresh failed: ${refreshResult.error?.message}`, 2);
+                throw this.classifyRefreshError(refreshResult.error);
+            }
+
+            const token = refreshResult.data.session?.access_token;
+            if (!token) {
+                logger(`${context}: session refresh returned no access token`, 2);
+                throw new SessionExpiredError('Session expired and refresh failed');
+            }
+
+            return token;
+        } catch (error) {
+            if (error instanceof SessionExpiredError || error instanceof SessionRefreshError) {
+                throw error;
+            }
+
+            logger(`${context}: unexpected error during session refresh: ${error}`, 2);
+            throw this.createSessionRefreshError('Session refresh failed');
+        }
+    }
+
+    private async request(endpoint: string, method: HttpMethod, body?: unknown): Promise<Response> {
+        const bodyText = body === undefined ? undefined : JSON.stringify(body);
+        const logMessage = method === 'PATCH' && bodyText
+            ? `${method}: ${endpoint} ${bodyText}`
+            : `${method}: ${endpoint}`;
+
+        const makeRequest = async (headers: Record<string, string>): Promise<Response> => {
+            return await fetch(`${this.baseUrl}${endpoint}`, {
+                method,
+                headers,
+                body: bodyText
+            });
+        };
+
+        let headers = await this.getAuthHeaders();
+        logger(logMessage);
+
+        let response = await makeRequest(headers);
+        if (response.status === 401) {
+            logger(`${method}: Received 401 for ${endpoint}. Refreshing session and retrying once.`, 2);
+            const refreshedToken = await this.refreshAccessToken(`${method} ${endpoint}`);
+            headers = this.buildAuthHeaders(refreshedToken);
+            response = await makeRequest(headers);
+
+            if (response.status === 401) {
+                logger(`${method}: Received 401 again for ${endpoint} after refresh.`, 2);
+                throw new SessionExpiredError('Session expired after retry');
+            }
+        }
+
+        if (!response.ok) {
+            await this.handleApiError(response);
+        }
+
+        return response;
+    }
+
+    private async parseJsonResponse<T>(response: Response, method: HttpMethod): Promise<T> {
+        const responseText = await response.text();
+        try {
+            return JSON.parse(responseText) as T;
+        } catch (parseError) {
+            logger(`${method}: JSON parse error. Response text: ${responseText}`);
+            throw parseError;
+        }
+    }
     
     /**
     * Gets authentication headers with JWT token if user is signed in.
@@ -27,39 +156,30 @@ export class ApiService {
     */
     async getAuthHeaders(): Promise<Record<string, string>> {
         const { data, error } = await supabase.auth.getSession();
-        let sessionData = data;
 
         if (error) {
             logger(`Error getting session: ${error.message}`, 2);
-            throw new ApiError(401, 'Error retrieving user session');
+            throw this.classifyRefreshError(error);
         }
 
-        if (!sessionData.session) {
-            throw new ApiError(401, 'User not authenticated');
+        if (!data.session) {
+            throw new SessionExpiredError('User not authenticated');
         }
 
         // Defense-in-depth: refresh if the token expires within 30s
-        const expiresAt = sessionData.session.expires_at;
+        const expiresAt = data.session.expires_at;
         if (expiresAt && expiresAt - Math.floor(Date.now() / 1000) < 30) {
             logger('Access token expired or near-expiry, refreshing session');
-            const refreshResult = await supabase.auth.refreshSession();
-            if (refreshResult.error || !refreshResult.data.session) {
-                logger(`Session refresh failed: ${refreshResult.error?.message}`, 2);
-                throw new ApiError(401, 'Session expired and refresh failed');
-            }
-            sessionData = refreshResult.data;
+            const refreshedToken = await this.refreshAccessToken('getAuthHeaders');
+            return this.buildAuthHeaders(refreshedToken);
         }
         
-        const token = sessionData.session!.access_token;
+        const token = data.session.access_token;
         if (!token) {
-            throw new ApiError(401, 'No access token available');
+            throw new SessionExpiredError('No access token available');
         }
-        
-        return {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            ...this.getVersionHeaders()
-        };
+
+        return this.buildAuthHeaders(token);
     }
 
     /**
@@ -124,94 +244,31 @@ export class ApiService {
     * Performs a GET request
     */
     async get<T>(endpoint: string): Promise<T> {
-        const headers = await this.getAuthHeaders();
-        logger(`GET: ${endpoint}`);
-        const response = await fetch(`${this.baseUrl}${endpoint}`, {
-            method: 'GET',
-            headers
-        });
-        
-        if (!response.ok) {
-            await this.handleApiError(response);
-        }
-        
-        // Return the response as JSON or throw an error if it's not valid JSON
-        const responseText = await response.text();
-        try {
-            return JSON.parse(responseText) as T;
-        } catch (parseError) {
-            logger(`GET: JSON parse error. Response text: ${responseText}`);
-            throw parseError;
-        }
+        const response = await this.request(endpoint, 'GET');
+        return await this.parseJsonResponse<T>(response, 'GET');
     }
     
     /**
     * Performs a POST request
     */
     async post<T>(endpoint: string, body: any): Promise<T> {
-        const headers = await this.getAuthHeaders();
-        logger(`POST: ${endpoint}`);
-        const response = await fetch(`${this.baseUrl}${endpoint}`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(body)
-        });
-        
-        if (!response.ok) {
-            await this.handleApiError(response);
-        }
-        
-        // Return the response as JSON or throw an error if it's not valid JSON
-        const responseText = await response.text();
-        try {
-            return JSON.parse(responseText) as T;
-        } catch (parseError) {
-            logger(`POST: JSON parse error. Response text: ${responseText}`);
-            throw parseError;
-        }
+        const response = await this.request(endpoint, 'POST', body);
+        return await this.parseJsonResponse<T>(response, 'POST');
     }
     
     /**
     * Performs a PATCH request
     */
     async patch<T>(endpoint: string, body: any): Promise<T> {
-        const headers = await this.getAuthHeaders();
-        logger(`PATCH: ${endpoint} ${JSON.stringify(body)}`);
-        const response = await fetch(`${this.baseUrl}${endpoint}`, {
-            method: 'PATCH',
-            headers,
-            body: JSON.stringify(body)
-        });
-        
-        if (!response.ok) {
-            await this.handleApiError(response);
-        }
-        
-        // Return the response as JSON or throw an error if it's not valid JSON
-        const responseText = await response.text();
-        try {
-            return JSON.parse(responseText) as T;
-        } catch (parseError) {
-            logger(`PATCH: JSON parse error. Response text: ${responseText}`);
-            throw parseError;
-        }
+        const response = await this.request(endpoint, 'PATCH', body);
+        return await this.parseJsonResponse<T>(response, 'PATCH');
     }
     
     /**
     * Performs a DELETE request
     */
     async delete(endpoint: string): Promise<void> {
-        const headers = await this.getAuthHeaders();
-        logger(`DELETE: ${endpoint}`);
-        const response = await fetch(`${this.baseUrl}${endpoint}`, {
-            method: 'DELETE',
-            headers
-        });
-        
-        if (!response.ok) {
-            await this.handleApiError(response);
-        }
-        
+        await this.request(endpoint, 'DELETE');
         return;
     }
 }

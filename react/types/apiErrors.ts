@@ -23,6 +23,28 @@ export class ApiError extends Error {
 }
 
 /**
+ * Error thrown when an authenticated request can no longer be recovered
+ * because the user's session is no longer valid.
+ */
+export class SessionExpiredError extends ApiError {
+    constructor(message?: string) {
+        super(401, 'Unauthorized', message || 'Session expired', 'SESSION_EXPIRED');
+        this.name = 'SessionExpiredError';
+    }
+}
+
+/**
+ * Error thrown when refreshing an otherwise valid session fails for a
+ * transient or retryable reason.
+ */
+export class SessionRefreshError extends ApiError {
+    constructor(message?: string, status: number = 503, statusText: string = 'Service Unavailable') {
+        super(status, statusText, message || 'Session refresh failed', 'SESSION_REFRESH_FAILED');
+        this.name = 'SessionRefreshError';
+    }
+}
+
+/**
  * Error thrown when Zotero instance is not linked to the user account
  */
 export class ZoteroInstanceMismatchError extends Error {
