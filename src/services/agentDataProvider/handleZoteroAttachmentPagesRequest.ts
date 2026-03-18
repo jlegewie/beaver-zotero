@@ -181,8 +181,26 @@ export async function handleZoteroAttachmentPagesRequest(
             );
         }
 
+        const requestedEndPage = end_page ?? totalPages;
+
+        if (requestedEndPage < 1) {
+            return errorResponse(
+                `End page ${requestedEndPage} is invalid (must be >= 1)`,
+                'page_out_of_range',
+                totalPages
+            );
+        }
+
+        if (requestedEndPage < startPage) {
+            return errorResponse(
+                `End page ${requestedEndPage} is before start page ${startPage}`,
+                'page_out_of_range',
+                totalPages
+            );
+        }
+
         // Clamp end_page to document bounds
-        const endPage = Math.min(end_page ?? totalPages, totalPages);
+        const endPage = Math.min(requestedEndPage, totalPages);
 
         // 7b. Try content cache for requested page range (0-indexed)
         const startIdx = startPage - 1;
