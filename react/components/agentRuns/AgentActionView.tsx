@@ -50,6 +50,7 @@ import {
     ArrowUpRightIcon,
     FolderAddIcon,
     TaskDoneIcon,
+    EditIcon,
     DocumentValidationIcon,
     DollarCircleIcon,
     GlobalSearchIcon,
@@ -593,7 +594,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         const getToolIcon = () => {
             if (toolName === 'edit_metadata') return PropertyEditIcon;
             if (toolName === 'edit_item') return PropertyEditIcon;
-            if (toolName === 'edit_note') return PropertyEditIcon;
+            if (toolName === 'edit_note') return EditIcon;
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
             if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
