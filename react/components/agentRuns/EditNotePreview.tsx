@@ -424,29 +424,148 @@ function truncateContext(text: string, maxLength: number = 80): string {
     return text.substring(0, maxLength) + '…';
 }
 
+// ---- Citation label recovery ----
+
+/**
+ * Use Zotero's citation formatter to produce a plain-text label from citation items.
+ * Each item in `citationItems` must have an `itemData` property (CSL-JSON).
+ * Returns null if formatting fails or produces no meaningful text.
+ */
+function formatCitationText(citationItems: any[]): string | null {
+    try {
+        if (citationItems.length === 0) return null;
+        const formatted = Zotero.EditorInstanceUtilities.formatCitation(
+            { citationItems, properties: {} }
+        );
+        const text = formatted.replace(/<[^>]+>/g, '').trim();
+        return (text && text !== '()') ? text : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Look up a Zotero item by "libraryID-key" string and return a citation-item
+ * object with CSL-JSON itemData, or null if the item can't be found.
+ */
+function lookupCitationItem(itemId: string): { itemData: any } | null {
+    try {
+        const dashIdx = itemId.indexOf('-');
+        if (dashIdx === -1) return null;
+        const libraryID = parseInt(itemId.substring(0, dashIdx), 10);
+        const key = itemId.substring(dashIdx + 1);
+        const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+        if (!item) return null;
+        return { itemData: Zotero.Utilities.Item.itemToCSLJSON(item) };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Recover a citation label from a simplified <citation> tag's attributes
+ * (item_id for single citations, items for compound citations).
+ */
+function recoverSimplifiedCitationLabel(tag: string): string | null {
+    // Single citation: item_id="1-KEY"
+    const itemIdMatch = tag.match(/\bitem_id="([^"]*)"/);
+    if (itemIdMatch) {
+        const ci = lookupCitationItem(itemIdMatch[1]);
+        return ci ? formatCitationText([ci]) : null;
+    }
+    // Compound citation: items="1-KEY1:page=P1, 1-KEY2"
+    const itemsMatch = tag.match(/\bitems="([^"]*)"/);
+    if (itemsMatch) {
+        const citationItems = itemsMatch[1].split(',')
+            .map(entry => lookupCitationItem(entry.trim().split(':')[0]))
+            .filter(Boolean);
+        return formatCitationText(citationItems);
+    }
+    return null;
+}
+
+/**
+ * Recover a citation label from a raw Zotero data-citation attribute
+ * (URL-encoded JSON with citationItems containing URIs).
+ */
+function recoverRawCitationLabel(encodedCitation: string): string | null {
+    try {
+        const citationData = JSON.parse(decodeURIComponent(encodedCitation));
+        const citationItems = (citationData.citationItems || []).map((ci: any) => {
+            if (ci.itemData) return ci;
+            const uri = ci.uris?.[0];
+            if (!uri) return ci;
+            const itemInfo = (Zotero.URI as any).getURIItemLibraryKey(uri);
+            if (!itemInfo) return ci;
+            const item = Zotero.Items.getByLibraryAndKey(itemInfo.libraryID, itemInfo.key);
+            if (!item) return ci;
+            return { ...ci, itemData: Zotero.Utilities.Item.itemToCSLJSON(item) };
+        });
+        return formatCitationText(citationItems);
+    } catch {
+        return null;
+    }
+}
+
+// ---- HTML stripping ----
+
 /**
  * Strip HTML tags for display, converting special elements to readable text.
- * - Citations: <citation ... label="(Author, 2020)"/> → (Author, 2020)
+ * - Citations (simplified): <citation ... label="(Author, 2020)"/> → (Author, 2020)
+ * - Citations (raw Zotero): <span class="citation" ...>(<span class="citation-item">Author, 2024</span>)</span> → (Author, 2024)
+ * - When a citation label is empty or "()", recovers a meaningful label by
+ *   looking up the cited item in the Zotero library.
  * - Annotations: <annotation ...>highlighted text</annotation> → highlighted text
  * - Images: <annotation-image .../> or <image .../> → [image]
  * - Standard HTML tags are stripped, block elements add newlines.
  */
 function stripHtmlTags(html: string): string {
     return html
-        // Convert citation tags to their label text
-        .replace(/<citation\b[^>]*\blabel="([^"]*)"[^>]*\/>/gi, '$1')
-        // Remove citation tags without a label (fallback)
-        .replace(/<citation\b[^>]*\/>/gi, '[citation]')
+        // Handle full raw Zotero citation spans: match the entire span (including
+        // nested citation-item spans), extract visible text, and recover if "()"
+        // by looking up the item via Zotero APIs. Must come before individual tag
+        // stripping to properly handle citations with empty visible text.
+        .replace(
+            /<span\s+class="citation"\s+data-citation="([^"]*)">((?:[^<]*(?:<span\b[^>]*>[^<]*<\/span>)?)*)<\/span>/gi,
+            (_match, encodedCitation, visibleContent) => {
+                const text = visibleContent.replace(/<[^>]+>/g, '').trim();
+                if (text && text !== '()') return text;
+                return recoverRawCitationLabel(encodedCitation) || text || '[citation]';
+            }
+        )
+        // Convert simplified self-closing citation tags to their label text.
+        // When label is empty or "()", recover by looking up the item.
+        .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\blabel="([^"]*)"(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi,
+            (match, label) => {
+                if (label && label !== '()') return label;
+                return recoverSimplifiedCitationLabel(match) || label || '[citation]';
+            })
+        // Remove simplified self-closing citation tags without a label (fallback)
+        .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi, '[citation]')
+        // Handle non-self-closing <citation> tags (preserve inner text)
+        .replace(/<citation\b[^>]*>([\s\S]*?)<\/citation>/gi, '$1')
         // Convert annotation tags to their inner text
         .replace(/<annotation\b[^>]*>([\s\S]*?)<\/annotation>/gi, '$1')
         // Convert image tags to placeholder
         .replace(/<(?:annotation-image|image)\b[^>]*\/>/gi, '[image]')
+        // Strip Zotero raw citation-item spans — fallback for unmatched spans
+        .replace(/<span\s+class="citation-item"[^>]*>/gi, '')
+        // Strip Zotero raw citation spans — fallback for unmatched spans
+        .replace(/<span\s+class="citation"\s+data-citation="[^"]*"[^>]*>/gi, '')
         // Block elements → newlines
         .replace(/<\/(p|div|h[1-6]|li|tr|blockquote)>/gi, '\n')
         .replace(/<(br|hr)\s*\/?>/gi, '\n')
-        // Strip all remaining HTML tags
-        .replace(/<[^>]+>/g, '')
+        // Strip all remaining HTML tags. Uses alternation to correctly skip over
+        // > characters that appear inside quoted attribute values.
+        .replace(/<(?:[^>"']|"[^"]*"|'[^']*')+>/g, '')
         .replace(/\n{3,}/g, '\n\n')
+        // Decode common HTML entities produced by escapeAttr
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
         .trim();
 }
 
