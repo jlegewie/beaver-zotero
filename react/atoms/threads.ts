@@ -34,6 +34,67 @@ import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
  */
 export const pendingScrollToRunAtom = atom<string | null>(null);
 
+/**
+ * Normalize a tool_call_id to a common base form for matching.
+ *
+ * Different model providers use different tool_call_id formats:
+ * - Some providers: "functions.edit_note:0" (dots + colon separator)
+ * - pydantic-ai modified: "functions_edit_note_0_8929eef7" (underscores + hash suffix)
+ *
+ * This normalizes both to "functions_edit_note_0" so they can be matched.
+ */
+function normalizeToolCallId(id: string): string {
+    // Replace dots and colons with underscores
+    let normalized = id.replace(/[.:]/g, '_');
+    // Strip trailing hex hash suffix (e.g., "_8929eef7")
+    normalized = normalized.replace(/_[0-9a-f]{8,}$/i, '');
+    return normalized;
+}
+
+/**
+ * Reconcile toolcall_id mismatches between agent actions (from REST API)
+ * and tool call parts (from model messages in runs).
+ *
+ * Some model providers store simplified tool_call_ids (e.g., "functions.edit_note:0")
+ * while pydantic-ai generates modified versions in model messages
+ * (e.g., "functions_edit_note_0_8929eef7"). This function maps the simplified IDs
+ * back to the full IDs so the UI can match agent actions to their tool calls.
+ */
+function reconcileToolcallIds(runs: AgentRun[], actions: AgentAction[]): void {
+    if (actions.length === 0 || runs.length === 0) return;
+
+    // Collect all tool_call_ids from model messages, indexed by normalized form
+    const normalizedToFull = new Map<string, string>();
+    for (const run of runs) {
+        for (const msg of run.model_messages) {
+            if (msg.kind === 'response') {
+                for (const part of msg.parts) {
+                    if (part.part_kind === 'tool-call' && part.tool_call_id) {
+                        normalizedToFull.set(normalizeToolCallId(part.tool_call_id), part.tool_call_id);
+                    }
+                }
+            }
+        }
+    }
+
+    // Fix agent actions whose toolcall_id doesn't match any model message tool_call_id
+    const fullIds = new Set(normalizedToFull.values());
+    let fixedCount = 0;
+    for (const action of actions) {
+        if (!action.toolcall_id || fullIds.has(action.toolcall_id)) continue;
+
+        const normalized = normalizeToolCallId(action.toolcall_id);
+        const fullId = normalizedToFull.get(normalized);
+        if (fullId) {
+            action.toolcall_id = fullId;
+            fixedCount++;
+        }
+    }
+    if (fixedCount > 0) {
+        logger(`reconcileToolcallIds: Fixed ${fixedCount} mismatched toolcall_ids`, 1);
+    }
+}
+
 // Thread types
 export interface ThreadData {
     id: string;
@@ -349,7 +410,12 @@ export const loadThreadAtom = atom(
 
                 // Set agent runs
                 set(threadRunsAtom, processedRuns);
-                
+
+                // Reconcile toolcall_id mismatches between REST API and model messages
+                if (agent_actions && agent_actions.length > 0) {
+                    reconcileToolcallIds(processedRuns, agent_actions);
+                }
+
                 // Set agent actions
                 set(threadAgentActionsAtom, agent_actions || []);
 
