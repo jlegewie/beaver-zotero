@@ -394,7 +394,7 @@ export async function openNoteAndSearchEdit(
 
     // Wait for the editor instance to be available and initialized,
     // then trigger the search.
-    await searchInNoteEditor(itemId, searchText);
+    await selectAndScrollInNoteEditor(itemId, searchText);
 }
 
 /**
@@ -493,66 +493,91 @@ function extractSearchTerm(html: string): string | null {
 }
 
 /**
- * Find the editor instance for a note and trigger a search.
- * Polls briefly for the editor to become available (it may still be
- * initializing after Zotero.Notes.open() returns).
+ * Find text in the note editor, select it, and scroll to it using
+ * ProseMirror's TextSelection and scrollIntoView — no search bar shown.
  */
-async function searchInNoteEditor(itemId: number, searchText: string): Promise<void> {
+async function selectAndScrollInNoteEditor(itemId: number, searchText: string): Promise<void> {
     const maxWaitMs = 3000;
     const pollIntervalMs = 100;
     const startTime = Date.now();
-    let pollCount = 0;
 
-    // The note-editor's search plugin internally escapes the search term for
-    // use in a RegExp with the `u` (Unicode) flag. However, it escapes `-`
-    // to `\-`, which is an invalid identity escape in Unicode mode. Work
-    // around this by splitting on hyphens and using the longest segment.
-    const safeText = sanitizeSearchTerm(searchText);
-    logger(`searchInNoteEditor: polling for editor instance (itemId=${itemId}), searchText="${safeText}" (original: "${searchText}")`, 1);
+    logger(`selectAndScrollInNoteEditor: polling for editor view (itemId=${itemId})`, 1);
 
     while (Date.now() - startTime < maxWaitMs) {
-        pollCount++;
-        const search = getNoteEditorSearch(itemId);
-        if (search) {
-            logger(`searchInNoteEditor: search plugin found after ${pollCount} polls (${Date.now() - startTime}ms)`, 1);
+        const view = getNoteEditorView(itemId);
+        if (view?.dom) {
+            logger(`selectAndScrollInNoteEditor: view found after ${Date.now() - startTime}ms`, 1);
 
-            // Activate the findbar first — without this, decorations and
-            // the search bar won't appear.
-            search.setActive(true);
-            logger(`searchInNoteEditor: setActive(true) called`, 1);
+            const match = findTextInEditorDOM(view.dom, searchText);
+            if (!match) {
+                logger(`selectAndScrollInNoteEditor: text not found in DOM: "${searchText}"`, 1);
+                return;
+            }
 
-            search.setSearchTerm(safeText);
-            logger(`searchInNoteEditor: setSearchTerm called`, 1);
+            const fromPos = view.posAtDOM(match.startNode, match.startOffset);
+            const toPos = view.posAtDOM(match.endNode, match.endOffset);
+            logger(`selectAndScrollInNoteEditor: mapped to positions ${fromPos}-${toPos}`, 1);
 
-            search.next();
-            logger(`searchInNoteEditor: next() called`, 1);
+            // Use the selection's constructor (TextSelection) to create a range selection
+            const TextSelection = view.state.selection.constructor;
+            const tr = view.state.tr.setSelection(
+                TextSelection.create(view.state.doc, fromPos, toPos)
+            );
+            view.dispatch(tr.scrollIntoView());
+            view.focus();
 
-            search.focusSelectedResult();
-            logger(`searchInNoteEditor: focusSelectedResult() called — search complete`, 1);
+            logger(`selectAndScrollInNoteEditor: selection set and scrolled into view`, 1);
             return;
         }
         await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
     }
 
-    logger(`searchInNoteEditor: timed out after ${maxWaitMs}ms (${pollCount} polls) — editor search plugin not found`, 1);
+    logger(`selectAndScrollInNoteEditor: timed out after ${maxWaitMs}ms`, 1);
 }
 
 /**
- * Sanitize a search term for the note-editor's ProseMirror search plugin.
- * The plugin internally escapes `-` to `\-` which is invalid in a RegExp
- * with the Unicode (`u`) flag. Work around this by splitting on hyphens
- * and returning the longest segment.
+ * Find a text string in the editor DOM, returning the DOM nodes and offsets
+ * for the start and end of the match. Handles text spanning inline elements
+ * (e.g., "The <strong>quick</strong> brown" can match "The quick brown").
  */
-function sanitizeSearchTerm(term: string): string {
-    let result = stripEllipsis(term);
+function findTextInEditorDOM(
+    editorDOM: HTMLElement,
+    searchStr: string,
+): { startNode: Node; startOffset: number; endNode: Node; endOffset: number } | null {
+    // Collect all text nodes with their cumulative offset
+    const walker = editorDOM.ownerDocument.createTreeWalker(editorDOM, 4 /* SHOW_TEXT */);
+    const textNodes: { node: Node; start: number }[] = [];
+    let fullText = '';
 
-    if (result.includes('-')) {
-        const segments = result.split('-');
-        result = segments.reduce((a, b) => a.length >= b.length ? a : b).trim();
-        logger(`sanitizeSearchTerm: split on hyphens → ${segments.length} segments, using longest (${result.length} chars): "${result.substring(0, 80)}"`, 1);
+    while (walker.nextNode()) {
+        textNodes.push({ node: walker.currentNode, start: fullText.length });
+        fullText += walker.currentNode.textContent || '';
     }
 
-    return result;
+    const idx = fullText.indexOf(searchStr);
+    if (idx === -1) return null;
+
+    const endIdx = idx + searchStr.length;
+    let startNode: Node | null = null;
+    let startOffset = 0;
+    let endNode: Node | null = null;
+    let endOffset = 0;
+
+    for (const tn of textNodes) {
+        const nodeEnd = tn.start + (tn.node.textContent?.length || 0);
+        if (!startNode && idx < nodeEnd) {
+            startNode = tn.node;
+            startOffset = idx - tn.start;
+        }
+        if (endIdx <= nodeEnd) {
+            endNode = tn.node;
+            endOffset = endIdx - tn.start;
+            break;
+        }
+    }
+
+    if (!startNode || !endNode) return null;
+    return { startNode, startOffset, endNode, endOffset };
 }
 
 /**
@@ -568,64 +593,26 @@ function stripEllipsis(term: string): string {
 }
 
 /**
- * Get the search plugin state from an open note editor instance.
+ * Get the ProseMirror EditorView from an open note editor instance.
  * Returns null if the editor isn't available or hasn't finished initializing.
  */
-function getNoteEditorSearch(itemId: number): any | null {
+function getNoteEditorView(itemId: number): any | null {
     try {
         const instances: any[] = (Zotero as any).Notes?._editorInstances;
-        if (!instances) {
-            logger(`getNoteEditorSearch: Zotero.Notes._editorInstances is unavailable`, 1);
-            return null;
-        }
+        if (!instances) return null;
 
         const inst = instances.find((e: any) => e.itemID === itemId);
-        if (!inst) {
-            logger(`getNoteEditorSearch: no editor instance found for itemId=${itemId} (${instances.length} instances open: [${instances.map((e: any) => e.itemID).join(', ')}])`, 1);
-            return null;
-        }
-        if (!inst._iframeWindow) {
-            logger(`getNoteEditorSearch: editor instance found but _iframeWindow is null/undefined`, 1);
-            return null;
-        }
+        if (!inst?._iframeWindow) return null;
 
         const wrappedJS = inst._iframeWindow.wrappedJSObject;
-        if (!wrappedJS) {
-            logger(`getNoteEditorSearch: _iframeWindow.wrappedJSObject is null/undefined`, 1);
-            return null;
-        }
+        if (!wrappedJS) return null;
 
         const innerEditor = wrappedJS._currentEditorInstance;
-        if (!innerEditor) {
-            logger(`getNoteEditorSearch: _currentEditorInstance is null/undefined`, 1);
-            return null;
-        }
+        if (!innerEditor?._editorCore?.view) return null;
 
-        if (!innerEditor._editorCore) {
-            logger(`getNoteEditorSearch: _editorCore is null/undefined`, 1);
-            return null;
-        }
-
-        if (!innerEditor._editorCore.pluginState) {
-            logger(`getNoteEditorSearch: pluginState is null/undefined`, 1);
-            return null;
-        }
-
-        const search = innerEditor._editorCore.pluginState.search;
-        if (!search) {
-            logger(`getNoteEditorSearch: pluginState.search is null/undefined (available keys: ${Object.keys(innerEditor._editorCore.pluginState).join(', ')})`, 1);
-            return null;
-        }
-
-        // Verify the search plugin is functional by checking for required methods
-        if (typeof search.setSearchTerm !== 'function') {
-            logger(`getNoteEditorSearch: search.setSearchTerm is not a function (type: ${typeof search.setSearchTerm}, available: ${Object.keys(search).join(', ')})`, 1);
-            return null;
-        }
-
-        return search;
+        return innerEditor._editorCore.view;
     } catch (err: any) {
-        logger(`getNoteEditorSearch: exception: ${err?.message || err}`, 1);
+        logger(`getNoteEditorView: exception: ${err?.message || err}`, 1);
         return null;
     }
 }
