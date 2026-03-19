@@ -553,45 +553,16 @@ describe('citation-specific roundtrips', () => {
 
     it('citation with numeric locator (integer) round-trips correctly', () => {
         // Fixture B has numeric locators (2 and 15 as integers in JSON).
-        // The simplifier's escapeAttr expects a string, so integer locators cause the
-        // try-catch to fall through, preserving the raw citation HTML. This is a known
-        // limitation — the roundtrip still works because the raw HTML is unchanged.
+        // The simplifier coerces them to strings via String().
         const { simplified, metadata } = simplifyNoteHtml(FIXTURE_B, 1);
 
-        // Because numeric locators cause silent simplification failure,
-        // the citations are preserved as-is (not simplified to <citation /> tags)
-        expect(simplified).toContain('class="citation"');
-        expect(simplified).toContain('data-citation=');
-
-        // Full roundtrip still works (raw HTML preserved = identity)
-        const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(stripDataCitationItems(FIXTURE_B));
-    });
-
-    it('citation with string locator round-trips with page attribute', () => {
-        // Same as fixture B but with string locators — verifies the intended behavior
-        const data1 = {
-            citationItems: [{
-                uris: ['http://zotero.org/users/17517181/items/HPDPU3J5'],
-                locator: '2',
-            }],
-        };
-        const data2 = {
-            citationItems: [{
-                uris: ['http://zotero.org/users/17517181/items/HPDPU3J5'],
-                locator: '15',
-            }],
-        };
-        const cit1 = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(data1))}"><span class="citation-item">(Smith, 2022, p. 2)</span></span>`;
-        const cit2 = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(data2))}"><span class="citation-item">(Smith, 2022, p. 15)</span></span>`;
-        const html = wrap(`<p>${cit1} text ${cit2}</p>`);
-
-        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        // Numeric locators should be coerced to strings and appear as page attributes
         expect(simplified).toContain('page="2"');
         expect(simplified).toContain('page="15"');
 
+        // Full roundtrip
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(stripDataCitationItems(html));
+        expect(expanded).toBe(stripDataCitationItems(FIXTURE_B));
     });
 
     it('citation within bold text: simplify → replace → expand preserves formatting', () => {

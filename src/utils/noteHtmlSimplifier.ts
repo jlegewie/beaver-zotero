@@ -246,7 +246,7 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
                     const uri = ci.uris?.[0] || '';
                     const itemKey = extractItemKeyFromUri(uri) || 'unknown';
                     const itemId = `${libraryID}-${itemKey}`;
-                    const page = ci.locator || '';
+                    const page = ci.locator != null ? String(ci.locator) : '';
 
                     // Content-based ID with occurrence counter
                     const keyForCount = itemKey;
@@ -282,7 +282,7 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
                         const uri = ci.uris?.[0] || '';
                         const key = extractItemKeyFromUri(uri) || 'unknown';
                         const itemId = `${libraryID}-${key}`;
-                        const page = ci.locator || '';
+                        const page = ci.locator != null ? String(ci.locator) : '';
                         return page ? `${itemId}:page=${page}` : itemId;
                     }).join(', ');
 
