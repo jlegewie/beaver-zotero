@@ -133,7 +133,11 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
         return oldText.split('\n').map(line => ({ type: 'deletion' as const, text: line }));
     }
     if (oldText === '') {
-        return newText.split('\n').map(line => ({ type: 'addition' as const, text: line }));
+        return newText.split('\n').map(line => ({
+            type: 'addition' as const,
+            text: line,
+            segments: [{ text: line, highlighted: true }],
+        }));
     }
 
     const oldLines = oldText.split('\n');
@@ -209,7 +213,7 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
                 diffLines.push({ type: 'deletion', text: deletions[k] });
             }
             for (let k = pairCount; k < additions.length; k++) {
-                diffLines.push({ type: 'addition', text: additions[k] });
+                diffLines.push({ type: 'addition', text: additions[k], segments: [{ text: additions[k], highlighted: true }] });
             }
         } else {
             diffLines.push({ type: rawOps[idx].type, text: rawOps[idx].text });
