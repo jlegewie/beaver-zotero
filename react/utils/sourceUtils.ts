@@ -367,16 +367,22 @@ export async function openNoteAndSearchEdit(
         await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // Determine what to search for based on edit status.
-    let searchText: string | null;
-    if (isApplied) {
-        // For applied edits, search for the highlighted diff (the dark green
-        // character-level additions shown in EditNotePreview).
-        searchText = extractHighlightedAddition(oldString, newString);
-        logger(`openNoteAndSearchEdit: extractHighlightedAddition result: ${searchText ? `"${searchText}"` : 'null'}`, 1);
+    // Determine what to search for and what to select based on edit status.
+    let searchText: string | null = null;
+    let selectText: string | undefined;
 
-        // Fall back to first line of newString if no highlighted diff found
-        if (!searchText) {
+    if (isApplied) {
+        // For applied edits, prefer the highlighted diff (diff-char-add text).
+        // extractHighlightedAddition returns both a wider searchText (for
+        // disambiguation) and a narrow selectText (the actual highlight).
+        const result = extractHighlightedAddition(oldString, newString);
+        if (result) {
+            searchText = result.searchText;
+            selectText = result.selectText;
+            logger(`openNoteAndSearchEdit: extractHighlightedAddition: searchText="${searchText.substring(0, 80)}", selectText="${selectText.substring(0, 80)}"`, 1);
+        } else {
+            // Fall back to first line of newString (e.g. pure insertions
+            // where the entire line is new and there's no char-level diff).
             searchText = extractSearchTerm(newString);
             logger(`openNoteAndSearchEdit: fell back to extractSearchTerm(newString): ${searchText ? `"${searchText}"` : 'null'}`, 1);
         }
@@ -390,23 +396,31 @@ export async function openNoteAndSearchEdit(
         logger(`openNoteAndSearchEdit: no search text resolved, aborting search`, 1);
         return;
     }
-    logger(`openNoteAndSearchEdit: final searchText="${searchText}"`, 1);
+    logger(`openNoteAndSearchEdit: final searchText="${searchText}", selectText=${selectText ? `"${selectText}"` : 'undefined'}`, 1);
 
     // Wait for the editor instance to be available and initialized,
-    // then trigger the search.
-    await selectAndScrollInNoteEditor(itemId, searchText);
+    // then select the text and scroll to it.
+    await selectAndScrollInNoteEditor(itemId, searchText, selectText);
 }
 
 /**
- * Extract a search term from the first addition line that contains a
- * highlighted (dark green) diff segment. Uses the full line text rather than
- * just the highlighted portion so the search uniquely locates the edit in the
- * note (the highlighted part alone may appear elsewhere).
+ * Extract search and selection text from the first addition line that contains
+ * a highlighted (dark green / diff-char-add) segment.
+ *
+ * Returns:
+ *  - `searchText`: the full addition line (used for disambiguation if the
+ *    highlighted portion is not unique in the note).
+ *  - `selectText`: only the highlighted portion (what we actually want to
+ *    select in the editor). When the highlighted portion IS unique, only
+ *    `selectText` is needed; when it's not, `searchText` provides context.
  *
  * Returns null when no addition with a highlight is found or the result is
  * too short to be a useful search term.
  */
-function extractHighlightedAddition(oldHtml: string, newHtml: string): string | null {
+function extractHighlightedAddition(
+    oldHtml: string,
+    newHtml: string,
+): { searchText: string; selectText: string } | null {
     const strippedOld = stripHtmlTags(oldHtml);
     const strippedNew = stripHtmlTags(newHtml);
     logger(`extractHighlightedAddition: strippedOld (${strippedOld.length} chars): "${strippedOld.substring(0, 150)}"`, 1);
@@ -417,38 +431,48 @@ function extractHighlightedAddition(oldHtml: string, newHtml: string): string | 
     const diffLines = computeDiff(strippedOld, strippedNew);
     logger(`extractHighlightedAddition: ${diffLines.length} diff lines computed`, 1);
 
-    // Find the first addition line that has a highlighted segment. Use the
-    // full line text (context + highlight) so the search is specific enough
-    // to land on the right location even if the highlighted part is common.
     for (const line of diffLines) {
         if (line.type !== 'addition' || !line.segments) continue;
 
         const hasHighlight = line.segments.some(s => s.highlighted && s.text.trim());
         if (!hasHighlight) continue;
 
-        // Reconstruct the full line from segments (they may have been
-        // truncated by truncateSegments in computeDiff).
-        const fullText = line.segments.map(s => s.text).join('').trim();
-        logger(`extractHighlightedAddition: first highlighted addition line (${fullText.length} chars): "${fullText.substring(0, 150)}"`, 1);
-
-        if (fullText.length < 10) {
-            logger(`extractHighlightedAddition: line too short (${fullText.length} chars), skipping`, 1);
+        // Use line.text (the original, un-truncated line) for search context.
+        const fullLineText = line.text.trim();
+        if (fullLineText.length < 10) {
+            logger(`extractHighlightedAddition: line too short (${fullLineText.length} chars), skipping`, 1);
             continue;
         }
 
-        let term = fullText;
-        if (term.length > 100) {
-            term = term.substring(0, 100);
-            logger(`extractHighlightedAddition: truncated to 100 chars`, 1);
+        // Extract only the highlighted (diff-char-add) portion.
+        // truncateSegments only truncates non-highlighted segments, so the
+        // highlighted text from segments is accurate.
+        let selectText = line.segments
+            .filter(s => s.highlighted)
+            .map(s => s.text)
+            .join('')
+            .trim();
+        selectText = stripEllipsis(selectText);
+        if (!selectText || selectText.length < 5) continue;
+        if (selectText.length > 100) selectText = selectText.substring(0, 100);
+
+        // Build searchText from the full line, truncated to a window centered
+        // around the highlighted portion so it always contains selectText.
+        let searchText = fullLineText;
+        if (searchText.length > 120) {
+            const hlIdx = searchText.indexOf(selectText);
+            if (hlIdx !== -1) {
+                const margin = Math.floor((120 - selectText.length) / 2);
+                const start = Math.max(0, hlIdx - margin);
+                searchText = searchText.substring(start, start + 120);
+            } else {
+                searchText = searchText.substring(0, 120);
+            }
         }
+        searchText = stripEllipsis(searchText);
 
-        // Strip leading/trailing ellipsis that truncateSegments or
-        // truncateContext may have added (won't match actual note text).
-        term = stripEllipsis(term);
-
-
-        logger(`extractHighlightedAddition: using "${term}"`, 1);
-        return term;
+        logger(`extractHighlightedAddition: searchText="${searchText.substring(0, 80)}", selectText="${selectText.substring(0, 80)}"`, 1);
+        return { searchText, selectText };
     }
 
     logger(`extractHighlightedAddition: no suitable highlighted addition line found`, 1);
@@ -495,8 +519,18 @@ function extractSearchTerm(html: string): string | null {
 /**
  * Find text in the note editor, select it, and scroll to it using
  * ProseMirror's TextSelection and scrollIntoView — no search bar shown.
+ *
+ * @param searchText - Text to locate in the editor DOM.
+ * @param selectText - Optional narrower text to actually select. When
+ *   provided, the function first checks if it's unique in the note. If
+ *   unique it selects just that text; otherwise it locates `searchText`
+ *   (the wider context) and selects the `selectText` portion within it.
  */
-async function selectAndScrollInNoteEditor(itemId: number, searchText: string): Promise<void> {
+async function selectAndScrollInNoteEditor(
+    itemId: number,
+    searchText: string,
+    selectText?: string,
+): Promise<void> {
     const maxWaitMs = 3000;
     const pollIntervalMs = 100;
     const startTime = Date.now();
@@ -508,9 +542,63 @@ async function selectAndScrollInNoteEditor(itemId: number, searchText: string): 
         if (view?.dom) {
             logger(`selectAndScrollInNoteEditor: view found after ${Date.now() - startTime}ms`, 1);
 
-            const match = findTextInEditorDOM(view.dom, searchText);
+            const { textNodes, fullText } = buildEditorTextMap(view.dom);
+
+            // Determine which character range to select
+            let rangeStart: number;
+            let rangeEnd: number;
+
+            if (selectText && selectText !== searchText) {
+                // We have a narrow selectText — check if it's unique in the note
+                const firstIdx = fullText.indexOf(selectText);
+                const secondIdx = firstIdx !== -1
+                    ? fullText.indexOf(selectText, firstIdx + 1)
+                    : -1;
+
+                if (firstIdx !== -1 && secondIdx === -1) {
+                    // selectText is unique → select it directly
+                    logger(`selectAndScrollInNoteEditor: selectText is unique, selecting directly`, 1);
+                    rangeStart = firstIdx;
+                    rangeEnd = firstIdx + selectText.length;
+                } else {
+                    // selectText appears multiple times (or not at all) —
+                    // use searchText for disambiguation
+                    logger(`selectAndScrollInNoteEditor: selectText not unique (first=${firstIdx}, second=${secondIdx}), using searchText context`, 1);
+                    const ctxIdx = fullText.indexOf(searchText);
+                    if (ctxIdx !== -1) {
+                        const withinIdx = searchText.indexOf(selectText);
+                        if (withinIdx !== -1) {
+                            rangeStart = ctxIdx + withinIdx;
+                            rangeEnd = rangeStart + selectText.length;
+                        } else {
+                            // selectText not in searchText — fall back to full searchText
+                            rangeStart = ctxIdx;
+                            rangeEnd = ctxIdx + searchText.length;
+                        }
+                    } else if (firstIdx !== -1) {
+                        // searchText not found but selectText exists — use first occurrence
+                        rangeStart = firstIdx;
+                        rangeEnd = firstIdx + selectText.length;
+                    } else {
+                        logger(`selectAndScrollInNoteEditor: neither searchText nor selectText found in DOM`, 1);
+                        return;
+                    }
+                }
+            } else {
+                // No separate selectText — find and select searchText
+                const idx = fullText.indexOf(searchText);
+                if (idx === -1) {
+                    logger(`selectAndScrollInNoteEditor: text not found in DOM: "${searchText}"`, 1);
+                    return;
+                }
+                rangeStart = idx;
+                rangeEnd = idx + searchText.length;
+            }
+
+            // Map character range to DOM nodes
+            const match = resolveRangeInTextMap(textNodes, rangeStart, rangeEnd);
             if (!match) {
-                logger(`selectAndScrollInNoteEditor: text not found in DOM: "${searchText}"`, 1);
+                logger(`selectAndScrollInNoteEditor: failed to map char range to DOM nodes`, 1);
                 return;
             }
 
@@ -536,15 +624,13 @@ async function selectAndScrollInNoteEditor(itemId: number, searchText: string): 
 }
 
 /**
- * Find a text string in the editor DOM, returning the DOM nodes and offsets
- * for the start and end of the match. Handles text spanning inline elements
- * (e.g., "The <strong>quick</strong> brown" can match "The quick brown").
+ * Walk all text nodes in the editor DOM and build a flat text string with
+ * a mapping from character offsets back to DOM nodes.
  */
-function findTextInEditorDOM(
-    editorDOM: HTMLElement,
-    searchStr: string,
-): { startNode: Node; startOffset: number; endNode: Node; endOffset: number } | null {
-    // Collect all text nodes with their cumulative offset
+function buildEditorTextMap(editorDOM: HTMLElement): {
+    textNodes: { node: Node; start: number }[];
+    fullText: string;
+} {
     const walker = editorDOM.ownerDocument.createTreeWalker(editorDOM, 4 /* SHOW_TEXT */);
     const textNodes: { node: Node; start: number }[] = [];
     let fullText = '';
@@ -554,10 +640,20 @@ function findTextInEditorDOM(
         fullText += walker.currentNode.textContent || '';
     }
 
-    const idx = fullText.indexOf(searchStr);
-    if (idx === -1) return null;
+    return { textNodes, fullText };
+}
 
-    const endIdx = idx + searchStr.length;
+/**
+ * Given a character range [startIdx, endIdx) in the flat text built by
+ * `buildEditorTextMap`, resolve it to the corresponding DOM nodes and
+ * offsets. Handles ranges that span multiple text nodes (e.g. across
+ * inline elements like bold, italic, links, citations).
+ */
+function resolveRangeInTextMap(
+    textNodes: { node: Node; start: number }[],
+    startIdx: number,
+    endIdx: number,
+): { startNode: Node; startOffset: number; endNode: Node; endOffset: number } | null {
     let startNode: Node | null = null;
     let startOffset = 0;
     let endNode: Node | null = null;
@@ -565,9 +661,9 @@ function findTextInEditorDOM(
 
     for (const tn of textNodes) {
         const nodeEnd = tn.start + (tn.node.textContent?.length || 0);
-        if (!startNode && idx < nodeEnd) {
+        if (!startNode && startIdx < nodeEnd) {
             startNode = tn.node;
-            startOffset = idx - tn.start;
+            startOffset = startIdx - tn.start;
         }
         if (endIdx <= nodeEnd) {
             endNode = tn.node;
