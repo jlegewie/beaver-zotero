@@ -246,10 +246,11 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         markdownContent = markdownContent
             // Fix common formatting issues
             .replace(/```plaintext\s*([\s\S]*?)\s*```/, '$1')
-            .replace(/\$\$([^$]+)\$\$/g, (_, equation) => `\n$$\n${equation.trim()}\n$$\n`)
-            // Inline and display math
+            // Convert \(...\) and \[...\] to $...$ and $$...$$ BEFORE newline-padding
             .replace(/(?<!\\)\\\(((?:\\.|[^\\])*?)\\\)/g, (_, match) => `$${match}$`)
-            .replace(/(?<!\\)\\\[((?:\\.|[^\\])*?)\\\]/g, (_, match) => `$$${match}$$`);
+            .replace(/(?<!\\)\\\[((?:\\.|[^\\])*?)\\\]/g, (_, match) => `$$${match}$$`)
+            // Ensure display math ($$...$$) has surrounding newlines for remark-math
+            .replace(/\$\$([^$]+)\$\$/g, (_, equation) => `\n$$\n${equation.trim()}\n$$\n`);
         
         return { type: 'markdown' as const, content: markdownContent };
     });
