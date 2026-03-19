@@ -55,7 +55,7 @@ import {
     DollarCircleIcon,
     GlobalSearchIcon,
 } from '../icons/icons';
-import { revealSource, openNoteByKey } from '../../utils/sourceUtils';
+import { revealSource, openNoteAndSearchEdit } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
@@ -95,6 +95,8 @@ interface AgentActionViewProps {
     toolName: string;
     /** Run ID for persisting action state to backend */
     runId: string;
+    /** Index of the parent response message within the run (disambiguates duplicate tool_call_ids) */
+    responseIndex: number;
     /** Pending approval request if awaiting user decision */
     pendingApproval: PendingApproval | null;
 }
@@ -201,6 +203,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     toolcallId,
     toolName,
     runId,
+    responseIndex,
     pendingApproval: pendingApprovalProp,
 }) => {
     const [isHovered, setIsHovered] = useState(false);
@@ -221,7 +224,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isAwaitingApproval = pendingApproval !== null;
 
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
-    const expansionKey = `${runId}:${toolcallId}`;
+    // Include responseIndex to disambiguate duplicate tool_call_ids within the same run
+    // (some providers reuse tool_call_ids across responses, e.g., when retrying failed calls)
+    const expansionKey = `${runId}:${responseIndex}:${toolcallId}`;
     const expansionState = useAtomValue(toolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
 
@@ -281,8 +286,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const markExternalReferenceDeleted = useSetAtom(markExternalReferenceDeletedAtom);
 
     // Item title state (shared across panes) - only for actions that have specific items
+    // Use composite key with responseIndex to disambiguate duplicate tool_call_ids
+    const itemTitleKey = `${responseIndex}:${toolcallId}`;
     const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
-    const itemTitle = itemTitleMap[toolcallId] ?? null;
+    const itemTitle = itemTitleMap[itemTitleKey] ?? null;
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
 
     // Determine if this action type has an associated item
@@ -310,12 +317,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 } else {
                     title = await shortItemTitle(item);
                 }
-                setItemTitle({ key: toolcallId, title });
+                setItemTitle({ key: itemTitleKey, title });
             }
         };
         
         fetchTitle();
-    }, [action, pendingApproval, itemTitle, toolcallId, hasAssociatedItem, setItemTitle]);
+    }, [action, pendingApproval, itemTitle, itemTitleKey, hasAssociatedItem, toolName, setItemTitle]);
 
     // Detect when pending approval is removed externally (e.g., via PendingActionsBar "Apply All")
     useEffect(() => {
@@ -672,7 +679,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                             e.stopPropagation();
                                             e.preventDefault();
                                             if (toolName === 'edit_note') {
-                                                openNoteByKey(action?.proposed_data?.library_id, action?.proposed_data?.zotero_key);
+                                                const isApplied = action?.status === 'applied';
+                                                openNoteAndSearchEdit(
+                                                    action?.proposed_data?.library_id,
+                                                    action?.proposed_data?.zotero_key,
+                                                    action?.proposed_data?.old_string || '',
+                                                    action?.proposed_data?.new_string || '',
+                                                    isApplied,
+                                                );
                                             } else {
                                                 revealSource({ library_id: action?.proposed_data?.library_id, zotero_key: action?.proposed_data?.zotero_key });
                                             }
