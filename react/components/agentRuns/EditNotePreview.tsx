@@ -110,16 +110,19 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
 
     const diffLines = useMemo(() => {
         if (needsNoteContext && noteContext && (noteContext.before || noteContext.after)) {
-            // Build diff with surrounding context from the note
+            // Build diff with surrounding context from the note.
+            // Context lines use 'addition' type without segments so they get the
+            // light green background (matching the added text) but no darker
+            // character-level highlight.
             const lines: DiffLine[] = [];
             if (noteContext.before) {
-                lines.push({ type: 'context', text: truncateContext(noteContext.before, 80, true) });
+                lines.push({ type: 'addition', text: truncateContext(noteContext.before, 80, true) });
             }
             for (const line of strippedNew.split('\n')) {
                 lines.push({ type: 'addition', text: line, segments: [{ text: line, highlighted: true }] });
             }
             if (noteContext.after) {
-                lines.push({ type: 'context', text: truncateContext(noteContext.after) });
+                lines.push({ type: 'addition', text: truncateContext(noteContext.after) });
             }
             return lines;
         }
