@@ -280,7 +280,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     
     // Load styles for this window
     loadStylesheet();
-    loadKatexStylesheet();
+    loadKatexStylesheet(win);
     ztoolkit.log("Styles loaded for window");
 }
 
@@ -395,7 +395,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         }
 
         // 8. Unload stylesheets
-        unloadKatexStylesheet();
+        unloadKatexStylesheet(win);
         unloadStylesheet();
 
         // 9. Unregister ztoolkit
@@ -441,27 +441,28 @@ function unloadStylesheet() {
     }	
 }
 
-function loadKatexStylesheet() {
-    const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/katex-embedded.css`;
-    const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
-        .getService(Ci.nsIStyleSheetService);
-    const styleSheet = Services.io.newURI(styleURI);
-    const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
-    if (ssService.sheetRegistered(styleSheet, sheetType)) {
-        ssService.unregisterSheet(styleSheet, sheetType);
-    }
-    ssService.loadAndRegisterSheet(styleSheet, sheetType);
+/**
+ * Load KaTeX stylesheet as a per-document <link> element instead of a global
+ * AUTHOR_SHEET. This prevents the note editor iframe (resource://zotero/note-editor/)
+ * from attempting to load chrome://beaver/ font resources, which its security
+ * policy blocks.
+ */
+function loadKatexStylesheet(win: Window) {
+    if (!win?.document) return;
+    const doc = win.document;
+    if (doc.getElementById("beaver-katex-stylesheet")) return;
+    const link = doc.createElementNS("http://www.w3.org/1999/xhtml", "html:link") as HTMLLinkElement;
+    link.id = "beaver-katex-stylesheet";
+    link.rel = "stylesheet";
+    link.type = "text/css";
+    link.href = `chrome://${addon.data.config.addonRef}/content/styles/katex-embedded.css`;
+    doc.documentElement.appendChild(link);
 }
 
-function unloadKatexStylesheet() {
-    const styleURI = `chrome://${addon.data.config.addonRef}/content/styles/katex-embedded.css`;
-    const ssService = Cc["@mozilla.org/content/style-sheet-service;1"]
-        .getService(Ci.nsIStyleSheetService);
-    const styleSheet = Services.io.newURI(styleURI);
-    const sheetType = Ci.nsIStyleSheetService.AUTHOR_SHEET!;
-    if (ssService.sheetRegistered(styleSheet, sheetType)) {
-        ssService.unregisterSheet(styleSheet, sheetType);
-    }	
+function unloadKatexStylesheet(win: Window) {
+    if (!win?.document) return;
+    const el = win.document.getElementById("beaver-katex-stylesheet");
+    if (el) el.remove();
 }
 
 /**
@@ -519,7 +520,10 @@ async function onShutdown(): Promise<void> {
         BeaverUIFactory.closeBeaverWindow();
         BeaverUIFactory.closePreferencesWindow();
 
-        unloadKatexStylesheet();
+        const mainWin = Zotero.getMainWindow();
+        if (mainWin) {
+            unloadKatexStylesheet(mainWin);
+        }
         unloadStylesheet();
         
         unregisterQuitObserver();
