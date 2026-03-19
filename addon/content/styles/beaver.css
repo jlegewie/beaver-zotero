@@ -926,6 +926,9 @@
     display: inline-block;
     margin: 0 0.1em;
     font-size: 1.1em !important;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 [id^="beaver-pane-"] .markdown .katex-display {
@@ -933,7 +936,9 @@
     /* display: block; */
     /* font-size: 1.2em !important; */
     padding: 0rem;
-    overflow: auto;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 [id^="beaver-pane-"] .markdown a {

@@ -1,4 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+    getOrSimplify,
+    getLatestNoteHtml,
+} from '../../../src/utils/noteHtmlSimplifier';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -15,6 +19,10 @@ interface EditNotePreviewProps {
     warnings?: string[];
     /** Current status of the action */
     status?: ActionStatus;
+    /** Library ID for fetching note context (optional) */
+    libraryId?: number;
+    /** Zotero key for fetching note context (optional) */
+    zoteroKey?: string;
 }
 
 // ---- Diff types ----
@@ -39,6 +47,8 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     occurrencesReplaced,
     warnings,
     status = 'pending',
+    libraryId,
+    zoteroKey,
 }) => {
     const isApplied = status === 'applied';
     const isRejectedOrUndone = status === 'rejected' || status === 'undone';
@@ -47,7 +57,74 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
 
     const strippedOld = stripHtmlTags(oldString);
     const strippedNew = stripHtmlTags(newString);
-    const diffLines = computeDiff(strippedOld, strippedNew);
+
+    // When strippedOld is empty (old_string was pure HTML structure), fetch
+    // surrounding visible text from the full note for context.
+    const needsNoteContext = strippedOld === '' && oldString !== '' && strippedNew !== '';
+    const [noteContext, setNoteContext] = useState<{ before: string; after: string } | null>(null);
+
+    useEffect(() => {
+        if (!needsNoteContext || libraryId == null || !zoteroKey) return;
+
+        let cancelled = false;
+
+        (async () => {
+            try {
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+                if (!item || cancelled) return;
+                await item.loadDataType('note');
+                const rawHtml = getLatestNoteHtml(item);
+                const noteId = `${libraryId}-${zoteroKey}`;
+                const { simplified } = getOrSimplify(noteId, rawHtml, libraryId);
+
+                // After the edit is applied, the note contains newString instead
+                // of oldString. Search for the appropriate string so we get
+                // surrounding context rather than the inserted text itself.
+                const searchString = isApplied ? newString : oldString;
+                const idx = simplified.indexOf(searchString);
+                if (idx === -1 || cancelled) return;
+
+                const beforeHtml = simplified.substring(0, idx);
+                const afterHtml = simplified.substring(idx + searchString.length);
+
+                const beforeText = stripHtmlTags(beforeHtml);
+                const afterText = stripHtmlTags(afterHtml);
+
+                // Take the last non-empty line before and first non-empty line after
+                const beforeLines = beforeText.split('\n').filter(l => l.trim());
+                const afterLines = afterText.split('\n').filter(l => l.trim());
+
+                if (!cancelled) {
+                    setNoteContext({
+                        before: beforeLines.length > 0 ? beforeLines[beforeLines.length - 1].trim() : '',
+                        after: afterLines.length > 0 ? afterLines[0].trim() : '',
+                    });
+                }
+            } catch {
+                // Context is optional — silently fall back to no context
+            }
+        })();
+
+        return () => { cancelled = true; };
+    }, [needsNoteContext, libraryId, zoteroKey, oldString, isApplied, newString]);
+
+    const diffLines = useMemo(() => {
+        if (needsNoteContext && noteContext && (noteContext.before || noteContext.after)) {
+            // Build diff with surrounding context from the note
+            const lines: DiffLine[] = [];
+            if (noteContext.before) {
+                lines.push({ type: 'context', text: truncateContext(noteContext.before) });
+            }
+            for (const line of strippedNew.split('\n')) {
+                lines.push({ type: 'addition', text: line, segments: [{ text: line, highlighted: true }] });
+            }
+            if (noteContext.after) {
+                lines.push({ type: 'context', text: truncateContext(noteContext.after) });
+            }
+            return lines;
+        }
+        return computeDiff(strippedOld, strippedNew);
+    }, [strippedOld, strippedNew, needsNoteContext, noteContext]);
 
     function getLineClass(type: DiffLine['type']): string {
         switch (type) {
