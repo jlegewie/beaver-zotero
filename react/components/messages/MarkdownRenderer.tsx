@@ -35,6 +35,76 @@ const customSchema = deepmerge(defaultSchema, {
     }
 });
 
+/**
+ * Extract text content from a HAST node tree.
+ */
+function hastTextContent(node: any): string {
+    if (node.type === 'text') return node.value || '';
+    if (node.children) {
+        return node.children.map((c: any) => hastTextContent(c)).join('');
+    }
+    return '';
+}
+
+/**
+ * Rehype plugin that converts math nodes to Zotero's note format
+ * instead of rendering with KaTeX.
+ *
+ * After remark-math + rehype-sanitize, math nodes appear as:
+ *   - Inline:  <code class="language-math">content</code>
+ *   - Display: <pre><code class="language-math">content</code></pre>
+ *
+ * This plugin transforms them to:
+ *   - Inline:  <span class="math">$content$</span>
+ *   - Display: <pre class="math">$$content$$</pre>
+ */
+function rehypeZoteroMath() {
+    return (tree: any) => {
+        transformMathNodes(tree);
+    };
+}
+
+function transformMathNodes(node: any) {
+    if (!node.children) return;
+
+    for (let i = 0; i < node.children.length; i++) {
+        const child = node.children[i];
+        if (child.type !== 'element') continue;
+
+        const classes: string[] = Array.isArray(child.properties?.className)
+            ? child.properties.className
+            : [];
+
+        // Display math: <pre><code class="language-math">content</code></pre>
+        if (child.tagName === 'pre' && child.children?.length === 1) {
+            const codeChild = child.children[0];
+            if (codeChild.type === 'element' && codeChild.tagName === 'code') {
+                const codeClasses: string[] = Array.isArray(codeChild.properties?.className)
+                    ? codeChild.properties.className
+                    : [];
+                if (codeClasses.includes('language-math')) {
+                    const mathContent = hastTextContent(codeChild);
+                    child.properties = { className: ['math'] };
+                    child.children = [{ type: 'text', value: `$$${mathContent}$$` }];
+                    continue;
+                }
+            }
+        }
+
+        // Inline math: <code class="language-math">content</code>
+        if (child.tagName === 'code' && classes.includes('language-math')) {
+            const mathContent = hastTextContent(child);
+            child.tagName = 'span';
+            child.properties = { className: ['math'] };
+            child.children = [{ type: 'text', value: `$${mathContent}$` }];
+            continue;
+        }
+
+        // Recurse into untransformed nodes
+        transformMathNodes(child);
+    }
+}
+
 /** Allow zotero:// URLs through react-markdown's URL sanitization */
 function urlTransform(url: string): string {
     if (url.startsWith('zotero://')) return url;
@@ -277,7 +347,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                     <div key={`markdown-${index}`} className={className}>
                         <ReactMarkdown
                             remarkPlugins={[remarkMath, remarkGfm]}
-                            rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema], rehypeKatex]}
+                            rehypePlugins={[rehypeRaw, [rehypeSanitize, customSchema], exportRendering ? rehypeZoteroMath : rehypeKatex]}
                             urlTransform={urlTransform}
                             components={{
                                 // @ts-expect-error - Custom component not in ReactMarkdown types
