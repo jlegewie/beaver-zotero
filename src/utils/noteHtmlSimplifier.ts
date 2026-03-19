@@ -229,9 +229,16 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
                 }
 
                 // Extract visible text (label) — the full visible content of the citation span
-                const label = visibleContent
+                let label = visibleContent
                     .replace(/<[^>]+>/g, '') // Strip HTML tags (e.g., <span class="citation-item">)
                     .trim();
+
+                // ProseMirror atom nodes regenerate visible text from data-citation attrs.
+                // When itemData is missing (schema v2+ moves it to container), toDOM
+                // produces "()" — recover a useful label by looking up the item.
+                if (!label || label === '()') {
+                    label = generateCitationLabel(citationData);
+                }
 
                 if (citationItems.length === 1) {
                     // Single citation
@@ -254,7 +261,7 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
                     });
 
                     let tag = `<citation id="${id}" item_id="${itemId}"`;
-                    if (page) tag += ` page="${page}"`;
+                    if (page) tag += ` page="${escapeAttr(page)}"`;
                     tag += ` label="${escapeAttr(label)}"`;
                     tag += '/>';
                     return tag;
@@ -297,6 +304,43 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
     );
 
     return { simplified, metadata };
+}
+
+/**
+ * Generate a label for a citation when the visible text is empty/just parentheses.
+ * This happens when ProseMirror round-trips citations: the atom node's toDOM
+ * regenerates visible text from data-citation attrs, and if itemData is missing
+ * (schema v2+ strips it into the container), the output is just "()".
+ *
+ * Uses Zotero.EditorInstanceUtilities.formatCitation when available (produces
+ * "(<span class='citation-item'>Author, Year</span>)"), falling back to a
+ * minimal "Author, Year" format from CSL-JSON data.
+ */
+function generateCitationLabel(citationData: any): string {
+    // Try using Zotero's formatter if available
+    try {
+        const citationItems = citationData.citationItems || [];
+        // Ensure each item has itemData — look up from library if missing
+        const enriched = citationItems.map((ci: any) => {
+            if (ci.itemData) return ci;
+            const uri = ci.uris?.[0];
+            if (!uri) return ci;
+            const itemInfo = (Zotero.URI as any).getURIItemLibraryKey(uri);
+            if (!itemInfo) return ci;
+            const item = Zotero.Items.getByLibraryAndKey(itemInfo.libraryID, itemInfo.key);
+            if (!item) return ci;
+            return { ...ci, itemData: Zotero.Utilities.Item.itemToCSLJSON(item) };
+        });
+
+        const enrichedCitation = { ...citationData, citationItems: enriched };
+        const formatted = Zotero.EditorInstanceUtilities.formatCitation(enrichedCitation);
+        // Strip HTML tags from the formatted output
+        const text = formatted.replace(/<[^>]+>/g, '').trim();
+        if (text && text !== '()') return text;
+    } catch {
+        // Fall through to manual construction
+    }
+    return '()';
 }
 
 /** Escape a string for use as an HTML attribute value */
@@ -514,12 +558,16 @@ export function rebuildDataCitationItems(html: string): string {
                 const uriKey = ci.uris?.[0];
                 if (uriKey && !seenUris.has(uriKey)) {
                     seenUris.add(uriKey);
-                    const item = Zotero.URI.getURIItem(uriKey);
-                    if (item) {
-                        storedCitationItems.push({
-                            uris: ci.uris,
-                            itemData: Zotero.Utilities.Item.itemToCSLJSON(item)
-                        });
+                    // getURIItem is async (returns a Promise) — use sync equivalents
+                    const itemInfo = (Zotero.URI as any).getURIItemLibraryKey(uriKey);
+                    if (itemInfo) {
+                        const item = Zotero.Items.getByLibraryAndKey(itemInfo.libraryID, itemInfo.key);
+                        if (item) {
+                            storedCitationItems.push({
+                                uris: ci.uris,
+                                itemData: Zotero.Utilities.Item.itemToCSLJSON(item)
+                            });
+                        }
                     }
                 }
             }

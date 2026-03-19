@@ -104,11 +104,29 @@ beforeEach(() => {
                 const keyMatch = uri.match(/\/items\/([A-Z0-9]+)$/i);
                 return keyMatch ? { key: keyMatch[1] } : null;
             }),
+            getURIItemLibraryKey: vi.fn((uri: string) => {
+                const keyMatch = uri.match(/\/items\/([A-Z0-9]+)$/i);
+                return keyMatch ? { libraryID: 1, key: keyMatch[1] } : false;
+            }),
         },
         Utilities: {
             Item: {
-                itemToCSLJSON: vi.fn((item: any) => ({ id: item.key, type: 'article-journal' })),
+                itemToCSLJSON: vi.fn((item: any) => ({
+                    id: item.key,
+                    type: 'article-journal',
+                    author: [{ family: 'Author', given: 'Test' }],
+                    issued: { 'date-parts': [['2024']] },
+                })),
             },
+        },
+        EditorInstanceUtilities: {
+            formatCitation: vi.fn((citation: any) => {
+                return '(' + citation.citationItems.map((ci: any) => {
+                    const author = ci.itemData?.author?.[0]?.family || '';
+                    const year = ci.itemData?.issued?.['date-parts']?.[0]?.[0] || '';
+                    return `<span class="citation-item">${author}${year ? ', ' + year : ''}</span>`;
+                }).join('; ') + ')';
+            }),
         },
         Notes: {
             _editorInstances: [],
@@ -220,6 +238,22 @@ describe('simplifyNoteHtml', () => {
         const html = wrap(`<p>${rawCitation('PG1', 1, '42')}</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('page="42"');
+    });
+
+    it('recovers label when visible text is empty parentheses "()"', () => {
+        // Simulates ProseMirror round-trip: atom nodes regenerate visible text
+        // from data-citation attrs, producing "()" when itemData is missing
+        const citationData = {
+            citationItems: [{
+                uris: ['http://zotero.org/users/1/items/ABCD1234'],
+            }],
+        };
+        const emptyCitation = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">()</span>`;
+        const html = wrap(`<p>${emptyCitation}</p>`);
+        const { simplified } = simplifyNoteHtml(html, 1);
+        // Should recover a meaningful label via generateCitationLabel
+        expect(simplified).toContain('label="(Author, 2024)"');
+        expect(simplified).not.toContain('label="()"');
     });
 
     it('leaves malformed citation JSON unchanged', () => {
