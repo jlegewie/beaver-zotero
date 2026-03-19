@@ -398,12 +398,13 @@ export async function openNoteAndSearchEdit(
 }
 
 /**
- * Extract the highlighted addition text (dark green in EditNotePreview) from
- * a diff between oldHtml and newHtml. This is the character-level change that
- * was actually inserted or modified — the `diff-char-add` segments.
+ * Extract a search term from the first addition line that contains a
+ * highlighted (dark green) diff segment. Uses the full line text rather than
+ * just the highlighted portion so the search uniquely locates the edit in the
+ * note (the highlighted part alone may appear elsewhere).
  *
- * Returns the first highlighted addition segment that is long enough to be a
- * useful search term, or null if none found.
+ * Returns null when no addition with a highlight is found or the result is
+ * too short to be a useful search term.
  */
 function extractHighlightedAddition(oldHtml: string, newHtml: string): string | null {
     const strippedOld = stripHtmlTags(oldHtml);
@@ -416,43 +417,42 @@ function extractHighlightedAddition(oldHtml: string, newHtml: string): string | 
     const diffLines = computeDiff(strippedOld, strippedNew);
     logger(`extractHighlightedAddition: ${diffLines.length} diff lines computed`, 1);
 
-    // Collect all highlighted segments from addition lines (these are the
-    // dark green parts shown in EditNotePreview).
-    const highlightedParts: string[] = [];
+    // Find the first addition line that has a highlighted segment. Use the
+    // full line text (context + highlight) so the search is specific enough
+    // to land on the right location even if the highlighted part is common.
     for (const line of diffLines) {
-        if (line.type === 'addition' && line.segments) {
-            for (const seg of line.segments) {
-                if (seg.highlighted && seg.text.trim()) {
-                    highlightedParts.push(seg.text.trim());
-                }
-            }
+        if (line.type !== 'addition' || !line.segments) continue;
+
+        const hasHighlight = line.segments.some(s => s.highlighted && s.text.trim());
+        if (!hasHighlight) continue;
+
+        // Reconstruct the full line from segments (they may have been
+        // truncated by truncateSegments in computeDiff).
+        const fullText = line.segments.map(s => s.text).join('').trim();
+        logger(`extractHighlightedAddition: first highlighted addition line (${fullText.length} chars): "${fullText.substring(0, 150)}"`, 1);
+
+        if (fullText.length < 10) {
+            logger(`extractHighlightedAddition: line too short (${fullText.length} chars), skipping`, 1);
+            continue;
         }
+
+        let term = fullText;
+        if (term.length > 100) {
+            term = term.substring(0, 100);
+            logger(`extractHighlightedAddition: truncated to 100 chars`, 1);
+        }
+
+        // Strip leading/trailing ellipsis that truncateSegments or
+        // truncateContext may have added (won't match actual note text).
+        term = stripEllipsis(term);
+
+
+        logger(`extractHighlightedAddition: using "${term}"`, 1);
+        return term;
     }
 
-    logger(`extractHighlightedAddition: found ${highlightedParts.length} highlighted parts: ${JSON.stringify(highlightedParts.map(p => p.substring(0, 60)))}`, 1);
-
-    if (highlightedParts.length === 0) return null;
-
-    // Pick the longest highlighted part as it's most likely to be a unique
-    // search target. Very short changes (e.g., a single character fix) won't
-    // uniquely identify a location in the note.
-    let best = highlightedParts.reduce((a, b) => a.length >= b.length ? a : b);
-
-    // If the best highlighted part is very short (< 10 chars), it may match
-    // too many places. In that case, return null so the caller can fall back
-    // to the full-line search.
-    if (best.length < 10) {
-        logger(`extractHighlightedAddition: best part "${best}" is too short (${best.length} chars), returning null`, 1);
-        return null;
-    }
-
-    if (best.length > 100) {
-        best = best.substring(0, 100);
-        logger(`extractHighlightedAddition: truncated to 100 chars`, 1);
-    }
-
-    logger(`extractHighlightedAddition: using "${best}"`, 1);
-    return best;
+    logger(`extractHighlightedAddition: no suitable highlighted addition line found`, 1);
+    return null;
 }
 
 /**
@@ -488,6 +488,7 @@ function extractSearchTerm(html: string): string | null {
         logger(`extractSearchTerm: truncated to 100 chars`, 1);
     }
 
+    term = stripEllipsis(term);
     return term;
 }
 
@@ -502,7 +503,12 @@ async function searchInNoteEditor(itemId: number, searchText: string): Promise<v
     const startTime = Date.now();
     let pollCount = 0;
 
-    logger(`searchInNoteEditor: polling for editor instance (itemId=${itemId}), searchText="${searchText}"`, 1);
+    // The note-editor's search plugin internally escapes the search term for
+    // use in a RegExp with the `u` (Unicode) flag. However, it escapes `-`
+    // to `\-`, which is an invalid identity escape in Unicode mode. Work
+    // around this by splitting on hyphens and using the longest segment.
+    const safeText = sanitizeSearchTerm(searchText);
+    logger(`searchInNoteEditor: polling for editor instance (itemId=${itemId}), searchText="${safeText}" (original: "${searchText}")`, 1);
 
     while (Date.now() - startTime < maxWaitMs) {
         pollCount++;
@@ -515,7 +521,7 @@ async function searchInNoteEditor(itemId: number, searchText: string): Promise<v
             search.setActive(true);
             logger(`searchInNoteEditor: setActive(true) called`, 1);
 
-            search.setSearchTerm(searchText);
+            search.setSearchTerm(safeText);
             logger(`searchInNoteEditor: setSearchTerm called`, 1);
 
             search.next();
@@ -529,6 +535,36 @@ async function searchInNoteEditor(itemId: number, searchText: string): Promise<v
     }
 
     logger(`searchInNoteEditor: timed out after ${maxWaitMs}ms (${pollCount} polls) — editor search plugin not found`, 1);
+}
+
+/**
+ * Sanitize a search term for the note-editor's ProseMirror search plugin.
+ * The plugin internally escapes `-` to `\-` which is invalid in a RegExp
+ * with the Unicode (`u`) flag. Work around this by splitting on hyphens
+ * and returning the longest segment.
+ */
+function sanitizeSearchTerm(term: string): string {
+    let result = stripEllipsis(term);
+
+    if (result.includes('-')) {
+        const segments = result.split('-');
+        result = segments.reduce((a, b) => a.length >= b.length ? a : b).trim();
+        logger(`sanitizeSearchTerm: split on hyphens → ${segments.length} segments, using longest (${result.length} chars): "${result.substring(0, 80)}"`, 1);
+    }
+
+    return result;
+}
+
+/**
+ * Strip leading/trailing ellipsis characters (`…`) that diff truncation
+ * helpers (truncateSegments, truncateContext) may have inserted. These
+ * won't match actual note text.
+ */
+function stripEllipsis(term: string): string {
+    let result = term;
+    if (result.startsWith('…')) result = result.substring(1);
+    if (result.endsWith('…')) result = result.slice(0, -1);
+    return result.trim();
 }
 
 /**
