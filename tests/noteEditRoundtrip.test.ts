@@ -892,40 +892,89 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
 
         expect(result.library_id).toBe(1);
         expect(result.zotero_key).toBe('NOTE0001');
-        expect(result.old_html).toBe(noteHtml);
-        expect(result.new_html).toContain('Goodbye');
-        expect(result.new_html).not.toContain('Hello');
         expect(result.occurrences_replaced).toBe(1);
+        // Result should not contain full HTML snapshots
+        expect(result).not.toHaveProperty('old_html');
+        expect(result).not.toHaveProperty('new_html');
     });
 
-    it('undo with result_data.old_html restores note', async () => {
-        const noteHtml = wrap('<p>Hello world</p>');
+    it('undo via reverse str-replace restores note', async () => {
         const editedHtml = wrap('<p>Goodbye world</p>');
         const item = makeMockItem(editedHtml);
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
 
         const { undoEditNoteAction } = await importEditNoteActions();
         const action = makeAction({
             result_data: {
                 library_id: 1,
                 zotero_key: 'NOTE0001',
-                old_html: noteHtml,
-                new_html: editedHtml,
                 occurrences_replaced: 1,
             },
         });
 
         await undoEditNoteAction(action);
 
-        expect(item.setNote).toHaveBeenCalledWith(noteHtml);
+        // Should reverse the replacement: Goodbye → Hello
+        const savedHtml = item.setNote.mock.calls[0][0];
+        expect(savedHtml).toContain('Hello');
+        expect(savedHtml).not.toContain('Goodbye');
         expect(item.saveTx).toHaveBeenCalled();
     });
 
-    it('undo fails gracefully when result_data missing', async () => {
-        const { undoEditNoteAction } = await importEditNoteActions();
-        const action = makeAction({ result_data: undefined });
+    it('undo is no-op when old_string already present (already undone)', async () => {
+        // Note already has old_string, meaning it was already undone
+        const noteHtml = wrap('<p>Hello world</p>');
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
 
-        await expect(undoEditNoteAction(action)).rejects.toThrow('No undo data available');
+        const { undoEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            result_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                occurrences_replaced: 1,
+            },
+        });
+
+        // Should not throw, just skip
+        await undoEditNoteAction(action);
+        expect(item.setNote).not.toHaveBeenCalled();
+    });
+
+    it('undo throws when note was modified externally', async () => {
+        // Note has neither old_string nor new_string
+        const noteHtml = wrap('<p>Completely different content</p>');
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const { undoEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            result_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                occurrences_replaced: 1,
+            },
+        });
+
+        await expect(undoEditNoteAction(action)).rejects.toThrow('note has been modified');
+    });
+
+    it('undo fails gracefully when proposed_data strings missing', async () => {
+        const { undoEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '',
+                new_string: '',
+            },
+            result_data: undefined,
+        });
+
+        await expect(undoEditNoteAction(action)).rejects.toThrow('old_string and new_string are required');
     });
 
     it('execute throws for item not found', async () => {
@@ -973,7 +1022,9 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         }));
 
         expect(result.occurrences_replaced).toBe(3);
-        expect(result.new_html).toContain('Goodbye Goodbye Goodbye');
+        // Verify the edit was applied by checking what was saved
+        const savedHtml = item.setNote.mock.calls[0][0];
+        expect(savedHtml).toContain('Goodbye Goodbye Goodbye');
     });
 
     it('execute rolls back in-memory on save failure', async () => {
@@ -1014,16 +1065,16 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         const result = await executeEditNoteAction(action);
 
         // Verify the edit
-        expect(result.old_html).toBe(noteHtml);
-        expect(result.new_html).toContain('elementary school settings');
         expect(result.occurrences_replaced).toBe(1);
-        expect(item.setNote).toHaveBeenCalledWith(result.new_html);
+        const editedHtml = item.setNote.mock.calls[0][0];
+        expect(editedHtml).toContain('elementary school settings');
         expect(item.saveTx).toHaveBeenCalled();
 
-        // Now undo
+        // Now undo — create a new mock item with the edited HTML
         vi.clearAllMocks();
-        const undoItem = makeMockItem(result.new_html);
+        const undoItem = makeMockItem(editedHtml);
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(undoItem);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
 
         const undoAction = {
             ...action,
@@ -1032,8 +1083,10 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
 
         await undoEditNoteAction(undoAction);
 
-        // Verify setNote was called with the original HTML
-        expect(undoItem.setNote).toHaveBeenCalledWith(noteHtml);
+        // Verify the undo reversed the replacement
+        const restoredHtml = undoItem.setNote.mock.calls[0][0];
+        expect(restoredHtml).toContain('middle school settings');
+        expect(restoredHtml).not.toContain('elementary school settings');
         expect(undoItem.saveTx).toHaveBeenCalled();
     });
 });

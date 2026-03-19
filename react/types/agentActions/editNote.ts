@@ -24,17 +24,14 @@ export interface EditNoteProposedData {
 
 /**
  * Result data after applying an edit_note action.
- * Captures full HTML snapshots for undo/redo.
+ * Undo uses reverse str-replace (proposed_data.new_string → old_string)
+ * rather than storing full HTML snapshots.
  */
 export interface EditNoteResultData {
     /** Library ID of the edited note */
     library_id: number;
     /** Zotero key of the edited note */
     zotero_key: string;
-    /** Full raw note HTML before edit (for undo) */
-    old_html: string;
-    /** Full raw note HTML after edit (for redo) */
-    new_html: string;
     /** Number of occurrences that were replaced */
     occurrences_replaced: number;
     /** Warnings (e.g., duplicate citation) */

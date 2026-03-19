@@ -43,7 +43,7 @@ export async function executeEditNoteAction(
     // 2. Load note data
     await item.loadDataType('note');
 
-    // 3. Snapshot for undo
+    // 3. Get current note HTML
     const oldHtml = getLatestNoteHtml(item);
 
     // 4. Get metadata from cache or re-simplify
@@ -126,30 +126,35 @@ export async function executeEditNoteAction(
     return {
         library_id,
         zotero_key,
-        old_html: oldHtml,
-        new_html: newHtml,
         occurrences_replaced: matchCount,
         warnings,
     };
 }
 
 /**
- * Undo an edit_note agent action by restoring the note to its previous HTML.
- * Uses old_html from result_data (captured at apply-time).
+ * Undo an edit_note agent action using reverse string replacement.
+ * Finds new_string in the current note and replaces with old_string.
  *
- * @param action The agent action to undo (must have been applied with result_data)
+ * 3-way detection (analogous to edit_metadata undo):
+ * - new_string found → undo succeeds (replace with old_string)
+ * - old_string found instead → already undone, no-op
+ * - neither found → note was modified externally, error
+ *
+ * @param action The agent action to undo (must have proposed_data with old_string/new_string)
  */
 export async function undoEditNoteAction(
     action: AgentAction
 ): Promise<void> {
-    const { library_id, zotero_key } = action.proposed_data as {
+    const { library_id, zotero_key, old_string, new_string, replace_all } = action.proposed_data as {
         library_id: number;
         zotero_key: string;
+        old_string: string;
+        new_string: string;
+        replace_all?: boolean;
     };
 
-    const resultData = action.result_data as EditNoteResultData | undefined;
-    if (!resultData?.old_html) {
-        throw new Error('No undo data available: result_data.old_html is missing');
+    if (!old_string || !new_string) {
+        throw new Error('No undo data available: proposed_data.old_string and new_string are required');
     }
 
     // 1. Load item
@@ -160,17 +165,64 @@ export async function undoEditNoteAction(
 
     // 2. Load note data
     await item.loadDataType('note');
+    const noteId = `${library_id}-${zotero_key}`;
 
-    // 3. Restore old HTML
+    // 3. Get current HTML and simplification metadata
+    const currentHtml = getLatestNoteHtml(item);
+    const { metadata } = getOrSimplify(noteId, currentHtml, library_id);
+
+    // 4. Expand the simplified strings to raw HTML for matching
+    let expandedNew: string;
+    let expandedOld: string;
     try {
-        item.setNote(resultData.old_html);
+        expandedNew = expandToRawHtml(new_string, metadata, 'new');
+        expandedOld = expandToRawHtml(old_string, metadata, 'old');
+    } catch (e: any) {
+        throw new Error(`Failed to expand strings for undo: ${e.message || String(e)}`);
+    }
+
+    // 5. Strip data-citation-items for matching
+    const strippedHtml = stripDataCitationItems(currentHtml);
+
+    // 6. 3-way detection
+    const newStringFound = strippedHtml.includes(expandedNew);
+    const oldStringFound = strippedHtml.includes(expandedOld);
+
+    if (!newStringFound && oldStringFound) {
+        // Already undone — no-op
+        logger(`undoEditNoteAction: Note ${noteId} already contains old_string, skipping`, 1);
+        return;
+    }
+
+    if (!newStringFound && !oldStringFound) {
+        throw new Error(
+            'Cannot undo: the note has been modified since this edit was applied. '
+            + 'Neither the applied text nor the original text could be found.'
+        );
+    }
+
+    // 7. Reverse the replacement: new_string → old_string
+    let restoredHtml: string;
+    if (replace_all) {
+        restoredHtml = strippedHtml.split(expandedNew).join(expandedOld);
+    } else {
+        const idx = strippedHtml.indexOf(expandedNew);
+        restoredHtml = strippedHtml.substring(0, idx) + expandedOld
+            + strippedHtml.substring(idx + expandedNew.length);
+    }
+
+    // 8. Rebuild data-citation-items
+    restoredHtml = rebuildDataCitationItems(restoredHtml);
+
+    // 9. Save
+    try {
+        item.setNote(restoredHtml);
         await item.saveTx();
-        logger(`undoEditNoteAction: Restored note ${library_id}-${zotero_key} to previous state`, 1);
+        logger(`undoEditNoteAction: Reversed edit on note ${noteId}`, 1);
     } catch (error) {
         throw new Error(`Failed to save note after undo: ${error}`);
     }
 
-    // 4. Invalidate simplification cache
-    const noteId = `${library_id}-${zotero_key}`;
+    // 10. Invalidate simplification cache
     invalidateSimplificationCache(noteId);
 }

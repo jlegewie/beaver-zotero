@@ -767,7 +767,7 @@ async function executeEditNoteAction(
     // 2. Load note
     await item.loadDataType('note');
 
-    // 3. Snapshot for undo
+    // 3. Get current note HTML (kept for rollback on save failure)
     const oldHtml = getLatestNoteHtml(item);
 
     // 4. Get metadata from cache or re-simplify
@@ -884,8 +884,6 @@ async function executeEditNoteAction(
         result_data: {
             library_id,
             zotero_key,
-            old_html: oldHtml,
-            new_html: newHtml,
             occurrences_replaced: matchCount,
             warnings,
         },
