@@ -113,7 +113,7 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
             // Build diff with surrounding context from the note
             const lines: DiffLine[] = [];
             if (noteContext.before) {
-                lines.push({ type: 'context', text: truncateContext(noteContext.before) });
+                lines.push({ type: 'context', text: truncateContext(noteContext.before, 80, true) });
             }
             for (const line of strippedNew.split('\n')) {
                 lines.push({ type: 'addition', text: line, segments: [{ text: line, highlighted: true }] });
@@ -419,9 +419,11 @@ function filterContext(lines: DiffLine[], contextSize: number): DiffLine[] {
 /**
  * Truncate context lines to a reasonable length.
  */
-function truncateContext(text: string, maxLength: number = 80): string {
+function truncateContext(text: string, maxLength: number = 80, showEnd: boolean = false): string {
     if (text.length <= maxLength) return text;
-    return text.substring(0, maxLength) + '…';
+    return showEnd
+        ? '…' + text.slice(-maxLength)
+        : text.substring(0, maxLength) + '…';
 }
 
 // ---- Citation label recovery ----
