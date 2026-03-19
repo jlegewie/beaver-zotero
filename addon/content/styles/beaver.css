@@ -932,13 +932,20 @@
 }
 
 [id^="beaver-pane-"] .markdown .katex-display {
-    /* Styles for display math */
-    /* display: block; */
-    /* font-size: 1.2em !important; */
+    /* Styles for display math block */
     padding: 0rem;
     max-width: 100%;
     overflow-x: auto;
     overflow-y: hidden;
+}
+
+[id^="beaver-pane-"] .markdown .katex-display > .katex {
+    /* Restore katex.css defaults inside display math — the .markdown .katex rule
+       above would otherwise override these to inline-block with overflow */
+    display: block;
+    margin: 0;
+    max-width: none;
+    overflow: visible;
 }
 
 [id^="beaver-pane-"] .markdown a {
