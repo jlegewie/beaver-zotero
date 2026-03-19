@@ -247,6 +247,10 @@ export interface NoteProposedData {
     content?: string | null;
     library_id?: number | null;
     zotero_key?: string | null;
+    /** Library name or ID string (resolved by frontend via getLibraryByIdOrName) */
+    library?: string | null;
+    /** Collection name or key (resolved by frontend via getCollectionByIdOrName) */
+    collection?: string | null;
     /** Raw tag from LLM output - used for matching during streaming */
     raw_tag?: string;
 }

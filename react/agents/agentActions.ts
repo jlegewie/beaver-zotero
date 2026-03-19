@@ -234,6 +234,8 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             zotero_key: typeof zoteroKeyRaw === 'string'
                 ? zoteroKeyRaw
                 : (zoteroKeyRaw !== undefined && zoteroKeyRaw !== null ? String(zoteroKeyRaw) : undefined),
+            library: typeof proposedData.library === 'string' ? proposedData.library : undefined,
+            collection: typeof proposedData.collection === 'string' ? proposedData.collection : undefined,
             raw_tag: typeof rawTag === 'string' ? rawTag : undefined,
         } as NoteProposedData;
     } else if (actionType === 'create_item') {
