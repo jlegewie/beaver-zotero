@@ -1,4 +1,6 @@
 import { truncateText } from './stringUtils';
+import { stripHtmlTags, computeDiff } from '../components/agentRuns/EditNotePreview';
+import { logger } from '../../src/utils/logger';
 import { syncingItemFilter, syncingItemFilterAsync, isSupportedItem, isLibraryValidForSync } from '../../src/utils/sync';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
@@ -314,5 +316,280 @@ export async function openNoteByKey(libraryId: number, zoteroKey: string): Promi
     const itemId = Zotero.Items.getIDFromLibraryAndKey(libraryId, zoteroKey);
     if (itemId) {
         await openNoteById(itemId);
+    }
+}
+
+/**
+ * Open a note and search for the edited text, scrolling to the match.
+ * Uses the ProseMirror search plugin to highlight and scroll to the relevant
+ * section of the note.
+ *
+ * @param libraryId - Library ID of the note item
+ * @param zoteroKey - Zotero key of the note item
+ * @param oldString - The original string being replaced (simplified HTML)
+ * @param newString - The replacement string (simplified HTML)
+ * @param isApplied - Whether the edit has already been applied
+ */
+export async function openNoteAndSearchEdit(
+    libraryId: number,
+    zoteroKey: string,
+    oldString: string,
+    newString: string,
+    isApplied: boolean,
+): Promise<void> {
+    logger(`openNoteAndSearchEdit: called with libraryId=${libraryId}, zoteroKey=${zoteroKey}, isApplied=${isApplied}`, 1);
+    logger(`openNoteAndSearchEdit: oldString (${oldString.length} chars): "${oldString.substring(0, 200)}"`, 1);
+    logger(`openNoteAndSearchEdit: newString (${newString.length} chars): "${newString.substring(0, 200)}"`, 1);
+
+    const itemId = Zotero.Items.getIDFromLibraryAndKey(libraryId, zoteroKey);
+    if (!itemId) {
+        logger(`openNoteAndSearchEdit: item not found for ${libraryId}-${zoteroKey}, aborting`, 1);
+        return;
+    }
+    logger(`openNoteAndSearchEdit: resolved itemId=${itemId}`, 1);
+
+    // Check if the note is already open in an editor before opening.
+    // If not, we'll need to wait longer for the tab to fully initialize.
+    const wasAlreadyOpen = (Zotero as any).Notes?._editorInstances?.some(
+        (e: any) => e.itemID === itemId
+    ) ?? false;
+    logger(`openNoteAndSearchEdit: note wasAlreadyOpen=${wasAlreadyOpen}`, 1);
+
+    // Open the note (or focus if already open)
+    await openNoteById(itemId);
+    logger(`openNoteAndSearchEdit: note opened/focused`, 1);
+
+    // When opening a note in a new tab, the tab switch triggers async UI
+    // events (useZoteroTabSelection, useZoteroContext) that can reinitialize
+    // the editor after our search runs. Wait for the tab switch to settle.
+    if (!wasAlreadyOpen) {
+        logger(`openNoteAndSearchEdit: waiting 500ms for new tab to settle`, 1);
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    // Determine what to search for based on edit status.
+    let searchText: string | null;
+    if (isApplied) {
+        // For applied edits, search for the highlighted diff (the dark green
+        // character-level additions shown in EditNotePreview).
+        searchText = extractHighlightedAddition(oldString, newString);
+        logger(`openNoteAndSearchEdit: extractHighlightedAddition result: ${searchText ? `"${searchText}"` : 'null'}`, 1);
+
+        // Fall back to first line of newString if no highlighted diff found
+        if (!searchText) {
+            searchText = extractSearchTerm(newString);
+            logger(`openNoteAndSearchEdit: fell back to extractSearchTerm(newString): ${searchText ? `"${searchText}"` : 'null'}`, 1);
+        }
+    } else {
+        // For non-applied edits, search for the old text that will be replaced.
+        searchText = extractSearchTerm(oldString);
+        logger(`openNoteAndSearchEdit: extractSearchTerm(oldString): ${searchText ? `"${searchText}"` : 'null'}`, 1);
+    }
+
+    if (!searchText) {
+        logger(`openNoteAndSearchEdit: no search text resolved, aborting search`, 1);
+        return;
+    }
+    logger(`openNoteAndSearchEdit: final searchText="${searchText}"`, 1);
+
+    // Wait for the editor instance to be available and initialized,
+    // then trigger the search.
+    await searchInNoteEditor(itemId, searchText);
+}
+
+/**
+ * Extract the highlighted addition text (dark green in EditNotePreview) from
+ * a diff between oldHtml and newHtml. This is the character-level change that
+ * was actually inserted or modified — the `diff-char-add` segments.
+ *
+ * Returns the first highlighted addition segment that is long enough to be a
+ * useful search term, or null if none found.
+ */
+function extractHighlightedAddition(oldHtml: string, newHtml: string): string | null {
+    const strippedOld = stripHtmlTags(oldHtml);
+    const strippedNew = stripHtmlTags(newHtml);
+    logger(`extractHighlightedAddition: strippedOld (${strippedOld.length} chars): "${strippedOld.substring(0, 150)}"`, 1);
+    logger(`extractHighlightedAddition: strippedNew (${strippedNew.length} chars): "${strippedNew.substring(0, 150)}"`, 1);
+
+    if (!strippedOld && !strippedNew) return null;
+
+    const diffLines = computeDiff(strippedOld, strippedNew);
+    logger(`extractHighlightedAddition: ${diffLines.length} diff lines computed`, 1);
+
+    // Collect all highlighted segments from addition lines (these are the
+    // dark green parts shown in EditNotePreview).
+    const highlightedParts: string[] = [];
+    for (const line of diffLines) {
+        if (line.type === 'addition' && line.segments) {
+            for (const seg of line.segments) {
+                if (seg.highlighted && seg.text.trim()) {
+                    highlightedParts.push(seg.text.trim());
+                }
+            }
+        }
+    }
+
+    logger(`extractHighlightedAddition: found ${highlightedParts.length} highlighted parts: ${JSON.stringify(highlightedParts.map(p => p.substring(0, 60)))}`, 1);
+
+    if (highlightedParts.length === 0) return null;
+
+    // Pick the longest highlighted part as it's most likely to be a unique
+    // search target. Very short changes (e.g., a single character fix) won't
+    // uniquely identify a location in the note.
+    let best = highlightedParts.reduce((a, b) => a.length >= b.length ? a : b);
+
+    // If the best highlighted part is very short (< 10 chars), it may match
+    // too many places. In that case, return null so the caller can fall back
+    // to the full-line search.
+    if (best.length < 10) {
+        logger(`extractHighlightedAddition: best part "${best}" is too short (${best.length} chars), returning null`, 1);
+        return null;
+    }
+
+    if (best.length > 100) {
+        best = best.substring(0, 100);
+        logger(`extractHighlightedAddition: truncated to 100 chars`, 1);
+    }
+
+    logger(`extractHighlightedAddition: using "${best}"`, 1);
+    return best;
+}
+
+/**
+ * Extract a search-friendly plain-text term from simplified HTML.
+ * Strips HTML tags (handling citations, annotations, images) and takes
+ * the first meaningful line, truncated to a reasonable length for search.
+ */
+function extractSearchTerm(html: string): string | null {
+    logger(`extractSearchTerm: input html (${html.length} chars): "${html.substring(0, 200)}"`, 1);
+
+    const plainText = stripHtmlTags(html);
+    logger(`extractSearchTerm: after stripHtmlTags (${plainText.length} chars): "${plainText.substring(0, 200)}"`, 1);
+
+    if (!plainText) {
+        logger(`extractSearchTerm: plainText is empty after stripping`, 1);
+        return null;
+    }
+
+    // Take the first non-empty line as the search term.
+    // This avoids multi-line search issues with ProseMirror.
+    const lines = plainText.split('\n').filter(l => l.trim());
+    logger(`extractSearchTerm: ${lines.length} non-empty lines found`, 1);
+    if (lines.length === 0) return null;
+
+    let term = lines[0].trim();
+    logger(`extractSearchTerm: first line (${term.length} chars): "${term.substring(0, 200)}"`, 1);
+
+    // Truncate to a reasonable length — long terms may not match well
+    // due to whitespace normalization differences between simplified HTML
+    // and ProseMirror's text representation.
+    if (term.length > 100) {
+        term = term.substring(0, 100);
+        logger(`extractSearchTerm: truncated to 100 chars`, 1);
+    }
+
+    return term;
+}
+
+/**
+ * Find the editor instance for a note and trigger a search.
+ * Polls briefly for the editor to become available (it may still be
+ * initializing after Zotero.Notes.open() returns).
+ */
+async function searchInNoteEditor(itemId: number, searchText: string): Promise<void> {
+    const maxWaitMs = 3000;
+    const pollIntervalMs = 100;
+    const startTime = Date.now();
+    let pollCount = 0;
+
+    logger(`searchInNoteEditor: polling for editor instance (itemId=${itemId}), searchText="${searchText}"`, 1);
+
+    while (Date.now() - startTime < maxWaitMs) {
+        pollCount++;
+        const search = getNoteEditorSearch(itemId);
+        if (search) {
+            logger(`searchInNoteEditor: search plugin found after ${pollCount} polls (${Date.now() - startTime}ms)`, 1);
+
+            // Activate the findbar first — without this, decorations and
+            // the search bar won't appear.
+            search.setActive(true);
+            logger(`searchInNoteEditor: setActive(true) called`, 1);
+
+            search.setSearchTerm(searchText);
+            logger(`searchInNoteEditor: setSearchTerm called`, 1);
+
+            search.next();
+            logger(`searchInNoteEditor: next() called`, 1);
+
+            search.focusSelectedResult();
+            logger(`searchInNoteEditor: focusSelectedResult() called — search complete`, 1);
+            return;
+        }
+        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+
+    logger(`searchInNoteEditor: timed out after ${maxWaitMs}ms (${pollCount} polls) — editor search plugin not found`, 1);
+}
+
+/**
+ * Get the search plugin state from an open note editor instance.
+ * Returns null if the editor isn't available or hasn't finished initializing.
+ */
+function getNoteEditorSearch(itemId: number): any | null {
+    try {
+        const instances: any[] = (Zotero as any).Notes?._editorInstances;
+        if (!instances) {
+            logger(`getNoteEditorSearch: Zotero.Notes._editorInstances is unavailable`, 1);
+            return null;
+        }
+
+        const inst = instances.find((e: any) => e.itemID === itemId);
+        if (!inst) {
+            logger(`getNoteEditorSearch: no editor instance found for itemId=${itemId} (${instances.length} instances open: [${instances.map((e: any) => e.itemID).join(', ')}])`, 1);
+            return null;
+        }
+        if (!inst._iframeWindow) {
+            logger(`getNoteEditorSearch: editor instance found but _iframeWindow is null/undefined`, 1);
+            return null;
+        }
+
+        const wrappedJS = inst._iframeWindow.wrappedJSObject;
+        if (!wrappedJS) {
+            logger(`getNoteEditorSearch: _iframeWindow.wrappedJSObject is null/undefined`, 1);
+            return null;
+        }
+
+        const innerEditor = wrappedJS._currentEditorInstance;
+        if (!innerEditor) {
+            logger(`getNoteEditorSearch: _currentEditorInstance is null/undefined`, 1);
+            return null;
+        }
+
+        if (!innerEditor._editorCore) {
+            logger(`getNoteEditorSearch: _editorCore is null/undefined`, 1);
+            return null;
+        }
+
+        if (!innerEditor._editorCore.pluginState) {
+            logger(`getNoteEditorSearch: pluginState is null/undefined`, 1);
+            return null;
+        }
+
+        const search = innerEditor._editorCore.pluginState.search;
+        if (!search) {
+            logger(`getNoteEditorSearch: pluginState.search is null/undefined (available keys: ${Object.keys(innerEditor._editorCore.pluginState).join(', ')})`, 1);
+            return null;
+        }
+
+        // Verify the search plugin is functional by checking for required methods
+        if (typeof search.setSearchTerm !== 'function') {
+            logger(`getNoteEditorSearch: search.setSearchTerm is not a function (type: ${typeof search.setSearchTerm}, available: ${Object.keys(search).join(', ')})`, 1);
+            return null;
+        }
+
+        return search;
+    } catch (err: any) {
+        logger(`getNoteEditorSearch: exception: ${err?.message || err}`, 1);
+        return null;
     }
 }

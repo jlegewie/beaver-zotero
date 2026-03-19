@@ -27,12 +27,12 @@ interface EditNotePreviewProps {
 
 // ---- Diff types ----
 
-interface DiffSegment {
+export interface DiffSegment {
     text: string;
     highlighted: boolean;
 }
 
-interface DiffLine {
+export interface DiffLine {
     type: 'context' | 'addition' | 'deletion' | 'separator';
     text: string;
     segments?: DiffSegment[];
@@ -204,7 +204,7 @@ function renderSegments(segments: DiffSegment[], lineType: DiffLine['type']): Re
  * Compute a line-level diff with character-level highlighting for modified lines.
  * Shows limited context around changes.
  */
-function computeDiff(oldText: string, newText: string): DiffLine[] {
+export function computeDiff(oldText: string, newText: string): DiffLine[] {
     // Edge cases
     if (oldText === newText) {
         return [{ type: 'context', text: truncateContext(oldText) }];
@@ -436,7 +436,7 @@ function truncateContext(text: string, maxLength: number = 80, showEnd: boolean 
  * Each item in `citationItems` must have an `itemData` property (CSL-JSON).
  * Returns null if formatting fails or produces no meaningful text.
  */
-function formatCitationText(citationItems: any[]): string | null {
+export function formatCitationText(citationItems: any[]): string | null {
     try {
         if (citationItems.length === 0) return null;
         const formatted = Zotero.EditorInstanceUtilities.formatCitation(
@@ -453,7 +453,7 @@ function formatCitationText(citationItems: any[]): string | null {
  * Look up a Zotero item by "libraryID-key" string and return a citation-item
  * object with CSL-JSON itemData, or null if the item can't be found.
  */
-function lookupCitationItem(itemId: string): { itemData: any } | null {
+export function lookupCitationItem(itemId: string): { itemData: any } | null {
     try {
         const dashIdx = itemId.indexOf('-');
         if (dashIdx === -1) return null;
@@ -471,7 +471,7 @@ function lookupCitationItem(itemId: string): { itemData: any } | null {
  * Recover a citation label from a simplified <citation> tag's attributes
  * (item_id for single citations, items for compound citations).
  */
-function recoverSimplifiedCitationLabel(tag: string): string | null {
+export function recoverSimplifiedCitationLabel(tag: string): string | null {
     // Single citation: item_id="1-KEY"
     const itemIdMatch = tag.match(/\bitem_id="([^"]*)"/);
     if (itemIdMatch) {
@@ -493,7 +493,7 @@ function recoverSimplifiedCitationLabel(tag: string): string | null {
  * Recover a citation label from a raw Zotero data-citation attribute
  * (URL-encoded JSON with citationItems containing URIs).
  */
-function recoverRawCitationLabel(encodedCitation: string): string | null {
+export function recoverRawCitationLabel(encodedCitation: string): string | null {
     try {
         const citationData = JSON.parse(decodeURIComponent(encodedCitation));
         const citationItems = (citationData.citationItems || []).map((ci: any) => {
@@ -524,7 +524,7 @@ function recoverRawCitationLabel(encodedCitation: string): string | null {
  * - Images: <annotation-image .../> or <image .../> → [image]
  * - Standard HTML tags are stripped, block elements add newlines.
  */
-function stripHtmlTags(html: string): string {
+export function stripHtmlTags(html: string): string {
     return html
         // Handle full raw Zotero citation spans: match the entire span (including
         // nested citation-item spans), extract visible text, and recover if "()"
