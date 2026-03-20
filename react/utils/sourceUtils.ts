@@ -478,7 +478,7 @@ function extractHighlightedDiffText(
         .join('')
         .trim();
     selectText = stripEllipsis(selectText);
-    if (!selectText || selectText.length < 5) {
+    if (!selectText || selectText.length < 2) {
         logger(`extractHighlightedDiffText(${targetType}): selectText too short after stripping`, 1);
         return null;
     }
