@@ -673,12 +673,34 @@ async function selectAndScrollInNoteEditor(
             const toPos = view.posAtDOM(match.endNode, match.endOffset);
             logger(`selectAndScrollInNoteEditor: mapped to positions ${fromPos}-${toPos}`, 1);
 
-            // Use the selection's constructor (TextSelection) to create a range selection.
-            const TextSelection = view.state.selection.constructor;
-            const tr = view.state.tr.setSelection(
-                TextSelection.create(view.state.doc, fromPos, toPos)
-            );
+            // Create a TextSelection for the target range.
+            // IMPORTANT: We must reliably get the TextSelection class, not just
+            // use `view.state.selection.constructor`. If the current selection is
+            // a NodeSelection (e.g., after clicking a citation/image/math block),
+            // its `.create()` method has a different signature and silently
+            // produces the wrong selection type.
+            let selection: any;
+            try {
+                // Walk the prototype chain: instance → SubclassProto → Selection.prototype
+                // Then use Selection.fromJSON which uses ProseMirror's internal registry
+                // to always create the correct selection type ('text' → TextSelection).
+                const SelectionBase = Object.getPrototypeOf(
+                    Object.getPrototypeOf(view.state.selection)
+                ).constructor;
+                selection = SelectionBase.fromJSON(view.state.doc, {
+                    type: 'text', anchor: fromPos, head: toPos,
+                });
+            } catch (selErr: any) {
+                logger(`selectAndScrollInNoteEditor: Selection.fromJSON failed (${selErr?.message}), using constructor fallback`, 1);
+                const Ctor = view.state.selection.constructor;
+                selection = Ctor.create(view.state.doc, fromPos, toPos);
+            }
+            const tr = view.state.tr.setSelection(selection).scrollIntoView();
             view.dispatch(tr);
+
+            // Verify the selection was actually applied
+            const actualSel = view.state.selection;
+            logger(`selectAndScrollInNoteEditor: selection after dispatch: from=${actualSel.from}, to=${actualSel.to} (expected ${fromPos}-${toPos})`, 1);
 
             // Scroll the selection start into the center of the editor's
             // scrollable container. We set scrollTop directly because
@@ -812,13 +834,27 @@ function stripEllipsis(term: string): string {
 /**
  * Get the ProseMirror EditorView from an open note editor instance.
  * Returns null if the editor isn't available or hasn't finished initializing.
+ *
+ * A note can have multiple editor instances open simultaneously (e.g., one in
+ * a tab and one in a window). Since `openNoteById` opens notes in a tab by
+ * default, we prefer tab instances over other viewModes. Picking the wrong
+ * instance would set the selection on a non-visible editor — the operation
+ * would log success but nothing would appear on screen.
  */
 function getNoteEditorView(itemId: number): any | null {
     try {
         const instances: any[] = (Zotero as any).Notes?._editorInstances;
         if (!instances) return null;
 
-        const inst = instances.find((e: any) => e.itemID === itemId);
+        const matching = instances.filter((e: any) => e.itemID === itemId);
+        if (matching.length === 0) return null;
+
+        // Prefer tab instance (openNoteById opens in a tab), then any other
+        const inst = matching.find((e: any) => e.viewMode === 'tab')
+            || matching[0];
+
+        logger(`getNoteEditorView: found instance viewMode=${inst.viewMode}, total matching=${matching.length}`, 1);
+
         if (!inst?._iframeWindow) return null;
 
         const wrappedJS = inst._iframeWindow.wrappedJSObject;
