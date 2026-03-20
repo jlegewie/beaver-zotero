@@ -386,9 +386,15 @@ export async function openNoteAndSearchEdit(
         selectOffsetInSearch = result.selectOffsetInSearch;
         logger(`openNoteAndSearchEdit: extractHighlightedDiffText(${diffTarget}): searchText="${searchText.substring(0, 80)}", selectText="${selectText.substring(0, 80)}", selectOffsetInSearch=${selectOffsetInSearch}${endSearchText ? `, endSearchText="${endSearchText.substring(0, 80)}"` : ''}`, 1);
     } else {
-        // Fall back to first line (e.g. pure insertions/deletions where the
-        // entire line is new/old and there's no char-level diff).
-        searchText = extractSearchTerm(fallbackHtml);
+        // Fall back when there's no char-level diff highlight.
+        // For pending pure insertions (diffTarget === 'deletion' but nothing
+        // was deleted), search for the END of the old text so we scroll to
+        // the insertion point rather than the beginning of the paragraph.
+        if (diffTarget === 'deletion') {
+            searchText = extractSearchTermEnd(fallbackHtml) || extractSearchTerm(fallbackHtml);
+        } else {
+            searchText = extractSearchTerm(fallbackHtml);
+        }
         logger(`openNoteAndSearchEdit: fell back to extractSearchTerm: ${searchText ? `"${searchText}"` : 'null'}`, 1);
     }
 
@@ -581,6 +587,26 @@ function extractSearchTerm(html: string): string | null {
 
     term = stripEllipsis(term);
     return term;
+}
+
+/**
+ * Like extractSearchTerm but takes the LAST line and its trailing portion.
+ * Used for pending pure insertions so we scroll to the insertion point
+ * (end of existing text) rather than the beginning of the paragraph.
+ */
+function extractSearchTermEnd(html: string): string | null {
+    const plainText = stripHtmlTags(html);
+    if (!plainText) return null;
+
+    const lines = plainText.split('\n').filter(l => l.trim());
+    if (lines.length === 0) return null;
+
+    let term = lines[lines.length - 1].trim();
+    if (term.length > 100) {
+        term = term.slice(-100);
+    }
+    term = stripEllipsis(term);
+    return term || null;
 }
 
 /**
