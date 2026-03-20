@@ -17,6 +17,7 @@ import {
     checkDuplicateCitations,
     findFuzzyMatch,
 } from '../../src/utils/noteHtmlSimplifier';
+import { clearNoteEditorSelection } from './sourceUtils';
 
 /**
  * Execute an edit_note agent action by applying string replacement on the note.
@@ -115,6 +116,9 @@ export async function executeEditNoteAction(
         }
         throw new Error(`Failed to save note: ${error}`);
     }
+
+    // 13b. Clear editor selection so it doesn't shift to unrelated text
+    clearNoteEditorSelection(library_id, zotero_key);
 
     // 14. Invalidate cache
     invalidateSimplificationCache(noteId);
@@ -222,6 +226,9 @@ export async function undoEditNoteAction(
     } catch (error) {
         throw new Error(`Failed to save note after undo: ${error}`);
     }
+
+    // 9b. Clear editor selection so it doesn't shift to unrelated text
+    clearNoteEditorSelection(library_id, zotero_key);
 
     // 10. Invalidate simplification cache
     invalidateSimplificationCache(noteId);

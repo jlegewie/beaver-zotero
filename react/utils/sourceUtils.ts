@@ -310,6 +310,36 @@ export async function openNoteById(itemId: number): Promise<void> {
 }
 
 /**
+ * Clear (collapse) the selection in an open note editor.
+ * Called after an edit is applied or undone so the selection doesn't shift
+ * to unrelated text when ProseMirror remaps through document changes.
+ */
+export function clearNoteEditorSelection(libraryId: number, zoteroKey: string): void {
+    const itemId = Zotero.Items.getIDFromLibraryAndKey(libraryId, zoteroKey);
+    if (!itemId) return;
+
+    // Wait for the Notifier to propagate the content change, then collapse
+    // the selection to a cursor so it doesn't highlight unrelated text.
+    setTimeout(() => {
+        try {
+            const view = getNoteEditorView(itemId);
+            if (!view?.dom) return;
+
+            const SelectionBase = Object.getPrototypeOf(
+                Object.getPrototypeOf(view.state.selection)
+            ).constructor;
+            const TextSelectionClass = SelectionBase.atStart(view.state.doc).constructor;
+            // Collapse to cursor at the selection's start (mapped to the edit point)
+            const cursorPos = Math.min(view.state.selection.from, view.state.doc.content.size);
+            const selection = TextSelectionClass.create(view.state.doc, cursorPos);
+            view.dispatch(view.state.tr.setSelection(selection));
+        } catch {
+            // Best-effort — a stale selection is cosmetic, not critical
+        }
+    }, 150);
+}
+
+/**
  * Open a note by library ID and zotero key.
  */
 export async function openNoteByKey(libraryId: number, zoteroKey: string): Promise<void> {
