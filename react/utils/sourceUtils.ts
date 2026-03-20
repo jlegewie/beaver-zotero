@@ -403,7 +403,20 @@ export async function openNoteAndSearchEdit(
 
     // Wait for the editor instance to be available and initialized,
     // then select the text and scroll to it.
-    await selectAndScrollInNoteEditor(itemId, searchText, selectText, endSearchText);
+    const found = await selectAndScrollInNoteEditor(itemId, searchText, selectText, endSearchText);
+
+    // Fallback: if the primary search failed (e.g. applied edit but the
+    // editor DOM still has the old content — undo, manual revert, race
+    // condition), try the opposite text.
+    if (!found) {
+        const fallbackText = isApplied
+            ? extractSearchTerm(oldString)
+            : extractSearchTerm(newString);
+        if (fallbackText) {
+            logger(`openNoteAndSearchEdit: primary search failed, trying fallback: "${fallbackText}"`, 1);
+            await selectAndScrollInNoteEditor(itemId, fallbackText);
+        }
+    }
 }
 
 /**
@@ -558,7 +571,7 @@ async function selectAndScrollInNoteEditor(
     searchText: string,
     selectText?: string,
     endSearchText?: string,
-): Promise<void> {
+): Promise<boolean> {
     const maxWaitMs = 3000;
     const pollIntervalMs = 100;
     const startTime = Date.now();
@@ -582,7 +595,7 @@ async function selectAndScrollInNoteEditor(
                 const ctxIdx = fullText.indexOf(searchText);
                 if (ctxIdx === -1) {
                     logger(`selectAndScrollInNoteEditor: searchText not found in DOM`, 1);
-                    return;
+                    return false;
                 }
 
                 // Start from the selectText (changed portion) within the
@@ -635,7 +648,7 @@ async function selectAndScrollInNoteEditor(
                         rangeEnd = firstIdx + selectText.length;
                     } else {
                         logger(`selectAndScrollInNoteEditor: neither searchText nor selectText found in DOM`, 1);
-                        return;
+                        return false;
                     }
                 }
             } else {
@@ -643,7 +656,7 @@ async function selectAndScrollInNoteEditor(
                 const idx = fullText.indexOf(searchText);
                 if (idx === -1) {
                     logger(`selectAndScrollInNoteEditor: text not found in DOM: "${searchText}"`, 1);
-                    return;
+                    return false;
                 }
                 rangeStart = idx;
                 rangeEnd = idx + searchText.length;
@@ -653,7 +666,7 @@ async function selectAndScrollInNoteEditor(
             const match = resolveRangeInTextMap(textNodes, rangeStart, rangeEnd);
             if (!match) {
                 logger(`selectAndScrollInNoteEditor: failed to map char range to DOM nodes`, 1);
-                return;
+                return false;
             }
 
             const fromPos = view.posAtDOM(match.startNode, match.startOffset);
@@ -688,12 +701,13 @@ async function selectAndScrollInNoteEditor(
             }
 
             logger(`selectAndScrollInNoteEditor: selection set and scrolled into view`, 1);
-            return;
+            return true;
         }
         await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
     }
 
     logger(`selectAndScrollInNoteEditor: timed out after ${maxWaitMs}ms`, 1);
+    return false;
 }
 
 /**
