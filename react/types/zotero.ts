@@ -103,6 +103,23 @@ export interface DeleteData extends ZoteroItemReference {
     date_modified: string | null;
 }
 
+/** Lightweight item data for search results. Omits formatted_citation, item_json, hashes, sync fields. */
+export interface ItemSearchData extends ZoteroItemReference {
+    item_type: string;
+    title?: string | null;
+    creators?: ZoteroCreator[] | null;
+    date?: string | null;
+    year?: number | null;
+    publication_title?: string | null;
+    abstract?: string | null;
+    url?: string | null;
+    identifiers?: BibliographicIdentifier | null;
+    language?: string | null;
+    tags?: any[] | null;
+    collections?: string[] | null;
+    citation_key?: string | null;
+}
+
 export interface ItemData extends ZoteroItemBase {
     // Core fields that most items have
     item_type: string;

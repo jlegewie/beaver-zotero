@@ -1,6 +1,6 @@
 import { calculateObjectHash } from '../utils/hash';
 import { logger } from './logger';
-import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary } from '../../react/types/zotero';
+import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemSearchData, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary } from '../../react/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
@@ -20,7 +20,7 @@ export interface FileData {
  * @param item Zotero item
  * @returns Array of collection keys
  */
-function getCollectionKeysFromItem(item: Zotero.Item): string[] | null {
+export function getCollectionKeysFromItem(item: Zotero.Item): string[] | null {
     const collectionKeys = item.getCollections().map(id => Zotero.Collections.get(id).key);
     return collectionKeys.length > 0 ? collectionKeys : null;
 }
@@ -30,7 +30,7 @@ function getCollectionKeysFromItem(item: Zotero.Item): string[] | null {
  * @param item Zotero item
  * @returns Array of creators
  */
-function getCreatorsFromItem(item: Zotero.Item): ZoteroCreator[] | null {
+export function getCreatorsFromItem(item: Zotero.Item): ZoteroCreator[] | null {
     const itemCreators = item.getCreators();
     const primaryCreatorTypeID = Zotero.CreatorTypes.getPrimaryIDForType(item.itemTypeID);
 
@@ -75,7 +75,7 @@ async function getCollectionsFromItem(item: Zotero.Item): Promise<ZoteroCollecti
  * @param item Zotero item
  * @returns Object with identifiers
  */
-function getIdentifiersFromItem(item: Zotero.Item): BibliographicIdentifier | null {
+export function getIdentifiersFromItem(item: Zotero.Item): BibliographicIdentifier | null {
     const identifiers: BibliographicIdentifier = {};
     
     const doi = item.getField('DOI');
@@ -278,6 +278,34 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
     };
 
     return itemData;
+}
+
+
+/**
+ * Lightweight item serializer for search results.
+ * Skips expensive operations: formatBibliography(), item.toJSON(), calculateObjectHash(),
+ * and all sync/date/deleted fields.
+ * @param item Zotero item
+ * @returns Promise resolving to ItemSearchData
+ */
+export async function serializeItemForSearch(item: Zotero.Item): Promise<ItemSearchData> {
+    return {
+        zotero_key: item.key,
+        library_id: item.libraryID,
+        item_type: item.itemType,
+        title: item.getField('title', false, true) || null,
+        creators: getCreatorsFromItem(item),
+        date: item.getField('date', false, true) || null,
+        year: getYearFromItem(item) ?? null,
+        publication_title: item.getField('publicationTitle', false, true) || null,
+        abstract: item.getField('abstractNote') || null,
+        url: item.getField('url') || null,
+        identifiers: getIdentifiersFromItem(item),
+        language: item.getField('language') || null,
+        tags: item.getTags().length > 0 ? item.getTags() : null,
+        collections: getCollectionKeysFromItem(item),
+        citation_key: await getCitationKeyFromItem(item),
+    };
 }
 
 

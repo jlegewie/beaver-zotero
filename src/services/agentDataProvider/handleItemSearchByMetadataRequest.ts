@@ -14,7 +14,7 @@ import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/ato
 import { userIdAtom } from '../../../react/atoms/auth';
 
 import { store } from '../../../react/store';
-import { serializeItem } from '../../utils/zoteroSerializers';
+import { serializeItemForSearch } from '../../utils/zoteroSerializers';
 import {
     WSItemSearchByMetadataRequest,
     WSItemSearchByMetadataResponse,
@@ -248,7 +248,7 @@ export async function handleItemSearchByMetadataRequest(
             batch.map(async (item): Promise<ItemSearchFrontendResultItem | null> => {
                 try {
                     const [itemData, attachments] = await Promise.all([
-                        ta.track('item_serialization_ms', () => serializeItem(item, undefined, { skipHash: true })),
+                        ta.track('item_serialization_ms', () => serializeItemForSearch(item)),
                         ta.track('attachment_processing_ms', () => processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, { skipHash: true, skipWorkerFallback: true, timing: ta }))
                     ]);
                     return { item: itemData, attachments };

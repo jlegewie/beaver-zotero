@@ -5,7 +5,7 @@ import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../react/types/
 import { ReaderState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
-import { AttachmentData, ItemData } from '../../react/types/zotero';
+import { ItemSearchData } from '../../react/types/zotero';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -261,7 +261,7 @@ export interface WSExternalReferenceCheckResponse {
 
 /** Item search result with attachments (unified format) */
 export interface ItemSearchFrontendResultItem {
-    item: ItemData;
+    item: ItemSearchData;
     attachments: AttachmentDataWithStatus[];
     /** Semantic similarity score (0-1) for topic searches, undefined for metadata searches */
     similarity?: number;
