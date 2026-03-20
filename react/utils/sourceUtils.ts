@@ -372,27 +372,22 @@ export async function openNoteAndSearchEdit(
     let selectText: string | undefined;
     let endSearchText: string | undefined;
 
-    if (isApplied) {
-        // For applied edits, prefer the highlighted diff (diff-char-add text).
-        // extractHighlightedAddition returns a wider searchText (for
-        // disambiguation), a narrow selectText (the actual highlight), and
-        // optionally endSearchText (last addition line for multi-line edits).
-        const result = extractHighlightedAddition(oldString, newString);
-        if (result) {
-            searchText = result.searchText;
-            selectText = result.selectText;
-            endSearchText = result.endSearchText;
-            logger(`openNoteAndSearchEdit: extractHighlightedAddition: searchText="${searchText.substring(0, 80)}", selectText="${selectText.substring(0, 80)}"${endSearchText ? `, endSearchText="${endSearchText.substring(0, 80)}"` : ''}`, 1);
-        } else {
-            // Fall back to first line of newString (e.g. pure insertions
-            // where the entire line is new and there's no char-level diff).
-            searchText = extractSearchTerm(newString);
-            logger(`openNoteAndSearchEdit: fell back to extractSearchTerm(newString): ${searchText ? `"${searchText}"` : 'null'}`, 1);
-        }
+    // For applied edits, highlight the added text; for pending/undone edits,
+    // highlight the text that will be replaced (the deleted portion).
+    const diffTarget = isApplied ? 'addition' : 'deletion';
+    const fallbackHtml = isApplied ? newString : oldString;
+
+    const result = extractHighlightedDiffText(oldString, newString, diffTarget);
+    if (result) {
+        searchText = result.searchText;
+        selectText = result.selectText;
+        endSearchText = result.endSearchText;
+        logger(`openNoteAndSearchEdit: extractHighlightedDiffText(${diffTarget}): searchText="${searchText.substring(0, 80)}", selectText="${selectText.substring(0, 80)}"${endSearchText ? `, endSearchText="${endSearchText.substring(0, 80)}"` : ''}`, 1);
     } else {
-        // For non-applied edits, search for the old text that will be replaced.
-        searchText = extractSearchTerm(oldString);
-        logger(`openNoteAndSearchEdit: extractSearchTerm(oldString): ${searchText ? `"${searchText}"` : 'null'}`, 1);
+        // Fall back to first line (e.g. pure insertions/deletions where the
+        // entire line is new/old and there's no char-level diff).
+        searchText = extractSearchTerm(fallbackHtml);
+        logger(`openNoteAndSearchEdit: fell back to extractSearchTerm: ${searchText ? `"${searchText}"` : 'null'}`, 1);
     }
 
     if (!searchText) {
@@ -422,54 +417,59 @@ export async function openNoteAndSearchEdit(
 /**
  * Extract search and selection text from the diff between old and new HTML.
  *
+ * @param targetType - Which diff line type to extract from:
+ *   `'addition'` for applied edits (find the new text in the note),
+ *   `'deletion'` for pending/undone edits (find the old text in the note).
+ *
  * Returns:
- *  - `searchText`: the first addition line (used for locating the edit and
+ *  - `searchText`: the first target-type line (used for locating the edit and
  *    for disambiguation when `selectText` is not unique).
- *  - `selectText`: the highlighted (diff-char-add) portion of the first
- *    addition line — the narrowest text we want to select.
- *  - `endSearchText` (optional): the last addition line text, returned only
+ *  - `selectText`: the highlighted (char-level diff) portion of the first
+ *    target-type line — the narrowest text we want to select.
+ *  - `endSearchText` (optional): the last target-type line text, returned only
  *    for multi-line edits so the selection can span the full edit range.
  *
- * Returns null when no addition with a highlight is found or the result is
- * too short to be a useful search term.
+ * Returns null when no target-type line with a highlight is found or the
+ * result is too short to be a useful search term.
  */
-function extractHighlightedAddition(
+function extractHighlightedDiffText(
     oldHtml: string,
     newHtml: string,
+    targetType: 'addition' | 'deletion',
 ): { searchText: string; selectText: string; endSearchText?: string } | null {
     const strippedOld = stripHtmlTags(oldHtml);
     const strippedNew = stripHtmlTags(newHtml);
-    logger(`extractHighlightedAddition: strippedOld (${strippedOld.length} chars): "${strippedOld.substring(0, 150)}"`, 1);
-    logger(`extractHighlightedAddition: strippedNew (${strippedNew.length} chars): "${strippedNew.substring(0, 150)}"`, 1);
+    logger(`extractHighlightedDiffText(${targetType}): strippedOld (${strippedOld.length} chars): "${strippedOld.substring(0, 150)}"`, 1);
+    logger(`extractHighlightedDiffText(${targetType}): strippedNew (${strippedNew.length} chars): "${strippedNew.substring(0, 150)}"`, 1);
 
     if (!strippedOld && !strippedNew) return null;
 
     const diffLines = computeDiff(strippedOld, strippedNew);
-    logger(`extractHighlightedAddition: ${diffLines.length} diff lines computed`, 1);
+    logger(`extractHighlightedDiffText(${targetType}): ${diffLines.length} diff lines computed`, 1);
 
-    // Collect all addition lines (with or without segments)
-    const additionLines = diffLines.filter(l => l.type === 'addition');
-    if (additionLines.length === 0) {
-        logger(`extractHighlightedAddition: no addition lines found`, 1);
+    // Collect all lines of the target type (with or without segments)
+    const targetLines = diffLines.filter(l => l.type === targetType);
+    if (targetLines.length === 0) {
+        logger(`extractHighlightedDiffText(${targetType}): no ${targetType} lines found`, 1);
         return null;
     }
 
-    // Find the first addition line with a highlighted segment
-    const firstHighlightedLine = additionLines.find(
+    // Find the first target line with a highlighted segment
+    const firstHighlightedLine = targetLines.find(
         l => l.segments?.some(s => s.highlighted && s.text.trim()),
     );
     if (!firstHighlightedLine) {
-        logger(`extractHighlightedAddition: no highlighted addition line found`, 1);
+        logger(`extractHighlightedDiffText(${targetType}): no highlighted ${targetType} line found`, 1);
         return null;
     }
 
     const fullLineText = firstHighlightedLine.text.trim();
     if (fullLineText.length < 10) {
-        logger(`extractHighlightedAddition: first highlighted line too short (${fullLineText.length} chars)`, 1);
+        logger(`extractHighlightedDiffText(${targetType}): first highlighted line too short (${fullLineText.length} chars)`, 1);
         return null;
     }
 
-    // Extract only the highlighted (diff-char-add) portion.
+    // Extract only the highlighted (char-level diff) portion.
     // truncateSegments only truncates non-highlighted segments, so the
     // highlighted text from segments is accurate.
     let selectText = firstHighlightedLine.segments!
@@ -479,7 +479,7 @@ function extractHighlightedAddition(
         .trim();
     selectText = stripEllipsis(selectText);
     if (!selectText || selectText.length < 5) {
-        logger(`extractHighlightedAddition: selectText too short after stripping`, 1);
+        logger(`extractHighlightedDiffText(${targetType}): selectText too short after stripping`, 1);
         return null;
     }
 
@@ -499,11 +499,11 @@ function extractHighlightedAddition(
     }
     searchText = stripEllipsis(searchText);
 
-    // For multi-line edits, include the last addition line so the selection
+    // For multi-line edits, include the last target line so the selection
     // can span the entire edited range (not just the first line).
     let endSearchText: string | undefined;
-    if (additionLines.length > 1) {
-        const lastLine = additionLines[additionLines.length - 1];
+    if (targetLines.length > 1) {
+        const lastLine = targetLines[targetLines.length - 1];
         let endText = lastLine.text.trim();
         if (endText.length > 100) endText = endText.slice(-100);
         endText = stripEllipsis(endText);
@@ -512,7 +512,7 @@ function extractHighlightedAddition(
         }
     }
 
-    logger(`extractHighlightedAddition: searchText="${searchText.substring(0, 80)}", selectText="${selectText.substring(0, 80)}"${endSearchText ? `, endSearchText="${endSearchText.substring(0, 80)}"` : ''}`, 1);
+    logger(`extractHighlightedDiffText(${targetType}): searchText="${searchText.substring(0, 80)}", selectText="${selectText.substring(0, 80)}"${endSearchText ? `, endSearchText="${endSearchText.substring(0, 80)}"` : ''}`, 1);
     return { searchText, selectText, endSearchText };
 }
 
