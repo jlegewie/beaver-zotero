@@ -132,9 +132,9 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     function getLineClass(type: DiffLine['type']): string {
         switch (type) {
             case 'deletion':
-                return isApplied ? 'diff-deletion' : isRejectedOrUndone ? 'diff-neutral' : 'diff-deletion';
+                return 'diff-deletion';
             case 'addition':
-                return isApplied ? 'diff-addition-applied' : isRejectedOrUndone ? 'diff-ghosted' : isError ? 'diff-error' : 'diff-addition';
+                return 'diff-addition';
             case 'context':
                 return 'diff-context';
             case 'separator':
