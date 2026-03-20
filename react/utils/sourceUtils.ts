@@ -417,15 +417,17 @@ export async function openNoteAndSearchEdit(
         logger(`openNoteAndSearchEdit: extractHighlightedDiffText(${diffTarget}): searchText="${searchText.substring(0, 80)}", selectText="${selectText.substring(0, 80)}", selectOffsetInSearch=${selectOffsetInSearch}${endSearchText ? `, endSearchText="${endSearchText.substring(0, 80)}"` : ''}`, 1);
     } else {
         // Fall back when there's no char-level diff highlight.
-        // For pending pure insertions (diffTarget === 'deletion' but nothing
-        // was deleted), search for the END of the old text so we scroll to
-        // the insertion point rather than the beginning of the paragraph.
         if (diffTarget === 'deletion') {
+            // For pending pure insertions, search for the END of the old text
+            // so we scroll to the insertion point.
             searchText = extractSearchTermEnd(fallbackHtml) || extractSearchTerm(fallbackHtml);
         } else {
-            searchText = extractSearchTerm(fallbackHtml);
+            // For applied pure deletions (nothing highlighted on the addition
+            // side), find context around the edit point in the new text so we
+            // scroll to where the deletion happened, not the paragraph start.
+            searchText = extractEditPointContext(oldString, newString) || extractSearchTerm(fallbackHtml);
         }
-        logger(`openNoteAndSearchEdit: fell back to extractSearchTerm: ${searchText ? `"${searchText}"` : 'null'}`, 1);
+        logger(`openNoteAndSearchEdit: fell back to fallback search: ${searchText ? `"${searchText}"` : 'null'}`, 1);
     }
 
     if (!searchText) {
@@ -637,6 +639,43 @@ function extractSearchTermEnd(html: string): string | null {
     }
     term = stripEllipsis(term);
     return term || null;
+}
+
+/**
+ * Find the context around the edit point in the new text by comparing
+ * old and new HTML. Used for applied pure deletions where nothing was
+ * added — ensures we scroll to where the deletion happened rather than
+ * the beginning of the paragraph.
+ */
+function extractEditPointContext(oldHtml: string, newHtml: string): string | null {
+    const oldText = stripHtmlTags(oldHtml);
+    const newText = stripHtmlTags(newHtml);
+    if (!oldText || !newText) return null;
+
+    // Find where old and new text first diverge
+    let prefixLen = 0;
+    const minLen = Math.min(oldText.length, newText.length);
+    while (prefixLen < minLen && oldText[prefixLen] === newText[prefixLen]) {
+        prefixLen++;
+    }
+
+    // If texts are identical, nothing to search for
+    if (prefixLen === oldText.length && prefixLen === newText.length) return null;
+
+    // Extract context around the edit point from the new text,
+    // biased toward text before the edit (recognizable to the user).
+    const contextBefore = 60;
+    const contextAfter = 40;
+    const start = Math.max(0, prefixLen - contextBefore);
+    const end = Math.min(newText.length, prefixLen + contextAfter);
+
+    let term = newText.substring(start, end).trim();
+    term = stripEllipsis(term);
+    if (!term || term.length < 10) return null;
+    if (term.length > 100) term = term.substring(0, 100);
+
+    logger(`extractEditPointContext: editPoint=${prefixLen}, context="${term.substring(0, 80)}"`, 1);
+    return term;
 }
 
 /**
