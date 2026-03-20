@@ -210,7 +210,11 @@ export function computeDiff(oldText: string, newText: string): DiffLine[] {
         return [{ type: 'context', text: truncateContext(oldText) }];
     }
     if (newText === '') {
-        return oldText.split('\n').map(line => ({ type: 'deletion' as const, text: line }));
+        return oldText.split('\n').map(line => ({
+            type: 'deletion' as const,
+            text: line,
+            segments: [{ text: line, highlighted: true }],
+        }));
     }
     if (oldText === '') {
         return newText.split('\n').map(line => ({
