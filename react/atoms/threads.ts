@@ -34,6 +34,77 @@ import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
  */
 export const pendingScrollToRunAtom = atom<string | null>(null);
 
+/**
+ * Normalize a tool_call_id to a common base form for matching.
+ *
+ * Different model providers use different tool_call_id formats:
+ * - Some providers: "functions.edit_note:0" (dots + colon separator)
+ * - pydantic-ai modified: "functions_edit_note_0_8929eef7" (underscores + hash suffix)
+ *
+ * This normalizes both to "functions_edit_note_0" so they can be matched.
+ */
+function normalizeToolCallId(id: string): string {
+    // Replace dots and colons with underscores
+    let normalized = id.replace(/[.:]/g, '_');
+    // Strip dedup suffix added by sanitize_tool_call_ids (e.g., "_d1", "_d2")
+    normalized = normalized.replace(/_d\d+$/, '');
+    // Strip trailing hex hash suffix added by pydantic-ai (e.g., "_8929eef7").
+    // Only strip if the remaining prefix still contains an underscore,
+    // to avoid collapsing unique provider IDs like "call_<hex>" (e.g., Fireworks/Kimi
+    // fixed IDs) down to just "call", which would make all IDs in a run identical.
+    const stripped = normalized.replace(/_[0-9a-f]{8,}$/i, '');
+    if (stripped.includes('_')) {
+        normalized = stripped;
+    }
+    return normalized;
+}
+
+/**
+ * Reconcile toolcall_id mismatches between agent actions (from REST API)
+ * and tool call parts (from model messages in runs).
+ *
+ * This is primarily needed for **legacy data** where Kimi raw IDs like
+ * "functions.edit_note:0" were stored in agent_actions, while pydantic-ai's
+ * sanitize_tool_call_ids rewrote model messages to "functions_edit_note_0_8929eef7".
+ *
+ * For newer data, the backend generates unique call_<hex> IDs that are consistent
+ * between agent_actions and model messages, so no reconciliation is needed.
+ */
+function reconcileToolcallIds(runs: AgentRun[], actions: AgentAction[]): void {
+    if (actions.length === 0 || runs.length === 0) return;
+
+    // Collect all tool_call_ids from model messages, indexed by normalized form
+    const normalizedToFull = new Map<string, string>();
+    for (const run of runs) {
+        for (const msg of run.model_messages) {
+            if (msg.kind === 'response') {
+                for (const part of msg.parts) {
+                    if (part.part_kind === 'tool-call' && part.tool_call_id) {
+                        normalizedToFull.set(normalizeToolCallId(part.tool_call_id), part.tool_call_id);
+                    }
+                }
+            }
+        }
+    }
+
+    // Fix agent actions whose toolcall_id doesn't match any model message tool_call_id
+    const fullIds = new Set(normalizedToFull.values());
+    let fixedCount = 0;
+    for (const action of actions) {
+        if (!action.toolcall_id || fullIds.has(action.toolcall_id)) continue;
+
+        const normalized = normalizeToolCallId(action.toolcall_id);
+        const fullId = normalizedToFull.get(normalized);
+        if (fullId) {
+            action.toolcall_id = fullId;
+            fixedCount++;
+        }
+    }
+    if (fixedCount > 0) {
+        logger(`reconcileToolcallIds: Fixed ${fixedCount} mismatched toolcall_ids`, 1);
+    }
+}
+
 // Thread types
 export interface ThreadData {
     id: string;
@@ -270,6 +341,9 @@ export const loadThreadAtom = atom(
 
             // Load agent runs with actions from the backend
             const { runs, agent_actions } = await agentRunService.getThreadRuns(threadId, true);
+
+            console.log("loadThreadAtom: runs", runs);
+            console.log("loadThreadAtom: agent_actions", agent_actions);
             
             // Mark any in_progress runs as canceled since they're no longer active
             const processedRuns = runs.map(run => {
