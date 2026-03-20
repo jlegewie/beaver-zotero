@@ -679,19 +679,22 @@ async function selectAndScrollInNoteEditor(
             // a NodeSelection (e.g., after clicking a citation/image/math block),
             // its `.create()` method has a different signature and silently
             // produces the wrong selection type.
+            //
+            // We can't use Selection.fromJSON here because Firefox's Xray
+            // wrappers prevent the content-compartment function from reading
+            // properties on objects created in the chrome compartment. Instead,
+            // we use Selection.atStart() which always returns a TextSelection —
+            // then grab its constructor. All arguments stay within the content
+            // compartment, avoiding cross-compartment issues.
             let selection: any;
             try {
-                // Walk the prototype chain: instance → SubclassProto → Selection.prototype
-                // Then use Selection.fromJSON which uses ProseMirror's internal registry
-                // to always create the correct selection type ('text' → TextSelection).
                 const SelectionBase = Object.getPrototypeOf(
                     Object.getPrototypeOf(view.state.selection)
                 ).constructor;
-                selection = SelectionBase.fromJSON(view.state.doc, {
-                    type: 'text', anchor: fromPos, head: toPos,
-                });
+                const TextSelectionClass = SelectionBase.atStart(view.state.doc).constructor;
+                selection = TextSelectionClass.create(view.state.doc, fromPos, toPos);
             } catch (selErr: any) {
-                logger(`selectAndScrollInNoteEditor: Selection.fromJSON failed (${selErr?.message}), using constructor fallback`, 1);
+                logger(`selectAndScrollInNoteEditor: TextSelection lookup failed (${selErr?.message}), using constructor fallback`, 1);
                 const Ctor = view.state.selection.constructor;
                 selection = Ctor.create(view.state.doc, fromPos, toPos);
             }
