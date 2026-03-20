@@ -679,26 +679,41 @@ async function selectAndScrollInNoteEditor(
                 TextSelection.create(view.state.doc, fromPos, toPos)
             );
             view.dispatch(tr);
-            view.focus();
 
-            // Scroll the start of the selection into view, centered in the
-            // viewport. Native scrollIntoView finds the correct scrollable
-            // ancestor automatically (works inside iframes).
+            // Scroll the selection start into the center of the editor's
+            // scrollable container. We set scrollTop directly because
+            // element.scrollIntoView() doesn't work reliably inside
+            // Zotero's note-editor iframe.
             try {
-                const domAtStart = view.domAtPos(fromPos);
-                const el = domAtStart.node.nodeType === 3 // TEXT_NODE
-                    ? (domAtStart.node as Text).parentElement
-                    : domAtStart.node as HTMLElement;
-                if (el) {
-                    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-                } else {
-                    view.dispatch(view.state.tr.scrollIntoView());
+                const scrollContainer = findScrollContainer(view.dom);
+                if (scrollContainer) {
+                    const coords = view.coordsAtPos(fromPos);
+                    const containerRect = scrollContainer.getBoundingClientRect();
+                    const targetScrollTop = scrollContainer.scrollTop
+                        + (coords.top - containerRect.top)
+                        - scrollContainer.clientHeight / 2;
+                    scrollContainer.scrollTop = Math.max(0, targetScrollTop);
                 }
             } catch (err: any) {
-                // Fallback: use ProseMirror's built-in scroll
-                logger(`selectAndScrollInNoteEditor: manual scroll failed (${err?.message}), using fallback`, 1);
-                view.dispatch(view.state.tr.scrollIntoView());
+                logger(`selectAndScrollInNoteEditor: scroll failed (${err?.message})`, 1);
             }
+
+            // Defer focus so it runs after the current click event finishes
+            // processing (the sidebar click steals focus back otherwise).
+            // Focus the iframe element in the parent window first, then the
+            // ProseMirror view inside it.
+            const iframeDoc = view.dom.ownerDocument;
+            const iframeEl = iframeDoc?.defaultView?.frameElement;
+            setTimeout(() => {
+                try {
+                    if (iframeEl && typeof (iframeEl as HTMLElement).focus === 'function') {
+                        (iframeEl as HTMLElement).focus();
+                    }
+                    view.focus();
+                } catch {
+                    // Best-effort — selection is still set even without focus
+                }
+            }, 50);
 
             logger(`selectAndScrollInNoteEditor: selection set and scrolled into view`, 1);
             return true;
@@ -761,6 +776,25 @@ function resolveRangeInTextMap(
 
     if (!startNode || !endNode) return null;
     return { startNode, startOffset, endNode, endOffset };
+}
+
+/**
+ * Walk up the DOM from `el` to find the nearest scrollable ancestor
+ * (overflow-y: auto or scroll with content taller than the viewport).
+ */
+function findScrollContainer(el: HTMLElement): HTMLElement | null {
+    const win = el.ownerDocument.defaultView;
+    if (!win) return null;
+    let current = el.parentElement;
+    while (current) {
+        const style = win.getComputedStyle(current);
+        if (style && (style.overflowY === 'auto' || style.overflowY === 'scroll')
+            && current.scrollHeight > current.clientHeight) {
+            return current;
+        }
+        current = current.parentElement;
+    }
+    return null;
 }
 
 /**
