@@ -20,6 +20,15 @@ import {
 import { MessageAttachment } from "../types/attachments/apiTypes";
 
 // =============================================================================
+// Helpers
+// =============================================================================
+
+/** Build a composite key for tool call lookups, scoped by run to prevent cross-run collisions. */
+export function toolCallKey(runId: string, toolCallId: string): string {
+    return `${runId}:${toolCallId}`;
+}
+
+// =============================================================================
 // Core Atoms
 // =============================================================================
 
@@ -64,7 +73,7 @@ export const runsCountAtom = atom((get) => get(allRunsAtom).length);
 /** Is there an active streaming run? */
 export const isStreamingAtom = atom((get) => get(activeRunAtom) !== null);
 
-/** Quick lookup of tool results by tool_call_id */
+/** Quick lookup of tool results keyed by `${runId}:${toolCallId}` to prevent cross-run collisions */
 export const toolResultsMapAtom = atom((get) => {
     const runs = get(allRunsAtom);
     const map = new Map<string, (ToolReturnPart | RetryPromptPart)>();
@@ -74,7 +83,7 @@ export const toolResultsMapAtom = atom((get) => {
             if (msg.kind === 'request') {
                 for (const part of msg.parts) {
                     if (part.part_kind === 'tool-return' || part.part_kind === 'retry-prompt') {
-                        map.set(part.tool_call_id, part as ToolReturnPart | RetryPromptPart);
+                        map.set(toolCallKey(run.id, part.tool_call_id), part as ToolReturnPart | RetryPromptPart);
                     }
                 }
             }
@@ -120,11 +129,12 @@ export type ToolCallStatus = 'in_progress' | 'completed' | 'error';
 
 /** Get the status of a tool call based on its result */
 export function getToolCallStatus(
+    runId: string,
     toolCallId: string,
     resultsMap: Map<string, (ToolReturnPart | RetryPromptPart)>,
     runStatus?: AgentRunStatus
 ): ToolCallStatus {
-    const result = resultsMap.get(toolCallId);
+    const result = resultsMap.get(toolCallKey(runId, toolCallId));
     if (!result && runStatus && runStatus === 'in_progress') return 'in_progress';
     if (!result) return 'error';
 

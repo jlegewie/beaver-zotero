@@ -51,7 +51,7 @@ export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(functi
             if (message.kind === 'response') {
                 for (const part of message.parts) {
                     if (part.part_kind === 'tool-call') {
-                        if (getToolCallStatus(part.tool_call_id, resultsMap, run.status) === 'in_progress') {
+                        if (getToolCallStatus(run.id, part.tool_call_id, resultsMap, run.status) === 'in_progress') {
                             return true;
                         }
                     }

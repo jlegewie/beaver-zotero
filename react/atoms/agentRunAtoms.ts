@@ -669,6 +669,7 @@ async function prevalidateExtractionApproval(
     event: WSDeferredApprovalRequest,
     attachmentIds: string[],
     includedFree: number,
+    runId: string,
 ): Promise<void> {
     let existingCount = 0;
 
@@ -705,7 +706,7 @@ async function prevalidateExtractionApproval(
         agentService.sendApprovalResponse(event.action_id, true);
     } else {
         // Show the dialog with the backend's original numbers
-        set(addPendingApprovalAtom, event);
+        set(addPendingApprovalAtom, { event, runId });
     }
 }
 
@@ -782,13 +783,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(activeRunAtom, (prev) => prev ? updateRunWithToolReturn(prev, event) : prev);
 
             // Remove pending approval for this specific tool call (if any)
-            // Note: We find approval by toolCallId since that's what we have in the event
             if (event.part.part_kind === "tool-return") {
                 const toolCallId = event.part.tool_call_id;
-                // Get current pending approvals and find the one for this tool call
                 const pendingMap = store.get(pendingApprovalsAtom);
                 for (const [actionId, pending] of pendingMap.entries()) {
-                    if (pending.toolcallId === toolCallId) {
+                    if (pending.runId === event.run_id && pending.toolcallId === toolCallId) {
                         set(removePendingApprovalAtom, actionId);
                         break;
                     }
@@ -1011,10 +1010,14 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onDeferredApprovalRequest: (event: WSDeferredApprovalRequest) => {
+            // Capture runId eagerly — async paths (prevalidateExtractionApproval)
+            // may resolve after activeRunAtom has changed.
+            const runId = store.get(activeRunAtom)?.id ?? '';
             logger('WS onDeferredApprovalRequest:', {
                 actionId: event.action_id,
                 toolcallId: event.toolcall_id,
                 actionType: event.action_type,
+                runId,
             }, 1);
 
             // confirm_extraction: skip confirmation if user disabled it, then pre-validate
@@ -1031,9 +1034,9 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 const includedFree: number = event.action_data?.included_free ?? 0;
 
                 if (attachmentIds.length > 0) {
-                    prevalidateExtractionApproval(set, event, attachmentIds, includedFree).catch(err => {
+                    prevalidateExtractionApproval(set, event, attachmentIds, includedFree, runId).catch(err => {
                         logger(`WS onDeferredApprovalRequest: Pre-validation failed, showing dialog: ${err}`, 1);
-                        set(addPendingApprovalAtom, event);
+                        set(addPendingApprovalAtom, { event, runId });
                     });
                     return;
                 }
@@ -1050,7 +1053,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             }
 
             // Default: add to pending approvals map for UI rendering
-            set(addPendingApprovalAtom, event);
+            set(addPendingApprovalAtom, { event, runId });
         },
 
         onOpen: () => {

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart } from '../../agents/types';
-import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
+import { toolResultsMapAtom, toolCallKey, getToolCallStatus } from '../../agents/atoms';
 import { getToolCallLabel } from '../../agents/toolLabels';
 import { ToolResultView } from './ToolResultView';
 import { AgentActionView } from './AgentActionView';
@@ -167,19 +167,19 @@ interface ToolCallPartViewProps {
  */
 export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId, responseIndex, runStatus }) => {
     const resultsMap = useAtomValue(toolResultsMapAtom);
-    const result = resultsMap.get(part.tool_call_id);
+    const result = resultsMap.get(toolCallKey(runId, part.tool_call_id));
     const hasResult = result !== undefined;
-    const status = getToolCallStatus(part.tool_call_id, resultsMap, runStatus);
+    const status = getToolCallStatus(runId, part.tool_call_id, resultsMap, runStatus);
     const baseLabel = getToolCallLabel(part, status);
     
     // Check for pending approval for this tool call
     const getPendingApproval = useAtomValue(getPendingApprovalForToolcallAtom);
-    const pendingApproval = getPendingApproval(part.tool_call_id);
+    const pendingApproval = getPendingApproval(runId, part.tool_call_id);
     const isAwaitingApproval = pendingApproval !== null;
     
     // Check for agent actions associated with this tool call
     const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
-    const agentActions = getAgentActionsByToolcall(part.tool_call_id);
+    const agentActions = getAgentActionsByToolcall(runId, part.tool_call_id);
     const hasAgentAction = agentActions.length > 0;
     
     // Determine if this tool should use AgentActionView

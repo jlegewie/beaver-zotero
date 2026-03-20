@@ -1,6 +1,7 @@
 import { atom } from 'jotai';
 import { logger } from '../../src/utils/logger';
 import { agentActionsService, AckActionLink } from '../../src/services/agentActionsService';
+import { toolCallKey } from './atoms';
 import { ZoteroItemReference } from '../types/zotero';
 import {
     ActionStatus,
@@ -381,12 +382,14 @@ export const threadAgentActionsAtom = atom<AgentAction[]>([]);
 function groupActionsByToolcall(actions: AgentAction[]): Map<string, AgentAction[]> {
     const grouped = new Map<string, AgentAction[]>();
     actions.forEach((action) => {
-        const targetId = action.toolcall_id;
-        if (!targetId) return;
-        if (!grouped.has(targetId)) {
-            grouped.set(targetId, []);
+        if (!action.toolcall_id) return;
+        const key = action.run_id
+            ? toolCallKey(action.run_id, action.toolcall_id)
+            : action.toolcall_id;
+        if (!grouped.has(key)) {
+            grouped.set(key, []);
         }
-        grouped.get(targetId)!.push(action);
+        grouped.get(key)!.push(action);
     });
     return grouped;
 }
@@ -397,8 +400,8 @@ export const agentActionsByToolcallAtom = atom<Map<string, AgentAction[]>>((get)
 });
 
 export const getAgentActionsByToolcallAtom = atom(
-    (get) => (toolcallId: string, filter: (action: AgentAction) => boolean = () => true) => 
-        get(agentActionsByToolcallAtom).get(toolcallId)?.filter(filter) || []
+    (get) => (runId: string, toolcallId: string, filter: (action: AgentAction) => boolean = () => true) =>
+        get(agentActionsByToolcallAtom).get(toolCallKey(runId, toolcallId))?.filter(filter) || []
 );
 
 // =============================================================================
@@ -715,6 +718,8 @@ export const clearAgentActionsAtom = atom(
  */
 export interface PendingApproval {
     actionId: string;
+    /** Run ID for scoped lookup (prevents cross-run collisions) */
+    runId: string;
     /** Tool call ID for UI matching (always provided by backend) */
     toolcallId: string;
     actionType: AgentActionType;
@@ -731,14 +736,18 @@ export const pendingApprovalsAtom = atom<Map<string, PendingApproval>>(new Map()
 /**
  * Add a pending approval from a WS event.
  * Supports multiple concurrent approvals for parallel tool calls.
+ * The caller must supply the runId eagerly (at event arrival time) rather than
+ * reading activeRunAtom, because async paths (e.g. prevalidateExtractionApproval)
+ * may resolve after the active run has changed.
  */
 export const addPendingApprovalAtom = atom(
     null,
-    (_, set, event: WSDeferredApprovalRequest) => {
+    (_, set, { event, runId }: { event: WSDeferredApprovalRequest; runId: string }) => {
         set(pendingApprovalsAtom, (prev) => {
             const next = new Map(prev);
             next.set(event.action_id, {
                 actionId: event.action_id,
+                runId,
                 toolcallId: event.toolcall_id,
                 actionType: event.action_type as AgentActionType,
                 actionData: event.action_data,
@@ -774,14 +783,14 @@ export const clearAllPendingApprovalsAtom = atom(
 );
 
 /**
- * Get pending approval for a specific toolcall_id.
- * Searches the map for an approval matching the toolcall_id.
+ * Get pending approval for a specific run + toolcall_id.
+ * Scoped by runId to prevent cross-run collisions.
  */
 export const getPendingApprovalForToolcallAtom = atom(
-    (get) => (toolcallId: string): PendingApproval | null => {
+    (get) => (runId: string, toolcallId: string): PendingApproval | null => {
         const pendingMap = get(pendingApprovalsAtom);
         for (const pending of pendingMap.values()) {
-            if (pending.toolcallId === toolcallId) {
+            if (pending.runId === runId && pending.toolcallId === toolcallId) {
                 return pending;
             }
         }
@@ -861,6 +870,7 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
 
     return {
         actionId: action.id,
+        runId: action.run_id,
         toolcallId: action.toolcall_id,
         actionType,
         actionData,

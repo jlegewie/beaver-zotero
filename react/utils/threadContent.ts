@@ -1,4 +1,5 @@
 import { AgentRun, TextPart, ToolCallPart } from '../agents/types';
+import { toolCallKey } from '../agents/atoms';
 import { getToolCallLabel } from '../agents/toolLabels';
 
 /**
@@ -7,7 +8,8 @@ import { getToolCallLabel } from '../agents/toolLabels';
  */
 export function getToolCallDetails(
     part: ToolCallPart,
-    toolResultsMap: Map<string, any>
+    toolResultsMap: Map<string, any>,
+    runId: string
 ): string {
     const label = getToolCallLabel(part, 'completed');
     let query = "";
@@ -22,7 +24,7 @@ export function getToolCallDetails(
         console.error('Error parsing tool call arguments:', e);
     }
 
-    const result = toolResultsMap.get(part.tool_call_id);
+    const result = toolResultsMap.get(toolCallKey(runId, part.tool_call_id));
     const count = result && result.part_kind === 'tool-return'
         ? result?.metadata?.summary?.result_count ?? null
         : null;
@@ -61,7 +63,7 @@ export function extractRunResponseContent(
             );
             if (toolCallParts.length > 0) {
                 const toolDescriptions = toolCallParts
-                    .map(p => getToolCallDetails(p, toolResultsMap))
+                    .map(p => getToolCallDetails(p, toolResultsMap, run.id))
                     .join('\n\n');
                 parts.push(toolDescriptions);
             }

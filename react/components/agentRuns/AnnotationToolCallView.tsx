@@ -355,14 +355,14 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
 
     // Get tool call status from results
     const resultsMap = useAtomValue(toolResultsMapAtom);
-    const status = getToolCallStatus(toolCallId, resultsMap, runStatus);
+    const status = getToolCallStatus(runId, toolCallId, resultsMap, runStatus);
     const isInProgress = status === 'in_progress';
     const isCompleted = status === 'completed';
     const isError = status === 'error';
 
     // Get annotations from agent actions
     const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
-    const annotations = getAgentActionsByToolcall(toolCallId, isAnnotationAgentAction) as AnnotationAgentAction[];
+    const annotations = getAgentActionsByToolcall(runId, toolCallId, isAnnotationAgentAction) as AnnotationAgentAction[];
     const totalAnnotations = annotations.length;
 
     // Current reader state

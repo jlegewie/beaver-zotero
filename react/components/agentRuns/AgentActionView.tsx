@@ -249,7 +249,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     // Get agent actions for this tool call
     const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
-    const actions = getAgentActionsByToolcall(toolcallId);
+    const actions = getAgentActionsByToolcall(runId, toolcallId);
     
     // Track if the run is still pending (needed to detect cancel vs external approval)
     const isRunPending = useAtomValue(isWSChatPendingAtom);
