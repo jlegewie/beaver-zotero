@@ -36,6 +36,16 @@ export interface EditNoteResultData {
     occurrences_replaced: number;
     /** Warnings (e.g., duplicate citation) */
     warnings?: string[];
+    /**
+     * Surrounding context before the deletion point (raw HTML, stripped of data-citation-items).
+     * Stored only for deletions (new_string is empty) to enable undo re-insertion.
+     */
+    undo_before_context?: string;
+    /**
+     * Surrounding context after the deletion point (raw HTML, stripped of data-citation-items).
+     * Stored only for deletions (new_string is empty) to enable undo re-insertion.
+     */
+    undo_after_context?: string;
 }
 
 /** Typed proposed action for edit_note */

@@ -84,12 +84,24 @@ export async function executeEditNoteAction(
         );
     }
 
-    // 10. Perform replacement
+    // 10. Perform replacement and capture context for deletions
     let newHtml: string;
+    let undoBeforeContext: string | undefined;
+    let undoAfterContext: string | undefined;
+    const UNDO_CONTEXT_LENGTH = 200;
+
     if (replace_all) {
         newHtml = strippedHtml.split(expandedOld).join(expandedNew);
     } else {
         const idx = strippedHtml.indexOf(expandedOld);
+
+        // For deletions (empty new_string), capture surrounding context for undo
+        if (!new_string) {
+            undoBeforeContext = strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx);
+            const afterStart = idx + expandedOld.length;
+            undoAfterContext = strippedHtml.substring(afterStart, afterStart + UNDO_CONTEXT_LENGTH);
+        }
+
         newHtml = strippedHtml.substring(0, idx) + expandedNew
             + strippedHtml.substring(idx + expandedOld.length);
     }
@@ -132,6 +144,8 @@ export async function executeEditNoteAction(
         zotero_key,
         occurrences_replaced: matchCount,
         warnings,
+        undo_before_context: undoBeforeContext,
+        undo_after_context: undoAfterContext,
     };
 }
 
@@ -143,6 +157,10 @@ export async function executeEditNoteAction(
  * - new_string found → undo succeeds (replace with old_string)
  * - old_string found instead → already undone, no-op
  * - neither found → note was modified externally, error
+ *
+ * For deletions (new_string is empty), uses surrounding context stored in
+ * result_data (undo_before_context / undo_after_context) to locate the
+ * insertion point.
  *
  * @param action The agent action to undo (must have proposed_data with old_string/new_string)
  */
@@ -157,9 +175,11 @@ export async function undoEditNoteAction(
         replace_all?: boolean;
     };
 
-    if (!old_string || !new_string) {
-        throw new Error('No undo data available: proposed_data.old_string and new_string are required');
+    if (!old_string) {
+        throw new Error('No undo data available: proposed_data.old_string is required');
     }
+
+    const isDeletion = !new_string;
 
     // 1. Load item
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
@@ -175,11 +195,9 @@ export async function undoEditNoteAction(
     const currentHtml = getLatestNoteHtml(item);
     const { metadata } = getOrSimplify(noteId, currentHtml, library_id);
 
-    // 4. Expand the simplified strings to raw HTML for matching
-    let expandedNew: string;
+    // 4. Expand old_string to raw HTML (always needed for re-insertion)
     let expandedOld: string;
     try {
-        expandedNew = expandToRawHtml(new_string, metadata, 'new');
         expandedOld = expandToRawHtml(old_string, metadata, 'old');
     } catch (e: any) {
         throw new Error(`Failed to expand strings for undo: ${e.message || String(e)}`);
@@ -188,37 +206,131 @@ export async function undoEditNoteAction(
     // 5. Strip data-citation-items for matching
     const strippedHtml = stripDataCitationItems(currentHtml);
 
-    // 6. 3-way detection
-    const newStringFound = strippedHtml.includes(expandedNew);
-    const oldStringFound = strippedHtml.includes(expandedOld);
+    let restoredHtml: string | undefined;
 
-    if (!newStringFound && oldStringFound) {
-        // Already undone — no-op
-        logger(`undoEditNoteAction: Note ${noteId} already contains old_string, skipping`, 1);
-        return;
-    }
+    if (isDeletion) {
+        // --- Deletion undo: use surrounding context to find insertion point ---
+        const resultData = action.result_data as import('../types/agentActions/editNote').EditNoteResultData | undefined;
+        const beforeCtx = resultData?.undo_before_context;
+        const afterCtx = resultData?.undo_after_context;
 
-    if (!newStringFound && !oldStringFound) {
-        throw new Error(
-            'Cannot undo: the note has been modified since this edit was applied. '
-            + 'Neither the applied text nor the original text could be found.'
-        );
-    }
+        if (!beforeCtx && !afterCtx) {
+            throw new Error(
+                'Cannot undo deletion: no surrounding context stored in result_data. '
+                + 'This action was applied before deletion-undo support was added.'
+            );
+        }
 
-    // 7. Reverse the replacement: new_string → old_string
-    let restoredHtml: string;
-    if (replace_all) {
-        restoredHtml = strippedHtml.split(expandedNew).join(expandedOld);
+        // Check if already undone (old_string is back in the note)
+        const oldStringFound = strippedHtml.includes(expandedOld);
+        if (oldStringFound) {
+            logger(`undoEditNoteAction: Note ${noteId} already contains old_string, skipping`, 1);
+            return;
+        }
+
+        // Find the insertion point using before/after context.
+        // The editor may normalize whitespace at the deletion seam (e.g. collapse
+        // double newlines), so we cannot rely on an exact beforeCtx+afterCtx match.
+        // Instead, find beforeCtx individually and use its end as the insertion point,
+        // with afterCtx as a nearby sanity check.
+        const MAX_GAP = 10; // Allow up to 10 chars of whitespace normalization at the seam
+
+        // Strategy 1: exact seam match (ideal case)
+        const seam = (beforeCtx || '') + (afterCtx || '');
+        let insertionPoint = -1;
+        const seamIdx = strippedHtml.indexOf(seam);
+        if (seamIdx !== -1) {
+            insertionPoint = seamIdx + (beforeCtx || '').length;
+            logger(`undoEditNoteAction: exact seam match at ${seamIdx}`, 1);
+        }
+
+        // Strategy 2: find beforeCtx end, verify afterCtx is nearby
+        if (insertionPoint === -1 && beforeCtx) {
+            const beforeIdx = strippedHtml.indexOf(beforeCtx);
+            if (beforeIdx !== -1) {
+                const beforeEnd = beforeIdx + beforeCtx.length;
+                if (afterCtx) {
+                    const afterIdx = strippedHtml.indexOf(afterCtx, Math.max(0, beforeEnd - MAX_GAP));
+                    if (afterIdx !== -1 && Math.abs(afterIdx - beforeEnd) <= MAX_GAP) {
+                        // afterCtx is near the end of beforeCtx — use beforeEnd as insertion point.
+                        // Remove any whitespace the editor inserted between the two contexts.
+                        insertionPoint = beforeEnd;
+                        // Adjust: if there are extra chars between beforeEnd and afterIdx, the
+                        // insertion should replace that gap (it's editor-inserted whitespace)
+                        const gapSize = afterIdx - beforeEnd;
+                        logger(`undoEditNoteAction: beforeCtx+afterCtx proximity match (gap=${gapSize})`, 1);
+                        restoredHtml = strippedHtml.substring(0, beforeEnd)
+                            + expandedOld
+                            + strippedHtml.substring(afterIdx);
+                    }
+                } else {
+                    // No afterCtx — use beforeEnd directly
+                    insertionPoint = beforeEnd;
+                    logger(`undoEditNoteAction: using beforeCtx end only (no afterCtx)`, 1);
+                }
+            }
+        }
+
+        // Strategy 3: find afterCtx start (beforeCtx not found)
+        if (insertionPoint === -1 && afterCtx) {
+            const afterIdx = strippedHtml.indexOf(afterCtx);
+            if (afterIdx !== -1) {
+                insertionPoint = afterIdx;
+                logger(`undoEditNoteAction: using afterCtx start only (no beforeCtx match)`, 1);
+            }
+        }
+
+        if (insertionPoint === -1) {
+            throw new Error(
+                'Cannot undo deletion: the note has been modified around the deletion point. '
+                + 'The surrounding context could not be found.'
+            );
+        }
+
+        // Build restored HTML (if not already set by proximity match above)
+        if (!restoredHtml) {
+            restoredHtml = strippedHtml.substring(0, insertionPoint)
+                + expandedOld
+                + strippedHtml.substring(insertionPoint);
+        }
     } else {
-        const idx = strippedHtml.indexOf(expandedNew);
-        restoredHtml = strippedHtml.substring(0, idx) + expandedOld
-            + strippedHtml.substring(idx + expandedNew.length);
+        // --- Non-deletion undo: reverse str-replace (new_string → old_string) ---
+        let expandedNew: string;
+        try {
+            expandedNew = expandToRawHtml(new_string, metadata, 'new');
+        } catch (e: any) {
+            throw new Error(`Failed to expand strings for undo: ${e.message || String(e)}`);
+        }
+
+        // 3-way detection
+        const newStringFound = strippedHtml.includes(expandedNew);
+        const oldStringFound = strippedHtml.includes(expandedOld);
+
+        if (!newStringFound && oldStringFound) {
+            logger(`undoEditNoteAction: Note ${noteId} already contains old_string, skipping`, 1);
+            return;
+        }
+
+        if (!newStringFound && !oldStringFound) {
+            throw new Error(
+                'Cannot undo: the note has been modified since this edit was applied. '
+                + 'Neither the applied text nor the original text could be found.'
+            );
+        }
+
+        if (replace_all) {
+            restoredHtml = strippedHtml.split(expandedNew).join(expandedOld);
+        } else {
+            const idx = strippedHtml.indexOf(expandedNew);
+            restoredHtml = strippedHtml.substring(0, idx) + expandedOld
+                + strippedHtml.substring(idx + expandedNew.length);
+        }
     }
 
-    // 8. Rebuild data-citation-items
-    restoredHtml = rebuildDataCitationItems(restoredHtml);
+    // Rebuild data-citation-items
+    restoredHtml = rebuildDataCitationItems(restoredHtml!);
 
-    // 9. Save
+    // Save
     try {
         item.setNote(restoredHtml);
         await item.saveTx();
@@ -227,9 +339,9 @@ export async function undoEditNoteAction(
         throw new Error(`Failed to save note after undo: ${error}`);
     }
 
-    // 9b. Clear editor selection so it doesn't shift to unrelated text
+    // Clear editor selection so it doesn't shift to unrelated text
     clearNoteEditorSelection(library_id, zotero_key);
 
-    // 10. Invalidate simplification cache
+    // Invalidate simplification cache
     invalidateSimplificationCache(noteId);
 }

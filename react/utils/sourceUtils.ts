@@ -366,6 +366,8 @@ export async function openNoteAndSearchEdit(
     oldString: string,
     newString: string,
     isApplied: boolean,
+    undoBeforeContext?: string,
+    undoAfterContext?: string,
 ): Promise<void> {
     logger(`openNoteAndSearchEdit: called with libraryId=${libraryId}, zoteroKey=${zoteroKey}, isApplied=${isApplied}`, 1);
     logger(`openNoteAndSearchEdit: oldString (${oldString.length} chars): "${oldString.substring(0, 200)}"`, 1);
@@ -425,7 +427,20 @@ export async function openNoteAndSearchEdit(
             // For applied pure deletions (nothing highlighted on the addition
             // side), find context around the edit point in the new text so we
             // scroll to where the deletion happened, not the paragraph start.
-            searchText = extractEditPointContext(oldString, newString) || extractSearchTerm(fallbackHtml);
+            if (!newString && undoBeforeContext && undoAfterContext) {
+                // For full deletions with undo context, search for the seam
+                // (before + after context concatenated) in the note's plain text.
+                const seamText = stripHtmlTags(undoBeforeContext + undoAfterContext);
+                // Use the last ~60 chars before + first ~40 chars after as search text
+                const beforePart = seamText.substring(Math.max(0, seamText.length / 2 - 60), Math.floor(seamText.length / 2));
+                const afterPart = seamText.substring(Math.floor(seamText.length / 2), Math.floor(seamText.length / 2) + 40);
+                const seamSearch = (beforePart + afterPart).trim();
+                searchText = seamSearch.length >= 10 ? seamSearch : null;
+                logger(`openNoteAndSearchEdit: using undo context seam for applied deletion: "${searchText?.substring(0, 80)}"`, 1);
+            }
+            if (!searchText) {
+                searchText = extractEditPointContext(oldString, newString) || extractSearchTerm(fallbackHtml);
+            }
         }
         logger(`openNoteAndSearchEdit: fell back to fallback search: ${searchText ? `"${searchText}"` : 'null'}`, 1);
     }

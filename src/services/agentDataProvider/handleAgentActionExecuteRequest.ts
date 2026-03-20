@@ -821,12 +821,24 @@ async function executeEditNoteAction(
         };
     }
 
-    // 10. Perform replacement
+    // 10. Perform replacement and capture context for deletions
     let newHtml: string;
+    let undoBeforeContext: string | undefined;
+    let undoAfterContext: string | undefined;
+    const UNDO_CONTEXT_LENGTH = 200;
+
     if (replace_all) {
         newHtml = strippedHtml.split(expandedOld).join(expandedNew);
     } else {
         const idx = strippedHtml.indexOf(expandedOld);
+
+        // For deletions (empty new_string), capture surrounding context for undo
+        if (!new_string) {
+            undoBeforeContext = strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx);
+            const afterStart = idx + expandedOld.length;
+            undoAfterContext = strippedHtml.substring(afterStart, afterStart + UNDO_CONTEXT_LENGTH);
+        }
+
         newHtml = strippedHtml.substring(0, idx) + expandedNew
             + strippedHtml.substring(idx + expandedOld.length);
     }
@@ -886,6 +898,8 @@ async function executeEditNoteAction(
             zotero_key,
             occurrences_replaced: matchCount,
             warnings,
+            undo_before_context: undoBeforeContext,
+            undo_after_context: undoAfterContext,
         },
     };
 }
