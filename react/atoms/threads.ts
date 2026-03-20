@@ -46,8 +46,16 @@ export const pendingScrollToRunAtom = atom<string | null>(null);
 function normalizeToolCallId(id: string): string {
     // Replace dots and colons with underscores
     let normalized = id.replace(/[.:]/g, '_');
-    // Strip trailing hex hash suffix (e.g., "_8929eef7")
-    normalized = normalized.replace(/_[0-9a-f]{8,}$/i, '');
+    // Strip dedup suffix added by sanitize_tool_call_ids (e.g., "_d1", "_d2")
+    normalized = normalized.replace(/_d\d+$/, '');
+    // Strip trailing hex hash suffix added by pydantic-ai (e.g., "_8929eef7").
+    // Only strip if the remaining prefix still contains an underscore,
+    // to avoid collapsing unique provider IDs like "call_<hex>" (e.g., Fireworks/Kimi
+    // fixed IDs) down to just "call", which would make all IDs in a run identical.
+    const stripped = normalized.replace(/_[0-9a-f]{8,}$/i, '');
+    if (stripped.includes('_')) {
+        normalized = stripped;
+    }
     return normalized;
 }
 
@@ -55,10 +63,12 @@ function normalizeToolCallId(id: string): string {
  * Reconcile toolcall_id mismatches between agent actions (from REST API)
  * and tool call parts (from model messages in runs).
  *
- * Some model providers store simplified tool_call_ids (e.g., "functions.edit_note:0")
- * while pydantic-ai generates modified versions in model messages
- * (e.g., "functions_edit_note_0_8929eef7"). This function maps the simplified IDs
- * back to the full IDs so the UI can match agent actions to their tool calls.
+ * This is primarily needed for **legacy data** where Kimi raw IDs like
+ * "functions.edit_note:0" were stored in agent_actions, while pydantic-ai's
+ * sanitize_tool_call_ids rewrote model messages to "functions_edit_note_0_8929eef7".
+ *
+ * For newer data, the backend generates unique call_<hex> IDs that are consistent
+ * between agent_actions and model messages, so no reconciliation is needed.
  */
 function reconcileToolcallIds(runs: AgentRun[], actions: AgentAction[]): void {
     if (actions.length === 0 || runs.length === 0) return;
@@ -331,6 +341,9 @@ export const loadThreadAtom = atom(
 
             // Load agent runs with actions from the backend
             const { runs, agent_actions } = await agentRunService.getThreadRuns(threadId, true);
+
+            console.log("loadThreadAtom: runs", runs);
+            console.log("loadThreadAtom: agent_actions", agent_actions);
             
             // Mark any in_progress runs as canceled since they're no longer active
             const processedRuns = runs.map(run => {
