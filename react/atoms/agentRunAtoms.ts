@@ -756,11 +756,10 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onPart: async (event: WSPartEvent) => {
-            logger('WS onPart:', {
+            logger(`WS onPart (${event.part.part_kind}):`, {
                 runId: event.run_id,
                 messageIndex: event.message_index,
-                partIndex: event.part_index,
-                partKind: event.part.part_kind,
+                part: event.part,
             });
             // Load item data for tool call
             if (event.part.part_kind === "tool-call") {
