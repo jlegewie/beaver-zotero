@@ -371,6 +371,7 @@ export async function openNoteAndSearchEdit(
     let searchText: string | null = null;
     let selectText: string | undefined;
     let endSearchText: string | undefined;
+    let selectOffsetInSearch: number | undefined;
 
     // For applied edits, highlight the added text; for pending/undone edits,
     // highlight the text that will be replaced (the deleted portion).
@@ -382,7 +383,8 @@ export async function openNoteAndSearchEdit(
         searchText = result.searchText;
         selectText = result.selectText;
         endSearchText = result.endSearchText;
-        logger(`openNoteAndSearchEdit: extractHighlightedDiffText(${diffTarget}): searchText="${searchText.substring(0, 80)}", selectText="${selectText.substring(0, 80)}"${endSearchText ? `, endSearchText="${endSearchText.substring(0, 80)}"` : ''}`, 1);
+        selectOffsetInSearch = result.selectOffsetInSearch;
+        logger(`openNoteAndSearchEdit: extractHighlightedDiffText(${diffTarget}): searchText="${searchText.substring(0, 80)}", selectText="${selectText.substring(0, 80)}", selectOffsetInSearch=${selectOffsetInSearch}${endSearchText ? `, endSearchText="${endSearchText.substring(0, 80)}"` : ''}`, 1);
     } else {
         // Fall back to first line (e.g. pure insertions/deletions where the
         // entire line is new/old and there's no char-level diff).
@@ -398,7 +400,7 @@ export async function openNoteAndSearchEdit(
 
     // Wait for the editor instance to be available and initialized,
     // then select the text and scroll to it.
-    const found = await selectAndScrollInNoteEditor(itemId, searchText, selectText, endSearchText);
+    const found = await selectAndScrollInNoteEditor(itemId, searchText, selectText, endSearchText, selectOffsetInSearch);
 
     // Fallback: if the primary search failed (e.g. applied edit but the
     // editor DOM still has the old content — undo, manual revert, race
@@ -436,7 +438,7 @@ function extractHighlightedDiffText(
     oldHtml: string,
     newHtml: string,
     targetType: 'addition' | 'deletion',
-): { searchText: string; selectText: string; endSearchText?: string } | null {
+): { searchText: string; selectText: string; selectOffsetInSearch?: number; endSearchText?: string } | null {
     const strippedOld = stripHtmlTags(oldHtml);
     const strippedNew = stripHtmlTags(newHtml);
     logger(`extractHighlightedDiffText(${targetType}): strippedOld (${strippedOld.length} chars): "${strippedOld.substring(0, 150)}"`, 1);
@@ -483,21 +485,49 @@ function extractHighlightedDiffText(
         return null;
     }
 
+    // Find the correct position of selectText in fullLineText.
+    // selectText may appear multiple times (e.g., "the" in
+    // "Why did the German police officer arrest the battery?").
+    // Use adjacent segment text as context to disambiguate.
+    const segs = firstHighlightedLine.segments!;
+    let selectOffset = fullLineText.indexOf(selectText);
+    let prefixContext = '';
+    for (const seg of segs) {
+        if (seg.highlighted) break;
+        prefixContext = seg.text; // keep last non-highlighted segment before highlight
+    }
+    prefixContext = prefixContext.replace(/^…+/, ''); // strip truncation ellipsis
+    if (prefixContext.length > 0) {
+        const ctxLen = Math.min(15, prefixContext.length);
+        const ctx = prefixContext.slice(-ctxLen);
+        const combined = ctx + selectText;
+        const combinedIdx = fullLineText.indexOf(combined);
+        if (combinedIdx !== -1) {
+            selectOffset = combinedIdx + ctx.length;
+        }
+    }
+
     // Build searchText from the full line, truncated to a window centered
     // around the highlighted portion so it always contains selectText.
     let searchText = fullLineText;
+    let searchTextStart = 0; // track where the window starts within fullLineText
     const windowSize = Math.max(200, selectText.length + 40);
     if (searchText.length > windowSize) {
-        const hlIdx = searchText.indexOf(selectText);
-        if (hlIdx !== -1) {
+        if (selectOffset !== -1) {
             const margin = Math.floor((windowSize - selectText.length) / 2);
-            const start = Math.max(0, hlIdx - margin);
-            searchText = searchText.substring(start, start + windowSize);
+            searchTextStart = Math.max(0, selectOffset - margin);
+            searchText = searchText.substring(searchTextStart, searchTextStart + windowSize);
         } else {
             searchText = searchText.substring(0, windowSize);
         }
     }
     searchText = stripEllipsis(searchText);
+
+    // Compute offset of selectText within searchText for downstream
+    // disambiguation (avoids indexOf which may find the wrong occurrence).
+    const selectOffsetInSearch = selectOffset !== -1
+        ? selectOffset - searchTextStart
+        : undefined;
 
     // For multi-line edits, include the last target line so the selection
     // can span the entire edited range (not just the first line).
@@ -512,8 +542,8 @@ function extractHighlightedDiffText(
         }
     }
 
-    logger(`extractHighlightedDiffText(${targetType}): searchText="${searchText.substring(0, 80)}", selectText="${selectText.substring(0, 80)}"${endSearchText ? `, endSearchText="${endSearchText.substring(0, 80)}"` : ''}`, 1);
-    return { searchText, selectText, endSearchText };
+    logger(`extractHighlightedDiffText(${targetType}): searchText="${searchText.substring(0, 80)}", selectText="${selectText.substring(0, 80)}", selectOffsetInSearch=${selectOffsetInSearch}${endSearchText ? `, endSearchText="${endSearchText.substring(0, 80)}"` : ''}`, 1);
+    return { searchText, selectText, selectOffsetInSearch, endSearchText };
 }
 
 /**
@@ -571,6 +601,7 @@ async function selectAndScrollInNoteEditor(
     searchText: string,
     selectText?: string,
     endSearchText?: string,
+    selectOffsetInSearch?: number,
 ): Promise<boolean> {
     const maxWaitMs = 3000;
     const pollIntervalMs = 100;
@@ -601,7 +632,7 @@ async function selectAndScrollInNoteEditor(
                 // Start from the selectText (changed portion) within the
                 // first addition line, not from the shared prefix.
                 if (selectText) {
-                    const withinIdx = searchText.indexOf(selectText);
+                    const withinIdx = selectOffsetInSearch ?? searchText.indexOf(selectText);
                     rangeStart = withinIdx !== -1 ? ctxIdx + withinIdx : ctxIdx;
                 } else {
                     rangeStart = ctxIdx;
@@ -635,7 +666,10 @@ async function selectAndScrollInNoteEditor(
                     logger(`selectAndScrollInNoteEditor: selectText not unique (first=${firstIdx}, second=${secondIdx}), using searchText context`, 1);
                     const ctxIdx = fullText.indexOf(searchText);
                     if (ctxIdx !== -1) {
-                        const withinIdx = searchText.indexOf(selectText);
+                        // Use the pre-computed offset when available (avoids
+                        // indexOf picking the wrong occurrence of selectText
+                        // within searchText, e.g. "the" appearing twice).
+                        const withinIdx = selectOffsetInSearch ?? searchText.indexOf(selectText);
                         if (withinIdx !== -1) {
                             rangeStart = ctxIdx + withinIdx;
                             rangeEnd = rangeStart + selectText.length;
@@ -726,10 +760,12 @@ async function selectAndScrollInNoteEditor(
             // Defer focus so it runs after the current click event finishes
             // processing (the sidebar click steals focus back otherwise).
             // Focus the iframe element in the parent window first, then the
-            // ProseMirror view inside it.
+            // ProseMirror view inside it. We retry a few times because React
+            // re-renders and event bubbling can steal focus back after our
+            // first attempt.
             const iframeDoc = view.dom.ownerDocument;
             const iframeEl = iframeDoc?.defaultView?.frameElement;
-            setTimeout(() => {
+            const focusEditor = () => {
                 try {
                     if (iframeEl && typeof (iframeEl as HTMLElement).focus === 'function') {
                         (iframeEl as HTMLElement).focus();
@@ -738,7 +774,9 @@ async function selectAndScrollInNoteEditor(
                 } catch {
                     // Best-effort — selection is still set even without focus
                 }
-            }, 50);
+            };
+            setTimeout(focusEditor, 50);
+            setTimeout(focusEditor, 200);
 
             logger(`selectAndScrollInNoteEditor: selection set and scrolled into view`, 1);
             return true;
