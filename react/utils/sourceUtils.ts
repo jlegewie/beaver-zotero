@@ -453,7 +453,22 @@ export async function openNoteAndSearchEdit(
 
     // Wait for the editor instance to be available and initialized,
     // then select the text and scroll to it.
-    const found = await selectAndScrollInNoteEditor(itemId, searchText, selectText, endSearchText, selectOffsetInSearch);
+    let found = await selectAndScrollInNoteEditor(itemId, searchText, selectText, endSearchText, selectOffsetInSearch);
+
+    // Retry without placeholder tokens ([citation], [image]) that won't
+    // match the editor DOM — citations render as formatted text and images
+    // have no text node. This handles cases where stripHtmlTags couldn't
+    // recover the citation label (e.g. item not in local library).
+    if (!found && /\[(citation|image)\]/.test(searchText)) {
+        const stripPlaceholders = (s: string) => s.replace(/\s*\[(citation|image)\]\s*/g, ' ').trim();
+        const cleanSearch = stripPlaceholders(searchText);
+        const cleanSelect = selectText ? stripPlaceholders(selectText) : undefined;
+        const cleanEnd = endSearchText ? stripPlaceholders(endSearchText) : undefined;
+        if (cleanSearch.length >= 10) {
+            logger(`openNoteAndSearchEdit: retrying without placeholder tokens: "${cleanSearch.substring(0, 80)}"`, 1);
+            found = await selectAndScrollInNoteEditor(itemId, cleanSearch, cleanSelect, cleanEnd);
+        }
+    }
 
     // Fallback: if the primary search failed (e.g. applied edit but the
     // editor DOM still has the old content — undo, manual revert, race

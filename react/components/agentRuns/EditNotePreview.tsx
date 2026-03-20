@@ -549,8 +549,11 @@ export function stripHtmlTags(html: string): string {
                 if (label && label !== '()') return label;
                 return recoverSimplifiedCitationLabel(match) || label || '[citation]';
             })
-        // Remove simplified self-closing citation tags without a label (fallback)
-        .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi, '[citation]')
+        // Remove simplified self-closing citation tags without a label (fallback).
+        // Try to recover a meaningful label by looking up the cited item.
+        .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi, (match) => {
+            return recoverSimplifiedCitationLabel(match) || '[citation]';
+        })
         // Handle non-self-closing <citation> tags (preserve inner text)
         .replace(/<citation\b[^>]*>([\s\S]*?)<\/citation>/gi, '$1')
         // Convert annotation tags to their inner text
