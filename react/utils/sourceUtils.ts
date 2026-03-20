@@ -829,7 +829,22 @@ async function selectAndScrollInNoteEditor(
             }
 
             const fromPos = view.posAtDOM(match.startNode, match.startOffset);
-            const toPos = view.posAtDOM(match.endNode, match.endOffset);
+            let toPos = view.posAtDOM(match.endNode, match.endOffset);
+
+            // posAtDOM maps positions inside an inline atom's DOM (e.g.
+            // citations, images) to the atom's start position, so the
+            // selection ends just before the atom. Detect this and extend
+            // toPos to include the full atom.
+            try {
+                const $to = view.state.doc.resolve(toPos);
+                if ($to.nodeAfter?.isAtom && $to.nodeAfter.isInline) {
+                    const atomDom = view.nodeDOM(toPos);
+                    if (atomDom && (atomDom === match.endNode || atomDom.contains(match.endNode))) {
+                        toPos += $to.nodeAfter.nodeSize;
+                    }
+                }
+            } catch { /* best effort */ }
+
             logger(`selectAndScrollInNoteEditor: mapped to positions ${fromPos}-${toPos}`, 1);
 
             // Create a TextSelection for the target range.
