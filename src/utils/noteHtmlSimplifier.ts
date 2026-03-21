@@ -248,22 +248,22 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
                     const itemId = `${libraryID}-${itemKey}`;
                     const page = ci.locator != null ? String(ci.locator) : '';
 
-                    // Content-based ID with occurrence counter
+                    // Content-based ref with occurrence counter
                     const keyForCount = itemKey;
                     const occurrence = citationKeyCounts.get(keyForCount) || 0;
                     citationKeyCounts.set(keyForCount, occurrence + 1);
-                    const id = `c_${itemKey}_${occurrence}`;
+                    const ref = `c_${itemKey}_${occurrence}`;
 
-                    metadata.elements.set(id, {
+                    metadata.elements.set(ref, {
                         rawHtml: match,
                         type: 'citation',
                         originalAttrs: { item_id: itemId, page: page || undefined },
                     });
 
-                    let tag = `<citation id="${id}" item_id="${itemId}"`;
+                    let tag = `<citation item_id="${itemId}"`;
                     if (page) tag += ` page="${escapeAttr(page)}"`;
                     tag += ` label="${escapeAttr(label)}"`;
-                    tag += '/>';
+                    tag += ` ref="${ref}"/>`;
                     return tag;
                 } else {
                     // Compound citation (multiple items)
@@ -275,7 +275,7 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
 
                     const occurrence = citationKeyCounts.get(compoundKey) || 0;
                     citationKeyCounts.set(compoundKey, occurrence + 1);
-                    const id = `c_${compoundKey}_${occurrence}`;
+                    const ref = `c_${compoundKey}_${occurrence}`;
 
                     // Build items attribute: "LIB-KEY1:page=P1, LIB-KEY2:page=P2"
                     const itemsAttr = citationItems.map((ci: any) => {
@@ -286,15 +286,15 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
                         return page ? `${itemId}:page=${page}` : itemId;
                     }).join(', ');
 
-                    metadata.elements.set(id, {
+                    metadata.elements.set(ref, {
                         rawHtml: match,
                         type: 'compound-citation',
                         isCompound: true,
                     });
 
-                    let tag = `<citation id="${id}" items="${escapeAttr(itemsAttr)}"`;
+                    let tag = `<citation items="${escapeAttr(itemsAttr)}"`;
                     tag += ` label="${escapeAttr(label)}"`;
-                    tag += '/>';
+                    tag += ` ref="${ref}"/>`;
                     return tag;
                 }
             } catch {
@@ -434,17 +434,17 @@ export function expandToRawHtml(
     str = str.replace(
         /<citation\s+([^/]*?)\s*\/>/g,
         (match, attrStr) => {
-            const id = extractAttr(attrStr, 'id');
+            const ref = extractAttr(attrStr, 'ref');
             const itemId = extractAttr(attrStr, 'item_id');
             const attId = extractAttr(attrStr, 'att_id');
             const items = extractAttr(attrStr, 'items');
 
-            // Case 1: Existing citation (has id) — look up from metadata map
-            if (id) {
-                const stored = metadata.elements.get(id);
+            // Case 1: Existing citation (has ref) — look up from metadata map
+            if (ref) {
+                const stored = metadata.elements.get(ref);
                 if (!stored) {
                     throw new Error(
-                        `Unknown citation id="${id}". Cannot modify citation references not present in the note.`
+                        `Unknown citation ref="${ref}". Cannot modify citation references not present in the note.`
                     );
                 }
                 // Compound citations are immutable — always return stored raw HTML
@@ -461,11 +461,11 @@ export function expandToRawHtml(
                 return stored.rawHtml; // exact original
             }
 
-            // Case 2: New citation (no id) — only allowed in new_string
+            // Case 2: New citation (no ref) — only allowed in new_string
             if (context === 'old') {
                 throw new Error(
-                    'Error: New citations (without an id) can only appear in new_string, not old_string. '
-                    + 'To reference an existing citation, include its id attribute.'
+                    'Error: New citations (without a ref) can only appear in new_string, not old_string. '
+                    + 'To reference an existing citation, include its ref attribute.'
                 );
             }
             if (itemId) {
@@ -690,8 +690,8 @@ export function validateNewString(
         }
     }
 
-    // Check for new compound citations (items attr without id)
-    const compoundRegex = /<citation\s+(?!.*id=)([^/]*items="[^"]*"[^/]*)\/>/g;
+    // Check for new compound citations (items attr without ref)
+    const compoundRegex = /<citation\s+(?!.*ref=)([^/]*items="[^"]*"[^/]*)\/>/g;
     let compMatch;
     while ((compMatch = compoundRegex.exec(newString)) !== null) {
         return 'Error: Cannot create new compound citations. Insert individual <citation item_id="..." /> tags instead.';
@@ -758,8 +758,8 @@ export function checkDuplicateCitations(
     newString: string,
     metadata: SimplificationMetadata
 ): string | null {
-    // Find new citations (item_id without id) in new_string
-    const newCitationRegex = /<citation\s+(?!id=)[^>]*item_id="([^"]*)"[^/]*\/>/g;
+    // Find new citations (item_id without ref) in new_string
+    const newCitationRegex = /<citation\s+(?![^/]*\bref=)[^>]*item_id="([^"]*)"[^/]*\/>/g;
     let match;
     const warnings: string[] = [];
 
@@ -770,7 +770,7 @@ export function checkDuplicateCitations(
             if (stored.type === 'citation' && stored.originalAttrs?.item_id === newItemId) {
                 warnings.push(
                     ` (Note: item ${newItemId} is already cited in this note as ${existingId}` +
-                    ` — if you intended to move the existing citation, use its id attribute instead.)`
+                    ` — if you intended to move the existing citation, use its ref attribute instead.)`
                 );
                 break;
             }

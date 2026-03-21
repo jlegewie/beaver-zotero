@@ -375,10 +375,10 @@ describe('executeEditNoteAction — success', () => {
     });
 
     it('includes duplicate citation warning when present', async () => {
-        vi.mocked(checkDuplicateCitations).mockReturnValueOnce('item 1-X is already cited as c_X_0');
+        vi.mocked(checkDuplicateCitations).mockReturnValueOnce('item 1-X is already cited as c_X_0 — use its ref attribute instead.');
         const response = await handleAgentActionExecuteRequest(makeExecuteRequest());
         expect(response.success).toBe(true);
-        expect(response.result_data!.warnings).toContain('item 1-X is already cited as c_X_0');
+        expect(response.result_data!.warnings).toContain('item 1-X is already cited as c_X_0 — use its ref attribute instead.');
     });
 
     it('invalidates cache on success', async () => {

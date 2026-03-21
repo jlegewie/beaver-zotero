@@ -21,6 +21,21 @@ vi.mock('../src/utils/logger', () => ({
     logger: vi.fn(),
 }));
 
+// Mock supabaseClient to avoid "Missing Supabase URL or Anon Key" error.
+// editNoteActions → agentActions → agentActionsService → apiService → supabaseClient
+vi.mock('../src/services/supabaseClient', () => ({
+    supabase: {
+        auth: {
+            getSession: vi.fn(),
+        },
+    },
+}));
+
+// Mock sourceUtils to avoid pulling in Jotai store / atom dependencies
+vi.mock('../react/utils/sourceUtils', () => ({
+    clearNoteEditorSelection: vi.fn(),
+}));
+
 // =============================================================================
 // Imports
 // =============================================================================
@@ -395,7 +410,7 @@ describe('edit + undo roundtrip', () => {
 
         // The simplified text should have two adjacent citation tags
         const adjacentMatch = simplified.match(
-            /<citation id="[^"]*"[^/]*\/><citation id="[^"]*"[^/]*\/>/
+            /<citation [^/]*ref="[^"]*"\/><citation [^/]*ref="[^"]*"\/>/
         );
         expect(adjacentMatch).toBeTruthy();
 
@@ -473,7 +488,7 @@ describe('edit + undo roundtrip', () => {
         const { simplified, metadata } = simplifyNoteHtml(FIXTURE_A, 1);
 
         // Find a citation tag in the simplified text
-        const existingTag = simplified.match(/<citation id="c_6QKY56PJ_0"[^/]*\/>/)?.[0];
+        const existingTag = simplified.match(/<citation [^/]*ref="c_6QKY56PJ_0"[^/]*\/>/)?.[0];
         expect(existingTag).toBeTruthy();
 
         // Replace old_string with itself + a new citation
@@ -513,20 +528,20 @@ describe('edit + undo roundtrip', () => {
 // =============================================================================
 
 describe('citation-specific roundtrips', () => {
-    it('same item cited 13+ times with different pages each gets unique id', () => {
+    it('same item cited 13+ times with different pages each gets unique ref', () => {
         const { simplified, metadata } = simplifyNoteHtml(FIXTURE_A, 1);
 
-        // Count unique citation ids for 6QKY56PJ
-        const citationIds = [...metadata.elements.keys()].filter(k => k.startsWith('c_6QKY56PJ_'));
-        expect(citationIds.length).toBeGreaterThanOrEqual(13);
+        // Count unique citation refs for 6QKY56PJ
+        const citationRefs = [...metadata.elements.keys()].filter(k => k.startsWith('c_6QKY56PJ_'));
+        expect(citationRefs.length).toBeGreaterThanOrEqual(13);
 
-        // Each id should be unique
-        const uniqueIds = new Set(citationIds);
-        expect(uniqueIds.size).toBe(citationIds.length);
+        // Each ref should be unique
+        const uniqueRefs = new Set(citationRefs);
+        expect(uniqueRefs.size).toBe(citationRefs.length);
 
         // Each round-trips independently
-        for (const id of citationIds) {
-            const tag = simplified.match(new RegExp(`<citation id="${id}"[^/]*/>`));
+        for (const ref of citationRefs) {
+            const tag = simplified.match(new RegExp(`<citation [^/]*ref="${ref}"[^/]*/>`));
             expect(tag).toBeTruthy();
             const expanded = expandToRawHtml(tag![0], metadata, 'old');
             expect(expanded).toContain('data-citation=');
@@ -974,7 +989,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
             result_data: undefined,
         });
 
-        await expect(undoEditNoteAction(action)).rejects.toThrow('old_string and new_string are required');
+        await expect(undoEditNoteAction(action)).rejects.toThrow('No undo data available: proposed_data.old_string is required');
     });
 
     it('execute throws for item not found', async () => {
