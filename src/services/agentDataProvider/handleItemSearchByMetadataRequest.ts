@@ -14,15 +14,15 @@ import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/ato
 import { userIdAtom } from '../../../react/atoms/auth';
 
 import { store } from '../../../react/store';
-import { serializeItemForSearch } from '../../utils/zoteroSerializers';
+import { serializeItemSummary } from '../../utils/zoteroSerializers';
 import {
     WSItemSearchByMetadataRequest,
     WSItemSearchByMetadataResponse,
     FrontendTimingMetadata,
 } from '../agentProtocol';
-import { ItemSearchData } from '../../../react/types/zotero';
+import { ItemSummary } from '../../../react/types/zotero';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../react/utils/searchTools';
-import { getCollectionByIdOrName, prepareBatchAttachmentData, processAttachmentsWithBatchData, toItemSearchAttachment } from './utils';
+import { getCollectionByIdOrName, prepareBatchAttachmentData, processAttachmentsWithBatchData, toAttachmentSummary } from './utils';
 import { TimingAccumulator } from '../../utils/timing';
 
 
@@ -240,18 +240,18 @@ export async function handleItemSearchByMetadataRequest(
     // Batch-fetch best attachments and sync dates for all candidate items
     const batchAttachmentData = await prepareBatchAttachmentData(candidates, attachmentContext, ta);
 
-    const resultItems: ItemSearchData[] = [];
+    const resultItems: ItemSummary[] = [];
     for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
         const batch = candidates.slice(batchStart, batchStart + BATCH_SIZE);
 
         const serialized = await Promise.all(
-            batch.map(async (item): Promise<ItemSearchData | null> => {
+            batch.map(async (item): Promise<ItemSummary | null> => {
                 try {
                     const [itemData, rawAttachments] = await Promise.all([
-                        ta.track('item_serialization_ms', () => serializeItemForSearch(item)),
+                        ta.track('item_serialization_ms', () => serializeItemSummary(item)),
                         ta.track('attachment_processing_ms', () => processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, { skipHash: true, skipWorkerFallback: true, timing: ta }))
                     ]);
-                    return { ...itemData, attachments: rawAttachments.map(toItemSearchAttachment) };
+                    return { ...itemData, attachments: rawAttachments.map(toAttachmentSummary) };
                 } catch (error) {
                     logger(`handleItemSearchByMetadataRequest: Failed to serialize item ${item.key}: ${error}`, 1);
                     return null;

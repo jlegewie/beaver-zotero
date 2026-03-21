@@ -1,7 +1,7 @@
 import { SubscriptionStatus, ProcessingMode, ChargeType } from '../../react/types/profile';
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../../react/agents/types';
 import { ZoteroItemReference } from '../../react/types/zotero';
-import { ItemDataWithStatus, AttachmentDataWithStatus, ItemSearchData } from '../../react/types/zotero';
+import { ItemDataWithStatus, AttachmentDataWithStatus, ItemSummary } from '../../react/types/zotero';
 import { ReaderState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
@@ -353,7 +353,7 @@ export type ItemSearchErrorCode =
 export interface WSItemSearchByMetadataResponse {
     type: 'item_search_by_metadata';
     request_id: string;
-    items: ItemSearchData[];
+    items: ItemSummary[];
     /** Error message if search failed */
     error?: string | null;
     /** Error code for programmatic handling */
@@ -395,7 +395,7 @@ export interface WSItemSearchByTopicRequest extends WSBaseEvent {
 export interface WSItemSearchByTopicResponse {
     type: 'item_search_by_topic';
     request_id: string;
-    items: ItemSearchData[];
+    items: ItemSummary[];
     /** Error message if search failed */
     error?: string | null;
     /** Error code for programmatic handling */

@@ -1,6 +1,6 @@
 import { calculateObjectHash } from '../utils/hash';
 import { logger } from './logger';
-import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemSearchData, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary } from '../../react/types/zotero';
+import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary } from '../../react/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
@@ -286,9 +286,9 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
  * Skips expensive operations: formatBibliography(), item.toJSON(), calculateObjectHash(),
  * and all sync/date/deleted fields.
  * @param item Zotero item
- * @returns Promise resolving to ItemSearchData
+ * @returns Promise resolving to ItemSummary
  */
-export async function serializeItemForSearch(item: Zotero.Item): Promise<ItemSearchData> {
+export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSummary> {
     return {
         zotero_key: item.key,
         library_id: item.libraryID,

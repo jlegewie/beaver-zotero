@@ -1,6 +1,6 @@
 import { logger } from '../../utils/logger';
 import { ZoteroItemReference } from '../../../react/types/zotero';
-import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus, ItemSearchAttachment } from '../../../react/types/zotero';
+import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus, AttachmentSummary } from '../../../react/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
 import { syncingItemFilter, syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
@@ -41,9 +41,9 @@ export function validateZoteroItemReference(ref: ZoteroItemReference): string | 
 }
 
 /**
- * Convert an AttachmentDataWithStatus to a lightweight ItemSearchAttachment.
+ * Convert an AttachmentDataWithStatus to a lightweight AttachmentSummary.
  */
-export function toItemSearchAttachment(a: AttachmentDataWithStatus): ItemSearchAttachment {
+export function toAttachmentSummary(a: AttachmentDataWithStatus): AttachmentSummary {
     return {
         library_id: a.attachment.library_id,
         zotero_key: a.attachment.zotero_key,

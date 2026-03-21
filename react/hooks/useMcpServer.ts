@@ -43,7 +43,7 @@ import type {
     WSListItemsRequest,
     WSListItemsResponse,
 } from '../../src/services/agentProtocol';
-import { ItemSearchData } from '../types/zotero';
+import { ItemSummary } from '../types/zotero';
 
 // =============================================================================
 // MCP stdio bridge script
@@ -512,9 +512,9 @@ function normalizeTags(tags: any[] | null | undefined): string[] {
 }
 
 /**
- * Transform an ItemSearchData to the compact MCP search result format.
+ * Transform an ItemSummary to the compact MCP search result format.
  */
-function formatSearchResultItem(entry: ItemSearchData, includeSimilarity: boolean): any {
+function formatSearchResultItem(entry: ItemSummary, includeSimilarity: boolean): any {
     const result: any = {
         item_id: `${entry.library_id}-${entry.zotero_key}`,
         item_type: entry.item_type,
