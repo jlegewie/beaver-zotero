@@ -170,17 +170,6 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                         ))}
                     </div>
                 </div>
-
-                {/* Warnings */}
-                {warnings && warnings.length > 0 && (
-                    <div className="px-3 py-1">
-                        {warnings.map((warning, i) => (
-                            <div key={i} className="text-xs font-color-secondary italic">
-                                {warning}
-                            </div>
-                        ))}
-                    </div>
-                )}
             </div>
         </div>
     );
