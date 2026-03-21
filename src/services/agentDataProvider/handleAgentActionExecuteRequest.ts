@@ -836,12 +836,10 @@ async function executeEditNoteAction(
     } else {
         const idx = strippedHtml.indexOf(expandedOld);
 
-        // For deletions (empty new_string), capture surrounding context for undo
-        if (!new_string) {
-            undoBeforeContext = strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx);
-            const afterStart = idx + expandedOld.length;
-            undoAfterContext = strippedHtml.substring(afterStart, afterStart + UNDO_CONTEXT_LENGTH);
-        }
+        // Capture surrounding context for robust undo of single-occurrence edits.
+        undoBeforeContext = strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx);
+        const afterStart = idx + expandedOld.length;
+        undoAfterContext = strippedHtml.substring(afterStart, afterStart + UNDO_CONTEXT_LENGTH);
 
         newHtml = strippedHtml.substring(0, idx) + expandedNew
             + strippedHtml.substring(idx + expandedOld.length);

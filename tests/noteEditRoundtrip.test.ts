@@ -11,10 +11,18 @@ vi.mock('../src/utils/zoteroUtils', () => ({
             `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify({
                 citationItems: [{
                     uris: [`http://zotero.org/users/1/items/${item.key}`],
+                    itemData: {
+                        id: `http://zotero.org/users/1/items/${item.key}`,
+                        type: 'article-journal',
+                        author: [{ family: 'Mock', given: 'Author' }],
+                        issued: { 'date-parts': [['2024']] },
+                    },
                     locator: page || '',
                 }],
+                properties: {},
             }))}"><span class="citation-item">${item.getField?.('title') || 'Mock Title'}${page ? ', p. ' + page : ''}</span></span>`
     ),
+    getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test-user' })),
 }));
 
 vi.mock('../src/utils/logger', () => ({
@@ -75,6 +83,66 @@ function rawCitation(key: string, libraryID = 1, page = '', label = 'Author, 202
     };
     return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">`
         + `<span class="citation-item">${label}</span></span>`;
+}
+
+function stripInlineItemDataFromDataCitationsForTest(html: string): string {
+    return html.replace(/data-citation="([^"]*)"/g, (match, encodedCitation) => {
+        try {
+            const citation = JSON.parse(decodeURIComponent(encodedCitation));
+            if (!Array.isArray(citation?.citationItems)) {
+                return match;
+            }
+
+            const citationItems = citation.citationItems.map((ci: any) => {
+                if (!ci || typeof ci !== 'object') {
+                    return ci;
+                }
+                const { itemData: _itemData, ...rest } = ci;
+                return rest;
+            });
+
+            return `data-citation="${encodeURIComponent(JSON.stringify({
+                ...citation,
+                citationItems,
+            }))}"`;
+        } catch {
+            return match;
+        }
+    });
+}
+
+function addInlineItemDataToDataCitationsForTest(html: string): string {
+    return html.replace(/data-citation="([^"]*)"/g, (match, encodedCitation) => {
+        try {
+            const citation = JSON.parse(decodeURIComponent(encodedCitation));
+            if (!Array.isArray(citation?.citationItems)) {
+                return match;
+            }
+
+            const citationItems = citation.citationItems.map((ci: any) => {
+                const uri = ci?.uris?.[0] || '';
+                const keyMatch = uri.match(/\/items\/([A-Z0-9]+)$/i);
+                const key = keyMatch ? keyMatch[1] : 'UNKNOWN';
+                return {
+                    ...ci,
+                    itemData: {
+                        id: uri || `http://zotero.org/users/1/items/${key}`,
+                        type: 'article-journal',
+                        author: [{ family: 'Mock', given: 'Author' }],
+                        issued: { 'date-parts': [['2024']] },
+                        title: key,
+                    },
+                };
+            });
+
+            return `data-citation="${encodeURIComponent(JSON.stringify({
+                ...citation,
+                citationItems,
+            }))}"`;
+        } catch {
+            return match;
+        }
+    });
 }
 
 /** Build a raw compound citation span */
@@ -228,15 +296,22 @@ beforeEach(() => {
         ...(globalThis as any).Zotero,
         Items: {
             getByLibraryAndKey: vi.fn((libId: number, key: string) => ({
+                id: `${libId}-${key}`,
                 key,
                 libraryID: libId,
                 getField: vi.fn(() => 'Mock Title'),
+                isAttachment: vi.fn(() => false),
+                isRegularItem: vi.fn(() => true),
+                getAttachments: vi.fn(() => []),
             })),
             getByLibraryAndKeyAsync: vi.fn(async (libId: number, key: string) => ({
                 key,
                 libraryID: libId,
                 id: 42,
                 getField: vi.fn(() => 'Mock Title'),
+                isAttachment: vi.fn(() => false),
+                isRegularItem: vi.fn(() => true),
+                getAttachments: vi.fn(() => []),
                 loadDataType: vi.fn().mockResolvedValue(undefined),
                 getNote: vi.fn(() => ''),
                 setNote: vi.fn(),
@@ -1226,6 +1301,151 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         const restoredHtml = undoItem.setNote.mock.calls[0][0];
         expect(stripDataCitationItems(restoredHtml)).toBe(stripDataCitationItems(originalHtml));
         expect((restoredHtml.match(/class="citation"/g) || []).length).toBe(2);
+        expect(undoItem.saveTx).toHaveBeenCalled();
+    });
+
+    it('undo succeeds when saved note strips inline itemData from new citations', async () => {
+        const noteHtml = wrap('<p>Hello world</p>');
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const { executeEditNoteAction, undoEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'Hello world',
+                new_string: 'Hello world <citation item_id="1-NEW1" page="4" label="Mock Title, p. 4"/>',
+            },
+        });
+
+        const result = await executeEditNoteAction(action);
+        expect(result.undo_new_html).not.toContain('itemData');
+
+        const editedHtml = item.setNote.mock.calls[0][0];
+        const normalizedEditedHtml = stripInlineItemDataFromDataCitationsForTest(editedHtml);
+
+        vi.clearAllMocks();
+        const undoItem = makeMockItem(normalizedEditedHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(undoItem);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        await undoEditNoteAction({
+            ...action,
+            result_data: result,
+        });
+
+        const restoredHtml = undoItem.setNote.mock.calls[0][0];
+        expect(stripDataCitationItems(restoredHtml)).toBe(stripDataCitationItems(noteHtml));
+        expect(undoItem.saveTx).toHaveBeenCalled();
+    });
+
+    it('undo falls back to semantic match when citation payloads are normalized differently', async () => {
+        const noteHtml = wrap('<p>Original sentence.</p>');
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const { executeEditNoteAction, undoEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'Original sentence.',
+                new_string: 'Revised sentence with support <citation item_id="1-NEW1" page="4" label="Mock Title, p. 4"/>.',
+            },
+        });
+
+        const result = await executeEditNoteAction(action);
+        const editedHtml = item.setNote.mock.calls[0][0];
+        const normalizedEditedHtml = addInlineItemDataToDataCitationsForTest(editedHtml);
+
+        vi.clearAllMocks();
+        const undoItem = makeMockItem(normalizedEditedHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(undoItem);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const legacyLikeResult = {
+            ...result,
+            undo_before_context: undefined,
+            undo_after_context: undefined,
+        };
+
+        await undoEditNoteAction({
+            ...action,
+            result_data: legacyLikeResult,
+        });
+
+        const restoredHtml = undoItem.setNote.mock.calls[0][0];
+        expect(stripDataCitationItems(restoredHtml)).toBe(stripDataCitationItems(noteHtml));
+        expect(undoItem.saveTx).toHaveBeenCalled();
+    });
+
+    it('undo tries multiple raw anchor candidates for legacy multi-paragraph edits without stored context', async () => {
+        const sharedLead = '<strong>Legewie, Farley, and Stewart (2019)</strong> provide a policy-focused '
+            + 'research brief that extends the findings from Legewie and Fagan\'s (2018) study on '
+            + 'Operation Impact. Their analysis draws on the same staggered implementation of police '
+            + 'surges in impact zones but emphasizes practical implications for educators and policymakers. ';
+        const decoyParagraph = `<p>${sharedLead}This earlier paragraph is a decoy with a different ending.</p>`;
+        const noteHtml = wrap(
+            `${decoyParagraph}`
+            + `<p><strong>Góldenberg</strong> has a related paper exploring the same NYC police surge policy `
+            + `and its academic impacts on students in affected neighborhoods. `
+            + `${rawCitation('OLD1', 1, '5', 'Mock Title, p. 5')}</p>`
+            + '<p>Trailing material that should remain unchanged.</p>'
+        );
+
+        const { simplified } = simplifyNoteHtml(noteHtml, 1);
+        const oldCitationTag = simplified.match(/<citation [^>]*ref="c_OLD1_0"[^>]*\/>/)?.[0];
+        expect(oldCitationTag).toBeTruthy();
+
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const { executeEditNoteAction, undoEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string:
+                    `<p><strong>Góldenberg</strong> has a related paper exploring the same NYC police surge `
+                    + `policy and its academic impacts on students in affected neighborhoods. `
+                    + `${oldCitationTag}</p>`,
+                new_string:
+                    `<p>${sharedLead}The brief documents that Black, Latino, and White students were `
+                    + `exposed to Operation Impact at very different rates <citation item_id="1-OLD1" `
+                    + `page="3" label="Mock Title, p. 3"/>.</p>\n\n`
+                    + '<p>The brief also argues that the modest crime reduction did not offset the '
+                    + 'educational harms and recommends restorative rather than punitive approaches to '
+                    + 'discipline <citation item_id="1-OLD1" page="7-8" '
+                    + 'label="Mock Title, p. 7-8"/>.</p>',
+            },
+        });
+
+        const result = await executeEditNoteAction(action);
+        const editedHtml = item.setNote.mock.calls[0][0];
+        const normalizedEditedHtml = addInlineItemDataToDataCitationsForTest(editedHtml);
+
+        vi.clearAllMocks();
+        const undoItem = makeMockItem(normalizedEditedHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(undoItem);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const legacyLikeResult = {
+            ...result,
+            undo_before_context: undefined,
+            undo_after_context: undefined,
+        };
+
+        await undoEditNoteAction({
+            ...action,
+            result_data: legacyLikeResult,
+        });
+
+        const restoredHtml = undoItem.setNote.mock.calls[0][0];
+        expect(stripDataCitationItems(restoredHtml)).toBe(stripDataCitationItems(noteHtml));
         expect(undoItem.saveTx).toHaveBeenCalled();
     });
 });

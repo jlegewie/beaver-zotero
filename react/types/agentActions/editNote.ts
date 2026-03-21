@@ -50,13 +50,15 @@ export interface EditNoteResultData {
      */
     undo_new_html?: string;
     /**
-     * Surrounding context before the deletion point (raw HTML, stripped of data-citation-items).
-     * Stored only for deletions (new_string is empty) to enable undo re-insertion.
+     * Surrounding context before the edited region (raw HTML, stripped of
+     * data-citation-items). Stored for single-occurrence edits to support
+     * robust undo when Zotero normalizes the edited fragment.
      */
     undo_before_context?: string;
     /**
-     * Surrounding context after the deletion point (raw HTML, stripped of data-citation-items).
-     * Stored only for deletions (new_string is empty) to enable undo re-insertion.
+     * Surrounding context after the edited region (raw HTML, stripped of
+     * data-citation-items). Stored for single-occurrence edits to support
+     * robust undo when Zotero normalizes the edited fragment.
      */
     undo_after_context?: string;
 }

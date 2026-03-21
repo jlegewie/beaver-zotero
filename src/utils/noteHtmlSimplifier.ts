@@ -359,6 +359,44 @@ function normalizeWS(s: string): string {
     return s.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Canonicalize inline data-citation payloads by stripping itemData from each
+ * citation item. Zotero persists itemData centrally in data-citation-items on
+ * the wrapper div, so inline itemData makes equivalent citations fail exact
+ * string matching during undo.
+ */
+function stripInlineItemDataFromDataCitations(html: string): string {
+    return html.replace(/data-citation="([^"]*)"/g, (match, encodedCitation) => {
+        try {
+            const citation = JSON.parse(decodeURIComponent(encodedCitation));
+            if (!Array.isArray(citation?.citationItems)) {
+                return match;
+            }
+
+            let changed = false;
+            const citationItems = citation.citationItems.map((ci: any) => {
+                if (!ci || typeof ci !== 'object' || !('itemData' in ci)) {
+                    return ci;
+                }
+                changed = true;
+                const { itemData: _itemData, ...rest } = ci;
+                return rest;
+            });
+
+            if (!changed) {
+                return match;
+            }
+
+            return `data-citation="${encodeURIComponent(JSON.stringify({
+                ...citation,
+                citationItems,
+            }))}"`;
+        } catch {
+            return match;
+        }
+    });
+}
+
 // =============================================================================
 // Page Label Resolution
 // =============================================================================
@@ -518,7 +556,7 @@ function buildCitationFromSimplifiedAttrs(attrs: { item_id: string; page?: strin
             }
         }
     }
-    return createCitationHTML(item, resolvedPage);
+    return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
 }
 
 /** Build a new citation from an attachment ID (att_id format: "LIB-KEY") */
@@ -536,7 +574,7 @@ function buildCitationFromAttId(attId: string, page?: string): string {
     // Resolve page index to page label using the attachment's cached page labels
     const resolvedPage = page ? resolvePageStr(item.id, page) : undefined;
     // createCitationHTML handles attachment-to-parent resolution internally
-    return createCitationHTML(item, resolvedPage);
+    return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
 }
 
 /**

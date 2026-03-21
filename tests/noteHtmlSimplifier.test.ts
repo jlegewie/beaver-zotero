@@ -7,10 +7,26 @@ vi.mock('../src/utils/zoteroUtils', () => ({
             `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify({
                 citationItems: [{
                     uris: [`http://zotero.org/users/1/items/${item.key}`],
+                    itemData: {
+                        id: `http://zotero.org/users/1/items/${item.key}`,
+                        type: 'article-journal',
+                        author: [{ family: 'Mock', given: 'Author' }],
+                        issued: { 'date-parts': [['2024']] },
+                    },
                     locator: page || '',
                 }],
+                properties: {},
             }))}"><span class="citation-item">${item.getField?.('title') || 'Mock Title'}${page ? ', p. ' + page : ''}</span></span>`
     ),
+    getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test-user' })),
+}));
+
+vi.mock('../src/services/supabaseClient', () => ({
+    supabase: {
+        auth: {
+            getSession: vi.fn(),
+        },
+    },
 }));
 
 import {
@@ -94,9 +110,13 @@ beforeEach(() => {
         ...(globalThis as any).Zotero,
         Items: {
             getByLibraryAndKey: vi.fn((libId: number, key: string) => ({
+                id: `${libId}-${key}`,
                 key,
                 libraryID: libId,
                 getField: vi.fn(() => 'Mock Title'),
+                isAttachment: vi.fn(() => false),
+                isRegularItem: vi.fn(() => true),
+                getAttachments: vi.fn(() => []),
             })),
         },
         URI: {

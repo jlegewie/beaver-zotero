@@ -25,6 +25,7 @@ vi.mock('../src/utils/noteHtmlSimplifier', () => ({
     findFuzzyMatch: vi.fn(() => null),
     invalidateSimplificationCache: vi.fn(),
     checkDuplicateCitations: vi.fn(() => null),
+    preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../react/store', () => ({
@@ -51,6 +52,7 @@ vi.mock('../src/utils/zoteroUtils', () => ({
     SETTABLE_PRIMARY_FIELDS: [],
     sanitizeCreators: vi.fn((c: any) => c),
     createCitationHTML: vi.fn(),
+    getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test-user' })),
 }));
 
 vi.mock('../react/utils/batchFindExistingReferences', () => ({
@@ -79,6 +81,7 @@ import {
     invalidateSimplificationCache,
     checkDuplicateCitations,
     rebuildDataCitationItems,
+    preloadPageLabelsForNewCitations,
 } from '../src/utils/noteHtmlSimplifier';
 import { getDeferredToolPreference } from '../src/services/agentDataProvider/utils';
 import { store } from '../react/store';
@@ -188,6 +191,7 @@ beforeEach(() => {
     vi.mocked(getDeferredToolPreference).mockReturnValue('always_ask');
     vi.mocked(checkDuplicateCitations).mockReturnValue(null);
     vi.mocked(invalidateSimplificationCache).mockImplementation(() => {});
+    vi.mocked(preloadPageLabelsForNewCitations).mockResolvedValue(undefined);
 });
 
 

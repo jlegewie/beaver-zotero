@@ -8,6 +8,7 @@ import type { EditNoteResultData } from '../types/agentActions/editNote';
 import { logger } from '../../src/utils/logger';
 import {
     getOrSimplify,
+    simplifyNoteHtml,
     expandToRawHtml,
     stripDataCitationItems,
     rebuildDataCitationItems,
@@ -19,6 +20,95 @@ import {
     preloadPageLabelsForNewCitations,
 } from '../../src/utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from './sourceUtils';
+
+function normalizeUndoComparisonHtml(html: string, libraryId: number): string {
+    const { simplified } = simplifyNoteHtml(stripDataCitationItems(html), libraryId);
+    return simplified.replace(/\s+/g, ' ').trim();
+}
+
+function findRangeByContexts(
+    currentHtml: string,
+    beforeCtx?: string,
+    afterCtx?: string
+): { start: number; end: number } | null {
+    if (beforeCtx && afterCtx) {
+        let searchFrom = 0;
+        while (true) {
+            const beforeIdx = currentHtml.indexOf(beforeCtx, searchFrom);
+            if (beforeIdx === -1) break;
+            const start = beforeIdx + beforeCtx.length;
+            const afterIdx = currentHtml.indexOf(afterCtx, start);
+            if (afterIdx !== -1 && afterIdx >= start) {
+                return { start, end: afterIdx };
+            }
+            searchFrom = beforeIdx + 1;
+        }
+    }
+    return null;
+}
+
+function findRangesByRawAnchors(
+    currentHtml: string,
+    targetHtml: string
+): Array<{ start: number; end: number }> {
+    const anchorLengths = [160, 120, 80, 40, 24, 16, 12];
+    const candidates: Array<{ start: number; end: number }> = [];
+    const seen = new Set<string>();
+    const MAX_PREFIX_MATCHES = 12;
+    const MAX_SUFFIX_MATCHES_PER_PREFIX = 8;
+
+    for (const prefixLen of anchorLengths) {
+        const resolvedPrefixLen = Math.min(prefixLen, targetHtml.length);
+        if (resolvedPrefixLen < 12) continue;
+
+        const prefix = targetHtml.slice(0, resolvedPrefixLen);
+        let prefixSearchFrom = 0;
+        let prefixMatches = 0;
+
+        while (prefixMatches < MAX_PREFIX_MATCHES) {
+            const start = currentHtml.indexOf(prefix, prefixSearchFrom);
+            if (start === -1) break;
+
+            prefixMatches += 1;
+
+            for (const suffixLen of anchorLengths) {
+                const resolvedSuffixLen = Math.min(suffixLen, targetHtml.length);
+                if (resolvedSuffixLen < 12) continue;
+
+                const suffix = targetHtml.slice(-resolvedSuffixLen);
+                let suffixSearchFrom = start + resolvedPrefixLen;
+                let suffixMatches = 0;
+
+                while (suffixMatches < MAX_SUFFIX_MATCHES_PER_PREFIX) {
+                    const suffixIdx = currentHtml.indexOf(suffix, suffixSearchFrom);
+                    if (suffixIdx === -1) break;
+
+                    suffixMatches += 1;
+
+                    const key = `${start}:${suffixIdx + resolvedSuffixLen}`;
+                    if (!seen.has(key)) {
+                        seen.add(key);
+                        candidates.push({ start, end: suffixIdx + resolvedSuffixLen });
+                    }
+
+                    suffixSearchFrom = suffixIdx + 1;
+                }
+            }
+
+            prefixSearchFrom = start + 1;
+        }
+    }
+
+    candidates.sort((a, b) => {
+        const lengthDiff = (a.end - a.start) - (b.end - b.start);
+        if (lengthDiff !== 0) {
+            return lengthDiff;
+        }
+        return a.start - b.start;
+    });
+
+    return candidates;
+}
 
 /**
  * Execute an edit_note agent action by applying string replacement on the note.
@@ -99,12 +189,10 @@ export async function executeEditNoteAction(
     } else {
         const idx = strippedHtml.indexOf(expandedOld);
 
-        // For deletions (empty new_string), capture surrounding context for undo
-        if (!new_string) {
-            undoBeforeContext = strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx);
-            const afterStart = idx + expandedOld.length;
-            undoAfterContext = strippedHtml.substring(afterStart, afterStart + UNDO_CONTEXT_LENGTH);
-        }
+        // Capture surrounding context for robust undo of single-occurrence edits.
+        undoBeforeContext = strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx);
+        const afterStart = idx + expandedOld.length;
+        undoAfterContext = strippedHtml.substring(afterStart, afterStart + UNDO_CONTEXT_LENGTH);
 
         newHtml = strippedHtml.substring(0, idx) + expandedNew
             + strippedHtml.substring(idx + expandedOld.length);
@@ -316,6 +404,9 @@ export async function undoEditNoteAction(
         const undoOldHtml = expandedOld!;
         const undoNewHtml = expandedNew!;
 
+        const beforeCtx = resultData?.undo_before_context;
+        const afterCtx = resultData?.undo_after_context;
+
         // 3-way detection
         const newStringFound = strippedHtml.includes(undoNewHtml);
         const oldStringFound = strippedHtml.includes(undoOldHtml);
@@ -326,18 +417,59 @@ export async function undoEditNoteAction(
         }
 
         if (!newStringFound && !oldStringFound) {
-            throw new Error(
-                'Cannot undo: the note has been modified since this edit was applied. '
-                + 'Neither the applied text nor the original text could be found.'
-            );
+            const candidateRanges: Array<{ start: number; end: number }> = [];
+            const seenRanges = new Set<string>();
+
+            const contextRange = findRangeByContexts(strippedHtml, beforeCtx, afterCtx);
+            if (contextRange) {
+                const key = `${contextRange.start}:${contextRange.end}`;
+                seenRanges.add(key);
+                candidateRanges.push(contextRange);
+            }
+
+            for (const anchorRange of findRangesByRawAnchors(strippedHtml, undoNewHtml)) {
+                const key = `${anchorRange.start}:${anchorRange.end}`;
+                if (seenRanges.has(key)) {
+                    continue;
+                }
+                seenRanges.add(key);
+                candidateRanges.push(anchorRange);
+            }
+
+            if (!replace_all) {
+                for (const candidateRange of candidateRanges) {
+                    const candidateHtml = strippedHtml.substring(candidateRange.start, candidateRange.end);
+                    const normalizedCandidate = normalizeUndoComparisonHtml(candidateHtml, library_id);
+                    const normalizedExpected = normalizeUndoComparisonHtml(undoNewHtml, library_id);
+
+                    if (normalizedCandidate !== normalizedExpected) {
+                        continue;
+                    }
+
+                    restoredHtml = strippedHtml.substring(0, candidateRange.start)
+                        + undoOldHtml
+                        + strippedHtml.substring(candidateRange.end);
+                    logger(`undoEditNoteAction: restored semantically equivalent normalized block on note ${noteId}`, 1);
+                    break;
+                }
+            }
+
+            if (!restoredHtml) {
+                throw new Error(
+                    'Cannot undo: the note has been modified since this edit was applied. '
+                    + 'Neither the applied text nor the original text could be found.'
+                );
+            }
         }
 
-        if (replace_all) {
-            restoredHtml = strippedHtml.split(undoNewHtml).join(undoOldHtml);
-        } else {
-            const idx = strippedHtml.indexOf(undoNewHtml);
-            restoredHtml = strippedHtml.substring(0, idx) + undoOldHtml
-                + strippedHtml.substring(idx + undoNewHtml.length);
+        if (!restoredHtml) {
+            if (replace_all) {
+                restoredHtml = strippedHtml.split(undoNewHtml).join(undoOldHtml);
+            } else {
+                const idx = strippedHtml.indexOf(undoNewHtml);
+                restoredHtml = strippedHtml.substring(0, idx) + undoOldHtml
+                    + strippedHtml.substring(idx + undoNewHtml.length);
+            }
         }
     }
 
