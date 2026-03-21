@@ -56,6 +56,7 @@ import {
     GlobalSearchIcon,
 } from '../icons/icons';
 import { revealSource, openNoteAndSearchEdit } from '../../utils/sourceUtils';
+import { dismissDiffPreview } from '../../utils/noteEditorDiffPreview';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
@@ -362,6 +363,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         : isMultiAction 
             ? getOverallStatus(actions)
             : (action?.status ?? 'pending');
+
+
     // For confirmation actions, hide post-run Apply/Undo/Reject/Retry — only approval during awaiting is meaningful
     const isConfirmExtraction = toolName === 'confirm_extraction';
     const isConfirmExternalSearch = toolName === 'confirm_external_search';
@@ -374,6 +377,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Handlers for awaiting approval (during agent run)
     const handleApprove = useCallback(() => {
         if (pendingApproval) {
+            if (toolName === 'edit_note') dismissDiffPreview();
             // Start processing state before sending response
             setIsProcessingApproval(true);
             setClickedButton('approve');
@@ -381,10 +385,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             sendApprovalResponse({ actionId: pendingApproval.actionId, approved: true });
             removePendingApproval(pendingApproval.actionId);
         }
-    }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
+    }, [pendingApproval, sendApprovalResponse, removePendingApproval, toolName]);
 
     const handleReject = useCallback(() => {
         if (pendingApproval) {
+            if (toolName === 'edit_note') dismissDiffPreview();
             // Start processing state before sending response
             setIsProcessingApproval(true);
             setClickedButton('reject');
@@ -392,7 +397,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             sendApprovalResponse({ actionId: pendingApproval.actionId, approved: false });
             removePendingApproval(pendingApproval.actionId);
         }
-    }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
+    }, [pendingApproval, sendApprovalResponse, removePendingApproval, toolName]);
 
     // Handlers for post-run actions (after agent run is complete)
     const handleApplyPending = useCallback(async () => {
@@ -426,6 +431,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 }]);
                 logger(`AgentActionView: Applied organize_items action ${action!.id}`, 1);
             } else if (toolName === 'edit_note') {
+                dismissDiffPreview();
                 const result = await executeEditNoteAction(action!);
                 await ackAgentActions(runId, [{
                     action_id: action!.id,
@@ -485,7 +491,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const handleRejectPending = useCallback(() => {
         if (actions.length === 0 || isProcessing) return;
-        
+        if (toolName === 'edit_note') dismissDiffPreview();
+
         setClickedButton('reject');
         // For multi-action, reject all actions
         if (isMultiAction) {
@@ -498,7 +505,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
         // Reset clicked button state after a short delay (rejection is synchronous)
         setTimeout(() => setClickedButton(null), 100);
-    }, [action, actions, isProcessing, isMultiAction, rejectAgentAction]);
+    }, [action, actions, isProcessing, isMultiAction, rejectAgentAction, toolName]);
 
     const handleUndo = useCallback(async () => {
         if (!action || isProcessing) return;

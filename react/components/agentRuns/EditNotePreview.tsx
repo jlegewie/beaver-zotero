@@ -1,8 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     getOrSimplify,
     getLatestNoteHtml,
 } from '../../../src/utils/noteHtmlSimplifier';
+import { showDiffPreview, isDiffPreviewActive, dismissDiffPreview } from '../../utils/noteEditorDiffPreview';
+import { ViewIcon } from '../icons/icons';
+import IconButton from '../ui/IconButton';
+import Tooltip from '../ui/Tooltip';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -108,6 +112,19 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
         return () => { cancelled = true; };
     }, [needsNoteContext, libraryId, zoteroKey, oldString, isApplied, newString]);
 
+    const showPreviewButton = status !== 'applied' && status !== 'error'
+        && libraryId != null && zoteroKey;
+
+    const handlePreviewInEditor = useCallback(async () => {
+        if (libraryId == null || !zoteroKey) return;
+        // Toggle: dismiss if already previewing this note
+        if (isDiffPreviewActive(libraryId, zoteroKey)) {
+            dismissDiffPreview();
+            return;
+        }
+        await showDiffPreview(libraryId, zoteroKey, oldString, newString, replaceAll);
+    }, [libraryId, zoteroKey, oldString, newString, replaceAll]);
+
     const diffLines = useMemo(() => {
         if (needsNoteContext && noteContext && (noteContext.before || noteContext.after)) {
             // Build diff with surrounding context from the note.
@@ -146,14 +163,30 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
         <div className="edit-note-preview">
             <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1">
-                    {/* Only show header when replace_all is true (with occurrence count) */}
-                    {replaceAll && (
-                        <div className="text-sm font-color-primary font-medium px-3 py-1">
-                            {isDelete ? 'Delete' : 'Replace'}
-                            {' (all occurrences)'}
-                            {occurrencesReplaced != null && occurrencesReplaced > 0
-                                ? ` — ${occurrencesReplaced} occurrence${occurrencesReplaced === 1 ? '' : 's'}`
-                                : ''}
+                    {/* Header: replace_all info + Preview in Editor button */}
+                    {(replaceAll || showPreviewButton) && (
+                        <div className="display-flex flex-row items-center">
+                            {replaceAll && (
+                                <div className="text-sm font-color-primary font-medium px-3 py-1">
+                                    {isDelete ? 'Delete' : 'Replace'}
+                                    {' (all occurrences)'}
+                                    {occurrencesReplaced != null && occurrencesReplaced > 0
+                                        ? ` — ${occurrencesReplaced} occurrence${occurrencesReplaced === 1 ? '' : 's'}`
+                                        : ''}
+                                </div>
+                            )}
+                            <div className="flex-1" />
+                            {showPreviewButton && (
+                                <div className="px-2">
+                                    <Tooltip content="Preview in Editor" singleLine>
+                                        <IconButton
+                                            icon={ViewIcon}
+                                            variant="ghost-secondary"
+                                            onClick={handlePreviewInEditor}
+                                        />
+                                    </Tooltip>
+                                </div>
+                            )}
                         </div>
                     )}
                     <div className="diff-container">
