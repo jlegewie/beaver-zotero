@@ -908,7 +908,9 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         expect(result.library_id).toBe(1);
         expect(result.zotero_key).toBe('NOTE0001');
         expect(result.occurrences_replaced).toBe(1);
-        // Result should not contain full HTML snapshots
+        expect(result.undo_old_html).toBe('Hello');
+        expect(result.undo_new_html).toBe('Goodbye');
+        // Result should not contain full-note HTML snapshots
         expect(result).not.toHaveProperty('old_html');
         expect(result).not.toHaveProperty('new_html');
     });
@@ -975,6 +977,36 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         });
 
         await expect(undoEditNoteAction(action)).rejects.toThrow('note has been modified');
+    });
+
+    it('undo prefers stored applied HTML over proposed_data when they diverge', async () => {
+        const editedHtml = wrap('<p>Goodbye world</p>');
+        const item = makeMockItem(editedHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const { undoEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'Hello',
+                new_string: 'Goodbye with typo',
+            },
+            result_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                occurrences_replaced: 1,
+                undo_old_html: 'Hello',
+                undo_new_html: 'Goodbye',
+            },
+        });
+
+        await undoEditNoteAction(action);
+
+        const savedHtml = item.setNote.mock.calls[0][0];
+        expect(savedHtml).toContain('Hello world');
+        expect(savedHtml).not.toContain('Goodbye world');
     });
 
     it('undo fails gracefully when proposed_data strings missing', async () => {

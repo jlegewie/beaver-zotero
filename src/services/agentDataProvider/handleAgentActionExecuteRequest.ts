@@ -898,6 +898,8 @@ async function executeEditNoteAction(
             zotero_key,
             occurrences_replaced: matchCount,
             warnings,
+            undo_old_html: expandedOld,
+            undo_new_html: expandedNew,
             undo_before_context: undoBeforeContext,
             undo_after_context: undoAfterContext,
         },

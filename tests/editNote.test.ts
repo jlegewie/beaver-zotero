@@ -347,6 +347,8 @@ describe('executeEditNoteAction — success', () => {
         expect(response.result_data!.occurrences_replaced).toBe(1);
         expect(response.result_data!.library_id).toBe(1);
         expect(response.result_data!.zotero_key).toBe('NOTE0001');
+        expect(response.result_data!.undo_old_html).toBe('Hello');
+        expect(response.result_data!.undo_new_html).toBe('Goodbye');
         // Verify save was called
         const item = await (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync(1, 'NOTE0001');
         expect(item.setNote).toHaveBeenCalled();

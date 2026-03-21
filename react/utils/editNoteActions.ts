@@ -22,7 +22,7 @@ import { clearNoteEditorSelection } from './sourceUtils';
 /**
  * Execute an edit_note agent action by applying string replacement on the note.
  * @param action The agent action to execute
- * @returns Result data including old/new HTML for undo
+ * @returns Result data including the exact applied HTML fragment for undo
  */
 export async function executeEditNoteAction(
     action: AgentAction
@@ -144,14 +144,16 @@ export async function executeEditNoteAction(
         zotero_key,
         occurrences_replaced: matchCount,
         warnings,
+        undo_old_html: expandedOld,
+        undo_new_html: expandedNew,
         undo_before_context: undoBeforeContext,
         undo_after_context: undoAfterContext,
     };
 }
 
 /**
- * Undo an edit_note agent action using reverse string replacement.
- * Finds new_string in the current note and replaces with old_string.
+ * Undo an edit_note agent action using the exact applied HTML fragment when available.
+ * Falls back to reverse expansion of proposed_data for older actions.
  *
  * 3-way detection (analogous to edit_metadata undo):
  * - new_string found → undo succeeds (replace with old_string)
@@ -190,29 +192,41 @@ export async function undoEditNoteAction(
     // 2. Load note data
     await item.loadDataType('note');
     const noteId = `${library_id}-${zotero_key}`;
+    const resultData = action.result_data as EditNoteResultData | undefined;
 
-    // 3. Get current HTML and simplification metadata
+    // 3. Get current HTML
     const currentHtml = getLatestNoteHtml(item);
-    const { metadata } = getOrSimplify(noteId, currentHtml, library_id);
 
-    // 4. Expand old_string to raw HTML (always needed for re-insertion)
-    let expandedOld: string;
-    try {
-        expandedOld = expandToRawHtml(old_string, metadata, 'old');
-    } catch (e: any) {
-        throw new Error(`Failed to expand strings for undo: ${e.message || String(e)}`);
-    }
-
-    // 5. Strip data-citation-items for matching
+    // 4. Strip data-citation-items for matching
     const strippedHtml = stripDataCitationItems(currentHtml);
+    const storedUndoOldHtml = resultData?.undo_old_html;
+    const storedUndoNewHtml = resultData?.undo_new_html;
+
+    let expandedOld = storedUndoOldHtml;
+    let expandedNew = storedUndoNewHtml;
+
+    if (!expandedOld || (!isDeletion && expandedNew === undefined)) {
+        const { metadata } = getOrSimplify(noteId, currentHtml, library_id);
+
+        try {
+            if (!expandedOld) {
+                expandedOld = expandToRawHtml(old_string, metadata, 'old');
+            }
+            if (!isDeletion && expandedNew === undefined) {
+                expandedNew = expandToRawHtml(new_string, metadata, 'new');
+            }
+        } catch (e: any) {
+            throw new Error(`Failed to expand strings for undo: ${e.message || String(e)}`);
+        }
+    }
 
     let restoredHtml: string | undefined;
 
     if (isDeletion) {
         // --- Deletion undo: use surrounding context to find insertion point ---
-        const resultData = action.result_data as import('../types/agentActions/editNote').EditNoteResultData | undefined;
         const beforeCtx = resultData?.undo_before_context;
         const afterCtx = resultData?.undo_after_context;
+        const undoOldHtml = expandedOld!;
 
         if (!beforeCtx && !afterCtx) {
             throw new Error(
@@ -222,7 +236,7 @@ export async function undoEditNoteAction(
         }
 
         // Check if already undone (old_string is back in the note)
-        const oldStringFound = strippedHtml.includes(expandedOld);
+        const oldStringFound = strippedHtml.includes(undoOldHtml);
         if (oldStringFound) {
             logger(`undoEditNoteAction: Note ${noteId} already contains old_string, skipping`, 1);
             return;
@@ -260,7 +274,7 @@ export async function undoEditNoteAction(
                         const gapSize = afterIdx - beforeEnd;
                         logger(`undoEditNoteAction: beforeCtx+afterCtx proximity match (gap=${gapSize})`, 1);
                         restoredHtml = strippedHtml.substring(0, beforeEnd)
-                            + expandedOld
+                            + undoOldHtml
                             + strippedHtml.substring(afterIdx);
                     }
                 } else {
@@ -290,21 +304,17 @@ export async function undoEditNoteAction(
         // Build restored HTML (if not already set by proximity match above)
         if (!restoredHtml) {
             restoredHtml = strippedHtml.substring(0, insertionPoint)
-                + expandedOld
+                + undoOldHtml
                 + strippedHtml.substring(insertionPoint);
         }
     } else {
-        // --- Non-deletion undo: reverse str-replace (new_string → old_string) ---
-        let expandedNew: string;
-        try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new');
-        } catch (e: any) {
-            throw new Error(`Failed to expand strings for undo: ${e.message || String(e)}`);
-        }
+        // --- Non-deletion undo: reverse str-replace (new fragment → old fragment) ---
+        const undoOldHtml = expandedOld!;
+        const undoNewHtml = expandedNew!;
 
         // 3-way detection
-        const newStringFound = strippedHtml.includes(expandedNew);
-        const oldStringFound = strippedHtml.includes(expandedOld);
+        const newStringFound = strippedHtml.includes(undoNewHtml);
+        const oldStringFound = strippedHtml.includes(undoOldHtml);
 
         if (!newStringFound && oldStringFound) {
             logger(`undoEditNoteAction: Note ${noteId} already contains old_string, skipping`, 1);
@@ -319,11 +329,11 @@ export async function undoEditNoteAction(
         }
 
         if (replace_all) {
-            restoredHtml = strippedHtml.split(expandedNew).join(expandedOld);
+            restoredHtml = strippedHtml.split(undoNewHtml).join(undoOldHtml);
         } else {
-            const idx = strippedHtml.indexOf(expandedNew);
-            restoredHtml = strippedHtml.substring(0, idx) + expandedOld
-                + strippedHtml.substring(idx + expandedNew.length);
+            const idx = strippedHtml.indexOf(undoNewHtml);
+            restoredHtml = strippedHtml.substring(0, idx) + undoOldHtml
+                + strippedHtml.substring(idx + undoNewHtml.length);
         }
     }
 

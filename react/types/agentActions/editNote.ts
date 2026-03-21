@@ -24,8 +24,8 @@ export interface EditNoteProposedData {
 
 /**
  * Result data after applying an edit_note action.
- * Undo uses reverse str-replace (proposed_data.new_string → old_string)
- * rather than storing full HTML snapshots.
+ * Undo stores the exact applied raw HTML fragment for the changed region
+ * rather than a full-note snapshot.
  */
 export interface EditNoteResultData {
     /** Library ID of the edited note */
@@ -36,6 +36,19 @@ export interface EditNoteResultData {
     occurrences_replaced: number;
     /** Warnings (e.g., duplicate citation) */
     warnings?: string[];
+    /**
+     * Exact raw HTML fragment that was removed by the applied edit
+     * (data-citation-items already stripped; fragment only, not full note HTML).
+     * Used for reliable undo when proposed_data no longer expands to the
+     * exact current fragment.
+     */
+    undo_old_html?: string;
+    /**
+     * Exact raw HTML fragment that was inserted by the applied edit
+     * (data-citation-items already stripped; fragment only, not full note HTML).
+     * Used for reliable undo without storing the entire note.
+     */
+    undo_new_html?: string;
     /**
      * Surrounding context before the deletion point (raw HTML, stripped of data-citation-items).
      * Stored only for deletions (new_string is empty) to enable undo re-insertion.
