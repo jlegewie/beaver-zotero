@@ -260,6 +260,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
     // Track when we're processing a post-run action (apply/undo/retry)
     const [isProcessingAction, setIsProcessingAction] = useState(false);
+    // Track whether the last error came from an undo attempt (so retry calls undo, not apply)
+    const [isUndoError, setIsUndoError] = useState(false);
+    // Inline undo error for edit_note: keeps action in 'applied' state with a warning banner
+    const [undoError, setUndoError] = useState<string | null>(null);
     // Track when approval was removed externally (e.g., via PendingActionsBar "Apply All")
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
     // Track which specific button was clicked ('approve' | 'reject' | null)
@@ -397,7 +401,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Handlers for post-run actions (after agent run is complete)
     const handleApplyPending = useCallback(async () => {
         if (actions.length === 0 || isProcessing) return;
-        
+
+        setIsUndoError(false);
         setIsProcessingAction(true);
         setClickedButton('approve');
         try {
@@ -502,7 +507,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const handleUndo = useCallback(async () => {
         if (!action || isProcessing) return;
-        
+
+        setUndoError(null);
         setIsProcessingAction(true);
         try {
             if (toolName === 'edit_metadata') {
@@ -578,13 +584,20 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             const errorMessage = error?.message || 'Failed to undo action';
             const stackTrace = error?.stack || '';
             logger(`AgentActionView: Failed to undo actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
-            // Set error on all applied actions
-            const appliedActionIds = actions.filter(a => a.status === 'applied').map(a => a.id);
-            if (appliedActionIds.length > 0) {
-                setAgentActionsToError(appliedActionIds, errorMessage, {
-                    stack_trace: stackTrace,
-                    error_name: error?.name,
-                });
+
+            if (toolName === 'edit_note') {
+                // For edit_note: keep action in 'applied' state, show inline error banner
+                setUndoError(errorMessage);
+            } else {
+                // For other action types: set error status but track that it came from undo
+                setIsUndoError(true);
+                const appliedActionIds = actions.filter(a => a.status === 'applied').map(a => a.id);
+                if (appliedActionIds.length > 0) {
+                    setAgentActionsToError(appliedActionIds, errorMessage, {
+                        stack_trace: stackTrace,
+                        error_name: error?.name,
+                    });
+                }
             }
         } finally {
             setIsProcessingAction(false);
@@ -592,9 +605,15 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [action, actions, isProcessing, toolName, undoAgentAction, setAgentActionsToError, markExternalReferenceDeleted]);
 
     const handleRetry = useCallback(async () => {
-        // Retry is the same as apply for pending/error/undone/rejected actions
-        await handleApplyPending();
-    }, [handleApplyPending]);
+        if (isUndoError) {
+            // Error came from a failed undo — retry the undo, not re-apply
+            setIsUndoError(false);
+            await handleUndo();
+        } else {
+            // Error came from a failed apply — retry the apply
+            await handleApplyPending();
+        }
+    }, [isUndoError, handleUndo, handleApplyPending]);
 
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
 
@@ -770,6 +789,21 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         </div>
                     )}
 
+                    {/* Inline undo error banner for edit_note */}
+                    {undoError && (
+                        <div
+                            className="display-flex flex-row items-start gap-2 mx-3 mt-2 px-3 py-2 rounded-md"
+                            style={{ backgroundColor: 'var(--tag-yellow-senary)' }}
+                        >
+                            <div className="mt-010 flex-shrink-0">
+                                <Icon icon={AlertIcon} className="font-color-yellow scale-09" />
+                            </div>
+                            <div className="text-sm font-color-secondary" style={{ lineHeight: '1.4' }}>
+                                Could not undo automatically. The note may have been modified since this edit was applied. You can revert manually in the note editor.
+                            </div>
+                        </div>
+                    )}
+
                     {/* Action buttons */}
                     <div className="display-flex flex-row gap-1 px-2 py-2 mt-1">
                         {isConfirmExtraction ? (
@@ -780,14 +814,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             <DeferredToolPreferenceButton toolName={toolName} />
                         )}
                         <div className="flex-1" />
-                        
-                        {/* Processing indicator - shown while waiting for backend response */}
-                        {/* {isProcessingApproval && (
-                            <div className="display-flex items-center px-3 py-1 text-sm font-color-secondary">
-                                <Icon icon={Spinner} className="mr-2" />
-                                Processing...
-                            </div>
-                        )} */}
 
                         {/* Reject button - for awaiting and pending */}
                         {config.showReject && (!isProcessing || clickedButton === 'reject') && (
@@ -812,7 +838,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             </Button>
                         )}
 
-                        {/* Retry button - for error */}
+                        {/* Retry button - for error (label changes based on error source) */}
                         {config.showRetry && (
                             <Button
                                 variant="outline"
@@ -820,7 +846,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 onClick={handleRetry}
                                 loading={isProcessing}
                             >
-                                Try Again
+                                {isUndoError ? 'Retry Undo' : 'Try Again'}
                             </Button>
                         )}
 
