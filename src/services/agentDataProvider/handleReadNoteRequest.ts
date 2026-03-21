@@ -214,8 +214,8 @@ export async function handleReadNoteRequest(
             parentTitle = item.parentItem.getField('title') as string;
         }
 
-        // 9. Resolve cited items from the simplified HTML
-        const citedRefs = extractCitedItemRefs(simplified);
+        // 9. Resolve cited items from the visible slice only
+        const citedRefs = extractCitedItemRefs(slice.join('\n'));
         const citedItems = await resolveCitedItems(citedRefs);
 
         // 10. Return response
