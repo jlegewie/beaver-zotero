@@ -119,6 +119,13 @@ export interface AttachmentSummary {
     status_reason?: string | null;
 }
 
+/** Lightweight collection reference with name */
+export interface CollectionSummary {
+    library_id: number;
+    zotero_key: string;
+    name: string;
+}
+
 /** Lightweight item data for search results. Omits formatted_citation, item_json, hashes, sync fields. */
 export interface ItemSummary extends ZoteroItemReference {
     item_type: string;
@@ -128,15 +135,12 @@ export interface ItemSummary extends ZoteroItemReference {
     year?: number | null;
     publication_title?: string | null;
     abstract?: string | null;
-    url?: string | null;
     identifiers?: BibliographicIdentifier | null;
     language?: string | null;
-    tags?: any[] | null;
-    collections?: string[] | null;
+    tags?: string[] | null;
+    collections?: CollectionSummary[] | null;
     citation_key?: string | null;
     attachments?: AttachmentSummary[];
-    /** Semantic similarity score (0-1), present only for topic searches */
-    similarity?: number;
 }
 
 export interface ItemData extends ZoteroItemBase {

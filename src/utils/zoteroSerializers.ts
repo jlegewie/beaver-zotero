@@ -1,6 +1,6 @@
 import { calculateObjectHash } from '../utils/hash';
 import { logger } from './logger';
-import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary } from '../../react/types/zotero';
+import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary } from '../../react/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
@@ -23,6 +23,19 @@ export interface FileData {
 export function getCollectionKeysFromItem(item: Zotero.Item): string[] | null {
     const collectionKeys = item.getCollections().map(id => Zotero.Collections.get(id).key);
     return collectionKeys.length > 0 ? collectionKeys : null;
+}
+
+export function getCollectionSummariesFromItem(item: Zotero.Item): CollectionSummary[] | null {
+    const collectionIds = item.getCollections();
+    if (collectionIds.length === 0) return null;
+    return collectionIds.map(id => {
+        const collection = Zotero.Collections.get(id);
+        return {
+            library_id: item.libraryID,
+            zotero_key: collection.key,
+            name: collection.name,
+        };
+    });
 }
 
 /**
@@ -289,6 +302,7 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
  * @returns Promise resolving to ItemSummary
  */
 export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSummary> {
+    const tags = item.getTags();
     return {
         zotero_key: item.key,
         library_id: item.libraryID,
@@ -299,11 +313,10 @@ export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSumma
         year: getYearFromItem(item) ?? null,
         publication_title: item.getField('publicationTitle', false, true) || null,
         abstract: item.getField('abstractNote') || null,
-        url: item.getField('url') || null,
         identifiers: getIdentifiersFromItem(item),
         language: item.getField('language') || null,
-        tags: item.getTags().length > 0 ? item.getTags() : null,
-        collections: getCollectionKeysFromItem(item),
+        tags: tags.length > 0 ? tags.map((t: any) => t.tag) : null,
+        collections: getCollectionSummariesFromItem(item),
         citation_key: await getCitationKeyFromItem(item),
     };
 }
