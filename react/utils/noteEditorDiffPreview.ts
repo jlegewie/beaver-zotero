@@ -25,6 +25,20 @@ import { openNoteById } from './sourceUtils';
 
 const DEL_STYLE = 'background-color:rgba(255,100,100,0.3);text-decoration:line-through';
 const ADD_STYLE = 'background-color:rgba(100,200,100,0.3)';
+const PREVIEW_STYLE_ID = 'beaver-diff-preview-style';
+const PREVIEW_CSS = `
+/* Freeze editing visuals */
+.ProseMirror {
+    cursor: default !important;
+    caret-color: transparent !important;
+    user-select: none !important;
+}
+/* Dim toolbar to signal inactivity */
+.toolbar {
+    opacity: 0.35;
+    pointer-events: none;
+}
+`;
 
 interface DiffPreviewState {
     itemId: number;
@@ -110,6 +124,14 @@ export async function showDiffPreview(
             return false;
         }
 
+        // Freeze editing — set contentEditable to false and inject preview-mode CSS
+        try {
+            const view = inst._iframeWindow.wrappedJSObject
+                ._currentEditorInstance._editorCore.view;
+            view.dom.contentEditable = 'false';
+        } catch { /* best effort */ }
+        injectPreviewStyles(inst._iframeWindow);
+
         // Store state
         activePreview = {
             itemId, editorInstance: inst, originalHtml: rawHtml, wasSavingDisabled,
@@ -142,6 +164,9 @@ export function dismissDiffPreview(): void {
             logger('dismissDiffPreview: editor closed, skipping restore', 1);
             return;
         }
+        // Restore editing before restoring content
+        removePreviewStyles(inst._iframeWindow);
+        wrappedJS._currentEditorInstance._editorCore.view.dom.contentEditable = 'true';
         inst.applyIncrementalUpdate({ html: originalHtml }, false);
         inst._disableSaving = wasSavingDisabled;
         logger('dismissDiffPreview: restored original HTML', 1);
@@ -219,6 +244,26 @@ async function pollForEditorInstance(itemId: number, maxWaitMs: number = 3000): 
 /**
  * Scroll the editor to the first diff highlight after injection.
  */
+/** Inject a <style> tag into the iframe to visually signal preview mode. */
+function injectPreviewStyles(iframeWindow: any): void {
+    try {
+        const doc = iframeWindow?.document;
+        if (!doc?.head) return;
+        doc.getElementById(PREVIEW_STYLE_ID)?.remove();
+        const style = doc.createElement('style');
+        style.id = PREVIEW_STYLE_ID;
+        style.textContent = PREVIEW_CSS;
+        doc.head.appendChild(style);
+    } catch { /* best effort */ }
+}
+
+/** Remove the preview-mode <style> tag from the iframe. */
+function removePreviewStyles(iframeWindow: any): void {
+    try {
+        iframeWindow?.document?.getElementById(PREVIEW_STYLE_ID)?.remove();
+    } catch { /* ignore */ }
+}
+
 function scrollToDiff(inst: any): void {
     setTimeout(() => {
         try {
