@@ -15,6 +15,7 @@ import {
     invalidateSimplificationCache,
     checkDuplicateCitations,
     findFuzzyMatch,
+    preloadPageLabelsForNewCitations,
 } from '../../utils/noteHtmlSimplifier';
 
 
@@ -774,7 +775,10 @@ async function executeEditNoteAction(
     const noteId = `${library_id}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
 
-    // 5. Expand old_string and new_string to raw HTML
+    // 5. Pre-load page labels so new citations resolve page indices to labels
+    await preloadPageLabelsForNewCitations(new_string);
+
+    // 6. Expand old_string and new_string to raw HTML
     let expandedOld: string;
     let expandedNew: string;
     try {

@@ -9,6 +9,7 @@
  */
 
 import { createCitationHTML } from './zoteroUtils';
+import { getAttachmentFileStatus } from '../services/agentDataProvider/utils';
 
 // =============================================================================
 // Types
@@ -359,6 +360,112 @@ function normalizeWS(s: string): string {
 }
 
 // =============================================================================
+// Page Label Resolution
+// =============================================================================
+
+/**
+ * Resolve a 0-based page index string to its display label using the in-memory cache.
+ * Equivalent to react/utils/pageLabels.ts:resolvePageStr but usable from src/.
+ */
+function resolvePageStr(itemId: number, pageStr: string): string {
+    try {
+        const cache = Zotero.Beaver?.attachmentFileCache;
+        if (!cache) return pageStr;
+        const pageLabels = cache.getPageLabelsSync(itemId);
+        if (!pageLabels) return pageStr;
+        return pageStr.replace(/\d+/g, (numStr) => {
+            const pageIndex = parseInt(numStr, 10);
+            if (isNaN(pageIndex)) return numStr;
+            return pageLabels[pageIndex] ?? numStr;
+        });
+    } catch {
+        return pageStr;
+    }
+}
+
+/**
+ * Find the best PDF attachment for a regular item.
+ * Prefers PDF attachments; falls back to the first attachment.
+ */
+function getBestPDFAttachment(item: any): any {
+    try {
+        const attachmentIDs = item.getAttachments();
+        if (!attachmentIDs || attachmentIDs.length === 0) return null;
+        for (const attID of attachmentIDs) {
+            const att = Zotero.Items.get(attID);
+            if (att && att.attachmentContentType === 'application/pdf') return att;
+        }
+        return Zotero.Items.get(attachmentIDs[0]) || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Pre-load page labels into the in-memory cache for citations in a string
+ * that have page attributes. Must be called (and awaited) before expandToRawHtml()
+ * so that synchronous resolvePageStr lookups succeed.
+ */
+export async function preloadPageLabelsForNewCitations(str: string): Promise<void> {
+    const cache = Zotero.Beaver?.attachmentFileCache;
+    if (!cache) return;
+
+    const seen = new Set<number>();
+    const regex = /<citation\s+([^/]*?)\s*\/>/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(str)) !== null) {
+        const attrStr = match[1];
+        const pageAttr = extractAttr(attrStr, 'page');
+        if (!pageAttr) continue;
+
+        const attIdStr = extractAttr(attrStr, 'att_id') || extractAttr(attrStr, 'attachment_id');
+        const itemIdStr = extractAttr(attrStr, 'item_id');
+
+        let attachmentItem: any = null;
+
+        if (attIdStr) {
+            const dashIdx = attIdStr.indexOf('-');
+            if (dashIdx > 0) {
+                const libId = parseInt(attIdStr.substring(0, dashIdx), 10);
+                const key = attIdStr.substring(dashIdx + 1);
+                if (libId && key) {
+                    const item = Zotero.Items.getByLibraryAndKey(libId, key);
+                    if (item && item.isAttachment()) {
+                        attachmentItem = item;
+                    }
+                }
+            }
+        } else if (itemIdStr) {
+            const dashIdx = itemIdStr.indexOf('-');
+            if (dashIdx > 0) {
+                const libId = parseInt(itemIdStr.substring(0, dashIdx), 10);
+                const key = itemIdStr.substring(dashIdx + 1);
+                if (libId && key) {
+                    const item = Zotero.Items.getByLibraryAndKey(libId, key);
+                    if (item && typeof item !== 'boolean') {
+                        attachmentItem = item.isAttachment() ? item : getBestPDFAttachment(item);
+                    }
+                }
+            }
+        }
+
+        if (!attachmentItem || seen.has(attachmentItem.id)) continue;
+        seen.add(attachmentItem.id);
+
+        try {
+            const filePath = await attachmentItem.getFilePathAsync();
+            if (!filePath) continue;
+            const record = await cache.getMetadata(attachmentItem.id, filePath);
+            if (record) continue;
+            await getAttachmentFileStatus(attachmentItem, false);
+        } catch {
+            // Skip items that can't be resolved
+        }
+    }
+}
+
+// =============================================================================
 // Expansion: Simplified → Raw HTML
 // =============================================================================
 
@@ -399,7 +506,19 @@ function buildCitationFromSimplifiedAttrs(attrs: { item_id: string; page?: strin
     if (!item) {
         throw new Error(`Item not found: ${attrs.item_id}`);
     }
-    return createCitationHTML(item, attrs.page);
+    // Resolve page index to page label (e.g., "7" → "iv" for Roman-numeral front matter)
+    let resolvedPage = attrs.page;
+    if (resolvedPage) {
+        if (item.isAttachment()) {
+            resolvedPage = resolvePageStr(item.id, resolvedPage);
+        } else {
+            const att = getBestPDFAttachment(item);
+            if (att) {
+                resolvedPage = resolvePageStr(att.id, resolvedPage);
+            }
+        }
+    }
+    return createCitationHTML(item, resolvedPage);
 }
 
 /** Build a new citation from an attachment ID (att_id format: "LIB-KEY") */
@@ -414,8 +533,10 @@ function buildCitationFromAttId(attId: string, page?: string): string {
     if (!item) {
         throw new Error(`Attachment not found: ${attId}`);
     }
+    // Resolve page index to page label using the attachment's cached page labels
+    const resolvedPage = page ? resolvePageStr(item.id, page) : undefined;
     // createCitationHTML handles attachment-to-parent resolution internally
-    return createCitationHTML(item, page);
+    return createCitationHTML(item, resolvedPage);
 }
 
 /**
