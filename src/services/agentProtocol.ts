@@ -1,11 +1,10 @@
 import { SubscriptionStatus, ProcessingMode, ChargeType } from '../../react/types/profile';
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../../react/agents/types';
 import { ZoteroItemReference } from '../../react/types/zotero';
-import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../react/types/zotero';
+import { ItemDataWithStatus, AttachmentDataWithStatus, ItemSearchData } from '../../react/types/zotero';
 import { ReaderState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
-import { ItemSearchData } from '../../react/types/zotero';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -259,14 +258,6 @@ export interface WSExternalReferenceCheckResponse {
     timing?: FrontendTimingMetadata;
 }
 
-/** Item search result with attachments (unified format) */
-export interface ItemSearchFrontendResultItem {
-    item: ItemSearchData;
-    attachments: AttachmentDataWithStatus[];
-    /** Semantic similarity score (0-1) for topic searches, undefined for metadata searches */
-    similarity?: number;
-}
-
 /**
  * Optional timing breakdown from frontend operations.
  * Used for backend diagnostics to understand where time is spent during search operations.
@@ -362,7 +353,7 @@ export type ItemSearchErrorCode =
 export interface WSItemSearchByMetadataResponse {
     type: 'item_search_by_metadata';
     request_id: string;
-    items: ItemSearchFrontendResultItem[];
+    items: ItemSearchData[];
     /** Error message if search failed */
     error?: string | null;
     /** Error code for programmatic handling */
@@ -404,7 +395,7 @@ export interface WSItemSearchByTopicRequest extends WSBaseEvent {
 export interface WSItemSearchByTopicResponse {
     type: 'item_search_by_topic';
     request_id: string;
-    items: ItemSearchFrontendResultItem[];
+    items: ItemSearchData[];
     /** Error message if search failed */
     error?: string | null;
     /** Error code for programmatic handling */

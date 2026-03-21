@@ -18,12 +18,12 @@ import { serializeItemForSearch } from '../../utils/zoteroSerializers';
 import {
     WSItemSearchByTopicRequest,
     WSItemSearchByTopicResponse,
-    ItemSearchFrontendResultItem,
     FrontendTimingMetadata,
 } from '../agentProtocol';
+import { ItemSearchData } from '../../../react/types/zotero';
 import { semanticSearchService, SearchResult } from '../semanticSearchService';
 import { BeaverDB } from '../database';
-import { getCollectionByIdOrName, prepareBatchAttachmentData, processAttachmentsWithBatchData } from '../agentDataProvider/utils';
+import { getCollectionByIdOrName, prepareBatchAttachmentData, processAttachmentsWithBatchData, toItemSearchAttachment } from '../agentDataProvider/utils';
 import { TimingAccumulator } from '../../utils/timing';
 
 
@@ -319,18 +319,18 @@ export async function handleItemSearchByTopicRequest(
     const candidateItems = candidates.map(c => c.item);
     const batchAttachmentData = await prepareBatchAttachmentData(candidateItems, attachmentContext, ta);
 
-    const resultItems: ItemSearchFrontendResultItem[] = [];
+    const resultItems: ItemSearchData[] = [];
     for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
         const batch = candidates.slice(batchStart, batchStart + BATCH_SIZE);
 
         const serialized = await Promise.all(
-            batch.map(async ({ item, similarity }): Promise<ItemSearchFrontendResultItem | null> => {
+            batch.map(async ({ item, similarity }): Promise<ItemSearchData | null> => {
                 try {
-                    const [itemData, attachments] = await Promise.all([
+                    const [itemData, rawAttachments] = await Promise.all([
                         ta.track('item_serialization_ms', () => serializeItemForSearch(item)),
                         ta.track('attachment_processing_ms', () => processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, { skipHash: true, skipWorkerFallback: true, timing: ta }))
                     ]);
-                    return { item: itemData, attachments, similarity };
+                    return { ...itemData, attachments: rawAttachments.map(toItemSearchAttachment), similarity };
                 } catch (error) {
                     logger(`handleItemSearchByTopicRequest: Failed to serialize item ${item.key}: ${error}`, 1);
                     return null;
@@ -350,7 +350,7 @@ export async function handleItemSearchByTopicRequest(
     serializationEndTime = Date.now();
 
     // Calculate total attachment count
-    const totalAttachments = resultItems.reduce((sum, item) => sum + item.attachments.length, 0);
+    const totalAttachments = resultItems.reduce((sum, item) => sum + (item.attachments?.length ?? 0), 0);
     
     // Build timing metadata with serialization breakdown
     const timing: FrontendTimingMetadata = {

@@ -1,6 +1,6 @@
 import { logger } from '../../utils/logger';
 import { ZoteroItemReference } from '../../../react/types/zotero';
-import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus } from '../../../react/types/zotero';
+import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus, ItemSearchAttachment } from '../../../react/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
 import { syncingItemFilter, syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
@@ -38,6 +38,23 @@ export function validateZoteroItemReference(ref: ZoteroItemReference): string | 
     }
 
     return null;
+}
+
+/**
+ * Convert an AttachmentDataWithStatus to a lightweight ItemSearchAttachment.
+ */
+export function toItemSearchAttachment(a: AttachmentDataWithStatus): ItemSearchAttachment {
+    return {
+        library_id: a.attachment.library_id,
+        zotero_key: a.attachment.zotero_key,
+        parent_key: a.attachment.parent_key ?? null,
+        title: a.attachment.title,
+        mime_type: a.attachment.mime_type,
+        is_primary: a.file_status?.is_primary ?? false,
+        page_count: a.file_status?.page_count ?? null,
+        status: a.file_status?.status === "available" ? "available" : "unavailable",
+        status_reason: a.file_status?.status_reason ?? null,
+    };
 }
 
 /**

@@ -42,8 +42,8 @@ import type {
     WSListTagsResponse,
     WSListItemsRequest,
     WSListItemsResponse,
-    ItemSearchFrontendResultItem,
 } from '../../src/services/agentProtocol';
+import { ItemSearchData } from '../types/zotero';
 
 // =============================================================================
 // MCP stdio bridge script
@@ -512,47 +512,46 @@ function normalizeTags(tags: any[] | null | undefined): string[] {
 }
 
 /**
- * Transform an ItemSearchFrontendResultItem to the compact MCP search result format.
+ * Transform an ItemSearchData to the compact MCP search result format.
  */
-function formatSearchResultItem(entry: ItemSearchFrontendResultItem, includeSimilarity: boolean): any {
-    const item = entry.item;
+function formatSearchResultItem(entry: ItemSearchData, includeSimilarity: boolean): any {
     const result: any = {
-        item_id: `${item.library_id}-${item.zotero_key}`,
-        item_type: item.item_type,
-        title: item.title ?? 'Untitled',
-        authors: formatAuthors(item.creators),
-        year: item.year ?? null,
-        publication: item.publication_title ?? null,
+        item_id: `${entry.library_id}-${entry.zotero_key}`,
+        item_type: entry.item_type,
+        title: entry.title ?? 'Untitled',
+        authors: formatAuthors(entry.creators),
+        year: entry.year ?? null,
+        publication: entry.publication_title ?? null,
     };
 
-    const zoteroUri = getZoteroSelectURI(item.library_id, item.zotero_key);
+    const zoteroUri = getZoteroSelectURI(entry.library_id, entry.zotero_key);
     if (zoteroUri) result.zotero_uri = zoteroUri;
 
     if (includeSimilarity && entry.similarity != null) {
         result.similarity = Math.round(entry.similarity * 100) / 100;
     }
 
-    if (item.citation_key) {
-        result.citation_key = item.citation_key;
+    if (entry.citation_key) {
+        result.citation_key = entry.citation_key;
     }
 
     // Abstract truncated to ~300 chars
-    if (item.abstract) {
-        result.abstract = item.abstract.length > 300
-            ? item.abstract.slice(0, 300) + '...'
-            : item.abstract;
+    if (entry.abstract) {
+        result.abstract = entry.abstract.length > 300
+            ? entry.abstract.slice(0, 300) + '...'
+            : entry.abstract;
     }
 
-    const tags = normalizeTags(item.tags);
+    const tags = normalizeTags(entry.tags);
     if (tags.length > 0) result.tags = tags;
 
     // Compact attachment format
     if (entry.attachments && entry.attachments.length > 0) {
         result.attachments = entry.attachments.map((a) => ({
-            attachment_id: `${a.attachment.library_id}-${a.attachment.zotero_key}`,
-            filename: a.attachment.filename || null,
-            page_count: a.file_status?.page_count ?? null,
-            status: a.file_status?.status ?? 'unavailable',
+            attachment_id: `${a.library_id}-${a.zotero_key}`,
+            title: a.title || null,
+            page_count: a.page_count ?? null,
+            status: a.status,
         }));
     }
 

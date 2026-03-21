@@ -103,6 +103,22 @@ export interface DeleteData extends ZoteroItemReference {
     date_modified: string | null;
 }
 
+/** Whether the model can read an attachment's content */
+export type AttachmentReadability = "available" | "unavailable";
+
+/** Lightweight attachment data nested in search results */
+export interface ItemSearchAttachment {
+    library_id: number;
+    zotero_key: string;
+    parent_key: string | null;
+    title?: string | null;
+    mime_type: string;
+    is_primary: boolean;
+    page_count?: number | null;
+    status: AttachmentReadability;
+    status_reason?: string | null;
+}
+
 /** Lightweight item data for search results. Omits formatted_citation, item_json, hashes, sync fields. */
 export interface ItemSearchData extends ZoteroItemReference {
     item_type: string;
@@ -118,6 +134,9 @@ export interface ItemSearchData extends ZoteroItemReference {
     tags?: any[] | null;
     collections?: string[] | null;
     citation_key?: string | null;
+    attachments?: ItemSearchAttachment[];
+    /** Semantic similarity score (0-1), present only for topic searches */
+    similarity?: number;
 }
 
 export interface ItemData extends ZoteroItemBase {

@@ -18,11 +18,11 @@ import { serializeItemForSearch } from '../../utils/zoteroSerializers';
 import {
     WSItemSearchByMetadataRequest,
     WSItemSearchByMetadataResponse,
-    ItemSearchFrontendResultItem,
     FrontendTimingMetadata,
 } from '../agentProtocol';
+import { ItemSearchData } from '../../../react/types/zotero';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../react/utils/searchTools';
-import { getCollectionByIdOrName, prepareBatchAttachmentData, processAttachmentsWithBatchData } from './utils';
+import { getCollectionByIdOrName, prepareBatchAttachmentData, processAttachmentsWithBatchData, toItemSearchAttachment } from './utils';
 import { TimingAccumulator } from '../../utils/timing';
 
 
@@ -240,18 +240,18 @@ export async function handleItemSearchByMetadataRequest(
     // Batch-fetch best attachments and sync dates for all candidate items
     const batchAttachmentData = await prepareBatchAttachmentData(candidates, attachmentContext, ta);
 
-    const resultItems: ItemSearchFrontendResultItem[] = [];
+    const resultItems: ItemSearchData[] = [];
     for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
         const batch = candidates.slice(batchStart, batchStart + BATCH_SIZE);
 
         const serialized = await Promise.all(
-            batch.map(async (item): Promise<ItemSearchFrontendResultItem | null> => {
+            batch.map(async (item): Promise<ItemSearchData | null> => {
                 try {
-                    const [itemData, attachments] = await Promise.all([
+                    const [itemData, rawAttachments] = await Promise.all([
                         ta.track('item_serialization_ms', () => serializeItemForSearch(item)),
                         ta.track('attachment_processing_ms', () => processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, { skipHash: true, skipWorkerFallback: true, timing: ta }))
                     ]);
-                    return { item: itemData, attachments };
+                    return { ...itemData, attachments: rawAttachments.map(toItemSearchAttachment) };
                 } catch (error) {
                     logger(`handleItemSearchByMetadataRequest: Failed to serialize item ${item.key}: ${error}`, 1);
                     return null;
@@ -266,12 +266,12 @@ export async function handleItemSearchByMetadataRequest(
             }
         }
     }
-    
+
     // Record serialization completion time
     serializationEndTime = Date.now();
-    
+
     // Calculate total attachment count
-    const totalAttachments = resultItems.reduce((sum, item) => sum + item.attachments.length, 0);
+    const totalAttachments = resultItems.reduce((sum, item) => sum + (item.attachments?.length ?? 0), 0);
     
     // Build timing metadata with serialization breakdown
     const timing: FrontendTimingMetadata = {
