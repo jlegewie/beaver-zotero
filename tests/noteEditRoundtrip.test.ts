@@ -896,6 +896,48 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         return await import('../react/utils/editNoteActions');
     }
 
+    function buildSameItemRefShiftScenario() {
+        const firstCitation = rawCitation('SAMEKEY', 1, '1', 'Same Item, p. 1');
+        const secondCitation = rawCitation('SAMEKEY', 1, '2', 'Same Item, p. 2');
+        const originalHtml = wrap(
+            `<p>Lead ${firstCitation}</p>`
+            + `<p>Target text ${secondCitation} end.</p>`
+        );
+
+        const { simplified } = simplifyNoteHtml(originalHtml, 1);
+        const targetCitationTag = simplified.match(/<citation [^>]*ref="c_SAMEKEY_1"[^>]*\/>/)?.[0];
+        if (!targetCitationTag) {
+            throw new Error('Expected second SAMEKEY citation to simplify to ref c_SAMEKEY_1');
+        }
+
+        return {
+            originalHtml,
+            action: makeAction({
+                proposed_data: {
+                    library_id: 1,
+                    zotero_key: 'NOTE0001',
+                    old_string: `Target text ${targetCitationTag} end.`,
+                    new_string:
+                        `Target text <citation item_id="1-SAMEKEY" page="9" label="Inserted, 2024"/> `
+                        + `${targetCitationTag} end.`,
+                },
+            }),
+        };
+    }
+
+    async function applySameItemRefShiftEdit() {
+        const scenario = buildSameItemRefShiftScenario();
+        const item = makeMockItem(scenario.originalHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const { executeEditNoteAction } = await importEditNoteActions();
+        const result = await executeEditNoteAction(scenario.action);
+        const editedHtml = item.setNote.mock.calls[0][0];
+
+        return { ...scenario, result, editedHtml };
+    }
+
     it('successful execute returns correct result_data', async () => {
         const noteHtml = wrap('<p>Hello world</p>');
         const item = makeMockItem(noteHtml);
@@ -1134,6 +1176,56 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         const restoredHtml = undoItem.setNote.mock.calls[0][0];
         expect(restoredHtml).toContain('middle school settings');
         expect(restoredHtml).not.toContain('elementary school settings');
+        expect(undoItem.saveTx).toHaveBeenCalled();
+    });
+
+    it('legacy undo path fails when same-item citation refs shift after apply', async () => {
+        const { action, editedHtml } = await applySameItemRefShiftEdit();
+        const { simplified: editedSimplified } = simplifyNoteHtml(editedHtml, 1);
+
+        const shiftedRefs = [...editedSimplified.matchAll(
+            /<citation [^>]*item_id="1-SAMEKEY"[^>]*page="([^"]*)"[^>]*ref="([^"]+)"[^>]*\/>/g
+        )].map(match => ({ page: match[1], ref: match[2] }));
+
+        expect(shiftedRefs).toEqual([
+            { page: '1', ref: 'c_SAMEKEY_0' },
+            { page: '9', ref: 'c_SAMEKEY_1' },
+            { page: '2', ref: 'c_SAMEKEY_2' },
+        ]);
+
+        vi.clearAllMocks();
+        const undoItem = makeMockItem(editedHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(undoItem);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const { undoEditNoteAction } = await importEditNoteActions();
+        await expect(undoEditNoteAction({
+            ...action,
+            result_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                occurrences_replaced: 1,
+            },
+        })).rejects.toThrow('note has been modified');
+    });
+
+    it('full apply → undo cycle succeeds when same-item citation refs shift after apply', async () => {
+        const { action, originalHtml, result, editedHtml } = await applySameItemRefShiftEdit();
+
+        vi.clearAllMocks();
+        const undoItem = makeMockItem(editedHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(undoItem);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const { undoEditNoteAction } = await importEditNoteActions();
+        await undoEditNoteAction({
+            ...action,
+            result_data: result,
+        });
+
+        const restoredHtml = undoItem.setNote.mock.calls[0][0];
+        expect(stripDataCitationItems(restoredHtml)).toBe(stripDataCitationItems(originalHtml));
+        expect((restoredHtml.match(/class="citation"/g) || []).length).toBe(2);
         expect(undoItem.saveTx).toHaveBeenCalled();
     });
 });
