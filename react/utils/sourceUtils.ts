@@ -721,7 +721,8 @@ function extractEditPointContext(oldHtml: string, newHtml: string): string | nul
  *   provided (multi-line edits), the selection spans from the start of
  *   `selectText` within `searchText` to the end of `endSearchText`.
  */
-async function selectAndScrollInNoteEditor(
+/** @internal Exported for testing only. */
+export async function selectAndScrollInNoteEditor(
     itemId: number,
     searchText: string,
     selectText?: string,
@@ -932,7 +933,8 @@ async function selectAndScrollInNoteEditor(
  * Walk all text nodes in the editor DOM and build a flat text string with
  * a mapping from character offsets back to DOM nodes.
  */
-function buildEditorTextMap(editorDOM: HTMLElement): {
+/** @internal Exported for testing only. */
+export function buildEditorTextMap(editorDOM: HTMLElement): {
     textNodes: { node: Node; start: number }[];
     fullText: string;
 } {
@@ -954,7 +956,8 @@ function buildEditorTextMap(editorDOM: HTMLElement): {
  * offsets. Handles ranges that span multiple text nodes (e.g. across
  * inline elements like bold, italic, links, citations).
  */
-function resolveRangeInTextMap(
+/** @internal Exported for testing only. */
+export function resolveRangeInTextMap(
     textNodes: { node: Node; start: number }[],
     startIdx: number,
     endIdx: number,
@@ -985,7 +988,8 @@ function resolveRangeInTextMap(
  * Walk up the DOM from `el` to find the nearest scrollable ancestor
  * (overflow-y: auto or scroll with content taller than the viewport).
  */
-function findScrollContainer(el: HTMLElement): HTMLElement | null {
+/** @internal Exported for testing only. */
+export function findScrollContainer(el: HTMLElement): HTMLElement | null {
     const win = el.ownerDocument.defaultView;
     if (!win) return null;
     let current = el.parentElement;
@@ -1005,7 +1009,8 @@ function findScrollContainer(el: HTMLElement): HTMLElement | null {
  * helpers (truncateSegments, truncateContext) may have inserted. These
  * won't match actual note text.
  */
-function stripEllipsis(term: string): string {
+/** @internal Exported for testing only. */
+export function stripEllipsis(term: string): string {
     let result = term;
     if (result.startsWith('…')) result = result.substring(1);
     if (result.endsWith('…')) result = result.slice(0, -1);
@@ -1022,7 +1027,8 @@ function stripEllipsis(term: string): string {
  * instance would set the selection on a non-visible editor — the operation
  * would log success but nothing would appear on screen.
  */
-function getNoteEditorView(itemId: number): any | null {
+/** @internal Exported for testing only. */
+export function getNoteEditorView(itemId: number): any | null {
     try {
         const instances: any[] = (Zotero as any).Notes?._editorInstances;
         if (!instances) return null;
