@@ -1,7 +1,7 @@
 import { SubscriptionStatus, ProcessingMode, ChargeType } from '../../react/types/profile';
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../../react/agents/types';
 import { ZoteroItemReference } from '../../react/types/zotero';
-import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../react/types/zotero';
+import { ItemDataWithStatus, AttachmentDataWithStatus, ItemSummary } from '../../react/types/zotero';
 import { ReaderState, NoteState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
@@ -616,6 +616,8 @@ export interface WSReadNoteResponse {
     total_lines?: number;
     /** The simplified HTML content with line numbers (format: "  N|content") */
     content?: string;
+    /** Items cited in the note content (resolved from citation tags) */
+    cited_items?: ItemSummary[];
 }
 
 // =============================================================================

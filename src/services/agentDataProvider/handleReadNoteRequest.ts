@@ -11,7 +11,109 @@ import {
     WSReadNoteRequest,
     WSReadNoteResponse,
 } from '../agentProtocol';
+import { ItemSummary } from '../../../react/types/zotero';
+import { serializeItemSummary } from '../../utils/zoteroSerializers';
+import { prepareBatchAttachmentData, processAttachmentsWithBatchData, toAttachmentSummary } from './utils';
+import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
+import { userIdAtom } from '../../../react/atoms/auth';
+import { store } from '../../../react/store';
 
+
+/**
+ * Extract unique cited item references from simplified note HTML.
+ * Parses both single citations (`<citation item_id="LIB-KEY" .../>`)
+ * and compound citations (`<citation items="LIB-KEY1, LIB-KEY2" .../>`).
+ * Returns deduplicated array of { libraryId, itemKey } pairs.
+ */
+function extractCitedItemRefs(simplifiedHtml: string): { libraryId: number; itemKey: string }[] {
+    const seen = new Set<string>();
+    const refs: { libraryId: number; itemKey: string }[] = [];
+
+    const addRef = (itemId: string) => {
+        // Strip page locator suffix (e.g., "1-KEY:page=42" → "1-KEY")
+        const colonIdx = itemId.indexOf(':');
+        const cleanId = colonIdx !== -1 ? itemId.substring(0, colonIdx) : itemId;
+
+        if (seen.has(cleanId)) return;
+        const parsed = parseNoteId(cleanId);
+        if (parsed) {
+            seen.add(cleanId);
+            refs.push(parsed);
+        }
+    };
+
+    // Match single citations: <citation item_id="LIB-KEY" .../>
+    const singleRe = /<citation\s+item_id="([^"]+)"/g;
+    let match;
+    while ((match = singleRe.exec(simplifiedHtml)) !== null) {
+        addRef(match[1]);
+    }
+
+    // Match compound citations: <citation items="LIB-KEY1:page=P1, LIB-KEY2" .../>
+    const compoundRe = /<citation\s+items="([^"]+)"/g;
+    while ((match = compoundRe.exec(simplifiedHtml)) !== null) {
+        const itemsStr = match[1];
+        for (const part of itemsStr.split(',')) {
+            addRef(part.trim());
+        }
+    }
+
+    return refs;
+}
+
+/**
+ * Resolve cited item references to ItemSummary[] with attachments.
+ */
+async function resolveCitedItems(
+    refs: { libraryId: number; itemKey: string }[]
+): Promise<ItemSummary[]> {
+    if (refs.length === 0) return [];
+
+    // Load all cited items
+    const items: Zotero.Item[] = [];
+    for (const ref of refs) {
+        try {
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryId, ref.itemKey);
+            if (item && item.isRegularItem() && !item.deleted) {
+                items.push(item);
+            }
+        } catch {
+            // Skip items that can't be loaded
+        }
+    }
+
+    if (items.length === 0) return [];
+
+    // Load data types needed for serialization
+    await Zotero.Items.loadDataTypes(items, ["primaryData", "itemData", "creators", "tags", "collections", "childItems"]);
+
+    // Build attachment context
+    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+    const attachmentContext = {
+        searchableLibraryIds,
+        syncWithZotero: store.get(syncWithZoteroAtom),
+        userId: store.get(userIdAtom),
+    };
+
+    // Batch-fetch attachment data
+    const batchAttachmentData = await prepareBatchAttachmentData(items, attachmentContext);
+
+    // Serialize items with attachments
+    const results: ItemSummary[] = [];
+    for (const item of items) {
+        try {
+            const [itemData, rawAttachments] = await Promise.all([
+                serializeItemSummary(item),
+                processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, { skipHash: true, skipWorkerFallback: true }),
+            ]);
+            results.push({ ...itemData, attachments: rawAttachments.map(toAttachmentSummary) });
+        } catch (error) {
+            logger(`resolveCitedItems: Failed to serialize item ${item.key}: ${error}`, 1);
+        }
+    }
+
+    return results;
+}
 
 /**
  * Parse a note_id string ("{libraryID}-{itemKey}") into its components.
@@ -112,7 +214,11 @@ export async function handleReadNoteRequest(
             parentTitle = item.parentItem.getField('title') as string;
         }
 
-        // 9. Return response
+        // 9. Resolve cited items from the simplified HTML
+        const citedRefs = extractCitedItemRefs(simplified);
+        const citedItems = await resolveCitedItems(citedRefs);
+
+        // 10. Return response
         return {
             type: 'read_note',
             request_id,
@@ -123,6 +229,7 @@ export async function handleReadNoteRequest(
             parent_title: parentTitle,
             total_lines: totalLines,
             content: numbered,
+            cited_items: citedItems.length > 0 ? citedItems : undefined,
         };
     } catch (error) {
         logger(`handleReadNoteRequest: Failed for ${note_id}: ${error}`, 1);
