@@ -351,10 +351,11 @@ describe('Page images handler', () => {
         expect(res.error_code).toBe('invalid_format');
     });
 
-    it('images local limits (env-dependent): large PDF is either allowed or rejected by limits', async () => {
+    it('images local limits (env-dependent): targeted page request is allowed unless file too large', async () => {
         const res = await fetchPageImages(LARGE_PDF, { pages: [1] });
         if (res.error_code) {
-            expect(['too_many_pages', 'file_too_large']).toContain(res.error_code);
+            // Page-range image requests are not blocked by maxPageCount, only by file size
+            expect(res.error_code).toBe('file_too_large');
             return;
         }
         expect(res.total_pages).toBe(316);
