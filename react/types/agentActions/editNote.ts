@@ -61,6 +61,12 @@ export interface EditNoteResultData {
      * robust undo when Zotero normalizes the edited fragment.
      */
     undo_after_context?: string;
+    /**
+     * Per-occurrence context anchors for replace_all edits.
+     * Each entry has before/after context for one occurrence, enabling
+     * individual-occurrence undo even when ProseMirror normalizes the HTML.
+     */
+    undo_occurrence_contexts?: Array<{ before: string; after: string }>;
 }
 
 /** Typed proposed action for edit_note */

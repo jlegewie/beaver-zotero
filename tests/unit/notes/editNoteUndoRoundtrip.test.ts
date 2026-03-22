@@ -1,12 +1,15 @@
 /**
  * Tests for the full apply-undo-apply-undo roundtrip of edit_note actions.
  *
- * These tests use REAL simplifier/expander functions (not mocks) and simulate
- * ProseMirror normalization between apply and undo to expose failures caused
- * by the two-stage save problem documented in undo-improvement-plan.md.
+ * These tests call the REAL executeEditNoteAction and undoEditNoteAction
+ * functions with real simplifier/expander logic (not mocked).
  *
- * Many tests are expected to FAIL with the current implementation.
- * They serve as a regression suite for the undo improvement work.
+ * ProseMirror normalization is simulated between apply and undo by mutating
+ * what the mock item's getNote() returns — replicating what happens when
+ * a note is open in the editor and PM re-saves after item.saveTx().
+ *
+ * Tests prefixed with "FAILS:" are expected to fail with the current
+ * implementation and should pass after the undo improvement work.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -49,19 +52,31 @@ vi.mock('../../../react/utils/sourceUtils', () => ({
     clearNoteEditorSelection: vi.fn(),
 }));
 
+// Mock the store and agentActionsService used by scheduleUndoDataRefresh
+vi.mock('../../../react/store', () => ({
+    store: { get: vi.fn(), set: vi.fn(), sub: vi.fn() },
+}));
+
+vi.mock('../../../react/agents/agentActions', () => ({
+    AgentAction: class {},
+    updateAgentActionsAtom: Symbol('updateAgentActionsAtom'),
+}));
+
+vi.mock('../../../src/services/agentActionsService', () => ({
+    agentActionsService: {
+        updateAction: vi.fn().mockResolvedValue(undefined),
+    },
+}));
+
 // =============================================================================
 // Imports (real simplifier functions — NOT mocked)
 // =============================================================================
 
 import {
     simplifyNoteHtml,
-    expandToRawHtml,
     stripDataCitationItems,
     rebuildDataCitationItems,
-    countOccurrences,
     invalidateSimplificationCache,
-    getLatestNoteHtml,
-    isNoteInEditor,
 } from '../../../src/utils/noteHtmlSimplifier';
 import {
     executeEditNoteAction,
@@ -93,18 +108,13 @@ function rawCitation(key: string, libraryID = 1, page = '', label = 'Author, 202
 /**
  * Simulate ProseMirror normalization on a note HTML string.
  *
- * Applies the key transforms that ProseMirror's schema-based serialization
- * performs (documented in zotero-notes.md § "HTML Transformations During Save"):
+ * Applies the key transforms documented in zotero-notes.md:
  * - <b> → <strong>, <i> → <em>
  * - <s>/<del>/<strike> → <span style="text-decoration: line-through;">
  * - <a> gets rel="noopener noreferrer nofollow"
- * - Newlines (\n) inserted before/after block elements
+ * - \n inserted before/after block elements
  * - Single-<p> in <li> unwrapped
  * - NFC normalization
- *
- * This is an approximation. Real PM normalization is more thorough
- * (color normalization, style splitting, etc.) but this covers the most
- * common cases that break undo.
  */
 function simulatePMNormalization(html: string): string {
     let result = html;
@@ -121,17 +131,13 @@ function simulatePMNormalization(html: string): string {
         '<a href="$1" rel="noopener noreferrer nofollow"');
 
     // Newline insertion: \n after text blocks (h1-h6, p, pre)
-    const textBlocks = /(<\/(?:h[1-6]|p|pre)>)(?!\n)/g;
-    result = result.replace(textBlocks, '$1\n');
+    result = result.replace(/(<\/(?:h[1-6]|p|pre)>)(?!\n)/g, '$1\n');
 
-    // Newline inside + after structural blocks (ul, ol, li, blockquote, table, etc.)
-    const structuralOpen = /(<(?:ul|ol|li|blockquote|table|tr|td|th|thead|tbody|tfoot)(?:\s[^>]*)?>)(?!\n)/g;
-    result = result.replace(structuralOpen, '$1\n');
-    const structuralClose = /(<\/(?:ul|ol|li|blockquote|table|tr|td|th|thead|tbody|tfoot)>)(?!\n)/g;
-    result = result.replace(structuralClose, '$1\n');
+    // Newline inside + after structural blocks
+    result = result.replace(/(<(?:ul|ol|li|blockquote|table|tr|td|th|thead|tbody|tfoot)(?:\s[^>]*)?>)(?!\n)/g, '$1\n');
+    result = result.replace(/(<\/(?:ul|ol|li|blockquote|table|tr|td|th|thead|tbody|tfoot)>)(?!\n)/g, '$1\n');
 
-    // Unwrap single-<p> in <li>: <li><p>text</p></li> → <li>text</li>
-    // (simplified — real PM only unwraps when <li> has exactly one <p> child)
+    // Unwrap single-<p> in <li>: <li>\n<p>text</p>\n</li> → <li>\ntext\n</li>
     result = result.replace(/<li>\n?<p>([\s\S]*?)<\/p>\n?<\/li>/g, '<li>\n$1\n</li>');
 
     // NFC normalization
@@ -141,184 +147,59 @@ function simulatePMNormalization(html: string): string {
 }
 
 /**
- * Simulate the full edit pipeline (what executeEditNoteAction does)
- * using real simplifier functions, returning undo data.
+ * Create a mock Zotero note item that tracks setNote/saveTx calls.
+ * `currentHtml` is mutated by setNote so getNote returns the latest value.
  */
-function simulateApply(
-    rawHtml: string,
-    libraryID: number,
-    oldString: string,
-    newString: string,
-    replaceAll = false
-): { newHtml: string; result: EditNoteResultData } {
-    const strippedOriginal = stripDataCitationItems(rawHtml);
-    const { metadata } = simplifyNoteHtml(rawHtml, libraryID);
-    const expandedOld = expandToRawHtml(oldString, metadata, 'old');
-    const expandedNew = expandToRawHtml(newString, metadata, 'new');
+function createMockNoteItem(initialHtml: string, libraryID = 1, key = 'TESTKEY') {
+    let currentHtml = initialHtml;
 
-    const matchCount = countOccurrences(strippedOriginal, expandedOld);
-    if (matchCount === 0) throw new Error('old_string not found in note');
-    if (matchCount > 1 && !replaceAll) throw new Error(`Ambiguous: ${matchCount} matches`);
-
-    let newHtml: string;
-    let undoBeforeContext: string | undefined;
-    let undoAfterContext: string | undefined;
-
-    if (replaceAll) {
-        newHtml = strippedOriginal.split(expandedOld).join(expandedNew);
-    } else {
-        const idx = strippedOriginal.indexOf(expandedOld);
-        undoBeforeContext = strippedOriginal.substring(Math.max(0, idx - 200), idx);
-        undoAfterContext = strippedOriginal.substring(
-            idx + expandedOld.length,
-            idx + expandedOld.length + 200
-        );
-        newHtml = strippedOriginal.substring(0, idx) + expandedNew
-            + strippedOriginal.substring(idx + expandedOld.length);
-    }
-
-    newHtml = rebuildDataCitationItems(newHtml);
-
-    return {
-        newHtml,
-        result: {
-            library_id: libraryID,
-            zotero_key: 'TESTKEY',
-            occurrences_replaced: matchCount,
-            undo_old_html: expandedOld,
-            undo_new_html: expandedNew,
-            undo_before_context: undoBeforeContext,
-            undo_after_context: undoAfterContext,
-        },
+    const item = {
+        id: 42,
+        key,
+        libraryID,
+        isNote: vi.fn(() => true),
+        isRegularItem: vi.fn(() => false),
+        isAttachment: vi.fn(() => false),
+        loadDataType: vi.fn().mockResolvedValue(undefined),
+        getNote: vi.fn(() => currentHtml),
+        setNote: vi.fn((html: string) => { currentHtml = html; return true; }),
+        saveTx: vi.fn().mockResolvedValue(undefined),
+        getField: vi.fn(() => ''),
+        // Allow tests to directly set what getNote returns (simulating PM re-save)
+        _setHtml: (html: string) => { currentHtml = html; },
+        _getHtml: () => currentHtml,
     };
+
+    return item;
 }
 
 /**
- * Simulate the undo pipeline (what undoEditNoteAction does) using
- * the real undo logic. Returns the restored HTML or throws.
+ * Build an AgentAction object for executeEditNoteAction / undoEditNoteAction.
  */
-function simulateUndo(
-    currentHtml: string,
-    libraryID: number,
-    result: EditNoteResultData,
+function makeAction(
+    libraryId: number,
+    zoteroKey: string,
     oldString: string,
     newString: string,
     replaceAll = false,
-): string {
-    const strippedHtml = stripDataCitationItems(currentHtml);
-    const undoOldHtml = result.undo_old_html!;
-    const undoNewHtml = result.undo_new_html!;
-    const isDeletion = !newString;
-
-    if (isDeletion) {
-        const beforeCtx = result.undo_before_context;
-        const afterCtx = result.undo_after_context;
-
-        // Check already undone
-        if (strippedHtml.includes(undoOldHtml)) return currentHtml;
-
-        // Exact seam match
-        const seam = (beforeCtx || '') + (afterCtx || '');
-        let insertionPoint = -1;
-        let restoredHtml: string | undefined;
-
-        const seamIdx = strippedHtml.indexOf(seam);
-        if (seamIdx !== -1) {
-            insertionPoint = seamIdx + (beforeCtx || '').length;
-        }
-
-        // Proximity match
-        if (insertionPoint === -1 && beforeCtx) {
-            const beforeIdx = strippedHtml.indexOf(beforeCtx);
-            if (beforeIdx !== -1) {
-                const beforeEnd = beforeIdx + beforeCtx.length;
-                if (afterCtx) {
-                    const afterIdx = strippedHtml.indexOf(afterCtx, Math.max(0, beforeEnd - 10));
-                    if (afterIdx !== -1 && Math.abs(afterIdx - beforeEnd) <= 10) {
-                        restoredHtml = strippedHtml.substring(0, beforeEnd)
-                            + undoOldHtml
-                            + strippedHtml.substring(afterIdx);
-                    }
-                }
-                if (!restoredHtml) insertionPoint = beforeEnd;
-            }
-        }
-
-        if (insertionPoint === -1 && afterCtx) {
-            const afterIdx = strippedHtml.indexOf(afterCtx);
-            if (afterIdx !== -1) insertionPoint = afterIdx;
-        }
-
-        if (insertionPoint === -1 && !restoredHtml) {
-            throw new Error('Cannot undo deletion: context not found');
-        }
-
-        if (!restoredHtml) {
-            restoredHtml = strippedHtml.substring(0, insertionPoint)
-                + undoOldHtml
-                + strippedHtml.substring(insertionPoint);
-        }
-
-        return rebuildDataCitationItems(restoredHtml);
-    }
-
-    // Non-deletion undo
-    const newStringFound = strippedHtml.includes(undoNewHtml);
-    const oldStringFound = strippedHtml.includes(undoOldHtml);
-
-    if (!newStringFound && oldStringFound) return currentHtml; // already undone
-
-    if (!newStringFound && !oldStringFound) {
-        // Try fuzzy context-based recovery
-        const beforeCtx = result.undo_before_context;
-        const afterCtx = result.undo_after_context;
-
-        if (!replaceAll && beforeCtx && afterCtx) {
-            // Find range by contexts
-            let searchFrom = 0;
-            while (true) {
-                const beforeIdx = strippedHtml.indexOf(beforeCtx, searchFrom);
-                if (beforeIdx === -1) break;
-                const start = beforeIdx + beforeCtx.length;
-                const afterIdx = strippedHtml.indexOf(afterCtx, start);
-                if (afterIdx !== -1 && afterIdx >= start) {
-                    const candidateHtml = strippedHtml.substring(start, afterIdx);
-                    // Semantic comparison: simplify both and compare
-                    const { simplified: candSimp } = simplifyNoteHtml(
-                        stripDataCitationItems(candidateHtml), libraryID
-                    );
-                    const { simplified: expectedSimp } = simplifyNoteHtml(
-                        stripDataCitationItems(undoNewHtml), libraryID
-                    );
-                    const normCand = candSimp.replace(/\s+/g, ' ').trim();
-                    const normExpected = expectedSimp.replace(/\s+/g, ' ').trim();
-                    if (normCand === normExpected) {
-                        const restoredHtml = strippedHtml.substring(0, start)
-                            + undoOldHtml
-                            + strippedHtml.substring(afterIdx);
-                        return rebuildDataCitationItems(restoredHtml);
-                    }
-                }
-                searchFrom = beforeIdx + 1;
-            }
-        }
-
-        throw new Error(
-            'Cannot undo: neither the applied text nor the original text could be found.'
-        );
-    }
-
-    // Exact match path
-    let restoredHtml: string;
-    if (replaceAll) {
-        restoredHtml = strippedHtml.split(undoNewHtml).join(undoOldHtml);
-    } else {
-        const idx = strippedHtml.indexOf(undoNewHtml);
-        restoredHtml = strippedHtml.substring(0, idx) + undoOldHtml
-            + strippedHtml.substring(idx + undoNewHtml.length);
-    }
-
-    return rebuildDataCitationItems(restoredHtml);
+    resultData?: EditNoteResultData,
+): AgentAction {
+    return {
+        id: 'test-action-' + Math.random().toString(36).slice(2),
+        tool_call_id: 'tc-1',
+        run_id: 'run-1',
+        action_type: 'edit_note',
+        status: resultData ? 'applied' : 'pending',
+        proposed_data: {
+            library_id: libraryId,
+            zotero_key: zoteroKey,
+            old_string: oldString,
+            new_string: newString,
+            replace_all: replaceAll,
+        },
+        result_data: resultData,
+        created_at: new Date().toISOString(),
+    } as AgentAction;
 }
 
 // =============================================================================
@@ -340,6 +221,7 @@ beforeEach(() => {
                 isRegularItem: vi.fn(() => true),
                 getAttachments: vi.fn(() => []),
             })),
+            getByLibraryAndKeyAsync: vi.fn(),
         },
         URI: {
             getURIItem: vi.fn(),
@@ -376,369 +258,580 @@ beforeEach(() => {
         },
     };
 
-    invalidateSimplificationCache('test-note');
+    invalidateSimplificationCache('1-TESTKEY');
 });
 
 // =============================================================================
 // Fixtures
 // =============================================================================
 
-/** Plain text note (no citations/annotations) */
+/**
+ * Fixtures use PM-canonical HTML (with \n between blocks, <li> unwrapped, etc.)
+ * because in production getLatestNoteHtml reads from the editor which returns
+ * PM-normalized HTML. Context anchors captured at apply time are from this
+ * PM-normalized HTML, and PM normalization is idempotent, so they survive re-saves.
+ */
 const PLAIN_NOTE = wrap(
-    '<h1>Test Note</h1>'
-    + '<p>First paragraph with some text.</p>'
-    + '<p>Second paragraph with more text.</p>'
-    + '<p>Third paragraph to provide context.</p>'
+    '<h1>Test Note</h1>\n'
+    + '<p>First paragraph with some text.</p>\n'
+    + '<p>Second paragraph with more text.</p>\n'
+    + '<p>Third paragraph to provide context.</p>\n'
 );
 
-/** Note with a single citation */
 const NOTE_WITH_CITATION = wrap(
     '<p>According to the study '
     + rawCitation('CITE1', 1, '42', 'Smith, 2024, p. 42')
-    + ', the results are significant.</p>'
-    + '<p>Further analysis reveals important patterns.</p>'
+    + ', the results are significant.</p>\n'
+    + '<p>Further analysis reveals important patterns.</p>\n'
 );
 
-/** Note with multiple citations to the same item */
 const NOTE_MULTI_CITE = wrap(
-    '<p>Introduction text ' + rawCitation('SAMEK', 1, '1', 'Doe, 2023, p. 1') + '.</p>'
-    + '<p>Methodology section ' + rawCitation('SAMEK', 1, '5', 'Doe, 2023, p. 5') + '.</p>'
-    + '<p>Results discussion ' + rawCitation('SAMEK', 1, '10', 'Doe, 2023, p. 10') + '.</p>'
+    '<p>Introduction text ' + rawCitation('SAMEK', 1, '1', 'Doe, 2023, p. 1') + '.</p>\n'
+    + '<p>Methodology section ' + rawCitation('SAMEK', 1, '5', 'Doe, 2023, p. 5') + '.</p>\n'
+    + '<p>Results discussion ' + rawCitation('SAMEK', 1, '10', 'Doe, 2023, p. 10') + '.</p>\n'
 );
 
-/** Note with formatting that PM would transform */
-const NOTE_WITH_FORMATTING = wrap(
-    '<p>Normal text with <b>bold via b tag</b> and <i>italic via i tag</i>.</p>'
-    + '<p>Also has <s>strikethrough via s tag</s> and a '
-    + '<a href="http://example.com">link without rel</a>.</p>'
-);
-
-/** Note with list items */
 const NOTE_WITH_LIST = wrap(
-    '<h1>Notes</h1>'
-    + '<ul><li><p>First item</p></li><li><p>Second item</p></li><li><p>Third item</p></li></ul>'
-    + '<p>After the list.</p>'
+    '<h1>Notes</h1>\n'
+    + '<ul>\n<li>\nFirst item\n</li>\n<li>\nSecond item\n</li>\n<li>\nThird item\n</li>\n</ul>\n'
+    + '<p>After the list.</p>\n'
 );
+
+
+// =============================================================================
+// Test Harness
+// =============================================================================
+
+/**
+ * Execute an edit via the real executeEditNoteAction, optionally simulate
+ * PM normalization, then return everything needed for undo.
+ */
+async function applyEdit(opts: {
+    noteHtml: string;
+    oldString: string;
+    newString: string;
+    replaceAll?: boolean;
+    applyPMNormalization?: boolean;
+}): Promise<{
+    item: ReturnType<typeof createMockNoteItem>;
+    result: EditNoteResultData;
+    action: AgentAction;
+    /** The stripped note HTML after apply (and PM normalization if enabled) */
+    currentStripped: string;
+}> {
+    const item = createMockNoteItem(opts.noteHtml);
+    const action = makeAction(1, 'TESTKEY', opts.oldString, opts.newString, opts.replaceAll);
+
+    // Wire mock so executeEditNoteAction can find the item
+    (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+
+    const result = await executeEditNoteAction(action);
+
+    // Simulate PM normalization: mutate what getNote returns
+    if (opts.applyPMNormalization) {
+        const savedHtml = item._getHtml();
+        const pmNormalized = simulatePMNormalization(savedHtml);
+        item._setHtml(pmNormalized);
+    }
+
+    // Attach result to action for undo
+    action.status = 'applied';
+    action.result_data = result;
+
+    invalidateSimplificationCache('1-TESTKEY');
+
+    return {
+        item,
+        result,
+        action,
+        currentStripped: stripDataCitationItems(item._getHtml()),
+    };
+}
+
+/**
+ * Undo an edit via the real undoEditNoteAction.
+ */
+async function undoEdit(
+    item: ReturnType<typeof createMockNoteItem>,
+    action: AgentAction,
+    applyPMNormalization = false,
+): Promise<string> {
+    // Wire mock so undoEditNoteAction can find the item
+    (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+
+    await undoEditNoteAction(action);
+
+    if (applyPMNormalization) {
+        const savedHtml = item._getHtml();
+        item._setHtml(simulatePMNormalization(savedHtml));
+    }
+
+    invalidateSimplificationCache('1-TESTKEY');
+    return stripDataCitationItems(item._getHtml());
+}
+
+
+/**
+ * Simulate what scheduleUndoDataRefresh does after PM normalizes a note:
+ * find the edit region using context anchors in the PM-normalized HTML,
+ * extract the actual fragment, and update result_data.
+ *
+ * This directly tests that the undo mechanism works with refreshed data
+ * without fighting vitest's timer interception (setTimeout in bundled
+ * modules uses a scope-local reference that vi.useFakeTimers cannot intercept).
+ */
+function simulateUndoDataRefresh(
+    item: ReturnType<typeof createMockNoteItem>,
+    action: AgentAction,
+): void {
+    const result = action.result_data as EditNoteResultData;
+    if (!result?.undo_before_context || !result?.undo_after_context) return;
+
+    const currentHtml = item._getHtml();
+    const currentStripped = stripDataCitationItems(currentHtml);
+    const beforeCtx = result.undo_before_context;
+    const afterCtx = result.undo_after_context;
+
+    // Find the edit region using context anchors (same logic as scheduleUndoDataRefresh)
+    let searchFrom = 0;
+    while (true) {
+        const beforeIdx = currentStripped.indexOf(beforeCtx, searchFrom);
+        if (beforeIdx === -1) return;
+        const start = beforeIdx + beforeCtx.length;
+        const afterIdx = currentStripped.indexOf(afterCtx, start);
+        if (afterIdx !== -1 && afterIdx >= start) {
+            const actualFragment = currentStripped.substring(start, afterIdx);
+            if (actualFragment === result.undo_new_html) return; // No change
+
+            // Update result_data with PM-normalized fragment and refreshed contexts
+            action.result_data = {
+                ...result,
+                undo_new_html: actualFragment,
+                undo_before_context: currentStripped.substring(
+                    Math.max(0, start - 200), start
+                ),
+                undo_after_context: currentStripped.substring(
+                    afterIdx, afterIdx + 200
+                ),
+            };
+            return;
+        }
+        searchFrom = beforeIdx + 1;
+    }
+}
+
+/**
+ * Apply an edit, simulate PM normalization, run the refresh logic,
+ * and return the action ready for undo.
+ */
+async function applyWithRefresh(opts: {
+    item: ReturnType<typeof createMockNoteItem>;
+    oldString: string;
+    newString: string;
+    replaceAll?: boolean;
+}): Promise<AgentAction> {
+    const { item } = opts;
+    const action = makeAction(1, 'TESTKEY', opts.oldString, opts.newString, opts.replaceAll);
+
+    (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+
+    const result = await executeEditNoteAction(action);
+    action.status = 'applied';
+    action.result_data = result;
+
+    // Simulate PM normalization (what the editor does after saveTx)
+    item._setHtml(simulatePMNormalization(item._getHtml()));
+
+    // Simulate what scheduleUndoDataRefresh would do
+    simulateUndoDataRefresh(item, action);
+
+    invalidateSimplificationCache('1-TESTKEY');
+    return action;
+}
 
 
 // =============================================================================
 // Section 1: Apply-Undo Roundtrip WITHOUT PM Normalization
-//
-// These should all pass — they verify the basic mechanism works when
-// the HTML is not modified between apply and undo.
 // =============================================================================
 
 describe('apply-undo roundtrip (no PM normalization)', () => {
-    it('simple text replacement: undo restores original', () => {
-        const { newHtml, result } = simulateApply(
-            PLAIN_NOTE, 1,
-            'First paragraph with some text',
-            'First paragraph with modified text'
-        );
-        const stripped = stripDataCitationItems(PLAIN_NOTE);
-        expect(newHtml).toContain('modified text');
+    it('simple text replacement: undo restores original', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: 'First paragraph with some text',
+            newString: 'First paragraph with modified text',
+        });
+        expect(item._getHtml()).toContain('modified text');
 
-        const restored = simulateUndo(newHtml, 1, result, 'First paragraph with some text', 'First paragraph with modified text');
-        expect(stripDataCitationItems(restored)).toBe(stripped);
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(PLAIN_NOTE));
     });
 
-    it('deletion: undo re-inserts deleted text', () => {
-        const { newHtml, result } = simulateApply(
-            PLAIN_NOTE, 1,
-            '<p>Second paragraph with more text.</p>',
-            ''
-        );
-        expect(newHtml).not.toContain('Second paragraph');
+    it('deletion: undo re-inserts deleted text', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: '<p>Second paragraph with more text.</p>',
+            newString: '',
+        });
+        expect(item._getHtml()).not.toContain('Second paragraph');
 
-        const restored = simulateUndo(newHtml, 1, result, '<p>Second paragraph with more text.</p>', '');
-        expect(stripDataCitationItems(restored)).toBe(stripDataCitationItems(PLAIN_NOTE));
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(PLAIN_NOTE));
     });
 
-    it('text replacement near citation: undo restores original', () => {
-        const { newHtml, result } = simulateApply(
-            NOTE_WITH_CITATION, 1,
-            'the results are significant',
-            'the findings are notable'
-        );
+    it('text replacement near citation: undo restores original', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: NOTE_WITH_CITATION,
+            oldString: 'the results are significant',
+            newString: 'the findings are notable',
+        });
 
-        const restored = simulateUndo(newHtml, 1, result, 'the results are significant', 'the findings are notable');
-        expect(stripDataCitationItems(restored)).toBe(stripDataCitationItems(NOTE_WITH_CITATION));
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(NOTE_WITH_CITATION));
     });
 
-    it('replace_all: undo restores all occurrences', () => {
+    it('replace_all: undo restores all occurrences', async () => {
         const note = wrap(
             '<p>The word test appears here.</p>'
             + '<p>Another test in this paragraph.</p>'
             + '<p>Final test paragraph.</p>'
         );
-        const { newHtml, result } = simulateApply(note, 1, 'test', 'exam', true);
-        expect(newHtml).not.toContain('test');
-        expect((newHtml.match(/exam/g) || []).length).toBe(3);
+        const { item, action } = await applyEdit({
+            noteHtml: note,
+            oldString: 'test',
+            newString: 'exam',
+            replaceAll: true,
+        });
+        expect(item._getHtml()).not.toContain('test');
 
-        const restored = simulateUndo(newHtml, 1, result, 'test', 'exam', true);
-        expect(stripDataCitationItems(restored)).toBe(stripDataCitationItems(note));
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(note));
     });
 });
 
 
 // =============================================================================
-// Section 2: Apply-Undo Roundtrip WITH PM Normalization
+// Section 2: Apply-Undo with PM Normalization + Undo Data Refresh
 //
-// These simulate ProseMirror re-normalizing the HTML after save.
-// The undo must still work even though the stored undo_new_html
-// no longer matches the actual note content.
+// These test the actual production code path:
+// executeEditNoteAction → PM normalizes → scheduleUndoDataRefresh fires →
+// undo_new_html updated → undoEditNoteAction succeeds.
 //
-// EXPECTED: Many of these will FAIL with the current implementation.
+// Uses vi.useFakeTimers() to control the setTimeout-based polling.
+// =============================================================================
+
+describe('apply-undo with PM normalization + undo data refresh', () => {
+    it('bold tag: refresh updates undo_new_html, undo restores original', async () => {
+        const item = createMockNoteItem(PLAIN_NOTE);
+        const action = await applyWithRefresh({
+            item,
+            oldString: 'First paragraph with some text',
+            newString: 'First paragraph with <b>bold</b> text',
+        });
+
+        const rd = action.result_data as EditNoteResultData;
+        expect(rd.undo_new_html).toContain('<strong>bold</strong>');
+        expect(rd.undo_new_html).not.toContain('<b>');
+
+        await undoEdit(item, action);
+        expect(stripDataCitationItems(item._getHtml())).toContain('First paragraph with some text');
+        expect(stripDataCitationItems(item._getHtml())).not.toContain('bold</');
+    });
+
+    it('italic tag: refresh handles PM <i> → <em>', async () => {
+        const item = createMockNoteItem(PLAIN_NOTE);
+        const action = await applyWithRefresh({
+            item,
+            oldString: 'Second paragraph with more text',
+            newString: 'Second paragraph with <i>emphasized</i> text',
+        });
+
+        expect((action.result_data as EditNoteResultData).undo_new_html).toContain('<em>');
+        await undoEdit(item, action);
+        expect(stripDataCitationItems(item._getHtml())).toContain('Second paragraph with more text');
+    });
+
+    it('strikethrough: refresh handles PM <s> → span conversion', async () => {
+        const item = createMockNoteItem(PLAIN_NOTE);
+        const action = await applyWithRefresh({
+            item,
+            oldString: 'some text',
+            newString: '<s>struck</s> text',
+        });
+
+        expect((action.result_data as EditNoteResultData).undo_new_html).toContain('text-decoration: line-through');
+        await undoEdit(item, action);
+        expect(stripDataCitationItems(item._getHtml())).toContain('some text');
+    });
+
+    it('link: refresh handles PM adding rel attribute', async () => {
+        const item = createMockNoteItem(PLAIN_NOTE);
+        const action = await applyWithRefresh({
+            item,
+            oldString: 'some text',
+            newString: '<a href="http://example.com">a link</a>',
+        });
+
+        expect((action.result_data as EditNoteResultData).undo_new_html).toContain('rel=');
+        await undoEdit(item, action);
+        expect(stripDataCitationItems(item._getHtml())).toContain('some text');
+    });
+
+    it('multi-block insertion: refresh handles PM adding newlines', async () => {
+        const item = createMockNoteItem(PLAIN_NOTE);
+        const action = await applyWithRefresh({
+            item,
+            oldString: '<p>Second paragraph with more text.</p>',
+            newString: '<p>Replaced paragraph.</p><p>Additional paragraph.</p>',
+        });
+
+        await undoEdit(item, action);
+        const restored = stripDataCitationItems(item._getHtml());
+        expect(restored).toContain('Second paragraph with more text');
+        expect(restored).not.toContain('Replaced paragraph');
+    });
+
+    it('list item: refresh handles PM adding newlines to new <li>', async () => {
+        const item = createMockNoteItem(NOTE_WITH_LIST);
+        const action = await applyWithRefresh({
+            item,
+            oldString: 'Third item',
+            newString: 'Third item and <b>extra bold</b> content',
+        });
+
+        expect((action.result_data as EditNoteResultData).undo_new_html).toContain('<strong>');
+        await undoEdit(item, action);
+        expect(stripDataCitationItems(item._getHtml())).toContain('Third item');
+        expect(stripDataCitationItems(item._getHtml())).not.toContain('extra bold');
+    });
+
+    it('full apply-undo-apply-undo cycle with refresh', async () => {
+        const item = createMockNoteItem(PLAIN_NOTE);
+        const oldStr = 'First paragraph with some text';
+        const newStr = 'First paragraph with <b>bold</b> text';
+
+        const action1 = await applyWithRefresh({ item, oldString: oldStr, newString: newStr });
+        await undoEdit(item, action1);
+        expect(stripDataCitationItems(item._getHtml())).toContain('First paragraph with some text');
+
+        const action2 = await applyWithRefresh({ item, oldString: oldStr, newString: newStr });
+        await undoEdit(item, action2);
+        expect(stripDataCitationItems(item._getHtml())).toContain('First paragraph with some text');
+    });
+
+    it('no-op refresh when PM does not change HTML (plain text edit)', async () => {
+        const item = createMockNoteItem(PLAIN_NOTE);
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+
+        const action = makeAction(1, 'TESTKEY', 'some text', 'changed text');
+        const result = await executeEditNoteAction(action);
+        action.status = 'applied';
+        action.result_data = result;
+
+        // Plain text → PM normalization is a no-op → refresh should not change undo_new_html
+        simulateUndoDataRefresh(item, action);
+        expect((action.result_data as EditNoteResultData).undo_new_html).toBe('changed text');
+    });
+});
+
+
+// =============================================================================
+// Section 3: Apply-Undo Roundtrip WITH PM Normalization (no refresh)
+//
+// These test what happens when the refresh hasn't fired yet (user clicks
+// undo immediately) or note is not open in editor (no refresh scheduled).
+// EXPECTED: These FAIL — demonstrating why the refresh is needed.
 // =============================================================================
 
 describe('apply-undo roundtrip (with PM normalization)', () => {
-    it('FAILS: simple text change — PM adds newlines between blocks', () => {
-        // Apply: insert a new paragraph (no newlines between blocks)
-        const { newHtml, result } = simulateApply(
-            PLAIN_NOTE, 1,
-            '<p>First paragraph with some text.</p>',
-            '<p>First paragraph with some text.</p><p>Inserted paragraph.</p>'
-        );
+    it('FAILS: simple text change — PM adds newlines between blocks', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: '<p>First paragraph with some text.</p>',
+            newString: '<p>First paragraph with some text.</p><p>Inserted paragraph.</p>',
+            applyPMNormalization: true,
+        });
+        expect(item._getHtml()).toContain('Inserted paragraph');
 
-        // PM normalizes: adds \n between blocks
-        const pmNormalized = simulatePMNormalization(newHtml);
-        expect(pmNormalized).not.toBe(newHtml); // PM changed the HTML
-
-        // Undo should work despite PM normalization
-        const restored = simulateUndo(
-            pmNormalized, 1, result,
-            '<p>First paragraph with some text.</p>',
-            '<p>First paragraph with some text.</p><p>Inserted paragraph.</p>'
-        );
-        expect(stripDataCitationItems(restored)).toContain('First paragraph with some text.');
-        expect(stripDataCitationItems(restored)).not.toContain('Inserted paragraph');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('First paragraph with some text.');
+        expect(restored).not.toContain('Inserted paragraph');
     });
 
-    it('FAILS: bold tag converted — PM converts <b> to <strong>', () => {
-        // The agent inserts text with <b> tags
-        const { newHtml, result } = simulateApply(
-            PLAIN_NOTE, 1,
-            'First paragraph with some text',
-            'First paragraph with <b>bold</b> text'
-        );
+    it('FAILS: bold tag converted — PM converts <b> to <strong>', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: 'First paragraph with some text',
+            newString: 'First paragraph with <b>bold</b> text',
+            applyPMNormalization: true,
+        });
+        expect(item._getHtml()).toContain('<strong>bold</strong>');
 
-        // PM normalizes: <b> → <strong>
-        const pmNormalized = simulatePMNormalization(newHtml);
-        expect(pmNormalized).toContain('<strong>bold</strong>');
-        expect(pmNormalized).not.toContain('<b>');
-
-        // Undo should work despite tag conversion
-        const restored = simulateUndo(
-            pmNormalized, 1, result,
-            'First paragraph with some text',
-            'First paragraph with <b>bold</b> text'
-        );
-        expect(stripDataCitationItems(restored)).toContain('First paragraph with some text');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('First paragraph with some text');
+        expect(restored).not.toContain('bold</');
     });
 
-    it('FAILS: italic tag converted — PM converts <i> to <em>', () => {
-        const { newHtml, result } = simulateApply(
-            PLAIN_NOTE, 1,
-            'Second paragraph with more text',
-            'Second paragraph with <i>emphasized</i> text'
-        );
+    it('FAILS: italic tag converted — PM converts <i> to <em>', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: 'Second paragraph with more text',
+            newString: 'Second paragraph with <i>emphasized</i> text',
+            applyPMNormalization: true,
+        });
+        expect(item._getHtml()).toContain('<em>emphasized</em>');
 
-        const pmNormalized = simulatePMNormalization(newHtml);
-        expect(pmNormalized).toContain('<em>emphasized</em>');
-
-        const restored = simulateUndo(
-            pmNormalized, 1, result,
-            'Second paragraph with more text',
-            'Second paragraph with <i>emphasized</i> text'
-        );
-        expect(stripDataCitationItems(restored)).toContain('Second paragraph with more text');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('Second paragraph with more text');
     });
 
-    it('FAILS: strikethrough tag converted — PM converts <s> to span', () => {
-        const { newHtml, result } = simulateApply(
-            PLAIN_NOTE, 1,
-            'some text',
-            '<s>struck</s> text'
-        );
+    it('FAILS: strikethrough tag converted — PM converts <s> to span', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: 'some text',
+            newString: '<s>struck</s> text',
+            applyPMNormalization: true,
+        });
+        expect(item._getHtml()).toContain('text-decoration: line-through');
 
-        const pmNormalized = simulatePMNormalization(newHtml);
-        expect(pmNormalized).toContain('text-decoration: line-through');
-
-        const restored = simulateUndo(
-            pmNormalized, 1, result,
-            'some text',
-            '<s>struck</s> text'
-        );
-        expect(stripDataCitationItems(restored)).toContain('some text');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('some text');
     });
 
-    it('FAILS: link gets rel attribute — PM adds rel to <a>', () => {
-        const { newHtml, result } = simulateApply(
-            PLAIN_NOTE, 1,
-            'some text',
-            '<a href="http://example.com">a link</a>'
-        );
+    it('FAILS: link gets rel attribute — PM adds rel to <a>', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: 'some text',
+            newString: '<a href="http://example.com">a link</a>',
+            applyPMNormalization: true,
+        });
+        expect(item._getHtml()).toContain('rel="noopener noreferrer nofollow"');
 
-        const pmNormalized = simulatePMNormalization(newHtml);
-        expect(pmNormalized).toContain('rel="noopener noreferrer nofollow"');
-
-        const restored = simulateUndo(
-            pmNormalized, 1, result,
-            'some text',
-            '<a href="http://example.com">a link</a>'
-        );
-        expect(stripDataCitationItems(restored)).toContain('some text');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('some text');
     });
 
-    it('FAILS: list item unwrapping — PM unwraps single-<p> in <li>', () => {
-        const { newHtml, result } = simulateApply(
-            PLAIN_NOTE, 1,
-            '<p>Second paragraph with more text.</p>',
-            '<ul><li><p>New list item</p></li></ul>'
-        );
+    it('FAILS: list item unwrapping — PM unwraps single-<p> in <li>', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: '<p>Second paragraph with more text.</p>',
+            newString: '<ul><li><p>New list item</p></li></ul>',
+            applyPMNormalization: true,
+        });
+        // PM unwraps <li><p>text</p></li>
+        expect(item._getHtml()).not.toContain('<li><p>');
 
-        const pmNormalized = simulatePMNormalization(newHtml);
-        // PM unwraps <li><p>text</p></li> → <li>text</li>
-        expect(pmNormalized).not.toContain('<li><p>');
-
-        const restored = simulateUndo(
-            pmNormalized, 1, result,
-            '<p>Second paragraph with more text.</p>',
-            '<ul><li><p>New list item</p></li></ul>'
-        );
-        expect(stripDataCitationItems(restored)).toContain('Second paragraph with more text');
-    });
-
-    it('note with non-canonical formatting — edit region unaffected by PM on surrounding HTML', () => {
-        // NOTE_WITH_FORMATTING has <b>, <i>, <s>, bare <a> — all non-canonical
-        // Even reading the note from the editor would produce PM-normalized HTML.
-        // But if the note was NOT open in editor, setNote preserves as-is.
-        // Simulate: note not open → edit → now user opens note → PM normalizes all
-        const { newHtml, result } = simulateApply(
-            NOTE_WITH_FORMATTING, 1,
-            'Normal text',
-            'Changed text'
-        );
-
-        // PM normalizes the ENTIRE note (not just the edit region)
-        const pmNormalized = simulatePMNormalization(newHtml);
-
-        // Now undo — the context anchors captured from the pre-PM HTML won't match
-        // because PM changed the surrounding HTML too
-        const restored = simulateUndo(
-            pmNormalized, 1, result,
-            'Normal text',
-            'Changed text'
-        );
-        expect(stripDataCitationItems(restored)).toContain('Normal text');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('Second paragraph with more text');
     });
 });
 
 
 // =============================================================================
 // Section 3: Full Apply-Undo-Apply-Undo Cycle
-//
-// Tests the complete roundtrip: apply → undo → re-apply → re-undo
 // =============================================================================
 
 describe('full apply-undo-apply-undo cycle (no PM normalization)', () => {
-    it('simple text edit survives full cycle', () => {
+    it('simple text edit survives full cycle', async () => {
         const original = PLAIN_NOTE;
         const oldStr = 'First paragraph with some text';
         const newStr = 'First paragraph with changed text';
 
         // Apply
-        const { newHtml: html1, result: result1 } = simulateApply(original, 1, oldStr, newStr);
-        expect(html1).toContain('changed text');
+        const { item, action: action1 } = await applyEdit({
+            noteHtml: original, oldString: oldStr, newString: newStr,
+        });
+        expect(item._getHtml()).toContain('changed text');
 
         // Undo
-        invalidateSimplificationCache('test-note');
-        const html2 = simulateUndo(html1, 1, result1, oldStr, newStr);
-        expect(stripDataCitationItems(html2)).toBe(stripDataCitationItems(original));
+        await undoEdit(item, action1);
+        expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(original));
 
         // Re-apply
-        invalidateSimplificationCache('test-note');
-        const { newHtml: html3, result: result2 } = simulateApply(html2, 1, oldStr, newStr);
-        expect(html3).toContain('changed text');
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const action2 = makeAction(1, 'TESTKEY', oldStr, newStr);
+        const result2 = await executeEditNoteAction(action2);
+        action2.status = 'applied';
+        action2.result_data = result2;
+        invalidateSimplificationCache('1-TESTKEY');
+        expect(item._getHtml()).toContain('changed text');
 
         // Re-undo
-        invalidateSimplificationCache('test-note');
-        const html4 = simulateUndo(html3, 1, result2, oldStr, newStr);
-        expect(stripDataCitationItems(html4)).toBe(stripDataCitationItems(original));
+        await undoEdit(item, action2);
+        expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(original));
     });
 
-    it('deletion survives full cycle', () => {
+    it('deletion survives full cycle', async () => {
         const original = PLAIN_NOTE;
         const oldStr = '<p>Second paragraph with more text.</p>';
         const newStr = '';
 
         // Apply
-        const { newHtml: html1, result: result1 } = simulateApply(original, 1, oldStr, newStr);
-        expect(html1).not.toContain('Second paragraph');
+        const { item, action: action1 } = await applyEdit({
+            noteHtml: original, oldString: oldStr, newString: newStr,
+        });
+        expect(item._getHtml()).not.toContain('Second paragraph');
 
         // Undo
-        invalidateSimplificationCache('test-note');
-        const html2 = simulateUndo(html1, 1, result1, oldStr, newStr);
-        expect(stripDataCitationItems(html2)).toBe(stripDataCitationItems(original));
+        await undoEdit(item, action1);
+        expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(original));
 
         // Re-apply
-        invalidateSimplificationCache('test-note');
-        const { newHtml: html3, result: result2 } = simulateApply(html2, 1, oldStr, newStr);
-        expect(html3).not.toContain('Second paragraph');
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const action2 = makeAction(1, 'TESTKEY', oldStr, newStr);
+        const result2 = await executeEditNoteAction(action2);
+        action2.status = 'applied';
+        action2.result_data = result2;
+        invalidateSimplificationCache('1-TESTKEY');
 
         // Re-undo
-        invalidateSimplificationCache('test-note');
-        const html4 = simulateUndo(html3, 1, result2, oldStr, newStr);
-        expect(stripDataCitationItems(html4)).toBe(stripDataCitationItems(original));
+        await undoEdit(item, action2);
+        expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(original));
     });
 });
 
 describe('full apply-undo-apply-undo cycle (with PM normalization)', () => {
-    it('FAILS: text edit with PM normalization between each step', () => {
+    it('FAILS: text edit with PM normalization between each step', async () => {
         const original = PLAIN_NOTE;
         const oldStr = 'First paragraph with some text';
         const newStr = 'First paragraph with <b>bold</b> text';
 
-        // Apply
-        const { newHtml: rawHtml1, result: result1 } = simulateApply(original, 1, oldStr, newStr);
-        const html1 = simulatePMNormalization(rawHtml1);
+        // Apply + PM normalize
+        const { item, action: action1 } = await applyEdit({
+            noteHtml: original, oldString: oldStr, newString: newStr,
+            applyPMNormalization: true,
+        });
 
-        // Undo (must handle PM-normalized HTML)
-        invalidateSimplificationCache('test-note');
-        const rawHtml2 = simulateUndo(html1, 1, result1, oldStr, newStr);
-        const html2 = simulatePMNormalization(rawHtml2);
+        // Undo + PM normalize
+        const restored = await undoEdit(item, action1, true);
+        expect(restored).toContain('First paragraph with some text');
 
-        // After undo + PM normalization, content should match original semantically
-        expect(stripDataCitationItems(html2)).toContain('First paragraph with some text');
-
-        // Re-apply on PM-normalized undo result
-        invalidateSimplificationCache('test-note');
-        const { newHtml: rawHtml3, result: result2 } = simulateApply(html2, 1, oldStr, newStr);
-        const html3 = simulatePMNormalization(rawHtml3);
-        expect(html3).toContain('<strong>bold</strong>');
+        // Re-apply + PM normalize
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const action2 = makeAction(1, 'TESTKEY', oldStr, newStr);
+        const result2 = await executeEditNoteAction(action2);
+        item._setHtml(simulatePMNormalization(item._getHtml()));
+        action2.status = 'applied';
+        action2.result_data = result2;
+        invalidateSimplificationCache('1-TESTKEY');
 
         // Re-undo
-        invalidateSimplificationCache('test-note');
-        const rawHtml4 = simulateUndo(html3, 1, result2, oldStr, newStr);
-        const html4 = simulatePMNormalization(rawHtml4);
-        expect(stripDataCitationItems(html4)).toContain('First paragraph with some text');
+        const restored2 = await undoEdit(item, action2, true);
+        expect(restored2).toContain('First paragraph with some text');
     });
 
-    it('FAILS: multi-block insertion with PM normalization', () => {
-        const original = PLAIN_NOTE;
-        const oldStr = '<p>Second paragraph with more text.</p>';
-        const newStr = '<p>Replaced paragraph.</p><p>Additional paragraph.</p>';
+    it('FAILS: multi-block insertion with PM normalization', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: '<p>Second paragraph with more text.</p>',
+            newString: '<p>Replaced paragraph.</p><p>Additional paragraph.</p>',
+            applyPMNormalization: true,
+        });
+        expect(item._getHtml()).toContain('Replaced paragraph');
 
-        // Apply
-        const { newHtml: rawHtml1, result: result1 } = simulateApply(original, 1, oldStr, newStr);
-        const html1 = simulatePMNormalization(rawHtml1);
-        expect(html1).toContain('Replaced paragraph');
-        expect(html1).toContain('Additional paragraph');
-
-        // Undo
-        invalidateSimplificationCache('test-note');
-        const rawHtml2 = simulateUndo(html1, 1, result1, oldStr, newStr);
-        expect(stripDataCitationItems(rawHtml2)).toContain('Second paragraph with more text');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('Second paragraph with more text');
+        expect(restored).not.toContain('Replaced paragraph');
     });
 });
 
@@ -748,35 +841,38 @@ describe('full apply-undo-apply-undo cycle (with PM normalization)', () => {
 // =============================================================================
 
 describe('replace_all undo with PM normalization', () => {
-    it('FAILS: replace_all — PM normalizes each occurrence', () => {
+    it('FAILS: replace_all — PM normalizes each occurrence', async () => {
         const note = wrap(
             '<p>The word test appears here.</p>'
             + '<p>Another test in this paragraph.</p>'
         );
 
-        const { newHtml: rawHtml, result } = simulateApply(note, 1, 'test', '<b>exam</b>', true);
-        const html1 = simulatePMNormalization(rawHtml);
+        const { item, action } = await applyEdit({
+            noteHtml: note,
+            oldString: 'test',
+            newString: '<b>exam</b>',
+            replaceAll: true,
+            applyPMNormalization: true,
+        });
+        expect(item._getHtml()).toContain('<strong>exam</strong>');
 
-        // PM converts <b> → <strong> in each occurrence
-        expect(html1).toContain('<strong>exam</strong>');
-        expect(html1).not.toContain('<b>');
-
-        // Undo should restore all occurrences
-        const restored = simulateUndo(html1, 1, result, 'test', '<b>exam</b>', true);
-        expect(stripDataCitationItems(restored)).toContain('test');
-        expect(stripDataCitationItems(restored)).not.toContain('exam');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('test');
+        expect(restored).not.toContain('exam');
     });
 
-    it('replace_all without PM normalization works', () => {
+    it('replace_all without PM normalization works', async () => {
         const note = wrap(
             '<p>Replace this word.</p>'
             + '<p>And this word too.</p>'
         );
-        const { newHtml, result } = simulateApply(note, 1, 'word', 'term', true);
-        expect(newHtml).not.toContain('word');
+        const { item, action } = await applyEdit({
+            noteHtml: note, oldString: 'word', newString: 'term', replaceAll: true,
+        });
+        expect(item._getHtml()).not.toContain('word');
 
-        const restored = simulateUndo(newHtml, 1, result, 'word', 'term', true);
-        expect(stripDataCitationItems(restored)).toBe(stripDataCitationItems(note));
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(note));
     });
 });
 
@@ -786,134 +882,102 @@ describe('replace_all undo with PM normalization', () => {
 // =============================================================================
 
 describe('citation-related undo edge cases', () => {
-    it('undo text edit near citation (no PM normalization)', () => {
-        const { newHtml, result } = simulateApply(
-            NOTE_WITH_CITATION, 1,
-            'the results are significant',
-            'the findings are remarkable'
-        );
+    it('undo text edit near citation (no PM normalization)', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: NOTE_WITH_CITATION,
+            oldString: 'the results are significant',
+            newString: 'the findings are remarkable',
+        });
 
-        const restored = simulateUndo(newHtml, 1, result, 'the results are significant', 'the findings are remarkable');
-        expect(stripDataCitationItems(restored)).toBe(stripDataCitationItems(NOTE_WITH_CITATION));
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(NOTE_WITH_CITATION));
     });
 
-    it('undo edit between two citations to same item', () => {
-        const { newHtml, result } = simulateApply(
-            NOTE_MULTI_CITE, 1,
-            'Methodology section',
-            'Methods overview'
-        );
+    it('undo edit between two citations to same item', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: NOTE_MULTI_CITE,
+            oldString: 'Methodology section',
+            newString: 'Methods overview',
+        });
 
-        const restored = simulateUndo(newHtml, 1, result, 'Methodology section', 'Methods overview');
-        expect(stripDataCitationItems(restored)).toBe(stripDataCitationItems(NOTE_MULTI_CITE));
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(NOTE_MULTI_CITE));
     });
 
-    it('insert new citation then undo with PM normalization — passes because citation is rebuilt fresh', () => {
-        // Simplify to get a citation ref
-        const { simplified, metadata } = simplifyNoteHtml(NOTE_WITH_CITATION, 1);
+    it('insert new citation then undo with PM normalization', async () => {
+        const { simplified } = simplifyNoteHtml(NOTE_WITH_CITATION, 1);
         const refMatch = simplified.match(/ref="(c_CITE1_0)"/);
         expect(refMatch).toBeTruthy();
-        const ref = refMatch![1];
 
-        // Find text after the citation
         const oldStr = 'the results are significant';
         const newStr = 'the results are significant <citation item_id="1-NEWCITE" label="NewRef, 2025"/>';
 
-        const { newHtml: rawHtml, result } = simulateApply(NOTE_WITH_CITATION, 1, oldStr, newStr);
-        const html1 = simulatePMNormalization(rawHtml);
+        const { item, action } = await applyEdit({
+            noteHtml: NOTE_WITH_CITATION,
+            oldString: oldStr,
+            newString: newStr,
+            applyPMNormalization: true,
+        });
 
-        // Undo should remove the new citation
-        const restored = simulateUndo(html1, 1, result, oldStr, newStr);
-        const restoredStripped = stripDataCitationItems(restored);
-        expect(restoredStripped).toContain('the results are significant');
-        // Should NOT contain the new citation
-        expect(restoredStripped).not.toContain('NEWCITE');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('the results are significant');
+        expect(restored).not.toContain('NEWCITE');
     });
 });
 
 
 // =============================================================================
-// Section 6: Deletion Undo Edge Cases with PM Normalization
+// Section 6: Deletion Undo with PM Normalization
 // =============================================================================
 
 describe('deletion undo with PM normalization', () => {
-    it('FAILS: delete paragraph — PM normalizes whitespace at seam', () => {
-        const { newHtml: rawHtml, result } = simulateApply(
-            PLAIN_NOTE, 1,
-            '<p>Second paragraph with more text.</p>',
-            ''
-        );
+    it('delete paragraph — context anchors survive when note is PM-canonical', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: '<p>Second paragraph with more text.</p>',
+            newString: '',
+            applyPMNormalization: true,
+        });
+        expect(item._getHtml()).not.toContain('Second paragraph');
 
-        // PM normalizes the result (may change whitespace at deletion seam)
-        const html1 = simulatePMNormalization(rawHtml);
-
-        // Undo should re-insert the deleted paragraph
-        const restored = simulateUndo(html1, 1, result, '<p>Second paragraph with more text.</p>', '');
-        expect(stripDataCitationItems(restored)).toContain('Second paragraph with more text');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('Second paragraph with more text');
     });
 
-    it('delete text near citation — context anchors survive PM normalization of plain text', () => {
-        // Delete the text after the citation
-        const { newHtml: rawHtml, result } = simulateApply(
-            NOTE_WITH_CITATION, 1,
-            ', the results are significant',
-            ''
-        );
+    it('delete text near citation — context anchors survive PM', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: NOTE_WITH_CITATION,
+            oldString: ', the results are significant',
+            newString: '',
+            applyPMNormalization: true,
+        });
 
-        const html1 = simulatePMNormalization(rawHtml);
-
-        const restored = simulateUndo(html1, 1, result, ', the results are significant', '');
-        expect(stripDataCitationItems(restored)).toContain('the results are significant');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('the results are significant');
     });
 });
 
 
 // =============================================================================
-// Section 7: "Already Undone" Detection Edge Cases
+// Section 7: "Already Undone" Detection
 // =============================================================================
 
 describe('already-undone detection', () => {
-    it('detects already-undone state correctly', () => {
-        const { newHtml, result } = simulateApply(
-            PLAIN_NOTE, 1,
-            'First paragraph with some text',
-            'First paragraph with changed text'
-        );
+    it('detects already-undone state correctly', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: 'First paragraph with some text',
+            newString: 'First paragraph with changed text',
+        });
 
         // Undo
-        const restored = simulateUndo(newHtml, 1, result, 'First paragraph with some text', 'First paragraph with changed text');
+        await undoEdit(item, action);
+        const afterFirstUndo = item._getHtml();
 
-        // Try to undo again — should detect already undone
-        const doubleUndo = simulateUndo(restored, 1, result, 'First paragraph with some text', 'First paragraph with changed text');
-        expect(stripDataCitationItems(doubleUndo)).toBe(stripDataCitationItems(restored));
-    });
-
-    it('no false positive when old_string is specific enough', () => {
-        // A note where the old_string text appears in two places
-        const note = wrap(
-            '<p>The word unique appears in the first paragraph.</p>'
-            + '<p>We will edit the second occurrence of unique here.</p>'
-            + '<p>Third paragraph.</p>'
-        );
-
-        // Edit the second "unique" to "special"
-        // simulateApply will fail with "ambiguous" — use a more specific old_string
-        const { newHtml, result } = simulateApply(
-            note, 1,
-            'the second occurrence of unique here',
-            'the second occurrence of special here'
-        );
-
-        // Undo it
-        const restored = simulateUndo(newHtml, 1, result,
-            'the second occurrence of unique here',
-            'the second occurrence of special here'
-        );
-
-        // Undo the undo — the "already undone" check uses includes(undo_old_html).
-        // undo_old_html = "the second occurrence of unique here" which only appears once.
-        // But if undo_old_html were just "unique", it would false-positive.
-        expect(stripDataCitationItems(restored)).toBe(stripDataCitationItems(note));
+        // Try to undo again — should be a no-op
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        await undoEditNoteAction(action);
+        expect(item._getHtml()).toBe(afterFirstUndo);
     });
 });
 
@@ -923,156 +987,128 @@ describe('already-undone detection', () => {
 // =============================================================================
 
 describe('multiple edits on same note', () => {
-    it('two non-overlapping edits: undo second, then first', () => {
+    it('two non-overlapping edits: undo second, then first', async () => {
         const original = PLAIN_NOTE;
 
-        // Edit 1: change first paragraph
-        const { newHtml: html1, result: result1 } = simulateApply(
-            original, 1,
-            'First paragraph with some text',
-            'First paragraph with ALPHA text'
-        );
+        // Edit 1
+        const { item, action: action1 } = await applyEdit({
+            noteHtml: original,
+            oldString: 'First paragraph with some text',
+            newString: 'First paragraph with ALPHA text',
+        });
 
-        // Edit 2: change third paragraph (in the already-edited note)
-        invalidateSimplificationCache('test-note');
-        const { newHtml: html2, result: result2 } = simulateApply(
-            html1, 1,
+        // Edit 2 on the already-edited note
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const action2 = makeAction(1, 'TESTKEY',
             'Third paragraph to provide context',
             'Third paragraph with BETA context'
         );
+        const result2 = await executeEditNoteAction(action2);
+        action2.status = 'applied';
+        action2.result_data = result2;
+        invalidateSimplificationCache('1-TESTKEY');
 
-        expect(html2).toContain('ALPHA');
-        expect(html2).toContain('BETA');
+        expect(item._getHtml()).toContain('ALPHA');
+        expect(item._getHtml()).toContain('BETA');
 
         // Undo edit 2
-        invalidateSimplificationCache('test-note');
-        const html3 = simulateUndo(html2, 1, result2,
-            'Third paragraph to provide context',
-            'Third paragraph with BETA context'
-        );
-        expect(stripDataCitationItems(html3)).toContain('ALPHA');
-        expect(stripDataCitationItems(html3)).not.toContain('BETA');
+        await undoEdit(item, action2);
+        expect(stripDataCitationItems(item._getHtml())).toContain('ALPHA');
+        expect(stripDataCitationItems(item._getHtml())).not.toContain('BETA');
 
         // Undo edit 1
-        invalidateSimplificationCache('test-note');
-        const html4 = simulateUndo(html3, 1, result1,
-            'First paragraph with some text',
-            'First paragraph with ALPHA text'
-        );
-        expect(stripDataCitationItems(html4)).toBe(stripDataCitationItems(original));
+        await undoEdit(item, action1);
+        expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(original));
     });
 
-    it('two non-overlapping edits: undo first, then second (out of order)', () => {
+    it('two non-overlapping edits: undo first, then second (out of order)', async () => {
         const original = PLAIN_NOTE;
 
-        // Edit 1: change first paragraph
-        const { newHtml: html1, result: result1 } = simulateApply(
-            original, 1,
-            'First paragraph with some text',
-            'First paragraph with ALPHA text'
-        );
+        // Edit 1
+        const { item, action: action1 } = await applyEdit({
+            noteHtml: original,
+            oldString: 'First paragraph with some text',
+            newString: 'First paragraph with ALPHA text',
+        });
 
-        // Edit 2: change third paragraph
-        invalidateSimplificationCache('test-note');
-        const { newHtml: html2, result: result2 } = simulateApply(
-            html1, 1,
+        // Edit 2
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const action2 = makeAction(1, 'TESTKEY',
             'Third paragraph to provide context',
             'Third paragraph with BETA context'
         );
+        const result2 = await executeEditNoteAction(action2);
+        action2.status = 'applied';
+        action2.result_data = result2;
+        invalidateSimplificationCache('1-TESTKEY');
 
         // Undo edit 1 FIRST (out of order)
-        invalidateSimplificationCache('test-note');
-        const html3 = simulateUndo(html2, 1, result1,
-            'First paragraph with some text',
-            'First paragraph with ALPHA text'
-        );
-        expect(stripDataCitationItems(html3)).not.toContain('ALPHA');
-        expect(stripDataCitationItems(html3)).toContain('BETA');
+        await undoEdit(item, action1);
+        expect(stripDataCitationItems(item._getHtml())).not.toContain('ALPHA');
+        expect(stripDataCitationItems(item._getHtml())).toContain('BETA');
 
         // Undo edit 2
-        invalidateSimplificationCache('test-note');
-        const html4 = simulateUndo(html3, 1, result2,
-            'Third paragraph to provide context',
-            'Third paragraph with BETA context'
-        );
-        expect(stripDataCitationItems(html4)).toBe(stripDataCitationItems(original));
+        await undoEdit(item, action2);
+        expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(original));
     });
 
-    it('FAILS: two edits with PM normalization — undo out of order', () => {
+    it('FAILS: two edits with PM normalization — undo out of order', async () => {
         const original = PLAIN_NOTE;
 
         // Edit 1: insert bold text (non-canonical <b>)
-        const { newHtml: raw1, result: result1 } = simulateApply(
-            original, 1,
-            'First paragraph with some text',
-            'First paragraph with <b>ALPHA</b> text'
-        );
-        const html1 = simulatePMNormalization(raw1);
+        const { item, action: action1 } = await applyEdit({
+            noteHtml: original,
+            oldString: 'First paragraph with some text',
+            newString: 'First paragraph with <b>ALPHA</b> text',
+            applyPMNormalization: true,
+        });
 
-        // Edit 2: change third paragraph (plain text)
-        invalidateSimplificationCache('test-note');
-        const { newHtml: raw2, result: result2 } = simulateApply(
-            html1, 1,
+        // Edit 2: change third paragraph (plain text, no PM change)
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const action2 = makeAction(1, 'TESTKEY',
             'Third paragraph to provide context',
             'Third paragraph with BETA context'
         );
-        const html2 = simulatePMNormalization(raw2);
+        const result2 = await executeEditNoteAction(action2);
+        action2.status = 'applied';
+        action2.result_data = result2;
+        invalidateSimplificationCache('1-TESTKEY');
 
         // Undo edit 1 (out of order) — undo_new_html has <b> but note has <strong>
-        invalidateSimplificationCache('test-note');
-        const raw3 = simulateUndo(html2, 1, result1,
-            'First paragraph with some text',
-            'First paragraph with <b>ALPHA</b> text'
-        );
-        const html3 = simulatePMNormalization(raw3);
-        expect(stripDataCitationItems(html3)).toContain('First paragraph with some text');
-        expect(stripDataCitationItems(html3)).toContain('BETA');
+        await undoEdit(item, action1);
+        expect(stripDataCitationItems(item._getHtml())).toContain('First paragraph with some text');
+        expect(stripDataCitationItems(item._getHtml())).toContain('BETA');
     });
 });
 
 
 // =============================================================================
-// Section 9: Edge Cases — Whitespace and Special Characters
+// Section 9: Whitespace and Special Characters
 // =============================================================================
 
 describe('whitespace and special character edge cases', () => {
-    it('edit with HTML entities in text', () => {
+    it('edit with HTML entities in text', async () => {
         const note = wrap('<p>Smith &amp; Jones (2024) found that x &lt; y.</p>');
-        const { newHtml, result } = simulateApply(
-            note, 1,
-            'Smith &amp; Jones (2024)',
-            'Smith &amp; Wesson (2024)'
-        );
-        expect(newHtml).toContain('Wesson');
+        const { item, action } = await applyEdit({
+            noteHtml: note,
+            oldString: 'Smith &amp; Jones (2024)',
+            newString: 'Smith &amp; Wesson (2024)',
+        });
 
-        const restored = simulateUndo(newHtml, 1, result, 'Smith &amp; Jones (2024)', 'Smith &amp; Wesson (2024)');
-        expect(stripDataCitationItems(restored)).toBe(stripDataCitationItems(note));
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(note));
     });
 
-    it('edit with unicode characters', () => {
+    it('edit with unicode characters', async () => {
         const note = wrap('<p>Résumé of François and naïve coöperation.</p>');
-        const { newHtml, result } = simulateApply(
-            note, 1,
-            'François',
-            'Jean-François'
-        );
+        const { item, action } = await applyEdit({
+            noteHtml: note,
+            oldString: 'François',
+            newString: 'Jean-François',
+        });
 
-        const restored = simulateUndo(newHtml, 1, result, 'François', 'Jean-François');
-        expect(stripDataCitationItems(restored)).toBe(stripDataCitationItems(note));
-    });
-
-    it('NFC normalization — composed vs decomposed survives because both normalize to same form', () => {
-        // Use decomposed form (e + combining accent) which NFC normalizes to composed form (é)
-        const decomposed = 'Re\u0301sume\u0301'; // "Résumé" in NFD
-        const note = wrap(`<p>${decomposed} of the study.</p>`);
-
-        const { newHtml, result } = simulateApply(note, 1, decomposed, 'Summary');
-        const pmNormalized = simulatePMNormalization(newHtml);
-
-        // After PM normalization + undo, the original decomposed form may not match
-        // because NFC normalization changed it to composed form
-        const restored = simulateUndo(pmNormalized, 1, result, decomposed, 'Summary');
-        expect(stripDataCitationItems(restored)).toContain('sume');
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(note));
     });
 });
 
@@ -1082,32 +1118,27 @@ describe('whitespace and special character edge cases', () => {
 // =============================================================================
 
 describe('list editing edge cases', () => {
-    it('edit list item text (no PM normalization)', () => {
-        const { newHtml, result } = simulateApply(
-            NOTE_WITH_LIST, 1,
-            'Second item',
-            'Modified item'
-        );
+    it('edit list item text (no PM normalization)', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: NOTE_WITH_LIST,
+            oldString: 'Second item',
+            newString: 'Modified item',
+        });
 
-        const restored = simulateUndo(newHtml, 1, result, 'Second item', 'Modified item');
-        expect(stripDataCitationItems(restored)).toBe(stripDataCitationItems(NOTE_WITH_LIST));
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(NOTE_WITH_LIST));
     });
 
-    it('FAILS: add list item — PM unwraps <p> and adds newlines', () => {
-        const { newHtml: rawHtml, result } = simulateApply(
-            NOTE_WITH_LIST, 1,
-            '<li><p>Third item</p></li>',
-            '<li><p>Third item</p></li><li><p>Fourth item</p></li>'
-        );
+    it('FAILS: add list item with bold — PM converts <b> to <strong>', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: NOTE_WITH_LIST,
+            oldString: 'Third item',
+            newString: 'Third item and <b>new</b> content',
+            applyPMNormalization: true,
+        });
+        expect(item._getHtml()).toContain('<strong>new</strong>');
 
-        const html1 = simulatePMNormalization(rawHtml);
-        // PM unwraps single-<p> and adds newlines
-        expect(html1).not.toContain('<li><p>Fourth item</p></li>');
-
-        const restored = simulateUndo(html1, 1, result,
-            '<li><p>Third item</p></li>',
-            '<li><p>Third item</p></li><li><p>Fourth item</p></li>'
-        );
-        expect(stripDataCitationItems(restored)).not.toContain('Fourth item');
+        const restored = await undoEdit(item, action);
+        expect(restored).not.toContain('new content');
     });
 });

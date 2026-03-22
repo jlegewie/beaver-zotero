@@ -3,7 +3,7 @@
  * These functions are used by AgentActionView for post-run action handling.
  */
 
-import { AgentAction } from '../agents/agentActions';
+import { AgentAction, updateAgentActionsAtom } from '../agents/agentActions';
 import type { EditNoteResultData } from '../types/agentActions/editNote';
 import { logger } from '../../src/utils/logger';
 import {
@@ -18,8 +18,11 @@ import {
     checkDuplicateCitations,
     findFuzzyMatch,
     preloadPageLabelsForNewCitations,
+    isNoteInEditor,
 } from '../../src/utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from './sourceUtils';
+import { agentActionsService } from '../../src/services/agentActionsService';
+import { store } from '../store';
 
 function normalizeUndoComparisonHtml(html: string, libraryId: number): string {
     const { simplified } = simplifyNoteHtml(stripDataCitationItems(html), libraryId);
@@ -111,6 +114,159 @@ function findRangesByRawAnchors(
 }
 
 /**
+ * Undo a replace_all edit by locating each occurrence via its stored context anchors.
+ * Returns the restored HTML, or undefined if any occurrence cannot be found.
+ */
+function undoReplaceAllViaContexts(
+    strippedHtml: string,
+    undoOldHtml: string,
+    undoNewHtml: string,
+    occurrenceContexts: Array<{ before: string; after: string }>,
+    libraryId: number
+): string | undefined {
+    // Collect all replacement ranges, working from last to first to avoid index shifting
+    const ranges: Array<{ start: number; end: number }> = [];
+
+    for (const ctx of occurrenceContexts) {
+        const range = findRangeByContexts(strippedHtml, ctx.before, ctx.after);
+        if (!range) return undefined; // Context not found — bail out
+
+        // Verify the region is semantically equivalent to the expected new fragment
+        const regionHtml = strippedHtml.substring(range.start, range.end);
+        if (regionHtml !== undoNewHtml) {
+            const normalizedRegion = normalizeUndoComparisonHtml(regionHtml, libraryId);
+            const normalizedExpected = normalizeUndoComparisonHtml(undoNewHtml, libraryId);
+            if (normalizedRegion !== normalizedExpected) return undefined;
+        }
+
+        ranges.push(range);
+    }
+
+    if (ranges.length === 0) return undefined;
+
+    // Sort ranges from last to first so replacements don't shift earlier indices
+    ranges.sort((a, b) => b.start - a.start);
+
+    let result = strippedHtml;
+    for (const range of ranges) {
+        result = result.substring(0, range.start) + undoOldHtml + result.substring(range.end);
+    }
+    return result;
+}
+
+/**
+ * Check if the edit appears already undone using context anchors when available.
+ * Falls back to bare `includes()` when no context is stored.
+ */
+function isAlreadyUndone(
+    strippedHtml: string,
+    undoOldHtml: string,
+    beforeCtx?: string,
+    afterCtx?: string
+): boolean {
+    if (beforeCtx && afterCtx) {
+        const range = findRangeByContexts(strippedHtml, beforeCtx, afterCtx);
+        if (range) {
+            return strippedHtml.substring(range.start, range.end) === undoOldHtml;
+        }
+    }
+    return strippedHtml.includes(undoOldHtml);
+}
+
+const UNDO_CONTEXT_LENGTH = 200;
+const REFRESH_INTERVAL_MS = 150;
+const REFRESH_MAX_WAIT_MS = 2000;
+
+/**
+ * Schedule a background refresh of undo data after ProseMirror normalizes the note.
+ *
+ * When a note is open in the editor, ProseMirror re-normalizes the HTML after
+ * `item.saveTx()`. This makes the stored `undo_new_html` stale. This function
+ * polls the editor until the HTML changes (PM processed it) or a timeout elapses,
+ * then extracts the actual PM-normalized fragment using context anchors and updates
+ * both the Jotai store and the backend.
+ */
+function scheduleUndoDataRefresh(
+    item: any,
+    savedStrippedHtml: string,
+    result: EditNoteResultData,
+    actionId: string
+): void {
+    if (!isNoteInEditor(item.id)) return;
+
+    // Only refresh single-occurrence edits that have context anchors
+    const beforeCtx = result.undo_before_context;
+    const afterCtx = result.undo_after_context;
+    if (!beforeCtx || !afterCtx) return;
+
+    let elapsed = 0;
+
+    const check = () => {
+        try {
+            const currentHtml = getLatestNoteHtml(item);
+            const currentStripped = stripDataCitationItems(currentHtml);
+
+            // If HTML matches what we saved, PM either hasn't processed yet
+            // or didn't change anything. Wait until timeout.
+            if (currentStripped === savedStrippedHtml) {
+                if (elapsed < REFRESH_MAX_WAIT_MS) {
+                    elapsed += REFRESH_INTERVAL_MS;
+                    setTimeout(check, REFRESH_INTERVAL_MS);
+                }
+                // Timeout reached — PM didn't change anything, keep original undo data
+                return;
+            }
+
+            // HTML changed — PM has normalized. Extract the actual fragment.
+            const range = findRangeByContexts(currentStripped, beforeCtx, afterCtx);
+            if (!range) {
+                logger('scheduleUndoDataRefresh: context anchors not found in PM-normalized HTML, skipping refresh', 1);
+                return;
+            }
+
+            const actualFragment = currentStripped.substring(range.start, range.end);
+
+            // Skip update if the fragment didn't actually change
+            if (actualFragment === result.undo_new_html) return;
+
+            // Build refreshed context from PM-normalized HTML
+            const refreshedBeforeCtx = currentStripped.substring(
+                Math.max(0, range.start - UNDO_CONTEXT_LENGTH), range.start
+            );
+            const refreshedAfterCtx = currentStripped.substring(
+                range.end, range.end + UNDO_CONTEXT_LENGTH
+            );
+
+            const updatedFields: Partial<EditNoteResultData> = {
+                undo_new_html: actualFragment,
+                undo_before_context: refreshedBeforeCtx,
+                undo_after_context: refreshedAfterCtx,
+            };
+
+            // Update Jotai store (frontend)
+            store.set(updateAgentActionsAtom, [{
+                id: actionId,
+                result_data: { ...result, ...updatedFields },
+            }]);
+
+            // Persist to backend (best-effort)
+            agentActionsService.updateAction(actionId, {
+                result_data: { ...result, ...updatedFields } as Record<string, any>,
+            }).catch((e: any) => {
+                logger(`scheduleUndoDataRefresh: failed to persist refreshed undo data: ${e}`, 1);
+            });
+
+            logger(`scheduleUndoDataRefresh: updated undo_new_html for action ${actionId} after PM normalization`, 1);
+        } catch (e: any) {
+            // Best effort — don't throw from background refresh
+            logger(`scheduleUndoDataRefresh: error during refresh: ${e?.message || e}`, 1);
+        }
+    };
+
+    setTimeout(check, REFRESH_INTERVAL_MS);
+}
+
+/**
  * Execute an edit_note agent action by applying string replacement on the note.
  * @param action The agent action to execute
  * @returns Result data including the exact applied HTML fragment for undo
@@ -178,13 +334,28 @@ export async function executeEditNoteAction(
         );
     }
 
-    // 10. Perform replacement and capture context for deletions
+    // 10. Perform replacement and capture context
     let newHtml: string;
     let undoBeforeContext: string | undefined;
     let undoAfterContext: string | undefined;
-    const UNDO_CONTEXT_LENGTH = 200;
+    let undoOccurrenceContexts: Array<{ before: string; after: string }> | undefined;
 
     if (replace_all) {
+        // Capture per-occurrence context anchors before replacing
+        undoOccurrenceContexts = [];
+        let searchFrom = 0;
+        while (true) {
+            const idx = strippedHtml.indexOf(expandedOld, searchFrom);
+            if (idx === -1) break;
+            undoOccurrenceContexts.push({
+                before: strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx),
+                after: strippedHtml.substring(
+                    idx + expandedOld.length,
+                    idx + expandedOld.length + UNDO_CONTEXT_LENGTH
+                ),
+            });
+            searchFrom = idx + expandedOld.length;
+        }
         newHtml = strippedHtml.split(expandedOld).join(expandedNew);
     } else {
         const idx = strippedHtml.indexOf(expandedOld);
@@ -231,7 +402,7 @@ export async function executeEditNoteAction(
     const duplicateWarning = checkDuplicateCitations(new_string, metadata);
     const warnings = duplicateWarning ? [duplicateWarning] : undefined;
 
-    return {
+    const result: EditNoteResultData = {
         library_id,
         zotero_key,
         occurrences_replaced: matchCount,
@@ -240,7 +411,17 @@ export async function executeEditNoteAction(
         undo_new_html: expandedNew,
         undo_before_context: undoBeforeContext,
         undo_after_context: undoAfterContext,
+        undo_occurrence_contexts: undoOccurrenceContexts,
     };
+
+    // 16. Schedule background refresh of undo data after ProseMirror normalizes.
+    // The refresh updates undo_new_html to match the PM-normalized version so that
+    // exact-match undo works even after PM transforms the inserted HTML.
+    // The actionId is stored on the action object by the caller before execute runs.
+    const savedStrippedHtml = stripDataCitationItems(newHtml);
+    scheduleUndoDataRefresh(item, savedStrippedHtml, result, action.id);
+
+    return result;
 }
 
 /**
@@ -327,9 +508,8 @@ export async function undoEditNoteAction(
             );
         }
 
-        // Check if already undone (old_string is back in the note)
-        const oldStringFound = strippedHtml.includes(undoOldHtml);
-        if (oldStringFound) {
+        // Check if already undone (old_string is back in the note) — context-aware
+        if (isAlreadyUndone(strippedHtml, undoOldHtml, beforeCtx, afterCtx)) {
             logger(`undoEditNoteAction: Note ${noteId} already contains old_string, skipping`, 1);
             return;
         }
@@ -407,36 +587,48 @@ export async function undoEditNoteAction(
         const beforeCtx = resultData?.undo_before_context;
         const afterCtx = resultData?.undo_after_context;
 
-        // 3-way detection
+        // 3-way detection — context-aware "already undone" check
         const newStringFound = strippedHtml.includes(undoNewHtml);
-        const oldStringFound = strippedHtml.includes(undoOldHtml);
 
-        if (!newStringFound && oldStringFound) {
+        if (!newStringFound && isAlreadyUndone(strippedHtml, undoOldHtml, beforeCtx, afterCtx)) {
             logger(`undoEditNoteAction: Note ${noteId} already contains old_string, skipping`, 1);
             return;
         }
 
-        if (!newStringFound && !oldStringFound) {
-            const candidateRanges: Array<{ start: number; end: number }> = [];
-            const seenRanges = new Set<string>();
-
-            const contextRange = findRangeByContexts(strippedHtml, beforeCtx, afterCtx);
-            if (contextRange) {
-                const key = `${contextRange.start}:${contextRange.end}`;
-                seenRanges.add(key);
-                candidateRanges.push(contextRange);
-            }
-
-            for (const anchorRange of findRangesByRawAnchors(strippedHtml, undoNewHtml)) {
-                const key = `${anchorRange.start}:${anchorRange.end}`;
-                if (seenRanges.has(key)) {
-                    continue;
+        if (!newStringFound) {
+            // Exact match failed — try fuzzy recovery via context anchors
+            if (replace_all) {
+                // replace_all: use per-occurrence contexts to locate and replace each occurrence
+                const occCtxs = resultData?.undo_occurrence_contexts;
+                if (occCtxs && occCtxs.length > 0) {
+                    restoredHtml = undoReplaceAllViaContexts(
+                        strippedHtml, undoOldHtml, undoNewHtml, occCtxs, library_id
+                    );
+                    if (restoredHtml) {
+                        logger(`undoEditNoteAction: restored ${occCtxs.length} replace_all occurrences via contexts on note ${noteId}`, 1);
+                    }
                 }
-                seenRanges.add(key);
-                candidateRanges.push(anchorRange);
-            }
+            } else {
+                // Single occurrence: find via context anchors + raw anchors, then normalize-compare
+                const candidateRanges: Array<{ start: number; end: number }> = [];
+                const seenRanges = new Set<string>();
 
-            if (!replace_all) {
+                const contextRange = findRangeByContexts(strippedHtml, beforeCtx, afterCtx);
+                if (contextRange) {
+                    const key = `${contextRange.start}:${contextRange.end}`;
+                    seenRanges.add(key);
+                    candidateRanges.push(contextRange);
+                }
+
+                for (const anchorRange of findRangesByRawAnchors(strippedHtml, undoNewHtml)) {
+                    const key = `${anchorRange.start}:${anchorRange.end}`;
+                    if (seenRanges.has(key)) {
+                        continue;
+                    }
+                    seenRanges.add(key);
+                    candidateRanges.push(anchorRange);
+                }
+
                 for (const candidateRange of candidateRanges) {
                     const candidateHtml = strippedHtml.substring(candidateRange.start, candidateRange.end);
                     const normalizedCandidate = normalizeUndoComparisonHtml(candidateHtml, library_id);
@@ -463,6 +655,7 @@ export async function undoEditNoteAction(
         }
 
         if (!restoredHtml) {
+            // Exact match path — undoNewHtml was found in strippedHtml
             if (replace_all) {
                 restoredHtml = strippedHtml.split(undoNewHtml).join(undoOldHtml);
             } else {
