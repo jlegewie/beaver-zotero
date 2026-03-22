@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../src/services/agentDataProvider/utils', () => ({
+vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getAttachmentFileStatus: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { preloadPageLabelsForContent } from '../react/utils/pageLabels';
-import { getAttachmentFileStatus } from '../src/services/agentDataProvider/utils';
+import { preloadPageLabelsForContent } from '../../../react/utils/pageLabels';
+import { getAttachmentFileStatus } from '../../../src/services/agentDataProvider/utils';
 
 const mockGetAttachmentFileStatus = vi.mocked(getAttachmentFileStatus);
 

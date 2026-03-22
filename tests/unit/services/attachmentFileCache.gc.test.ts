@@ -6,12 +6,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { BeaverDB } from '../src/services/database';
+import { BeaverDB } from '../../../src/services/database';
 import {
     AttachmentFileCache,
     EXTRACTION_VERSION,
-} from '../src/services/attachmentFileCache';
-import { MockDBConnection } from './mocks/mockDBConnection';
+} from '../../../src/services/attachmentFileCache';
+import { MockDBConnection } from '../../mocks/mockDBConnection';
 
 // Cast globals for typed mock access
 const mockIOUtils = (globalThis as any).IOUtils as {

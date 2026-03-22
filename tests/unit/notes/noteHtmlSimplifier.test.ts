@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock createCitationHTML before importing the module under test
-vi.mock('../src/utils/zoteroUtils', () => ({
+vi.mock('../../../src/utils/zoteroUtils', () => ({
     createCitationHTML: vi.fn(
         (item: any, page?: string) =>
             `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify({
@@ -21,7 +21,7 @@ vi.mock('../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test-user' })),
 }));
 
-vi.mock('../src/services/supabaseClient', () => ({
+vi.mock('../../../src/services/supabaseClient', () => ({
     supabase: {
         auth: {
             getSession: vi.fn(),
@@ -43,8 +43,8 @@ import {
     isNoteInEditor,
     getLatestNoteHtml,
     SimplificationMetadata,
-} from '../src/utils/noteHtmlSimplifier';
-import { createCitationHTML } from '../src/utils/zoteroUtils';
+} from '../../../src/utils/noteHtmlSimplifier';
+import { createCitationHTML } from '../../../src/utils/zoteroUtils';
 
 
 // =============================================================================

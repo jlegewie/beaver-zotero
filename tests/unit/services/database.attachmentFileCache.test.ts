@@ -6,8 +6,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { BeaverDB, AttachmentFileCacheRecord } from '../src/services/database';
-import { MockDBConnection } from './mocks/mockDBConnection';
+import { BeaverDB, AttachmentFileCacheRecord } from '../../../src/services/database';
+import { MockDBConnection } from '../../mocks/mockDBConnection';
 
 // ---------------------------------------------------------------------------
 // Helpers

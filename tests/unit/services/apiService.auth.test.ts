@@ -10,12 +10,12 @@ const { mockSupabase } = vi.hoisted(() => ({
     },
 }));
 
-vi.mock('../src/services/supabaseClient', () => ({
+vi.mock('../../../src/services/supabaseClient', () => ({
     supabase: mockSupabase,
 }));
 
-import { SessionExpiredError, SessionRefreshError } from '../react/types/apiErrors';
-import { ApiService } from '../src/services/apiService';
+import { SessionExpiredError, SessionRefreshError } from '../../../react/types/apiErrors';
+import { ApiService } from '../../../src/services/apiService';
 
 describe('ApiService authentication recovery', () => {
     let service: ApiService;

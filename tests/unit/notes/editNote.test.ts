@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Module Mocks (must be before imports)
 // =============================================================================
 
-vi.mock('../src/utils/noteHtmlSimplifier', () => ({
+vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     getOrSimplify: vi.fn((_noteId: string, rawHtml: string, _libId: number) => ({
         simplified: rawHtml.replace(/<[^>]+>/g, ''), // Crude strip-tags for testing
         metadata: { elements: new Map() },
@@ -28,26 +28,26 @@ vi.mock('../src/utils/noteHtmlSimplifier', () => ({
     preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../react/store', () => ({
+vi.mock('../../../react/store', () => ({
     store: { get: vi.fn(() => [1, 2]) },
 }));
 
-vi.mock('../react/atoms/profile', () => ({
+vi.mock('../../../react/atoms/profile', () => ({
     searchableLibraryIdsAtom: Symbol('searchableLibraryIdsAtom'),
 }));
 
-vi.mock('../src/services/agentDataProvider/utils', () => ({
+vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getDeferredToolPreference: vi.fn(() => 'always_ask'),
     resolveToPdfAttachment: vi.fn(),
     validateZoteroItemReference: vi.fn(() => null),
     backfillMetadataForError: vi.fn(),
 }));
 
-vi.mock('../src/utils/logger', () => ({
+vi.mock('../../../src/utils/logger', () => ({
     logger: vi.fn(),
 }));
 
-vi.mock('../src/utils/zoteroUtils', () => ({
+vi.mock('../../../src/utils/zoteroUtils', () => ({
     canSetField: vi.fn(() => true),
     SETTABLE_PRIMARY_FIELDS: [],
     sanitizeCreators: vi.fn((c: any) => c),
@@ -55,12 +55,12 @@ vi.mock('../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test-user' })),
 }));
 
-vi.mock('../react/utils/batchFindExistingReferences', () => ({
+vi.mock('../../../react/utils/batchFindExistingReferences', () => ({
     batchFindExistingReferences: vi.fn().mockResolvedValue([]),
     BatchReferenceCheckItem: {},
 }));
 
-vi.mock('../react/utils/addItemActions', () => ({
+vi.mock('../../../react/utils/addItemActions', () => ({
     applyCreateItemData: vi.fn(),
 }));
 
@@ -68,8 +68,8 @@ vi.mock('../react/utils/addItemActions', () => ({
 // Imports
 // =============================================================================
 
-import { handleAgentActionValidateRequest } from '../src/services/agentDataProvider/handleAgentActionValidateRequest';
-import { handleAgentActionExecuteRequest } from '../src/services/agentDataProvider/handleAgentActionExecuteRequest';
+import { handleAgentActionValidateRequest } from '../../../src/services/agentDataProvider/handleAgentActionValidateRequest';
+import { handleAgentActionExecuteRequest } from '../../../src/services/agentDataProvider/handleAgentActionExecuteRequest';
 import {
     getOrSimplify,
     expandToRawHtml,
@@ -82,13 +82,13 @@ import {
     checkDuplicateCitations,
     rebuildDataCitationItems,
     preloadPageLabelsForNewCitations,
-} from '../src/utils/noteHtmlSimplifier';
-import { getDeferredToolPreference } from '../src/services/agentDataProvider/utils';
-import { store } from '../react/store';
+} from '../../../src/utils/noteHtmlSimplifier';
+import { getDeferredToolPreference } from '../../../src/services/agentDataProvider/utils';
+import { store } from '../../../react/store';
 import type {
     WSAgentActionValidateRequest,
     WSAgentActionExecuteRequest,
-} from '../src/services/agentProtocol';
+} from '../../../src/services/agentProtocol';
 
 
 // =============================================================================

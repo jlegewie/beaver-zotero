@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // =============================================================================
 
 // Mock createCitationHTML — same pattern as noteHtmlSimplifier.test.ts
-vi.mock('../src/utils/zoteroUtils', () => ({
+vi.mock('../../../src/utils/zoteroUtils', () => ({
     createCitationHTML: vi.fn(
         (item: any, page?: string) =>
             `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify({
@@ -25,13 +25,13 @@ vi.mock('../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test-user' })),
 }));
 
-vi.mock('../src/utils/logger', () => ({
+vi.mock('../../../src/utils/logger', () => ({
     logger: vi.fn(),
 }));
 
 // Mock supabaseClient to avoid "Missing Supabase URL or Anon Key" error.
 // editNoteActions → agentActions → agentActionsService → apiService → supabaseClient
-vi.mock('../src/services/supabaseClient', () => ({
+vi.mock('../../../src/services/supabaseClient', () => ({
     supabase: {
         auth: {
             getSession: vi.fn(),
@@ -40,7 +40,7 @@ vi.mock('../src/services/supabaseClient', () => ({
 }));
 
 // Mock sourceUtils to avoid pulling in Jotai store / atom dependencies
-vi.mock('../react/utils/sourceUtils', () => ({
+vi.mock('../../../react/utils/sourceUtils', () => ({
     clearNoteEditorSelection: vi.fn(),
 }));
 
@@ -61,8 +61,8 @@ import {
     validateNewString,
     getLatestNoteHtml,
     SimplificationMetadata,
-} from '../src/utils/noteHtmlSimplifier';
-import { createCitationHTML } from '../src/utils/zoteroUtils';
+} from '../../../src/utils/noteHtmlSimplifier';
+import { createCitationHTML } from '../../../src/utils/zoteroUtils';
 
 // =============================================================================
 // Helpers
@@ -968,7 +968,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
 
     // We'll import the module lazily within tests to ensure mocks are active
     async function importEditNoteActions() {
-        return await import('../react/utils/editNoteActions');
+        return await import('../../../react/utils/editNoteActions');
     }
 
     function buildSameItemRefShiftScenario() {

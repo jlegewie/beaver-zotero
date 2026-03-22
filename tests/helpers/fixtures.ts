@@ -1,8 +1,8 @@
 /**
- * Test fixture definitions for integration tests.
+ * Shared test fixture definitions.
  *
- * Each fixture references a real attachment in the test Zotero library.
- * The Zotero HTTP port is configurable via ZOTERO_HTTP_PORT env var.
+ * Contains Zotero port/URL config and attachment fixtures used by both
+ * live and integration tests.
  */
 
 export const ZOTERO_PORT = parseInt(process.env.ZOTERO_HTTP_PORT || '23119', 10);

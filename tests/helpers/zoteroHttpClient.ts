@@ -1,5 +1,7 @@
 /**
  * HTTP client wrapper for Beaver endpoints on Zotero's local server.
+ *
+ * Shared by live and integration tests.
  */
 
 import { BASE_URL, type AttachmentFixture } from './fixtures';
@@ -8,7 +10,7 @@ interface RequestOptions {
     timeout?: number;
 }
 
-async function post<T>(path: string, body: unknown, opts?: RequestOptions): Promise<T> {
+export async function post<T>(path: string, body: unknown, opts?: RequestOptions): Promise<T> {
     const controller = new AbortController();
     const timeoutMs = opts?.timeout ?? 25000;
     const timer = setTimeout(() => controller.abort(), timeoutMs);

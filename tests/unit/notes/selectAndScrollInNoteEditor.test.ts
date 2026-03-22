@@ -4,49 +4,49 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Module Mocks (must be before imports)
 // =============================================================================
 
-vi.mock('../src/utils/logger', () => ({
+vi.mock('../../../src/utils/logger', () => ({
     logger: vi.fn(),
 }));
 
-vi.mock('../react/store', () => ({
+vi.mock('../../../react/store', () => ({
     store: { get: vi.fn(() => [1]) },
 }));
 
-vi.mock('../react/atoms/profile', () => ({
+vi.mock('../../../react/atoms/profile', () => ({
     searchableLibraryIdsAtom: Symbol('searchableLibraryIdsAtom'),
     isDatabaseSyncSupportedAtom: Symbol('isDatabaseSyncSupportedAtom'),
     syncWithZoteroAtom: Symbol('syncWithZoteroAtom'),
 }));
 
-vi.mock('../react/atoms/auth', () => ({
+vi.mock('../../../react/atoms/auth', () => ({
     userIdAtom: Symbol('userIdAtom'),
 }));
 
-vi.mock('../react/components/agentRuns/EditNotePreview', () => ({
+vi.mock('../../../react/components/agentRuns/EditNotePreview', () => ({
     stripHtmlTags: vi.fn((s: string) => s),
     computeDiff: vi.fn(),
 }));
 
-vi.mock('../src/utils/sync', () => ({
+vi.mock('../../../src/utils/sync', () => ({
     syncingItemFilter: vi.fn(),
     syncingItemFilterAsync: vi.fn(),
     isSupportedItem: vi.fn(),
     isLibraryValidForSync: vi.fn(),
 }));
 
-vi.mock('../src/utils/selectItem', () => ({
+vi.mock('../../../src/utils/selectItem', () => ({
     selectItemById: vi.fn(),
 }));
 
-vi.mock('../src/utils/webAPI', () => ({
+vi.mock('../../../src/utils/webAPI', () => ({
     isAttachmentOnServer: vi.fn(),
 }));
 
-vi.mock('../src/utils/zoteroUtils', () => ({
+vi.mock('../../../src/utils/zoteroUtils', () => ({
     safeFileExists: vi.fn(),
 }));
 
-vi.mock('../react/utils/stringUtils', () => ({
+vi.mock('../../../react/utils/stringUtils', () => ({
     truncateText: vi.fn((s: string) => s),
 }));
 
@@ -61,7 +61,7 @@ import {
     findScrollContainer,
     getNoteEditorView,
     stripEllipsis,
-} from '../react/utils/sourceUtils';
+} from '../../../react/utils/sourceUtils';
 
 // =============================================================================
 // Helpers

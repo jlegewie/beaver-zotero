@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../src/services/pdf', () => {
+vi.mock('../../../src/services/pdf', () => {
     class MockPDFExtractor {
         async getPageCount(): Promise<number> {
             return 3;
@@ -39,14 +39,14 @@ vi.mock('../src/services/pdf', () => {
     };
 });
 
-vi.mock('../src/services/agentDataProvider/utils', () => ({
+vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     resolveToPdfAttachment: vi.fn(),
     validateZoteroItemReference: vi.fn(() => null),
     backfillMetadataForError: vi.fn(),
 }));
 
-import { handleZoteroAttachmentPagesRequest } from '../src/services/agentDataProvider/handleZoteroAttachmentPagesRequest';
-import { resolveToPdfAttachment } from '../src/services/agentDataProvider/utils';
+import { handleZoteroAttachmentPagesRequest } from '../../../src/services/agentDataProvider/handleZoteroAttachmentPagesRequest';
+import { resolveToPdfAttachment } from '../../../src/services/agentDataProvider/utils';
 
 describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
     const mockIOUtils = (globalThis as any).IOUtils as {

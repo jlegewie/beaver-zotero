@@ -2,6 +2,7 @@
  * Cache state inspection and cleanup helpers.
  *
  * Talks to the /beaver/test/* endpoints registered in useHttpEndpoints.ts.
+ * Shared by live and integration tests.
  */
 
 import { BASE_URL } from './fixtures';

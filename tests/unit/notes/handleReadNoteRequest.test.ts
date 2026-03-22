@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock noteHtmlSimplifier
-vi.mock('../src/utils/noteHtmlSimplifier', () => ({
+vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     getOrSimplify: vi.fn((_noteId: string, _rawHtml: string, _libId: number) => ({
         simplified: 'Line one\nLine two\nLine three\nLine four\nLine five',
         metadata: { elements: new Map() },
@@ -11,13 +11,33 @@ vi.mock('../src/utils/noteHtmlSimplifier', () => ({
 }));
 
 // Mock logger
-vi.mock('../src/utils/logger', () => ({
+vi.mock('../../../src/utils/logger', () => ({
     logger: vi.fn(),
 }));
 
-import { handleReadNoteRequest } from '../src/services/agentDataProvider/handleReadNoteRequest';
-import { getOrSimplify, getLatestNoteHtml } from '../src/utils/noteHtmlSimplifier';
-import type { WSReadNoteRequest } from '../src/services/agentProtocol';
+// Mock transitive dependencies pulled in by agentDataProvider
+vi.mock('../../../src/services/supabaseClient', () => ({
+    supabase: {
+        auth: { getSession: vi.fn() },
+    },
+}));
+
+vi.mock('../../../src/utils/zoteroUtils', () => ({
+    getZoteroUserIdentifier: vi.fn(() => ({ userID: '123', localUserKey: 'abc' })),
+    createCitationHTML: vi.fn(),
+}));
+
+vi.mock('../../../react/atoms/profile', () => ({
+    userIdentifierAtom: {},
+}));
+
+vi.mock('../../../react/store', () => ({
+    store: { get: vi.fn(), set: vi.fn(), sub: vi.fn() },
+}));
+
+import { handleReadNoteRequest } from '../../../src/services/agentDataProvider/handleReadNoteRequest';
+import { getOrSimplify, getLatestNoteHtml } from '../../../src/utils/noteHtmlSimplifier';
+import type { WSReadNoteRequest } from '../../../src/services/agentProtocol';
 
 
 // =============================================================================
