@@ -3,7 +3,7 @@
  * These functions are used by AgentActionView for post-run action handling.
  */
 
-import { AgentAction, updateAgentActionsAtom } from '../agents/agentActions';
+import { AgentAction } from '../agents/agentActions';
 import type { EditNoteResultData } from '../types/agentActions/editNote';
 import { logger } from '../../src/utils/logger';
 import {
@@ -21,8 +21,6 @@ import {
     isNoteInEditor,
 } from '../../src/utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from './sourceUtils';
-import { agentActionsService } from '../../src/services/agentActionsService';
-import { store } from '../store';
 
 function normalizeUndoComparisonHtml(html: string, libraryId: number): string {
     const { simplified } = simplifyNoteHtml(stripDataCitationItems(html), libraryId);
@@ -176,22 +174,29 @@ function isAlreadyUndone(
 const UNDO_CONTEXT_LENGTH = 200;
 const REFRESH_INTERVAL_MS = 150;
 const REFRESH_MAX_WAIT_MS = 2000;
+// After this many polls with no change, assume PM produced identical output and stop.
+// PM processes the incremental update within ~one event-loop tick of the notifier,
+// so 2 polls (~300ms) is ample time. This avoids a 2s stall on simple text edits
+// where PM re-serializes the HTML identically.
+const REFRESH_EARLY_EXIT_POLLS = 2;
 
 /**
- * Schedule a background refresh of undo data after ProseMirror normalizes the note.
+ * Wait for ProseMirror to normalize the note and update undo data in-place.
  *
  * When a note is open in the editor, ProseMirror re-normalizes the HTML after
  * `item.saveTx()`. This makes the stored `undo_new_html` stale. This function
  * polls the editor until the HTML changes (PM processed it) or a timeout elapses,
- * then extracts the actual PM-normalized fragment using context anchors and updates
- * both the Jotai store and the backend.
+ * then extracts the actual PM-normalized fragment using context anchors and
+ * updates the result object in-place before it is returned to the caller.
+ *
+ * Called inline (awaited) inside executeEditNoteAction so the returned result
+ * already contains the correct undo data — no background refresh needed.
  */
-function scheduleUndoDataRefresh(
+async function waitForPMAndRefreshUndoData(
     item: any,
     savedStrippedHtml: string,
-    result: EditNoteResultData,
-    actionId: string
-): void {
+    result: EditNoteResultData
+): Promise<void> {
     if (!isNoteInEditor(item.id)) return;
 
     // Only refresh single-occurrence edits that have context anchors
@@ -199,28 +204,29 @@ function scheduleUndoDataRefresh(
     const afterCtx = result.undo_after_context;
     if (!beforeCtx || !afterCtx) return;
 
-    let elapsed = 0;
+    let unchangedPolls = 0;
 
-    const check = () => {
+    // Poll until PM changes the HTML or we time out
+    for (let elapsed = 0; elapsed < REFRESH_MAX_WAIT_MS; elapsed += REFRESH_INTERVAL_MS) {
+        await new Promise(resolve => setTimeout(resolve, REFRESH_INTERVAL_MS));
+
         try {
             const currentHtml = getLatestNoteHtml(item);
             const currentStripped = stripDataCitationItems(currentHtml);
 
-            // If HTML matches what we saved, PM either hasn't processed yet
-            // or didn't change anything. Wait until timeout.
+            // If HTML still matches what we saved, PM either hasn't processed
+            // yet or produced identical output (common for plain-text edits).
+            // After a few polls, assume the latter and stop waiting.
             if (currentStripped === savedStrippedHtml) {
-                if (elapsed < REFRESH_MAX_WAIT_MS) {
-                    elapsed += REFRESH_INTERVAL_MS;
-                    setTimeout(check, REFRESH_INTERVAL_MS);
-                }
-                // Timeout reached — PM didn't change anything, keep original undo data
-                return;
+                unchangedPolls++;
+                if (unchangedPolls >= REFRESH_EARLY_EXIT_POLLS) return;
+                continue;
             }
 
             // HTML changed — PM has normalized. Extract the actual fragment.
             const range = findRangeByContexts(currentStripped, beforeCtx, afterCtx);
             if (!range) {
-                logger('scheduleUndoDataRefresh: context anchors not found in PM-normalized HTML, skipping refresh', 1);
+                logger('waitForPMAndRefreshUndoData: context anchors not found in PM-normalized HTML, skipping refresh', 1);
                 return;
             }
 
@@ -229,41 +235,23 @@ function scheduleUndoDataRefresh(
             // Skip update if the fragment didn't actually change
             if (actualFragment === result.undo_new_html) return;
 
-            // Build refreshed context from PM-normalized HTML
-            const refreshedBeforeCtx = currentStripped.substring(
+            // Update result in-place with PM-normalized data
+            result.undo_new_html = actualFragment;
+            result.undo_before_context = currentStripped.substring(
                 Math.max(0, range.start - UNDO_CONTEXT_LENGTH), range.start
             );
-            const refreshedAfterCtx = currentStripped.substring(
+            result.undo_after_context = currentStripped.substring(
                 range.end, range.end + UNDO_CONTEXT_LENGTH
             );
 
-            const updatedFields: Partial<EditNoteResultData> = {
-                undo_new_html: actualFragment,
-                undo_before_context: refreshedBeforeCtx,
-                undo_after_context: refreshedAfterCtx,
-            };
-
-            // Update Jotai store (frontend)
-            store.set(updateAgentActionsAtom, [{
-                id: actionId,
-                result_data: { ...result, ...updatedFields },
-            }]);
-
-            // Persist to backend (best-effort)
-            agentActionsService.updateAction(actionId, {
-                result_data: { ...result, ...updatedFields } as Record<string, any>,
-            }).catch((e: any) => {
-                logger(`scheduleUndoDataRefresh: failed to persist refreshed undo data: ${e}`, 1);
-            });
-
-            logger(`scheduleUndoDataRefresh: updated undo_new_html for action ${actionId} after PM normalization`, 1);
+            logger('waitForPMAndRefreshUndoData: updated undo_new_html after PM normalization', 1);
+            return;
         } catch (e: any) {
-            // Best effort — don't throw from background refresh
-            logger(`scheduleUndoDataRefresh: error during refresh: ${e?.message || e}`, 1);
+            logger(`waitForPMAndRefreshUndoData: error during poll: ${e?.message || e}`, 1);
+            return;
         }
-    };
-
-    setTimeout(check, REFRESH_INTERVAL_MS);
+    }
+    // Timeout — PM didn't change anything, keep original undo data
 }
 
 /**
@@ -414,12 +402,12 @@ export async function executeEditNoteAction(
         undo_occurrence_contexts: undoOccurrenceContexts,
     };
 
-    // 16. Schedule background refresh of undo data after ProseMirror normalizes.
-    // The refresh updates undo_new_html to match the PM-normalized version so that
-    // exact-match undo works even after PM transforms the inserted HTML.
-    // The actionId is stored on the action object by the caller before execute runs.
+    // 16. Wait for ProseMirror to normalize the note and update undo data.
+    // When the note is open in the editor, PM re-normalizes after saveTx().
+    // We poll until PM processes or timeout, then update undo_new_html in-place
+    // so the returned result already has correct undo data.
     const savedStrippedHtml = stripDataCitationItems(newHtml);
-    scheduleUndoDataRefresh(item, savedStrippedHtml, result, action.id);
+    await waitForPMAndRefreshUndoData(item, savedStrippedHtml, result);
 
     return result;
 }

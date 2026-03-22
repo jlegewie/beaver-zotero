@@ -8,8 +8,8 @@
  * what the mock item's getNote() returns — replicating what happens when
  * a note is open in the editor and PM re-saves after item.saveTx().
  *
- * Tests prefixed with "FAILS:" are expected to fail with the current
- * implementation and should pass after the undo improvement work.
+ * Tests prefixed with "FAILS:" are expected to fail and document
+ * known limitations (e.g., replace_all with PM normalization).
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -303,8 +303,14 @@ const NOTE_WITH_LIST = wrap(
 // =============================================================================
 
 /**
- * Execute an edit via the real executeEditNoteAction, optionally simulate
- * PM normalization, then return everything needed for undo.
+ * Execute an edit via the real executeEditNoteAction, optionally with
+ * a mock editor that simulates ProseMirror normalization.
+ *
+ * When `applyPMNormalization` is true, sets up a mock editor whose
+ * getDataSync returns PM-normalized HTML. This causes the inline
+ * waitForPMAndRefreshUndoData (inside executeEditNoteAction) to detect
+ * the change and update undo_new_html before the result is returned —
+ * exactly like the production path.
  */
 async function applyEdit(opts: {
     noteHtml: string;
@@ -316,25 +322,27 @@ async function applyEdit(opts: {
     item: ReturnType<typeof createMockNoteItem>;
     result: EditNoteResultData;
     action: AgentAction;
-    /** The stripped note HTML after apply (and PM normalization if enabled) */
     currentStripped: string;
 }> {
     const item = createMockNoteItem(opts.noteHtml);
     const action = makeAction(1, 'TESTKEY', opts.oldString, opts.newString, opts.replaceAll);
 
-    // Wire mock so executeEditNoteAction can find the item
+    // Set up mock editor BEFORE execute so waitForPMAndRefreshUndoData
+    // can read PM-normalized HTML via getLatestNoteHtml during polling
+    if (opts.applyPMNormalization) {
+        setupPMNormalizingEditor(item);
+    }
+
     (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
 
     const result = await executeEditNoteAction(action);
 
-    // Simulate PM normalization: mutate what getNote returns
+    // After execute, update the item to reflect what PM would have saved
+    // (for subsequent reads by undoEditNoteAction)
     if (opts.applyPMNormalization) {
-        const savedHtml = item._getHtml();
-        const pmNormalized = simulatePMNormalization(savedHtml);
-        item._setHtml(pmNormalized);
+        item._setHtml(simulatePMNormalization(item._getHtml()));
     }
 
-    // Attach result to action for undo
     action.status = 'applied';
     action.result_data = result;
 
@@ -372,81 +380,29 @@ async function undoEdit(
 
 
 /**
- * Simulate what scheduleUndoDataRefresh does after PM normalizes a note:
- * find the edit region using context anchors in the PM-normalized HTML,
- * extract the actual fragment, and update result_data.
+ * Set up a mock editor instance that simulates ProseMirror normalization.
  *
- * This directly tests that the undo mechanism works with refreshed data
- * without fighting vitest's timer interception (setTimeout in bundled
- * modules uses a scope-local reference that vi.useFakeTimers cannot intercept).
+ * getLatestNoteHtml reads from the editor via getDataSync(). This mock
+ * returns PM-normalized HTML so that waitForPMAndRefreshUndoData (which
+ * runs inline inside executeEditNoteAction) detects the change and updates
+ * undo_new_html before the result is returned.
+ *
+ * The mock reads item.getNote() (the pre-PM HTML saved by setNote) and
+ * applies simulatePMNormalization on the fly — matching what the real
+ * ProseMirror editor does after receiving the Notifier event.
  */
-function simulateUndoDataRefresh(
-    item: ReturnType<typeof createMockNoteItem>,
-    action: AgentAction,
-): void {
-    const result = action.result_data as EditNoteResultData;
-    if (!result?.undo_before_context || !result?.undo_after_context) return;
-
-    const currentHtml = item._getHtml();
-    const currentStripped = stripDataCitationItems(currentHtml);
-    const beforeCtx = result.undo_before_context;
-    const afterCtx = result.undo_after_context;
-
-    // Find the edit region using context anchors (same logic as scheduleUndoDataRefresh)
-    let searchFrom = 0;
-    while (true) {
-        const beforeIdx = currentStripped.indexOf(beforeCtx, searchFrom);
-        if (beforeIdx === -1) return;
-        const start = beforeIdx + beforeCtx.length;
-        const afterIdx = currentStripped.indexOf(afterCtx, start);
-        if (afterIdx !== -1 && afterIdx >= start) {
-            const actualFragment = currentStripped.substring(start, afterIdx);
-            if (actualFragment === result.undo_new_html) return; // No change
-
-            // Update result_data with PM-normalized fragment and refreshed contexts
-            action.result_data = {
-                ...result,
-                undo_new_html: actualFragment,
-                undo_before_context: currentStripped.substring(
-                    Math.max(0, start - 200), start
-                ),
-                undo_after_context: currentStripped.substring(
-                    afterIdx, afterIdx + 200
-                ),
-            };
-            return;
-        }
-        searchFrom = beforeIdx + 1;
-    }
-}
-
-/**
- * Apply an edit, simulate PM normalization, run the refresh logic,
- * and return the action ready for undo.
- */
-async function applyWithRefresh(opts: {
-    item: ReturnType<typeof createMockNoteItem>;
-    oldString: string;
-    newString: string;
-    replaceAll?: boolean;
-}): Promise<AgentAction> {
-    const { item } = opts;
-    const action = makeAction(1, 'TESTKEY', opts.oldString, opts.newString, opts.replaceAll);
-
-    (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
-
-    const result = await executeEditNoteAction(action);
-    action.status = 'applied';
-    action.result_data = result;
-
-    // Simulate PM normalization (what the editor does after saveTx)
-    item._setHtml(simulatePMNormalization(item._getHtml()));
-
-    // Simulate what scheduleUndoDataRefresh would do
-    simulateUndoDataRefresh(item, action);
-
-    invalidateSimplificationCache('1-TESTKEY');
-    return action;
+function setupPMNormalizingEditor(item: ReturnType<typeof createMockNoteItem>): void {
+    (Zotero as any).Notes._editorInstances = [{
+        _item: { id: item.id },
+        _iframeWindow: {
+            frameElement: { isConnected: true },
+            wrappedJSObject: {
+                getDataSync: () => ({
+                    html: simulatePMNormalization(item.getNote()),
+                }),
+            },
+        },
+    }];
 }
 
 
@@ -511,78 +467,77 @@ describe('apply-undo roundtrip (no PM normalization)', () => {
 
 
 // =============================================================================
-// Section 2: Apply-Undo with PM Normalization + Undo Data Refresh
+// Section 2: Apply-Undo with PM Normalization + Inline Undo Data Refresh
 //
-// These test the actual production code path:
-// executeEditNoteAction → PM normalizes → scheduleUndoDataRefresh fires →
-// undo_new_html updated → undoEditNoteAction succeeds.
-//
-// Uses vi.useFakeTimers() to control the setTimeout-based polling.
+// These test the production code path: executeEditNoteAction runs
+// waitForPMAndRefreshUndoData inline, which polls getLatestNoteHtml
+// (reading from a mock editor that returns PM-normalized HTML),
+// detects the change, and updates undo_new_html before returning.
+// Then undoEditNoteAction succeeds with the corrected data.
 // =============================================================================
 
-describe('apply-undo with PM normalization + undo data refresh', () => {
-    it('bold tag: refresh updates undo_new_html, undo restores original', async () => {
-        const item = createMockNoteItem(PLAIN_NOTE);
-        const action = await applyWithRefresh({
-            item,
+describe('apply-undo with PM normalization + inline refresh', () => {
+    it('bold tag: undo_new_html updated to <strong>, undo restores original', async () => {
+        const { item, action, result } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
             oldString: 'First paragraph with some text',
             newString: 'First paragraph with <b>bold</b> text',
+            applyPMNormalization: true,
         });
 
-        const rd = action.result_data as EditNoteResultData;
-        expect(rd.undo_new_html).toContain('<strong>bold</strong>');
-        expect(rd.undo_new_html).not.toContain('<b>');
+        expect(result.undo_new_html).toContain('<strong>bold</strong>');
+        expect(result.undo_new_html).not.toContain('<b>');
 
         await undoEdit(item, action);
         expect(stripDataCitationItems(item._getHtml())).toContain('First paragraph with some text');
         expect(stripDataCitationItems(item._getHtml())).not.toContain('bold</');
     });
 
-    it('italic tag: refresh handles PM <i> → <em>', async () => {
-        const item = createMockNoteItem(PLAIN_NOTE);
-        const action = await applyWithRefresh({
-            item,
+    it('italic tag: undo_new_html updated after PM <i> → <em>', async () => {
+        const { item, action, result } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
             oldString: 'Second paragraph with more text',
             newString: 'Second paragraph with <i>emphasized</i> text',
+            applyPMNormalization: true,
         });
 
-        expect((action.result_data as EditNoteResultData).undo_new_html).toContain('<em>');
+        expect(result.undo_new_html).toContain('<em>');
         await undoEdit(item, action);
         expect(stripDataCitationItems(item._getHtml())).toContain('Second paragraph with more text');
     });
 
-    it('strikethrough: refresh handles PM <s> → span conversion', async () => {
-        const item = createMockNoteItem(PLAIN_NOTE);
-        const action = await applyWithRefresh({
-            item,
+    it('strikethrough: undo_new_html updated after PM <s> → span', async () => {
+        const { item, action, result } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
             oldString: 'some text',
             newString: '<s>struck</s> text',
+            applyPMNormalization: true,
         });
 
-        expect((action.result_data as EditNoteResultData).undo_new_html).toContain('text-decoration: line-through');
+        expect(result.undo_new_html).toContain('text-decoration: line-through');
         await undoEdit(item, action);
         expect(stripDataCitationItems(item._getHtml())).toContain('some text');
     });
 
-    it('link: refresh handles PM adding rel attribute', async () => {
-        const item = createMockNoteItem(PLAIN_NOTE);
-        const action = await applyWithRefresh({
-            item,
+    it('link: undo_new_html updated after PM adds rel attribute', async () => {
+        const { item, action, result } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
             oldString: 'some text',
             newString: '<a href="http://example.com">a link</a>',
+            applyPMNormalization: true,
         });
 
-        expect((action.result_data as EditNoteResultData).undo_new_html).toContain('rel=');
+        expect(result.undo_new_html).toContain('rel=');
         await undoEdit(item, action);
         expect(stripDataCitationItems(item._getHtml())).toContain('some text');
     });
 
-    it('multi-block insertion: refresh handles PM adding newlines', async () => {
-        const item = createMockNoteItem(PLAIN_NOTE);
-        const action = await applyWithRefresh({
-            item,
-            oldString: '<p>Second paragraph with more text.</p>',
+    it('multi-block insertion: undo_new_html updated after PM adds newlines', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: '<p>Second paragraph with more text.</p>\n',
             newString: '<p>Replaced paragraph.</p><p>Additional paragraph.</p>',
+            applyPMNormalization: true,
         });
 
         await undoEdit(item, action);
@@ -591,60 +546,74 @@ describe('apply-undo with PM normalization + undo data refresh', () => {
         expect(restored).not.toContain('Replaced paragraph');
     });
 
-    it('list item: refresh handles PM adding newlines to new <li>', async () => {
-        const item = createMockNoteItem(NOTE_WITH_LIST);
-        const action = await applyWithRefresh({
-            item,
+    it('list item: undo_new_html updated after PM normalizes bold in <li>', async () => {
+        const { item, action, result } = await applyEdit({
+            noteHtml: NOTE_WITH_LIST,
             oldString: 'Third item',
             newString: 'Third item and <b>extra bold</b> content',
+            applyPMNormalization: true,
         });
 
-        expect((action.result_data as EditNoteResultData).undo_new_html).toContain('<strong>');
+        expect(result.undo_new_html).toContain('<strong>');
         await undoEdit(item, action);
         expect(stripDataCitationItems(item._getHtml())).toContain('Third item');
         expect(stripDataCitationItems(item._getHtml())).not.toContain('extra bold');
     });
 
-    it('full apply-undo-apply-undo cycle with refresh', async () => {
-        const item = createMockNoteItem(PLAIN_NOTE);
-        const oldStr = 'First paragraph with some text';
-        const newStr = 'First paragraph with <b>bold</b> text';
+    it('full apply-undo-apply-undo cycle with PM normalization', async () => {
+        // First apply
+        const { item, action: action1 } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: 'First paragraph with some text',
+            newString: 'First paragraph with <b>bold</b> text',
+            applyPMNormalization: true,
+        });
 
-        const action1 = await applyWithRefresh({ item, oldString: oldStr, newString: newStr });
+        // Undo
         await undoEdit(item, action1);
         expect(stripDataCitationItems(item._getHtml())).toContain('First paragraph with some text');
 
-        const action2 = await applyWithRefresh({ item, oldString: oldStr, newString: newStr });
+        // Re-apply on the same item
+        setupPMNormalizingEditor(item);
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const action2 = makeAction(1, 'TESTKEY',
+            'First paragraph with some text',
+            'First paragraph with <b>bold</b> text'
+        );
+        const result2 = await executeEditNoteAction(action2);
+        item._setHtml(simulatePMNormalization(item._getHtml()));
+        action2.status = 'applied';
+        action2.result_data = result2;
+        invalidateSimplificationCache('1-TESTKEY');
+
+        // Re-undo
         await undoEdit(item, action2);
         expect(stripDataCitationItems(item._getHtml())).toContain('First paragraph with some text');
     });
 
     it('no-op refresh when PM does not change HTML (plain text edit)', async () => {
-        const item = createMockNoteItem(PLAIN_NOTE);
-        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const { result } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: 'some text',
+            newString: 'changed text',
+            applyPMNormalization: true,
+        });
 
-        const action = makeAction(1, 'TESTKEY', 'some text', 'changed text');
-        const result = await executeEditNoteAction(action);
-        action.status = 'applied';
-        action.result_data = result;
-
-        // Plain text → PM normalization is a no-op → refresh should not change undo_new_html
-        simulateUndoDataRefresh(item, action);
-        expect((action.result_data as EditNoteResultData).undo_new_html).toBe('changed text');
+        // Plain text → PM normalization is a no-op → undo_new_html unchanged
+        expect(result.undo_new_html).toBe('changed text');
     });
 });
 
 
 // =============================================================================
-// Section 3: Apply-Undo Roundtrip WITH PM Normalization (no refresh)
+// Section 3: Apply-Undo Roundtrip WITH PM Normalization (via applyEdit)
 //
-// These test what happens when the refresh hasn't fired yet (user clicks
-// undo immediately) or note is not open in editor (no refresh scheduled).
-// EXPECTED: These FAIL — demonstrating why the refresh is needed.
+// These also exercise the inline refresh but use applyEdit directly
+// (same production path as Section 2, different edit scenarios).
 // =============================================================================
 
 describe('apply-undo roundtrip (with PM normalization)', () => {
-    it('FAILS: simple text change — PM adds newlines between blocks', async () => {
+    it('simple text change — PM adds newlines between blocks', async () => {
         const { item, action } = await applyEdit({
             noteHtml: PLAIN_NOTE,
             oldString: '<p>First paragraph with some text.</p>',
@@ -658,7 +627,7 @@ describe('apply-undo roundtrip (with PM normalization)', () => {
         expect(restored).not.toContain('Inserted paragraph');
     });
 
-    it('FAILS: bold tag converted — PM converts <b> to <strong>', async () => {
+    it('bold tag converted — PM converts <b> to <strong>', async () => {
         const { item, action } = await applyEdit({
             noteHtml: PLAIN_NOTE,
             oldString: 'First paragraph with some text',
@@ -672,7 +641,7 @@ describe('apply-undo roundtrip (with PM normalization)', () => {
         expect(restored).not.toContain('bold</');
     });
 
-    it('FAILS: italic tag converted — PM converts <i> to <em>', async () => {
+    it('italic tag converted — PM converts <i> to <em>', async () => {
         const { item, action } = await applyEdit({
             noteHtml: PLAIN_NOTE,
             oldString: 'Second paragraph with more text',
@@ -685,7 +654,7 @@ describe('apply-undo roundtrip (with PM normalization)', () => {
         expect(restored).toContain('Second paragraph with more text');
     });
 
-    it('FAILS: strikethrough tag converted — PM converts <s> to span', async () => {
+    it('strikethrough tag converted — PM converts <s> to span', async () => {
         const { item, action } = await applyEdit({
             noteHtml: PLAIN_NOTE,
             oldString: 'some text',
@@ -698,7 +667,7 @@ describe('apply-undo roundtrip (with PM normalization)', () => {
         expect(restored).toContain('some text');
     });
 
-    it('FAILS: link gets rel attribute — PM adds rel to <a>', async () => {
+    it('link gets rel attribute — PM adds rel to <a>', async () => {
         const { item, action } = await applyEdit({
             noteHtml: PLAIN_NOTE,
             oldString: 'some text',
@@ -711,7 +680,7 @@ describe('apply-undo roundtrip (with PM normalization)', () => {
         expect(restored).toContain('some text');
     });
 
-    it('FAILS: list item unwrapping — PM unwraps single-<p> in <li>', async () => {
+    it('list item unwrapping — PM unwraps single-<p> in <li>', async () => {
         const { item, action } = await applyEdit({
             noteHtml: PLAIN_NOTE,
             oldString: '<p>Second paragraph with more text.</p>',
@@ -791,7 +760,7 @@ describe('full apply-undo-apply-undo cycle (no PM normalization)', () => {
 });
 
 describe('full apply-undo-apply-undo cycle (with PM normalization)', () => {
-    it('FAILS: text edit with PM normalization between each step', async () => {
+    it('text edit with PM normalization between each step', async () => {
         const original = PLAIN_NOTE;
         const oldStr = 'First paragraph with some text';
         const newStr = 'First paragraph with <b>bold</b> text';
@@ -820,7 +789,7 @@ describe('full apply-undo-apply-undo cycle (with PM normalization)', () => {
         expect(restored2).toContain('First paragraph with some text');
     });
 
-    it('FAILS: multi-block insertion with PM normalization', async () => {
+    it('multi-block insertion with PM normalization', async () => {
         const { item, action } = await applyEdit({
             noteHtml: PLAIN_NOTE,
             oldString: '<p>Second paragraph with more text.</p>',
@@ -1052,7 +1021,7 @@ describe('multiple edits on same note', () => {
         expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(original));
     });
 
-    it('FAILS: two edits with PM normalization — undo out of order', async () => {
+    it('two edits with PM normalization — undo out of order', async () => {
         const original = PLAIN_NOTE;
 
         // Edit 1: insert bold text (non-canonical <b>)
@@ -1129,7 +1098,7 @@ describe('list editing edge cases', () => {
         expect(restored).toBe(stripDataCitationItems(NOTE_WITH_LIST));
     });
 
-    it('FAILS: add list item with bold — PM converts <b> to <strong>', async () => {
+    it('add list item with bold — PM converts <b> to <strong>', async () => {
         const { item, action } = await applyEdit({
             noteHtml: NOTE_WITH_LIST,
             oldString: 'Third item',
