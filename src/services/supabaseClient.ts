@@ -21,7 +21,10 @@ const zoteroStorage = {
     getItem: async (key: string) => {
         try {
             const data = await encryptedStorage.getItem(key);
-            if (!data) return null;
+            if (!data) {
+                logger(`zoteroStorage: getItem("${key}") returned null (no stored session)`);
+                return null;
+            }
 
             // Migrate double-encoded tokens from old format
             // Old format: JSON.stringify('{"access_token":"..."}') → "\"{\\"access_token\\"...\""
@@ -57,6 +60,7 @@ const zoteroStorage = {
             + 'Session will work in memory but a restart will require re-login.', 2);
     },
     removeItem: async (key: string) => {
+        logger(`zoteroStorage: removeItem("${key}") called — session being cleared`, new Error().stack);
         try {
             await encryptedStorage.removeItem(key);
         } catch (error) {
@@ -146,7 +150,12 @@ async function acquireAuthLock<T>(
     }
 
     try {
-        return await fn();
+        const result = await fn();
+        // Log when auto-refresh operations complete — helps diagnose silent token failures
+        if (name.includes('refresh') || name.includes('initialize')) {
+            logger(`Auth lock: "${name}" completed successfully`);
+        }
+        return result;
     } catch (error) {
         handleAuthError(error, name);
         throw error;
