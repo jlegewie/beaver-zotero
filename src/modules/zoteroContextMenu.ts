@@ -43,6 +43,33 @@ function isActionableContextItem(item: any): boolean {
     return !!supported && !safeIsInTrash(item);
 }
 
+// ---------------------------------------------------------------------------
+// Winning target type — determined per popup-show by submenu onShowing,
+// consumed by filterItemAction. Safe because submenu onShowing always fires
+// before inner menu items' onShowing (parent popup → submenu popup order).
+// ---------------------------------------------------------------------------
+
+interface WinningTarget { type: 'items' | 'attachment'; count: number }
+let winningTarget: WinningTarget | null = null;
+
+/**
+ * Determine the single winning target type from actionable items.
+ * Priority: regular items > PDF attachments (mirrors getActiveTarget in ActionSuggestions).
+ */
+function getWinningTarget(actionable: any[]): WinningTarget | null {
+    const regular = actionable.filter((i: any) => i.isRegularItem());
+    if (regular.length > 0) return { type: 'items', count: regular.length };
+    const pdfs = actionable.filter((i: any) => i.isPDFAttachment());
+    if (pdfs.length > 0) return { type: 'attachment', count: pdfs.length };
+    return null;
+}
+
+/** Build a human-readable label for the winning target (e.g. "3 items", "1 attachment"). */
+function winningTargetLabel(wt: WinningTarget): string {
+    if (wt.type === 'items') return `${wt.count} item${wt.count !== 1 ? 's' : ''}`;
+    return `${wt.count} attachment${wt.count !== 1 ? 's' : ''}`;
+}
+
 const ITEM_MENU_ID = 'beaver-item-context-menu';
 const COLLECTION_MENU_ID = 'beaver-collection-context-menu';
 const PLUGIN_ID = config.config.addonID;
@@ -170,38 +197,50 @@ function registerMenus(): void {
         menus: [{
             menuType: 'submenu' as const,
             l10nID: 'beaver-context-menu-submenu',
+            l10nArgs: JSON.stringify({ context: 'none' }),
             onShowing: (_event: any, context: any) => {
-                const { items, setVisible } = context;
+                const { items, setVisible, setL10nArgs } = context;
+
+                // Reset module-level state
+                winningTarget = null;
+
                 if (!items || items.length === 0) {
                     setVisible(false);
                     return;
                 }
                 // Hide for annotations — not yet supported
-                const allAnnotations = items.every((i: any) => i.isAnnotation?.());
-                if (allAnnotations) {
+                if (items.every((i: any) => i.isAnnotation?.())) {
                     setVisible(false);
                     return;
                 }
                 // Hide for notes — not yet supported (re-enable by removing this block)
-                const allNotes = items.every((i: any) => i.isNote());
-                if (allNotes) {
+                if (items.every((i: any) => i.isNote())) {
                     setVisible(false);
                     return;
                 }
+
                 // Filter to actionable items (supported type + not in trash)
                 const actionable = items.filter((i: any) => isActionableContextItem(i));
                 if (actionable.length === 0) {
                     setVisible(false);
                     return;
                 }
-                // Hide if selection contains both regular items and PDF attachments
-                // (mixed target types — same safety as ActionSuggestions' getActiveTarget)
-                const hasRegular = actionable.some((i: any) => i.isRegularItem());
-                const hasAttachment = actionable.some((i: any) => i.isPDFAttachment());
-                if (hasRegular && hasAttachment) {
+
+                // Determine the single winning target type (items > attachments)
+                winningTarget = getWinningTarget(actionable);
+                if (!winningTarget) {
                     setVisible(false);
                     return;
                 }
+
+                // Show context label when some selected items are filtered out
+                // (mixed types, notes, trashed, annotations, etc.)
+                if (winningTarget.count < items.length) {
+                    setL10nArgs(JSON.stringify({ context: winningTargetLabel(winningTarget) }));
+                } else {
+                    setL10nArgs(JSON.stringify({ context: 'none' }));
+                }
+
                 setVisible(true);
             },
             menus: buildItemMenuItems(itemActions),
@@ -219,6 +258,7 @@ function registerMenus(): void {
         menus: [{
             menuType: 'submenu' as const,
             l10nID: 'beaver-context-menu-submenu',
+            l10nArgs: JSON.stringify({ context: 'none' }),
             onShowing: (_event: any, context: any) => {
                 const { collectionTreeRow, setVisible } = context;
                 setVisible(collectionTreeRow?.isCollection?.() === true);
@@ -297,12 +337,17 @@ function buildCollectionMenuItems(collectionActions: Action[]): any[] {
 
 function filterItemAction(action: Action, context: any): void {
     const { items, setVisible } = context;
-    if (!items || items.length === 0) {
+    if (!items || items.length === 0 || !winningTarget) {
         setVisible(false);
         return;
     }
 
-    // Use isActionableContextItem (isSupportedItem + safeIsInTrash) consistently
+    // Only show actions matching the winning target type
+    if (action.targetType !== winningTarget.type) {
+        setVisible(false);
+        return;
+    }
+
     const actionable = items.filter((i: any) => isActionableContextItem(i));
 
     switch (action.targetType) {
@@ -315,11 +360,6 @@ function filterItemAction(action: Action, context: any): void {
         case 'attachment': {
             const hasAttachment = actionable.some((i: any) => i.isPDFAttachment());
             setVisible(hasAttachment);
-            break;
-        }
-        case 'note': {
-            const allNotes = items.length > 0 && items.every((i: any) => i.isNote());
-            setVisible(allNotes);
             break;
         }
         default:
