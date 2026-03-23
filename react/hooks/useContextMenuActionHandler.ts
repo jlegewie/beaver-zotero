@@ -50,7 +50,7 @@ export function useContextMenuActionHandler() {
                 }
 
                 // For collection actions: explicitly attach the right-clicked collection
-                if (collectionId) {
+                if (targetType === 'collection' && collectionId) {
                     const col = Zotero.Collections.get(collectionId);
                     if (col) {
                         setCurrentMessageCollections([{
