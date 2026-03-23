@@ -9,6 +9,7 @@ import { ModelMessage } from '../agents/types';
 import { ZoteroItemReference } from '../types/zotero';
 import { activeRunAtom } from '../agents/atoms';
 import { loadFullItemDataWithAllTypes, isLibraryEditable } from '../../src/utils/zoteroUtils';
+import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../src/services/agentDataProvider/utils';
 import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
@@ -352,8 +353,38 @@ export async function autoCreateNoteAgentActions(
             }
         }
 
+        // If no target library from item_id, try resolving from library attribute
+        if (!targetLibraryId && proposed.library) {
+            const libraryResult = getLibraryByIdOrName(proposed.library);
+            if (libraryResult.library) {
+                targetLibraryId = libraryResult.library.libraryID;
+            }
+        }
+
+        // Fallback to user's default library if no library specified but collection is
+        if (!targetLibraryId && proposed.collection) {
+            targetLibraryId = Zotero.Libraries.userLibraryID;
+        }
+
         if (!targetLibraryId) continue;
         if (!isLibraryEditable(targetLibraryId)) continue;
+
+        // Resolve collection if specified
+        let collectionKey: string | undefined;
+        if (proposed.collection) {
+            const collectionResult = getCollectionByIdOrName(proposed.collection, targetLibraryId);
+            if (collectionResult) {
+                collectionKey = collectionResult.collection.key;
+                // If collection is in a different library than targetLibraryId
+                // (e.g. library was not specified but collection was found elsewhere),
+                // update targetLibraryId to match
+                if (!proposed.library_id && !proposed.zotero_key && !proposed.library) {
+                    targetLibraryId = collectionResult.libraryID;
+                }
+            } else {
+                logger(`autoCreateNoteAgentActions: Collection "${proposed.collection}" not found, creating note without collection`, 1);
+            }
+        }
 
         try {
             const noteContent = `<h1>${title}</h1>\n\n${content}`;
@@ -367,6 +398,21 @@ export async function autoCreateNoteAgentActions(
                 threadId: threadId || undefined,
                 runId,
             });
+
+            // Add the note to the collection if resolved
+            if (collectionKey && result.zotero_key) {
+                try {
+                    const noteItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                        result.library_id, result.zotero_key
+                    );
+                    if (noteItem) {
+                        noteItem.addToCollection(collectionKey);
+                        await noteItem.saveTx();
+                    }
+                } catch (collectionError: any) {
+                    logger(`autoCreateNoteAgentActions: Failed to add note to collection: ${collectionError.message}`, 1);
+                }
+            }
 
             // Acknowledge the action (marks as 'applied')
             set(ackAgentActionsAtom, runId, [{ action_id: action.id, result_data: result }]);
