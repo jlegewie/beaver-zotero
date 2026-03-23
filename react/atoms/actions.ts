@@ -18,7 +18,7 @@ import { zoteroContextAtom } from './zoteroContext';
 import { isActionVisible, ActionContext } from '../utils/actionVisibility';
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
 import { sendWSMessageAtom } from './agentRunAtoms';
-import { currentMessageItemsAtom, currentMessageCollectionsAtom } from './messageComposition';
+import { currentMessageItemsAtom, currentMessageCollectionsAtom, CollectionReference } from './messageComposition';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { itemValidationResultsAtom } from './itemValidation';
 
@@ -221,7 +221,7 @@ export const sendResolvedActionAtom = atom(
             }
         }
 
-        if (collection) {
+        if (collection && (get(currentMessageCollectionsAtom) as CollectionReference[]).length === 0) {
             set(currentMessageCollectionsAtom, [collection]);
         }
 
