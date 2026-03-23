@@ -190,7 +190,7 @@ export const BUILTIN_ACTIONS: Action[] = [
     {
         id: 'builtin-collection-tag-all',
         title: 'Tag all items in this collection',
-        text: 'Analyze every item in this collection and suggest subject tags. Use my existing tags where they fit. Be consistent across items. Papers on similar subtopics should share tags.',
+        text: 'Analyze every item in this collection and assign appropriate tags to each item. Use my existing tags where they fit. Be consistent across items. Papers on similar subtopics should share tags.',
         targetType: 'collection',
         sortOrder: 440,
     },
