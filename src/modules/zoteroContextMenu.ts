@@ -139,8 +139,9 @@ function registerMenus(): void {
     const actions = getMergedActions();
 
     // --- Item context menu ---
+    // Note actions are excluded for now — enable by adding 'note' back to this filter
     const itemActions = actions.filter(a =>
-        a.targetType === 'items' || a.targetType === 'attachment' || a.targetType === 'note'
+        a.targetType === 'items' || a.targetType === 'attachment'
     );
 
     // Always register — at minimum shows "Add custom action..."
@@ -157,10 +158,22 @@ function registerMenus(): void {
                     setVisible(false);
                     return;
                 }
+                // Hide for annotations — not yet supported
+                const allAnnotations = items.every((i: any) => i.isAnnotation?.());
+                if (allAnnotations) {
+                    setVisible(false);
+                    return;
+                }
+                // Hide for notes — not yet supported (re-enable by removing this block)
+                const allNotes = items.every((i: any) => i.isNote());
+                if (allNotes) {
+                    setVisible(false);
+                    return;
+                }
+                // Show for regular items and attachments
                 const hasRegular = items.some((i: any) => i.isRegularItem() && !i.deleted);
-                const hasAttachment = items.some((i: any) => i.isAttachment() && !i.deleted);
-                const allNotes = items.length > 0 && items.every((i: any) => i.isNote());
-                setVisible(hasRegular || hasAttachment || allNotes);
+                const hasAttachment = items.some((i: any) => i.isPDFAttachment() && !i.deleted);
+                setVisible(hasRegular || hasAttachment);
             },
             menus: buildItemMenuItems(itemActions),
         }],
