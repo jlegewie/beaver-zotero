@@ -117,6 +117,9 @@ export async function handleZoteroAttachmentPageImagesRequest(
         const cache = Zotero.Beaver?.attachmentFileCache;
         const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, filePath).catch(() => null) : null;
 
+        // Determine once whether this is an all-pages request
+        const requestingAllPages = !pages || pages.length === 0;
+
         if (cachedMeta) {
             if (cachedMeta.is_encrypted) {
                 return errorResponse(`The PDF file for ${pdfKey} is password-protected`, 'encrypted');
@@ -125,7 +128,6 @@ export async function handleZoteroAttachmentPageImagesRequest(
                 return errorResponse(`The PDF file for ${pdfKey} is invalid or corrupted`, 'invalid_pdf');
             }
             // Check page count limit only for all-pages requests (not targeted page access)
-            const requestingAllPages = !pages || pages.length === 0;
             if (!skip_local_limits && requestingAllPages && cachedMeta.page_count != null) {
                 const maxPageCount = getPref('maxPageCount');
                 if (cachedMeta.page_count > maxPageCount) {
@@ -149,7 +151,6 @@ export async function handleZoteroAttachmentPageImagesRequest(
         }
 
         // 6. Check page count limit for all-pages requests (skip if skip_local_limits is true)
-        const requestingAllPages = !pages || pages.length === 0;
         if (!skip_local_limits && requestingAllPages) {
             const maxPageCount = getPref('maxPageCount');
             if (totalPages > maxPageCount) {

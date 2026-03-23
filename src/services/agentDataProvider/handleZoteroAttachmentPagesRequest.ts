@@ -127,7 +127,7 @@ export async function handleZoteroAttachmentPagesRequest(
         const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, filePath).catch(() => null) : null;
 
         // Fast-path: use cached metadata for known error states
-        const extractingAllPages = start_page === null && end_page === null;
+        const extractingAllPages = start_page == null && end_page == null;
         if (cachedMeta) {
             if (cachedMeta.is_encrypted) {
                 return errorResponse(`The PDF file for ${pdfKey} is password-protected`, 'encrypted');
