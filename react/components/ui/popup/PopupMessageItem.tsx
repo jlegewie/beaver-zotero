@@ -120,7 +120,16 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
                         count={message.count}
                         buttonIcon={message.buttonIcon}
                         buttonOnClick={message.buttonOnClick}
-                        fontColor={fontColor}
+                        fontColor={
+                            message.type === 'version_update' && !isFloating
+                                ? 'font-color-primary'
+                                : fontColor
+                        }
+                        titleClassName={
+                            message.type === 'version_update' && !isFloating
+                                ? 'text-xl font-semibold mb-2'
+                                : undefined
+                        }
                         handleDismiss={handleDismiss}
                         cancelable={message.cancelable}
                     />
