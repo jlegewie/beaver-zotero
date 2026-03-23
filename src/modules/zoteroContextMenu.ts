@@ -29,6 +29,12 @@ const ITEM_MENU_ID = 'beaver-item-context-menu';
 const COLLECTION_MENU_ID = 'beaver-collection-context-menu';
 const PLUGIN_ID = config.config.addonID;
 
+// Store the namespaced keys returned by MenuManager.registerMenu().
+// MenuManager internally namespaces the menuID with the pluginID
+// (e.g. "beaver@jlegewie.com-beaver-item-context-menu") and
+// unregisterMenu() requires that namespaced key, not the raw menuID.
+let registeredItemKey: string | null = null;
+let registeredCollectionKey: string | null = null;
 let prefObserverSymbol: symbol | null = null;
 
 // ---------------------------------------------------------------------------
@@ -98,25 +104,33 @@ export function initContextMenus(): void {
 
 export function cleanupContextMenus(): void {
     stopPrefObserver();
-    try {
-        (Zotero as any).MenuManager?.unregisterMenu?.(ITEM_MENU_ID);
-        (Zotero as any).MenuManager?.unregisterMenu?.(COLLECTION_MENU_ID);
-    } catch (_e) {
-        // Ignore — may not exist
-    }
+    unregisterMenus();
 }
 
 // ---------------------------------------------------------------------------
 // Menu registration
 // ---------------------------------------------------------------------------
 
+function unregisterMenus(): void {
+    const MenuManager = (Zotero as any).MenuManager;
+    if (!MenuManager) return;
+
+    if (registeredItemKey) {
+        try { MenuManager.unregisterMenu(registeredItemKey); } catch (_e) { /* ignore */ }
+        registeredItemKey = null;
+    }
+    if (registeredCollectionKey) {
+        try { MenuManager.unregisterMenu(registeredCollectionKey); } catch (_e) { /* ignore */ }
+        registeredCollectionKey = null;
+    }
+}
+
 function registerMenus(): void {
     const MenuManager = (Zotero as any).MenuManager;
     if (!MenuManager) return;
 
-    // Unregister existing menus first (safe to call repeatedly)
-    try { MenuManager.unregisterMenu(ITEM_MENU_ID); } catch (_e) { /* ignore */ }
-    try { MenuManager.unregisterMenu(COLLECTION_MENU_ID); } catch (_e) { /* ignore */ }
+    // Unregister existing menus first using stored namespaced keys
+    unregisterMenus();
 
     const actions = getMergedActions();
 
@@ -126,7 +140,7 @@ function registerMenus(): void {
     );
 
     // Always register — at minimum shows "Add custom action..."
-    MenuManager.registerMenu({
+    const itemKey = MenuManager.registerMenu({
         menuID: ITEM_MENU_ID,
         pluginID: PLUGIN_ID,
         target: 'main/library/item',
@@ -147,11 +161,12 @@ function registerMenus(): void {
             menus: buildItemMenuItems(itemActions),
         }],
     });
+    if (itemKey) registeredItemKey = itemKey;
 
     // --- Collection context menu ---
     const collectionActions = actions.filter(a => a.targetType === 'collection');
 
-    MenuManager.registerMenu({
+    const collectionKey = MenuManager.registerMenu({
         menuID: COLLECTION_MENU_ID,
         pluginID: PLUGIN_ID,
         target: 'main/library/collection',
@@ -165,6 +180,7 @@ function registerMenus(): void {
             menus: buildCollectionMenuItems(collectionActions),
         }],
     });
+    if (collectionKey) registeredCollectionKey = collectionKey;
 
     ztoolkit.log(`zoteroContextMenu: Registered menus (${itemActions.length} item actions, ${collectionActions.length} collection actions)`);
 }
