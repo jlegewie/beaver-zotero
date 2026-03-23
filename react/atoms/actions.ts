@@ -18,7 +18,7 @@ import { zoteroContextAtom } from './zoteroContext';
 import { isActionVisible, ActionContext } from '../utils/actionVisibility';
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
 import { sendWSMessageAtom } from './agentRunAtoms';
-import { currentMessageItemsAtom } from './messageComposition';
+import { currentMessageItemsAtom, currentMessageCollectionsAtom } from './messageComposition';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { itemValidationResultsAtom } from './itemValidation';
 
@@ -177,7 +177,7 @@ export const actionsForContextAtom = atom<Action[]>((get) => {
 export const sendResolvedActionAtom = atom(
     null,
     async (get, set, payload: { text: string; targetType?: ActionTargetType }) => {
-        const { text, items, emptyItemVariables } = await resolvePromptVariables(
+        const { text, items, collection, emptyItemVariables } = await resolvePromptVariables(
             payload.text, payload.targetType
         );
 
@@ -219,6 +219,10 @@ export const sendResolvedActionAtom = atom(
             if (newItems.length > 0) {
                 set(currentMessageItemsAtom, [...currentItems, ...newItems]);
             }
+        }
+
+        if (collection) {
+            set(currentMessageCollectionsAtom, [collection]);
         }
 
         return set(sendWSMessageAtom, text);

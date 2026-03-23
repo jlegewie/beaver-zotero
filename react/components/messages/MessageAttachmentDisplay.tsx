@@ -1,6 +1,6 @@
 import React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
-import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
+import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom, currentMessageCollectionsAtom } from '../../atoms/messageComposition';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
@@ -8,6 +8,7 @@ import { LibraryButton } from '../library/LibraryButton';
 import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
 import { MessageItemButton } from '../input/MessageItemButton';
+import { MessageCollectionButton } from '../input/MessageCollectionButton';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { activePreviewAtom } from '../../atoms/ui';
 
@@ -35,6 +36,7 @@ const MessageAttachmentDisplay = ({
     const currentMessageFilters = useAtomValue(currentMessageFiltersAtom);
     const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
+    const currentMessageCollections = useAtomValue(currentMessageCollectionsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
     const setActivePreview = useSetAtom(activePreviewAtom);
 
@@ -94,6 +96,11 @@ const MessageAttachmentDisplay = ({
             {/* Selected Tags */}
             {currentTagSelections.map(tag => (
                 <TagButton key={tag.id} tag={tag} />
+            ))}
+
+            {/* Current message collections */}
+            {currentMessageCollections.map(col => (
+                <MessageCollectionButton key={col.key} collection={col} />
             ))}
 
             {/* Current reader attachment */}

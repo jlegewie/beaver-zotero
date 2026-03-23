@@ -4,9 +4,11 @@ import { BeaverAgentPrompt } from '../../agents/types';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { MessageItemButton } from '../input/MessageItemButton';
+import { MessageCollectionButton } from '../input/MessageCollectionButton';
 import { LibraryButton } from '../library/LibraryButton';
 import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
+import { CollectionAttachment } from '../../types/attachments/apiTypes';
 import { EditIcon, Spinner } from '../icons/icons';
 import Button from '../ui/Button';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
@@ -67,10 +69,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         menuItems: selectionMenuItems
     } = useSelectionContextMenu(contentRef);
 
-    // Get Zotero items for attachments
+    // Get Zotero items for attachments (skip collections — they're not Zotero.Item)
     const attachmentItems = useMemo(() => {
         if (!userPrompt.attachments) return [];
         return userPrompt.attachments
+            .filter(att => att.type !== 'collection')
             .map((att) => {
                 try {
                     const item = Zotero.Items.getByLibraryAndKey(att.library_id, att.zotero_key);
@@ -80,7 +83,15 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                     return null;
                 }
             })
-            .filter((a): a is { attachment: typeof userPrompt.attachments[0]; item: Zotero.Item } => a !== null);
+            .filter((a): a is NonNullable<typeof a> => a !== null);
+    }, [userPrompt.attachments]);
+
+    // Get collection attachments separately
+    const collectionAttachments = useMemo(() => {
+        if (!userPrompt.attachments) return [];
+        return userPrompt.attachments.filter(
+            (att): att is CollectionAttachment => att.type === 'collection'
+        );
     }, [userPrompt.attachments]);
 
     // Initialize edited content when opening edit mode
@@ -183,8 +194,9 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     }, [editedContent, isEditing, editMaxHeight]);
 
     // Check if we have content to display in the filters/attachments section
-    const hasFiltersOrAttachments = 
+    const hasFiltersOrAttachments =
         attachmentItems.length > 0 ||
+        collectionAttachments.length > 0 ||
         (userPrompt.filters?.libraries && userPrompt.filters.libraries.length > 0) ||
         (userPrompt.filters?.collections && userPrompt.filters.collections.length > 0) ||
         (userPrompt.filters?.tags && userPrompt.filters.tags.length > 0);
@@ -263,6 +275,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                         {/* Tag filters */}
                         {userPrompt.filters?.tags?.map((tag) => (
                             <TagButton key={tag.id} tag={tag} canEdit={false} />
+                        ))}
+
+                        {/* Collection attachments */}
+                        {collectionAttachments.map((col) => (
+                            <MessageCollectionButton key={col.zotero_key} collection={{ key: col.zotero_key, name: col.name, libraryID: col.library_id, parentKey: col.parent_key }} canEdit={false} />
                         ))}
 
                         {/* Attachments */}
@@ -346,6 +363,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                             {/* Tag filters (read-only in edit mode) */}
                             {userPrompt.filters?.tags?.map((tag) => (
                                 <TagButton key={tag.id} tag={tag} canEdit={false} />
+                            ))}
+
+                            {/* Collection attachments (read-only in edit mode) */}
+                            {collectionAttachments.map((col) => (
+                                <MessageCollectionButton key={col.zotero_key} collection={{ key: col.zotero_key, name: col.name, libraryID: col.library_id, parentKey: col.parent_key }} canEdit={false} />
                             ))}
 
                             {/* Attachments (read-only in edit mode) */}
