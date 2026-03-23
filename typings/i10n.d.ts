@@ -5,6 +5,7 @@
 export type FluentMessageId =
   | 'beaver-context-menu-action'
   | 'beaver-context-menu-add-action'
+  | 'beaver-context-menu-context-header'
   | 'beaver-context-menu-submenu'
   | 'beaver-menu-upsert'
   | 'item-info-row-example-label'

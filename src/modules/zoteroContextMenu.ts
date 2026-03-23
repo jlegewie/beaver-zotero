@@ -197,9 +197,8 @@ function registerMenus(): void {
         menus: [{
             menuType: 'submenu' as const,
             l10nID: 'beaver-context-menu-submenu',
-            l10nArgs: JSON.stringify({ context: 'none' }),
             onShowing: (_event: any, context: any) => {
-                const { items, setVisible, setL10nArgs } = context;
+                const { items, setVisible } = context;
 
                 // Reset module-level state
                 winningTarget = null;
@@ -233,14 +232,6 @@ function registerMenus(): void {
                     return;
                 }
 
-                // Show context label when some selected items are filtered out
-                // (mixed types, notes, trashed, annotations, etc.)
-                if (winningTarget.count < items.length) {
-                    setL10nArgs(JSON.stringify({ context: winningTargetLabel(winningTarget) }));
-                } else {
-                    setL10nArgs(JSON.stringify({ context: 'none' }));
-                }
-
                 setVisible(true);
             },
             menus: buildItemMenuItems(itemActions),
@@ -258,7 +249,6 @@ function registerMenus(): void {
         menus: [{
             menuType: 'submenu' as const,
             l10nID: 'beaver-context-menu-submenu',
-            l10nArgs: JSON.stringify({ context: 'none' }),
             onShowing: (_event: any, context: any) => {
                 const { collectionTreeRow, setVisible } = context;
                 setVisible(collectionTreeRow?.isCollection?.() === true);
@@ -276,23 +266,47 @@ function registerMenus(): void {
 // ---------------------------------------------------------------------------
 
 function buildItemMenuItems(itemActions: Action[]): any[] {
-    const items: any[] = itemActions.map(action => ({
-        menuType: 'menuitem' as const,
-        l10nID: 'beaver-context-menu-action',
-        l10nArgs: JSON.stringify({ title: action.title }),
-        onShowing: (_event: any, context: any) => {
-            filterItemAction(action, context);
-        },
-        onCommand: (_event: any, context: any) => {
-            dispatchAction(action, context);
-        },
-    }));
+    const menus: any[] = [];
 
-    if (items.length > 0) {
-        items.push({ menuType: 'separator' as const });
+    // Disabled context header — only visible when some selected items are
+    // filtered out (mixed types, trashed, notes, etc.)
+    menus.push({
+        menuType: 'menuitem' as const,
+        l10nID: 'beaver-context-menu-context-header',
+        l10nArgs: JSON.stringify({ context: '' }),
+        onShowing: (_event: any, context: any) => {
+            const { items, setVisible, setEnabled, setL10nArgs } = context;
+            const totalSelected = items?.length ?? 0;
+            if (winningTarget && winningTarget.count < totalSelected) {
+                setL10nArgs(JSON.stringify({ context: winningTargetLabel(winningTarget) }));
+                setEnabled(false);
+                setVisible(true);
+            } else {
+                setVisible(false);
+            }
+        },
+    });
+
+    // Action items
+    for (const action of itemActions) {
+        menus.push({
+            menuType: 'menuitem' as const,
+            l10nID: 'beaver-context-menu-action',
+            l10nArgs: JSON.stringify({ title: action.title }),
+            onShowing: (_event: any, context: any) => {
+                filterItemAction(action, context);
+            },
+            onCommand: (_event: any, context: any) => {
+                dispatchAction(action, context);
+            },
+        });
     }
 
-    items.push({
+    if (itemActions.length > 0) {
+        menus.push({ menuType: 'separator' as const });
+    }
+
+    menus.push({
         menuType: 'menuitem' as const,
         l10nID: 'beaver-context-menu-add-action',
         onCommand: () => {
@@ -300,7 +314,7 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
         },
     });
 
-    return items;
+    return menus;
 }
 
 function buildCollectionMenuItems(collectionActions: Action[]): any[] {

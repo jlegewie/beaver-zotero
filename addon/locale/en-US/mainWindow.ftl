@@ -12,10 +12,10 @@ item-info-row-example-label = Example Row
 item-pane-status = Beaver Status
 
 beaver-context-menu-submenu =
-    .label = { $context ->
-        [none] Beaver Actions
-       *[other] Beaver Actions ({$context})
-    }
+    .label = Beaver Actions
+
+beaver-context-menu-context-header =
+    .label = { $context }
 
 beaver-context-menu-action =
     .label = { $title }
