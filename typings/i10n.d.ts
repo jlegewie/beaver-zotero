@@ -3,6 +3,9 @@
 /* eslint-disable */
 // @ts-nocheck
 export type FluentMessageId =
+  | 'beaver-context-menu-action'
+  | 'beaver-context-menu-add-action'
+  | 'beaver-context-menu-submenu'
   | 'beaver-menu-upsert'
   | 'item-info-row-example-label'
   | 'item-pane-status'
