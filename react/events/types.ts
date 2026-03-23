@@ -4,6 +4,7 @@ export interface BeaverEvents {
     toggleChat: {
         location?: 'library' | 'reader';
         forceOpen?: boolean;
+        skipAutoPopulate?: boolean;
     };
     loadThread: {
         threadId: string;

@@ -31,11 +31,13 @@ export function useToggleSidebar() {
             if (!currentlyOpen) {
                 setCurrentMessageItems([]);
                 removePopupMessagesByType(['items_summary']);
-                const libraryIds = store.get(searchableLibraryIdsAtom);   // Checking for empty array ensures that profile is loaded
-                const addSelectedItemsOnOpen = getPref('addSelectedItemsOnOpen');
-                if (addSelectedItemsOnOpen && isLibraryTab && libraryIds.length > 0) {
-                    const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
-                    updateMessageItemsFromZoteroSelection(maxAddAttachmentToMessage);
+                if (!detail?.skipAutoPopulate) {
+                    const libraryIds = store.get(searchableLibraryIdsAtom);   // Checking for empty array ensures that profile is loaded
+                    const addSelectedItemsOnOpen = getPref('addSelectedItemsOnOpen');
+                    if (addSelectedItemsOnOpen && isLibraryTab && libraryIds.length > 0) {
+                        const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
+                        updateMessageItemsFromZoteroSelection(maxAddAttachmentToMessage);
+                    }
                 }
             }
             

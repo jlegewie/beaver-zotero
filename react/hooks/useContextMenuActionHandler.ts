@@ -26,11 +26,12 @@ export function useContextMenuActionHandler() {
 
         logger(`useContextMenuActionHandler: Received action ${actionId} (${targetType}), ${itemIds.length} items`);
 
-        // 1. Open sidebar
-        eventManager.dispatch('toggleChat', { forceOpen: true });
+        // 1. Open sidebar (skip auto-populate — we manage items ourselves)
+        eventManager.dispatch('toggleChat', { forceOpen: true, skipAutoPopulate: true });
 
         // 2. Start new thread (clears current thread state + message items)
-        await newThread();
+        //    Skip auto-populate — we manage items/collection ourselves below
+        await newThread({ skipAutoPopulate: true });
 
         // 3. Load items/collection and set on the message
         //    Use setTimeout(0) to let the sidebar-open state settle
