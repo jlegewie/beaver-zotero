@@ -104,7 +104,11 @@ export function initContextMenus(): void {
 
 export function cleanupContextMenus(): void {
     stopPrefObserver();
+
+    // MenuManager's auto-cleanup doesn't seem remove DOM (selector mismatch).
+    // We unregister from cache and manually remove stale DOM elements.
     unregisterMenus();
+    removeStaleMenuDOM();
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +310,30 @@ function dispatchAction(action: Action, context: any): void {
             collectionId,
         },
     }));
+}
+
+// ---------------------------------------------------------------------------
+// DOM cleanup (workaround for Zotero MenuManager _key vs mainKey mismatch)
+// ---------------------------------------------------------------------------
+
+const CUSTOM_MENU_CLASS = 'zotero-custom-menu-item';
+
+function removeStaleMenuDOM(): void {
+    try {
+        const win = Zotero.getMainWindow();
+        if (!win?.document) return;
+
+        for (const popupId of ['zotero-itemmenu', 'zotero-collectionmenu']) {
+            const popup = win.document.getElementById(popupId);
+            if (!popup) continue;
+            const stale = popup.querySelectorAll(`.${CUSTOM_MENU_CLASS}`);
+            if (stale.length > 0) {
+                stale.forEach((el: Element) => el.remove());
+            }
+        }
+    } catch (_e) {
+        // Best-effort — popup may not exist
+    }
 }
 
 // ---------------------------------------------------------------------------
