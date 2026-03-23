@@ -78,8 +78,8 @@ const ActionsPreferenceSection: React.FC = () => {
             onClick: () => handleAddAction('items'),
             customContent: (
                 <div className="display-flex flex-col">
-                    <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.items}</span>
-                    <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.items}</span>
+                    <span className="text-base font-color-primary">{TARGET_TYPE_LABELS.items}</span>
+                    <span className="text-base font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.items}</span>
                 </div>
             ),
         },
@@ -133,14 +133,9 @@ const ActionsPreferenceSection: React.FC = () => {
                     menuItems={addActionMenuItems}
                     buttonLabel="Add Action"
                     variant="outline"
-                    className="text-sm mb-15"
+                    className="text-base mb-15"
                     width="220px"
-                    customContent={
-                        <span className="display-flex items-center gap-1">
-                            <Icon icon={PlusSignIcon} className="scale-80" />
-                            <span>Add Action</span>
-                        </span>
-                    }
+                    icon={PlusSignIcon}
                 />
             </div>
             <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
