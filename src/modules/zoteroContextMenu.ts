@@ -25,6 +25,24 @@ import { getPref } from '../utils/prefs';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import config from '../../package.json';
 
+// ---------------------------------------------------------------------------
+// Inlined helpers — can't import from sync.ts or zoteroUtils.ts because they
+// transitively pull in react/store (webpack-only). These mirror isSupportedItem,
+// safeIsInTrash, and isActionableItem from actionVisibility.ts.
+// ---------------------------------------------------------------------------
+
+function safeIsInTrash(item: any): boolean {
+    try {
+        return typeof item?.isInTrash === 'function' && item.isInTrash();
+    } catch { return false; }
+}
+
+function isActionableContextItem(item: any): boolean {
+    if (!item) return false;
+    const supported = item.isRegularItem?.() || item.isPDFAttachment?.();
+    return !!supported && !safeIsInTrash(item);
+}
+
 const ITEM_MENU_ID = 'beaver-item-context-menu';
 const COLLECTION_MENU_ID = 'beaver-collection-context-menu';
 const PLUGIN_ID = config.config.addonID;
@@ -170,10 +188,21 @@ function registerMenus(): void {
                     setVisible(false);
                     return;
                 }
-                // Show for regular items and attachments
-                const hasRegular = items.some((i: any) => i.isRegularItem() && !i.deleted);
-                const hasAttachment = items.some((i: any) => i.isPDFAttachment() && !i.deleted);
-                setVisible(hasRegular || hasAttachment);
+                // Filter to actionable items (supported type + not in trash)
+                const actionable = items.filter((i: any) => isActionableContextItem(i));
+                if (actionable.length === 0) {
+                    setVisible(false);
+                    return;
+                }
+                // Hide if selection contains both regular items and PDF attachments
+                // (mixed target types — same safety as ActionSuggestions' getActiveTarget)
+                const hasRegular = actionable.some((i: any) => i.isRegularItem());
+                const hasAttachment = actionable.some((i: any) => i.isPDFAttachment());
+                if (hasRegular && hasAttachment) {
+                    setVisible(false);
+                    return;
+                }
+                setVisible(true);
             },
             menus: buildItemMenuItems(itemActions),
         }],
@@ -273,17 +302,18 @@ function filterItemAction(action: Action, context: any): void {
         return;
     }
 
+    // Use isActionableContextItem (isSupportedItem + safeIsInTrash) consistently
+    const actionable = items.filter((i: any) => isActionableContextItem(i));
+
     switch (action.targetType) {
         case 'items': {
             const min = action.minItems ?? 1;
-            const regular = items.filter((i: any) => i.isRegularItem() && !i.deleted);
+            const regular = actionable.filter((i: any) => i.isRegularItem());
             setVisible(regular.length >= min);
             break;
         }
         case 'attachment': {
-            const hasAttachment = items.some((i: any) =>
-                i.isAttachment() && !i.deleted
-            );
+            const hasAttachment = actionable.some((i: any) => i.isPDFAttachment());
             setVisible(hasAttachment);
             break;
         }
@@ -311,7 +341,21 @@ function dispatchAction(action: Action, context: any): void {
     const eventBus = win?.__beaverEventBus;
     if (!eventBus) return;
 
-    const itemIds: number[] = context.items?.map((i: any) => i.id) ?? [];
+    // Filter items to the winning target type — never send mismatched items
+    const allItems: any[] = context.items ?? [];
+    let filteredItems: any[];
+    switch (action.targetType) {
+        case 'items':
+            filteredItems = allItems.filter((i: any) => i.isRegularItem() && !safeIsInTrash(i));
+            break;
+        case 'attachment':
+            filteredItems = allItems.filter((i: any) => i.isPDFAttachment() && !safeIsInTrash(i));
+            break;
+        default:
+            filteredItems = allItems;
+    }
+
+    const itemIds: number[] = filteredItems.map((i: any) => i.id);
     const collectionId: number | null = context.collectionTreeRow?.ref?.id ?? null;
 
     eventBus.dispatchEvent(new win.CustomEvent('contextMenuAction', {
