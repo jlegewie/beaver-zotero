@@ -140,7 +140,7 @@ const ActionsPreferenceSection: React.FC = () => {
             </div>
             <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
                 Actions are reusable prompts for common research tasks.
-                They appear based on what you're doing in Zotero: on the homepage, in the slash menu, and soon anywhere in Zotero in the right-click menu.
+                They appear based on what you're doing in Zotero: on the Beaver homepage, in the slash menu, and Zotero's right-click menu.
                 Each action targets items, collections, or your whole library, and Beaver shows the relevant ones automatically.
                 {' '}<DocLink path="actions">Learn more</DocLink>.
             </div>
