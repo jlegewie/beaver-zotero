@@ -42,6 +42,10 @@ export function useContextMenuActionHandler() {
                         await Zotero.Items.loadDataTypes(items, ['itemData']);
                         setCurrentMessageItems(items);
                     }
+                } else {
+                    // Collection/global actions: clear any items auto-populated
+                    // from Zotero selection by useZoteroContext
+                    setCurrentMessageItems([]);
                 }
 
                 // 4. Send the action
