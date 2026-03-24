@@ -212,6 +212,7 @@ export function useZoteroContext() {
             if (isNoteTabType(tab.type) && tab.data?.itemID) {
                 const item = await Zotero.Items.getAsync(tab.data.itemID);
                 if (item) {
+                    await item.loadDataType('itemData');
                     logger(`useZoteroContext: note tab active, type=${tab.type}, itemID=${tab.data.itemID}`);
                     setNoteItem(item);
                     return;
@@ -274,8 +275,11 @@ export function useZoteroContext() {
                 (tab: any) => tab.id === mainWindow.Zotero_Tabs.selectedID,
             );
             if (currentTab && isNoteTabType(currentTab.type) && currentTab.data?.itemID) {
-                Zotero.Items.getAsync(currentTab.data.itemID).then((item: Zotero.Item) => {
-                    if (item) setNoteItem(item);
+                Zotero.Items.getAsync(currentTab.data.itemID).then(async (item: Zotero.Item) => {
+                    if (item) {
+                        await item.loadDataType('itemData');
+                        setNoteItem(item);
+                    }
                 });
             } else {
                 setNoteItem(null);
