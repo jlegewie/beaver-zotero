@@ -2300,6 +2300,32 @@
     padding: 0 1px;
 }
 
+/* Inline diff view — continuous text with interwoven deletions and additions */
+[id^="beaver-pane-"] .inline-diff-container {
+    font-size: 0.875rem;
+    line-height: 1.6;
+    padding: 6px 10px;
+    word-break: break-word;
+    white-space: pre-wrap;
+    border-radius: 1px;
+}
+
+[id^="beaver-pane-"] .inline-diff-del {
+    background-color: rgba(186, 42, 41, 0.18);
+    text-decoration: line-through;
+    border-radius: 2px;
+    padding: 1px 1px;
+    color: var(--fill-primary);
+    opacity: 0.7;
+}
+
+[id^="beaver-pane-"] .inline-diff-add {
+    background-color: rgba(20, 135, 85, 0.18);
+    border-radius: 2px;
+    padding: 1px 1px;
+    color: var(--fill-primary);
+}
+
 /* Feature Tour Styles */
 [id^="beaver-pane-"] .feature-tour-content {
     max-width: 100%;

@@ -38,6 +38,11 @@ export interface DiffLine {
     segments?: DiffSegment[];
 }
 
+export interface InlineSegment {
+    text: string;
+    type: 'context' | 'deletion' | 'addition';
+}
+
 // ---- Component ----
 
 export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
@@ -108,39 +113,21 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
         return () => { cancelled = true; };
     }, [needsNoteContext, libraryId, zoteroKey, oldString, isApplied, newString]);
 
-    const diffLines = useMemo(() => {
+    const inlineSegments = useMemo(() => {
         if (needsNoteContext && noteContext && (noteContext.before || noteContext.after)) {
-            // Build diff with surrounding context from the note.
-            // Context lines use 'addition' type without segments so they get the
-            // light green background (matching the added text) but no darker
-            // character-level highlight.
-            const lines: DiffLine[] = [];
+            // Build inline segments with surrounding context from the note.
+            const segments: InlineSegment[] = [];
             if (noteContext.before) {
-                lines.push({ type: 'addition', text: truncateContext(noteContext.before, 80, true) });
+                segments.push({ text: truncateContext(noteContext.before, 80, true) + ' ', type: 'context' });
             }
-            for (const line of strippedNew.split('\n')) {
-                lines.push({ type: 'addition', text: line, segments: [{ text: line, highlighted: true }] });
-            }
+            segments.push({ text: strippedNew, type: 'addition' });
             if (noteContext.after) {
-                lines.push({ type: 'addition', text: truncateContext(noteContext.after) });
+                segments.push({ text: ' ' + truncateContext(noteContext.after), type: 'context' });
             }
-            return lines;
+            return segments;
         }
-        return computeDiff(strippedOld, strippedNew);
+        return computeInlineDiff(strippedOld, strippedNew);
     }, [strippedOld, strippedNew, needsNoteContext, noteContext]);
-
-    function getLineClass(type: DiffLine['type']): string {
-        switch (type) {
-            case 'deletion':
-                return 'diff-deletion';
-            case 'addition':
-                return 'diff-addition';
-            case 'context':
-                return 'diff-context';
-            case 'separator':
-                return 'diff-separator';
-        }
-    }
 
     return (
         <div className="edit-note-preview">
@@ -156,18 +143,16 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                                 : ''}
                         </div>
                     )}
-                    <div className="diff-container">
-                        {diffLines.map((line, i) => (
-                            <div key={i} className={`diff-line ${getLineClass(line.type)}`}>
-                                <span className="diff-content">
-                                    {line.type === 'separator'
-                                        ? line.text
-                                        : line.segments
-                                            ? renderSegments(line.segments, line.type)
-                                            : line.text}
-                                </span>
-                            </div>
-                        ))}
+                    <div className="inline-diff-container">
+                        {inlineSegments.map((seg, i) => {
+                            if (seg.type === 'deletion') {
+                                return <span key={i} className="inline-diff-del">{seg.text}</span>;
+                            }
+                            if (seg.type === 'addition') {
+                                return <span key={i} className="inline-diff-add">{seg.text}</span>;
+                            }
+                            return <span key={i}>{seg.text}</span>;
+                        })}
                     </div>
                 </div>
             </div>
@@ -175,19 +160,117 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     );
 };
 
-// ---- Rendering helpers ----
+// ---- Inline diff computation ----
 
-function renderSegments(segments: DiffSegment[], lineType: DiffLine['type']): React.ReactNode {
-    return segments.map((seg, i) => {
-        if (seg.highlighted) {
-            const className = lineType === 'deletion' ? 'diff-char-del' : 'diff-char-add';
-            return <span key={i} className={className}>{seg.text}</span>;
-        }
-        return <React.Fragment key={i}>{seg.text}</React.Fragment>;
-    });
+/**
+ * Tokenize text into word tokens (each word with its trailing whitespace).
+ */
+function tokenize(text: string): string[] {
+    return text.match(/\S+\s*|\s+/g) || [];
 }
 
-// ---- Diff computation ----
+/**
+ * Compute an inline (word-level) diff between two texts.
+ * Returns a sequence of context/deletion/addition segments rendered
+ * as continuous text with interwoven red+strikethrough and green spans.
+ */
+export function computeInlineDiff(oldText: string, newText: string): InlineSegment[] {
+    if (oldText === newText) {
+        return [{ text: truncateContext(oldText), type: 'context' }];
+    }
+    if (oldText === '') {
+        return [{ text: newText, type: 'addition' }];
+    }
+    if (newText === '') {
+        return [{ text: oldText, type: 'deletion' }];
+    }
+
+    const oldTokens = tokenize(oldText);
+    const newTokens = tokenize(newText);
+
+    // For very long inputs, fall back to simple before/after
+    if (oldTokens.length * newTokens.length > 1_000_000) {
+        return [
+            { text: oldText, type: 'deletion' },
+            { text: newText, type: 'addition' },
+        ];
+    }
+
+    // LCS on word tokens
+    const m = oldTokens.length;
+    const n = newTokens.length;
+    const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            if (oldTokens[i - 1] === newTokens[j - 1]) {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+                dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+            }
+        }
+    }
+
+    // Backtrack to get operations
+    const ops: Array<{ token: string; type: 'context' | 'deletion' | 'addition' }> = [];
+    let i = m, j = n;
+    while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && oldTokens[i - 1] === newTokens[j - 1]) {
+            ops.unshift({ token: oldTokens[i - 1], type: 'context' });
+            i--; j--;
+        } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+            ops.unshift({ token: newTokens[j - 1], type: 'addition' });
+            j--;
+        } else {
+            ops.unshift({ token: oldTokens[i - 1], type: 'deletion' });
+            i--;
+        }
+    }
+
+    // Merge consecutive segments of the same type
+    const segments: InlineSegment[] = [];
+    for (const op of ops) {
+        const last = segments[segments.length - 1];
+        if (last && last.type === op.type) {
+            last.text += op.token;
+        } else {
+            segments.push({ text: op.token, type: op.type });
+        }
+    }
+
+    return truncateInlineContext(segments);
+}
+
+/**
+ * Truncate leading, trailing, and long middle context segments for readability.
+ */
+function truncateInlineContext(segments: InlineSegment[], maxContext: number = 80): InlineSegment[] {
+    if (segments.length === 0) return segments;
+
+    const result = segments.map(s => ({ ...s }));
+
+    // Truncate leading context
+    if (result[0].type === 'context' && result[0].text.length > maxContext) {
+        result[0].text = '…' + result[0].text.slice(-maxContext);
+    }
+
+    // Truncate trailing context
+    const last = result.length - 1;
+    if (last > 0 && result[last].type === 'context' && result[last].text.length > maxContext) {
+        result[last].text = result[last].text.slice(0, maxContext) + '…';
+    }
+
+    // Truncate long middle context
+    for (let k = 1; k < result.length - 1; k++) {
+        if (result[k].type === 'context' && result[k].text.length > maxContext * 2) {
+            result[k].text = result[k].text.slice(0, maxContext) + ' … ' + result[k].text.slice(-maxContext);
+        }
+    }
+
+    return result;
+}
+
+// ---- Line-level diff computation (used by sourceUtils.ts) ----
 
 /**
  * Compute a line-level diff with character-level highlighting for modified lines.
