@@ -481,6 +481,13 @@ declare namespace Zotero {
 }
 
 
+declare namespace Zotero {
+    namespace MenuManager {
+        function registerMenu(options: any): string | false;
+        function unregisterMenu(menuID: string): boolean;
+    }
+}
+
 declare namespace _ZoteroTypes {
     interface HTTP {
         UnexpectedStatusException: new (...args: any[]) => Error;

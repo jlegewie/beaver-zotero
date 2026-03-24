@@ -39,6 +39,7 @@ import { isDatabaseSyncSupportedAtom } from './profile';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import {
     currentMessageItemsAtom,
+    currentMessageCollectionsAtom,
     currentReaderAttachmentAtom,
     currentMessageFiltersAtom,
     readerTextSelectionAtom,
@@ -1178,6 +1179,18 @@ export const sendWSMessageAtom = atom(
                 .filter((attachment): attachment is MessageAttachment => attachment !== null);
         attachments = await processImageAnnotations(attachments);
 
+        // Add collection attachments if set
+        const messageCollections = get(currentMessageCollectionsAtom);
+        for (const col of messageCollections) {
+            attachments.push({
+                type: 'collection',
+                library_id: col.libraryID,
+                zotero_key: col.key,
+                name: col.name,
+                parent_key: col.parentKey,
+            });
+        }
+
         // Add current reader attachment as source if not already present in thread
         const readerState = getReaderState(get);
         const readerAttachment = get(currentReaderAttachmentAtom);
@@ -1334,6 +1347,7 @@ export const sendWSMessageAtom = atom(
             set(currentMessageContentAtom, '');
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(currentMessageItemsAtom, []);
+            set(currentMessageCollectionsAtom, []);
 
             // Execute the WebSocket request
             await executeWSRequest(run, request, get, set);

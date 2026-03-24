@@ -922,17 +922,21 @@ export interface CollectionLookupResult {
 
 /**
  * Get collection by ID, key, or name.
- * 
+ *
  * Supports:
  * - Number: Looks up by collection ID
- * - String: Checks for a key (8 alphanumeric chars), then numeric ID (digits only), then searches by name
+ * - String: Checks for a key (8 alphanumeric chars), then "<libraryID>-<key>" compound format
+ *   (e.g. "1-ABCD1234"), then numeric ID (digits only), then searches by name
  * - null/undefined: Returns null
- * 
+ *
+ * The "<libraryID>-<key>" format is resolved only in the embedded library, ignoring the
+ * libraryId parameter.
+ *
  * When libraryId is provided, does a full lookup (key + name) in that library first.
  * Cross-library fallback only applies when the input looks like a Zotero key (8 alphanumeric
  * chars). Name-based lookups stay scoped to the requested
  * library to avoid returning a same-named collection from the wrong library.
- * 
+ *
  * @param collectionIdOrName - Collection ID, key, or name
  * @param libraryId - Optional library ID to search first (falls back to other libraries)
  * @returns Collection and its library ID, or null if not found
@@ -950,7 +954,18 @@ export function getCollectionByIdOrName(
         const collection = Zotero.Collections.get(collectionIdOrName);
         return collection ? { collection, libraryID: collection.libraryID } : null;
     }
-    
+
+    // Try "<libraryID>-<key>" compound format (e.g. "1-ABCD1234")
+    const compoundMatch = collectionIdOrName.match(/^(\d+)-(.+)$/);
+    if (compoundMatch) {
+        const compoundLibId = parseInt(compoundMatch[1], 10);
+        const compoundKey = compoundMatch[2];
+        if (Zotero.Utilities.isValidObjectKey(compoundKey)) {
+            const collection = Zotero.Collections.getByLibraryAndKey(compoundLibId, compoundKey);
+            if (collection) return { collection, libraryID: collection.libraryID };
+        }
+    }
+
     const isKeyLike = Zotero.Utilities.isValidObjectKey(collectionIdOrName);
     const hasLibraryId = libraryId !== undefined && Number.isFinite(libraryId);
 

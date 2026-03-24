@@ -227,7 +227,7 @@ async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any,
  */
 export const newThreadAtom = atom(
     null,
-    async (get, set) => {
+    async (get, set, options?: { skipAutoPopulate?: boolean }) => {
         // Show loading state immediately if there's an active run to cancel
         const hasActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
         if (hasActiveWork) {
@@ -264,13 +264,15 @@ export const newThreadAtom = atom(
             set(resetMessageUIStateAtom);
             set(clearExternalReferenceCacheAtom);
             // Update message items from Zotero selection or reader
-            const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
-            if (isLibraryTab && addSelectedItemsOnNewThread) {
-                const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
-                set(updateMessageItemsFromZoteroSelectionAtom, maxAddAttachmentToMessage);
-            }
-            if (!isLibraryTab) {
-                await set(updateReaderAttachmentAtom);
+            if (!options?.skipAutoPopulate) {
+                const addSelectedItemsOnNewThread = getPref('addSelectedItemsOnNewThread');
+                if (isLibraryTab && addSelectedItemsOnNewThread) {
+                    const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage');
+                    set(updateMessageItemsFromZoteroSelectionAtom, maxAddAttachmentToMessage);
+                }
+                if (!isLibraryTab) {
+                    await set(updateReaderAttachmentAtom);
+                }
             }
             // Reset scroll state for both sidebar and window
             set(userScrolledAtom, false);

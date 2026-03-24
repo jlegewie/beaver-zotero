@@ -190,7 +190,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     e.currentTarget.style.height = "auto";
                     e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
                 }}
-                placeholder="Enter prompt text... Use {{active_item}}, {{selected_items}}, or {{recent_items}} to insert context."
+                placeholder="Enter prompt text..."
                 maxLength={MAX_PROMPT_TEXT_LENGTH}
                 className="chat-input custom-prompt-edit-textarea text-base"
                 rows={2}
