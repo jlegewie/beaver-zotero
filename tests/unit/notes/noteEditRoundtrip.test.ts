@@ -60,6 +60,7 @@ import {
     checkDuplicateCitations,
     validateNewString,
     getLatestNoteHtml,
+    normalizePageLocator,
     SimplificationMetadata,
 } from '../../../src/utils/noteHtmlSimplifier';
 import { createCitationHTML } from '../../../src/utils/zoteroUtils';
@@ -1617,5 +1618,224 @@ describe('edge cases', () => {
         // Second and third paragraphs should be completely untouched
         expect(result).toContain(`<p>Second paragraph ${cit2} here.</p>`);
         expect(result).toContain('<p>Third paragraph with no citations.</p>');
+    });
+});
+
+
+// =============================================================================
+// Section 7: Page Locator Normalization
+// =============================================================================
+
+describe('normalizePageLocator', () => {
+    it('single page number passes through unchanged', () => {
+        expect(normalizePageLocator('42')).toBe('42');
+    });
+
+    it('page range extracts first page', () => {
+        expect(normalizePageLocator('241-243')).toBe('241');
+    });
+
+    it('en-dash range extracts first page', () => {
+        expect(normalizePageLocator('241–243')).toBe('241');
+    });
+
+    it('comma-separated pages extracts first page', () => {
+        expect(normalizePageLocator('222, 237-238')).toBe('222');
+    });
+
+    it('comma-separated single pages extracts first', () => {
+        expect(normalizePageLocator('10, 15, 20')).toBe('10');
+    });
+
+    it('non-numeric locator without separators passes through', () => {
+        expect(normalizePageLocator('§3.2')).toBe('§3.2');
+        expect(normalizePageLocator('fn. 5')).toBe('fn. 5');
+        expect(normalizePageLocator('xii')).toBe('xii');
+    });
+
+    it('non-numeric locator with dash passes through (no leading digits)', () => {
+        // "xii-xv" has a dash but no leading digits → pass through
+        expect(normalizePageLocator('xii-xv')).toBe('xii-xv');
+    });
+
+    it('leading whitespace is handled', () => {
+        expect(normalizePageLocator(' 42-45')).toBe('42');
+    });
+
+    it('empty string passes through', () => {
+        expect(normalizePageLocator('')).toBe('');
+    });
+});
+
+
+describe('page locator normalization in citation expansion', () => {
+    it('new citation with page range: locator is normalized to first page', () => {
+        const html = wrap(`<p>Some text ${rawCitation('EX1', 1, '10', 'Author, 2024, p. 10')}</p>`);
+        const { metadata } = simplifyNoteHtml(html, 1);
+
+        // Insert a new citation (no ref) with a page range
+        const input = '<citation item_id="1-NEWITEM" page="222, 237-238"/>';
+        const expanded = expandToRawHtml(input, metadata, 'new');
+
+        // createCitationHTML should have been called with the normalized single page
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'NEWITEM' }),
+            '222'
+        );
+        expect(expanded).toContain('data-citation=');
+    });
+
+    it('new citation with en-dash range: locator is normalized to first page', () => {
+        const html = wrap(`<p>Text ${rawCitation('EX1', 1, '', 'Author, 2024')}</p>`);
+        const { metadata } = simplifyNoteHtml(html, 1);
+
+        const input = '<citation item_id="1-RANGEITEM" page="100–105"/>';
+        expandToRawHtml(input, metadata, 'new');
+
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'RANGEITEM' }),
+            '100'
+        );
+    });
+
+    it('new citation with single page: locator passes through unchanged', () => {
+        const html = wrap(`<p>Text ${rawCitation('EX1', 1, '', 'Author, 2024')}</p>`);
+        const { metadata } = simplifyNoteHtml(html, 1);
+
+        const input = '<citation item_id="1-SINGLEITEM" page="42"/>';
+        expandToRawHtml(input, metadata, 'new');
+
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'SINGLEITEM' }),
+            '42'
+        );
+    });
+
+    it('new citation with non-numeric locator: passes through unchanged', () => {
+        const html = wrap(`<p>Text ${rawCitation('EX1', 1, '', 'Author, 2024')}</p>`);
+        const { metadata } = simplifyNoteHtml(html, 1);
+
+        const input = '<citation item_id="1-SECITEM" page="§3.2"/>';
+        expandToRawHtml(input, metadata, 'new');
+
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'SECITEM' }),
+            '§3.2'
+        );
+    });
+
+    it('existing citation with changed page range: normalized to first page', () => {
+        // Citation originally has page="10"
+        const cit = rawCitation('PGCHG', 1, '10', 'Author, 2024, p. 10');
+        const html = wrap(`<p>Text ${cit}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        // LLM changes page to a range
+        const tag = simplified.match(/<citation [^/]*ref="c_PGCHG_0"[^/]*\/>/)?.[0];
+        expect(tag).toBeTruthy();
+        const modified = tag!.replace('page="10"', 'page="10, 15-18"');
+        const expanded = expandToRawHtml(modified, metadata, 'new');
+
+        // Should have been called with normalized page
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'PGCHG' }),
+            '10'
+        );
+        expect(expanded).toContain('data-citation=');
+    });
+
+    it('existing citation with unchanged page: returns stored raw HTML (no normalization)', () => {
+        const cit = rawCitation('UNCHG', 1, '42', 'Author, 2024, p. 42');
+        const html = wrap(`<p>Text ${cit}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        // Expand with the same page — should return original raw HTML
+        const tag = simplified.match(/<citation [^/]*ref="c_UNCHG_0"[^/]*\/>/)?.[0];
+        expect(tag).toBeTruthy();
+        const expanded = expandToRawHtml(tag!, metadata, 'old');
+
+        // Should return stored raw HTML, not call createCitationHTML
+        expect(expanded).toBe(cit);
+    });
+
+    it('edit + undo roundtrip: new citation with page range normalizes then undoes correctly', () => {
+        const existingCit = rawCitation('EXIST', 1, '', 'Author, 2024');
+        const html = wrap(`<p>Text ${existingCit} here.</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        const existingTag = simplified.match(/<citation [^/]*ref="c_EXIST_0"[^/]*\/>/)?.[0];
+        expect(existingTag).toBeTruthy();
+
+        // old_string: just the existing citation
+        // new_string: existing citation + new citation with page range
+        const oldStr = existingTag!;
+        const newStr = `${existingTag} <citation item_id="1-NEWCIT" page="50-55"/>`;
+
+        const expandedOld = expandToRawHtml(oldStr, metadata, 'old');
+        const expandedNew = expandToRawHtml(newStr, metadata, 'new');
+
+        // Verify normalization happened
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'NEWCIT' }),
+            '50' // normalized from "50-55"
+        );
+
+        // Apply the edit
+        const stripped = stripDataCitationItems(html);
+        const edited = stripped.replace(expandedOld, expandedNew);
+        expect(edited).toContain('class="citation"');
+
+        // Undo: replacing expandedNew with expandedOld should restore original
+        const undone = edited.replace(expandedNew, expandedOld);
+        expect(undone).toBe(stripped);
+    });
+
+    it('new citation via att_id with page range: normalized to first page', () => {
+        const html = wrap(`<p>Text ${rawCitation('EX1', 1, '', 'Author, 2024')}</p>`);
+        const { metadata } = simplifyNoteHtml(html, 1);
+
+        // Mock the item as an attachment
+        const mockAttItem = {
+            id: 'att-123',
+            key: 'ATTKEY',
+            libraryID: 1,
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            parentID: 999,
+            getField: vi.fn(() => ''),
+        };
+        const mockParentItem = {
+            id: 999,
+            key: 'PARENTKEY',
+            libraryID: 1,
+            isAttachment: vi.fn(() => false),
+            isRegularItem: vi.fn(() => true),
+            getField: vi.fn(() => 'Parent Title'),
+            getAttachments: vi.fn(() => []),
+        };
+        (Zotero.Items.getByLibraryAndKey as any).mockImplementation(
+            (libId: number, key: string) => {
+                if (key === 'ATTKEY') return mockAttItem;
+                if (key === 'PARENTKEY') return mockParentItem;
+                return {
+                    id: `${libId}-${key}`,
+                    key,
+                    libraryID: libId,
+                    getField: vi.fn(() => 'Mock Title'),
+                    isAttachment: vi.fn(() => false),
+                    isRegularItem: vi.fn(() => true),
+                    getAttachments: vi.fn(() => []),
+                };
+            }
+        );
+
+        const input = '<citation att_id="1-ATTKEY" page="30-35"/>';
+        expandToRawHtml(input, metadata, 'new');
+
+        // createCitationHTML should have been called with normalized page
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            mockAttItem,
+            '30' // normalized from "30-35"
+        );
     });
 });

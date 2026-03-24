@@ -532,6 +532,23 @@ function attrsChanged(
     return original.item_id !== current.item_id || original.page !== current.page;
 }
 
+/**
+ * Normalize a page locator to a single page number.
+ *
+ * LLM-generated citations sometimes contain page ranges ("241-243") or
+ * comma-separated pages ("222, 237-238"). Zotero's "Go to Page" does an
+ * exact string match against PDF page labels, so multi-page locators
+ * silently fail to navigate. This extracts the first page number.
+ *
+ * Only applied to locators that contain range/list separators (-, –, ,).
+ * Non-numeric locators like "§3.2", "xii", or "fn. 5" pass through unchanged.
+ */
+export function normalizePageLocator(page: string): string {
+    if (!/[-–,]/.test(page)) return page;
+    const match = page.match(/^\s*(\d+)/);
+    return match ? match[1] : page;
+}
+
 /** Build a new citation from simplified attributes (item_id format: "LIB-KEY") */
 function buildCitationFromSimplifiedAttrs(attrs: { item_id: string; page?: string }): string {
     const dashIdx = attrs.item_id.indexOf('-');
@@ -544,8 +561,9 @@ function buildCitationFromSimplifiedAttrs(attrs: { item_id: string; page?: strin
     if (!item) {
         throw new Error(`Item not found: ${attrs.item_id}`);
     }
+    // Normalize multi-page locators to single page for "Go to Page" compatibility
+    let resolvedPage = attrs.page ? normalizePageLocator(attrs.page) : undefined;
     // Resolve page index to page label (e.g., "7" → "iv" for Roman-numeral front matter)
-    let resolvedPage = attrs.page;
     if (resolvedPage) {
         if (item.isAttachment()) {
             resolvedPage = resolvePageStr(item.id, resolvedPage);
@@ -571,8 +589,9 @@ function buildCitationFromAttId(attId: string, page?: string): string {
     if (!item) {
         throw new Error(`Attachment not found: ${attId}`);
     }
-    // Resolve page index to page label using the attachment's cached page labels
-    const resolvedPage = page ? resolvePageStr(item.id, page) : undefined;
+    // Normalize multi-page locators to single page, then resolve to label
+    const normalizedPage = page ? normalizePageLocator(page) : undefined;
+    const resolvedPage = normalizedPage ? resolvePageStr(item.id, normalizedPage) : undefined;
     // createCitationHTML handles attachment-to-parent resolution internally
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
 }

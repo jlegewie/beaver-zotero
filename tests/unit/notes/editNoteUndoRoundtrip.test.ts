@@ -1111,3 +1111,106 @@ describe('list editing edge cases', () => {
         expect(restored).not.toContain('new content');
     });
 });
+
+
+// =============================================================================
+// Section 11: Page Locator Normalization in Apply-Undo Cycle
+// =============================================================================
+
+describe('page locator normalization in apply-undo cycle', () => {
+    it('insert new citation with page range: apply + undo restores original', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: NOTE_WITH_CITATION,
+            oldString: 'the results are significant',
+            newString: 'the results are significant <citation item_id="1-RANGECIT" page="50-55"/>',
+        });
+
+        // The citation should have been created with normalized page "50"
+        const { createCitationHTML } = await import('../../../src/utils/zoteroUtils');
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'RANGECIT' }),
+            '50'
+        );
+        expect(item._getHtml()).toContain('RANGECIT');
+
+        // Undo should restore the original
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(NOTE_WITH_CITATION));
+        expect(restored).not.toContain('RANGECIT');
+    });
+
+    it('insert new citation with comma-separated pages: apply + undo restores original', async () => {
+        const { item, action } = await applyEdit({
+            noteHtml: NOTE_WITH_CITATION,
+            oldString: 'Further analysis reveals important patterns',
+            newString: 'Further analysis reveals important patterns <citation item_id="1-COMMACIT" page="222, 237-238"/>',
+        });
+
+        const { createCitationHTML } = await import('../../../src/utils/zoteroUtils');
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'COMMACIT' }),
+            '222'
+        );
+
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(NOTE_WITH_CITATION));
+    });
+
+    it('full apply-undo-apply-undo cycle with page-range citation', async () => {
+        const original = NOTE_WITH_CITATION;
+        const oldStr = 'the results are significant';
+        const newStr = 'the results are significant <citation item_id="1-CYCLEREF" page="241-243"/>';
+
+        // Apply
+        const { item, action: action1 } = await applyEdit({
+            noteHtml: original, oldString: oldStr, newString: newStr,
+        });
+        expect(item._getHtml()).toContain('CYCLEREF');
+
+        // Undo
+        await undoEdit(item, action1);
+        expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(original));
+        expect(item._getHtml()).not.toContain('CYCLEREF');
+
+        // Re-apply
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        const action2 = makeAction(1, 'TESTKEY', oldStr, newStr);
+        const result2 = await executeEditNoteAction(action2);
+        action2.status = 'applied';
+        action2.result_data = result2;
+        invalidateSimplificationCache('1-TESTKEY');
+        expect(item._getHtml()).toContain('CYCLEREF');
+
+        // Re-undo
+        await undoEdit(item, action2);
+        expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(original));
+    });
+
+    it('existing citation page changed to range: normalized, apply + undo works', async () => {
+        // Note has a citation with page="42"
+        const { simplified } = simplifyNoteHtml(NOTE_WITH_CITATION, 1);
+        const citTag = simplified.match(/<citation [^/]*ref="c_CITE1_0"[^/]*\/>/)?.[0];
+        expect(citTag).toBeTruthy();
+        expect(citTag).toContain('page="42"');
+
+        // LLM changes page to a range
+        const modifiedTag = citTag!.replace('page="42"', 'page="42-48"');
+        const oldStr = citTag!;
+        const newStr = modifiedTag;
+
+        const { item, action } = await applyEdit({
+            noteHtml: NOTE_WITH_CITATION, oldString: oldStr, newString: newStr,
+        });
+
+        // Should have been called with normalized page "42" (same as original)
+        const { createCitationHTML } = await import('../../../src/utils/zoteroUtils');
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'CITE1' }),
+            '42'
+        );
+
+        // Undo should restore the original
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(NOTE_WITH_CITATION));
+    });
+});
