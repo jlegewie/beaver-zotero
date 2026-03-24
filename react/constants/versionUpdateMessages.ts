@@ -374,8 +374,8 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         title: "Beaver Version 0.16",
         featureList: [
             {
-                title: "Beaver Actions from the right-click menu",
-                description: "Run AI workflows without opening the chat panel",
+                title: "Beaver Actions from the right-click menu (Zotero 8+ only)",
+                description: "Start customizable AI workflows without opening the chat panel",
             },
             {
                 title: "Create notes in any collection",
