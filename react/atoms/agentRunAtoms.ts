@@ -1100,7 +1100,7 @@ async function executeWSRequest(
         }
         
         // No error was set yet, so set a generic connection error
-        const errorMessage = 'Could not connect to Beaver. Please check your internet connection and try again.';
+        const errorMessage = 'Could not connect to the server. Please check your internet connection and try again.';
         set(wsErrorAtom, {
             event: 'error',
             type: 'connection_error',
