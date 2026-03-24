@@ -22,6 +22,15 @@ let moduleItemNotifierId: string | null = null;
 let moduleTabNotifierId: string | null = null;
 
 /**
+ * Check if a tab type represents a note tab (loaded, unloaded, or loading).
+ * Zotero uses 'note-unloaded' for session-restored tabs not yet loaded,
+ * and 'note-loading' while a tab is being initialized.
+ */
+function isNoteTabType(type: string): boolean {
+    return type === 'note' || type === 'note-unloaded' || type === 'note-loading';
+}
+
+/**
  * Query count of regular items added today (not notes/attachments/annotations/deleted).
  */
 async function queryRecentlyAddedTodayCount(): Promise<number> {
@@ -199,26 +208,42 @@ export function useZoteroContext() {
             moduleTabNotifierId = null;
         }
 
-        const tabObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
+        const setNoteItemFromTab = async (tab: any) => {
+            if (isNoteTabType(tab.type) && tab.data?.itemID) {
+                const item = await Zotero.Items.getAsync(tab.data.itemID);
+                if (item) {
+                    logger(`useZoteroContext: note tab active, type=${tab.type}, itemID=${tab.data.itemID}`);
+                    setNoteItem(item);
+                    return;
+                }
+            }
+            setNoteItem(null);
+        };
+
+        const tabObserver = {
             notify: async function (
-                event: _ZoteroTypes.Notifier.Event,
-                type: _ZoteroTypes.Notifier.Type,
+                event: string,
+                type: string,
                 ids: string[] | number[],
             ) {
-                if (type !== 'tab' || event !== 'select') return;
-                const selectedTab = mainWindow.Zotero_Tabs._tabs.find(
-                    (tab: any) => tab.id === ids[0],
-                );
-                if (!selectedTab) return;
+                if (type !== 'tab') return;
 
-                if (selectedTab.type === 'note' && selectedTab.data?.itemID) {
-                    const item = await Zotero.Items.getAsync(selectedTab.data.itemID);
-                    if (item) {
-                        logger(`useZoteroContext: note tab selected, itemID=${selectedTab.data.itemID}`);
-                        setNoteItem(item);
-                    }
-                } else {
-                    setNoteItem(null);
+                if (event === 'select') {
+                    const selectedTab = mainWindow.Zotero_Tabs._tabs.find(
+                        (tab: any) => tab.id === ids[0],
+                    );
+                    if (!selectedTab) return;
+                    await setNoteItemFromTab(selectedTab);
+                } else if (event === 'load') {
+                    // When an unloaded note tab finishes loading, re-check
+                    // if it's the currently selected tab and update the atom.
+                    const loadedTabId = ids[0];
+                    if (loadedTabId !== mainWindow.Zotero_Tabs.selectedID) return;
+                    const loadedTab = mainWindow.Zotero_Tabs._tabs.find(
+                        (tab: any) => tab.id === loadedTabId,
+                    );
+                    if (!loadedTab) return;
+                    await setNoteItemFromTab(loadedTab);
                 }
             },
         };
@@ -244,11 +269,11 @@ export function useZoteroContext() {
             setSelectedItemCount(0);
             setSelectedItems([]);
             setSelectedTags([]);
-            // Check if current tab is a note tab
+            // Check if current tab is a note tab (including unloaded/loading)
             const currentTab = mainWindow.Zotero_Tabs._tabs.find(
                 (tab: any) => tab.id === mainWindow.Zotero_Tabs.selectedID,
             );
-            if (currentTab?.type === 'note' && currentTab.data?.itemID) {
+            if (currentTab && isNoteTabType(currentTab.type) && currentTab.data?.itemID) {
                 Zotero.Items.getAsync(currentTab.data.itemID).then((item: Zotero.Item) => {
                     if (item) setNoteItem(item);
                 });
