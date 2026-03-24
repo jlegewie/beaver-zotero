@@ -16,7 +16,8 @@ export type MessageAttachment =
     | SourceAttachment
     | ItemMetadataAttachment
     | AnnotationAttachment
-    | NoteAttachment;
+    | NoteAttachment
+    | CollectionAttachment;
 
 interface BaseMessageAttachment {
     library_id: number;
@@ -57,6 +58,13 @@ export interface NoteAttachment extends BaseMessageAttachment {
     parent_key?: string;      // Optional - standalone notes have no parent
     title?: string;            // Derived from note content (getNoteTitle())
     date_modified?: string;    // ISO string
+}
+
+// "collection" type attachment (explicit collection reference)
+export interface CollectionAttachment extends BaseMessageAttachment {
+    type: "collection";
+    name: string;
+    parent_key: string | null;
 }
 
 /**
@@ -131,6 +139,10 @@ export function isAnnotationAttachment(attachment: MessageAttachment): attachmen
 
 export function isNoteAttachment(attachment: MessageAttachment): attachment is NoteAttachment {
     return attachment.type === "note";
+}
+
+export function isCollectionAttachment(attachment: MessageAttachment): attachment is CollectionAttachment {
+    return attachment.type === "collection";
 }
 
 /**

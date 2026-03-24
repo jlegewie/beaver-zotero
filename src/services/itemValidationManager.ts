@@ -348,15 +348,6 @@ class ItemValidationManager {
                 throw error;
             }
 
-            // Check page count limit
-            const maxPageCount = getPref('maxPageCount');
-            if (pageCount > maxPageCount) {
-                return { 
-                    isValid: false, 
-                    reason: `PDF has ${pageCount} pages, exceeds ${maxPageCount}-page limit` 
-                };
-            }
-
             // Check if PDF needs OCR
             const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
             if (ocrAnalysis.needsOCR) {

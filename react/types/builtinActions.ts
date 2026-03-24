@@ -172,7 +172,7 @@ export const BUILTIN_ACTIONS: Action[] = [
     {
         id: 'builtin-collection-summarize',
         title: 'Summarize this collection',
-        text: 'Write a concise narrative summary of this collection: what topics it covers, the main findings across papers, where authors agree and disagree, and what methodological approaches are represented. Keep it under 500 words. Avoid bullet points and numbered lists. Use a note for the summary.',
+        text: 'Write a concise narrative summary of this collection: what topics it covers, the main findings across papers, where authors agree and disagree, and what methodological approaches are represented. Keep it under 500 words. Avoid bullet points and numbered lists. Use a note for the summary and assign it to this collection. Cite all relevant papers in the note.',
         // Save as a Zotero note in this collection.
         targetType: 'collection',
         sortOrder: 420,
@@ -190,7 +190,7 @@ export const BUILTIN_ACTIONS: Action[] = [
     {
         id: 'builtin-collection-tag-all',
         title: 'Tag all items in this collection',
-        text: 'Analyze every item in this collection and suggest subject tags. Use my existing tags where they fit. Be consistent across items. Papers on similar subtopics should share tags.',
+        text: 'Analyze every item in this collection and assign appropriate tags to each item. Use my existing tags where they fit. Be consistent across items. Papers on similar subtopics should share tags.',
         targetType: 'collection',
         sortOrder: 440,
     },

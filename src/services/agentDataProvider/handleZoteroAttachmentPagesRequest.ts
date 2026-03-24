@@ -127,6 +127,7 @@ export async function handleZoteroAttachmentPagesRequest(
         const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, filePath).catch(() => null) : null;
 
         // Fast-path: use cached metadata for known error states
+        const extractingAllPages = start_page == null && end_page == null;
         if (cachedMeta) {
             if (cachedMeta.is_encrypted) {
                 return errorResponse(`The PDF file for ${pdfKey} is password-protected`, 'encrypted');
@@ -136,6 +137,16 @@ export async function handleZoteroAttachmentPagesRequest(
             }
             if (cachedMeta.needs_ocr) {
                 return errorResponse(`The PDF file for ${pdfKey} requires OCR (no text layer)`, 'no_text_layer', cachedMeta.page_count ?? null);
+            }
+            // Check page count limit for all-pages requests (fast-path from cache)
+            if (!skip_local_limits && extractingAllPages && cachedMeta.page_count != null) {
+                const maxPageCount = getPref('maxPageCount');
+                if (cachedMeta.page_count > maxPageCount) {
+                    return errorResponse(
+                        `The PDF file for ${pdfKey} has ${cachedMeta.page_count} pages, which exceeds the ${maxPageCount}-page limit`,
+                        'too_many_pages'
+                    );
+                }
             }
         }
 
@@ -151,7 +162,6 @@ export async function handleZoteroAttachmentPagesRequest(
         }
 
         // 6. Check page count limit when extracting all pages.
-        const extractingAllPages = start_page === null && end_page === null;
         if (!skip_local_limits && extractingAllPages) {
             const maxPageCount = getPref('maxPageCount');
             if (totalPages > maxPageCount) {

@@ -97,6 +97,19 @@ export const currentMessageContentAtom = atom<string>('');
 export const currentMessageItemsAtom = atom<Zotero.Item[]>([]);
 
 /**
+ * Current message collection attachments.
+ * Set when a collection action is triggered (context menu, slash menu).
+ * Cleared after the message is sent.
+ */
+export interface CollectionReference {
+    key: string;
+    name: string;
+    libraryID: number;
+    parentKey: string | null;
+}
+export const currentMessageCollectionsAtom = atom<CollectionReference[]>([]);
+
+/**
 * Current reader attachment
 */
 export const currentReaderAttachmentAtom = atom<Zotero.Item | null>(null);

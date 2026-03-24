@@ -369,6 +369,25 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         ],
         footer: `Read full <a href="https://www.beaverapp.ai/changelog/v0.15" target='_blank'>announcement</a>`
     },
+    {
+        version: "0.16.0",
+        title: "Beaver Version 0.16",
+        featureList: [
+            {
+                title: "Beaver Actions from the right-click menu",
+                description: "Run AI workflows without opening the chat panel",
+            },
+            {
+                title: "Create notes in any collection",
+                description: "Beaver can now add notes directly where you need them",
+            },
+            {
+                title: "Support for much longer documents",
+                description: "Work with documents up to 800 pages with Plus Tools",
+            },
+        ],
+        inPanel: true,
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));

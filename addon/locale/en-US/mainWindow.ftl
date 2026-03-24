@@ -10,3 +10,15 @@ item-section-example2-button-tooltip =
     .tooltiptext = Unregister this section
 item-info-row-example-label = Example Row
 item-pane-status = Beaver Status
+
+beaver-context-menu-submenu =
+    .label = Beaver Actions
+
+beaver-context-menu-context-header =
+    .label = { $context }
+
+beaver-context-menu-action =
+    .label = { $title }
+
+beaver-context-menu-add-action =
+    .label = Add custom action…

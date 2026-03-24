@@ -131,16 +131,11 @@ async function checkAttachmentAvailability(
  * Build a FrontendFileStatus from a cached metadata record.
  */
 function fileStatusFromCache(record: AttachmentFileCacheRecord, isPrimary: boolean): FrontendFileStatus {
-    const maxPageCount = getPref('maxPageCount');
-
     if (record.is_encrypted) {
         return { is_primary: isPrimary, mime_type: record.content_type, page_count: null, status: "unavailable", status_reason: 'PDF is password-protected' };
     }
     if (record.is_invalid) {
         return { is_primary: isPrimary, mime_type: record.content_type, page_count: null, status: "unavailable", status_reason: 'PDF file is invalid or corrupted' };
-    }
-    if (record.page_count != null && record.page_count > maxPageCount) {
-        return { is_primary: isPrimary, mime_type: record.content_type, page_count: record.page_count, status: "unavailable", status_reason: `PDF has ${record.page_count} pages, which exceeds the ${maxPageCount}-page limit` };
     }
     if (record.needs_ocr) {
         return { is_primary: isPrimary, mime_type: record.content_type, page_count: record.page_count, status: "unavailable", status_reason: `Text unavailable because the PDF requires OCR. Page images are available` };
@@ -334,22 +329,6 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
             throw error;
         }
 
-        // Check page count limit
-        const maxPageCount = getPref('maxPageCount');
-
-        if (pageCount > maxPageCount) {
-            // No cache write: a full record would require OCR analysis
-            // (expensive, pointless for a rejected PDF). The lightweight
-            // path gets page count cheaply from fulltext/PDFWorker.
-            return {
-                is_primary: isPrimary,
-                mime_type: contentType,
-                page_count: pageCount,
-                status: "unavailable",
-                status_reason: `PDF has ${pageCount} pages, which exceeds the ${maxPageCount}-page limit`,
-            };
-        }
-
         // Analyze OCR needs and extract page labels in parallel
         const [ocrAnalysis, pageLabels] = await Promise.all([
             extractor.analyzeOCRNeeds(pdfData),
@@ -462,19 +441,6 @@ export async function getAttachmentFileStatusLightweight(
             page_count: null,
             status: "unavailable",
             status_reason: 'Unable to read PDF - file may be encrypted, corrupted, or invalid',
-        }, fileExistsLocally };
-    }
-
-    // Check page count limit
-    const maxPageCount = getPref('maxPageCount');
-
-    if (pageCount > maxPageCount) {
-        return { fileStatus: {
-            is_primary: isPrimary,
-            mime_type: contentType,
-            page_count: pageCount,
-            status: "unavailable",
-            status_reason: `PDF has ${pageCount} pages, which exceeds the ${maxPageCount}-page limit`,
         }, fileExistsLocally };
     }
 
@@ -974,17 +940,21 @@ export interface CollectionLookupResult {
 
 /**
  * Get collection by ID, key, or name.
- * 
+ *
  * Supports:
  * - Number: Looks up by collection ID
- * - String: Checks for a key (8 alphanumeric chars), then numeric ID (digits only), then searches by name
+ * - String: Checks for a key (8 alphanumeric chars), then "<libraryID>-<key>" compound format
+ *   (e.g. "1-ABCD1234"), then numeric ID (digits only), then searches by name
  * - null/undefined: Returns null
- * 
+ *
+ * The "<libraryID>-<key>" format is resolved only in the embedded library, ignoring the
+ * libraryId parameter.
+ *
  * When libraryId is provided, does a full lookup (key + name) in that library first.
  * Cross-library fallback only applies when the input looks like a Zotero key (8 alphanumeric
  * chars). Name-based lookups stay scoped to the requested
  * library to avoid returning a same-named collection from the wrong library.
- * 
+ *
  * @param collectionIdOrName - Collection ID, key, or name
  * @param libraryId - Optional library ID to search first (falls back to other libraries)
  * @returns Collection and its library ID, or null if not found
@@ -1002,7 +972,18 @@ export function getCollectionByIdOrName(
         const collection = Zotero.Collections.get(collectionIdOrName);
         return collection ? { collection, libraryID: collection.libraryID } : null;
     }
-    
+
+    // Try "<libraryID>-<key>" compound format (e.g. "1-ABCD1234")
+    const compoundMatch = collectionIdOrName.match(/^(\d+)-(.+)$/);
+    if (compoundMatch) {
+        const compoundLibId = parseInt(compoundMatch[1], 10);
+        const compoundKey = compoundMatch[2];
+        if (Zotero.Utilities.isValidObjectKey(compoundKey)) {
+            const collection = Zotero.Collections.getByLibraryAndKey(compoundLibId, compoundKey);
+            if (collection) return { collection, libraryID: collection.libraryID };
+        }
+    }
+
     const isKeyLike = Zotero.Utilities.isValidObjectKey(collectionIdOrName);
     const hasLibraryId = libraryId !== undefined && Number.isFinite(libraryId);
 

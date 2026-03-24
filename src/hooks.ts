@@ -13,6 +13,7 @@ import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUp
 import { disposeMuPDF } from "./utils/mupdf";
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";
+import { initContextMenus, cleanupContextMenus } from "./modules/zoteroContextMenu";
 
 /** Timeout for individual async shutdown operations to prevent hangs. */
 const SHUTDOWN_TIMEOUT_MS = 3000;
@@ -214,6 +215,9 @@ async function onStartup() {
         // -------- Register protocol handler (zotero://beaver) --------
         registerBeaverProtocolHandler();
 
+        // -------- Register Zotero 8 context menus (no-op on Zotero 7) --------
+        initContextMenus();
+
         // -------- Load UI for all windows --------
         const mainWindows = Zotero.getMainWindows();
         if (mainWindows.length > 0) {
@@ -409,7 +413,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 11. Unregister quit observer
         unregisterQuitObserver();
 
-        // 12. Unregister protocol handler
+        // 12. Unregister context menus
+        cleanupContextMenus();
+
+        // 13. Unregister protocol handler
         unregisterBeaverProtocolHandler();
 
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
@@ -527,6 +534,7 @@ async function onShutdown(): Promise<void> {
         unloadStylesheet();
         
         unregisterQuitObserver();
+        cleanupContextMenus();
         unregisterBeaverProtocolHandler();
 
         ztoolkit.unregisterAll();

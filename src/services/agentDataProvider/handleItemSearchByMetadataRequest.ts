@@ -47,13 +47,18 @@ export async function handleItemSearchByMetadataRequest(
     let searchEndTime = 0;
     let serializationEndTime = 0;
     
-    // Validate: at least one query parameter must be provided
+    // Validate: at least one query parameter or filter must be provided
     const hasQuery = !!request.title_query ||
                      !!request.author_query ||
                      !!request.publication_query;
+    const hasFilter = !!(request.collections_filter?.length) ||
+                      !!(request.tags_filter?.length) ||
+                      !!(request.libraries_filter?.length) ||
+                      !!request.year_min ||
+                      !!request.year_max;
 
-    if (!hasQuery) {
-        logger('handleItemSearchByMetadataRequest: No query parameters provided', 1);
+    if (!hasQuery && !hasFilter) {
+        logger('handleItemSearchByMetadataRequest: No query parameters or filters provided', 1);
         return {
             type: 'item_search_by_metadata',
             request_id: request.request_id,

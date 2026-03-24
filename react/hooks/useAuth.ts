@@ -66,7 +66,7 @@ export function useAuth() {
     
     // Stable callback for the auth listener
     const handleAuthStateChange = useCallback((event: AuthChangeEvent, newSession: Session | null) => {
-        // logger(`auth: received event ${event}`, newSession ? 1 : 0);
+        logger(`auth: received event=${event}, hasSession=${!!newSession}, hasCurrentSession=${!!sessionRef.current}, hasCurrentUser=${!!userRef.current}`);
         
         const currentSession = sessionRef.current;
         const currentUser = userRef.current;

@@ -7,6 +7,8 @@ interface PopupMessageHeaderProps {
     title?: string;
     handleDismiss: () => void;
     fontColor?: string;
+    /** Overrides default title typography (text-base font-medium). Use for prominent headers e.g. in-panel version updates. */
+    titleClassName?: string;
     count?: number;
     buttonIcon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
     buttonOnClick?: () => void;
@@ -20,6 +22,7 @@ const PopupMessageHeader: React.FC<PopupMessageHeaderProps> = ({
     buttonIcon,
     buttonOnClick,
     fontColor = 'font-color-secondary',
+    titleClassName,
     handleDismiss,
     cancelable = true,
 }) => {
@@ -31,7 +34,7 @@ const PopupMessageHeader: React.FC<PopupMessageHeaderProps> = ({
                     {icon}
                 </div>
             }
-            <div className={`flex-1 text-base font-medium ${fontColor}`}>
+            <div className={`flex-1 ${titleClassName ?? 'text-base font-medium'} ${fontColor}`}>
                 {`${title} ${count ? `(${count})` : ''}`}
             </div>
             <div className="display-flex flex-row gap-2 flex-shrink-0">

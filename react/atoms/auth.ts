@@ -90,7 +90,7 @@ export const isWaitingForProfileAtom = atom<boolean>(false);
  * so it works with both Jotai atom write `set` and `store.set`.
  */
 export function resetLoginFormState(set: (atom: any, value: any) => void): void {
-    logger('resetLoginFormState: resetting login form state');
+    logger('resetLoginFormState: resetting login form state', new Error().stack);
     set(loginStepAtom, 'method-selection');
     set(loginLoadingAtom, false);
     set(loginPasswordAtom, '');
