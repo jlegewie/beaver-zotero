@@ -791,12 +791,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
                     {/* Inline undo error banner for edit_note */}
                     {undoError && (
-                        <div
-                            className="display-flex flex-row items-start gap-2 mx-3 mt-2 px-3 py-2 rounded-md"
-                            style={{ backgroundColor: 'var(--tag-yellow-senary)' }}
-                        >
+                        <div className="display-flex flex-row items-start gap-2 mx-3 mt-2 px-3 py-2 rounded-md bg-senary">
                             <div className="mt-010 flex-shrink-0">
-                                <Icon icon={AlertIcon} className="font-color-yellow scale-09" />
+                                <Icon icon={AlertIcon} className="font-color-secondary scale-90" />
                             </div>
                             <div className="text-sm font-color-secondary" style={{ lineHeight: '1.4' }}>
                                 Could not undo automatically. The note may have been modified since this edit was applied. You can revert manually in the note editor.
