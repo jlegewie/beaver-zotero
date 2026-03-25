@@ -218,6 +218,15 @@ async function onStartup() {
         // -------- Register Zotero 8 context menus (no-op on Zotero 7) --------
         initContextMenus();
 
+        // -------- Register Zotero preferences pane --------
+        await Zotero.PreferencePanes.register({
+            pluginID: addon.data.config.addonID,
+            src: rootURI + 'content/beaverZoteroPrefs.xhtml',
+            id: 'beaver-prefpane',
+            label: 'Beaver',
+            image: rootURI + 'content/icons/beaver@0.5x.png',
+        });
+
         // -------- Load UI for all windows --------
         const mainWindows = Zotero.getMainWindows();
         if (mainWindows.length > 0) {
