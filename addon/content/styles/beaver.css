@@ -2326,6 +2326,28 @@
     color: var(--fill-primary);
 }
 
+/* KaTeX within inline diff */
+[id^="beaver-pane-"] .inline-diff-container .katex {
+    font-size: 0.95em;
+    color: inherit;
+}
+[id^="beaver-pane-"] .inline-diff-container .katex * {
+    color: inherit;
+}
+/* Display math: centered block, compact spacing */
+[id^="beaver-pane-"] .inline-diff-container .inline-diff-display-math {
+    display: block;
+    text-align: center;
+    margin: 4px 0;
+}
+[id^="beaver-pane-"] .inline-diff-container .inline-diff-display-math .katex-display {
+    display: inline;
+    margin: 0;
+}
+[id^="beaver-pane-"] .inline-diff-container .inline-diff-display-math .katex {
+    font-size: 1.1em;
+}
+
 /* Feature Tour Styles */
 [id^="beaver-pane-"] .feature-tour-content {
     max-width: 100%;
