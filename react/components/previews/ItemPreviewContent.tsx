@@ -144,7 +144,13 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
             // Show note preview
             try {
                 const noteContent = item.getNote();
-                const plainText = noteContent.replace(/<[^>]*>/g, '').substring(0, 200);
+                const noteTitle = item.getNoteTitle();
+                let plainText = noteContent.replace(/<[^>]*>/g, '').trim();
+                // Strip the title from the beginning of the content to avoid duplication
+                if (noteTitle && plainText.startsWith(noteTitle)) {
+                    plainText = plainText.substring(noteTitle.length).trim();
+                }
+                plainText = plainText.substring(0, 200);
 
                 return (
                     <div className="p-3 display-flex flex-col items-start gap-2">
@@ -153,7 +159,7 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
                             title={getDisplayNameFromItem(item)}
                             handleDismiss={() => setActivePreview(null)}
                         />
-                        <div className="text-sm font-color-secondary ml-15">{plainText}{plainText.length >= 200 ? '...' : ''}</div>
+                        {plainText && <div className="text-sm font-color-secondary ml-15">{plainText}{plainText.length >= 200 ? '...' : ''}</div>}
                     </div>
                 );
             } catch (error) {
