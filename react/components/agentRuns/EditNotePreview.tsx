@@ -196,6 +196,11 @@ export function computeInlineDiff(oldText: string, newText: string): InlineSegme
         ];
     }
 
+    // Trim trailing whitespace for comparison so that tokens like
+    // "word." and "word. " (differing only in trailing space) match.
+    const oldTrimmed = oldTokens.map(t => t.trimEnd());
+    const newTrimmed = newTokens.map(t => t.trimEnd());
+
     // LCS on word tokens
     const m = oldTokens.length;
     const n = newTokens.length;
@@ -203,7 +208,7 @@ export function computeInlineDiff(oldText: string, newText: string): InlineSegme
 
     for (let i = 1; i <= m; i++) {
         for (let j = 1; j <= n; j++) {
-            if (oldTokens[i - 1] === newTokens[j - 1]) {
+            if (oldTrimmed[i - 1] === newTrimmed[j - 1]) {
                 dp[i][j] = dp[i - 1][j - 1] + 1;
             } else {
                 dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
@@ -215,8 +220,10 @@ export function computeInlineDiff(oldText: string, newText: string): InlineSegme
     const ops: Array<{ token: string; type: 'context' | 'deletion' | 'addition' }> = [];
     let i = m, j = n;
     while (i > 0 || j > 0) {
-        if (i > 0 && j > 0 && oldTokens[i - 1] === newTokens[j - 1]) {
-            ops.unshift({ token: oldTokens[i - 1], type: 'context' });
+        if (i > 0 && j > 0 && oldTrimmed[i - 1] === newTrimmed[j - 1]) {
+            // Use the new token for context — it has the correct whitespace
+            // for the post-edit text.
+            ops.unshift({ token: newTokens[j - 1], type: 'context' });
             i--; j--;
         } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
             ops.unshift({ token: newTokens[j - 1], type: 'addition' });
