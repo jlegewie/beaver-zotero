@@ -202,7 +202,11 @@ function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeConte
         }
         case 'note': {
             const noteItem = store.get(currentNoteItemAtom);
-            return { items: noteItem ? [noteItem] : [], collection: null };
+            if (noteItem) return { items: [noteItem], collection: null };
+            // Fallback: selected notes in library view
+            const selectedItems = store.get(selectedZoteroItemsAtom);
+            const notes = selectedItems.filter((i: Zotero.Item) => i.isNote());
+            return { items: notes.slice(0, 10), collection: null };
         }
         case 'global':
             return { items: [], collection: null };

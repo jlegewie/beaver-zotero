@@ -49,24 +49,28 @@ function isActionableContextItem(item: any): boolean {
 // before inner menu items' onShowing (parent popup → submenu popup order).
 // ---------------------------------------------------------------------------
 
-interface WinningTarget { type: 'items' | 'attachment'; count: number }
+interface WinningTarget { type: 'items' | 'attachment' | 'note'; count: number }
 let winningTarget: WinningTarget | null = null;
 
 /**
- * Determine the single winning target type from actionable items.
- * Priority: regular items > PDF attachments (mirrors getActiveTarget in ActionSuggestions).
+ * Determine the single winning target type from selected items.
+ * Priority: regular items > PDF attachments > notes (mirrors getActiveTarget in ActionSuggestions).
  */
-function getWinningTarget(actionable: any[]): WinningTarget | null {
+function getWinningTarget(items: any[]): WinningTarget | null {
+    const actionable = items.filter((i: any) => isActionableContextItem(i));
     const regular = actionable.filter((i: any) => i.isRegularItem());
     if (regular.length > 0) return { type: 'items', count: regular.length };
     const pdfs = actionable.filter((i: any) => i.isPDFAttachment());
     if (pdfs.length > 0) return { type: 'attachment', count: pdfs.length };
+    const notes = items.filter((i: any) => i.isNote?.() && !safeIsInTrash(i));
+    if (notes.length > 0) return { type: 'note', count: notes.length };
     return null;
 }
 
 /** Build a human-readable label for the winning target (e.g. "3 items", "1 attachment"). */
 function winningTargetLabel(wt: WinningTarget): string {
     if (wt.type === 'items') return `${wt.count} item${wt.count !== 1 ? 's' : ''}`;
+    if (wt.type === 'note') return `${wt.count} note${wt.count !== 1 ? 's' : ''}`;
     return `${wt.count} attachment${wt.count !== 1 ? 's' : ''}`;
 }
 
@@ -184,9 +188,8 @@ function registerMenus(): void {
     const actions = getMergedActions();
 
     // --- Item context menu ---
-    // Note actions are excluded for now — enable by adding 'note' back to this filter
     const itemActions = actions.filter(a =>
-        a.targetType === 'items' || a.targetType === 'attachment'
+        a.targetType === 'items' || a.targetType === 'attachment' || a.targetType === 'note'
     );
 
     // Always register — at minimum shows "Add custom action..."
@@ -212,21 +215,9 @@ function registerMenus(): void {
                     setVisible(false);
                     return;
                 }
-                // Hide for notes — not yet supported (re-enable by removing this block)
-                if (items.every((i: any) => i.isNote())) {
-                    setVisible(false);
-                    return;
-                }
 
-                // Filter to actionable items (supported type + not in trash)
-                const actionable = items.filter((i: any) => isActionableContextItem(i));
-                if (actionable.length === 0) {
-                    setVisible(false);
-                    return;
-                }
-
-                // Determine the single winning target type (items > attachments)
-                winningTarget = getWinningTarget(actionable);
+                // Determine the single winning target type (items > attachments > notes)
+                winningTarget = getWinningTarget(items);
                 if (!winningTarget) {
                     setVisible(false);
                     return;
@@ -362,18 +353,23 @@ function filterItemAction(action: Action, context: any): void {
         return;
     }
 
-    const actionable = items.filter((i: any) => isActionableContextItem(i));
-
     switch (action.targetType) {
         case 'items': {
             const min = action.minItems ?? 1;
+            const actionable = items.filter((i: any) => isActionableContextItem(i));
             const regular = actionable.filter((i: any) => i.isRegularItem());
             setVisible(regular.length >= min);
             break;
         }
         case 'attachment': {
+            const actionable = items.filter((i: any) => isActionableContextItem(i));
             const hasAttachment = actionable.some((i: any) => i.isPDFAttachment());
             setVisible(hasAttachment);
+            break;
+        }
+        case 'note': {
+            const notes = items.filter((i: any) => i.isNote?.() && !safeIsInTrash(i));
+            setVisible(notes.length > 0);
             break;
         }
         default:
@@ -404,6 +400,9 @@ function dispatchAction(action: Action, context: any): void {
             break;
         case 'attachment':
             filteredItems = allItems.filter((i: any) => i.isPDFAttachment() && !safeIsInTrash(i));
+            break;
+        case 'note':
+            filteredItems = allItems.filter((i: any) => i.isNote?.() && !safeIsInTrash(i));
             break;
         default:
             filteredItems = allItems;
