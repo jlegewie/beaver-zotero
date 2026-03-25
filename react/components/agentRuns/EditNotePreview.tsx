@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import katex from 'katex';
 import {
     getOrSimplify,
     getLatestNoteHtml,
@@ -43,6 +44,19 @@ export interface InlineSegment {
     type: 'context' | 'deletion' | 'addition';
 }
 
+// ---- Preprocessing ----
+
+/**
+ * Convert heading tags to markdown-style markers before HTML stripping.
+ * This makes heading structure visible in the diff view.
+ */
+function prepareHtmlForDiff(html: string): string {
+    return html.replace(
+        /<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi,
+        (_match, level, content) => '#'.repeat(Number(level)) + ' ' + content + '\n'
+    );
+}
+
 // ---- Component ----
 
 export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
@@ -60,8 +74,8 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     const isError = status === 'error';
     const isDelete = newString === '';
 
-    const strippedOld = stripHtmlTags(oldString);
-    const strippedNew = stripHtmlTags(newString);
+    const strippedOld = stripHtmlTags(prepareHtmlForDiff(oldString));
+    const strippedNew = stripHtmlTags(prepareHtmlForDiff(newString));
 
     // When strippedOld is empty (old_string was pure HTML structure), fetch
     // surrounding visible text from the full note for context.
@@ -146,12 +160,12 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                     <div className="inline-diff-container">
                         {inlineSegments.map((seg, i) => {
                             if (seg.type === 'deletion') {
-                                return <span key={i} className="inline-diff-del">{seg.text}</span>;
+                                return <span key={i} className="inline-diff-del">{renderFormattedText(seg.text)}</span>;
                             }
                             if (seg.type === 'addition') {
-                                return <span key={i} className="inline-diff-add">{seg.text}</span>;
+                                return <span key={i} className="inline-diff-add">{renderFormattedText(seg.text)}</span>;
                             }
-                            return <span key={i}>{seg.text}</span>;
+                            return <span key={i}>{renderFormattedText(seg.text)}</span>;
                         })}
                     </div>
                 </div>
@@ -160,13 +174,100 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     );
 };
 
+// ---- Formatted text rendering ----
+
+/**
+ * Render math expressions within text using KaTeX.
+ * Display math ($$...$$) uses displayMode for proper sizing but is wrapped
+ * in a compact inline-block container to avoid excessive spacing.
+ */
+function renderMathInText(text: string): React.ReactNode {
+    const parts = text.split(/(\$\$[\s\S]+?\$\$|\$(?!\$)[^$\n]+\$(?!\$))/g);
+    if (parts.length === 1) return text;
+
+    return parts.map((part, i) => {
+        const displayMatch = part.match(/^\$\$([\s\S]+?)\$\$$/);
+        if (displayMatch) {
+            try {
+                const html = katex.renderToString(displayMatch[1], { displayMode: true, throwOnError: false });
+                return <span key={i} className="inline-diff-display-math" dangerouslySetInnerHTML={{ __html: html }} />;
+            } catch { return <span key={i}>{part}</span>; }
+        }
+        const inlineMatch = part.match(/^\$([^$\n]+)\$$/);
+        if (inlineMatch) {
+            try {
+                const html = katex.renderToString(inlineMatch[1], { displayMode: false, throwOnError: false });
+                return <span key={i} dangerouslySetInnerHTML={{ __html: html }} />;
+            } catch { return <span key={i}>{part}</span>; }
+        }
+        return <React.Fragment key={i}>{part}</React.Fragment>;
+    });
+}
+
+/**
+ * Render a segment's text with formatting: split by newlines so that heading
+ * markers only apply to their own line, render math via KaTeX, and collapse
+ * consecutive blank lines.
+ */
+function renderFormattedText(text: string): React.ReactNode {
+    const lines = text.split('\n');
+    if (lines.length === 1) {
+        return renderLine(lines[0]);
+    }
+
+    const result: React.ReactNode[] = [];
+    let prevBlank = false;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const isBlank = line.trim() === '';
+
+        // Collapse consecutive blank lines into one break
+        if (isBlank) {
+            if (!prevBlank && i > 0) {
+                result.push(<br key={`br-${i}`} />);
+            }
+            prevBlank = true;
+            continue;
+        }
+        prevBlank = false;
+
+        if (result.length > 0 && !isBlank) {
+            // Add line break between non-blank lines (unless we just added a br)
+            const lastNode = result[result.length - 1];
+            if (lastNode && typeof lastNode === 'object' && 'key' in lastNode && typeof lastNode.key === 'string' && lastNode.key.startsWith('br-')) {
+                // Already have a break, skip
+            } else {
+                result.push(<br key={`br-${i}`} />);
+            }
+        }
+        result.push(<React.Fragment key={`l-${i}`}>{renderLine(line)}</React.Fragment>);
+    }
+    return <>{result}</>;
+}
+
+/**
+ * Render a single line: detect heading markers and apply styling,
+ * otherwise render math in the text.
+ */
+function renderLine(line: string): React.ReactNode {
+    const headingMatch = line.match(/^(#{1,6})\s/);
+    if (headingMatch) {
+        const level = headingMatch[1].length;
+        const content = line.replace(/^#{1,6}\s*/, '');
+        const fontSize = level <= 1 ? '1.3em' : level <= 2 ? '1.2em' : level <= 3 ? '1.1em' : '1.05em';
+        const marginTop = level <= 1 ? 10 : level <= 2 ? 8 : 6;
+        return <span style={{ display: 'inline-block', fontWeight: 700, fontSize, marginTop }}>{renderMathInText(content)}</span>;
+    }
+    return renderMathInText(line);
+}
+
 // ---- Inline diff computation ----
 
 /**
  * Tokenize text into word tokens (each word with its trailing whitespace).
  */
 function tokenize(text: string): string[] {
-    return text.match(/\S+\s*|\s+/g) || [];
+    return text.match(/\$\$[\s\S]+?\$\$\s*|\$(?!\$)[^$\n]+\$(?!\$)\s*|\S+\s*|\s+/g) || [];
 }
 
 /**
