@@ -90,14 +90,18 @@ beforeEach(() => {
 // =============================================================================
 
 describe('handleReadNoteRequest — success', () => {
-    it('returns success with correct title, total_lines, and numbered content', async () => {
+    it('returns success with correct title, total_lines, and content without line numbers', async () => {
         const response = await handleReadNoteRequest(makeRequest());
         expect(response.success).toBe(true);
         expect(response.title).toBe('Test Note');
         expect(response.total_lines).toBe(5);
-        expect(response.content).toContain('1|Line one');
-        expect(response.content).toContain('5|Line five');
+        expect(response.content).toContain('Line one');
+        expect(response.content).toContain('Line five');
+        expect(response.content).not.toContain('1|');
         expect(response.note_id).toBe('1-ABCD1234');
+        expect(response.has_more).toBe(false);
+        expect(response.next_offset).toBeUndefined();
+        expect(response.lines_returned).toBe('1-5');
     });
 
     it('includes parent_item_id and parent_title when note has parent', async () => {
@@ -148,15 +152,20 @@ describe('handleReadNoteRequest — pagination', () => {
         expect(response.content).toContain('Line three');
         expect(response.content).not.toContain('Line one');
         expect(response.content).not.toContain('Line two');
+        expect(response.has_more).toBe(false);
+        expect(response.next_offset).toBeUndefined();
+        expect(response.lines_returned).toBe('3-5');
     });
 
-    it('limit caps output', async () => {
+    it('limit caps output and sets has_more', async () => {
         const response = await handleReadNoteRequest(makeRequest({ limit: 2 }));
         expect(response.success).toBe(true);
-        // Should only have first 2 lines
         expect(response.content).toContain('Line one');
         expect(response.content).toContain('Line two');
         expect(response.content).not.toContain('Line three');
+        expect(response.has_more).toBe(true);
+        expect(response.next_offset).toBe(3);
+        expect(response.lines_returned).toBe('1-2');
     });
 
     it('offset + limit combination', async () => {
@@ -166,6 +175,9 @@ describe('handleReadNoteRequest — pagination', () => {
         expect(response.content).toContain('Line three');
         expect(response.content).not.toContain('Line one');
         expect(response.content).not.toContain('Line four');
+        expect(response.has_more).toBe(true);
+        expect(response.next_offset).toBe(4);
+        expect(response.lines_returned).toBe('2-3');
     });
 
     it('offset beyond total returns empty content', async () => {
@@ -173,41 +185,31 @@ describe('handleReadNoteRequest — pagination', () => {
         expect(response.success).toBe(true);
         expect(response.content).toBe('');
         expect(response.total_lines).toBe(5);
+        expect(response.has_more).toBe(false);
+        expect(response.next_offset).toBeUndefined();
     });
 
     it('offset defaults to 1 (reads from beginning)', async () => {
         const response = await handleReadNoteRequest(makeRequest());
         expect(response.success).toBe(true);
-        expect(response.content).toContain('1|Line one');
-    });
-});
-
-
-// =============================================================================
-// Line Numbering
-// =============================================================================
-
-describe('handleReadNoteRequest — line numbering', () => {
-    it('pads line numbers for multi-digit ranges', async () => {
-        // 5 lines → single digit, no padding needed for lines 1-5
-        const response = await handleReadNoteRequest(makeRequest());
-        // Lines 1-5 all single digit
-        expect(response.content).toContain('1|Line one');
-        expect(response.content).toContain('5|Line five');
+        expect(response.content).toContain('Line one');
+        expect(response.content).not.toContain('1|');
     });
 
-    it('pads line numbers correctly with offset producing multi-digit end', async () => {
-        // Mock 12-line content
-        vi.mocked(getOrSimplify).mockReturnValueOnce({
-            simplified: Array.from({ length: 12 }, (_, i) => `Line ${i + 1}`).join('\n'),
-            metadata: { elements: new Map() },
-            isStale: false,
-        });
-        const response = await handleReadNoteRequest(makeRequest());
+    it('has_more is false at exact boundary', async () => {
+        const response = await handleReadNoteRequest(makeRequest({ limit: 5 }));
         expect(response.success).toBe(true);
-        // Line numbers should be padded: " 1|...", "12|..."
-        expect(response.content).toContain(' 1|Line 1');
-        expect(response.content).toContain('12|Line 12');
+        expect(response.has_more).toBe(false);
+        expect(response.next_offset).toBeUndefined();
+        expect(response.lines_returned).toBe('1-5');
+    });
+
+    it('lines_returned shows single line for single-line result', async () => {
+        const response = await handleReadNoteRequest(makeRequest({ offset: 3, limit: 1 }));
+        expect(response.success).toBe(true);
+        expect(response.lines_returned).toBe('3');
+        expect(response.has_more).toBe(true);
+        expect(response.next_offset).toBe(4);
     });
 });
 

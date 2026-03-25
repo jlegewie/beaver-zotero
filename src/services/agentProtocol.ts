@@ -614,8 +614,14 @@ export interface WSReadNoteResponse {
     parent_title?: string;
     /** Total line count of the simplified HTML */
     total_lines?: number;
-    /** The simplified HTML content with line numbers (format: "  N|content") */
+    /** The simplified HTML content */
     content?: string;
+    /** Whether more lines exist beyond this page */
+    has_more?: boolean;
+    /** 1-indexed offset for the next page (undefined if no more lines) */
+    next_offset?: number;
+    /** Range of lines returned, e.g. '1-50' */
+    lines_returned?: string;
     /** Items cited in the note content (resolved from citation tags) */
     cited_items?: ItemSummary[];
 }

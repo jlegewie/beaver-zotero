@@ -1,7 +1,7 @@
 /**
  * Handler for read_note_request events.
  *
- * Returns a Zotero note's content in simplified HTML with line numbers,
+ * Returns a Zotero note's content in simplified HTML,
  * warming the simplification cache used by edit_note.
  */
 
@@ -131,7 +131,7 @@ function parseNoteId(noteId: string): { libraryId: number; itemKey: string } | n
 
 /**
  * Handle read_note_request event.
- * Reads a Zotero note's content and returns it in simplified HTML with line numbers.
+ * Reads a Zotero note's content and returns it in simplified HTML.
  */
 export async function handleReadNoteRequest(
     request: WSReadNoteRequest
@@ -192,18 +192,19 @@ export async function handleReadNoteRequest(
         // 6. Simplify (also warms cache for subsequent edit_note calls)
         const { simplified } = getOrSimplify(note_id, rawHtml, item.libraryID);
 
-        // 7. Format with line numbers and apply offset/limit pagination
+        // 7. Apply offset/limit pagination
         const lines = simplified.split('\n');
         const totalLines = lines.length;
         const start = Math.max(0, (offset ?? 1) - 1);
         const end = limit ? Math.min(start + limit, totalLines) : totalLines;
         const slice = lines.slice(start, end);
 
-        const maxLineNumWidth = String(end).length;
-        const numbered = slice.map((line, i) => {
-            const lineNum = String(start + i + 1).padStart(maxLineNumWidth, ' ');
-            return `${lineNum}|${line}`;
-        }).join('\n');
+        const content = slice.join('\n');
+        const hasMore = end < totalLines;
+        const nextOffset = hasMore ? end + 1 : undefined; // 1-indexed
+        const startLine = start + 1;
+        const linesReturned = slice.length === 0 ? undefined
+            : (startLine === end ? String(startLine) : `${startLine}-${end}`);
 
         // 8. Gather parent metadata
         let parentItemId: string | undefined;
@@ -228,7 +229,10 @@ export async function handleReadNoteRequest(
             parent_item_id: parentItemId,
             parent_title: parentTitle,
             total_lines: totalLines,
-            content: numbered,
+            content,
+            has_more: hasMore,
+            next_offset: nextOffset,
+            lines_returned: linesReturned,
             cited_items: citedItems.length > 0 ? citedItems : undefined,
         };
     } catch (error) {
