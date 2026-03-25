@@ -732,7 +732,7 @@ export function expandToRawHtml(
     );
     // <p ...>$...$</p> → $$...$$ (standalone single-dollar math = display intent)
     str = str.replace(
-        /<p(?:\s[^>]*)?>(\s*)\$(?!\$)((?:[^\$\\<]|\\.)+?)\$(?!\$)(\s*)<\/p>/g,
+        /<p(?:\s[^>]*)?>(\s*)\$(?!\$)((?:[^$\\<]|\\.)+?)\$(?!\$)(\s*)<\/p>/g,
         (_match, _ws1, content) => `$$${content}$$`
     );
 
@@ -745,7 +745,7 @@ export function expandToRawHtml(
     // Rules: not adjacent to another $, content starts/ends with non-whitespace,
     // allows backslash-escaped chars (e.g. \$ for literal dollar in LaTeX)
     str = str.replace(
-        /(?<!\$)\$(?!\$)(?=\S)((?:[^\$\\]|\\.)+?)(?<=\S)\$(?!\$)/g,
+        /(?<!\$)\$(?!\$)(?=\S)((?:[^$\\]|\\.)+?)(?<=\S)\$(?!\$)/g,
         (match) => `<span class="math">${match}</span>`
     );
 
