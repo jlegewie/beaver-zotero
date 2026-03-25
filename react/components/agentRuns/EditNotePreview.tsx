@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { diffWords, diffLines, diffChars } from 'diff';
 import {
     getOrSimplify,
     getLatestNoteHtml,
@@ -277,17 +278,7 @@ function splitIntoParagraphs(segments: InlineSegment[]): InlineSegment[][] {
 }
 
 /**
- * Tokenize text into word tokens (each word with its trailing non-newline
- * whitespace) and newline tokens. Keeping newlines separate prevents orphaned
- * words (e.g. "contact." appearing alone on a line) when a \n sits at the
- * boundary between diff segments.
- */
-function tokenize(text: string): string[] {
-    return text.match(/\S+[^\S\n]*|\n+/g) || [];
-}
-
-/**
- * Compute an inline (word-level) diff between two texts.
+ * Compute an inline (word-level) diff between two texts using jsdiff.
  * Returns a sequence of context/deletion/addition segments rendered
  * as continuous text with interwoven red+strikethrough and green spans.
  */
@@ -302,65 +293,11 @@ export function computeInlineDiff(oldText: string, newText: string): InlineSegme
         return [{ text: oldText, type: 'deletion' }];
     }
 
-    const oldTokens = tokenize(oldText);
-    const newTokens = tokenize(newText);
-
-    // For very long inputs, fall back to simple before/after
-    if (oldTokens.length * newTokens.length > 1_000_000) {
-        return [
-            { text: oldText, type: 'deletion' },
-            { text: newText, type: 'addition' },
-        ];
-    }
-
-    // Trim trailing whitespace for comparison so that tokens like
-    // "word." and "word. " (differing only in trailing space) match.
-    const oldTrimmed = oldTokens.map(t => t.trimEnd());
-    const newTrimmed = newTokens.map(t => t.trimEnd());
-
-    // LCS on word tokens
-    const m = oldTokens.length;
-    const n = newTokens.length;
-    const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-
-    for (let i = 1; i <= m; i++) {
-        for (let j = 1; j <= n; j++) {
-            if (oldTrimmed[i - 1] === newTrimmed[j - 1]) {
-                dp[i][j] = dp[i - 1][j - 1] + 1;
-            } else {
-                dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-            }
-        }
-    }
-
-    // Backtrack to get operations
-    const ops: Array<{ token: string; type: 'context' | 'deletion' | 'addition' }> = [];
-    let i = m, j = n;
-    while (i > 0 || j > 0) {
-        if (i > 0 && j > 0 && oldTrimmed[i - 1] === newTrimmed[j - 1]) {
-            // Use the new token for context — it has the correct whitespace
-            // for the post-edit text.
-            ops.unshift({ token: newTokens[j - 1], type: 'context' });
-            i--; j--;
-        } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-            ops.unshift({ token: newTokens[j - 1], type: 'addition' });
-            j--;
-        } else {
-            ops.unshift({ token: oldTokens[i - 1], type: 'deletion' });
-            i--;
-        }
-    }
-
-    // Merge consecutive segments of the same type
-    const segments: InlineSegment[] = [];
-    for (const op of ops) {
-        const last = segments[segments.length - 1];
-        if (last && last.type === op.type) {
-            last.text += op.token;
-        } else {
-            segments.push({ text: op.token, type: op.type });
-        }
-    }
+    const changes = diffWords(oldText, newText);
+    const segments: InlineSegment[] = changes.map(c => ({
+        text: c.value,
+        type: c.added ? 'addition' : c.removed ? 'deletion' : 'context',
+    }));
 
     return truncateInlineContext(segments);
 }
@@ -398,6 +335,7 @@ function truncateInlineContext(segments: InlineSegment[], maxContext: number = 8
 
 /**
  * Compute a line-level diff with character-level highlighting for modified lines.
+ * Uses jsdiff for line-level and character-level diffing.
  * Shows limited context around changes.
  */
 export function computeDiff(oldText: string, newText: string): DiffLine[] {
@@ -420,42 +358,20 @@ export function computeDiff(oldText: string, newText: string): DiffLine[] {
         }));
     }
 
-    const oldLines = oldText.split('\n');
-    const newLines = newText.split('\n');
-
-    // LCS table for line-level diff
-    const m = oldLines.length;
-    const n = newLines.length;
-    const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-
-    for (let i = 1; i <= m; i++) {
-        for (let j = 1; j <= n; j++) {
-            if (oldLines[i - 1] === newLines[j - 1]) {
-                dp[i][j] = dp[i - 1][j - 1] + 1;
-            } else {
-                dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-            }
-        }
-    }
-
-    // Backtrack to get raw diff operations
+    // Use jsdiff for line-level diff, then convert to per-line rawOps
+    const changes = diffLines(oldText, newText);
     const rawOps: Array<{ type: 'context' | 'addition' | 'deletion'; text: string }> = [];
-    let i = m, j = n;
-    while (i > 0 || j > 0) {
-        if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-            rawOps.unshift({ type: 'context', text: oldLines[i - 1] });
-            i--; j--;
-        } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-            rawOps.unshift({ type: 'addition', text: newLines[j - 1] });
-            j--;
-        } else {
-            rawOps.unshift({ type: 'deletion', text: oldLines[i - 1] });
-            i--;
+    for (const change of changes) {
+        const type = change.added ? 'addition' : change.removed ? 'deletion' : 'context';
+        // diffLines includes trailing newlines in values; split and trim the trailing one
+        const lines = change.value.replace(/\n$/, '').split('\n');
+        for (const line of lines) {
+            rawOps.push({ type, text: line });
         }
     }
 
     // Pair consecutive deletion+addition blocks for character-level diff
-    const diffLines: DiffLine[] = [];
+    const result: DiffLine[] = [];
     let idx = 0;
     while (idx < rawOps.length) {
         if (rawOps[idx].type === 'deletion') {
@@ -477,71 +393,49 @@ export function computeDiff(oldText: string, newText: string): DiffLine[] {
                 const newHasHighlight = newSegs.some(s => s.highlighted);
 
                 if (!oldHasHighlight && newHasHighlight) {
-                    // Pure addition within line: show only the addition with truncated context prefix
-                    diffLines.push({ type: 'addition', text: additions[k], segments: truncateSegments(newSegs) });
+                    result.push({ type: 'addition', text: additions[k], segments: truncateSegments(newSegs) });
                 } else if (oldHasHighlight && !newHasHighlight) {
-                    // Pure deletion within line: show only the deletion with truncated context suffix
-                    diffLines.push({ type: 'deletion', text: deletions[k], segments: truncateSegments(oldSegs) });
+                    result.push({ type: 'deletion', text: deletions[k], segments: truncateSegments(oldSegs) });
                 } else {
-                    // Regular modification: show both deletion and addition with highlights
-                    diffLines.push({ type: 'deletion', text: deletions[k], segments: truncateSegments(oldSegs) });
-                    diffLines.push({ type: 'addition', text: additions[k], segments: truncateSegments(newSegs) });
+                    result.push({ type: 'deletion', text: deletions[k], segments: truncateSegments(oldSegs) });
+                    result.push({ type: 'addition', text: additions[k], segments: truncateSegments(newSegs) });
                 }
             }
             // Remaining unpaired lines
             for (let k = pairCount; k < deletions.length; k++) {
-                diffLines.push({ type: 'deletion', text: deletions[k] });
+                result.push({ type: 'deletion', text: deletions[k] });
             }
             for (let k = pairCount; k < additions.length; k++) {
-                diffLines.push({ type: 'addition', text: additions[k], segments: [{ text: additions[k], highlighted: true }] });
+                result.push({ type: 'addition', text: additions[k], segments: [{ text: additions[k], highlighted: true }] });
             }
         } else {
-            diffLines.push({ type: rawOps[idx].type, text: rawOps[idx].text });
+            result.push({ type: rawOps[idx].type, text: rawOps[idx].text });
             idx++;
         }
     }
 
-    return filterContext(diffLines, 1);
+    return filterContext(result, 1);
 }
 
 /**
- * Compute character-level diff between two lines.
- * Finds the common prefix and suffix, highlights only the changed middle.
+ * Compute character-level diff between two lines using jsdiff.
+ * Returns separate old and new segment arrays with highlighted changed portions.
  */
 function computeCharDiff(oldLine: string, newLine: string): [DiffSegment[], DiffSegment[]] {
-    // Find common prefix
-    let prefixLen = 0;
-    while (prefixLen < oldLine.length && prefixLen < newLine.length && oldLine[prefixLen] === newLine[prefixLen]) {
-        prefixLen++;
-    }
-
-    // Find common suffix (not overlapping with prefix)
-    let suffixLen = 0;
-    while (
-        suffixLen < oldLine.length - prefixLen &&
-        suffixLen < newLine.length - prefixLen &&
-        oldLine[oldLine.length - 1 - suffixLen] === newLine[newLine.length - 1 - suffixLen]
-    ) {
-        suffixLen++;
-    }
-
-    const prefix = oldLine.substring(0, prefixLen);
-    const oldMiddle = oldLine.substring(prefixLen, oldLine.length - suffixLen);
-    const newMiddle = newLine.substring(prefixLen, newLine.length - suffixLen);
-    const suffix = oldLine.substring(oldLine.length - suffixLen);
+    const changes = diffChars(oldLine, newLine);
 
     const oldSegments: DiffSegment[] = [];
     const newSegments: DiffSegment[] = [];
 
-    if (prefix) {
-        oldSegments.push({ text: prefix, highlighted: false });
-        newSegments.push({ text: prefix, highlighted: false });
-    }
-    if (oldMiddle) oldSegments.push({ text: oldMiddle, highlighted: true });
-    if (newMiddle) newSegments.push({ text: newMiddle, highlighted: true });
-    if (suffix) {
-        oldSegments.push({ text: suffix, highlighted: false });
-        newSegments.push({ text: suffix, highlighted: false });
+    for (const change of changes) {
+        if (change.added) {
+            newSegments.push({ text: change.value, highlighted: true });
+        } else if (change.removed) {
+            oldSegments.push({ text: change.value, highlighted: true });
+        } else {
+            oldSegments.push({ text: change.value, highlighted: false });
+            newSegments.push({ text: change.value, highlighted: false });
+        }
     }
 
     // Fallback: if no segments produced, highlight the whole line
