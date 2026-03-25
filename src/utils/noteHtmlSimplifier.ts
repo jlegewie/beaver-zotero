@@ -725,15 +725,15 @@ export function expandToRawHtml(
     // it should render as display math (block-level <pre class="math">). Without
     // this, ProseMirror converts the paragraph-wrapped inline math to display math
     // itself, causing empty <p> wrappers and undo data mismatches.
-    // <p>$$...$$</p> → $$...$$ (unwrap paragraph around display math)
+    // <p ...>$$...$$</p> → $$...$$ (unwrap paragraph around display math)
     str = str.replace(
-        /<p>\s*(\$\$[^<]+?\$\$)\s*<\/p>/g,
+        /<p(?:\s[^>]*)?>(\$\$[^<]+?\$\$)<\/p>/g,
         (_match, content) => content
     );
-    // <p>$...$</p> → $$...$$ (standalone single-dollar math = display intent)
+    // <p ...>$...$</p> → $$...$$ (standalone single-dollar math = display intent)
     str = str.replace(
-        /<p>\s*\$(?!\$)((?:[^\$\\<]|\\.)+?)\$(?!\$)\s*<\/p>/g,
-        (_match, content) => `$$${content}$$`
+        /<p(?:\s[^>]*)?>(\s*)\$(?!\$)((?:[^\$\\<]|\\.)+?)\$(?!\$)(\s*)<\/p>/g,
+        (_match, _ws1, content) => `$$${content}$$`
     );
 
     // Display math: $$...$$ → <pre class="math">$$...$$</pre>

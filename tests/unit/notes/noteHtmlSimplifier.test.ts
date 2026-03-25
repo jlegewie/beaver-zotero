@@ -1353,6 +1353,18 @@ describe('Math expansion', () => {
         expect(result).toBe(`<p>The formula ${rawInlineMath('E=mc^2')} is famous.</p>`);
     });
 
+    it('converts standalone math in <p> with style attribute to display', () => {
+        const input = '<p style="text-align: center;">$\\hat{\\beta} = (X\'X)^{-1}X\'y$</p>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(rawDisplayMath('\\hat{\\beta} = (X\'X)^{-1}X\'y'));
+    });
+
+    it('converts standalone display math in <p> with attributes (unwraps)', () => {
+        const input = '<p style="text-align: center;">$$E=mc^2$$</p>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(rawDisplayMath('E=mc^2'));
+    });
+
     it('mixed: standalone equation + inline math in separate paragraphs', () => {
         const input = '<p>$E=mc^2$</p>\n<p>Where $E$ is energy.</p>';
         const result = expandToRawHtml(input, emptyMetadata(), 'new');
