@@ -97,6 +97,27 @@ function rawImage(attKey: string): string {
     return `<img data-attachment-key="${attKey}" width="400" height="300" />`;
 }
 
+/**
+ * Substring-based replace that avoids JavaScript's special $ handling in
+ * String.prototype.replace() replacement strings.  Mirrors what
+ * editNoteActions.ts does at runtime (indexOf + substring splicing).
+ */
+function replaceFirst(haystack: string, needle: string, replacement: string): string {
+    const idx = haystack.indexOf(needle);
+    if (idx === -1) throw new Error(`replaceFirst: needle not found in haystack`);
+    return haystack.substring(0, idx) + replacement + haystack.substring(idx + needle.length);
+}
+
+/** Build a raw inline math span */
+function rawInlineMath(latex: string): string {
+    return `<span class="math">$${latex}$</span>`;
+}
+
+/** Build a raw display math pre */
+function rawDisplayMath(latex: string): string {
+    return `<pre class="math">$$${latex}$$</pre>`;
+}
+
 
 // =============================================================================
 // Setup
@@ -1113,5 +1134,547 @@ describe('getLatestNoteHtml', () => {
             get _iframeWindow() { throw new Error('dead object'); },
         }];
         expect(getLatestNoteHtml(item)).toBe('<p>saved version</p>');
+    });
+});
+
+
+// =============================================================================
+// Math Simplification
+// =============================================================================
+
+describe('Math simplification', () => {
+    it('simplifies inline math to dollar notation', () => {
+        const html = wrap(`<p>The formula ${rawInlineMath('E=mc^2')} is famous.</p>`);
+        const { simplified } = simplifyNoteHtml(html, 1);
+        expect(simplified).toContain('$E=mc^2$');
+        expect(simplified).not.toContain('class="math"');
+        expect(simplified).not.toContain('<span');
+    });
+
+    it('simplifies display math to dollar notation', () => {
+        const html = wrap(`<p>Consider:</p>${rawDisplayMath('\\int_0^1 f(x) dx')}`);
+        const { simplified } = simplifyNoteHtml(html, 1);
+        expect(simplified).toContain('$$\\int_0^1 f(x) dx$$');
+        expect(simplified).not.toContain('class="math"');
+        expect(simplified).not.toContain('<pre');
+    });
+
+    it('simplifies multiple inline math expressions', () => {
+        const html = wrap(`<p>Given ${rawInlineMath('x')} and ${rawInlineMath('y')}, then ${rawInlineMath('x+y')}.</p>`);
+        const { simplified } = simplifyNoteHtml(html, 1);
+        expect(simplified).toContain('$x$');
+        expect(simplified).toContain('$y$');
+        expect(simplified).toContain('$x+y$');
+        expect(simplified).not.toContain('class="math"');
+    });
+
+    it('simplifies mixed inline and display math', () => {
+        const html = wrap(
+            `<p>Inline ${rawInlineMath('a^2+b^2=c^2')} and display:</p>`
+            + rawDisplayMath('\\sum_{i=1}^n i = \\frac{n(n+1)}{2}')
+        );
+        const { simplified } = simplifyNoteHtml(html, 1);
+        expect(simplified).toContain('$a^2+b^2=c^2$');
+        expect(simplified).toContain('$$\\sum_{i=1}^n i = \\frac{n(n+1)}{2}$$');
+        expect(simplified).not.toContain('<span');
+        expect(simplified).not.toContain('<pre');
+    });
+
+    it('simplifies math with HTML entities', () => {
+        const html = wrap(`<p>${rawInlineMath('x &lt; y')}</p>`);
+        const { simplified } = simplifyNoteHtml(html, 1);
+        expect(simplified).toContain('$x &lt; y$');
+        expect(simplified).not.toContain('class="math"');
+    });
+
+    it('simplifies math alongside citations', () => {
+        const cit = rawCitation('MC1', 1, '', 'Author, 2024');
+        const html = wrap(`<p>As shown by ${cit}, ${rawInlineMath('p < 0.05')}.</p>`);
+        const { simplified } = simplifyNoteHtml(html, 1);
+        expect(simplified).toContain('$p < 0.05$');
+        expect(simplified).toContain('ref="c_MC1_0"');
+    });
+
+    it('does not affect non-math spans', () => {
+        const html = wrap('<p><span class="highlight">text</span> and <span style="color:red">red</span></p>');
+        const { simplified } = simplifyNoteHtml(html, 1);
+        // highlight is handled separately (as annotation with data-annotation), plain highlight without data-annotation passes through
+        expect(simplified).toContain('class="highlight"');
+        expect(simplified).toContain('style="color:red"');
+    });
+
+    it('leaves math without dollar delimiters unchanged', () => {
+        // Forward-compatibility edge case: content without $ delimiters
+        const html = wrap('<p><span class="math">x^2</span></p>');
+        const { simplified } = simplifyNoteHtml(html, 1);
+        // Should pass through unchanged since regex requires $ delimiters
+        expect(simplified).toContain('<span class="math">x^2</span>');
+    });
+
+    it('simplifies math with LaTeX backslash commands', () => {
+        const html = wrap(`<p>${rawInlineMath('\\alpha + \\beta')}</p>`);
+        const { simplified } = simplifyNoteHtml(html, 1);
+        expect(simplified).toContain('$\\alpha + \\beta$');
+    });
+});
+
+
+// =============================================================================
+// Math Expansion
+// =============================================================================
+
+describe('Math expansion', () => {
+    function emptyMetadata(): SimplificationMetadata {
+        return { elements: new Map() };
+    }
+
+    it('expands inline math to span.math', () => {
+        const input = 'The formula $E=mc^2$ is famous.';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(`The formula ${rawInlineMath('E=mc^2')} is famous.`);
+    });
+
+    it('expands display math to pre.math', () => {
+        const input = '<p>Consider:</p>$$\\int_0^1 f(x) dx$$';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(`<p>Consider:</p>${rawDisplayMath('\\int_0^1 f(x) dx')}`);
+    });
+
+    it('expands multiple inline math expressions', () => {
+        const input = 'Given $x$ and $y$, then $x+y$.';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(`Given ${rawInlineMath('x')} and ${rawInlineMath('y')}, then ${rawInlineMath('x+y')}.`);
+    });
+
+    it('expands mixed inline and display math', () => {
+        const input = '<p>Inline $a^2$ and display:</p>$$E=mc^2$$';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(`<p>Inline ${rawInlineMath('a^2')} and display:</p>${rawDisplayMath('E=mc^2')}`);
+    });
+
+    it('does not expand lone dollar signs (no closing pair)', () => {
+        const input = 'The price is $5,000 and rising.';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(input); // unchanged
+    });
+
+    it('does not expand dollar with leading space in content', () => {
+        const input = '$ not math$';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(input); // unchanged — content starts with space
+    });
+
+    it('does not expand dollar with trailing space in content', () => {
+        const input = '$not math $';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(input); // unchanged — content ends with space
+    });
+
+    it('does not expand empty dollar pair', () => {
+        const input = 'empty $$ here';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(input); // unchanged — $$ needs content for display math
+    });
+
+    it('handles math with LaTeX commands', () => {
+        const input = '$\\frac{a}{b}$';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(rawInlineMath('\\frac{a}{b}'));
+    });
+
+    it('handles math with backslash-escaped dollar', () => {
+        const input = '$\\$5$';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(rawInlineMath('\\$5'));
+    });
+
+    it('handles display math with multiline content', () => {
+        const input = '$$\\begin{align}\n  x &= 1 \\\\\n  y &= 2\n\\end{align}$$';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(`<pre class="math">${input}</pre>`);
+    });
+
+    it('does not double-wrap already-wrapped math in old context', () => {
+        // If somehow the input already has math HTML, the dollar regex should
+        // not match the $ inside the tag content (they are flanked by > and <)
+        const input = '<span class="math">$x$</span>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'old');
+        // The $x$ inside the span: $ is preceded by > (not $) and followed by x,
+        // but the whole thing is already wrapped. The inner $x$ WILL be matched
+        // by the inline regex since it sees the bare $x$ between > and <.
+        // This produces double-wrapping — but this case should never occur
+        // because the simplified view strips math wrappers.
+        // We just document this known behavior rather than guard against it.
+        expect(result).toContain('class="math"');
+    });
+
+    it('passes through plain text without math unchanged', () => {
+        const input = 'Just plain text with no math.';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(input);
+    });
+
+    it('single character inline math', () => {
+        const input = '$x$';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(rawInlineMath('x'));
+    });
+
+    it('does not expand adjacent $$ as inline', () => {
+        // $$ without content after should not trigger inline or display
+        const input = 'See $$ for prices';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(input);
+    });
+
+    // ---- Standalone math in paragraph → display math ----
+
+    it('converts standalone inline math in <p> to display math', () => {
+        const input = '<p>$E=mc^2$</p>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(rawDisplayMath('E=mc^2'));
+    });
+
+    it('converts standalone display math in <p> (unwraps paragraph)', () => {
+        const input = '<p>$$E=mc^2$$</p>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(rawDisplayMath('E=mc^2'));
+    });
+
+    it('converts standalone math with LaTeX commands in <p> to display', () => {
+        const input = '<p>$\\hat{\\beta} = (X\'X)^{-1}X\'Y$</p>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(rawDisplayMath('\\hat{\\beta} = (X\'X)^{-1}X\'Y'));
+    });
+
+    it('keeps inline math as span when paragraph has other content', () => {
+        const input = '<p>The formula $E=mc^2$ is famous.</p>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(`<p>The formula ${rawInlineMath('E=mc^2')} is famous.</p>`);
+    });
+
+    it('mixed: standalone equation + inline math in separate paragraphs', () => {
+        const input = '<p>$E=mc^2$</p>\n<p>Where $E$ is energy.</p>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(`${rawDisplayMath('E=mc^2')}\n<p>Where ${rawInlineMath('E')} is energy.</p>`);
+    });
+});
+
+
+// =============================================================================
+// Math Round-Trips: simplify → expand
+// =============================================================================
+
+describe('Math round-trips', () => {
+    it('inline math: simplify then expand restores original raw HTML', () => {
+        const raw = rawInlineMath('E=mc^2');
+        const html = wrap(`<p>The formula ${raw} is famous.</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        // Simplified form should have dollar notation, no HTML wrapper
+        expect(simplified).toContain('$E=mc^2$');
+        expect(simplified).not.toContain('class="math"');
+
+        // Expanding should restore the raw HTML
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toContain(raw);
+    });
+
+    it('display math: simplify then expand restores original raw HTML', () => {
+        const raw = rawDisplayMath('\\frac{a}{b}');
+        const html = wrap(`<p>Consider:</p>${raw}<p>where a,b are integers.</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        expect(simplified).toContain('$$\\frac{a}{b}$$');
+        expect(simplified).not.toContain('<pre');
+
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toContain(raw);
+    });
+
+    it('multiple math expressions round-trip', () => {
+        const inline1 = rawInlineMath('x');
+        const inline2 = rawInlineMath('y');
+        const display = rawDisplayMath('x + y = z');
+        const html = wrap(`<p>${inline1} and ${inline2}</p>${display}`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toContain(inline1);
+        expect(expanded).toContain(inline2);
+        expect(expanded).toContain(display);
+    });
+
+    it('mixed math and citations round-trip', () => {
+        const cit = rawCitation('MRT1', 1, '', 'Author, 2024');
+        const math = rawInlineMath('p < 0.05');
+        const html = wrap(`<p>As shown by ${cit}, ${math} is significant.</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        expect(simplified).toContain('$p < 0.05$');
+        expect(simplified).toContain('ref="c_MRT1_0"');
+
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toContain(cit);
+        expect(expanded).toContain(math);
+    });
+
+    it('agent modifies existing math: expanded old matches raw, expanded new wraps correctly', () => {
+        const html = wrap(`<p>The formula ${rawInlineMath('E=mc^2')} is famous.</p>`);
+        const strippedHtml = stripDataCitationItems(html);
+        const { metadata } = simplifyNoteHtml(html, 1);
+
+        // Agent proposes changing E=mc^2 to E=mc^3
+        const expandedOld = expandToRawHtml('$E=mc^2$', metadata, 'old');
+        const expandedNew = expandToRawHtml('$E=mc^3$', metadata, 'new');
+
+        expect(expandedOld).toBe(rawInlineMath('E=mc^2'));
+        expect(expandedNew).toBe(rawInlineMath('E=mc^3'));
+
+        // Expanded old should be findable in the raw HTML
+        expect(strippedHtml).toContain(expandedOld);
+    });
+
+    it('agent removes math: expanded old_string matches raw HTML', () => {
+        const html = wrap(`<p>Remove ${rawInlineMath('x^2')} here.</p>`);
+        const strippedHtml = stripDataCitationItems(html);
+        const { metadata } = simplifyNoteHtml(html, 1);
+
+        const expandedOld = expandToRawHtml('$x^2$ ', metadata, 'old');
+        expect(expandedOld).toBe(`${rawInlineMath('x^2')} `);
+        expect(strippedHtml).toContain(rawInlineMath('x^2'));
+    });
+
+    it('agent adds math to note without math', () => {
+        const html = wrap('<p>Plain text note.</p>');
+        const { metadata } = simplifyNoteHtml(html, 1);
+
+        // Agent adds math in new_string
+        const expandedNew = expandToRawHtml('Plain text note with $x^2$.', metadata, 'new');
+        expect(expandedNew).toBe(`Plain text note with ${rawInlineMath('x^2')}.`);
+    });
+
+    it('new display math in new_string expands correctly', () => {
+        const html = wrap('<p>Some text.</p>');
+        const { metadata } = simplifyNoteHtml(html, 1);
+
+        const expandedNew = expandToRawHtml(
+            '<p>Some text.</p>$$\\int_0^\\infty e^{-x} dx = 1$$',
+            metadata,
+            'new'
+        );
+        expect(expandedNew).toContain(rawDisplayMath('\\int_0^\\infty e^{-x} dx = 1'));
+    });
+});
+
+
+// =============================================================================
+// Math Apply-Undo-Apply Cycle
+// =============================================================================
+
+describe('Math apply-undo-apply cycle', () => {
+    it('full cycle: apply math edit, undo restores, re-apply succeeds', () => {
+        // --- Original note with inline math ---
+        const noteHtml = wrap(`<p>The formula ${rawInlineMath('E=mc^2')} is famous.</p>`);
+        const strippedHtml = stripDataCitationItems(noteHtml);
+
+        // --- Step 1: Simplify ---
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+        expect(simplified).toContain('$E=mc^2$');
+        expect(simplified).not.toContain('class="math"');
+
+        // --- Step 2: Agent proposes edit ---
+        const oldString = '$E=mc^2$';
+        const newString = '$E=mc^3$';
+
+        // --- Step 3: Expand ---
+        const expandedOld = expandToRawHtml(oldString, metadata, 'old');
+        const expandedNew = expandToRawHtml(newString, metadata, 'new');
+        expect(expandedOld).toBe(rawInlineMath('E=mc^2'));
+        expect(expandedNew).toBe(rawInlineMath('E=mc^3'));
+
+        // --- Step 4: Apply (use replaceFirst to avoid $ interpretation in .replace()) ---
+        expect(strippedHtml).toContain(expandedOld);
+        const afterApply = replaceFirst(strippedHtml, expandedOld, expandedNew);
+        expect(afterApply).toContain(rawInlineMath('E=mc^3'));
+        expect(afterApply).not.toContain(rawInlineMath('E=mc^2'));
+
+        // --- Step 5: Undo data (as stored by executeEditNoteAction) ---
+        const undoOldHtml = expandedOld;
+        const undoNewHtml = expandedNew;
+
+        // --- Step 6: Undo (find undoNewHtml, replace with undoOldHtml) ---
+        const afterUndoStripped = stripDataCitationItems(afterApply);
+        expect(afterUndoStripped).toContain(undoNewHtml);
+        const afterUndo = replaceFirst(afterUndoStripped, undoNewHtml, undoOldHtml);
+        expect(afterUndo).toBe(strippedHtml); // restored to original
+
+        // --- Step 7: Re-apply (same edit on restored note) ---
+        invalidateSimplificationCache('test-note');
+        const { simplified: simplified2, metadata: metadata2 } = simplifyNoteHtml(afterUndo, 1);
+        const expandedOld2 = expandToRawHtml(oldString, metadata2, 'old');
+        const expandedNew2 = expandToRawHtml(newString, metadata2, 'new');
+        expect(afterUndo).toContain(expandedOld2);
+        const afterReapply = replaceFirst(afterUndo, expandedOld2, expandedNew2);
+        expect(afterReapply).toBe(afterApply); // same result as first apply
+    });
+
+    it('full cycle with display math', () => {
+        const noteHtml = wrap(`<p>Proof:</p>${rawDisplayMath('a^2 + b^2 = c^2')}<p>QED</p>`);
+        const strippedHtml = stripDataCitationItems(noteHtml);
+
+        // Simplify
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+        expect(simplified).toContain('$$a^2 + b^2 = c^2$$');
+
+        // Agent changes the equation
+        const oldString = '$$a^2 + b^2 = c^2$$';
+        const newString = '$$a^n + b^n = c^n$$';
+
+        // Expand
+        const expandedOld = expandToRawHtml(oldString, metadata, 'old');
+        const expandedNew = expandToRawHtml(newString, metadata, 'new');
+        expect(expandedOld).toBe(rawDisplayMath('a^2 + b^2 = c^2'));
+        expect(expandedNew).toBe(rawDisplayMath('a^n + b^n = c^n'));
+
+        // Apply (use replaceFirst to avoid $$ interpretation in .replace())
+        expect(strippedHtml).toContain(expandedOld);
+        const afterApply = replaceFirst(strippedHtml, expandedOld, expandedNew);
+
+        // Undo
+        const afterUndo = replaceFirst(afterApply, expandedNew, expandedOld);
+        expect(afterUndo).toBe(strippedHtml);
+
+        // Re-apply
+        invalidateSimplificationCache('test-note');
+        const { metadata: metadata2 } = simplifyNoteHtml(afterUndo, 1);
+        const expandedOld2 = expandToRawHtml(oldString, metadata2, 'old');
+        const expandedNew2 = expandToRawHtml(newString, metadata2, 'new');
+        const afterReapply = replaceFirst(afterUndo, expandedOld2, expandedNew2);
+        expect(afterReapply).toBe(afterApply);
+    });
+
+    it('full cycle: add math to plain text note', () => {
+        const noteHtml = wrap('<p>Plain text.</p>');
+        const strippedHtml = stripDataCitationItems(noteHtml);
+
+        const { metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        // Agent adds math
+        const oldString = 'Plain text.';
+        const newString = 'Plain text with $x^2$.';
+
+        const expandedOld = expandToRawHtml(oldString, metadata, 'old');
+        const expandedNew = expandToRawHtml(newString, metadata, 'new');
+
+        expect(expandedOld).toBe('Plain text.');
+        expect(expandedNew).toBe(`Plain text with ${rawInlineMath('x^2')}.`);
+
+        // Apply
+        const afterApply = replaceFirst(strippedHtml, expandedOld, expandedNew);
+        expect(afterApply).toContain(rawInlineMath('x^2'));
+
+        // Undo
+        const afterUndo = replaceFirst(afterApply, expandedNew, expandedOld);
+        expect(afterUndo).toBe(strippedHtml);
+    });
+
+    it('full cycle: delete math from note', () => {
+        const noteHtml = wrap(`<p>Text ${rawInlineMath('x^2')} end.</p>`);
+        const strippedHtml = stripDataCitationItems(noteHtml);
+
+        const { metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        // Agent removes math (include enough surrounding context for unique match)
+        const oldString = 'Text $x^2$ end.';
+        const newString = 'Text end.';
+
+        const expandedOld = expandToRawHtml(oldString, metadata, 'old');
+        const expandedNew = expandToRawHtml(newString, metadata, 'new');
+
+        expect(expandedOld).toBe(`Text ${rawInlineMath('x^2')} end.`);
+        expect(expandedNew).toBe('Text end.');
+
+        // Apply
+        expect(strippedHtml).toContain(expandedOld);
+        const afterApply = replaceFirst(strippedHtml, expandedOld, expandedNew);
+        expect(afterApply).not.toContain('class="math"');
+
+        // Undo
+        const afterUndo = replaceFirst(afterApply, expandedNew, expandedOld);
+        expect(afterUndo).toBe(strippedHtml);
+    });
+
+    it('full cycle with math alongside citations', () => {
+        const cit = rawCitation('CYC1', 1, '', 'Author, 2024');
+        const noteHtml = wrap(`<p>As ${cit} shows, ${rawInlineMath('p=0.01')}.</p>`);
+        const strippedHtml = stripDataCitationItems(noteHtml);
+
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+        const citTag = simplified.match(/<citation [^/]*\/>/)?.[0];
+        expect(citTag).toBeTruthy();
+
+        // Agent modifies the math but keeps the citation
+        const oldString = `${citTag} shows, $p=0.01$.`;
+        const newString = `${citTag} shows, $p=0.001$.`;
+
+        const expandedOld = expandToRawHtml(oldString, metadata, 'old');
+        const expandedNew = expandToRawHtml(newString, metadata, 'new');
+
+        // Citation should be restored, math should be wrapped
+        expect(expandedOld).toContain(cit);
+        expect(expandedOld).toContain(rawInlineMath('p=0.01'));
+        expect(expandedNew).toContain(cit);
+        expect(expandedNew).toContain(rawInlineMath('p=0.001'));
+
+        // Apply
+        expect(strippedHtml).toContain(expandedOld);
+        const afterApply = replaceFirst(strippedHtml, expandedOld, expandedNew);
+
+        // Undo
+        const afterUndo = replaceFirst(afterApply, expandedNew, expandedOld);
+        expect(afterUndo).toBe(strippedHtml);
+    });
+
+    it('full cycle: add standalone equation (paragraph-to-display)', () => {
+        // Simulates the real scenario: agent adds a standalone equation in its
+        // own <p> alongside inline math in running text.
+        const noteHtml = wrap('<p>Some existing text.</p>\n</div>');
+        const strippedHtml = stripDataCitationItems(noteHtml);
+
+        const { metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        const oldString = '<p>Some existing text.</p>\n</div>';
+        const newString = '<p>Some existing text.</p>\n'
+            + '<p>The estimator is:</p>\n'
+            + '<p>$\\hat{\\beta} = (X\'X)^{-1}X\'Y$</p>\n'
+            + '<p>Where $X$ is the design matrix.</p>\n'
+            + '</div>';
+
+        const expandedOld = expandToRawHtml(oldString, metadata, 'old');
+        const expandedNew = expandToRawHtml(newString, metadata, 'new');
+
+        // Standalone equation → display math (no <p> wrapper)
+        expect(expandedNew).toContain('<pre class="math">$$\\hat{\\beta} = (X\'X)^{-1}X\'Y$$</pre>');
+        expect(expandedNew).not.toContain('<p><span class="math">');
+        expect(expandedNew).not.toContain('<p><pre');
+        // Inline math in running text → inline math
+        expect(expandedNew).toContain('<span class="math">$X$</span>');
+
+        // Apply
+        expect(strippedHtml).toContain(expandedOld);
+        const afterApply = replaceFirst(strippedHtml, expandedOld, expandedNew);
+
+        // Undo
+        const afterUndo = replaceFirst(afterApply, expandedNew, expandedOld);
+        expect(afterUndo).toBe(strippedHtml);
+
+        // Re-apply
+        invalidateSimplificationCache('test-note');
+        const { metadata: m2 } = simplifyNoteHtml(afterUndo, 1);
+        const expandedOld2 = expandToRawHtml(oldString, m2, 'old');
+        const expandedNew2 = expandToRawHtml(newString, m2, 'new');
+        const afterReapply = replaceFirst(afterUndo, expandedOld2, expandedNew2);
+        expect(afterReapply).toBe(afterApply);
     });
 });

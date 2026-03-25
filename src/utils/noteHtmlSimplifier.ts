@@ -118,8 +118,9 @@ function extractItemKeyFromUri(uri: string): string | null {
 /**
  * Simplify Zotero note HTML to a clean format for LLM editing.
  *
- * Replaces citations, annotations, annotation-images, and regular images
- * with semantic tags, and strips data-citation-items from the wrapper div.
+ * Replaces citations, annotations, annotation-images, regular images, and
+ * math elements with semantic tags / dollar notation, and strips
+ * data-citation-items from the wrapper div.
  * Stores original raw HTML in the metadata map for expansion back.
  */
 export function simplifyNoteHtml(rawHtml: string, libraryID: number): SimplificationResult {
@@ -302,6 +303,19 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
                 return match;
             }
         }
+    );
+
+    // 6. Simplify math to dollar notation
+    // Strip HTML wrappers from math elements, leaving dollar-delimited content.
+    // Display math: <pre class="math">$$...$$</pre> → $$...$$
+    simplified = simplified.replace(
+        /<pre\s+class="math">(\$\$[^<]*\$\$)<\/pre>/g,
+        (_match, content) => content
+    );
+    // Inline math: <span class="math">$...$</span> → $...$
+    simplified = simplified.replace(
+        /<span\s+class="math">(\$[^<]*\$)<\/span>/g,
+        (_match, content) => content
     );
 
     return { simplified, metadata };
@@ -598,6 +612,7 @@ function buildCitationFromAttId(attId: string, page?: string): string {
 
 /**
  * Expand simplified tags in a string back to their raw HTML equivalents.
+ * Handles citations, annotations, images, and math dollar notation.
  *
  * @param str - String containing simplified tags (from old_string or new_string)
  * @param metadata - The metadata map from simplification
@@ -702,6 +717,36 @@ export function expandToRawHtml(
             }
             return stored.rawHtml;
         }
+    );
+
+    // Expand math: dollar notation → Zotero HTML wrappers
+    //
+    // Pre-processing: when the agent places a standalone equation in its own <p>,
+    // it should render as display math (block-level <pre class="math">). Without
+    // this, ProseMirror converts the paragraph-wrapped inline math to display math
+    // itself, causing empty <p> wrappers and undo data mismatches.
+    // <p>$$...$$</p> → $$...$$ (unwrap paragraph around display math)
+    str = str.replace(
+        /<p>\s*(\$\$[^<]+?\$\$)\s*<\/p>/g,
+        (_match, content) => content
+    );
+    // <p>$...$</p> → $$...$$ (standalone single-dollar math = display intent)
+    str = str.replace(
+        /<p>\s*\$(?!\$)((?:[^\$\\<]|\\.)+?)\$(?!\$)\s*<\/p>/g,
+        (_match, content) => `$$${content}$$`
+    );
+
+    // Display math: $$...$$ → <pre class="math">$$...$$</pre>
+    str = str.replace(
+        /\$\$([\s\S]+?)\$\$/g,
+        (match) => `<pre class="math">${match}</pre>`
+    );
+    // Inline math: $...$ → <span class="math">$...$</span>
+    // Rules: not adjacent to another $, content starts/ends with non-whitespace,
+    // allows backslash-escaped chars (e.g. \$ for literal dollar in LaTeX)
+    str = str.replace(
+        /(?<!\$)\$(?!\$)(?=\S)((?:[^\$\\]|\\.)+?)(?<=\S)\$(?!\$)/g,
+        (match) => `<span class="math">${match}</span>`
     );
 
     return str;
