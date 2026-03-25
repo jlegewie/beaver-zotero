@@ -98,6 +98,13 @@ import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messa
 import { currentThreadNameAtom } from './threads';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '../agents/toolLabels';
+import {
+    autoApproveNoteKeysAtom,
+    clearAutoApproveNoteKeysAtom,
+    addAutoApprovedActionIdAtom,
+    clearAutoApprovedActionIdsAtom,
+    makeNoteKey,
+} from './editNoteAutoApprove';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { store } from '../store';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
@@ -916,6 +923,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
             agentService.close();
             set(isWSChatPendingAtom, false);
+            // Clear per-run auto-approve state (keys only; IDs kept for UI labeling)
+            set(clearAutoApproveNoteKeysAtom);
         },
 
         onError: (event: WSErrorEvent) => {
@@ -939,6 +948,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(isWSChatPendingAtom, false);
             // Clear retry state on error
             set(wsRetryAtom, null);
+            // Clear per-run auto-approve state
+            set(clearAutoApproveNoteKeysAtom);
         },
 
         onWarning: (event: WSWarningEvent) => {
@@ -1061,6 +1072,21 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     logger('WS onDeferredApprovalRequest: Auto-approving confirm_external_search (confirmation disabled)', 1);
                     agentService.sendApprovalResponse(event.action_id, true);
                     return;
+                }
+            }
+
+            // edit_note: auto-approve if user opted in for this note in this run
+            if (event.action_type === 'edit_note') {
+                const { library_id, zotero_key } = event.action_data || {};
+                if (library_id != null && zotero_key) {
+                    const noteKey = makeNoteKey(library_id, zotero_key);
+                    const autoApproveKeys = store.get(autoApproveNoteKeysAtom);
+                    if (autoApproveKeys.has(noteKey)) {
+                        logger(`Auto-approving edit_note for ${noteKey}`, 1);
+                        agentService.sendApprovalResponse(event.action_id, true);
+                        set(addAutoApprovedActionIdAtom, event.action_id);
+                        return;
+                    }
                 }
             }
 
@@ -1897,6 +1923,8 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
 
     // Clear any pending approvals (for parallel tool calls that were awaiting user response)
     set(clearAllPendingApprovalsAtom);
+    // Clear per-run auto-approve state
+    set(clearAutoApproveNoteKeysAtom);
 
     // Mark active run as canceled if it exists
     const activeRun = get(activeRunAtom);
@@ -1930,6 +1958,9 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(citationMetadataAtom, []);
     set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
     set(clearWarningsAtom);
+    // Clear per-run auto-approve state (both keys and action IDs)
+    set(clearAutoApproveNoteKeysAtom);
+    set(clearAutoApprovedActionIdsAtom);
 });
 
 /**

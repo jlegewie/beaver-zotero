@@ -4,6 +4,7 @@ import {
     AgentAction,
     PendingApproval,
     getAgentActionsByToolcallAtom,
+    pendingApprovalsAtom,
     removePendingApprovalAtom,
     undoAgentActionAtom,
     ackAgentActionsAtom,
@@ -62,8 +63,13 @@ import Tooltip from '../ui/Tooltip';
 import DeferredToolPreferenceButton from '../ui/buttons/DeferredToolPreferenceButton';
 import ExtractionApprovalButton from '../ui/buttons/ExtractionApprovalButton';
 import ExternalSearchApprovalButton from '../ui/buttons/ExternalSearchApprovalButton';
+import SplitApplyButton from '../ui/buttons/SplitApplyButton';
 import { truncateText } from '../../utils/stringUtils';
 import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
+import {
+    addAutoApproveNoteKeyAtom,
+    makeNoteKey,
+} from '../../atoms/editNoteAutoApprove';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
@@ -288,6 +294,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
     const markExternalReferenceDeleted = useSetAtom(markExternalReferenceDeletedAtom);
+    const addAutoApproveNoteKey = useSetAtom(addAutoApproveNoteKeyAtom);
 
     // Item title state (shared across panes) - only for actions that have specific items
     // Use composite key with responseIndex to disambiguate duplicate tool_call_ids
@@ -397,6 +404,31 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             removePendingApproval(pendingApproval.actionId);
         }
     }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
+
+    // Handler: opt-in to auto-approve all edit_note calls for this note in this run
+    const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
+    const handleApproveAllForNote = useCallback(() => {
+        if (!pendingApproval) return;
+        const { library_id, zotero_key } = pendingApproval.actionData || {};
+        if (library_id != null && zotero_key) {
+            const noteKey = makeNoteKey(library_id, zotero_key);
+            addAutoApproveNoteKey(noteKey);
+
+            // Auto-approve any other already-pending approvals for the same note
+            for (const [, pa] of allPendingApprovals) {
+                if (pa.actionId === pendingApproval.actionId) continue;
+                if (pa.actionType !== 'edit_note') continue;
+                const paLib = pa.actionData?.library_id;
+                const paKey = pa.actionData?.zotero_key;
+                if (paLib != null && paKey && makeNoteKey(paLib, paKey) === noteKey) {
+                    sendApprovalResponse({ actionId: pa.actionId, approved: true });
+                    removePendingApproval(pa.actionId);
+                }
+            }
+        }
+        // Approve the current action via the normal path
+        handleApprove();
+    }, [pendingApproval, allPendingApprovals, addAutoApproveNoteKey, sendApprovalResponse, removePendingApproval, handleApprove]);
 
     // Handlers for post-run actions (after agent run is complete)
     const handleApplyPending = useCallback(async () => {
@@ -849,17 +881,25 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
                         {/* Apply button - for awaiting, pending, rejected, undone (not while processing) */}
                         {config.showApply && (!isProcessing || clickedButton === 'approve') && (
-                            <Button
-                                variant={isAwaitingApproval ? 'solid' : 'ghost-secondary'}
-                                onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                loading={isProcessing && clickedButton === 'approve'}
-                                disabled={isProcessing}
-                            >
-                                <span>
-                                    {isConfirmAction ? 'Confirm' : 'Apply'}
-                                    {/* {isAwaitingApproval && <span className="opacity-50 ml-1">⏎</span>} */}
-                                </span>
-                            </Button>
+                            toolName === 'edit_note' && isAwaitingApproval ? (
+                                <SplitApplyButton
+                                    onApply={handleApprove}
+                                    onApplyAll={handleApproveAllForNote}
+                                    loading={isProcessing && clickedButton === 'approve'}
+                                    disabled={isProcessing}
+                                />
+                            ) : (
+                                <Button
+                                    variant={isAwaitingApproval ? 'solid' : 'ghost-secondary'}
+                                    onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
+                                    loading={isProcessing && clickedButton === 'approve'}
+                                    disabled={isProcessing}
+                                >
+                                    <span>
+                                        {isConfirmAction ? 'Confirm' : 'Apply'}
+                                    </span>
+                                </Button>
+                            )
                         )}
 
                         {/* Applied badge - for applied state */}
