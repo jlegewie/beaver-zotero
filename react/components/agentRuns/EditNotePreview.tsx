@@ -60,8 +60,8 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     const isError = status === 'error';
     const isDelete = newString === '';
 
-    const strippedOld = stripHtmlTags(oldString);
-    const strippedNew = stripHtmlTags(newString);
+    const strippedOld = normalizeForInlineDiff(stripHtmlTags(oldString));
+    const strippedNew = normalizeForInlineDiff(stripHtmlTags(newString));
 
     // When strippedOld is empty (old_string was pure HTML structure), fetch
     // surrounding visible text from the full note for context.
@@ -144,15 +144,19 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                         </div>
                     )}
                     <div className="inline-diff-container">
-                        {inlineSegments.map((seg, i) => {
-                            if (seg.type === 'deletion') {
-                                return <span key={i} className="inline-diff-del">{seg.text}</span>;
-                            }
-                            if (seg.type === 'addition') {
-                                return <span key={i} className="inline-diff-add">{seg.text}</span>;
-                            }
-                            return <span key={i}>{seg.text}</span>;
-                        })}
+                        {splitIntoParagraphs(inlineSegments).map((para, pi) => (
+                            <div key={pi} className={pi > 0 ? 'inline-diff-para' : undefined}>
+                                {para.map((seg, si) => {
+                                    if (seg.type === 'deletion') {
+                                        return <span key={si} className="inline-diff-del">{seg.text}</span>;
+                                    }
+                                    if (seg.type === 'addition') {
+                                        return <span key={si} className="inline-diff-add">{seg.text}</span>;
+                                    }
+                                    return <span key={si}>{seg.text}</span>;
+                                })}
+                            </div>
+                        ))}
                     </div>
                 </div>
             </div>
@@ -163,10 +167,29 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
 // ---- Inline diff computation ----
 
 /**
- * Tokenize text into word tokens (each word with its trailing whitespace).
+ * Split inline diff segments into paragraph groups at \n boundaries.
+ * Each paragraph is an array of segments with no \n in their text.
+ */
+function splitIntoParagraphs(segments: InlineSegment[]): InlineSegment[][] {
+    const paragraphs: InlineSegment[][] = [[]];
+    for (const seg of segments) {
+        const parts = seg.text.split('\n');
+        parts.forEach((part, i) => {
+            if (i > 0) paragraphs.push([]);
+            if (part) paragraphs[paragraphs.length - 1].push({ text: part, type: seg.type });
+        });
+    }
+    return paragraphs.filter(p => p.length > 0);
+}
+
+/**
+ * Tokenize text into word tokens (each word with its trailing non-newline
+ * whitespace) and newline tokens. Keeping newlines separate prevents orphaned
+ * words (e.g. "contact." appearing alone on a line) when a \n sits at the
+ * boundary between diff segments.
  */
 function tokenize(text: string): string[] {
-    return text.match(/\S+\s*|\s+/g) || [];
+    return text.match(/\S+[^\S\n]*|\n+/g) || [];
 }
 
 /**
@@ -510,6 +533,14 @@ function truncateContext(text: string, maxLength: number = 80, showEnd: boolean 
     return showEnd
         ? '…' + text.slice(-maxLength)
         : text.substring(0, maxLength) + '…';
+}
+
+/**
+ * Normalize stripped text for the inline diff view:
+ * - Collapse consecutive newlines to a single \n (tight paragraph spacing)
+ */
+function normalizeForInlineDiff(text: string): string {
+    return text.replace(/\n{2,}/g, '\n').trim();
 }
 
 // ---- Citation label recovery ----
