@@ -1351,14 +1351,14 @@ describe('page locator normalization in apply-undo cycle', () => {
 // =============================================================================
 
 describe('stale undo data (server-side handler bug scenario)', () => {
-    it('undo fails with stale undo data when PM converts <b> to <strong>', async () => {
+    it('undo succeeds with stale undo data via text-content fallback when PM converts <b> to <strong>', async () => {
         const note = wrap(
             '<p>Some existing text.</p>\n'
             + '<p>More text here.</p>\n'
         );
 
         // Apply edit WITHOUT PM normalization during execute — simulates
-        // old server-side handler that lacked waitForPMNormalization
+        // case where waitForPMNormalization missed the change
         const { item, action } = await applyEdit({
             noteHtml: note,
             oldString: 'More text here.',
@@ -1374,8 +1374,11 @@ describe('stale undo data (server-side handler bug scenario)', () => {
         item._setHtml(simulatePMNormalization(item._getHtml()));
         invalidateSimplificationCache('1-TESTKEY');
 
-        // Undo should fail because undo_new_html has <b> but note now has <strong>
-        await expect(undoEdit(item, action)).rejects.toThrow('Cannot undo');
+        // Undo succeeds via text-content fallback: PM changed <b> to <strong>
+        // but the visible text is the same, so context anchors are trusted.
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('More text here.');
+        expect(restored).not.toContain('Important');
     });
 
     it('undo succeeds with PM-refreshed undo data (the fix)', async () => {
@@ -1409,7 +1412,7 @@ describe('stale undo data (server-side handler bug scenario)', () => {
             + '<p>Final paragraph.</p>\n'
         );
 
-        // Without PM refresh: stale undo data
+        // Without PM refresh: stale undo data, but text-content fallback handles it
         const { item: item1, action: action1 } = await applyEdit({
             noteHtml: note,
             oldString: 'Final paragraph.',
@@ -1418,9 +1421,10 @@ describe('stale undo data (server-side handler bug scenario)', () => {
         });
         item1._setHtml(simulatePMNormalization(item1._getHtml()));
         invalidateSimplificationCache('1-TESTKEY');
-        await expect(undoEdit(item1, action1)).rejects.toThrow('Cannot undo');
+        const restored1 = await undoEdit(item1, action1);
+        expect(restored1).toContain('Final paragraph.');
 
-        // With PM refresh: undo succeeds
+        // With PM refresh: undo also succeeds (via exact match)
         const { item: item2, action: action2, result } = await applyEdit({
             noteHtml: note,
             oldString: 'Final paragraph.',
@@ -1443,7 +1447,7 @@ describe('stale undo data (server-side handler bug scenario)', () => {
             + '<p><strong>Note:</strong> Important info.</p>\n'
         );
 
-        // Without PM refresh: stale undo data → undo fails
+        // Without PM refresh: stale undo data, but text-content fallback handles it
         const { item: item1, action: action1 } = await applyEdit({
             noteHtml: note,
             oldString: '</div>',
@@ -1455,9 +1459,11 @@ describe('stale undo data (server-side handler bug scenario)', () => {
 
         item1._setHtml(simulatePMNormalization(item1._getHtml()));
         invalidateSimplificationCache('1-TESTKEY');
-        await expect(undoEdit(item1, action1)).rejects.toThrow('Cannot undo');
+        const restored1 = await undoEdit(item1, action1);
+        expect(restored1).toContain('Some content.');
+        expect(restored1).not.toContain('Test Edit #3');
 
-        // With PM refresh: undo data is updated → undo succeeds
+        // With PM refresh: undo data is updated → undo also succeeds
         const { item: item2, action: action2, result } = await applyEdit({
             noteHtml: note,
             oldString: '</div>',
@@ -1517,5 +1523,90 @@ describe('stale undo data (server-side handler bug scenario)', () => {
         // Undo edit 1
         await undoEdit(item, action1);
         expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(note));
+    });
+});
+
+
+// =============================================================================
+// Section: Text-Content Fallback for PM Structural Changes
+// =============================================================================
+
+describe('text-content fallback for PM structural changes', () => {
+    it('undo succeeds when PM restructures inline styles to semantic wrappers', async () => {
+        // PM converts <p style="font-weight: bold; color: blue;">text</p>
+        // into <p><strong><span style="color: blue;">text</span></strong></p>
+        // The text content is the same but HTML structure is completely different.
+        const note = wrap(
+            '<h1>Title</h1>\n'
+            + '<p>Some paragraph.</p>\n'
+        );
+
+        const { item, action } = await applyEdit({
+            noteHtml: note,
+            oldString: '<p>Some paragraph.</p>',
+            newString: '<p>Some paragraph.</p>\n<p style="font-weight: bold; color: blue;">Styled addition</p>',
+            applyPMNormalization: false,
+        });
+
+        // Simulate PM normalization (restructures style to semantic tags)
+        item._setHtml(simulatePMNormalization(item._getHtml()));
+        invalidateSimplificationCache('1-TESTKEY');
+
+        // The undo_new_html still has the inline style version
+        expect(action.result_data!.undo_new_html).toContain('font-weight: bold');
+
+        // Undo succeeds via text-content fallback
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('Some paragraph.');
+        expect(restored).not.toContain('Styled addition');
+    });
+
+    it('undo still fails when text content genuinely differs (manual edit)', async () => {
+        const note = wrap(
+            '<p>Original paragraph.</p>\n'
+            + '<p>Second paragraph.</p>\n'
+        );
+
+        const { item, action } = await applyEdit({
+            noteHtml: note,
+            oldString: 'Second paragraph.',
+            newString: 'Modified text here.',
+            applyPMNormalization: false,
+        });
+
+        // Simulate user manually editing the note (different text content)
+        item._setHtml(item._getHtml().replace('Modified text here.', 'User changed this completely.'));
+        invalidateSimplificationCache('1-TESTKEY');
+
+        // Undo should fail — text content is genuinely different
+        await expect(undoEdit(item, action)).rejects.toThrow('Cannot undo');
+    });
+
+    it('text-content fallback requires context anchors (not just raw anchors)', async () => {
+        const note = wrap(
+            '<p>First section.</p>\n'
+            + '<p>Unique context before the edit.</p>\n'
+            + '<p>Target text.</p>\n'
+            + '<p>Unique context after the edit.</p>\n'
+        );
+
+        const { item, action } = await applyEdit({
+            noteHtml: note,
+            oldString: 'Target text.',
+            newString: '<b>Target text.</b>',
+            applyPMNormalization: false,
+        });
+
+        // PM converts <b> to <strong> — same text, different structure
+        item._setHtml(simulatePMNormalization(item._getHtml()));
+        invalidateSimplificationCache('1-TESTKEY');
+
+        // Context anchors are present → text-content fallback works
+        expect(action.result_data!.undo_before_context).toBeTruthy();
+        expect(action.result_data!.undo_after_context).toBeTruthy();
+
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('Target text.');
+        expect(restored).not.toContain('<strong>');
     });
 });

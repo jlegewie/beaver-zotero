@@ -500,14 +500,14 @@ export async function undoEditNoteAction(
                 }
             } else {
                 // Single occurrence: find via context anchors + raw anchors, then normalize-compare
-                const candidateRanges: Array<{ start: number; end: number }> = [];
+                const candidateRanges: Array<{ start: number; end: number; fromContext: boolean }> = [];
                 const seenRanges = new Set<string>();
 
                 const contextRange = findRangeByContexts(strippedHtml, beforeCtx, afterCtx);
                 if (contextRange) {
                     const key = `${contextRange.start}:${contextRange.end}`;
                     seenRanges.add(key);
-                    candidateRanges.push(contextRange);
+                    candidateRanges.push({ ...contextRange, fromContext: true });
                 }
 
                 for (const anchorRange of findRangesByRawAnchors(strippedHtml, undoNewHtml)) {
@@ -516,7 +516,7 @@ export async function undoEditNoteAction(
                         continue;
                     }
                     seenRanges.add(key);
-                    candidateRanges.push(anchorRange);
+                    candidateRanges.push({ ...anchorRange, fromContext: false });
                 }
 
                 for (const candidateRange of candidateRanges) {
@@ -525,13 +525,31 @@ export async function undoEditNoteAction(
                     const normalizedExpected = normalizeUndoComparisonHtml(undoNewHtml, library_id);
 
                     if (normalizedCandidate !== normalizedExpected) {
-                        continue;
+                        // Normalized HTML didn't match — PM may have restructured
+                        // the HTML (e.g., inline styles → semantic wrappers like
+                        // <strong>). Fall back to text-content comparison: if the
+                        // visible text is the same, PM only changed structure and
+                        // it's safe to trust the context anchors.
+                        //
+                        // IMPORTANT: Only allow this fallback for context-anchor
+                        // candidates (200 chars before + after), which provide
+                        // strong uniqueness guarantees. Raw anchor candidates are
+                        // less reliable and could false-positive on duplicate text.
+                        if (!candidateRange.fromContext) {
+                            continue;
+                        }
+                        const candidateText = candidateHtml.replace(/<[^>]+>/g, '').trim();
+                        const expectedText = undoNewHtml.replace(/<[^>]+>/g, '').trim();
+                        if (!candidateText || candidateText !== expectedText) {
+                            continue;
+                        }
+                        logger(`undoEditNoteAction: text-content match (PM restructured HTML) on note ${noteId}`, 1);
                     }
 
                     restoredHtml = strippedHtml.substring(0, candidateRange.start)
                         + undoOldHtml
                         + strippedHtml.substring(candidateRange.end);
-                    logger(`undoEditNoteAction: restored semantically equivalent normalized block on note ${noteId}`, 1);
+                    logger(`undoEditNoteAction: restored via fuzzy matching on note ${noteId}`, 1);
                     break;
                 }
             }

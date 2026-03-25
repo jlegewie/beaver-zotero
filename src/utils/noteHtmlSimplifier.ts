@@ -1114,17 +1114,20 @@ export function findRangeByContexts(
 const PM_REFRESH_INTERVAL_MS = 150;
 const PM_REFRESH_MAX_WAIT_MS = 2000;
 // After this many polls with no change, assume PM produced identical output and stop.
-const PM_REFRESH_EARLY_EXIT_POLLS = 2;
+// 3 polls × 150ms = 450ms — enough headroom for editors to process Notifier events.
+const PM_REFRESH_EARLY_EXIT_POLLS = 3;
 const PM_UNDO_CONTEXT_LENGTH = 200;
 
 /**
  * Wait for ProseMirror to normalize the note and update undo data in-place.
  *
- * When a note is open in the editor, ProseMirror re-normalizes the HTML after
- * `item.saveTx()`. This makes the stored `undo_new_html` stale. This function
- * polls the editor until the HTML changes (PM processed it) or a timeout elapses,
- * then extracts the actual PM-normalized fragment using context anchors and
- * updates the undoData object in-place before it is returned to the caller.
+ * When a note is open in the editor (or in a loaded tab), ProseMirror
+ * re-normalizes the HTML after `item.saveTx()` via a Notifier event. This
+ * makes the stored `undo_new_html` stale. This function polls `item.getNote()`
+ * until the HTML changes (PM processed it) or a timeout elapses, then extracts
+ * the actual PM-normalized fragment using context anchors and updates the
+ * undoData object in-place before it is returned to the caller.
+ *
  */
 export async function waitForPMNormalization(
     item: any,
@@ -1132,7 +1135,6 @@ export async function waitForPMNormalization(
     undoData: { undo_new_html?: string; undo_before_context?: string; undo_after_context?: string }
 ): Promise<void> {
     if (!undoData.undo_new_html) return;
-    if (!isNoteInEditor(item.id)) return;
 
     // Only refresh edits that have context anchors.
     // Note: empty string ("") is a valid context (edit at start/end of note),

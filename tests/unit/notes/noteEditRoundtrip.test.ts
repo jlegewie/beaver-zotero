@@ -964,13 +964,14 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
     }
 
     function makeMockItem(noteHtml: string, overrides: any = {}) {
+        let currentHtml = noteHtml;
         return {
             key: 'NOTE0001',
             libraryID: 1,
             id: 42,
             loadDataType: vi.fn().mockResolvedValue(undefined),
-            getNote: vi.fn(() => noteHtml),
-            setNote: vi.fn(),
+            getNote: vi.fn(() => currentHtml),
+            setNote: vi.fn((html: string) => { currentHtml = html; return true; }),
             saveTx: vi.fn().mockResolvedValue(undefined),
             ...overrides,
         };
