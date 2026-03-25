@@ -18,50 +18,14 @@ import {
     checkDuplicateCitations,
     findFuzzyMatch,
     preloadPageLabelsForNewCitations,
-    isNoteInEditor,
+    findRangeByContexts,
+    waitForPMNormalization,
 } from '../../src/utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from './sourceUtils';
 
 function normalizeUndoComparisonHtml(html: string, libraryId: number): string {
     const { simplified } = simplifyNoteHtml(stripDataCitationItems(html), libraryId);
     return simplified.replace(/\s+/g, ' ').trim();
-}
-
-function findRangeByContexts(
-    currentHtml: string,
-    beforeCtx?: string,
-    afterCtx?: string
-): { start: number; end: number } | null {
-    const hasBefore = beforeCtx != null && beforeCtx.length > 0;
-    const hasAfter = afterCtx != null && afterCtx.length > 0;
-
-    if (hasBefore && hasAfter) {
-        // Both anchors — bracket the region
-        let searchFrom = 0;
-        while (true) {
-            const beforeIdx = currentHtml.indexOf(beforeCtx!, searchFrom);
-            if (beforeIdx === -1) break;
-            const start = beforeIdx + beforeCtx!.length;
-            const afterIdx = currentHtml.indexOf(afterCtx!, start);
-            if (afterIdx !== -1 && afterIdx >= start) {
-                return { start, end: afterIdx };
-            }
-            searchFrom = beforeIdx + 1;
-        }
-    } else if (hasBefore && !hasAfter) {
-        // Edit at end of note — beforeCtx anchors the start, end is end-of-string
-        const beforeIdx = currentHtml.indexOf(beforeCtx!);
-        if (beforeIdx !== -1) {
-            return { start: beforeIdx + beforeCtx!.length, end: currentHtml.length };
-        }
-    } else if (!hasBefore && hasAfter) {
-        // Edit at start of note — afterCtx anchors the end, start is 0
-        const afterIdx = currentHtml.indexOf(afterCtx!);
-        if (afterIdx !== -1) {
-            return { start: 0, end: afterIdx };
-        }
-    }
-    return null;
 }
 
 function findRangesByRawAnchors(
@@ -188,89 +152,6 @@ function isAlreadyUndone(
 }
 
 const UNDO_CONTEXT_LENGTH = 200;
-const REFRESH_INTERVAL_MS = 150;
-const REFRESH_MAX_WAIT_MS = 2000;
-// After this many polls with no change, assume PM produced identical output and stop.
-// PM processes the incremental update within ~one event-loop tick of the notifier,
-// so 2 polls (~300ms) is ample time. This avoids a 2s stall on simple text edits
-// where PM re-serializes the HTML identically.
-const REFRESH_EARLY_EXIT_POLLS = 2;
-
-/**
- * Wait for ProseMirror to normalize the note and update undo data in-place.
- *
- * When a note is open in the editor, ProseMirror re-normalizes the HTML after
- * `item.saveTx()`. This makes the stored `undo_new_html` stale. This function
- * polls the editor until the HTML changes (PM processed it) or a timeout elapses,
- * then extracts the actual PM-normalized fragment using context anchors and
- * updates the result object in-place before it is returned to the caller.
- *
- * Called inline (awaited) inside executeEditNoteAction so the returned result
- * already contains the correct undo data — no background refresh needed.
- */
-async function waitForPMAndRefreshUndoData(
-    item: any,
-    savedStrippedHtml: string,
-    result: EditNoteResultData
-): Promise<void> {
-    if (!isNoteInEditor(item.id)) return;
-
-    // Only refresh single-occurrence edits that have context anchors.
-    // Note: empty string ("") is a valid context (edit at start/end of note),
-    // so we check for undefined, not falsy.
-    const beforeCtx = result.undo_before_context;
-    const afterCtx = result.undo_after_context;
-    if (beforeCtx === undefined && afterCtx === undefined) return;
-
-    let unchangedPolls = 0;
-
-    // Poll until PM changes the HTML or we time out
-    for (let elapsed = 0; elapsed < REFRESH_MAX_WAIT_MS; elapsed += REFRESH_INTERVAL_MS) {
-        await new Promise(resolve => setTimeout(resolve, REFRESH_INTERVAL_MS));
-
-        try {
-            const currentHtml = getLatestNoteHtml(item);
-            const currentStripped = stripDataCitationItems(currentHtml);
-
-            // If HTML still matches what we saved, PM either hasn't processed
-            // yet or produced identical output (common for plain-text edits).
-            // After a few polls, assume the latter and stop waiting.
-            if (currentStripped === savedStrippedHtml) {
-                unchangedPolls++;
-                if (unchangedPolls >= REFRESH_EARLY_EXIT_POLLS) return;
-                continue;
-            }
-
-            // HTML changed — PM has normalized. Extract the actual fragment.
-            const range = findRangeByContexts(currentStripped, beforeCtx, afterCtx);
-            if (!range) {
-                logger('waitForPMAndRefreshUndoData: context anchors not found in PM-normalized HTML, skipping refresh', 1);
-                return;
-            }
-
-            const actualFragment = currentStripped.substring(range.start, range.end);
-
-            // Skip update if the fragment didn't actually change
-            if (actualFragment === result.undo_new_html) return;
-
-            // Update result in-place with PM-normalized data
-            result.undo_new_html = actualFragment;
-            result.undo_before_context = currentStripped.substring(
-                Math.max(0, range.start - UNDO_CONTEXT_LENGTH), range.start
-            );
-            result.undo_after_context = currentStripped.substring(
-                range.end, range.end + UNDO_CONTEXT_LENGTH
-            );
-
-            logger('waitForPMAndRefreshUndoData: updated undo_new_html after PM normalization', 1);
-            return;
-        } catch (e: any) {
-            logger(`waitForPMAndRefreshUndoData: error during poll: ${e?.message || e}`, 1);
-            return;
-        }
-    }
-    // Timeout — PM didn't change anything, keep original undo data
-}
 
 /**
  * Execute an edit_note agent action by applying string replacement on the note.
@@ -425,7 +306,7 @@ export async function executeEditNoteAction(
     // We poll until PM processes or timeout, then update undo_new_html in-place
     // so the returned result already has correct undo data.
     const savedStrippedHtml = stripDataCitationItems(newHtml);
-    await waitForPMAndRefreshUndoData(item, savedStrippedHtml, result);
+    await waitForPMNormalization(item, savedStrippedHtml, result);
 
     return result;
 }

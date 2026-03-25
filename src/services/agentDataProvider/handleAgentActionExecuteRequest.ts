@@ -16,7 +16,9 @@ import {
     checkDuplicateCitations,
     findFuzzyMatch,
     preloadPageLabelsForNewCitations,
+    waitForPMNormalization,
 } from '../../utils/noteHtmlSimplifier';
+import { clearNoteEditorSelection } from '../../../react/utils/sourceUtils';
 
 
 /** Default timeout in seconds if not specified by backend */
@@ -825,13 +827,29 @@ async function executeEditNoteAction(
         };
     }
 
-    // 10. Perform replacement and capture context for deletions
+    // 10. Perform replacement and capture context
     let newHtml: string;
     let undoBeforeContext: string | undefined;
     let undoAfterContext: string | undefined;
+    let undoOccurrenceContexts: Array<{ before: string; after: string }> | undefined;
     const UNDO_CONTEXT_LENGTH = 200;
 
     if (replace_all) {
+        // Capture per-occurrence context anchors before replacing
+        undoOccurrenceContexts = [];
+        let searchFrom = 0;
+        while (true) {
+            const idx = strippedHtml.indexOf(expandedOld, searchFrom);
+            if (idx === -1) break;
+            undoOccurrenceContexts.push({
+                before: strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx),
+                after: strippedHtml.substring(
+                    idx + expandedOld.length,
+                    idx + expandedOld.length + UNDO_CONTEXT_LENGTH
+                ),
+            });
+            searchFrom = idx + expandedOld.length;
+        }
         newHtml = strippedHtml.split(expandedOld).join(expandedNew);
     } else {
         const idx = strippedHtml.indexOf(expandedOld);
@@ -884,12 +902,27 @@ async function executeEditNoteAction(
         };
     }
 
-    // 15. Invalidate cache
+    // 15. Clear editor selection so it doesn't shift to unrelated text
+    clearNoteEditorSelection(library_id, zotero_key);
+
+    // 16. Invalidate cache
     invalidateSimplificationCache(noteId);
 
     // 17. Check for duplicate citation warnings
     const duplicateWarning = checkDuplicateCitations(new_string, metadata);
     const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+
+    // 18. Wait for ProseMirror to normalize the note and update undo data.
+    // When the note is open in the editor, PM re-normalizes after saveTx(),
+    // which can change the HTML structure (e.g. inline styles → semantic elements).
+    // Without this, undo_new_html becomes stale and undo fails.
+    const undoData = {
+        undo_new_html: expandedNew,
+        undo_before_context: undoBeforeContext,
+        undo_after_context: undoAfterContext,
+    };
+    const savedStrippedHtml = stripDataCitationItems(newHtml);
+    await waitForPMNormalization(item, savedStrippedHtml, undoData);
 
     return {
         type: 'agent_action_execute_response',
@@ -901,9 +934,10 @@ async function executeEditNoteAction(
             occurrences_replaced: matchCount,
             warnings,
             undo_old_html: expandedOld,
-            undo_new_html: expandedNew,
-            undo_before_context: undoBeforeContext,
-            undo_after_context: undoAfterContext,
+            undo_new_html: undoData.undo_new_html,
+            undo_before_context: undoData.undo_before_context,
+            undo_after_context: undoData.undo_after_context,
+            undo_occurrence_contexts: undoOccurrenceContexts,
         },
     };
 }

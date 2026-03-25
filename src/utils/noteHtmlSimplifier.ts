@@ -10,6 +10,7 @@
 
 import { createCitationHTML } from './zoteroUtils';
 import { getAttachmentFileStatus } from '../services/agentDataProvider/utils';
+import { logger } from './logger';
 
 // =============================================================================
 // Types
@@ -1015,4 +1016,132 @@ export function countOccurrences(haystack: string, needle: string): number {
         pos += needle.length;
     }
     return count;
+}
+
+// =============================================================================
+// Context-Anchored Range Finding
+// =============================================================================
+
+/**
+ * Find the range in currentHtml bracketed by before/after context strings.
+ * Used for context-anchored undo and PM normalization refresh.
+ */
+export function findRangeByContexts(
+    currentHtml: string,
+    beforeCtx?: string,
+    afterCtx?: string
+): { start: number; end: number } | null {
+    const hasBefore = beforeCtx != null && beforeCtx.length > 0;
+    const hasAfter = afterCtx != null && afterCtx.length > 0;
+
+    if (hasBefore && hasAfter) {
+        // Both anchors — bracket the region
+        let searchFrom = 0;
+        while (true) {
+            const beforeIdx = currentHtml.indexOf(beforeCtx!, searchFrom);
+            if (beforeIdx === -1) break;
+            const start = beforeIdx + beforeCtx!.length;
+            const afterIdx = currentHtml.indexOf(afterCtx!, start);
+            if (afterIdx !== -1 && afterIdx >= start) {
+                return { start, end: afterIdx };
+            }
+            searchFrom = beforeIdx + 1;
+        }
+    } else if (hasBefore && !hasAfter) {
+        // Edit at end of note — beforeCtx anchors the start, end is end-of-string
+        const beforeIdx = currentHtml.indexOf(beforeCtx!);
+        if (beforeIdx !== -1) {
+            return { start: beforeIdx + beforeCtx!.length, end: currentHtml.length };
+        }
+    } else if (!hasBefore && hasAfter) {
+        // Edit at start of note — afterCtx anchors the end, start is 0
+        const afterIdx = currentHtml.indexOf(afterCtx!);
+        if (afterIdx !== -1) {
+            return { start: 0, end: afterIdx };
+        }
+    }
+    return null;
+}
+
+// =============================================================================
+// ProseMirror Normalization Refresh
+// =============================================================================
+
+const PM_REFRESH_INTERVAL_MS = 150;
+const PM_REFRESH_MAX_WAIT_MS = 2000;
+// After this many polls with no change, assume PM produced identical output and stop.
+const PM_REFRESH_EARLY_EXIT_POLLS = 2;
+const PM_UNDO_CONTEXT_LENGTH = 200;
+
+/**
+ * Wait for ProseMirror to normalize the note and update undo data in-place.
+ *
+ * When a note is open in the editor, ProseMirror re-normalizes the HTML after
+ * `item.saveTx()`. This makes the stored `undo_new_html` stale. This function
+ * polls the editor until the HTML changes (PM processed it) or a timeout elapses,
+ * then extracts the actual PM-normalized fragment using context anchors and
+ * updates the undoData object in-place before it is returned to the caller.
+ */
+export async function waitForPMNormalization(
+    item: any,
+    savedStrippedHtml: string,
+    undoData: { undo_new_html?: string; undo_before_context?: string; undo_after_context?: string }
+): Promise<void> {
+    if (!undoData.undo_new_html) return;
+    if (!isNoteInEditor(item.id)) return;
+
+    // Only refresh edits that have context anchors.
+    // Note: empty string ("") is a valid context (edit at start/end of note),
+    // so we check for undefined, not falsy.
+    const beforeCtx = undoData.undo_before_context;
+    const afterCtx = undoData.undo_after_context;
+    if (beforeCtx === undefined && afterCtx === undefined) return;
+
+    let unchangedPolls = 0;
+
+    // Poll until PM changes the HTML or we time out
+    for (let elapsed = 0; elapsed < PM_REFRESH_MAX_WAIT_MS; elapsed += PM_REFRESH_INTERVAL_MS) {
+        await new Promise(resolve => setTimeout(resolve, PM_REFRESH_INTERVAL_MS));
+
+        try {
+            const currentHtml = getLatestNoteHtml(item);
+            const currentStripped = stripDataCitationItems(currentHtml);
+
+            // If HTML still matches what we saved, PM either hasn't processed
+            // yet or produced identical output (common for plain-text edits).
+            if (currentStripped === savedStrippedHtml) {
+                unchangedPolls++;
+                if (unchangedPolls >= PM_REFRESH_EARLY_EXIT_POLLS) return;
+                continue;
+            }
+
+            // HTML changed — PM has normalized. Extract the actual fragment.
+            const range = findRangeByContexts(currentStripped, beforeCtx, afterCtx);
+            if (!range) {
+                logger('waitForPMNormalization: context anchors not found in PM-normalized HTML, skipping refresh', 1);
+                return;
+            }
+
+            const actualFragment = currentStripped.substring(range.start, range.end);
+
+            // Skip update if the fragment didn't actually change
+            if (actualFragment === undoData.undo_new_html) return;
+
+            // Update in-place with PM-normalized data
+            undoData.undo_new_html = actualFragment;
+            undoData.undo_before_context = currentStripped.substring(
+                Math.max(0, range.start - PM_UNDO_CONTEXT_LENGTH), range.start
+            );
+            undoData.undo_after_context = currentStripped.substring(
+                range.end, range.end + PM_UNDO_CONTEXT_LENGTH
+            );
+
+            logger('waitForPMNormalization: updated undo_new_html after PM normalization', 1);
+            return;
+        } catch (e: any) {
+            logger(`waitForPMNormalization: error during poll: ${e?.message || e}`, 1);
+            return;
+        }
+    }
+    // Timeout — PM didn't change anything, keep original undo data
 }

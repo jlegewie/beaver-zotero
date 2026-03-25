@@ -308,7 +308,7 @@ const NOTE_WITH_LIST = wrap(
  *
  * When `applyPMNormalization` is true, sets up a mock editor whose
  * getDataSync returns PM-normalized HTML. This causes the inline
- * waitForPMAndRefreshUndoData (inside executeEditNoteAction) to detect
+ * waitForPMNormalization (inside executeEditNoteAction) to detect
  * the change and update undo_new_html before the result is returned —
  * exactly like the production path.
  */
@@ -327,7 +327,7 @@ async function applyEdit(opts: {
     const item = createMockNoteItem(opts.noteHtml);
     const action = makeAction(1, 'TESTKEY', opts.oldString, opts.newString, opts.replaceAll);
 
-    // Set up mock editor BEFORE execute so waitForPMAndRefreshUndoData
+    // Set up mock editor BEFORE execute so waitForPMNormalization
     // can read PM-normalized HTML via getLatestNoteHtml during polling
     if (opts.applyPMNormalization) {
         setupPMNormalizingEditor(item);
@@ -383,7 +383,7 @@ async function undoEdit(
  * Set up a mock editor instance that simulates ProseMirror normalization.
  *
  * getLatestNoteHtml reads from the editor via getDataSync(). This mock
- * returns PM-normalized HTML so that waitForPMAndRefreshUndoData (which
+ * returns PM-normalized HTML so that waitForPMNormalization (which
  * runs inline inside executeEditNoteAction) detects the change and updates
  * undo_new_html before the result is returned.
  *
@@ -470,7 +470,7 @@ describe('apply-undo roundtrip (no PM normalization)', () => {
 // Section 2: Apply-Undo with PM Normalization + Inline Undo Data Refresh
 //
 // These test the production code path: executeEditNoteAction runs
-// waitForPMAndRefreshUndoData inline, which polls getLatestNoteHtml
+// waitForPMNormalization inline, which polls getLatestNoteHtml
 // (reading from a mock editor that returns PM-normalized HTML),
 // detects the change, and updates undo_new_html before returning.
 // Then undoEditNoteAction succeeds with the corrected data.
