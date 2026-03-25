@@ -1105,6 +1105,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
             set(isWSChatPendingAtom, false);
+            // Clear per-run auto-approve state if the socket drops before done/error.
+            set(clearAutoApproveNoteKeysAtom);
         }
     };
 }
