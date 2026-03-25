@@ -32,17 +32,33 @@ function findRangeByContexts(
     beforeCtx?: string,
     afterCtx?: string
 ): { start: number; end: number } | null {
-    if (beforeCtx && afterCtx) {
+    const hasBefore = beforeCtx != null && beforeCtx.length > 0;
+    const hasAfter = afterCtx != null && afterCtx.length > 0;
+
+    if (hasBefore && hasAfter) {
+        // Both anchors — bracket the region
         let searchFrom = 0;
         while (true) {
-            const beforeIdx = currentHtml.indexOf(beforeCtx, searchFrom);
+            const beforeIdx = currentHtml.indexOf(beforeCtx!, searchFrom);
             if (beforeIdx === -1) break;
-            const start = beforeIdx + beforeCtx.length;
-            const afterIdx = currentHtml.indexOf(afterCtx, start);
+            const start = beforeIdx + beforeCtx!.length;
+            const afterIdx = currentHtml.indexOf(afterCtx!, start);
             if (afterIdx !== -1 && afterIdx >= start) {
                 return { start, end: afterIdx };
             }
             searchFrom = beforeIdx + 1;
+        }
+    } else if (hasBefore && !hasAfter) {
+        // Edit at end of note — beforeCtx anchors the start, end is end-of-string
+        const beforeIdx = currentHtml.indexOf(beforeCtx!);
+        if (beforeIdx !== -1) {
+            return { start: beforeIdx + beforeCtx!.length, end: currentHtml.length };
+        }
+    } else if (!hasBefore && hasAfter) {
+        // Edit at start of note — afterCtx anchors the end, start is 0
+        const afterIdx = currentHtml.indexOf(afterCtx!);
+        if (afterIdx !== -1) {
+            return { start: 0, end: afterIdx };
         }
     }
     return null;
@@ -162,7 +178,7 @@ function isAlreadyUndone(
     beforeCtx?: string,
     afterCtx?: string
 ): boolean {
-    if (beforeCtx && afterCtx) {
+    if (beforeCtx !== undefined || afterCtx !== undefined) {
         const range = findRangeByContexts(strippedHtml, beforeCtx, afterCtx);
         if (range) {
             return strippedHtml.substring(range.start, range.end) === undoOldHtml;
@@ -199,10 +215,12 @@ async function waitForPMAndRefreshUndoData(
 ): Promise<void> {
     if (!isNoteInEditor(item.id)) return;
 
-    // Only refresh single-occurrence edits that have context anchors
+    // Only refresh single-occurrence edits that have context anchors.
+    // Note: empty string ("") is a valid context (edit at start/end of note),
+    // so we check for undefined, not falsy.
     const beforeCtx = result.undo_before_context;
     const afterCtx = result.undo_after_context;
-    if (!beforeCtx || !afterCtx) return;
+    if (beforeCtx === undefined && afterCtx === undefined) return;
 
     let unchangedPolls = 0;
 
@@ -489,7 +507,7 @@ export async function undoEditNoteAction(
         const afterCtx = resultData?.undo_after_context;
         const undoOldHtml = expandedOld!;
 
-        if (!beforeCtx && !afterCtx) {
+        if (beforeCtx === undefined && afterCtx === undefined) {
             throw new Error(
                 'Cannot undo deletion: no surrounding context stored in result_data. '
                 + 'This action was applied before deletion-undo support was added.'
