@@ -1305,7 +1305,7 @@ async function validateEditNoteAction(
             request_id: request.request_id,
             valid: false,
             error: 'The string to replace was not found in the note.'
-                + (fuzzy ? ` Found a possible fuzzy match:\n${fuzzy}` : ''),
+                + (fuzzy ? ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\`` : ''),
             error_code: 'old_string_not_found',
             preference: 'always_ask',
         };
