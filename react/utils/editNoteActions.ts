@@ -25,7 +25,10 @@ import { clearNoteEditorSelection } from './sourceUtils';
 
 function normalizeUndoComparisonHtml(html: string, libraryId: number): string {
     const { simplified } = simplifyNoteHtml(stripDataCitationItems(html), libraryId);
-    return simplified.replace(/\s+/g, ' ').trim();
+    // Collapse all whitespace, then strip whitespace between HTML tags so that
+    // ProseMirror-inserted newlines (e.g. </p>\n</div> vs </p></div>) don't
+    // cause false mismatches during undo comparison.
+    return simplified.replace(/\s+/g, ' ').replace(/>\s+</g, '><').trim();
 }
 
 function findRangesByRawAnchors(
