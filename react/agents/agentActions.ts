@@ -105,6 +105,13 @@ export const isOrganizeItemsAgentAction = (action: AgentAction): boolean => {
 };
 
 /**
+ * Type guard for edit note actions
+ */
+export const isEditNoteAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'edit_note';
+};
+
+/**
  * Type guard for confirm extraction actions
  */
 export const isConfirmExtractionAgentAction = (action: AgentAction): boolean => {
