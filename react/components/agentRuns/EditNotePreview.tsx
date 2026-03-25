@@ -43,6 +43,100 @@ export interface InlineSegment {
     type: 'context' | 'deletion' | 'addition';
 }
 
+// ---- Formatting markers (control chars that survive the diff pipeline) ----
+
+const BOLD_START = '\x02';
+const BOLD_END = '\x03';
+const HEADING_START = '\x04';
+const HEADING_END = '\x05';
+const ITALIC_START = '\x06';
+const ITALIC_END = '\x07';
+const ALL_MARKERS_RE = new RegExp(
+    `[${String.fromCharCode(2)}-${String.fromCharCode(7)}]`,
+    'g',
+);
+
+/**
+ * Like stripHtmlTags but converts bold, italic, and heading tags to control-char
+ * markers so formatting survives the diff computation and can be rendered later.
+ */
+function stripHtmlPreserveFormatting(html: string): string {
+    const withMarkers = html
+        // Headings → heading markers (must come before stripHtmlTags which converts </h> to \n)
+        .replace(/<h[1-6]\b[^>]*>/gi, HEADING_START)
+        .replace(/<\/h[1-6]>/gi, HEADING_END + '\n')
+        // Bold
+        .replace(/<(strong|b)\b[^>]*>/gi, BOLD_START)
+        .replace(/<\/(strong|b)>/gi, BOLD_END)
+        // Italic
+        .replace(/<(em|i)\b[^>]*>/gi, ITALIC_START)
+        .replace(/<\/(em|i)>/gi, ITALIC_END);
+    return stripHtmlTags(withMarkers);
+}
+
+/**
+ * Render a paragraph of inline-diff segments, tracking bold/italic state across
+ * segment boundaries. Maintains separate old/new formatting streams so that
+ * markers from deletions (old text) don't pollute the state for additions (new text).
+ */
+function renderFormattedParagraph(segments: InlineSegment[]): React.ReactNode[] {
+    const nodes: React.ReactNode[] = [];
+    // Separate formatting streams for old (deletions) and new (additions/context) text
+    let oldBold = false, oldItalic = false;
+    let newBold = false, newItalic = false;
+    let key = 0;
+
+    for (const seg of segments) {
+        const isDeletion = seg.type === 'deletion';
+        const diffClass = isDeletion ? 'inline-diff-del'
+            : seg.type === 'addition' ? 'inline-diff-add'
+                : undefined;
+
+        let bold: boolean = isDeletion ? oldBold : newBold;
+        let italic: boolean = isDeletion ? oldItalic : newItalic;
+        let current = '';
+        let runBold = bold;
+        let runItalic = italic;
+
+        const flushRun = () => {
+            if (!current) return;
+            let inner: React.ReactNode = current;
+            if (runBold && runItalic) inner = <strong><em>{current}</em></strong>;
+            else if (runBold) inner = <strong>{current}</strong>;
+            else if (runItalic) inner = <em>{current}</em>;
+            nodes.push(<span key={key++} className={diffClass}>{inner}</span>);
+            current = '';
+        };
+
+        for (const ch of seg.text) {
+            switch (ch) {
+                case BOLD_START: case HEADING_START:
+                    flushRun(); bold = true; runBold = true; break;
+                case BOLD_END: case HEADING_END:
+                    flushRun(); bold = false; runBold = false; break;
+                case ITALIC_START:
+                    flushRun(); italic = true; runItalic = true; break;
+                case ITALIC_END:
+                    flushRun(); italic = false; runItalic = false; break;
+                default: current += ch;
+            }
+        }
+        flushRun();
+
+        // Update the appropriate stream(s)
+        if (isDeletion) {
+            oldBold = bold; oldItalic = italic;
+        } else if (seg.type === 'addition') {
+            newBold = bold; newItalic = italic;
+        } else {
+            oldBold = bold; oldItalic = italic;
+            newBold = bold; newItalic = italic;
+        }
+    }
+
+    return nodes;
+}
+
 // ---- Component ----
 
 export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
@@ -60,8 +154,8 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     const isError = status === 'error';
     const isDelete = newString === '';
 
-    const strippedOld = normalizeForInlineDiff(stripHtmlTags(oldString));
-    const strippedNew = normalizeForInlineDiff(stripHtmlTags(newString));
+    const strippedOld = normalizeForInlineDiff(stripHtmlPreserveFormatting(oldString));
+    const strippedNew = normalizeForInlineDiff(stripHtmlPreserveFormatting(newString));
 
     // When strippedOld is empty (old_string was pure HTML structure), fetch
     // surrounding visible text from the full note for context.
@@ -144,19 +238,19 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                         </div>
                     )}
                     <div className="inline-diff-container">
-                        {splitIntoParagraphs(inlineSegments).map((para, pi) => (
-                            <div key={pi} className={pi > 0 ? 'inline-diff-para' : undefined}>
-                                {para.map((seg, si) => {
-                                    if (seg.type === 'deletion') {
-                                        return <span key={si} className="inline-diff-del">{seg.text}</span>;
-                                    }
-                                    if (seg.type === 'addition') {
-                                        return <span key={si} className="inline-diff-add">{seg.text}</span>;
-                                    }
-                                    return <span key={si}>{seg.text}</span>;
-                                })}
-                            </div>
-                        ))}
+                        {splitIntoParagraphs(inlineSegments).map((para, pi) => {
+                            const isHeading = para.length > 0
+                                && para[0].text.charAt(0) === HEADING_START;
+                            const cls = [
+                                pi > 0 ? 'inline-diff-para' : '',
+                                isHeading ? 'inline-diff-heading' : '',
+                            ].filter(Boolean).join(' ') || undefined;
+                            return (
+                                <div key={pi} className={cls}>
+                                    {renderFormattedParagraph(para)}
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             </div>

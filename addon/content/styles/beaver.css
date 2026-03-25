@@ -2310,7 +2310,11 @@
 }
 
 [id^="beaver-pane-"] .inline-diff-para {
-    margin-top: 0.6em;
+    margin-top: 0.4em;
+}
+
+[id^="beaver-pane-"] .inline-diff-heading {
+    font-weight: 600;
 }
 
 [id^="beaver-pane-"] .inline-diff-del {
