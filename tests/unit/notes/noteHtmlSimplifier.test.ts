@@ -42,6 +42,7 @@ import {
     checkDuplicateCitations,
     isNoteInEditor,
     getLatestNoteHtml,
+    findRangeByContexts,
     SimplificationMetadata,
 } from '../../../src/utils/noteHtmlSimplifier';
 import { createCitationHTML } from '../../../src/utils/zoteroUtils';
@@ -1134,6 +1135,87 @@ describe('getLatestNoteHtml', () => {
             get _iframeWindow() { throw new Error('dead object'); },
         }];
         expect(getLatestNoteHtml(item)).toBe('<p>saved version</p>');
+    });
+});
+
+
+// =============================================================================
+// findRangeByContexts
+// =============================================================================
+
+describe('findRangeByContexts', () => {
+    const html = '<div><p>First paragraph.</p><p>Second paragraph.</p><p>Third paragraph.</p></div>';
+
+    it('returns range between both anchors', () => {
+        const result = findRangeByContexts(html, '<p>First paragraph.</p>', '<p>Third paragraph.</p>');
+        expect(result).not.toBeNull();
+        expect(html.substring(result!.start, result!.end)).toBe('<p>Second paragraph.</p>');
+    });
+
+    it('returns range from before anchor to end when no after anchor', () => {
+        const result = findRangeByContexts(html, '<p>Second paragraph.</p>');
+        expect(result).not.toBeNull();
+        expect(html.substring(result!.start, result!.end)).toBe('<p>Third paragraph.</p></div>');
+    });
+
+    it('returns range from before anchor to end when after anchor is empty string', () => {
+        // Empty string has length 0, so hasAfter = false → edit-at-end-of-note branch
+        const result = findRangeByContexts(html, '<p>Second paragraph.</p>', '');
+        expect(result).not.toBeNull();
+        expect(html.substring(result!.start, result!.end)).toBe('<p>Third paragraph.</p></div>');
+    });
+
+    it('returns range from start to after anchor when no before anchor', () => {
+        const result = findRangeByContexts(html, undefined, '<p>Second paragraph.</p>');
+        expect(result).not.toBeNull();
+        expect(html.substring(result!.start, result!.end)).toBe('<div><p>First paragraph.</p>');
+    });
+
+    it('returns range from start to after anchor when before anchor is empty string', () => {
+        // Empty string has length 0, so hasBefore = false → edit-at-start-of-note branch
+        const result = findRangeByContexts(html, '', '<p>Second paragraph.</p>');
+        expect(result).not.toBeNull();
+        expect(html.substring(result!.start, result!.end)).toBe('<div><p>First paragraph.</p>');
+    });
+
+    it('returns null when neither anchor provided', () => {
+        expect(findRangeByContexts(html)).toBeNull();
+    });
+
+    it('returns null when both anchors are undefined', () => {
+        expect(findRangeByContexts(html, undefined, undefined)).toBeNull();
+    });
+
+    it('returns null when both anchors are empty strings', () => {
+        expect(findRangeByContexts(html, '', '')).toBeNull();
+    });
+
+    it('returns null when before anchor not found', () => {
+        expect(findRangeByContexts(html, 'nonexistent text')).toBeNull();
+    });
+
+    it('returns null when after anchor not found', () => {
+        expect(findRangeByContexts(html, undefined, 'nonexistent text')).toBeNull();
+    });
+
+    it('returns null when before anchor exists but after anchor not found', () => {
+        expect(findRangeByContexts(html, '<p>First paragraph.</p>', 'nonexistent')).toBeNull();
+    });
+
+    it('returns empty range when anchors are adjacent', () => {
+        const result = findRangeByContexts(html,
+            '<p>First paragraph.</p>',
+            '<p>Second paragraph.</p>');
+        expect(result).not.toBeNull();
+        expect(html.substring(result!.start, result!.end)).toBe('');
+    });
+
+    it('handles before anchor that appears multiple times (uses first valid pair)', () => {
+        const repeated = '<p>A</p><p>B</p><p>A</p><p>C</p>';
+        const result = findRangeByContexts(repeated, '<p>A</p>', '<p>C</p>');
+        expect(result).not.toBeNull();
+        // First <p>A</p> to <p>C</p>
+        expect(repeated.substring(result!.start, result!.end)).toBe('<p>B</p><p>A</p>');
     });
 });
 

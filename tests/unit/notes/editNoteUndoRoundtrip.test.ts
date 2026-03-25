@@ -126,6 +126,24 @@ function simulatePMNormalization(html: string): string {
     result = result.replace(/<del>([\s\S]*?)<\/del>/g, '<span style="text-decoration: line-through;">$1</span>');
     result = result.replace(/<strike>([\s\S]*?)<\/strike>/g, '<span style="text-decoration: line-through;">$1</span>');
 
+    // Inline style normalization: PM converts CSS font-weight/font-style
+    // on elements to semantic wrappers (<strong>, <em>)
+    // Combined color + bold (both orderings)
+    result = result.replace(
+        /<p style="color:\s*([^;]+);\s*font-weight:\s*bold;?">([\s\S]*?)<\/p>/g,
+        '<p><strong><span style="color: $1;">$2</span></strong></p>');
+    result = result.replace(
+        /<p style="font-weight:\s*bold;\s*color:\s*([^;"]+);?">([\s\S]*?)<\/p>/g,
+        '<p><strong><span style="color: $1;">$2</span></strong></p>');
+    // Just bold on paragraph
+    result = result.replace(
+        /<p style="font-weight:\s*bold;?">([\s\S]*?)<\/p>/g,
+        '<p><strong>$1</strong></p>');
+    // Just italic on paragraph
+    result = result.replace(
+        /<p style="font-style:\s*italic;?">([\s\S]*?)<\/p>/g,
+        '<p><em>$1</em></p>');
+
     // Add rel to links that don't have it
     result = result.replace(/<a\s+href="([^"]*)"(?![^>]*rel=)/g,
         '<a href="$1" rel="noopener noreferrer nofollow"');
@@ -1212,5 +1230,189 @@ describe('page locator normalization in apply-undo cycle', () => {
         // Undo should restore the original
         const restored = await undoEdit(item, action);
         expect(restored).toBe(stripDataCitationItems(NOTE_WITH_CITATION));
+    });
+});
+
+
+// =============================================================================
+// Section 12: Stale Undo Data — Server-Side Handler Bug Scenario
+//
+// Before the fix, the server-side handler did not call waitForPMNormalization,
+// so undo_new_html stored the pre-PM HTML. When ProseMirror restructured the
+// HTML (e.g., inline styles → semantic elements), undo would fail because
+// the stored undo_new_html didn't match the actual note content.
+//
+// These tests demonstrate that:
+// - Without PM refresh, undo fails (the bug)
+// - With PM refresh, undo succeeds (the fix)
+// =============================================================================
+
+describe('stale undo data (server-side handler bug scenario)', () => {
+    it('undo fails with stale undo data when PM converts <b> to <strong>', async () => {
+        const note = wrap(
+            '<p>Some existing text.</p>\n'
+            + '<p>More text here.</p>\n'
+        );
+
+        // Apply edit WITHOUT PM normalization during execute — simulates
+        // old server-side handler that lacked waitForPMNormalization
+        const { item, action } = await applyEdit({
+            noteHtml: note,
+            oldString: 'More text here.',
+            newString: '<b>Important:</b> Modified text.',
+            applyPMNormalization: false,
+        });
+
+        // undo_new_html has pre-PM format (with <b>)
+        expect(action.result_data!.undo_new_html).toContain('<b>');
+        expect(action.result_data!.undo_new_html).not.toContain('<strong>');
+
+        // Manually apply PM normalization (as if PM processed the note after save)
+        item._setHtml(simulatePMNormalization(item._getHtml()));
+        invalidateSimplificationCache('1-TESTKEY');
+
+        // Undo should fail because undo_new_html has <b> but note now has <strong>
+        await expect(undoEdit(item, action)).rejects.toThrow('Cannot undo');
+    });
+
+    it('undo succeeds with PM-refreshed undo data (the fix)', async () => {
+        const note = wrap(
+            '<p>Some existing text.</p>\n'
+            + '<p>More text here.</p>\n'
+        );
+
+        // Same edit but WITH PM normalization during execute — simulates
+        // fixed server-side handler that calls waitForPMNormalization
+        const { item, action, result } = await applyEdit({
+            noteHtml: note,
+            oldString: 'More text here.',
+            newString: '<b>Important:</b> Modified text.',
+            applyPMNormalization: true,
+        });
+
+        // undo_new_html was updated to PM-normalized format
+        expect(result.undo_new_html).toContain('<strong>');
+        expect(result.undo_new_html).not.toContain('<b>');
+
+        // Undo should succeed
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain('More text here.');
+        expect(restored).not.toContain('Modified text');
+    });
+
+    it('inline style "font-weight: bold" → PM converts to <strong> wrapper', async () => {
+        const note = wrap(
+            '<p>Existing content.</p>\n'
+            + '<p>Final paragraph.</p>\n'
+        );
+
+        // Without PM refresh: stale undo data
+        const { item: item1, action: action1 } = await applyEdit({
+            noteHtml: note,
+            oldString: 'Final paragraph.',
+            newString: '<p style="font-weight: bold;">Bold via style.</p>',
+            applyPMNormalization: false,
+        });
+        item1._setHtml(simulatePMNormalization(item1._getHtml()));
+        invalidateSimplificationCache('1-TESTKEY');
+        await expect(undoEdit(item1, action1)).rejects.toThrow('Cannot undo');
+
+        // With PM refresh: undo succeeds
+        const { item: item2, action: action2, result } = await applyEdit({
+            noteHtml: note,
+            oldString: 'Final paragraph.',
+            newString: '<p style="font-weight: bold;">Bold via style.</p>',
+            applyPMNormalization: true,
+        });
+        expect(result.undo_new_html).toContain('<strong>');
+        expect(result.undo_new_html).not.toContain('font-weight');
+
+        const restored = await undoEdit(item2, action2);
+        expect(restored).toContain('Final paragraph.');
+    });
+
+    it('exact bug report: color+bold style at end of note → PM restructures', async () => {
+        // Reproduces the exact pattern from the bug report:
+        // <p style="color: blue; font-weight: bold;">[text]</p>
+        // → PM converts to <p><strong><span style="color: blue;">[text]</span></strong></p>
+        const note = wrap(
+            '<p>Some content.</p>\n'
+            + '<p><strong>Note:</strong> Important info.</p>\n'
+        );
+
+        // Without PM refresh: stale undo data → undo fails
+        const { item: item1, action: action1 } = await applyEdit({
+            noteHtml: note,
+            oldString: '</div>',
+            newString: '<p style="color: blue; font-weight: bold;">[Test Edit #3]</p>\n</div>',
+            applyPMNormalization: false,
+        });
+        // undo_new_html still has the inline style
+        expect(action1.result_data!.undo_new_html).toContain('style="color: blue; font-weight: bold;"');
+
+        item1._setHtml(simulatePMNormalization(item1._getHtml()));
+        invalidateSimplificationCache('1-TESTKEY');
+        await expect(undoEdit(item1, action1)).rejects.toThrow('Cannot undo');
+
+        // With PM refresh: undo data is updated → undo succeeds
+        const { item: item2, action: action2, result } = await applyEdit({
+            noteHtml: note,
+            oldString: '</div>',
+            newString: '<p style="color: blue; font-weight: bold;">[Test Edit #3]</p>\n</div>',
+            applyPMNormalization: true,
+        });
+
+        // undo_new_html should now have PM-normalized structure
+        expect(result.undo_new_html).toContain('<strong>');
+        expect(result.undo_new_html).toContain('style="color: blue;"');
+        expect(result.undo_new_html).not.toContain('style="color: blue; font-weight: bold;"');
+
+        const restored = await undoEdit(item2, action2);
+        expect(restored).not.toContain('Test Edit');
+        expect(restored).toBe(stripDataCitationItems(note));
+    });
+
+    it('multiple sequential edits: each undo works with PM refresh', async () => {
+        // Simulates multiple edits in one agent run — each with PM refresh
+        const note = wrap(
+            '<p>First paragraph.</p>\n'
+            + '<p>Second paragraph.</p>\n'
+        );
+
+        // Edit 1: simple text change
+        const { item, action: action1, result: result1 } = await applyEdit({
+            noteHtml: note,
+            oldString: 'First paragraph.',
+            newString: 'First paragraph. <i>Added italic.</i>',
+            applyPMNormalization: true,
+        });
+        expect(result1.undo_new_html).toContain('<em>');
+
+        // Edit 2: add styled paragraph at end (like the bug report)
+        const action2 = makeAction(1, 'TESTKEY', '</div>',
+            '<p style="color: blue; font-weight: bold;">[New paragraph]</p>\n</div>');
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        // Set up PM editor for this edit too
+        setupPMNormalizingEditor(item);
+        const result2 = await executeEditNoteAction(action2);
+        item._setHtml(simulatePMNormalization(item._getHtml()));
+        action2.status = 'applied';
+        action2.result_data = result2;
+        invalidateSimplificationCache('1-TESTKEY');
+
+        expect(result2.undo_new_html).toContain('<strong>');
+
+        // Undo edit 2 first
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+        await undoEditNoteAction(action2);
+        invalidateSimplificationCache('1-TESTKEY');
+
+        // Note should still have edit 1's changes
+        expect(item._getHtml()).toContain('<em>');
+        expect(item._getHtml()).not.toContain('New paragraph');
+
+        // Undo edit 1
+        await undoEdit(item, action1);
+        expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(note));
     });
 });
