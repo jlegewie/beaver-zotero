@@ -35,6 +35,7 @@ import {
     getOrSimplify,
     invalidateSimplificationCache,
     stripDataCitationItems,
+    stripNoteWrapperDiv,
     rebuildDataCitationItems,
     validateNewString,
     findFuzzyMatch,
@@ -249,6 +250,27 @@ describe('simplifyNoteHtml', () => {
         const html = wrap('<p>text</p>', ' data-citation-items="encoded-stuff"');
         const { simplified } = simplifyNoteHtml(html, 1);
         expect(simplified).not.toContain('data-citation-items');
+    });
+
+    it('strips the outer wrapper div from simplified output', () => {
+        const html = wrap('<h1>Title</h1>\n<p>Content</p>');
+        const { simplified } = simplifyNoteHtml(html, 1);
+        expect(simplified).not.toContain('<div');
+        expect(simplified).not.toContain('</div>');
+        expect(simplified).not.toContain('data-schema-version');
+        expect(simplified).toBe('<h1>Title</h1>\n<p>Content</p>');
+    });
+
+    it('strips wrapper div even without data-schema-version', () => {
+        const html = '<div><p>Legacy note</p></div>';
+        const { simplified } = simplifyNoteHtml(html, 1);
+        expect(simplified).toBe('<p>Legacy note</p>');
+    });
+
+    it('preserves HTML when not wrapped in a div', () => {
+        const html = '<p>Bare paragraph</p>';
+        const { simplified } = simplifyNoteHtml(html, 1);
+        expect(simplified).toBe('<p>Bare paragraph</p>');
     });
 
     it('handles mixed content with all element types', () => {
@@ -791,6 +813,38 @@ describe('stripDataCitationItems', () => {
     it('is a noop when attribute is absent', () => {
         const html = '<div data-schema-version="9">content</div>';
         expect(stripDataCitationItems(html)).toBe(html);
+    });
+});
+
+describe('stripNoteWrapperDiv', () => {
+    it('strips wrapper with data-schema-version', () => {
+        expect(stripNoteWrapperDiv('<div data-schema-version="9"><p>content</p></div>'))
+            .toBe('<p>content</p>');
+    });
+
+    it('strips bare wrapper div', () => {
+        expect(stripNoteWrapperDiv('<div><p>content</p></div>'))
+            .toBe('<p>content</p>');
+    });
+
+    it('preserves inner whitespace', () => {
+        expect(stripNoteWrapperDiv('<div data-schema-version="9">\n<h1>Title</h1>\n<p>Text</p>\n</div>'))
+            .toBe('\n<h1>Title</h1>\n<p>Text</p>\n');
+    });
+
+    it('is a no-op for non-div HTML', () => {
+        expect(stripNoteWrapperDiv('<p>just a paragraph</p>'))
+            .toBe('<p>just a paragraph</p>');
+    });
+
+    it('is a no-op for empty string', () => {
+        expect(stripNoteWrapperDiv('')).toBe('');
+    });
+
+    it('does not strip if inner divs are unbalanced', () => {
+        const html = '<div><div><p>nested</p></div></div>';
+        // Inner has 1 open and 1 close — balanced, so it strips the outer
+        expect(stripNoteWrapperDiv(html)).toBe('<div><p>nested</p></div>');
     });
 });
 

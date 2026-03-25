@@ -319,6 +319,12 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
         (_match, content) => content
     );
 
+    // 7. Strip the outer wrapper div.
+    // Zotero notes are wrapped in <div data-schema-version="N">...</div>.
+    // This wrapper is structural metadata, not content the agent should edit.
+    // Stripping it prevents the agent from anchoring edits on </div>.
+    simplified = stripNoteWrapperDiv(simplified);
+
     return { simplified, metadata };
 }
 
@@ -751,6 +757,44 @@ export function expandToRawHtml(
     );
 
     return str;
+}
+
+// =============================================================================
+// Wrapper Div Handling
+// =============================================================================
+
+/**
+ * Strip the outer wrapper `<div data-schema-version="N">...</div>` from note HTML.
+ *
+ * Zotero notes returned by `item.getNote()` / editor `getDataSync()` are wrapped
+ * in a single `<div>` (with optional `data-schema-version` and `data-citation-items`
+ * attributes). This wrapper is structural metadata — not content the agent should
+ * interact with. Stripping it from simplified output prevents the agent from
+ * anchoring edits on `</div>`, which causes undo failures.
+ *
+ * Only strips when the HTML starts with `<div` and ends with `</div>` to avoid
+ * accidentally stripping content from fragments or non-note HTML.
+ */
+export function stripNoteWrapperDiv(html: string): string {
+    const trimmed = html.trim();
+    // Must start with <div and end with </div>
+    if (!trimmed.startsWith('<div') || !trimmed.endsWith('</div>')) {
+        return html;
+    }
+    // Find the end of the opening <div ...> tag
+    const closeAngle = trimmed.indexOf('>');
+    if (closeAngle === -1) return html;
+    // Extract inner content (between opening tag and closing </div>)
+    const inner = trimmed.substring(closeAngle + 1, trimmed.length - 6);
+    // Only strip if the inner content doesn't have unmatched div nesting
+    // (i.e., there's exactly one wrapper div, not nested divs where removing
+    // the outer one would break structure)
+    const innerDivOpens = (inner.match(/<div[\s>]/g) || []).length;
+    const innerDivCloses = (inner.match(/<\/div>/g) || []).length;
+    if (innerDivOpens !== innerDivCloses) {
+        return html; // Unbalanced inner divs — don't strip
+    }
+    return inner;
 }
 
 // =============================================================================

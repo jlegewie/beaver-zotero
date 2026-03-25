@@ -464,7 +464,23 @@ describe('apply-undo roundtrip (no PM normalization)', () => {
         expect(restored).toBe(stripDataCitationItems(NOTE_WITH_CITATION));
     });
 
-    it('append at end of note via </div> replacement: undo restores original', async () => {
+    it('append at end of note via last paragraph anchor: undo restores original', async () => {
+        // The correct pattern: agent anchors on the last content element
+        // instead of the wrapper </div> (which is stripped from simplified output).
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: '<p>Third paragraph to provide context.</p>',
+            newString: '<p>Third paragraph to provide context.</p>\n<p>Appended at the end.</p>',
+        });
+        expect(item._getHtml()).toContain('Appended at the end');
+
+        const restored = await undoEdit(item, action);
+        expect(restored).toBe(stripDataCitationItems(PLAIN_NOTE));
+    });
+
+    it('append at end of note via </div> replacement: undo restores original (legacy)', async () => {
+        // Legacy scenario: if agent somehow sends </div> as old_string,
+        // execution still works since executeEditNoteAction operates on full HTML.
         const { item, action } = await applyEdit({
             noteHtml: PLAIN_NOTE,
             oldString: '</div>',
@@ -724,7 +740,43 @@ describe('apply-undo roundtrip (with PM normalization)', () => {
         expect(restored).toContain('Second paragraph with more text');
     });
 
-    it('append at end of note via </div> — PM adds newline before closing tag', async () => {
+    it('append at end via last paragraph anchor — PM normalization', async () => {
+        // Correct pattern: agent anchors on last content element.
+        // The wrapper </div> becomes part of undo_after_context, not undo_new_html.
+        const { item, action } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: '<p>Third paragraph to provide context.</p>',
+            newString: '<p>Third paragraph to provide context.</p>\n<p>Appended text.</p>',
+            applyPMNormalization: true,
+        });
+        expect(item._getHtml()).toContain('Appended text');
+
+        const restored = await undoEdit(item, action, true);
+        expect(restored).toContain('Third paragraph to provide context');
+        expect(restored).not.toContain('Appended text');
+    });
+
+    it('append at end via last paragraph anchor — stale undo (PM missed)', async () => {
+        // Content-based anchor + editor not active (waitForPMNormalization is no-op).
+        // The undo_after_context contains </div> as a stable anchor.
+        const { item, action, result } = await applyEdit({
+            noteHtml: PLAIN_NOTE,
+            oldString: '<p>Third paragraph to provide context.</p>',
+            newString: '<p>Third paragraph to provide context.</p>\n<p>Stale test.</p>',
+            applyPMNormalization: true,
+        });
+        expect(item._getHtml()).toContain('Stale test');
+
+        // Revert undo_new_html to pre-PM version (simulating editor not active)
+        result.undo_new_html = '<p>Third paragraph to provide context.</p>\n<p>Stale test.</p>';
+        action.result_data = result;
+
+        const restored = await undoEdit(item, action, true);
+        expect(restored).toContain('Third paragraph to provide context');
+        expect(restored).not.toContain('Stale test');
+    });
+
+    it('append at end of note via </div> — PM adds newline before closing tag (legacy)', async () => {
         const { item, action, result } = await applyEdit({
             noteHtml: PLAIN_NOTE,
             oldString: '</div>',
@@ -741,7 +793,7 @@ describe('apply-undo roundtrip (with PM normalization)', () => {
         expect(restored).not.toContain('test addition at the end');
     });
 
-    it('append at end of note via </div> — stale undo_new_html (PM missed)', async () => {
+    it('append at end of note via </div> — stale undo_new_html (PM missed, legacy)', async () => {
         // Simulate the case where waitForPMNormalization did NOT update
         // undo_new_html (PM was too slow). The undo should still succeed
         // via fuzzy matching with whitespace-normalized comparison.

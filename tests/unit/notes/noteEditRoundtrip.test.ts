@@ -52,6 +52,7 @@ import {
     simplifyNoteHtml,
     expandToRawHtml,
     stripDataCitationItems,
+    stripNoteWrapperDiv,
     rebuildDataCitationItems,
     getOrSimplify,
     invalidateSimplificationCache,
@@ -84,6 +85,15 @@ function rawCitation(key: string, libraryID = 1, page = '', label = 'Author, 202
     };
     return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">`
         + `<span class="citation-item">${label}</span></span>`;
+}
+
+/**
+ * Expected result of a simplify → expand roundtrip.
+ * Strips both data-citation-items and the wrapper div (since simplifyNoteHtml
+ * now strips the wrapper from its output, expandToRawHtml can't restore it).
+ */
+function roundtripExpected(html: string): string {
+    return stripNoteWrapperDiv(stripDataCitationItems(html));
 }
 
 function stripInlineItemDataFromDataCitationsForTest(html: string): string {
@@ -364,39 +374,38 @@ beforeEach(() => {
 // =============================================================================
 // Section 1: Simplification Roundtrip Invariant
 //
-// Core invariant: simplify → expand('old') ≡ stripDataCitationItems(original)
+// Core invariant: simplify → expand('old') ≡ roundtripExpected(original)
+// (stripDataCitationItems + stripNoteWrapperDiv, since both are removed
+//  during simplification and not restored by expandToRawHtml)
 // =============================================================================
 
 describe('simplification roundtrip invariant', () => {
-    it('fixture A: simplify → expand produces stripDataCitationItems(original)', () => {
+    it('fixture A: simplify → expand produces roundtripExpected(original)', () => {
         const { simplified, metadata } = simplifyNoteHtml(FIXTURE_A, 1);
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        const expected = stripDataCitationItems(FIXTURE_A);
-        expect(expanded).toBe(expected);
+        expect(expanded).toBe(roundtripExpected(FIXTURE_A));
     });
 
-    it('fixture B: simplify → expand produces stripDataCitationItems(original)', () => {
+    it('fixture B: simplify → expand produces roundtripExpected(original)', () => {
         const { simplified, metadata } = simplifyNoteHtml(FIXTURE_B, 1);
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        const expected = stripDataCitationItems(FIXTURE_B);
-        expect(expanded).toBe(expected);
+        expect(expanded).toBe(roundtripExpected(FIXTURE_B));
     });
 
-    it('fixture C (all element types): simplify → expand produces stripDataCitationItems(original)', () => {
+    it('fixture C (all element types): simplify → expand produces roundtripExpected(original)', () => {
         const { simplified, metadata } = simplifyNoteHtml(FIXTURE_C, 1);
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        const expected = stripDataCitationItems(FIXTURE_C);
-        expect(expanded).toBe(expected);
+        expect(expanded).toBe(roundtripExpected(FIXTURE_C));
     });
 
-    it('plain text note: simplify → expand is identity', () => {
+    it('plain text note: simplify → expand is identity (minus wrapper)', () => {
         const html = wrap('<p>Hello world, this is a plain note.</p><p>No citations here.</p>');
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(html);
+        expect(expanded).toBe(roundtripExpected(html));
     });
 
-    it('note with only headings and formatting: simplify → expand is identity', () => {
+    it('note with only headings and formatting: simplify → expand is identity (minus wrapper)', () => {
         const html = wrap(
             '<h1>Main Title</h1>'
             + '<h3>Subsection</h3>'
@@ -404,7 +413,7 @@ describe('simplification roundtrip invariant', () => {
         );
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(html);
+        expect(expanded).toBe(roundtripExpected(html));
     });
 });
 
@@ -639,7 +648,7 @@ describe('citation-specific roundtrips', () => {
 
         // Full roundtrip
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(stripDataCitationItems(html));
+        expect(expanded).toBe(roundtripExpected(html));
     });
 
     it('citation with numeric locator (integer) round-trips correctly', () => {
@@ -653,7 +662,7 @@ describe('citation-specific roundtrips', () => {
 
         // Full roundtrip
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(stripDataCitationItems(FIXTURE_B));
+        expect(expanded).toBe(roundtripExpected(FIXTURE_B));
     });
 
     it('citation within bold text: simplify → replace → expand preserves formatting', () => {
@@ -1465,15 +1474,15 @@ describe('edge cases', () => {
 
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(stripDataCitationItems(html));
+        expect(expanded).toBe(roundtripExpected(html));
     });
 
     it('empty note body (just wrapper div)', () => {
         const html = wrap('');
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
-        expect(simplified).toBe(html);
+        expect(simplified).toBe('');
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(html);
+        expect(expanded).toBe('');
     });
 
     it('note with only citations (no plain text) round-trips each', () => {
@@ -1489,7 +1498,7 @@ describe('edge cases', () => {
 
         // Full roundtrip
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(stripDataCitationItems(html));
+        expect(expanded).toBe(roundtripExpected(html));
     });
 
     it('very long note with many citations: correctness maintained', () => {
@@ -1505,7 +1514,7 @@ describe('edge cases', () => {
         expect(metadata.elements.size).toBe(50);
 
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(stripDataCitationItems(html));
+        expect(expanded).toBe(roundtripExpected(html));
     });
 
     it('locator with special characters: page range, section symbol, footnote', () => {
@@ -1522,7 +1531,7 @@ describe('edge cases', () => {
 
         // Full roundtrip
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(stripDataCitationItems(html));
+        expect(expanded).toBe(roundtripExpected(html));
     });
 
     it('citation label with quotes and ampersands: attribute escaping roundtrips', () => {
@@ -1537,7 +1546,7 @@ describe('edge cases', () => {
 
         // Full roundtrip
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(stripDataCitationItems(html));
+        expect(expanded).toBe(roundtripExpected(html));
     });
 
     it('note with table, code block, blockquote: structure preserved in roundtrip', () => {
@@ -1549,7 +1558,7 @@ describe('edge cases', () => {
 
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(html);
+        expect(expanded).toBe(roundtripExpected(html));
     });
 
     it('unicode characters in note text survive roundtrip', () => {
@@ -1565,7 +1574,7 @@ describe('edge cases', () => {
         expect(simplified).toContain('über-analysis');
 
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(stripDataCitationItems(html));
+        expect(expanded).toBe(roundtripExpected(html));
     });
 
     it('annotation + citation in same paragraph roundtrip', () => {
@@ -1578,7 +1587,7 @@ describe('edge cases', () => {
         expect(simplified).toContain('<citation ');
 
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(stripDataCitationItems(html));
+        expect(expanded).toBe(roundtripExpected(html));
     });
 
     it('annotation-image + regular image + citation in same note roundtrip', () => {
@@ -1596,7 +1605,7 @@ describe('edge cases', () => {
 
         // Full roundtrip
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toBe(stripDataCitationItems(FIXTURE_C));
+        expect(expanded).toBe(roundtripExpected(FIXTURE_C));
     });
 
     it('replacing text does not affect unrelated paragraphs', () => {
