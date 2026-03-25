@@ -212,7 +212,7 @@ export async function executeEditNoteAction(
         const fuzzy = findFuzzyMatch(simplified, old_string);
         throw new Error(
             'The string to replace was not found in the note.'
-            + (fuzzy ? ` Found a possible fuzzy match:\n${fuzzy}` : '')
+            + (fuzzy ? ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\`` : '')
         );
     }
 
