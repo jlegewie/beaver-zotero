@@ -20,6 +20,7 @@ import {
     preloadPageLabelsForNewCitations,
     findRangeByContexts,
     waitForPMNormalization,
+    hasSchemaVersionWrapper,
 } from '../../src/utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from './sourceUtils';
 
@@ -263,8 +264,8 @@ export async function executeEditNoteAction(
     newHtml = rebuildDataCitationItems(newHtml);
 
     // 12. Wrapper div protection — only error if the edit removed it
-    const hadSchemaVersion = strippedHtml.includes('data-schema-version=');
-    if (hadSchemaVersion && !newHtml.includes('data-schema-version=')) {
+    const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
+    if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
         throw new Error('The note wrapper <div data-schema-version="..."> must not be removed.');
     }
 

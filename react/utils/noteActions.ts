@@ -1,6 +1,7 @@
 import { ZoteroItemReference } from "../types/zotero";
 import { renderToHTML, RenderContextData } from "./citationRenderers";
 import { preloadPageLabelsForContent } from "./pageLabels";
+import { hasSchemaVersionWrapper } from "../../src/utils/noteHtmlSimplifier";
 
 /**
  * Schema version used by the Zotero note editor for modern notes.
@@ -14,7 +15,7 @@ const NOTE_SCHEMA_VERSION = 9;
  * Zotero note editor, which is required for edit_note to work correctly.
  */
 export function wrapWithSchemaVersion(html: string): string {
-    if (html.includes('data-schema-version=')) return html;
+    if (hasSchemaVersionWrapper(html)) return html;
     return `<div data-schema-version="${NOTE_SCHEMA_VERSION}">${html}</div>`;
 }
 

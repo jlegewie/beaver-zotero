@@ -17,6 +17,7 @@ import {
     findFuzzyMatch,
     preloadPageLabelsForNewCitations,
     waitForPMNormalization,
+    hasSchemaVersionWrapper,
 } from '../../utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from '../../../react/utils/sourceUtils';
 
@@ -867,8 +868,8 @@ async function executeEditNoteAction(
     newHtml = rebuildDataCitationItems(newHtml);
 
     // 12. Wrapper div protection — only error if the edit removed it
-    const hadSchemaVersion = strippedHtml.includes('data-schema-version=');
-    if (hadSchemaVersion && !newHtml.includes('data-schema-version=')) {
+    const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
+    if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,

@@ -797,6 +797,20 @@ export function stripNoteWrapperDiv(html: string): string {
     return inner;
 }
 
+/**
+ * Check whether the HTML has a root `<div data-schema-version="...">` wrapper element.
+ * Only inspects the opening tag of the root element — not arbitrary substrings —
+ * so content that merely mentions `data-schema-version` (e.g. code blocks) won't match.
+ */
+export function hasSchemaVersionWrapper(html: string): boolean {
+    const trimmed = html.trim();
+    if (!trimmed.startsWith('<div')) return false;
+    const closeAngle = trimmed.indexOf('>');
+    if (closeAngle === -1) return false;
+    const openingTag = trimmed.substring(0, closeAngle + 1);
+    return /data-schema-version="/.test(openingTag);
+}
+
 // =============================================================================
 // data-citation-items Handling
 // =============================================================================
