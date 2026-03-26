@@ -158,6 +158,15 @@ const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promi
     );
 };
 
+const formatTimeRemaining = (periodEnd: string, isAnnual: boolean): string => {
+    const days = Math.max(0, Math.ceil((new Date(periodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+    if (isAnnual && days > 60) {
+        const months = Math.round(days / 30);
+        return `${months} month${months !== 1 ? 's' : ''}`;
+    }
+    return `${days} day${days !== 1 ? 's' : ''}`;
+};
+
 const BillingSection: React.FC = () => {
     const setActiveTab = useSetAtom(activePreferencePageTabAtom);
     const user = useAtomValue(userAtom);
@@ -239,7 +248,9 @@ const BillingSection: React.FC = () => {
                             <div className="display-flex flex-col">
                                 <div className="display-flex flex-row items-center gap-3">
                                     <div className="text-2xl font-color-primary font-bold">
-                                        {creditPlan.plan ? creditPlan.plan.charAt(0).toUpperCase() + creditPlan.plan.slice(1) : ''}
+                                        {creditPlan.plan?.includes('annual')
+                                            ? creditPlan.plan.replace('_annual', '').charAt(0).toUpperCase() + creditPlan.plan.replace('_annual', '').slice(1) + ' (Annual)'
+                                            : creditPlan.plan ? creditPlan.plan.charAt(0).toUpperCase() + creditPlan.plan.slice(1) : ''}
                                     </div>
                                     {creditPlan.cancelAtPeriodEnd && (
                                         <span
@@ -261,13 +272,13 @@ const BillingSection: React.FC = () => {
                                 {creditPlan.periodEnd && !creditPlan.cancelAtPeriodEnd && (
                                     <span className="text-sm font-color-secondary">
                                         Renews {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                                        {' '}({Math.max(0, Math.ceil((new Date(creditPlan.periodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))} days)
+                                        {' '}({formatTimeRemaining(creditPlan.periodEnd, creditPlan.plan?.includes('annual') ?? false)})
                                     </span>
                                 )}
                                 {creditPlan.cancelAtPeriodEnd && creditPlan.periodEnd && (
                                     <span className="text-sm font-color-secondary">
                                         Your plan ends {new Date(creditPlan.periodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                                        {' '}({Math.max(0, Math.ceil((new Date(creditPlan.periodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))} days remaining)
+                                        {' '}({formatTimeRemaining(creditPlan.periodEnd, creditPlan.plan?.includes('annual') ?? false)} remaining)
                                     </span>
                                 )}
                             </div>
