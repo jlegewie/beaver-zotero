@@ -1218,10 +1218,11 @@ export interface GetMetadataResultSummary {
 }
 
 /**
- * Result item from zotero_search.
- * Matches ZoteroSearchResultItem from backend.
+ * Regular (non-note/attachment) result item from zotero_search.
+ * Matches RegularSearchResultItem from agentProtocol.
  */
-export interface ZoteroSearchResultItem {
+export interface RegularSearchResultItem {
+    result_type: 'regular';
     item_id: string;
     item_type: string;
     title?: string | null;
@@ -1230,11 +1231,37 @@ export interface ZoteroSearchResultItem {
     extra_fields?: Record<string, unknown> | null;
 }
 
+/** Note result item from search/list results */
+export interface NoteResultItem {
+    result_type: 'note';
+    item_id: string;
+    title?: string | null;
+    parent_item_id?: string | null;
+    parent_title?: string | null;
+    date_modified?: string | null;
+}
+
+/** Attachment result item from search/list results */
+export interface AttachmentResultItem {
+    result_type: 'attachment';
+    item_id: string;
+    title?: string | null;
+    filename?: string | null;
+    content_type?: string | null;
+    parent_item_id?: string | null;
+    parent_title?: string | null;
+    date_modified?: string | null;
+}
+
+/** Result item from zotero_search (regular, note, or attachment) */
+export type ZoteroSearchResultItem = RegularSearchResultItem | NoteResultItem | AttachmentResultItem;
+
 /**
- * Result item from list_items.
- * Matches ListItemsResultItem from backend.
+ * Regular (non-note/attachment) result item from list_items.
+ * Matches RegularListResultItem from agentProtocol.
  */
-export interface ListItemsResultItem {
+export interface RegularListResultItem {
+    result_type: 'regular';
     item_id: string;
     item_type: string;
     title?: string | null;
@@ -1243,6 +1270,9 @@ export interface ListItemsResultItem {
     date_added?: string | null;
     date_modified?: string | null;
 }
+
+/** Result item from list_items (regular, note, or attachment) */
+export type ListItemsResultItem = RegularListResultItem | NoteResultItem | AttachmentResultItem;
 
 /**
  * Collection info from list_collections.
