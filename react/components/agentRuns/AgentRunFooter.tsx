@@ -8,7 +8,7 @@ import MenuButton from '../ui/MenuButton';
 import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
-import { getBeaverNoteFooterHTML } from '../../utils/noteActions';
+import { getBeaverNoteFooterHTML, wrapWithSchemaVersion } from '../../utils/noteActions';
 import CopyButton from '../ui/buttons/CopyButton';
 import { citationDataMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
@@ -180,9 +180,9 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         if (context.targetLibraryId !== undefined) {
             newNote.libraryID = context.targetLibraryId;
         }
-        newNote.setNote(formattedContent);
+        newNote.setNote(wrapWithSchemaVersion(formattedContent));
         await newNote.saveTx();
-        
+
         // Add to collection if one is selected
         if (context.collectionToAddTo) {
             await context.collectionToAddTo.addItem(newNote.id);
@@ -216,9 +216,9 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         const newNote = new Zotero.Item('note');
         newNote.libraryID = context.parentReference.library_id;
         newNote.parentKey = context.parentReference.zotero_key;
-        newNote.setNote(formattedContent);
+        newNote.setNote(wrapWithSchemaVersion(formattedContent));
         await newNote.saveTx();
-        
+
         // Only navigate to the item in library view, not in reader
         const win = Zotero.getMainWindow();
         const isInReader = win.Zotero_Tabs?.selectedType === 'reader';

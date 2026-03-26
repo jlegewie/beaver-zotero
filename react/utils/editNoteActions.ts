@@ -262,8 +262,9 @@ export async function executeEditNoteAction(
     // 11. Rebuild data-citation-items
     newHtml = rebuildDataCitationItems(newHtml);
 
-    // 12. Wrapper div protection
-    if (!newHtml.includes('data-schema-version=')) {
+    // 12. Wrapper div protection — only error if the edit removed it
+    const hadSchemaVersion = strippedHtml.includes('data-schema-version=');
+    if (hadSchemaVersion && !newHtml.includes('data-schema-version=')) {
         throw new Error('The note wrapper <div data-schema-version="..."> must not be removed.');
     }
 

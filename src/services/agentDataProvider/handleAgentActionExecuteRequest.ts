@@ -810,7 +810,7 @@ async function executeEditNoteAction(
             request_id: request.request_id,
             success: false,
             error: 'The string to replace was not found in the note.'
-                + (fuzzy ? ` Found a possible fuzzy match:\n${fuzzy}` : ''),
+                + (fuzzy ? ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\`` : ''),
             error_code: 'old_string_not_found',
         };
     }
@@ -866,8 +866,9 @@ async function executeEditNoteAction(
     // 11. Rebuild data-citation-items
     newHtml = rebuildDataCitationItems(newHtml);
 
-    // 12. Wrapper div protection
-    if (!newHtml.includes('data-schema-version=')) {
+    // 12. Wrapper div protection — only error if the edit removed it
+    const hadSchemaVersion = strippedHtml.includes('data-schema-version=');
+    if (hadSchemaVersion && !newHtml.includes('data-schema-version=')) {
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,

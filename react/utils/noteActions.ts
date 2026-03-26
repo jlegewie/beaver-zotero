@@ -2,6 +2,22 @@ import { ZoteroItemReference } from "../types/zotero";
 import { renderToHTML, RenderContextData } from "./citationRenderers";
 import { preloadPageLabelsForContent } from "./pageLabels";
 
+/**
+ * Schema version used by the Zotero note editor for modern notes.
+ * Version 9 is standard for notes without underline annotations.
+ */
+const NOTE_SCHEMA_VERSION = 9;
+
+/**
+ * Wrap note HTML in a `<div data-schema-version="N">` container if not already present.
+ * This ensures Beaver-created notes have the same structure as notes created by the
+ * Zotero note editor, which is required for edit_note to work correctly.
+ */
+export function wrapWithSchemaVersion(html: string): string {
+    if (html.includes('data-schema-version=')) return html;
+    return `<div data-schema-version="${NOTE_SCHEMA_VERSION}">${html}</div>`;
+}
+
 export interface SaveStreamingNoteOptions {
     markdownContent: string;
     title: string;
@@ -44,7 +60,7 @@ export async function saveStreamingNote(options: SaveStreamingNoteOptions): Prom
         zoteroNote.libraryID = targetLibraryId;
     }
 
-    zoteroNote.setNote(htmlContent);
+    zoteroNote.setNote(wrapWithSchemaVersion(htmlContent));
     await zoteroNote.saveTx();
 
     return {
