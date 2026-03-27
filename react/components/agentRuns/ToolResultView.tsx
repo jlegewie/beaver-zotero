@@ -62,6 +62,22 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
     const content = result.content;
     const metadata = result.metadata;
 
+    // Zotero search results (zotero_search)
+    if (isZoteroSearchResult(toolName, content, metadata)) {
+        const data = extractZoteroSearchData(content, metadata);
+        if (data) {
+            return <ItemSearchResultView items={data.items} showParentItem={false} />;
+        }
+    }
+
+    // List items results (list_items)
+    if (isListItemsResult(toolName, content, metadata)) {
+        const data = extractListItemsData(content, metadata);
+        if (data) {
+            return <ItemSearchResultView items={data.items} showParentItem={false} />;
+        }
+    }
+
     // Item search results (search_references_by_topic, search_references_by_metadata)
     if (isItemSearchResult(toolName, content, metadata)) {
         const data = extractItemSearchData(content, metadata);
@@ -135,22 +151,6 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
                     </div>
                 </div>
             );
-        }
-    }
-
-    // Zotero search results (zotero_search)
-    if (isZoteroSearchResult(toolName, content, metadata)) {
-        const data = extractZoteroSearchData(content, metadata);
-        if (data) {
-            return <ItemSearchResultView items={data.items} />;
-        }
-    }
-
-    // List items results (list_items)
-    if (isListItemsResult(toolName, content, metadata)) {
-        const data = extractListItemsData(content, metadata);
-        if (data) {
-            return <ItemSearchResultView items={data.items} />;
         }
     }
 
