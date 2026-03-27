@@ -18,6 +18,7 @@ import {
     WSZoteroDataRequest,
     WSZoteroDataResponse,
     WSDataError,
+    NoteResultItem,
 } from '../agentProtocol';
 
 
@@ -36,10 +37,12 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
     // Track keys to avoid duplicates when including parents/attachments
     const itemKeys = new Set<string>();
     const attachmentKeys = new Set<string>();
+    const noteKeys = new Set<string>();
 
     // Collect Zotero items to serialize
     const itemsToSerialize: Zotero.Item[] = [];
     const attachmentsToSerialize: Zotero.Item[] = [];
+    const notesToSerialize: Zotero.Item[] = [];
 
     const makeKey = (libraryId: number, zoteroKey: string) => `${libraryId}-${zoteroKey}`;
 
@@ -116,10 +119,20 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
                         attachmentIdsToLoad.add(attachmentId);
                     }
                 }
+            } else if (zoteroItem.isNote()) {
+                const key = makeKey(zoteroItem.libraryID, zoteroItem.key);
+                if (!noteKeys.has(key)) {
+                    noteKeys.add(key);
+                    notesToSerialize.push(zoteroItem);
+                }
+                // Collect parent ID for batch loading
+                if (request.include_parents && zoteroItem.parentID) {
+                    parentIdsToLoad.add(zoteroItem.parentID);
+                }
             } else {
                 errors.push({
                     reference,
-                    error: 'Item is not a regular item or attachment',
+                    error: 'Item is not a regular item, attachment, or note',
                     error_code: 'filtered_from_sync'
                 });
             }
@@ -199,7 +212,7 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
     }
 
     // Phase 4: Load data for all items (including newly discovered parents and children)
-    const allItems = [...itemsToSerialize, ...attachmentsToSerialize];
+    const allItems = [...itemsToSerialize, ...attachmentsToSerialize, ...notesToSerialize];
     if (allItems.length > 0) {
         // Load all item data in bulk
         await Zotero.Items.loadDataTypes(allItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]);
@@ -315,13 +328,43 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
     const items = itemResults.filter((i): i is ItemDataWithStatus => i !== null);
     const attachments = attachmentResults.filter((a): a is AttachmentDataWithStatus => a !== null);
 
+    // Serialize notes using the same pattern as zotero_search/list_items
+    const noteResults: NoteResultItem[] = [];
+    for (const note of notesToSerialize) {
+        try {
+            const parentInfo = note.parentID ? parentItemsById.get(note.parentID) : null;
+            let parentTitle = '';
+            if (parentInfo) {
+                try { parentTitle = (parentInfo.getField('title', false, true) as string) || ''; }
+                catch { parentTitle = parentInfo.getDisplayTitle?.() || ''; }
+            }
+            noteResults.push({
+                result_type: 'note',
+                item_id: `${note.libraryID}-${note.key}`,
+                title: note.getDisplayTitle?.() || '',
+                parent_item_id: parentInfo ? `${parentInfo.libraryID}-${parentInfo.key}` : null,
+                parent_title: parentInfo ? parentTitle : null,
+                date_modified: note.dateModified,
+            });
+        } catch (error: any) {
+            logger(`AgentService: Failed to serialize note ${note.libraryID}/${note.key}: ${error}`, 1);
+            errors.push({
+                reference: { library_id: note.libraryID, zotero_key: note.key },
+                error: 'Failed to serialize note',
+                error_code: 'load_failed',
+                details: error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error),
+            });
+        }
+    }
+
     const response: WSZoteroDataResponse = {
         type: 'zotero_data',
         request_id: request.request_id,
         items,
         attachments,
+        notes: noteResults.length > 0 ? noteResults : undefined,
         errors: errors.length > 0 ? errors : undefined
     };
 
-    return response;   
+    return response;
 }

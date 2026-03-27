@@ -443,6 +443,8 @@ export interface WSZoteroDataResponse {
     items: ItemDataWithStatus[];
     /** Attachment metadata with status for successfully retrieved attachments */
     attachments: AttachmentDataWithStatus[];
+    /** Note metadata for successfully retrieved notes */
+    notes?: NoteResultItem[];
     /** Optional errors for references that couldn't be retrieved */
     errors?: WSDataError[];
 }
