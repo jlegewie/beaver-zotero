@@ -17,6 +17,7 @@ import {
 import { OTPVerification } from './OTPVerification'
 import { sendOTP, verifyOTP, getOTPErrorMessage, isServiceUnavailableError, SERVICE_UNAVAILABLE_MESSAGE } from './otp'
 import { getPref } from '../../../src/utils/prefs'
+import { logger } from '../../../src/utils/logger'
 
 interface SignInFormProps {
   setErrorMsg: (errorMsg: string | null) => void;
@@ -39,7 +40,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
   // Store the associated email at mount time for error messages
   const [associatedEmail] = useState<string | undefined>(() => getPref("userEmail"))
   const isProfileLoaded = useAtomValue(isProfileLoadedAtom)
-  const isProfileInvalid = useAtomValue(isProfileInvalidAtom)
+  const [isProfileInvalid, setIsProfileInvalid] = useAtom(isProfileInvalidAtom)
 
   const PROFILE_LOAD_TIMEOUT = 10000; // 10 second timeout
 
@@ -57,6 +58,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
     if (isWaitingForProfile) {
       const timeout = setTimeout(() => {
         if (!isProfileLoaded) {
+          logger('SignInForm: profile load timed out, signing out', 2);
           setError('Failed to load profile data. Try again later.');
           setErrorMsg('Failed to load profile data. Try again later.');
           supabase.auth.signOut();
@@ -72,14 +74,18 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
   // Handle successful profile loading
   useEffect(() => {
     if (isWaitingForProfile && isProfileLoaded) {
+      logger('SignInForm: profile loaded successfully, clearing waiting state');
       setIsWaitingForProfile(false);
       setIsLoading(false);
     }
   }, [isWaitingForProfile, isProfileLoaded]);
 
-  // Handle profile invalid state (Zotero instance mismatch)
+  // Handle profile invalid state (Zotero instance mismatch).
+  // Consume the signal (set false) after handling so the effect doesn't re-fire
+  // when `step` changes — isProfileInvalidAtom acts as a one-shot signal.
   useEffect(() => {
     if (isProfileInvalid) {
+      logger(`SignInForm: isProfileInvalid=true detected (step=${step}), showing mismatch error`, 2);
       const errorMessage = 'This Zotero instance is not linked to your account. Please try signing in from the correct Zotero instance.';
       setError(errorMessage);
       setErrorMsg(errorMessage);
@@ -90,6 +96,8 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
         setAuthMethod('initial');
         setStep('method-selection');
       }
+      // Consume: clear the flag so the effect doesn't re-fire on step changes
+      setIsProfileInvalid(false);
     }
   }, [isProfileInvalid, setErrorMsg, step]);
 
@@ -155,11 +163,13 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
     
     try {
       await verifyOTP(email, otpCode, 'email')
+      logger('SignInForm: OTP verification succeeded, waiting for profile');
       // Wait for useProfileSync to fetch the profile
       setIsWaitingForProfile(true);
       // isLoading will be set to false when profile loads or timeout occurs
     } catch (error) {
       const errorMessage = error instanceof Error ? getOTPErrorMessage(error) : 'Verification failed'
+      logger(`SignInForm: OTP verification failed: ${errorMessage}`, 2);
       setError(errorMessage)
       setErrorMsg(errorMessage)
       setIsLoading(false)
@@ -199,6 +209,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
       if (error) throw error
       
       if (data.user) {
+        logger('SignInForm: password sign-in succeeded, waiting for profile');
         // Wait for useProfileSync to fetch the profile
         setIsWaitingForProfile(true);
         // isLoading will be set to false when profile loads or timeout occurs
@@ -207,6 +218,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
       const errorMessage = isServiceUnavailableError(error)
         ? SERVICE_UNAVAILABLE_MESSAGE
         : error instanceof Error ? error.message : 'An error occurred during login'
+      logger(`SignInForm: password sign-in failed: ${errorMessage}`, 2);
       setError(errorMessage)
       setErrorMsg(errorMessage)
       setIsLoading(false)
