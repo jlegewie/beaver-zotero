@@ -209,15 +209,14 @@ export class ApiService {
         if (response.status >= 500) {
             throw new ServerError(`Server error: ${response.status} - ${response.statusText}`);
         } else {
-            // Try to parse error response as JSON, but don't fail if it's not
             let errorBody = '';
             try {
                 errorBody = await response.text();
+                logger(`API error ${response.status} ${response.statusText}: ${errorBody}`, 2);
                 const errorJson = JSON.parse(errorBody);
                 // Handle FastAPI HTTPException detail format (can be string or object)
                 const detail = errorJson.detail;
                 if (typeof detail === 'object' && detail !== null && !Array.isArray(detail)) {
-                    // Structured error with code and message
                     throw new ApiError(
                         response.status,
                         response.statusText,
@@ -225,7 +224,6 @@ export class ApiService {
                         detail.code
                     );
                 } else {
-                    // Simple string detail or fallback
                     throw new ApiError(
                         response.status,
                         response.statusText,
@@ -233,8 +231,8 @@ export class ApiService {
                     );
                 }
             } catch (e) {
-                // Re-throw if it's already an ApiError
                 if (e instanceof ApiError) throw e;
+                logger(`API error ${response.status} ${response.statusText} (non-JSON body: ${errorBody})`, 2);
                 throw new ApiError(response.status, response.statusText);
             }
         }

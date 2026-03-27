@@ -6,6 +6,7 @@ import { ApiError, ZoteroInstanceMismatchError } from '../../react/types/apiErro
 import { ModelConfig } from '../../react/atoms/models';
 import { ZoteroLibrary } from '../../react/types/zotero';
 import { OverallSyncStatus } from '../../react/atoms/sync';
+import { logger } from '../utils/logger';
 
 interface AuthorizationRequest {
     zotero_local_id: string;
@@ -134,19 +135,23 @@ export class AccountService extends ApiService {
     async getProfileWithPlan(): Promise<ProfileResponse> {
         const version = Zotero.Beaver.pluginVersion || '';
         const { userID, localUserKey } = getZoteroUserIdentifier();
-        
+        logger(`accountService.getProfileWithPlan: zotero_local_id=${localUserKey}, zotero_user_id=${userID}, version=${version}`);
+
         try {
-            return await this.post<ProfileResponse>('/api/v1/account/profile', {
+            const result = await this.post<ProfileResponse>('/api/v1/account/profile', {
                 zotero_local_id: localUserKey,
                 zotero_user_id: userID,
                 frontend_version: version
             } as ProfileRequest);
+            logger(`accountService.getProfileWithPlan: success, plan=${result.profile?.plan?.name}, has_authorized_access=${result.profile?.has_authorized_access}, has_authorized_free_access=${result.profile?.has_authorized_free_access}`);
+            return result;
         } catch (error) {
             // Handle profile-specific 403 errors as Zotero instance mismatch
             if (error instanceof ApiError && error.status === 403) {
+                logger(`accountService.getProfileWithPlan: 403 Zotero instance mismatch (zotero_local_id=${localUserKey}, zotero_user_id=${userID})`, 2);
                 throw new ZoteroInstanceMismatchError();
             }
-            // Re-throw other errors as-is
+            logger(`accountService.getProfileWithPlan: error=${error instanceof Error ? error.message : error}`, 2);
             throw error;
         }
     }
