@@ -28,11 +28,11 @@ function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
     return VALID_MIME_TYPES.includes(mimeType as ValidMimeType);
 }
 
-export function getDisplayNameFromItem(item: Zotero.Item, count: number | null = null): string {
+export function getDisplayNameFromItem(item: Zotero.Item, count: number | null = null, noteTitleLength: number = MAX_NOTE_TITLE_LENGTH): string {
     let displayName: string;
-    
+
     if (item.isNote()) {
-        displayName = truncateText(item.getNoteTitle(), MAX_NOTE_TITLE_LENGTH);
+        displayName = truncateText(item.getNoteTitle(), noteTitleLength);
     } else if(item.isAttachment() && !item.parentItem) {
         displayName = item.getField('title') || '';
     } else {
