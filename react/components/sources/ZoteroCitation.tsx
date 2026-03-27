@@ -304,10 +304,14 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             return;
         }
 
-        // Handle note links
+        // Handle note links using Zotero.Notes.open()
         if (item.isNote()) {
             logger(`ZoteroCitation: Note Link (${item.id})`);
-            await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
+            if (typeof Zotero.Notes?.open === 'function') {
+                await Zotero.Notes.open(item.id);
+            } else {
+                await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
+            }
             return;
         }
 
