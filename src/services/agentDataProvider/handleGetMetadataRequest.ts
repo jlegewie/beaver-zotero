@@ -12,6 +12,7 @@ import {
     WSGetMetadataRequest,
     WSGetMetadataResponse,
 } from '../agentProtocol';
+import { serializeNote } from '../../utils/zoteroSerializers';
 
 
 /**
@@ -114,7 +115,7 @@ export async function handleGetMetadataRequest(
                 }
             }
             
-            // Handle notes if requested (same shape as NoteResultItem in search/list)
+            // Handle notes if requested
             if (request.include_notes && item.isRegularItem()) {
                 const noteIds = item.getNotes();
                 if (noteIds.length > 0) {
@@ -125,18 +126,13 @@ export async function handleGetMetadataRequest(
                     await Zotero.Items.loadDataTypes(noteItems, ['primaryData', 'itemData']);
 
                     const notes: any[] = [];
+                    const parentInfo = { item_id: itemId, title: itemData.title || '' };
 
                     for (const note of noteItems) {
                         if (!note || !note.isNote()) continue;
 
                         try {
-                            notes.push({
-                                item_id: `${libraryId}-${note.key}`,
-                                title: note.getDisplayTitle() || null,
-                                parent_item_id: itemId,
-                                parent_title: itemData.title || null,
-                                date_modified: note.dateModified || null,
-                            });
+                            notes.push(serializeNote(note, parentInfo));
                         } catch (error) {
                             logger(`handleGetMetadataRequest: Error processing note ${note.key}: ${error}`, 2);
                         }

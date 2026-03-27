@@ -13,9 +13,9 @@ import {
     WSListItemsResponse,
     ListItemsResultItem,
     RegularListResultItem,
-    NoteResultItem,
     AttachmentResultItem,
 } from '../agentProtocol';
+import { serializeNote } from '../../utils/zoteroSerializers';
 import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, extractYear, formatCreatorsString } from './utils';
 
 
@@ -236,15 +236,7 @@ export async function handleListItemsRequest(
         for (const { item } of paginatedItems) {
             if (item.isNote()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
-                const noteItem: NoteResultItem = {
-                    result_type: 'note',
-                    item_id: `${library.libraryID}-${item.key}`,
-                    title: item.getDisplayTitle?.() || '',
-                    parent_item_id: parentInfo?.item_id ?? null,
-                    parent_title: parentInfo?.title ?? null,
-                    date_modified: item.dateModified,
-                };
-                items.push(noteItem);
+                items.push(serializeNote(item, parentInfo));
             } else if (item.isAttachment()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
                 const attachmentItem: AttachmentResultItem = {

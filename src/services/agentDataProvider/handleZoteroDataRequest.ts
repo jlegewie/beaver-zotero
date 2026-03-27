@@ -12,7 +12,7 @@ import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../../react/typ
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
-import { serializeAttachment, serializeItem } from '../../utils/zoteroSerializers';
+import { serializeAttachment, serializeItem, serializeNote } from '../../utils/zoteroSerializers';
 import { computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight, getBestAttachmentBatch } from './utils';
 import {
     WSZoteroDataRequest,
@@ -338,14 +338,10 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
                 try { parentTitle = (parentInfo.getField('title', false, true) as string) || ''; }
                 catch { parentTitle = parentInfo.getDisplayTitle?.() || ''; }
             }
-            noteResults.push({
-                result_type: 'note',
-                item_id: `${note.libraryID}-${note.key}`,
-                title: note.getDisplayTitle?.() || '',
-                parent_item_id: parentInfo ? `${parentInfo.libraryID}-${parentInfo.key}` : null,
-                parent_title: parentInfo ? parentTitle : null,
-                date_modified: note.dateModified,
-            });
+            noteResults.push(serializeNote(
+                note,
+                parentInfo ? { item_id: `${parentInfo.libraryID}-${parentInfo.key}`, title: parentTitle } : null,
+            ));
         } catch (error: any) {
             logger(`AgentService: Failed to serialize note ${note.libraryID}/${note.key}: ${error}`, 1);
             errors.push({

@@ -5,6 +5,7 @@ import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, get
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
+import { NoteResultItem } from '../services/agentProtocol';
 
 export interface FileData {
     // filename: string;
@@ -556,4 +557,24 @@ export async function serializeItemWithAttachments(
     }
     
     return result;
+}
+
+/**
+ * Serializes a Zotero note item into a NoteResultItem.
+ * @param note Zotero note item
+ * @param parentInfo Optional parent item info (id string and title)
+ * @returns NoteResultItem
+ */
+export function serializeNote(
+    note: Zotero.Item,
+    parentInfo?: { item_id: string; title: string } | null,
+): NoteResultItem {
+    return {
+        result_type: 'note',
+        item_id: `${note.libraryID}-${note.key}`,
+        title: note.getDisplayTitle?.() || '',
+        parent_item_id: parentInfo?.item_id ?? null,
+        parent_title: parentInfo?.title ?? null,
+        date_modified: note.dateModified,
+    };
 }
