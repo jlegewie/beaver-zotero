@@ -72,8 +72,9 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                     // Fallback: create minimal CitationData from CitationMetadata
                     unique.push({
                         ...citation,
-                        type: citation.citation_type === 'external_reference' ? 'external' : 
-                              citation.citation_type === 'attachment' ? 'attachment' : 'item',
+                        type: citation.citation_type === 'external_reference' ? 'external' :
+                              citation.citation_type === 'attachment' ? 'attachment' :
+                              citation.citation_type === 'note' ? 'note' : 'item',
                         parentKey: null,
                         icon: null,
                         name: citation.author_year || null,

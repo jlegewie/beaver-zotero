@@ -80,7 +80,7 @@ export interface CitationMetadata {
     
     // Common fields for all citation types
     /** Citation type discriminator */
-    citation_type?: "item" | "attachment" | "external_reference";
+    citation_type?: "item" | "attachment" | "external_reference" | "note";
     /** The display marker, e.g., '1', '2'.. */
     marker?: string;
     /** The author-year of the citation. */
