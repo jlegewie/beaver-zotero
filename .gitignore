@@ -17,6 +17,7 @@ logs
 .cursorrules
 .cursor/*
 CLAUDE.local.md
+.claude/*
 archive
 .vscode/
 
