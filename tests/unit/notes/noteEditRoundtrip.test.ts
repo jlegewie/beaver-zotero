@@ -1849,3 +1849,174 @@ describe('page locator normalization in citation expansion', () => {
         );
     });
 });
+
+
+// =============================================================================
+// Page Number → Page Label Translation during expansion
+// =============================================================================
+
+describe('Page label translation during citation expansion', () => {
+    function setupPageLabels(labels: string[] | null) {
+        (globalThis as any).Zotero.Beaver = {
+            attachmentFileCache: {
+                getPageLabelsSync: vi.fn(() => labels),
+            },
+        };
+    }
+
+    it('translates model page number to label with offset labels', () => {
+        // Journal starting at page 338
+        const labels = Array.from({ length: 28 }, (_, i) => String(338 + i));
+        setupPageLabels(labels);
+
+        const mockItem = {
+            id: 99,
+            key: 'ABC123',
+            libraryID: 1,
+            getField: vi.fn(() => 'Test Paper'),
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            parentItem: null,
+            getAttachments: vi.fn(() => []),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
+
+        invalidateSimplificationCache('test');
+        const { metadata } = simplifyNoteHtml(wrap('<p>Text</p>'), 1);
+
+        const input = '<citation att_id="1-ABC123" page="15"/>';
+        expandToRawHtml(input, metadata, 'new');
+
+        // Page 15 → pageLabels[14] = "352"
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '352');
+    });
+
+    it('translates to same value for sequential labels (identity case)', () => {
+        // Sequential labels [1..100] — pageLabels[14] = "15"
+        const labels = Array.from({ length: 100 }, (_, i) => String(i + 1));
+        setupPageLabels(labels);
+
+        const mockItem = {
+            id: 99,
+            key: 'DEF456',
+            libraryID: 1,
+            getField: vi.fn(() => 'Test Paper'),
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            parentItem: null,
+            getAttachments: vi.fn(() => []),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
+
+        invalidateSimplificationCache('test');
+        const { metadata } = simplifyNoteHtml(wrap('<p>Text</p>'), 1);
+
+        const input = '<citation att_id="1-DEF456" page="15"/>';
+        expandToRawHtml(input, metadata, 'new');
+
+        // Page 15 → pageLabels[14] = "15" (identity)
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15');
+    });
+
+    it('passes through page when no labels are cached', () => {
+        setupPageLabels(null);
+
+        const mockItem = {
+            id: 99,
+            key: 'GHI789',
+            libraryID: 1,
+            getField: vi.fn(() => 'Test Paper'),
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            parentItem: null,
+            getAttachments: vi.fn(() => []),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
+
+        invalidateSimplificationCache('test');
+        const { metadata } = simplifyNoteHtml(wrap('<p>Text</p>'), 1);
+
+        const input = '<citation att_id="1-GHI789" page="15"/>';
+        expandToRawHtml(input, metadata, 'new');
+
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15');
+    });
+
+    it('preserves existing citation rawHtml when not edited', () => {
+        setupPageLabels(null);
+
+        const citHtml = rawCitation('ORIG1', 1, '1', '(Author, 2024, p. 1)');
+        const noteHtml = wrap(`<p>Text ${citHtml} more text</p>`);
+
+        invalidateSimplificationCache('test');
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        // Expand old_string without modifications — should use stored rawHtml
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        // The stored rawHtml is passed through, not re-translated
+        expect(expanded).toContain('ORIG1');
+    });
+
+    it('does not translate unchanged page when only item_id changes on existing citation', () => {
+        // Roman front matter + arabic: page label "2" is at index 4
+        const labels = ['i', 'ii', 'iii', '1', '2', '3'];
+        setupPageLabels(labels);
+
+        // Original citation has page="2" (a display label, not a page number)
+        const citHtml = rawCitation('ITEMKEY', 1, '2', '(Author, 2024, p. 2)');
+        const noteHtml = wrap(`<p>Text ${citHtml} more text</p>`);
+
+        const mockItem = {
+            id: 99,
+            key: 'NEWKEY',
+            libraryID: 1,
+            getField: vi.fn(() => 'New Paper'),
+            isAttachment: vi.fn(() => false),
+            isRegularItem: vi.fn(() => true),
+            getAttachments: vi.fn(() => []),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
+
+        invalidateSimplificationCache('test');
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        // Model changes item_id but keeps the same page="2"
+        const editedSimplified = simplified.replace(/item_id="1-ITEMKEY"/, 'item_id="1-NEWKEY"');
+        expandToRawHtml(editedSimplified, metadata, 'new');
+
+        // Page "2" should NOT be translated to "ii" — it's an existing display label
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '2');
+    });
+
+    it('translates page when model edits the page on an existing citation', () => {
+        // Roman front matter + arabic
+        const labels = ['i', 'ii', 'iii', '1', '2', '3'];
+        setupPageLabels(labels);
+
+        const citHtml = rawCitation('ITEMKEY', 1, '2', '(Author, 2024, p. 2)');
+        const noteHtml = wrap(`<p>Text ${citHtml} more text</p>`);
+
+        // Use an attachment item so translation is applied directly
+        const mockItem = {
+            id: 99,
+            key: 'ITEMKEY',
+            libraryID: 1,
+            getField: vi.fn(() => 'Paper'),
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            parentItem: null,
+            getAttachments: vi.fn(() => []),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
+
+        invalidateSimplificationCache('test');
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+
+        // Model changes page from "2" to "5" (meaning physical page 5)
+        const editedSimplified = simplified.replace(/page="2"/, 'page="5"');
+        expandToRawHtml(editedSimplified, metadata, 'new');
+
+        // Page 5 → pageLabels[4] = "2"
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '2');
+    });
+});

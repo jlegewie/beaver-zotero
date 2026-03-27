@@ -44,6 +44,7 @@ import {
     isNoteInEditor,
     getLatestNoteHtml,
     findRangeByContexts,
+    translatePageNumberToLabel,
     SimplificationMetadata,
 } from '../../../src/utils/noteHtmlSimplifier';
 import { createCitationHTML } from '../../../src/utils/zoteroUtils';
@@ -1824,5 +1825,115 @@ describe('Math apply-undo-apply cycle', () => {
         const expandedNew2 = expandToRawHtml(newString, m2, 'new');
         const afterReapply = replaceFirst(afterUndo, expandedOld2, expandedNew2);
         expect(afterReapply).toBe(afterApply);
+    });
+});
+
+
+// =============================================================================
+// translatePageNumberToLabel
+// =============================================================================
+
+describe('translatePageNumberToLabel', () => {
+    const ITEM_ID = 42;
+
+    function mockPageLabels(labels: string[] | null) {
+        (globalThis as any).Zotero = {
+            ...(globalThis as any).Zotero,
+            Beaver: {
+                attachmentFileCache: {
+                    getPageLabelsSync: vi.fn(() => labels),
+                },
+            },
+        };
+    }
+
+    it('returns as-is when no cache is available', () => {
+        (globalThis as any).Zotero = { ...(globalThis as any).Zotero, Beaver: undefined };
+        expect(translatePageNumberToLabel(ITEM_ID, '15')).toBe('15');
+    });
+
+    it('returns as-is when no page labels are cached', () => {
+        mockPageLabels(null);
+        expect(translatePageNumberToLabel(ITEM_ID, '15')).toBe('15');
+    });
+
+    it('translates 1-based page number to label with offset labels', () => {
+        // Journal article starting at page 338 (28 pages: 338-365)
+        const labels = Array.from({ length: 28 }, (_, i) => String(338 + i));
+        mockPageLabels(labels);
+        // Page 15 → pageLabels[14] = "352"
+        expect(translatePageNumberToLabel(ITEM_ID, '15')).toBe('352');
+    });
+
+    it('translates correctly for sequential labels (identity case)', () => {
+        // Sequential labels [1..100]
+        const labels = Array.from({ length: 100 }, (_, i) => String(i + 1));
+        mockPageLabels(labels);
+        // Page 15 → pageLabels[14] = "15" (identity mapping)
+        expect(translatePageNumberToLabel(ITEM_ID, '15')).toBe('15');
+    });
+
+    it('translates correctly for mixed roman/arabic labels', () => {
+        // [i, ii, iii, 1, 2, ..., 100]
+        const labels = ['i', 'ii', 'iii', ...Array.from({ length: 100 }, (_, i) => String(i + 1))];
+        mockPageLabels(labels);
+        // Page 2 → pageLabels[1] = "ii" (not label "2")
+        expect(translatePageNumberToLabel(ITEM_ID, '2')).toBe('ii');
+        // Page 15 → pageLabels[14] = "12"
+        expect(translatePageNumberToLabel(ITEM_ID, '15')).toBe('12');
+    });
+
+    it('falls back for out-of-range offset label values', () => {
+        // Labels [338..365] (28 pages)
+        const labels = Array.from({ length: 28 }, (_, i) => String(338 + i));
+        mockPageLabels(labels);
+        // "340" as page number → pageLabels[339] = undefined → fallback "340"
+        expect(translatePageNumberToLabel(ITEM_ID, '340')).toBe('340');
+    });
+
+    it('falls back to original value when page number is out of range', () => {
+        // Labels [338..342] (5 pages)
+        const labels = Array.from({ length: 5 }, (_, i) => String(338 + i));
+        mockPageLabels(labels);
+        // "100" is not a label, and pageLabels[99] is undefined → fallback
+        expect(translatePageNumberToLabel(ITEM_ID, '100')).toBe('100');
+    });
+
+    it('handles page ranges', () => {
+        const labels = Array.from({ length: 28 }, (_, i) => String(338 + i));
+        mockPageLabels(labels);
+        // "15-17" → "352-354"
+        expect(translatePageNumberToLabel(ITEM_ID, '15-17')).toBe('352-354');
+    });
+
+    it('handles non-numeric strings gracefully', () => {
+        const labels = ['i', 'ii', 'iii'];
+        mockPageLabels(labels);
+        expect(translatePageNumberToLabel(ITEM_ID, 'intro')).toBe('intro');
+    });
+
+    it('does not translate structured locators like §3.2', () => {
+        const labels = Array.from({ length: 100 }, (_, i) => String(i + 1));
+        mockPageLabels(labels);
+        expect(translatePageNumberToLabel(ITEM_ID, '§3.2')).toBe('§3.2');
+    });
+
+    it('does not translate footnote locators like fn. 5', () => {
+        const labels = Array.from({ length: 100 }, (_, i) => String(i + 1));
+        mockPageLabels(labels);
+        expect(translatePageNumberToLabel(ITEM_ID, 'fn. 5')).toBe('fn. 5');
+    });
+
+    it('does not translate roman numeral locators', () => {
+        const labels = Array.from({ length: 100 }, (_, i) => String(i + 1));
+        mockPageLabels(labels);
+        expect(translatePageNumberToLabel(ITEM_ID, 'xii')).toBe('xii');
+    });
+
+    it('translates comma-separated page lists', () => {
+        const labels = Array.from({ length: 28 }, (_, i) => String(338 + i));
+        mockPageLabels(labels);
+        // "3, 5" → "340, 342"
+        expect(translatePageNumberToLabel(ITEM_ID, '3, 5')).toBe('340, 342');
     });
 });

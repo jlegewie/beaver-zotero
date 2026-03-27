@@ -423,18 +423,28 @@ function stripInlineItemDataFromDataCitations(html: string): string {
 // =============================================================================
 
 /**
- * Resolve a 0-based page index string to its display label using the in-memory cache.
- * Equivalent to react/utils/pageLabels.ts:resolvePageStr but usable from src/.
+ * Translate a page number string (1-based, as humans see it) to its display label.
+ *
+ * Only translates strings that are purely numeric page references (digits with
+ * optional whitespace/range separators like "-", "–", ","). Non-page locators
+ * such as "§3.2", "fn. 5", or "xii" are returned unchanged.
+ *
+ * Equivalent to react/utils/pageLabels.ts:translatePageNumberToLabel but usable from src/.
  */
-function resolvePageStr(itemId: number, pageStr: string): string {
+export function translatePageNumberToLabel(itemId: number, pageStr: string): string {
     try {
         const cache = Zotero.Beaver?.attachmentFileCache;
         if (!cache) return pageStr;
         const pageLabels = cache.getPageLabelsSync(itemId);
         if (!pageLabels) return pageStr;
+        // Only translate strings that look like pure numeric page references
+        // (digits, whitespace, range/list separators). Anything else (letters,
+        // "§", ".", etc.) means a structured locator — return unchanged.
+        if (!/^\s*\d[\d\s,\-–]*$/.test(pageStr)) return pageStr;
         return pageStr.replace(/\d+/g, (numStr) => {
-            const pageIndex = parseInt(numStr, 10);
-            if (isNaN(pageIndex)) return numStr;
+            // Interpret as 1-based page number → 0-based index
+            const pageIndex = parseInt(numStr, 10) - 1;
+            if (isNaN(pageIndex) || pageIndex < 0) return numStr;
             return pageLabels[pageIndex] ?? numStr;
         });
     } catch {
@@ -463,7 +473,7 @@ function getBestPDFAttachment(item: any): any {
 /**
  * Pre-load page labels into the in-memory cache for citations in a string
  * that have page attributes. Must be called (and awaited) before expandToRawHtml()
- * so that synchronous resolvePageStr lookups succeed.
+ * so that synchronous translatePageNumberToLabel lookups succeed.
  */
 export async function preloadPageLabelsForNewCitations(str: string): Promise<void> {
     const cache = Zotero.Beaver?.attachmentFileCache;
@@ -570,8 +580,31 @@ export function normalizePageLocator(page: string): string {
     return match ? match[1] : page;
 }
 
+/**
+ * Resolve page for a citation, optionally translating 1-based page numbers to labels.
+ * @param itemId - Zotero item ID for the attachment (or regular item)
+ * @param item - The Zotero item (used to find best PDF attachment for regular items)
+ * @param page - Raw page string from the citation attributes
+ * @param shouldTranslate - If true, translate 1-based page numbers to labels (for model-provided pages)
+ */
+function resolvePageForCitation(item: any, page: string | undefined, shouldTranslate: boolean): string | undefined {
+    if (!page) return undefined;
+    let resolved = normalizePageLocator(page);
+    if (shouldTranslate && resolved) {
+        if (item.isAttachment()) {
+            resolved = translatePageNumberToLabel(item.id, resolved);
+        } else {
+            const att = getBestPDFAttachment(item);
+            if (att) {
+                resolved = translatePageNumberToLabel(att.id, resolved);
+            }
+        }
+    }
+    return resolved;
+}
+
 /** Build a new citation from simplified attributes (item_id format: "LIB-KEY") */
-function buildCitationFromSimplifiedAttrs(attrs: { item_id: string; page?: string }): string {
+function buildCitationFromSimplifiedAttrs(attrs: { item_id: string; page?: string }, shouldTranslatePage: boolean): string {
     const dashIdx = attrs.item_id.indexOf('-');
     if (dashIdx === -1) {
         throw new Error(`Invalid item_id format: "${attrs.item_id}". Expected "libraryID-itemKey".`);
@@ -582,24 +615,12 @@ function buildCitationFromSimplifiedAttrs(attrs: { item_id: string; page?: strin
     if (!item) {
         throw new Error(`Item not found: ${attrs.item_id}`);
     }
-    // Normalize multi-page locators to single page for "Go to Page" compatibility
-    let resolvedPage = attrs.page ? normalizePageLocator(attrs.page) : undefined;
-    // Resolve page index to page label (e.g., "7" → "iv" for Roman-numeral front matter)
-    if (resolvedPage) {
-        if (item.isAttachment()) {
-            resolvedPage = resolvePageStr(item.id, resolvedPage);
-        } else {
-            const att = getBestPDFAttachment(item);
-            if (att) {
-                resolvedPage = resolvePageStr(att.id, resolvedPage);
-            }
-        }
-    }
+    const resolvedPage = resolvePageForCitation(item, attrs.page, shouldTranslatePage);
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
 }
 
 /** Build a new citation from an attachment ID (att_id format: "LIB-KEY") */
-function buildCitationFromAttId(attId: string, page?: string): string {
+function buildCitationFromAttId(attId: string, page?: string, shouldTranslatePage = true): string {
     const dashIdx = attId.indexOf('-');
     if (dashIdx === -1) {
         throw new Error(`Invalid att_id format: "${attId}". Expected "libraryID-itemKey".`);
@@ -610,9 +631,7 @@ function buildCitationFromAttId(attId: string, page?: string): string {
     if (!item) {
         throw new Error(`Attachment not found: ${attId}`);
     }
-    // Normalize multi-page locators to single page, then resolve to label
-    const normalizedPage = page ? normalizePageLocator(page) : undefined;
-    const resolvedPage = normalizedPage ? resolvePageStr(item.id, normalizedPage) : undefined;
+    const resolvedPage = resolvePageForCitation(item, page, shouldTranslatePage);
     // createCitationHTML handles attachment-to-parent resolution internally
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
 }
@@ -655,7 +674,10 @@ export function expandToRawHtml(
                 if (itemId) {
                     const newAttrs = parseSimplifiedCitationAttrs(attrStr);
                     if (attrsChanged(stored.originalAttrs, newAttrs)) {
-                        return buildCitationFromSimplifiedAttrs(newAttrs);
+                        // Only translate the page if the page itself was changed by the model.
+                        // If only item_id changed, the page is still the original display label.
+                        const pageChanged = stored.originalAttrs?.page !== newAttrs.page;
+                        return buildCitationFromSimplifiedAttrs(newAttrs, pageChanged);
                     }
                 }
                 return stored.rawHtml; // exact original
@@ -668,12 +690,13 @@ export function expandToRawHtml(
                     + 'To reference an existing citation, include its ref attribute.'
                 );
             }
+            // New citations from the model always use 1-based page numbers → translate
             if (itemId) {
                 const attrs = parseSimplifiedCitationAttrs(attrStr);
-                return buildCitationFromSimplifiedAttrs(attrs);
+                return buildCitationFromSimplifiedAttrs(attrs, true);
             }
             if (attId) {
-                return buildCitationFromAttId(attId, extractAttr(attrStr, 'page'));
+                return buildCitationFromAttId(attId, extractAttr(attrStr, 'page'), true);
             }
             if (items) {
                 throw new Error(

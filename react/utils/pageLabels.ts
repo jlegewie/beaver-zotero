@@ -5,11 +5,13 @@
  * to their display labels (e.g., Roman numerals for front matter).
  *
  * Two conventions coexist in the codebase:
- * - Citation tag `page` attribute: 0-based page index (matches page_labels keys)
+ * - Citation tag `page` attribute / model-provided page numbers: 1-based page numbers
  * - `getCitationPages()` return values: 1-based page numbers (page_idx + 1)
  *
  * The two resolver functions handle each convention:
- * - `resolvePageStr`: for raw citation tag attributes (0-based, no offset)
+ * - `translatePageNumberToLabel`: for page numbers (1-based). If the value already
+ *   matches an existing label it is returned as-is; otherwise interprets as
+ *   1-based page number and looks up pageLabels[number - 1].
  * - `resolvePageLabel`: for getCitationPages() values (1-based, subtracts 1)
  *
  * All lookups are synchronous (memory cache only). Call `preloadPageLabelsForContent`
@@ -47,17 +49,17 @@ export function resolvePageLabel(itemId: number, pageNumber: number): string {
 }
 
 /**
- * Resolve a page string from a citation tag attribute (0-based page index).
- * Replaces each numeric token with its corresponding page label.
+ * Translate a page number string (1-based, as humans see it) to its display label.
  *
- * The `page` attribute in citation tags uses 0-based page indices that map
- * directly to page_labels keys (no offset needed).
+ * Only translates strings that are purely numeric page references (digits with
+ * optional whitespace/range separators like "-", "–", ","). Non-page locators
+ * such as "§3.2", "fn. 5", or "xii" are returned unchanged.
  *
  * @param itemId - Zotero item ID (typically an attachment)
- * @param pageStr - Page string from citation tag attributes (e.g., "7", "7-8")
+ * @param pageStr - Page string (e.g., "15", "7-8")
  * @returns Resolved page label string
  */
-export function resolvePageStr(itemId: number, pageStr: string): string {
+export function translatePageNumberToLabel(itemId: number, pageStr: string): string {
     try {
         const cache = Zotero.Beaver?.attachmentFileCache;
         if (!cache) return pageStr;
@@ -65,10 +67,15 @@ export function resolvePageStr(itemId: number, pageStr: string): string {
         const pageLabels = cache.getPageLabelsSync(itemId);
         if (!pageLabels) return pageStr;
 
-        // page attribute values are 0-based indices — use directly as keys
+        // Only translate strings that look like pure numeric page references
+        // (digits, whitespace, range/list separators). Anything else (letters,
+        // "§", ".", etc.) means a structured locator — return unchanged.
+        if (!/^\s*\d[\d\s,\-–]*$/.test(pageStr)) return pageStr;
+
         return pageStr.replace(/\d+/g, (numStr) => {
-            const pageIndex = parseInt(numStr, 10);
-            if (isNaN(pageIndex)) return numStr;
+            // Interpret as 1-based page number → 0-based index
+            const pageIndex = parseInt(numStr, 10) - 1;
+            if (isNaN(pageIndex) || pageIndex < 0) return numStr;
             return pageLabels[pageIndex] ?? numStr;
         });
     } catch {
