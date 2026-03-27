@@ -46,10 +46,19 @@ export function getDisplayNameFromItem(item: Zotero.Item, count: number | null =
 }
 
 export function getReferenceFromItem(item: Zotero.Item): string {
-    const formatted_citation = item.isNote()
+    let formatted_citation: string;
+    if (item.isNote()) {
         // @ts-ignore unescapeHTML exists
-        ? truncateText(Zotero.Utilities.unescapeHTML(item.getNote()), MAX_NOTE_CONTENT_LENGTH)
-        : Zotero.Beaver?.citationService?.formatBibliography(item) ?? '';
+        let plainText: string = Zotero.Utilities.unescapeHTML(item.getNote());
+        // Strip the title from the beginning of the content to avoid duplication
+        const noteTitle = item.getNoteTitle();
+        if (noteTitle && plainText.startsWith(noteTitle)) {
+            plainText = plainText.substring(noteTitle.length).trim();
+        }
+        formatted_citation = truncateText(plainText, MAX_NOTE_CONTENT_LENGTH);
+    } else {
+        formatted_citation = Zotero.Beaver?.citationService?.formatBibliography(item) ?? '';
+    }
     return formatted_citation.replace(/\n/g, '<br />');
 }
 
