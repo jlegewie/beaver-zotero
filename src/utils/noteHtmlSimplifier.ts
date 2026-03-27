@@ -674,10 +674,14 @@ export function expandToRawHtml(
                 if (itemId) {
                     const newAttrs = parseSimplifiedCitationAttrs(attrStr);
                     if (attrsChanged(stored.originalAttrs, newAttrs)) {
-                        // Only translate the page if the page itself was changed by the model.
-                        // If only item_id changed, the page is still the original display label.
-                        const pageChanged = stored.originalAttrs?.page !== newAttrs.page;
-                        return buildCitationFromSimplifiedAttrs(newAttrs, pageChanged);
+                        // For existing citations, never translate the page. The agent
+                        // sees and edits page LABELS (from the original locator), not
+                        // 1-based page indices. Translation is only for NEW citations
+                        // where the agent provides a page index that needs conversion
+                        // to a label. Translating here corrupts the locator — e.g.,
+                        // label "15" gets treated as 1-based index and converted to
+                        // the PDF's physical page label at that index (e.g., "352").
+                        return buildCitationFromSimplifiedAttrs(newAttrs, false);
                     }
                 }
                 return stored.rawHtml; // exact original

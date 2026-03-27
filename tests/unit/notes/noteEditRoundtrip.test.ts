@@ -1988,15 +1988,17 @@ describe('Page label translation during citation expansion', () => {
         expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '2');
     });
 
-    it('translates page when model edits the page on an existing citation', () => {
-        // Roman front matter + arabic
+    it('does NOT translate page when model edits the page on an existing citation', () => {
+        // For existing citations, the page attribute is already a label (from the
+        // original locator). Translation should NOT apply — the agent modifies
+        // labels, not 1-based page indices.
         const labels = ['i', 'ii', 'iii', '1', '2', '3'];
         setupPageLabels(labels);
 
         const citHtml = rawCitation('ITEMKEY', 1, '2', '(Author, 2024, p. 2)');
         const noteHtml = wrap(`<p>Text ${citHtml} more text</p>`);
 
-        // Use an attachment item so translation is applied directly
+        // Use an attachment item so translation would be applied if shouldTranslate=true
         const mockItem = {
             id: 99,
             key: 'ITEMKEY',
@@ -2012,11 +2014,11 @@ describe('Page label translation during citation expansion', () => {
         invalidateSimplificationCache('test');
         const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
 
-        // Model changes page from "2" to "5" (meaning physical page 5)
+        // Model changes page from "2" to "5" — this is a label, not a page index
         const editedSimplified = simplified.replace(/page="2"/, 'page="5"');
         expandToRawHtml(editedSimplified, metadata, 'new');
 
-        // Page 5 → pageLabels[4] = "2"
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '2');
+        // Page "5" should pass through unchanged (no translation for existing citations)
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '5');
     });
 });
