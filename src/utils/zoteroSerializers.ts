@@ -21,21 +21,37 @@ export interface FileData {
  * @returns Array of collection keys
  */
 export function getCollectionKeysFromItem(item: Zotero.Item): string[] | null {
-    const collectionKeys = item.getCollections().map(id => Zotero.Collections.get(id).key);
+    const collectionKeys = item.getCollections()
+        .map(id => {
+            const col = Zotero.Collections.get(id);
+            if (!col) {
+                logger(`getCollectionKeysFromItem: Collection ${id} not found for item ${item.libraryID}/${item.key}, skipping`, 1);
+                return null;
+            }
+            return col.key;
+        })
+        .filter((key): key is string => key !== null);
     return collectionKeys.length > 0 ? collectionKeys : null;
 }
 
 export function getCollectionSummariesFromItem(item: Zotero.Item): CollectionSummary[] | null {
     const collectionIds = item.getCollections();
     if (collectionIds.length === 0) return null;
-    return collectionIds.map(id => {
-        const collection = Zotero.Collections.get(id);
-        return {
-            library_id: item.libraryID,
-            zotero_key: collection.key,
-            name: collection.name,
-        };
-    });
+    const summaries = collectionIds
+        .map(id => {
+            const collection = Zotero.Collections.get(id);
+            if (!collection) {
+                logger(`getCollectionSummariesFromItem: Collection ${id} not found for item ${item.libraryID}/${item.key}, skipping`, 1);
+                return null;
+            }
+            return {
+                library_id: item.libraryID,
+                zotero_key: collection.key,
+                name: collection.name,
+            };
+        })
+        .filter((s): s is CollectionSummary => s !== null);
+    return summaries.length > 0 ? summaries : null;
 }
 
 /**
@@ -67,7 +83,12 @@ export function getCreatorsFromItem(item: Zotero.Item): ZoteroCreator[] | null {
 async function getCollectionsFromItem(item: Zotero.Item): Promise<ZoteroCollection[] | null> {
     const collectionPromises = item.getCollections()
         .map(async (collection_id) => {
-            const collection = Zotero.Collections.get(collection_id).toJSON();
+            const col = Zotero.Collections.get(collection_id);
+            if (!col) {
+                logger(`getCollectionsFromItem: Collection ${collection_id} not found for item ${item.libraryID}/${item.key}, skipping`, 1);
+                return null;
+            }
+            const collection = col.toJSON();
             return {
                 library_id: item.libraryID,
                 zotero_key: collection.key,
@@ -78,7 +99,7 @@ async function getCollectionsFromItem(item: Zotero.Item): Promise<ZoteroCollecti
                 relations: Object.keys(collection.relations).length > 0 ? collection.relations : null,
             } as ZoteroCollection;
         })
-    const collections = await Promise.all(collectionPromises);
+    const collections = (await Promise.all(collectionPromises)).filter((c): c is ZoteroCollection => c !== null);
 
     return collections.length > 0 ? collections : null;
 }

@@ -245,47 +245,69 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
 
     const [itemResults, attachmentResults] = await Promise.all([
         Promise.all(itemsToSerialize.map(async (item): Promise<ItemDataWithStatus | null> => {
-            const serialized = await serializeItem(item, undefined, { skipHash: true });
-            const status = await computeItemStatus(item, searchableLibraryIds, syncWithZotero, userId, { syncDateCache });
-            return { item: serialized, status };
-        })),
-        Promise.all(attachmentsToSerialize.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
-            const serialized = await serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true, skipHash: true });
-            if (!serialized) {
+            try {
+                const serialized = await serializeItem(item, undefined, { skipHash: true });
+                const status = await computeItemStatus(item, searchableLibraryIds, syncWithZotero, userId, { syncDateCache });
+                return { item: serialized, status };
+            } catch (error: any) {
+                logger(`AgentService: Failed to serialize item ${item.libraryID}/${item.key}: ${error}`, 1);
                 errors.push({
-                    reference: { library_id: attachment.libraryID, zotero_key: attachment.key },
-                    error: 'Attachment not available locally',
-                    error_code: 'not_available'
+                    reference: { library_id: item.libraryID, zotero_key: item.key },
+                    error: 'Failed to serialize item',
+                    error_code: 'load_failed',
+                    details: error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error),
                 });
                 return null;
             }
-            // Determine if this is the primary attachment for its parent (using batch data)
-            let isPrimary = false;
-            if (attachment.parentID) {
-                const bestAttachmentId = bestAttachmentMap.get(attachment.parentID);
-                isPrimary = bestAttachmentId !== undefined && attachment.id === bestAttachmentId;
+        })),
+        Promise.all(attachmentsToSerialize.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
+            try {
+                const serialized = await serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true, skipHash: true });
+                if (!serialized) {
+                    errors.push({
+                        reference: { library_id: attachment.libraryID, zotero_key: attachment.key },
+                        error: 'Attachment not available locally',
+                        error_code: 'not_available'
+                    });
+                    return null;
+                }
+                // Determine if this is the primary attachment for its parent (using batch data)
+                let isPrimary = false;
+                if (attachment.parentID) {
+                    const bestAttachmentId = bestAttachmentMap.get(attachment.parentID);
+                    isPrimary = bestAttachmentId !== undefined && attachment.id === bestAttachmentId;
+                }
+
+                // Get file status based on requested level
+                // - 'none': skip file status entirely (fastest, for metadata-only lookups)
+                // - 'lightweight': fast checks without reading full PDF (default)
+                // - 'full': full analysis including OCR detection (slowest)
+                // Run file status first when lightweight to extract fileExistsLocally hint,
+                // avoiding redundant filesystem I/O in computeItemStatus
+                let fileStatus = undefined;
+                let fileExistsLocally: boolean | undefined;
+                if (fileStatusLevel === 'lightweight') {
+                    const result = await getAttachmentFileStatusLightweight(attachment, isPrimary);
+                    fileStatus = result.fileStatus;
+                    fileExistsLocally = result.fileExistsLocally;
+                } else if (fileStatusLevel === 'full') {
+                    fileStatus = await getAttachmentFileStatus(attachment, isPrimary);
+                }
+                // else: fileStatusLevel === 'none', skip file status
+
+                const status = await computeItemStatus(attachment, searchableLibraryIds, syncWithZotero, userId, { syncDateCache, fileExistsLocally });
+
+                return { attachment: serialized, status, file_status: fileStatus };
+            } catch (error: any) {
+                logger(`AgentService: Failed to serialize attachment ${attachment.libraryID}/${attachment.key}: ${error}`, 1);
+                errors.push({
+                    reference: { library_id: attachment.libraryID, zotero_key: attachment.key },
+                    error: 'Failed to serialize attachment',
+                    error_code: 'load_failed',
+                    details: error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error),
+                });
+                return null;
             }
-
-            // Get file status based on requested level
-            // - 'none': skip file status entirely (fastest, for metadata-only lookups)
-            // - 'lightweight': fast checks without reading full PDF (default)
-            // - 'full': full analysis including OCR detection (slowest)
-            // Run file status first when lightweight to extract fileExistsLocally hint,
-            // avoiding redundant filesystem I/O in computeItemStatus
-            let fileStatus = undefined;
-            let fileExistsLocally: boolean | undefined;
-            if (fileStatusLevel === 'lightweight') {
-                const result = await getAttachmentFileStatusLightweight(attachment, isPrimary);
-                fileStatus = result.fileStatus;
-                fileExistsLocally = result.fileExistsLocally;
-            } else if (fileStatusLevel === 'full') {
-                fileStatus = await getAttachmentFileStatus(attachment, isPrimary);
-            }
-            // else: fileStatusLevel === 'none', skip file status
-
-            const status = await computeItemStatus(attachment, searchableLibraryIds, syncWithZotero, userId, { syncDateCache, fileExistsLocally });
-
-            return { attachment: serialized, status, file_status: fileStatus };
         }))
     ]);
 
