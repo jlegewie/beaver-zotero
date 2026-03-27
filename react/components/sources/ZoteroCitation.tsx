@@ -518,6 +518,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     External reference
                 </span>
             )}
+            {citationMetadata?.type === 'note' && (
+                <span className="px-3 py-15 text-xs font-color-tertiary border-top-quinary block">
+                    Click to open note
+                </span>
+            )}
         </span>
     )
 
