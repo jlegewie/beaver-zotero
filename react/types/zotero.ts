@@ -71,6 +71,12 @@ export interface ZoteroCreator {
     is_primary: boolean;
 }
 
+export interface CollectionSummary {
+    library_id: number;
+    zotero_key: string;
+    name: string;
+}
+
 export interface ZoteroCollection extends ZoteroItemReference {
     name: string;
     zotero_version: number;
