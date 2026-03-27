@@ -114,32 +114,34 @@ export async function handleGetMetadataRequest(
                 }
             }
             
-            // Handle notes if requested
+            // Handle notes if requested (same shape as NoteResultItem in search/list)
             if (request.include_notes && item.isRegularItem()) {
                 const noteIds = item.getNotes();
                 if (noteIds.length > 0) {
                     // Batch fetch all notes at once
                     const noteItems = await Zotero.Items.getAsync(noteIds);
-                    
+
                     // Ensure note data is loaded
-                    await Zotero.Items.loadDataTypes(noteItems, ['primaryData', 'itemData', 'note', 'tags', 'collections', 'childItems']);
-                    
+                    await Zotero.Items.loadDataTypes(noteItems, ['primaryData', 'itemData']);
+
                     const notes: any[] = [];
-                    
+
                     for (const note of noteItems) {
                         if (!note || !note.isNote()) continue;
-                        
+
                         try {
                             notes.push({
-                                note_id: `${libraryId}-${note.key}`,
+                                item_id: `${libraryId}-${note.key}`,
                                 title: note.getDisplayTitle() || null,
-                                note: note.getNote() || '',
+                                parent_item_id: itemId,
+                                parent_title: itemData.title || null,
+                                date_modified: note.dateModified || null,
                             });
                         } catch (error) {
                             logger(`handleGetMetadataRequest: Error processing note ${note.key}: ${error}`, 2);
                         }
                     }
-                    
+
                     if (notes.length > 0) {
                         result.notes = notes;
                     }

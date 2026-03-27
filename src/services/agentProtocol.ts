@@ -764,7 +764,6 @@ export interface WSGetMetadataRequest extends WSBaseEvent {
     request_id: string;
     item_ids: string[];
     include_attachments: boolean;
-    /** Not supported yet - always false from backend */
     include_notes: boolean;
 }
 
