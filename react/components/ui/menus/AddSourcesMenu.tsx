@@ -16,11 +16,12 @@ import { useSourcesMenu } from './hooks/useSourcesMenu';
 import { useLibrariesMenu } from './hooks/useLibrariesMenu';
 import { useCollectionsMenu } from './hooks/useCollectionsMenu';
 import { useTagsMenu } from './hooks/useTagsMenu';
+import { useNotesMenu } from './hooks/useNotesMenu';
 import { ZoteroTag } from '../../../types/zotero';
 
 const RECENT_ITEMS_LIMIT = 5;
 
-type MenuMode = 'sources' | 'libraries' | 'collections' | 'tags';
+type MenuMode = 'sources' | 'libraries' | 'collections' | 'tags' | 'notes';
 
 interface RecentItem {
     zotero_key: string;
@@ -208,6 +209,11 @@ const AddSourcesMenu: React.FC<{
         setMenuMode('tags');
     }, [setActiveZoteroLibraryId, setMenuMode, setSearchQuery]);
 
+    const handleNavigateToNotes = useCallback(() => {
+        setSearchQuery('');
+        setMenuMode('notes');
+    }, [setMenuMode, setSearchQuery]);
+
     // Handler functions for menu item callbacks
     const handleAddSourceItem = useCallback((item: Zotero.Item) => {
         updateRecentItems([{ zotero_key: item.key, library_id: item.libraryID }]);
@@ -293,6 +299,7 @@ const AddSourcesMenu: React.FC<{
         onNavigateToLibraries: handleNavigateToLibraries,
         onNavigateToCollections: handleNavigateToCollections,
         onNavigateToTags: handleNavigateToTags,
+        onNavigateToNotes: handleNavigateToNotes,
         getRecentItems,
         recentItemsLimit: RECENT_ITEMS_LIMIT,
         verticalPosition
@@ -322,13 +329,23 @@ const AddSourcesMenu: React.FC<{
         verticalPosition
     });
 
+    const notesMenu = useNotesMenu({
+        isActive: isMenuOpen && menuMode === 'notes',
+        searchQuery,
+        searchableLibraryIds,
+        sourceMenuItemContext,
+        verticalPosition
+    });
+
     const menuItems = menuMode === 'sources'
         ? sourcesMenu.menuItems
         : menuMode === 'libraries'
             ? librariesMenu.menuItems
             : menuMode === 'collections'
                 ? collectionsMenu.menuItems
-                : tagsMenu.menuItems;
+                : menuMode === 'tags'
+                    ? tagsMenu.menuItems
+                    : notesMenu.menuItems;
 
     const handleButtonClick = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -359,7 +376,9 @@ const AddSourcesMenu: React.FC<{
             ? "No libraries found"
             : menuMode === 'collections'
                 ? "No collections found"
-                : "No tags found";
+                : menuMode === 'tags'
+                    ? "No tags found"
+                    : "No notes found";
 
     const placeholderText = menuMode === 'sources'
         ? "Search by author, year and title"
@@ -367,11 +386,13 @@ const AddSourcesMenu: React.FC<{
             ? "Search libraries"
             : menuMode === 'collections'
                 ? "Search collections"
-                : "Search tags";
+                : menuMode === 'tags'
+                    ? "Search tags"
+                    : "Search notes";
 
     // Handle backspace/delete when search input is empty
     const handleEmptyBackspace = useCallback(() => {
-        if (menuMode === 'libraries' || menuMode === 'collections' || menuMode === 'tags') {
+        if (menuMode === 'libraries' || menuMode === 'collections' || menuMode === 'tags' || menuMode === 'notes') {
             // Navigate back to sources mode
             setSearchQuery('');
             setMenuMode('sources');
