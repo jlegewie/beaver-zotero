@@ -30,7 +30,7 @@ import { TimingAccumulator } from '../../utils/timing';
  * content extraction, or page-images after pages).
  */
 const _remoteDataCache = new Map<string, { data: Uint8Array; ts: number }>();
-const REMOTE_CACHE_TTL_MS = 60_000;
+const REMOTE_CACHE_TTL_MS = 120_000;
 const REMOTE_CACHE_MAX = 5;
 
 /**
@@ -53,6 +53,7 @@ export async function loadPdfData(
     if (hash) {
         const cached = _remoteDataCache.get(hash);
         if (cached && Date.now() - cached.ts < REMOTE_CACHE_TTL_MS) {
+            cached.ts = Date.now(); // refresh TTL on read
             return cached.data;
         }
     }
