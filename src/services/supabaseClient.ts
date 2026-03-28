@@ -97,17 +97,24 @@ interface AuthLockState {
     queue: LockQueueEntry[];
     lockName: string | null;
     lockToken: number | null;  // Unique token to verify lock ownership
+    tokenCounter: number;      // Counter for generating unique lock tokens
 }
 
-const authLock: AuthLockState = {
+// Persist auth lock on the current window so it survives webpack module reloads
+const previousLock: AuthLockState | undefined = (currentWindow as any)?.__beaverAuthLock;
+const authLock: AuthLockState = previousLock ?? {
     locked: false,
     queue: [],
     lockName: null,
-    lockToken: null
+    lockToken: null,
+    tokenCounter: 0
 };
-
-// Counter for generating unique lock tokens
-let lockTokenCounter = 0;
+// Preserve the existing queue when the bundle reloads. If an auth operation is
+// already waiting behind an in-flight refresh, the old holder can still release
+// this shared lock and let that waiter continue under the new module instance.
+if (currentWindow) {
+    (currentWindow as any).__beaverAuthLock = authLock;
+}
 
 /**
  * Error thrown when lock acquisition times out
@@ -176,7 +183,7 @@ async function acquireAuthLock<T>(
 function tryAcquireLock(name: string, acquireTimeout: number): Promise<number | null> {
     // Lock is free - acquire immediately with a unique token
     if (!authLock.locked) {
-        const token = ++lockTokenCounter;
+        const token = ++authLock.tokenCounter;
         authLock.locked = true;
         authLock.lockName = name;
         authLock.lockToken = token;
@@ -235,7 +242,7 @@ function releaseLock(token: number): void {
         if (next.timeoutId) {
             clearTimeout(next.timeoutId);
         }
-        const newToken = ++lockTokenCounter;
+        const newToken = ++authLock.tokenCounter;
         next.resolve(newToken);
     } else {
         // No waiters - release lock
