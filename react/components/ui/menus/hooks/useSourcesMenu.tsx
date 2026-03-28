@@ -14,6 +14,7 @@ interface UseSourcesMenuOptions {
     onNavigateToLibraries: () => void;
     onNavigateToCollections: (libraryId: number) => void;
     onNavigateToTags: (libraryId: number) => void;
+    onNavigateToNotes: () => void;
     getRecentItems: () => Promise<Zotero.Item[]>;
     recentItemsLimit: number;
     verticalPosition?: 'above' | 'below';
@@ -32,6 +33,7 @@ export const useSourcesMenu = ({
     onNavigateToLibraries,
     onNavigateToCollections,
     onNavigateToTags,
+    onNavigateToNotes,
     getRecentItems,
     recentItemsLimit,
     verticalPosition = 'above'
@@ -177,6 +179,23 @@ export const useSourcesMenu = ({
                 )
             });
 
+            filterItems.unshift({
+                label: '"Select Notes"',
+                onClick: async () => {
+                    onNavigateToNotes();
+                },
+                customContent: (
+                    <div className={'display-flex flex-row flex-1 items-start font-color-secondary'}>
+                        <div className="display-flex flex-row gap-2">
+                            <CSSIcon name="note" className="icon-16 font-color-secondary scale-90" />
+                            <div>Select Notes</div>
+                        </div>
+                        <div className="flex-1" />
+                        <Icon icon={ArrowRightIcon} className="scale-12 mt-020" />
+                    </div>
+                )
+            });
+
             const menuItemsCurrentItems = await Promise.all(
                 currentMessageItemsFiltered.map(async (item) => await createSourceMenuItem(item, sourceMenuItemContext))
             );
@@ -230,6 +249,7 @@ export const useSourcesMenu = ({
         onNavigateToLibraries,
         onNavigateToCollections,
         onNavigateToTags,
+        onNavigateToNotes,
         getRecentItems,
         recentItemsLimit,
         verticalPosition
