@@ -5,7 +5,8 @@ import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../util
 import { syncingItemFilter, syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer, getAttachmentDataInMemory } from '../../utils/webAPI';
+import { isAttachmentOnServer, getAttachmentDataInMemory, DownloadOptions } from '../../utils/webAPI';
+import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
 import { MuPDFService } from '../pdf/MuPDFService';
@@ -22,6 +23,48 @@ import { TimingAccumulator } from '../../utils/timing';
 // ---------------------------------------------------------------------------
 // Remote PDF download cache
 // ---------------------------------------------------------------------------
+
+/**
+ * Check if remote file access is enabled AND the attachment is on the server.
+ * Combines the preference check with the server-availability check.
+ */
+export function isRemoteAccessAvailable(item: Zotero.Item): boolean {
+    return getPref('accessRemoteFiles') && isAttachmentOnServer(item);
+}
+
+// ---------------------------------------------------------------------------
+// Remote download failure notification (once per session)
+// ---------------------------------------------------------------------------
+
+let _remoteDownloadFailureNotified = false;
+
+function notifyRemoteDownloadFailure(): void {
+    if (_remoteDownloadFailureNotified) return;
+    _remoteDownloadFailureNotified = true;
+
+    try {
+        store.set(addPopupMessageAtom, {
+            id: 'remote-download-failed',
+            type: 'warning' as any,
+            title: 'Remote File Download Failed',
+            text: 'A remotely stored attachment couldn\'t be downloaded. '
+                + 'To avoid this, sync your files locally in Zotero. '
+                + 'You can also disable remote file access in Settings \u203A Permissions.',
+            expire: false,
+        });
+    } catch {
+        // Popup system may not be available (e.g., during startup)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Agent-context download options (fail fast)
+// ---------------------------------------------------------------------------
+
+const AGENT_DOWNLOAD_OPTIONS: DownloadOptions = {
+    errorDelayIntervals: [],   // no retries — agent context can't afford the delay
+    timeout: 20_000,           // 20s per-request timeout (30s backend timeout - 10s buffer)
+};
 
 /**
  * Brief in-memory cache for remote PDF downloads.
@@ -64,12 +107,15 @@ export async function loadPdfData(
         if (inflight) return inflight;
     }
 
-    const downloadPromise = getAttachmentDataInMemory(item);
+    const downloadPromise = getAttachmentDataInMemory(item, AGENT_DOWNLOAD_OPTIONS);
     if (hash) _remoteInflight.set(hash, downloadPromise);
 
     let data: Uint8Array;
     try {
         data = await downloadPromise;
+    } catch (error) {
+        notifyRemoteDownloadFailure();
+        throw error;
     } finally {
         if (hash) _remoteInflight.delete(hash);
     }
@@ -172,13 +218,14 @@ async function checkAttachmentAvailability(
     // getFilePathAsync() resolves the path AND checks OS-level existence in one call
     const filePath = await attachment.getFilePathAsync();
     if (!filePath) {
-        // File is not local — check if it's available on the Zotero server
-        if (isAttachmentOnServer(attachment)) {
+        // File is not local — check if remote access is enabled and file is on the server
+        if (isRemoteAccessAvailable(attachment)) {
             // Report as available with a synthetic remote path.
             // The actual download will happen when content is requested.
             const remotePath = makeRemoteFilePath(attachment.attachmentSyncedHash);
             return { available: true, filePath: remotePath, contentType };
         }
+        const onServer = isAttachmentOnServer(attachment);
         return {
             available: false,
             fileExistsLocally: false,
@@ -187,7 +234,9 @@ async function checkAttachmentAvailability(
                 mime_type: contentType,
                 page_count: null,
                 status: "unavailable",
-                status_reason: 'File is not available locally',
+                status_reason: onServer && !getPref('accessRemoteFiles')
+                    ? 'File is not available locally. Remote file access is disabled in settings.'
+                    : 'File is not available locally',
             }
         };
     }

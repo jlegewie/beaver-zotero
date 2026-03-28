@@ -10,7 +10,7 @@
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer } from '../../utils/webAPI';
+import { isAttachmentOnServer } from '../../utils/webAPI';  // kept for file_missing message check
 import {
     WSZoteroAttachmentPageImagesRequest,
     WSZoteroAttachmentPageImagesResponse,
@@ -19,7 +19,7 @@ import {
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
 import { makeRemoteFilePath } from '../attachmentFileCache';
-import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize } from './utils';
+import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
 
 /**
  * Handle zotero_attachment_page_images_request event.
@@ -88,13 +88,16 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // 3. Get the file path — returns false if missing or nonexistent
         const rawFilePath = await pdfItem.getFilePathAsync();
         const filePath = rawFilePath || null;  // normalize false → null
-        const isRemoteOnly = !filePath && isAttachmentOnServer(pdfItem);
+        const isRemoteOnly = !filePath && isRemoteAccessAvailable(pdfItem);
         const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(pdfItem.attachmentSyncedHash) : null);
         resolvedFilePath = effectiveFilePath;
 
         if (!effectiveFilePath) {
+            const onServer = isAttachmentOnServer(pdfItem);
             return errorResponse(
-                `The PDF file for ${pdfKey} is not available locally.`,
+                onServer
+                    ? `The PDF file for ${pdfKey} is not available locally and remote file access is disabled in settings.`
+                    : `The PDF file for ${pdfKey} is not available locally.`,
                 'file_missing'
             );
         }

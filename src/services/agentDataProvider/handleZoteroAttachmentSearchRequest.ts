@@ -10,7 +10,7 @@
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer } from '../../utils/webAPI';
+import { isAttachmentOnServer } from '../../utils/webAPI';  // kept for file_missing message check
 import {
     WSZoteroAttachmentSearchRequest,
     WSZoteroAttachmentSearchResponse,
@@ -20,7 +20,7 @@ import {
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
 import { makeRemoteFilePath } from '../attachmentFileCache';
-import { validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize } from './utils';
+import { validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
 
 
 /**
@@ -98,13 +98,16 @@ export async function handleZoteroAttachmentSearchRequest(
         resolvedItem = zoteroItem;
         const rawFilePath = await zoteroItem.getFilePathAsync();
         const filePath = rawFilePath || null;  // normalize false → null
-        const isRemoteOnly = !filePath && isAttachmentOnServer(zoteroItem);
+        const isRemoteOnly = !filePath && isRemoteAccessAvailable(zoteroItem);
         const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(zoteroItem.attachmentSyncedHash) : null);
         resolvedFilePath = effectiveFilePath;
 
         if (!effectiveFilePath) {
+            const onServer = isAttachmentOnServer(zoteroItem);
             return errorResponse(
-                'PDF file is not available locally',
+                onServer
+                    ? 'PDF file is not available locally and remote file access is disabled in settings.'
+                    : 'PDF file is not available locally',
                 'file_missing'
             );
         }

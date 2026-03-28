@@ -108,15 +108,24 @@ function md5FromBytes(uint8: Uint8Array): string {
 }
 
 
+/** Options for controlling download retry and timeout behavior. */
+export interface DownloadOptions {
+    /** Retry delay intervals in ms for 5xx errors. Default: [500, 1500, 3000]. Pass [] to disable retries. */
+    errorDelayIntervals?: number[];
+    /** Per-request timeout in ms. Default: undefined (Zotero HTTP default ~30s). */
+    timeout?: number;
+}
+
 /**
  * Downloads the file data of an attachment from the server into memory.
  * Supports both Zotero File Storage (ZFS) and WebDAV storage.
  *
  * @param {Zotero.Item} item - The attachment item to download.
+ * @param {DownloadOptions} [options] - Optional retry/timeout configuration.
  * @returns {Promise<Uint8Array>} A promise that resolves with the file data
  * @throws {Error} If the file cannot be downloaded, with a descriptive error message
  */
-export async function getAttachmentDataInMemory(item: Zotero.Item): Promise<Uint8Array> {
+export async function getAttachmentDataInMemory(item: Zotero.Item, options?: DownloadOptions): Promise<Uint8Array> {
     // Validate the input item
     if (!item || !item.isStoredFileAttachment()) {
         logger("getAttachmentDataInMemory: Item is not a valid stored file attachment.");
@@ -133,16 +142,16 @@ export async function getAttachmentDataInMemory(item: Zotero.Item): Promise<Uint
     logger(`getAttachmentDataInMemory: Using storage mode '${storageMode}' for library ${item.libraryID}`, 4);
 
     if (storageMode === 'webdav') {
-        return await downloadFromWebDAV(item);
+        return await downloadFromWebDAV(item, options);
     } else {
-        return await downloadFromZFS(item);
+        return await downloadFromZFS(item, options);
     }
 }
 
 /**
  * Downloads file data from Zotero File Storage (ZFS)
  */
-async function downloadFromZFS(item: Zotero.Item): Promise<Uint8Array> {
+async function downloadFromZFS(item: Zotero.Item, options?: DownloadOptions): Promise<Uint8Array> {
     // Get the necessary API credentials for the download
     const userID = Zotero.Users.getCurrentUserID();
     if (!userID) {
@@ -162,16 +171,17 @@ async function downloadFromZFS(item: Zotero.Item): Promise<Uint8Array> {
         ? `${baseApiUrl}groups/${item.library.id}/items/${item.key}/file`
         : `${baseApiUrl}users/${userID}/items/${item.key}/file`;
     
-    const retryOptions = {
-        errorDelayIntervals: [500, 1500, 3000] // 3 retries
+    const httpOptions: Record<string, any> = {
+        errorDelayIntervals: options?.errorDelayIntervals ?? [500, 1500, 3000],
     };
+    if (options?.timeout != null) httpOptions.timeout = options.timeout;
 
     try {
         logger(`downloadFromZFS: Requesting download URL from: ${apiUrl}`);
         const resp = await Zotero.HTTP.request('GET', apiUrl, {
             headers: { 'Zotero-API-Key': apiKey, 'Zotero-API-Version': ZOTERO_CONFIG.API_VERSION },
             responseType: 'arraybuffer',
-            ...retryOptions
+            ...httpOptions
         });
         
         if (resp.status !== 200) {
@@ -196,7 +206,7 @@ async function downloadFromZFS(item: Zotero.Item): Promise<Uint8Array> {
  * Downloads file data from WebDAV storage
  * WebDAV files are always stored as ZIP archives, so we need to extract the file
  */
-async function downloadFromWebDAV(item: Zotero.Item): Promise<Uint8Array> {
+async function downloadFromWebDAV(item: Zotero.Item, options?: DownloadOptions): Promise<Uint8Array> {
     // WebDAV is only available for personal libraries, not group libraries
     if (item.library.isGroup) {
         throw new Error("WebDAV storage is not available for group libraries");
@@ -211,15 +221,16 @@ async function downloadFromWebDAV(item: Zotero.Item): Promise<Uint8Array> {
         // Returns URI for {item.key}.zip
         const uri = controller._getItemURI(item);
         
-        const retryOptions = {
-            errorDelayIntervals: [500, 1500, 3000] // 3 retries
+        const httpOptions: Record<string, any> = {
+            errorDelayIntervals: options?.errorDelayIntervals ?? [500, 1500, 3000],
         };
+        if (options?.timeout != null) httpOptions.timeout = options.timeout;
 
         logger(`downloadFromWebDAV: Downloading from WebDAV: ${item.key}`);
-        
+
         const resp = await Zotero.HTTP.request('GET', uri.spec, {
             responseType: 'arraybuffer',
-            ...retryOptions
+            ...httpOptions
         });
 
         if (resp.status !== 200) {
