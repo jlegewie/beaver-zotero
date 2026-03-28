@@ -54,7 +54,11 @@ vi.mock('../../../react/utils/sourceUtils', () => ({
 
 // Mock the store and agentActionsService used by scheduleUndoDataRefresh
 vi.mock('../../../react/store', () => ({
-    store: { get: vi.fn(), set: vi.fn(), sub: vi.fn() },
+    store: { get: vi.fn(() => null), set: vi.fn(), sub: vi.fn() },
+}));
+
+vi.mock('../../../react/atoms/threads', () => ({
+    currentThreadIdAtom: Symbol('currentThreadIdAtom'),
 }));
 
 vi.mock('../../../react/agents/agentActions', () => ({

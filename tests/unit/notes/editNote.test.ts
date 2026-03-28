@@ -36,6 +36,10 @@ vi.mock('../../../react/atoms/profile', () => ({
     searchableLibraryIdsAtom: Symbol('searchableLibraryIdsAtom'),
 }));
 
+vi.mock('../../../react/atoms/threads', () => ({
+    currentThreadIdAtom: Symbol('currentThreadIdAtom'),
+}));
+
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getDeferredToolPreference: vi.fn(() => 'always_ask'),
     resolveToPdfAttachment: vi.fn(),

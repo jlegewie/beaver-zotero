@@ -23,6 +23,9 @@ import {
     hasSchemaVersionWrapper,
 } from '../../src/utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from './sourceUtils';
+import { store } from '../store';
+import { currentThreadIdAtom } from '../atoms/threads';
+import { addOrUpdateEditFooter } from '../../src/utils/noteEditFooter';
 
 function normalizeUndoComparisonHtml(html: string, libraryId: number): string {
     const { simplified } = simplifyNoteHtml(stripDataCitationItems(html), libraryId);
@@ -258,6 +261,12 @@ export async function executeEditNoteAction(
 
         newHtml = strippedHtml.substring(0, idx) + expandedNew
             + strippedHtml.substring(idx + expandedOld.length);
+    }
+
+    // 10b. Add/update "Edited by Beaver" footer
+    const threadId = store.get(currentThreadIdAtom);
+    if (threadId) {
+        newHtml = addOrUpdateEditFooter(newHtml, threadId);
     }
 
     // 11. Rebuild data-citation-items

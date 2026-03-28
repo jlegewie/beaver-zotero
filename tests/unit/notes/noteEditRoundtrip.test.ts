@@ -44,6 +44,15 @@ vi.mock('../../../react/utils/sourceUtils', () => ({
     clearNoteEditorSelection: vi.fn(),
 }));
 
+// Mock store and atoms to avoid transitive deps from editNoteActions imports
+vi.mock('../../../react/store', () => ({
+    store: { get: vi.fn(() => null), set: vi.fn(), sub: vi.fn() },
+}));
+
+vi.mock('../../../react/atoms/threads', () => ({
+    currentThreadIdAtom: Symbol('currentThreadIdAtom'),
+}));
+
 // =============================================================================
 // Imports
 // =============================================================================

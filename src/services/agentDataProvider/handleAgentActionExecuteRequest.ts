@@ -20,6 +20,9 @@ import {
     hasSchemaVersionWrapper,
 } from '../../utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from '../../../react/utils/sourceUtils';
+import { store } from '../../../react/store';
+import { currentThreadIdAtom } from '../../../react/atoms/threads';
+import { addOrUpdateEditFooter } from '../../utils/noteEditFooter';
 
 
 /** Default timeout in seconds if not specified by backend */
@@ -862,6 +865,12 @@ async function executeEditNoteAction(
 
         newHtml = strippedHtml.substring(0, idx) + expandedNew
             + strippedHtml.substring(idx + expandedOld.length);
+    }
+
+    // 10b. Add/update "Edited by Beaver" footer
+    const threadId = store.get(currentThreadIdAtom);
+    if (threadId) {
+        newHtml = addOrUpdateEditFooter(newHtml, threadId);
     }
 
     // 11. Rebuild data-citation-items

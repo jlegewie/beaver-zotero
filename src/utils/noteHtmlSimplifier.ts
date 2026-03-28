@@ -11,6 +11,7 @@
 import { createCitationHTML } from './zoteroUtils';
 import { getAttachmentFileStatus } from '../services/agentDataProvider/utils';
 import { logger } from './logger';
+import { stripBeaverEditFooter, stripBeaverCreatedFooter } from './noteEditFooter';
 
 // =============================================================================
 // Types
@@ -319,7 +320,11 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
         (_match, content) => content
     );
 
-    // 7. Strip the outer wrapper div.
+    // 7. Strip Beaver footers — user-facing metadata, not content.
+    simplified = stripBeaverEditFooter(simplified);
+    simplified = stripBeaverCreatedFooter(simplified);
+
+    // 8. Strip the outer wrapper div.
     // Zotero notes are wrapped in <div data-schema-version="N">...</div>.
     // This wrapper is structural metadata, not content the agent should edit.
     // Stripping it prevents the agent from anchoring edits on </div>.
