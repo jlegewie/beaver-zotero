@@ -10,7 +10,7 @@
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer } from '../../utils/webAPI';
+import { isAttachmentOnServer, getAttachmentDataInMemory } from '../../utils/webAPI';
 import {
     WSZoteroAttachmentSearchRequest,
     WSZoteroAttachmentSearchResponse,
@@ -19,6 +19,7 @@ import {
     WSSearchHit,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { isRemoteFilePath, makeRemoteFilePath } from '../attachmentFileCache';
 import { validateZoteroItemReference, backfillMetadataForError } from './utils';
 
 
@@ -95,36 +96,38 @@ export async function handleZoteroAttachmentSearchRequest(
 
         // 3. Get the file path
         resolvedItem = zoteroItem;
-        const filePath = await zoteroItem.getFilePathAsync();
-        resolvedFilePath = filePath || null;
-        if (!filePath) {
-            const isFileAvailableOnServer = isAttachmentOnServer(zoteroItem);
-            const errorMessage = isFileAvailableOnServer
-                ? 'PDF file is not available locally. It may be in remote storage, which cannot be accessed by Beaver.'
-                : 'PDF file is not available locally';
+        const rawFilePath = await zoteroItem.getFilePathAsync();
+        const filePath = rawFilePath || null;  // normalize false → null
+        const isRemoteOnly = !filePath && isAttachmentOnServer(zoteroItem);
+        const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(zoteroItem.attachmentSyncedHash) : null);
+        resolvedFilePath = effectiveFilePath;
+
+        if (!effectiveFilePath) {
             return errorResponse(
-                errorMessage,
+                'PDF file is not available locally',
                 'file_missing'
             );
         }
 
-        // 4. Verify file exists
-        const fileExists = await zoteroItem.fileExists();
-        if (!fileExists) {
-            return errorResponse(
-                'PDF file does not exist at expected location',
-                'file_missing'
-            );
+        // 4. Verify file exists (skip for remote files)
+        if (!isRemoteOnly) {
+            const fileExists = await zoteroItem.fileExists();
+            if (!fileExists) {
+                return errorResponse(
+                    'PDF file does not exist at expected location',
+                    'file_missing'
+                );
+            }
         }
 
-        // 5. Check file size before reading (skip if skip_local_limits is true)
-        if (!skip_local_limits) {
+        // 5. Check file size before reading (skip if skip_local_limits is true; skip for remote — checked after download)
+        if (!skip_local_limits && !isRemoteOnly) {
             const maxFileSizeMB = getPref('maxFileSizeMB');
             const fileSize = await Zotero.Attachments.getTotalFileSize(zoteroItem);
-            
+
             if (fileSize) {
                 const fileSizeInMB = fileSize / 1024 / 1024;
-                
+
                 if (fileSizeInMB > maxFileSizeMB) {
                     return errorResponse(
                         `PDF file size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
@@ -136,7 +139,7 @@ export async function handleZoteroAttachmentSearchRequest(
 
         // 5b. Try metadata cache for fast prechecks
         const cache = Zotero.Beaver?.attachmentFileCache;
-        const cachedMeta = cache ? await cache.getMetadata(zoteroItem.id, filePath).catch(() => null) : null;
+        const cachedMeta = cache ? await cache.getMetadata(zoteroItem.id, effectiveFilePath).catch(() => null) : null;
 
         if (cachedMeta) {
             if (cachedMeta.is_encrypted) {
@@ -160,7 +163,31 @@ export async function handleZoteroAttachmentSearchRequest(
         }
 
         // 6. Read the PDF data
-        const pdfData = await IOUtils.read(filePath);
+        let pdfData: Uint8Array;
+        if (isRemoteOnly) {
+            try {
+                pdfData = await getAttachmentDataInMemory(zoteroItem);
+            } catch (downloadError) {
+                logger(`handleZoteroAttachmentSearchRequest: Remote download failed: ${downloadError}`, 1);
+                return errorResponse(
+                    `Failed to download PDF from remote storage: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`,
+                    'download_failed'
+                );
+            }
+            // Check file size after remote download
+            if (!skip_local_limits) {
+                const maxFileSizeMB = getPref('maxFileSizeMB');
+                const fileSizeInMB = pdfData.length / 1024 / 1024;
+                if (fileSizeInMB > maxFileSizeMB) {
+                    return errorResponse(
+                        `PDF file size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
+                        'file_too_large'
+                    );
+                }
+            }
+        } else {
+            pdfData = await IOUtils.read(filePath!);
+        }
 
         // 7. Create extractor and get page count first
         const extractor = new PDFExtractor();

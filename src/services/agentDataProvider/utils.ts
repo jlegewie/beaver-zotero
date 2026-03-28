@@ -5,11 +5,11 @@ import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../util
 import { syncingItemFilter, syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer } from '../../utils/webAPI';
+import { isAttachmentOnServer, getAttachmentDataInMemory } from '../../utils/webAPI';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
 import { MuPDFService } from '../pdf/MuPDFService';
-import { EXTRACTION_VERSION } from '../attachmentFileCache';
+import { EXTRACTION_VERSION, isRemoteFilePath, makeRemoteFilePath } from '../attachmentFileCache';
 import type { AttachmentFileCacheRecord } from '../attachmentFileCache';
 import { DeferredToolPreference } from '../agentProtocol';
 import { isSupportedItem } from '../../utils/sync';
@@ -80,10 +80,13 @@ async function checkAttachmentAvailability(
     // getFilePathAsync() resolves the path AND checks OS-level existence in one call
     const filePath = await attachment.getFilePathAsync();
     if (!filePath) {
-        const isFileAvailableOnServer = isAttachmentOnServer(attachment);
-        const status_message = isFileAvailableOnServer
-            ? 'File not available locally. It may be in remote storage, which cannot be accessed by Beaver.'
-            : 'File is not available locally';
+        // File is not local — check if it's available on the Zotero server
+        if (isAttachmentOnServer(attachment)) {
+            // Report as available with a synthetic remote path.
+            // The actual download will happen when content is requested.
+            const remotePath = makeRemoteFilePath(attachment.attachmentSyncedHash);
+            return { available: true, filePath: remotePath, contentType };
+        }
         return {
             available: false,
             fileExistsLocally: false,
@@ -92,7 +95,7 @@ async function checkAttachmentAvailability(
                 mime_type: contentType,
                 page_count: null,
                 status: "unavailable",
-                status_reason: status_message,
+                status_reason: 'File is not available locally',
             }
         };
     }
@@ -100,28 +103,31 @@ async function checkAttachmentAvailability(
     // Check file size limit using IOUtils.stat on the PDF file directly.
     // This replaces Zotero.Attachments.getTotalFileSize() which iterates the
     // entire storage directory with OS.File.stat() per entry — very expensive.
-    const maxFileSizeMB = getPref('maxFileSizeMB');
-    try {
-        const stat = await IOUtils.stat(filePath);
-        const fileSizeInMB = (stat.size ?? 0) / 1024 / 1024;
+    // Skip for remote files (size unknown until download).
+    if (!isRemoteFilePath(filePath)) {
+        const maxFileSizeMB = getPref('maxFileSizeMB');
+        try {
+            const stat = await IOUtils.stat(filePath);
+            const fileSizeInMB = (stat.size ?? 0) / 1024 / 1024;
 
-        if (fileSizeInMB > maxFileSizeMB) {
-            return {
-                available: false,
-                fileExistsLocally: true,
-                status: {
-                    is_primary: isPrimary,
-                    mime_type: contentType,
-                    page_count: null,
-                    status: "unavailable",
-                    status_reason: `File size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
-                }
-            };
+            if (fileSizeInMB > maxFileSizeMB) {
+                return {
+                    available: false,
+                    fileExistsLocally: true,
+                    status: {
+                        is_primary: isPrimary,
+                        mime_type: contentType,
+                        page_count: null,
+                        status: "unavailable",
+                        status_reason: `File size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
+                    }
+                };
+            }
+        } catch (error) {
+            // If stat fails, skip size check and continue — the file was confirmed
+            // to exist by getFilePathAsync() above, so this is a transient issue
+            logger(`checkAttachmentAvailability: IOUtils.stat failed for ${filePath}: ${error}`, 2);
         }
-    } catch (error) {
-        // If stat fails, skip size check and continue — the file was confirmed
-        // to exist by getFilePathAsync() above, so this is a transient issue
-        logger(`checkAttachmentAvailability: IOUtils.stat failed for ${filePath}: ${error}`, 2);
     }
 
     return { available: true, filePath, contentType };
@@ -181,14 +187,20 @@ async function persistMetadataToCache(
     if (!cache) return;
 
     try {
-        const stat = await IOUtils.stat(filePath);
+        let file_mtime_ms = 0;
+        let file_size_bytes = 0;
+        if (!isRemoteFilePath(filePath)) {
+            const stat = await IOUtils.stat(filePath);
+            file_mtime_ms = stat.lastModified ?? 0;
+            file_size_bytes = stat.size ?? 0;
+        }
         await cache.setMetadata({
             item_id: attachment.id,
             library_id: attachment.libraryID,
             zotero_key: attachment.key,
             file_path: filePath,
-            file_mtime_ms: stat.lastModified ?? 0,
-            file_size_bytes: stat.size ?? 0,
+            file_mtime_ms,
+            file_size_bytes,
             content_type: contentType,
             page_count: fields.page_count,
             page_labels: fields.page_labels,
@@ -239,14 +251,20 @@ export async function backfillMetadataForError(
     }
 
     try {
-        const stat = await IOUtils.stat(filePath);
+        let file_mtime_ms = 0;
+        let file_size_bytes = 0;
+        if (!isRemoteFilePath(filePath)) {
+            const stat = await IOUtils.stat(filePath);
+            file_mtime_ms = stat.lastModified ?? 0;
+            file_size_bytes = stat.size ?? 0;
+        }
         await cache.setMetadata({
             item_id: item.id,
             library_id: item.libraryID,
             zotero_key: item.key,
             file_path: filePath,
-            file_mtime_ms: stat.lastModified ?? 0,
-            file_size_bytes: stat.size ?? 0,
+            file_mtime_ms,
+            file_size_bytes,
             content_type: item.attachmentContentType || 'application/pdf',
             page_count: error.pageCount ?? fallbackPageCount,
             page_labels: pageLabels,
@@ -297,7 +315,23 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
 
     // Cache miss: run full extraction
     try {
-        const pdfData = await IOUtils.read(filePath);
+        let pdfData: Uint8Array;
+        if (isRemoteFilePath(filePath)) {
+            try {
+                pdfData = await getAttachmentDataInMemory(attachment);
+            } catch (downloadError) {
+                logger(`getAttachmentFileStatus: remote download failed: ${downloadError}`, 1);
+                return {
+                    is_primary: isPrimary,
+                    mime_type: contentType,
+                    page_count: null,
+                    status: "unavailable",
+                    status_reason: 'Failed to download file from remote storage',
+                };
+            }
+        } else {
+            pdfData = await IOUtils.read(filePath);
+        }
         const extractor = new PDFExtractor();
 
         // Get page count - this also validates the PDF and detects encryption
@@ -396,8 +430,8 @@ export async function getAttachmentFileStatusLightweight(
 
     const { filePath, contentType } = availabilityCheck;
 
-    // File passed getFilePathAsync() — it exists locally
-    const fileExistsLocally = true;
+    // File is available — locally or on the Zotero server
+    const fileExistsLocally = !isRemoteFilePath(filePath);
 
     // Cache-first: all writers produce complete records, so any hit is usable.
     const cache = Zotero.Beaver?.attachmentFileCache;
@@ -419,14 +453,15 @@ export async function getAttachmentFileStatusLightweight(
     // Fallback to PDFWorker if not indexed (reads minimal data).
     // In batch/search contexts, skip the worker to avoid queue contention —
     // many concurrent calls serialize on the single PDFWorker and cause timeouts.
-    if (pageCount === null && !options?.skipWorkerFallback) {
+    if (pageCount === null && !options?.skipWorkerFallback && !isRemoteFilePath(filePath)) {
         pageCount = await getPDFPageCountFromWorker(attachment);
     }
 
     if (pageCount === null) {
-        if (options?.skipWorkerFallback) {
-            // Optimistic: file passed availability checks (exists, correct type, within size limit).
-            // Page count is unknown but the PDF is likely usable — just not yet fulltext-indexed.
+        if (options?.skipWorkerFallback || isRemoteFilePath(filePath)) {
+            // Optimistic: file passed availability checks (exists locally or on server, correct type).
+            // Page count is unknown but the PDF is likely usable — just not yet fulltext-indexed
+            // or the file is remote-only (page count will be determined on download).
             return { fileStatus: {
                 is_primary: isPrimary,
                 mime_type: contentType,

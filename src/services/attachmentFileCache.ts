@@ -25,6 +25,19 @@ export const EXTRACTION_VERSION = '1';
 /** Maximum entries in the in-memory metadata cache. */
 const MEMORY_CACHE_MAX = 500;
 
+/** Prefix for synthetic file paths representing remote-only files. */
+export const REMOTE_PATH_PREFIX = 'remote:';
+
+/** Build a synthetic file path for a remote-only attachment (keyed by synced hash). */
+export function makeRemoteFilePath(syncedHash: string): string {
+    return `${REMOTE_PATH_PREFIX}${syncedHash}`;
+}
+
+/** Check if a file path represents a remote-only attachment. */
+export function isRemoteFilePath(filePath: string): boolean {
+    return filePath.startsWith(REMOTE_PATH_PREFIX);
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -118,8 +131,8 @@ export class AttachmentFileCache {
                     shouldRemove = true;
                 }
 
-                // Remove if the source file no longer exists
-                if (!shouldRemove) {
+                // Remove if the source file no longer exists (skip for remote-only entries)
+                if (!shouldRemove && !isRemoteFilePath(record.file_path)) {
                     try {
                         const exists = await IOUtils.exists(record.file_path);
                         if (!exists) {
@@ -576,9 +589,15 @@ export class AttachmentFileCache {
             return true;
         }
 
-        // File path changed
+        // File path changed (for remote paths this also detects server-side hash changes)
         if (record.file_path !== filePath) {
             return true;
+        }
+
+        // Remote files: staleness is determined solely by path match (which
+        // encodes the synced hash) and extraction version. No local stat needed.
+        if (isRemoteFilePath(filePath)) {
+            return false;
         }
 
         // Check file signature (mtime + size)
@@ -599,6 +618,11 @@ export class AttachmentFileCache {
      * Get mtime and size for a file path.
      */
     private async getFileSignature(filePath: string): Promise<FileSignature | null> {
+        // Remote files have no local path — return a synthetic signature.
+        // Staleness is detected via file_path change (which embeds the synced hash).
+        if (isRemoteFilePath(filePath)) {
+            return { mtime_ms: 0, size_bytes: 0 };
+        }
         try {
             const stat = await IOUtils.stat(filePath);
             return {

@@ -10,7 +10,7 @@
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer } from '../../utils/webAPI';
+import { isAttachmentOnServer, getAttachmentDataInMemory } from '../../utils/webAPI';
 import {
     WSZoteroAttachmentPageImagesRequest,
     WSZoteroAttachmentPageImagesResponse,
@@ -18,6 +18,7 @@ import {
     WSPageImage,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { isRemoteFilePath, makeRemoteFilePath } from '../attachmentFileCache';
 import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError } from './utils';
 
 /**
@@ -85,20 +86,21 @@ export async function handleZoteroAttachmentPageImagesRequest(
         resolvedPdfItem = pdfItem;
 
         // 3. Get the file path — returns false if missing or nonexistent
-        const filePath = await pdfItem.getFilePathAsync();
-        resolvedFilePath = filePath || null;
-        if (!filePath) {
-            const isOnServer = isAttachmentOnServer(pdfItem);
+        const rawFilePath = await pdfItem.getFilePathAsync();
+        const filePath = rawFilePath || null;  // normalize false → null
+        const isRemoteOnly = !filePath && isAttachmentOnServer(pdfItem);
+        const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(pdfItem.attachmentSyncedHash) : null);
+        resolvedFilePath = effectiveFilePath;
+
+        if (!effectiveFilePath) {
             return errorResponse(
-                isOnServer
-                    ? `The PDF file for ${pdfKey} is not available locally. It may be in remote storage, which cannot be accessed by Beaver.`
-                    : `The PDF file for ${pdfKey} is not available locally.`,
+                `The PDF file for ${pdfKey} is not available locally.`,
                 'file_missing'
             );
         }
 
-        // 4. Check file size limit (skip if skip_local_limits is true)
-        if (!skip_local_limits) {
+        // 4. Check file size limit (skip if skip_local_limits is true; skip for remote — checked after download)
+        if (!skip_local_limits && !isRemoteOnly) {
             const maxFileSizeMB = getPref('maxFileSizeMB');
             const fileSize = await Zotero.Attachments.getTotalFileSize(pdfItem);
 
@@ -115,7 +117,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         // 4b. Try metadata cache for fast prechecks
         const cache = Zotero.Beaver?.attachmentFileCache;
-        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, filePath).catch(() => null) : null;
+        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, effectiveFilePath).catch(() => null) : null;
 
         // Determine once whether this is an all-pages request
         const requestingAllPages = !pages || pages.length === 0;
@@ -140,7 +142,31 @@ export async function handleZoteroAttachmentPageImagesRequest(
         }
 
         // 5. Read PDF and get page count
-        const pdfData = await IOUtils.read(filePath);
+        let pdfData: Uint8Array;
+        if (isRemoteOnly) {
+            try {
+                pdfData = await getAttachmentDataInMemory(pdfItem);
+            } catch (downloadError) {
+                logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${downloadError}`, 1);
+                return errorResponse(
+                    `Failed to download PDF for ${pdfKey} from remote storage: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`,
+                    'download_failed'
+                );
+            }
+            // Check file size after remote download
+            if (!skip_local_limits) {
+                const maxFileSizeMB = getPref('maxFileSizeMB');
+                const fileSizeInMB = pdfData.length / 1024 / 1024;
+                if (fileSizeInMB > maxFileSizeMB) {
+                    return errorResponse(
+                        `The PDF file for ${pdfKey} has a file size of ${fileSizeInMB.toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit`,
+                        'file_too_large'
+                    );
+                }
+            }
+        } else {
+            pdfData = await IOUtils.read(filePath!);
+        }
         const extractor = new PDFExtractor();
         let totalPages: number;
 

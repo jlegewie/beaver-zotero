@@ -10,7 +10,7 @@
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer } from '../../utils/webAPI';
+import { isAttachmentOnServer, getAttachmentDataInMemory } from '../../utils/webAPI';
 import {
     WSZoteroAttachmentPagesRequest,
     WSZoteroAttachmentPagesResponse,
@@ -18,7 +18,7 @@ import {
     WSPageContent,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { EXTRACTION_VERSION } from '../attachmentFileCache';
+import { EXTRACTION_VERSION, isRemoteFilePath, makeRemoteFilePath } from '../attachmentFileCache';
 import type { CachedPageContent } from '../attachmentFileCache';
 import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError } from './utils';
 
@@ -91,20 +91,21 @@ export async function handleZoteroAttachmentPagesRequest(
         resolvedPdfItem = pdfItem;
 
         // 3. Get the file path — returns false if missing or nonexistent
-        const filePath = await pdfItem.getFilePathAsync();
-        resolvedFilePath = filePath || null;
-        if (!filePath) {
-            const isOnServer = isAttachmentOnServer(pdfItem);
+        const rawFilePath = await pdfItem.getFilePathAsync();
+        const filePath = rawFilePath || null;  // normalize false → null
+        const isRemoteOnly = !filePath && isAttachmentOnServer(pdfItem);
+        const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(pdfItem.attachmentSyncedHash) : null);
+        resolvedFilePath = effectiveFilePath;
+
+        if (!effectiveFilePath) {
             return errorResponse(
-                isOnServer
-                    ? `The PDF file for ${pdfKey} is not available locally. It may be in remote storage, which cannot be accessed by Beaver.`
-                    : `The PDF file for ${pdfKey} is not available locally.`,
+                `The PDF file for ${pdfKey} is not available locally.`,
                 'file_missing'
             );
         }
 
-        // 4. Check file size limit (skip if skip_local_limits is true)
-        if (!skip_local_limits) {
+        // 4. Check file size limit (skip if skip_local_limits is true; skip for remote — checked after download)
+        if (!skip_local_limits && !isRemoteOnly) {
             const maxFileSizeMB = getPref('maxFileSizeMB');
             const fileSize = await Zotero.Attachments.getTotalFileSize(pdfItem);
 
@@ -124,7 +125,7 @@ export async function handleZoteroAttachmentPagesRequest(
         if (!cache) {
             logger(`handleZoteroAttachmentPagesRequest: cache not available for ${requestKey}`, 1);
         }
-        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, filePath).catch(() => null) : null;
+        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, effectiveFilePath).catch(() => null) : null;
 
         // Fast-path: use cached metadata for known error states
         const extractingAllPages = start_page == null && end_page == null;
@@ -157,7 +158,31 @@ export async function handleZoteroAttachmentPagesRequest(
         if (cachedMeta?.page_count != null) {
             totalPages = cachedMeta.page_count;
         } else {
-            pdfData = await IOUtils.read(filePath);
+            // Load PDF data — from local disk or remote server
+            if (isRemoteOnly) {
+                try {
+                    pdfData = await getAttachmentDataInMemory(pdfItem);
+                } catch (downloadError) {
+                    logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${downloadError}`, 1);
+                    return errorResponse(
+                        `Failed to download PDF for ${pdfKey} from remote storage: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`,
+                        'download_failed'
+                    );
+                }
+                // Check file size after remote download
+                if (!skip_local_limits) {
+                    const maxFileSizeMB = getPref('maxFileSizeMB');
+                    const fileSizeInMB = pdfData.length / 1024 / 1024;
+                    if (fileSizeInMB > maxFileSizeMB) {
+                        return errorResponse(
+                            `The PDF file for ${pdfKey} has a file size of ${fileSizeInMB.toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit`,
+                            'file_too_large'
+                        );
+                    }
+                }
+            } else {
+                pdfData = await IOUtils.read(filePath!);
+            }
             totalPages = await extractor.getPageCount(pdfData);
         }
 
@@ -220,7 +245,7 @@ export async function handleZoteroAttachmentPagesRequest(
             try {
                 const cachedPages = await cache.getContentRange(
                     pdfItem.libraryID, pdfItem.key,
-                    filePath, startIdx, endIdx
+                    effectiveFilePath, startIdx, endIdx
                 );
                 if (cachedPages) {
                     logger(`handleZoteroAttachmentPagesRequest: Cache hit for ${requestKey} pages ${startPage}-${endPage}`, 3);
@@ -244,7 +269,19 @@ export async function handleZoteroAttachmentPagesRequest(
         // 8. Cache miss — extract pages (convert to 0-indexed for extractor)
         logger(`handleZoteroAttachmentPagesRequest: Cache miss for ${requestKey} pages ${startPage}-${endPage}`, 3);
         if (!pdfData) {
-            pdfData = await IOUtils.read(filePath);
+            if (isRemoteOnly) {
+                try {
+                    pdfData = await getAttachmentDataInMemory(pdfItem);
+                } catch (downloadError) {
+                    logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${downloadError}`, 1);
+                    return errorResponse(
+                        `Failed to download PDF for ${pdfKey} from remote storage: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`,
+                        'download_failed'
+                    );
+                }
+            } else {
+                pdfData = await IOUtils.read(filePath!);
+            }
         }
         const pageIndices = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage - 1 + i);
         const result = await extractor.extract(pdfData, {
@@ -266,7 +303,13 @@ export async function handleZoteroAttachmentPagesRequest(
                 // that lightweight handlers (search, images, file-status) don't
                 // capture, so we must always write — even when a prior handler
                 // already seeded metadata with those fields as null.
-                const stat = await IOUtils.stat(filePath);
+                let file_mtime_ms = 0;
+                let file_size_bytes = 0;
+                if (!isRemoteOnly) {
+                    const stat = await IOUtils.stat(filePath!);
+                    file_mtime_ms = stat.lastModified ?? 0;
+                    file_size_bytes = stat.size ?? 0;
+                }
                 // page_labels semantics:
                 // - null => not checked yet (lightweight metadata path)
                 // - {} => checked, no custom labels found
@@ -278,9 +321,9 @@ export async function handleZoteroAttachmentPagesRequest(
                     item_id: pdfItem.id,
                     library_id: pdfItem.libraryID,
                     zotero_key: pdfItem.key,
-                    file_path: filePath,
-                    file_mtime_ms: stat.lastModified ?? 0,
-                    file_size_bytes: stat.size ?? 0,
+                    file_path: effectiveFilePath,
+                    file_mtime_ms,
+                    file_size_bytes,
                     content_type: pdfItem.attachmentContentType || 'application/pdf',
                     page_count: totalPages,
                     page_labels: pageLabels,
@@ -302,7 +345,7 @@ export async function handleZoteroAttachmentPagesRequest(
                 await cache.setContentPages(
                     pdfItem.libraryID,
                     pdfItem.key,
-                    filePath,
+                    effectiveFilePath,
                     totalPages,
                     contentPages
                 );

@@ -463,6 +463,7 @@ export type AttachmentPagesErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
+    | 'download_failed'    // Remote file download failed
     | 'extraction_failed';  // General extraction failure
 
 /** Response to zotero attachment pages request */
@@ -493,6 +494,7 @@ export type AttachmentPageImagesErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
+    | 'download_failed'    // Remote file download failed
     | 'render_failed';      // General rendering failure
 
 /** Response to zotero attachment page images request */
@@ -522,6 +524,7 @@ export type AttachmentSearchErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'no_text_layer'       // PDF requires OCR — text search unavailable
     | 'too_many_pages'      // PDF exceeds page count limit
+    | 'download_failed'    // Remote file download failed
     | 'search_failed';      // General search failure
 
 /** Request from backend to search text within an attachment */
