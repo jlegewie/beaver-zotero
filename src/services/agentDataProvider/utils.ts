@@ -30,8 +30,10 @@ import { TimingAccumulator } from '../../utils/timing';
  * content extraction, or page-images after pages).
  */
 const _remoteDataCache = new Map<string, { data: Uint8Array; ts: number }>();
+/** In-flight downloads keyed by hash — coalesces concurrent requests for the same file. */
+const _remoteInflight = new Map<string, Promise<Uint8Array>>();
 const REMOTE_CACHE_TTL_MS = 120_000;
-const REMOTE_CACHE_MAX = 5;
+const REMOTE_CACHE_MAX = 10;
 
 /**
  * Load PDF data from local disk or remote server.
@@ -56,9 +58,21 @@ export async function loadPdfData(
             cached.ts = Date.now(); // refresh TTL on read
             return cached.data;
         }
+
+        // Coalesce with an in-flight download for the same hash
+        const inflight = _remoteInflight.get(hash);
+        if (inflight) return inflight;
     }
 
-    const data = await getAttachmentDataInMemory(item);
+    const downloadPromise = getAttachmentDataInMemory(item);
+    if (hash) _remoteInflight.set(hash, downloadPromise);
+
+    let data: Uint8Array;
+    try {
+        data = await downloadPromise;
+    } finally {
+        if (hash) _remoteInflight.delete(hash);
+    }
 
     // Only cache data within the configured size limit to avoid pinning
     // oversized buffers in memory (the caller will reject them anyway).
