@@ -33,7 +33,7 @@ export function getBeaverNoteFooterHTML(threadId: string, runId?: string): strin
     const url = runId
         ? `zotero://beaver/thread/${threadId}/run/${runId}`
         : `zotero://beaver/thread/${threadId}`;
-    return `<p><span style="color: #aaa;"><a href="${url}">Open in Beaver</a></span></p>`;
+    return `<p><span style="color: #aaa;"><a href="${url}">Created by Beaver</a></span></p>`;
 }
 
 export interface SavedNoteReference {
