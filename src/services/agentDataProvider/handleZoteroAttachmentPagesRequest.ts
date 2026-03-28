@@ -10,7 +10,7 @@
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer, getAttachmentDataInMemory } from '../../utils/webAPI';
+import { isAttachmentOnServer } from '../../utils/webAPI';
 import {
     WSZoteroAttachmentPagesRequest,
     WSZoteroAttachmentPagesResponse,
@@ -18,9 +18,9 @@ import {
     WSPageContent,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { EXTRACTION_VERSION, isRemoteFilePath, makeRemoteFilePath } from '../attachmentFileCache';
+import { EXTRACTION_VERSION, makeRemoteFilePath } from '../attachmentFileCache';
 import type { CachedPageContent } from '../attachmentFileCache';
-import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError } from './utils';
+import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize } from './utils';
 
 
 /**
@@ -158,30 +158,24 @@ export async function handleZoteroAttachmentPagesRequest(
         if (cachedMeta?.page_count != null) {
             totalPages = cachedMeta.page_count;
         } else {
-            // Load PDF data — from local disk or remote server
+            try {
+                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+            } catch (error) {
+                if (!isRemoteOnly) throw error; // local I/O error — let outer handler deal with it
+                logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${error}`, 1);
+                return errorResponse(
+                    `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                    'download_failed'
+                );
+            }
             if (isRemoteOnly) {
-                try {
-                    pdfData = await getAttachmentDataInMemory(pdfItem);
-                } catch (downloadError) {
-                    logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${downloadError}`, 1);
+                const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                if (exceeded) {
                     return errorResponse(
-                        `Failed to download PDF for ${pdfKey} from remote storage: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`,
-                        'download_failed'
+                        `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                        'file_too_large'
                     );
                 }
-                // Check file size after remote download
-                if (!skip_local_limits) {
-                    const maxFileSizeMB = getPref('maxFileSizeMB');
-                    const fileSizeInMB = pdfData.length / 1024 / 1024;
-                    if (fileSizeInMB > maxFileSizeMB) {
-                        return errorResponse(
-                            `The PDF file for ${pdfKey} has a file size of ${fileSizeInMB.toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit`,
-                            'file_too_large'
-                        );
-                    }
-                }
-            } else {
-                pdfData = await IOUtils.read(filePath!);
             }
             totalPages = await extractor.getPageCount(pdfData);
         }
@@ -269,18 +263,15 @@ export async function handleZoteroAttachmentPagesRequest(
         // 8. Cache miss — extract pages (convert to 0-indexed for extractor)
         logger(`handleZoteroAttachmentPagesRequest: Cache miss for ${requestKey} pages ${startPage}-${endPage}`, 3);
         if (!pdfData) {
-            if (isRemoteOnly) {
-                try {
-                    pdfData = await getAttachmentDataInMemory(pdfItem);
-                } catch (downloadError) {
-                    logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${downloadError}`, 1);
-                    return errorResponse(
-                        `Failed to download PDF for ${pdfKey} from remote storage: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`,
-                        'download_failed'
-                    );
-                }
-            } else {
-                pdfData = await IOUtils.read(filePath!);
+            try {
+                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+            } catch (error) {
+                if (!isRemoteOnly) throw error; // local I/O error — let outer handler deal with it
+                logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${error}`, 1);
+                return errorResponse(
+                    `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                    'download_failed'
+                );
             }
         }
         const pageIndices = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage - 1 + i);

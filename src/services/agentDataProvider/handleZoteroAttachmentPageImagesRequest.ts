@@ -10,7 +10,7 @@
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer, getAttachmentDataInMemory } from '../../utils/webAPI';
+import { isAttachmentOnServer } from '../../utils/webAPI';
 import {
     WSZoteroAttachmentPageImagesRequest,
     WSZoteroAttachmentPageImagesResponse,
@@ -18,8 +18,8 @@ import {
     WSPageImage,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { isRemoteFilePath, makeRemoteFilePath } from '../attachmentFileCache';
-import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError } from './utils';
+import { makeRemoteFilePath } from '../attachmentFileCache';
+import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize } from './utils';
 
 /**
  * Handle zotero_attachment_page_images_request event.
@@ -143,29 +143,24 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         // 5. Read PDF and get page count
         let pdfData: Uint8Array;
+        try {
+            pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+        } catch (error) {
+            if (!isRemoteOnly) throw error; // local I/O error — let outer handler deal with it
+            logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
+            return errorResponse(
+                `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                'download_failed'
+            );
+        }
         if (isRemoteOnly) {
-            try {
-                pdfData = await getAttachmentDataInMemory(pdfItem);
-            } catch (downloadError) {
-                logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${downloadError}`, 1);
+            const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+            if (exceeded) {
                 return errorResponse(
-                    `Failed to download PDF for ${pdfKey} from remote storage: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`,
-                    'download_failed'
+                    `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                    'file_too_large'
                 );
             }
-            // Check file size after remote download
-            if (!skip_local_limits) {
-                const maxFileSizeMB = getPref('maxFileSizeMB');
-                const fileSizeInMB = pdfData.length / 1024 / 1024;
-                if (fileSizeInMB > maxFileSizeMB) {
-                    return errorResponse(
-                        `The PDF file for ${pdfKey} has a file size of ${fileSizeInMB.toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit`,
-                        'file_too_large'
-                    );
-                }
-            }
-        } else {
-            pdfData = await IOUtils.read(filePath!);
         }
         const extractor = new PDFExtractor();
         let totalPages: number;

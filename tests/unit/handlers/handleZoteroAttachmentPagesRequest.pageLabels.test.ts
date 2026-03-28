@@ -43,6 +43,8 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     resolveToPdfAttachment: vi.fn(),
     validateZoteroItemReference: vi.fn(() => null),
     backfillMetadataForError: vi.fn(),
+    loadPdfData: vi.fn(async () => new Uint8Array([1, 2, 3])),
+    checkRemotePdfSize: vi.fn(() => null),
 }));
 
 import { handleZoteroAttachmentPagesRequest } from '../../../src/services/agentDataProvider/handleZoteroAttachmentPagesRequest';

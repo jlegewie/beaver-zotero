@@ -19,6 +19,83 @@ import { serializeAttachment } from '../../utils/zoteroSerializers';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from '../../../react/utils/pdfUtils';
 import { TimingAccumulator } from '../../utils/timing';
 
+// ---------------------------------------------------------------------------
+// Remote PDF download cache
+// ---------------------------------------------------------------------------
+
+/**
+ * Brief in-memory cache for remote PDF downloads.
+ * Avoids redundant server round-trips when multiple operations target the
+ * same remote file within a short window (e.g., metadata check followed by
+ * content extraction, or page-images after pages).
+ */
+const _remoteDataCache = new Map<string, { data: Uint8Array; ts: number }>();
+const REMOTE_CACHE_TTL_MS = 60_000;
+const REMOTE_CACHE_MAX = 5;
+
+/**
+ * Load PDF data from local disk or remote server.
+ * Remote downloads are briefly cached in memory (keyed by synced hash)
+ * to avoid redundant downloads across sequential handler calls.
+ *
+ * @throws On download failure (callers should catch and produce their own error response)
+ */
+export async function loadPdfData(
+    item: Zotero.Item,
+    filePath: string,
+    isRemoteOnly: boolean,
+): Promise<Uint8Array> {
+    if (!isRemoteOnly) {
+        return IOUtils.read(filePath);
+    }
+
+    const hash = item.attachmentSyncedHash;
+    if (hash) {
+        const cached = _remoteDataCache.get(hash);
+        if (cached && Date.now() - cached.ts < REMOTE_CACHE_TTL_MS) {
+            return cached.data;
+        }
+    }
+
+    const data = await getAttachmentDataInMemory(item);
+
+    // Only cache data within the configured size limit to avoid pinning
+    // oversized buffers in memory (the caller will reject them anyway).
+    const maxMB = getPref('maxFileSizeMB');
+    const withinSizeLimit = (data.length / 1024 / 1024) <= maxMB;
+
+    if (hash && withinSizeLimit) {
+        // Evict expired entries when at capacity
+        if (_remoteDataCache.size >= REMOTE_CACHE_MAX) {
+            const now = Date.now();
+            for (const [k, v] of _remoteDataCache) {
+                if (now - v.ts > REMOTE_CACHE_TTL_MS) _remoteDataCache.delete(k);
+            }
+        }
+        if (_remoteDataCache.size >= REMOTE_CACHE_MAX) {
+            const oldest = _remoteDataCache.keys().next().value;
+            if (oldest !== undefined) _remoteDataCache.delete(oldest);
+        }
+        _remoteDataCache.set(hash, { data, ts: Date.now() });
+    }
+
+    return data;
+}
+
+/**
+ * Check whether remote PDF data exceeds the configured size limit.
+ * Returns size info when the limit is exceeded, or null when within limits.
+ */
+export function checkRemotePdfSize(
+    data: Uint8Array,
+    skipLimits?: boolean,
+): { sizeMB: number; maxMB: number } | null {
+    if (skipLimits) return null;
+    const maxMB = getPref('maxFileSizeMB');
+    const sizeMB = data.length / 1024 / 1024;
+    return sizeMB > maxMB ? { sizeMB, maxMB } : null;
+}
+
 /**
  * Validate that a ZoteroItemReference has correctly formatted fields.
  * - library_id must be a finite positive integer
@@ -315,22 +392,20 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
 
     // Cache miss: run full extraction
     try {
+        const isRemote = isRemoteFilePath(filePath);
         let pdfData: Uint8Array;
-        if (isRemoteFilePath(filePath)) {
-            try {
-                pdfData = await getAttachmentDataInMemory(attachment);
-            } catch (downloadError) {
-                logger(`getAttachmentFileStatus: remote download failed: ${downloadError}`, 1);
-                return {
-                    is_primary: isPrimary,
-                    mime_type: contentType,
-                    page_count: null,
-                    status: "unavailable",
-                    status_reason: 'Failed to download file from remote storage',
-                };
-            }
-        } else {
-            pdfData = await IOUtils.read(filePath);
+        try {
+            pdfData = await loadPdfData(attachment, filePath, isRemote);
+        } catch (error) {
+            if (!isRemote) throw error; // local I/O error — let outer catch deal with it
+            logger(`getAttachmentFileStatus: remote download failed: ${error}`, 1);
+            return {
+                is_primary: isPrimary,
+                mime_type: contentType,
+                page_count: null,
+                status: "unavailable",
+                status_reason: 'Failed to download file from remote storage',
+            };
         }
         const extractor = new PDFExtractor();
 
