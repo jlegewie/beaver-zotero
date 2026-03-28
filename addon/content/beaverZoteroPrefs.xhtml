@@ -2,21 +2,21 @@
     <groupbox>
         <!-- <label><html:h2>Beaver Preferences</html:h2></label> -->
         <html:p style="margin: 8px 0 16px 0; font-size: 13px; color: #555;">
-            Beaver preferences are managed in a separate window.
-            Click the button below to open Beaver settings.
+            Click the button below to open the Beaver sidebar.
+            Beaver preferences are available from within the sidebar.
         </html:p>
         <hbox>
         <button id="beaver-open-prefs-btn"
-                label="Open Beaver Preferences…"
+                label="Open Beaver"
                 oncommand="
-                    var wm = Services.wm;
-                    var existing = wm.getMostRecentWindow('beaver:preferences');
-                    if (existing) { existing.focus(); } else {
-                        Zotero.getMainWindow().openDialog(
-                            'chrome://beaver/content/beaverPreferences.xhtml',
-                            'beaver-preferences-window',
-                            'chrome,resizable,centerscreen,dialog=false',
-                            { tab: null }
+                    var mainWin = Zotero.getMainWindow();
+                    mainWin.focus();
+                    var eventBus = mainWin.__beaverEventBus;
+                    if (eventBus) {
+                        eventBus.dispatchEvent(
+                            new mainWin.CustomEvent('toggleChat', {
+                                detail: { forceOpen: true }
+                            })
                         );
                     }
                 " />
