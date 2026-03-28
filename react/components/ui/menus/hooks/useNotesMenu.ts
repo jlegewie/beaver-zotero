@@ -131,17 +131,21 @@ export const useNotesMenu = ({
             );
 
             if (!isCancelled) {
-                let headerLabel = searchQuery.trim() ? 'Search Results' : 'Recent Notes';
-                if (!searchQuery.trim() && activeLibraryId) {
-                    const library = Zotero.Libraries.get(activeLibraryId);
-                    headerLabel = library ? `Notes in ${library.name}` : headerLabel;
-                }
-                const header: SearchMenuItem = { label: headerLabel, isGroupHeader: true, onClick: () => {} };
-
-                if (verticalPosition === 'above') {
-                    setMenuItems([...items.reverse(), header]);
+                if (items.length === 0) {
+                    setMenuItems([]);
                 } else {
-                    setMenuItems([header, ...items]);
+                    let headerLabel = searchQuery.trim() ? 'Search Results' : 'Recent Notes';
+                    if (!searchQuery.trim() && activeLibraryId) {
+                        const library = Zotero.Libraries.get(activeLibraryId);
+                        headerLabel = library ? `Notes in ${library.name}` : headerLabel;
+                    }
+                    const header: SearchMenuItem = { label: headerLabel, isGroupHeader: true, onClick: () => {} };
+
+                    if (verticalPosition === 'above') {
+                        setMenuItems([...items.reverse(), header]);
+                    } else {
+                        setMenuItems([header, ...items]);
+                    }
                 }
             }
         };

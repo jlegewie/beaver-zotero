@@ -180,7 +180,7 @@ export const useSourcesMenu = ({
             });
 
             filterItems.unshift({
-                label: '"Browse Notes"',
+                label: '"Select Notes"',
                 onClick: async () => {
                     onNavigateToNotes();
                 },
@@ -188,7 +188,7 @@ export const useSourcesMenu = ({
                     <div className={'display-flex flex-row flex-1 items-start font-color-secondary'}>
                         <div className="display-flex flex-row gap-2">
                             <CSSIcon name="note" className="icon-16 font-color-secondary scale-90" />
-                            <div>Browse Notes</div>
+                            <div>Select Notes</div>
                         </div>
                         <div className="flex-1" />
                         <Icon icon={ArrowRightIcon} className="scale-12 mt-020" />
