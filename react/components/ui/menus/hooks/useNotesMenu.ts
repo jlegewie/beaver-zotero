@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SearchMenuItem } from '../SearchMenu';
 import { SourceMenuItemContext, createNoteMenuItem } from '../utils/menuItemFactories';
 import { loadFullItemData, getActiveZoteroLibraryId } from '../../../../../src/utils/zoteroUtils';
 
-const NOTES_FETCH_LIMIT = 100;
 const NOTES_DISPLAY_LIMIT = 20;
+const SEARCH_DEBOUNCE_MS = 200;
 
 interface UseNotesMenuOptions {
     isActive: boolean;
@@ -26,13 +26,18 @@ export const useNotesMenu = ({
     verticalPosition = 'above'
 }: UseNotesMenuOptions): UseNotesMenuResult => {
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
-    const [notes, setNotes] = useState<Zotero.Item[]>([]);
+    const [recentNotes, setRecentNotes] = useState<Zotero.Item[]>([]);
+    const [searchResults, setSearchResults] = useState<Zotero.Item[]>([]);
+    const [hasSearchResults, setHasSearchResults] = useState(false);
     const [activeLibraryId, setActiveLibraryId] = useState<number | null>(null);
+    const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Phase 1: Fetch recent notes from the active library when active
     useEffect(() => {
         if (!isActive) {
-            setNotes([]);
+            setRecentNotes([]);
+            setSearchResults([]);
+            setHasSearchResults(false);
             setMenuItems([]);
             setActiveLibraryId(null);
             return;
@@ -42,13 +47,17 @@ export const useNotesMenu = ({
 
         const fetchNotes = async () => {
             const libraryId = getActiveZoteroLibraryId();
-            setActiveLibraryId(libraryId);
 
             if (!libraryId || !searchableLibraryIds.includes(libraryId)) {
                 if (!isCancelled) {
-                    setNotes([]);
+                    setActiveLibraryId(null);
+                    setRecentNotes([]);
                 }
                 return;
+            }
+
+            if (!isCancelled) {
+                setActiveLibraryId(libraryId);
             }
 
             try {
@@ -59,7 +68,7 @@ export const useNotesMenu = ({
                     AND itemID NOT IN (SELECT itemID FROM deletedItems)
                     ORDER BY dateModified DESC
                     LIMIT ?`;
-                const params = [noteTypeID, libraryId, NOTES_FETCH_LIMIT];
+                const params = [noteTypeID, libraryId, NOTES_DISPLAY_LIMIT];
                 const ids = await Zotero.DB.columnQueryAsync(sql, params) as number[];
 
                 if (ids.length > 0) {
@@ -77,15 +86,15 @@ export const useNotesMenu = ({
                     );
 
                     if (!isCancelled) {
-                        setNotes(validItems);
+                        setRecentNotes(validItems);
                     }
                 } else if (!isCancelled) {
-                    setNotes([]);
+                    setRecentNotes([]);
                 }
             } catch (error) {
                 console.error('Error fetching notes:', error);
                 if (!isCancelled) {
-                    setNotes([]);
+                    setRecentNotes([]);
                 }
             }
         };
@@ -97,7 +106,79 @@ export const useNotesMenu = ({
         };
     }, [isActive, searchableLibraryIds]);
 
-    // Phase 2: Filter and build menu items based on search query
+    // Phase 2: Search notes via Zotero.Search when query changes (debounced)
+    useEffect(() => {
+        if (!isActive || !activeLibraryId) return;
+
+        if (searchTimerRef.current) {
+            clearTimeout(searchTimerRef.current);
+            searchTimerRef.current = null;
+        }
+
+        if (!searchQuery.trim()) {
+            setSearchResults([]);
+            setHasSearchResults(false);
+            return;
+        }
+
+        let isCancelled = false;
+        setHasSearchResults(false);
+
+        searchTimerRef.current = setTimeout(async () => {
+            try {
+                const search = new Zotero.Search({ libraryID: activeLibraryId });
+                search.addCondition('itemType', 'is', 'note');
+                search.addCondition('note', 'contains', searchQuery.trim());
+                const ids = await search.search();
+
+                if (isCancelled) return;
+
+                const limitedIds = ids.slice(0, NOTES_DISPLAY_LIMIT);
+                if (limitedIds.length > 0) {
+                    const items = await Zotero.Items.getAsync(limitedIds);
+                    const validItems = items.filter((item: Zotero.Item) => Boolean(item));
+                    await loadFullItemData(validItems, {
+                        includeParents: true,
+                        includeChildren: false,
+                        dataTypes: ["primaryData", "creators", "itemData", "note"]
+                    });
+
+                    // Rank title matches above content-only matches, then by dateModified
+                    const lowerQuery = searchQuery.trim().toLowerCase();
+                    validItems.sort((a: Zotero.Item, b: Zotero.Item) => {
+                        const aTitle = (a.getNoteTitle() || '').toLowerCase().includes(lowerQuery);
+                        const bTitle = (b.getNoteTitle() || '').toLowerCase().includes(lowerQuery);
+                        if (aTitle !== bTitle) return aTitle ? -1 : 1;
+                        return (b.dateModified || '').localeCompare(a.dateModified || '');
+                    });
+
+                    if (!isCancelled) {
+                        setSearchResults(validItems);
+                        setHasSearchResults(true);
+                    }
+                } else if (!isCancelled) {
+                    setSearchResults([]);
+                    setHasSearchResults(true);
+                }
+            } catch (error) {
+                console.error('Error searching notes:', error);
+                if (!isCancelled) {
+                    setSearchResults([]);
+                    setHasSearchResults(true);
+                }
+            }
+        }, SEARCH_DEBOUNCE_MS);
+
+        return () => {
+            isCancelled = true;
+            if (searchTimerRef.current) {
+                clearTimeout(searchTimerRef.current);
+                searchTimerRef.current = null;
+            }
+        };
+    }, [isActive, searchQuery, activeLibraryId]);
+
+    // Phase 3: Build menu items from the appropriate note set
     useEffect(() => {
         if (!isActive) return;
 
@@ -105,29 +186,23 @@ export const useNotesMenu = ({
 
         const buildMenuItems = async () => {
             let displayNotes: Zotero.Item[];
-
-            if (searchQuery.trim()) {
-                const lowerQuery = searchQuery.toLowerCase();
-                displayNotes = notes
-                    .map(note => {
-                        const title = (note.getNoteTitle() || '').toLowerCase();
-                        const content = (note.getNote() || '').replace(/<[^>]*>/g, '').toLowerCase();
-                        const titleMatch = title.includes(lowerQuery);
-                        const contentMatch = content.includes(lowerQuery);
-                        // Title matches score higher; ties preserve dateModified order
-                        const score = titleMatch ? 2 : contentMatch ? 1 : 0;
-                        return { note, score };
-                    })
-                    .filter(r => r.score > 0)
-                    .sort((a, b) => b.score - a.score)
-                    .map(r => r.note);
+            if (!searchQuery.trim()) {
+                displayNotes = recentNotes;
+            } else if (hasSearchResults) {
+                displayNotes = searchResults;
             } else {
-                displayNotes = notes;
+                // Local filter as immediate fallback while debounced search is pending
+                const lowerQuery = searchQuery.trim().toLowerCase();
+                displayNotes = recentNotes.filter(note => {
+                    const title = (note.getNoteTitle() || '').toLowerCase();
+                    if (title.includes(lowerQuery)) return true;
+                    const content = (note.getNote() || '').replace(/<[^>]*>/g, '').toLowerCase();
+                    return content.includes(lowerQuery);
+                });
             }
 
-            const limited = displayNotes.slice(0, NOTES_DISPLAY_LIMIT);
             const items = await Promise.all(
-                limited.map(note => createNoteMenuItem(note, sourceMenuItemContext))
+                displayNotes.map(note => createNoteMenuItem(note, sourceMenuItemContext))
             );
 
             if (!isCancelled) {
@@ -142,7 +217,7 @@ export const useNotesMenu = ({
                     const header: SearchMenuItem = { label: headerLabel, isGroupHeader: true, onClick: () => {} };
 
                     if (verticalPosition === 'above') {
-                        setMenuItems([...items.reverse(), header]);
+                        setMenuItems([...[...items].reverse(), header]);
                     } else {
                         setMenuItems([header, ...items]);
                     }
@@ -155,7 +230,7 @@ export const useNotesMenu = ({
         return () => {
             isCancelled = true;
         };
-    }, [isActive, searchQuery, notes, sourceMenuItemContext, activeLibraryId, verticalPosition]);
+    }, [isActive, searchQuery, recentNotes, searchResults, hasSearchResults, sourceMenuItemContext, activeLibraryId, verticalPosition]);
 
     return { menuItems };
 };
