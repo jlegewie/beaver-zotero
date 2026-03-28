@@ -40,6 +40,23 @@ function withShutdownTimeout<T>(
     ]).finally(() => clearTimeout(timeoutId));
 }
 
+async function cleanupSupabaseWindowState(
+    win: Window | null | undefined,
+): Promise<void> {
+    if (!win) return;
+
+    try {
+        if (win.__beaverDisposeSupabase) {
+            await withShutdownTimeout(win.__beaverDisposeSupabase(), "disposeSupabase");
+        }
+    } catch (e) {
+        ztoolkit.log(`disposeSupabase: ${e}`);
+    } finally {
+        win.__beaverDisposeSupabase = undefined;
+        delete (win as any).__beaverAuthLock;
+    }
+}
+
 let isAppQuitting = false;
 let quitObserverRegistered = false;
 const quitObserver = {
@@ -369,14 +386,9 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         //    on the window where the bundle was loaded.  Use the `win` parameter
         //    (the window being unloaded) rather than Zotero.getMainWindow(), which
         //    may be unreliable during unload of the last window.
-        try {
-            if (win?.__beaverDisposeSupabase) {
-                await withShutdownTimeout(win.__beaverDisposeSupabase(), "disposeSupabase");
-                win.__beaverDisposeSupabase = undefined;
-            }
-        } catch (e) {
-            ztoolkit.log(`disposeSupabase: ${e}`);
-        }
+        // Reset the shared auth lock even if disposing Supabase fails so a
+        // stale held-lock cannot block authentication on the next load.
+        await cleanupSupabaseWindowState(win);
 
         // 2. Dispose MuPDF WASM module to release native resources
         await withShutdownTimeout(disposeMuPDF(), "disposeMuPDF");
@@ -504,11 +516,7 @@ async function onShutdown(): Promise<void> {
 
         // These should already be done in onMainWindowUnload, but just in case
         try {
-            const mainWin = Zotero.getMainWindow();
-            if (mainWin?.__beaverDisposeSupabase) {
-                await mainWin.__beaverDisposeSupabase();
-                mainWin.__beaverDisposeSupabase = undefined;
-            }
+            await cleanupSupabaseWindowState(Zotero.getMainWindow());
         } catch (_e) { /* may not be available during shutdown */ }
         await disposeMuPDF();
 

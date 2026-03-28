@@ -29,6 +29,14 @@ declare const ZOTERO_CONFIG: {
 
 interface Window {
     __beaverDisposeSupabase?: () => Promise<void>;
+    /** Auth lock shared across webpack module reloads to prevent concurrent token refresh */
+    __beaverAuthLock?: {
+        locked: boolean;
+        queue: Array<{ resolve: (token: number) => void; timeoutId: ReturnType<typeof setTimeout> | null }>;
+        lockName: string | null;
+        lockToken: number | null;
+        tokenCounter: number;
+    };
 }
 
 interface ZoteroSearchWritable extends Zotero.Search {
