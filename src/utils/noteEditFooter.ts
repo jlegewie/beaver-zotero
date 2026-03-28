@@ -25,8 +25,9 @@ const EDIT_FOOTER_REGEX = /<p><span style="color:[^"]*">Edited by Beaver[\s\S]*?
 /**
  * Matches the "Created by Beaver" footer added when Beaver creates a new note.
  * Color is matched flexibly for the same ProseMirror normalisation reason.
+ * Matches both old format (entire text as link) and new format (gray prefix + "Chat" link).
  */
-const CREATED_FOOTER_REGEX = /<p><span style="color:[^"]*"><a href="zotero:\/\/beaver\/thread\/[^"]*"[^>]*>Created by Beaver<\/a><\/span><\/p>/;
+const CREATED_FOOTER_REGEX = /<p><span style="color:[^"]*">(?:Created by Beaver[\s\S]*?|<a href="zotero:\/\/beaver\/thread\/[^"]*"[^>]*>Created by Beaver<\/a>)<\/span><\/p>/;
 
 export interface ParsedEditFooter {
     footerHtml: string;

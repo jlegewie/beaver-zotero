@@ -20,10 +20,18 @@ describe('parseEditFooter', () => {
         expect(parseEditFooter(html)).toBeNull();
     });
 
-    it('returns null when only "Created by Beaver" footer exists', () => {
+    it('returns null when only "Created by Beaver" footer exists (old format)', () => {
         const html = wrap(
             '<p>Content</p>' +
             '<p><span style="color: #aaa;"><a href="zotero://beaver/thread/t1">Created by Beaver</a></span></p>'
+        );
+        expect(parseEditFooter(html)).toBeNull();
+    });
+
+    it('returns null when only "Created by Beaver" footer exists (new format)', () => {
+        const html = wrap(
+            '<p>Content</p>' +
+            '<p><span style="color: #aaa;">Created by Beaver \u00b7 <a href="zotero://beaver/thread/t1">Chat</a></span></p>'
         );
         expect(parseEditFooter(html)).toBeNull();
     });
@@ -180,13 +188,21 @@ describe('addOrUpdateEditFooter', () => {
         expect(result).toContain('zotero://beaver/thread/t2');
     });
 
-    it('works alongside "Created by Beaver" footer', () => {
+    it('works alongside "Created by Beaver" footer (new format)', () => {
+        const createdFooter = '<p><span style="color: #aaa;">Created by Beaver \u00b7 <a href="zotero://beaver/thread/t0/run/r0">Chat</a></span></p>';
+        const html = wrap('<p>Content</p>' + createdFooter);
+        const result = addOrUpdateEditFooter(html, 'thread-1');
+        expect(result).toContain('Created by Beaver');
+        expect(result).toContain('Edited by Beaver');
+        expect(result.indexOf('Edited by Beaver')).toBeGreaterThan(result.indexOf('Created by Beaver'));
+    });
+
+    it('works alongside "Created by Beaver" footer (old format)', () => {
         const createdFooter = '<p><span style="color: #aaa;"><a href="zotero://beaver/thread/t0/run/r0">Created by Beaver</a></span></p>';
         const html = wrap('<p>Content</p>' + createdFooter);
         const result = addOrUpdateEditFooter(html, 'thread-1');
         expect(result).toContain('Created by Beaver');
         expect(result).toContain('Edited by Beaver');
-        // Edit footer should come after Created footer
         expect(result.indexOf('Edited by Beaver')).toBeGreaterThan(result.indexOf('Created by Beaver'));
     });
 
@@ -220,7 +236,7 @@ describe('stripBeaverEditFooter', () => {
     });
 
     it('preserves "Created by Beaver" footer when stripping edit footer', () => {
-        const createdFooter = '<p><span style="color: #aaa;"><a href="zotero://beaver/thread/t0">Created by Beaver</a></span></p>';
+        const createdFooter = '<p><span style="color: #aaa;">Created by Beaver \u00b7 <a href="zotero://beaver/thread/t0">Chat</a></span></p>';
         const editFooter = buildEditFooterHtml(['t1']);
         const html = wrap('<p>Content</p>' + createdFooter + editFooter);
         const result = stripBeaverEditFooter(html);
@@ -258,7 +274,7 @@ describe('stripBeaverCreatedFooter', () => {
         expect(stripBeaverCreatedFooter(html)).toBe(html);
     });
 
-    it('strips the created footer completely', () => {
+    it('strips old-format created footer (entire text as link)', () => {
         const createdFooter = '<p><span style="color: #aaa;"><a href="zotero://beaver/thread/t0">Created by Beaver</a></span></p>';
         const html = wrap('<p>Content</p>' + createdFooter);
         const result = stripBeaverCreatedFooter(html);
@@ -266,14 +282,22 @@ describe('stripBeaverCreatedFooter', () => {
         expect(result).toContain('<p>Content</p>');
     });
 
-    it('strips created footer with run ID in URL', () => {
+    it('strips old-format created footer with run ID in URL', () => {
         const createdFooter = '<p><span style="color: #aaa;"><a href="zotero://beaver/thread/t0/run/r0">Created by Beaver</a></span></p>';
         const html = wrap('<p>Content</p>' + createdFooter);
         const result = stripBeaverCreatedFooter(html);
         expect(result).not.toContain('Created by Beaver');
     });
 
-    it('strips PM-normalized created footer', () => {
+    it('strips new-format created footer (gray prefix + Chat link)', () => {
+        const createdFooter = '<p><span style="color: #aaa;">Created by Beaver \u00b7 <a href="zotero://beaver/thread/t0/run/r0">Chat</a></span></p>';
+        const html = wrap('<p>Content</p>' + createdFooter);
+        const result = stripBeaverCreatedFooter(html);
+        expect(result).not.toContain('Created by Beaver');
+        expect(result).toContain('<p>Content</p>');
+    });
+
+    it('strips PM-normalized old-format created footer', () => {
         const pmCreatedFooter = '<p><span style="color: rgb(170, 170, 170);"><a href="zotero://beaver/thread/t0" rel="noopener noreferrer nofollow">Created by Beaver</a></span></p>';
         const html = wrap('<p>Content</p>' + pmCreatedFooter);
         const result = stripBeaverCreatedFooter(html);
@@ -281,8 +305,16 @@ describe('stripBeaverCreatedFooter', () => {
         expect(result).toContain('<p>Content</p>');
     });
 
+    it('strips PM-normalized new-format created footer', () => {
+        const pmCreatedFooter = '<p><span style="color: rgb(170, 170, 170);">Created by Beaver \u00b7 <a href="zotero://beaver/thread/t0/run/r0" rel="noopener noreferrer nofollow">Chat</a></span></p>';
+        const html = wrap('<p>Content</p>' + pmCreatedFooter);
+        const result = stripBeaverCreatedFooter(html);
+        expect(result).not.toContain('Created by Beaver');
+        expect(result).toContain('<p>Content</p>');
+    });
+
     it('preserves edit footer when stripping created footer', () => {
-        const createdFooter = '<p><span style="color: #aaa;"><a href="zotero://beaver/thread/t0">Created by Beaver</a></span></p>';
+        const createdFooter = '<p><span style="color: #aaa;">Created by Beaver \u00b7 <a href="zotero://beaver/thread/t0">Chat</a></span></p>';
         const editFooter = buildEditFooterHtml(['t1']);
         const html = wrap('<p>Content</p>' + createdFooter + editFooter);
         const result = stripBeaverCreatedFooter(html);
