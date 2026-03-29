@@ -1,5 +1,9 @@
 Test the Beaver note editing feature end-to-end using the Zotero MCP server. This runs a complete automated test: open a note, send an edit prompt, verify the edit, test undo/apply, and test the open-in-editor button.
 
+There are two testing modes:
+1. **Note-in-tab mode** (Steps 1–10 below): The note is open in a Zotero tab. ProseMirror actively processes the HTML.
+2. **Library-view mode** (see "Library-View Test Procedure" section): The note is NOT open in any tab. No ProseMirror processing occurs. The edit is applied directly to the raw HTML via the Zotero API.
+
 ## Prerequisites
 
 - Zotero must be running with the Beaver plugin loaded
@@ -197,7 +201,185 @@ Undo the edit to restore the note to its original state:
 // Expand and click Undo if currently applied
 ```
 
-## Verification Checklist
+---
+
+## Library-View Test Procedure (Note NOT Open in Tab)
+
+This procedure tests note editing when the note is **not open in any Zotero tab**. Without an active note editor, ProseMirror does not process the HTML — edits are applied directly to the raw HTML stored in the Zotero database. This is important to test because:
+- PM normalization does not occur (inline styles stay as-is)
+- `waitForPMNormalization` exits after 3 unchanged polls (~450ms)
+- Undo data matches the raw HTML exactly (no PM restructuring)
+
+### Library Step 1: Close all note/reader tabs
+
+```javascript
+// Close all tabs except library
+const tabs = Zotero_Tabs._tabs.filter(t => t.id !== 'zotero-pane');
+for (const t of tabs) { Zotero_Tabs.close(t.id); }
+Zotero_Tabs.select('zotero-pane');
+```
+
+Verify: `Zotero_Tabs.selectedType` returns `'library'` and no other tabs exist.
+
+### Library Step 2: Find a suitable note and get its reference
+
+```javascript
+const item = await Zotero.Items.getAsync(NOTE_ID);
+await item.loadDataType('itemData');
+const html = item.getNote();
+return JSON.stringify({
+    id: NOTE_ID,
+    key: item.key,
+    libraryID: item.libraryID,
+    ref: item.libraryID + '-' + item.key,
+    hasSchemaVersion: html.includes('data-schema-version'),
+    length: html.length
+});
+```
+
+Record the `ref` value (e.g., `1-72DUSPAN`) — this is used in the prompt to identify the note.
+
+### Library Step 3: Open Beaver sidebar and start new chat
+
+```javascript
+const win = Zotero.getMainWindow();
+// Open sidebar if hidden
+const pane = win.document.getElementById('beaver-pane-library');
+if (pane.style.display === 'none') {
+    win.document.getElementById('zotero-beaver-tb-chat-toggle').click();
+}
+// Start new chat
+win.document.querySelector('#beaver-pane-library button[aria-label="New chat"]').click();
+```
+
+Take a screenshot to verify:
+```
+zotero_screenshot(target: "element", selector: "#beaver-react-root-library", scale: 2)
+```
+Expected: No source chips attached in the prompt area. The sidebar should show "+ Add Sources" but no "Current Note" chip.
+
+### Library Step 4: Send edit prompt with note reference
+
+The key difference from note-in-tab mode: **reference the note by its `<library_id>-<zotero_key>`** in the prompt text. Do NOT attach it as a source chip.
+
+```javascript
+const win = Zotero.getMainWindow();
+const textarea = win.document.querySelector('#beaver-pane-library textarea.chat-input');
+const setter = Object.getOwnPropertyDescriptor(win.HTMLTextAreaElement.prototype, 'value').set;
+setter.call(textarea, "YOUR PROMPT HERE — referencing note '<library_id>-<zotero_key>'");
+textarea.dispatchEvent(new win.Event('input', { bubbles: true }));
+// Click Send
+win.document.querySelector('#beaver-pane-library button.variant-solid').click();
+```
+
+**Prompt format**: Include the note reference and be explicit about what to change. Example:
+> "This is a test. Please follow the instructions exactly. Change the title of note '1-72DUSPAN' from 'Old Title' to 'New Title'. Do not change anything else."
+
+### Library Step 5: Wait for agent and approve edits
+
+Same as note-in-tab mode, but use `#beaver-pane-library` / `#beaver-react-root-library` selectors:
+
+```javascript
+const win = Zotero.getMainWindow();
+const buttons = win.document.querySelectorAll('#beaver-react-root-library button');
+for (const btn of buttons) {
+    if (btn.textContent.trim() === 'Approve All') { btn.click(); break; }
+}
+```
+
+### Library Step 6: Verify the edit (Apply → Undo → Re-Apply roundtrip)
+
+**IMPORTANT**: Since the note is NOT open in a tab, there is no visual editor to check. Verification is **API-only** (via `item.getNote()`).
+
+#### 6a. After Apply
+
+```javascript
+const item = await Zotero.Items.getAsync(NOTE_ID);
+await item.loadDataType('itemData');
+const html = item.getNote();
+const titleMatch = html.match(/<h1>(.*?)<\/h1>/);
+return 'AFTER APPLY: ' + (titleMatch ? titleMatch[1] : html.substring(0, 100));
+```
+
+Sidebar check: Green checkmark icon and "Undo" button visible on the edit action.
+
+#### 6b. Undo
+
+Expand the edit action, then click Undo:
+
+```javascript
+const win = Zotero.getMainWindow();
+// Expand the edit action
+win.document.querySelector('#beaver-react-root-library .agent-action-view button').click();
+// Wait briefly for expansion, then click Undo
+const buttons = win.document.querySelectorAll('#beaver-react-root-library button');
+for (const btn of buttons) {
+    if (btn.textContent.trim() === 'Undo') { btn.click(); break; }
+}
+```
+
+API check: `item.getNote()` shows original content.
+Sidebar check: Red X icon, "Apply" button visible.
+
+#### 6c. Re-Apply
+
+```javascript
+const buttons = win.document.querySelectorAll('#beaver-react-root-library button');
+for (const btn of buttons) {
+    if (btn.textContent.trim() === 'Apply') { btn.click(); break; }
+}
+```
+
+API check: `item.getNote()` shows edited content again.
+Sidebar check: Green checkmark restored.
+
+### Library Step 7: Arrow (↗) button behavior
+
+In library-view mode, the arrow button may **not** open the note in a new tab (unlike note-in-tab mode where it scrolls to the edit). This is expected — the button's behavior depends on the active view context.
+
+### Library Step 8: Clean up
+
+Undo the edit to restore the note to its original state.
+
+---
+
+## Key Differences: Note-in-Tab vs Library-View
+
+| Aspect | Note-in-Tab | Library-View |
+|--------|-------------|-------------|
+| ProseMirror active | Yes | No |
+| PM normalization of inline styles | Yes (restructures HTML) | No (raw HTML preserved) |
+| Verification method | API + visual editor | API only |
+| Note reference | "Current Note" chip auto-attached | Include `<library_id>-<zotero_key>` in prompt text |
+| Sidebar pane | `#beaver-pane-reader` / `#beaver-react-root-reader` | `#beaver-pane-library` / `#beaver-react-root-library` |
+| Arrow (↗) button | Opens/focuses note tab, scrolls to edit | May not open note |
+| `waitForPMNormalization` | Polls until PM saves back normalized HTML | Exits after 3 unchanged polls (~450ms) |
+| Undo reliability for styled edits | Depends on PM normalization capture | More reliable (raw HTML match) |
+
+---
+
+## Verification Checklist (Library-View Mode)
+
+- [ ] Library tab is active, no note/reader tabs open
+- [ ] Beaver sidebar opens in library pane with NO source chips
+- [ ] Agent finds and reads the note by its `<library_id>-<zotero_key>` reference
+- [ ] Agent produces edit with diff preview
+- [ ] Edit shows correct additions (green) and deletions (red)
+- [ ] **APPLY**: Edit applies successfully
+  - [ ] API: `item.getNote()` contains the new text
+  - [ ] Sidebar: Green checkmark icon, "Undo" button visible
+- [ ] **UNDO**: Edit reverts successfully
+  - [ ] API: `item.getNote()` matches original text
+  - [ ] Sidebar: Red X icon, "Apply" button visible
+- [ ] **RE-APPLY**: Edit re-applies successfully
+  - [ ] API: `item.getNote()` contains the new text again
+  - [ ] Sidebar: Green checkmark icon restored
+- [ ] No Beaver-related errors in `zotero_read_errors`
+- [ ] Note restored to original state after test (final undo)
+
+---
+
+## Verification Checklist (Note-in-Tab Mode)
 
 - [ ] Note opens in a tab with `type: "note"`
 - [ ] Beaver sidebar opens with "Current Note" chip auto-attached
@@ -228,6 +410,8 @@ Undo the edit to restore the note to its original state:
 | `undefined` from `zotero_execute_js` | Connection drop after plugin reload | Call `zotero_ping` to reconnect |
 | Agent loops with repeated failed edits | HTML structure mismatch | Stop the agent, try a simpler edit prompt |
 | "old_string_not_found" error | Agent's HTML doesn't match actual note content | Usually self-corrects; agent re-reads the note |
+| Agent can't find note by reference | Wrong `<library_id>-<zotero_key>` format | Verify with `item.key` and `item.libraryID` |
+| Edit applies but no visual update | Note not open in tab (library-view mode) | Expected — verify via API only |
 
 ## Key Selectors Reference
 
