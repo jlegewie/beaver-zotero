@@ -390,7 +390,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.17.0",
-        title: "New in Beaver 0.17",
+        title: "New in Beaver 0.17 (beta)",
         subtitle: "Turn Beaver into a full-featured writing and reviewing assistant for your research notes.",
         steps: [
             {
