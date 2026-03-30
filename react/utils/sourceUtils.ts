@@ -1071,7 +1071,35 @@ export function buildEditorTextMap(editorDOM: HTMLElement): {
     const textNodes: { node: Node; start: number }[] = [];
     let fullText = '';
 
+    // Block-level tag names — when the tree walker crosses from one block
+    // ancestor into another, we insert a space so that text from adjacent
+    // paragraphs/headings doesn't run together. This matches how
+    // extractTargetContextSearches joins context fragments with spaces.
+    const blockTags = new Set([
+        'P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+        'LI', 'TR', 'BLOCKQUOTE', 'PRE', 'TABLE', 'UL', 'OL',
+        'SECTION', 'ARTICLE', 'HEADER', 'FOOTER',
+    ]);
+
+    function getBlockAncestor(node: Node): Node {
+        let current = node.parentNode;
+        while (current && current !== editorDOM) {
+            if ((current as Element).tagName && blockTags.has((current as Element).tagName)) {
+                return current;
+            }
+            current = current.parentNode;
+        }
+        return editorDOM;
+    }
+
+    let prevBlock: Node | null = null;
+
     while (walker.nextNode()) {
+        const currentBlock = getBlockAncestor(walker.currentNode);
+        if (prevBlock !== null && currentBlock !== prevBlock && fullText.length > 0) {
+            fullText += ' ';
+        }
+        prevBlock = currentBlock;
         textNodes.push({ node: walker.currentNode, start: fullText.length });
         fullText += walker.currentNode.textContent || '';
     }
@@ -1100,11 +1128,14 @@ export function resolveRangeInTextMap(
         const nodeEnd = tn.start + (tn.node.textContent?.length || 0);
         if (!startNode && startIdx < nodeEnd) {
             startNode = tn.node;
-            startOffset = startIdx - tn.start;
+            // Clamp to 0: if startIdx falls on a virtual block separator
+            // (inserted by buildEditorTextMap between blocks), it may be
+            // before this text node's start position.
+            startOffset = Math.max(0, startIdx - tn.start);
         }
         if (endIdx <= nodeEnd) {
             endNode = tn.node;
-            endOffset = endIdx - tn.start;
+            endOffset = Math.max(0, endIdx - tn.start);
             break;
         }
     }

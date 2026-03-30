@@ -119,6 +119,48 @@ function createMockDOMWithText(texts: string[]): HTMLElement {
 }
 
 /**
+ * Create a mock DOM tree with block elements containing text nodes.
+ * Each entry in `blocks` produces a separate `<p>` (or custom tag) element
+ * whose children are the specified text nodes.
+ *
+ * Example: createMockDOMWithBlocks([['Hello '], ['World']])
+ *   → <editorDOM><p>Hello </p><p>World</p></editorDOM>
+ */
+function createMockDOMWithBlocks(
+    blocks: Array<{ tag?: string; texts: string[] }>,
+): HTMLElement {
+    const editorDOM = { tagName: 'DIV' } as any;
+
+    // Build text nodes with proper parentNode references
+    const allTextNodes: any[] = [];
+    for (const block of blocks) {
+        const blockEl = { tagName: (block.tag || 'P').toUpperCase(), parentNode: editorDOM };
+        for (const t of block.texts) {
+            allTextNodes.push({
+                nodeType: 3,
+                textContent: t,
+                parentNode: blockEl,
+            });
+        }
+    }
+
+    let walkIdx = -1;
+    const mockTreeWalker = {
+        get currentNode() { return allTextNodes[walkIdx]; },
+        nextNode() {
+            walkIdx++;
+            return walkIdx < allTextNodes.length ? allTextNodes[walkIdx] : null;
+        },
+    };
+
+    editorDOM.ownerDocument = {
+        createTreeWalker: vi.fn(() => mockTreeWalker),
+    };
+
+    return editorDOM as unknown as HTMLElement;
+}
+
+/**
  * Build a mock ProseMirror EditorView with controllable behavior.
  */
 function createMockEditorView(fullText: string, options?: {
@@ -313,6 +355,56 @@ describe('buildEditorTextMap', () => {
         buildEditorTextMap(dom);
         expect(dom.ownerDocument.createTreeWalker).toHaveBeenCalledWith(dom, 4);
     });
+
+    it('inserts space separator between different block elements', () => {
+        const dom = createMockDOMWithBlocks([
+            { texts: ['Hello'] },
+            { texts: ['World'] },
+        ]);
+        const result = buildEditorTextMap(dom);
+        expect(result.fullText).toBe('Hello World');
+        expect(result.textNodes).toHaveLength(2);
+        // Second text node starts after "Hello" + virtual space
+        expect(result.textNodes[0].start).toBe(0);
+        expect(result.textNodes[1].start).toBe(6);
+    });
+
+    it('does not insert separator between text nodes in the same block', () => {
+        const dom = createMockDOMWithBlocks([
+            { texts: ['Hello ', 'World'] },
+        ]);
+        const result = buildEditorTextMap(dom);
+        expect(result.fullText).toBe('Hello World');
+        expect(result.textNodes).toHaveLength(2);
+        expect(result.textNodes[0].start).toBe(0);
+        expect(result.textNodes[1].start).toBe(6);
+    });
+
+    it('inserts separator between paragraph and heading blocks', () => {
+        const dom = createMockDOMWithBlocks([
+            { tag: 'P', texts: ['end of paragraph.'] },
+            { tag: 'H2', texts: ['Section Title'] },
+            { tag: 'P', texts: ['start of next.'] },
+        ]);
+        const result = buildEditorTextMap(dom);
+        expect(result.fullText).toBe('end of paragraph. Section Title start of next.');
+    });
+
+    it('handles citation at end of paragraph followed by new paragraph', () => {
+        // Simulates: <p>...analysis. (Hommel et al., 2022)</p><p>Content Validity:...</p>
+        const dom = createMockDOMWithBlocks([
+            { texts: ['analysis. ', '(Hommel et al., 2022)'] },
+            { texts: ['Content Validity: Two independent'] },
+        ]);
+        const result = buildEditorTextMap(dom);
+        expect(result.fullText).toBe(
+            'analysis. (Hommel et al., 2022) Content Validity: Two independent'
+        );
+        // The search text from extractTargetContextSearches would include
+        // a space between the citation and the next paragraph's content,
+        // which now matches the fullText.
+        expect(result.fullText.indexOf('(Hommel et al., 2022) Content')).toBeGreaterThan(-1);
+    });
 });
 
 // =============================================================================
@@ -388,6 +480,23 @@ describe('resolveRangeInTextMap', () => {
         expect(result!.startOffset).toBe(0);
         expect(result!.endNode).toBe(textNodes[1].node);
         expect(result!.endOffset).toBe(5);
+    });
+
+    it('clamps offset to 0 when startIdx falls on a virtual block separator', () => {
+        // Simulate: "Hello" (0-4) + virtual space at 5 + "World" (6-10)
+        const n1 = { textContent: 'Hello' };
+        const n2 = { textContent: 'World' };
+        const textNodes = [
+            { node: n1 as unknown as Node, start: 0 },
+            { node: n2 as unknown as Node, start: 6 },
+        ];
+        // startIdx=5 is the virtual separator — between nodes
+        const result = resolveRangeInTextMap(textNodes, 5, 10);
+        expect(result).not.toBeNull();
+        expect(result!.startNode).toBe(n2);
+        expect(result!.startOffset).toBe(0); // clamped from -1 to 0
+        expect(result!.endNode).toBe(n2);
+        expect(result!.endOffset).toBe(4);
     });
 });
 
