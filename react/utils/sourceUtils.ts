@@ -767,6 +767,14 @@ function appendCitationPageWithStyle(tag: string, label: string, style: 'short' 
     if (!pageMatch || !pageMatch[1]) return label;
     const page = pageMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&');
     const suffix = style === 'word' ? `, page ${page}` : `, p. ${page}`;
+    const locatorWithParen = /^(.*?)(,\s*(?:p{1,2}\.|page)\s+[^)]*)(\))$/i;
+    if (locatorWithParen.test(label)) {
+        return label.replace(locatorWithParen, `$1${suffix}$3`);
+    }
+    const locatorPlain = /^(.*?)(,\s*(?:p{1,2}\.|page)\s+.*)$/i;
+    if (locatorPlain.test(label)) {
+        return label.replace(locatorPlain, `$1${suffix}`);
+    }
     if (label.endsWith(')')) {
         return label.slice(0, -1) + suffix + ')';
     }

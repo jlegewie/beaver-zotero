@@ -29,9 +29,18 @@ vi.mock('../../../react/components/agentRuns/EditNotePreview', () => ({
             (match: string, label: string) => {
                 const pageMatch = match.match(/\bpage="([^"]*)"/);
                 if (!pageMatch || !pageMatch[1]) return label;
+                const suffix = `, page ${pageMatch[1]}`;
+                const locatorWithParen = /^(.*?)(,\s*(?:p{1,2}\.|page)\s+[^)]*)(\))$/i;
+                if (locatorWithParen.test(label)) {
+                    return label.replace(locatorWithParen, `$1${suffix}$3`);
+                }
+                const locatorPlain = /^(.*?)(,\s*(?:p{1,2}\.|page)\s+.*)$/i;
+                if (locatorPlain.test(label)) {
+                    return label.replace(locatorPlain, `$1${suffix}`);
+                }
                 return label.endsWith(')')
-                    ? label.slice(0, -1) + `, page ${pageMatch[1]})`
-                    : `${label} page ${pageMatch[1]}`;
+                    ? label.slice(0, -1) + `${suffix})`
+                    : `${label}${suffix}`;
             }
         )
         .replace(/<(?:[^>"']|"[^"]*"|'[^']*')+>/g, '')
@@ -1094,6 +1103,34 @@ describe('openNoteAndSearchEdit', () => {
             expect.anything(),
             targetStart,
             targetStart + '(Hommel et al., 2022, page 1)'.length
+        );
+    });
+
+    it('replaces an existing trailing citation locator instead of appending a second one', async () => {
+        vi.mocked(computeDiff).mockReturnValue([]);
+
+        const fullText = 'Intro (Hommel et al., 2022, p. 10). Target (Hommel et al., 2022, page 25) area.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            '<citation item_id="1-F8E4GHHW" label="(Hommel et al., 2022, p. 10)" ref="c_F8E4GHHW_0"/>',
+            '<citation item_id="1-F8E4GHHW" label="(Hommel et al., 2022, p. 10)" ref="c_F8E4GHHW_0" page="25"/>',
+            true,
+            undefined,
+            undefined,
+            'Target ',
+            ' area.',
+        );
+
+        const targetStart = fullText.indexOf('(Hommel et al., 2022, page 25)');
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(
+            expect.anything(),
+            targetStart,
+            targetStart + '(Hommel et al., 2022, page 25)'.length
         );
     });
 });
