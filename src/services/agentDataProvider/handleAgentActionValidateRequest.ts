@@ -1210,14 +1210,23 @@ async function validateEditNoteAction(
 
     // 4. Item is a note
     if (!item.isNote()) {
-        return {
+        const itemId = `${library_id}-${zotero_key}`;
+        const resp = {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Item ${library_id}-${zotero_key} is not a note`,
+            error: `Item ${itemId} is not a note`,
             error_code: 'not_a_note',
             preference: 'always_ask',
-        };
+        } as WSAgentActionValidateResponse;
+        if (item.isRegularItem()) {
+            resp.error = `Item ${itemId} is a regular item and not a note. To create a new zotero note that is attached to the regular item ${itemId}, use the the <note item_id="${itemId}">...</note> tag in your response.`;
+        } else if (item.isAttachment()) {
+            resp.error = `Item ${itemId} is an attachment and not a note. To create a new zotero note, use the the <note>...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
+        } else if (item.isAnnotation()) {
+            resp.error = `Item ${itemId} is an annotation and not a note. To create a new zotero note, use the the <note>...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
+        }
+        return resp;
     }
 
     // 5. Check library is editable (after item type, matching edit_metadata ordering)
