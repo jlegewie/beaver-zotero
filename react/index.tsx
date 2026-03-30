@@ -22,6 +22,7 @@ import { useHttpEndpoints } from './hooks/useHttpEndpoints';
 import { useMcpServer } from './hooks/useMcpServer';
 import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 import { useContextMenuActionHandler } from './hooks/useContextMenuActionHandler';
+import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActionHandler';
 
 
 /**
@@ -71,6 +72,9 @@ const GlobalContextInitializer = () => {
 
     // Handle context menu actions dispatched from Zotero 8 MenuManager
     useContextMenuActionHandler();
+
+    // Handle reader text selection actions (Explain / Ask)
+    useReaderSelectionActionHandler();
 
     return null; // This component does not render any UI
 };

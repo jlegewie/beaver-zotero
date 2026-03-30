@@ -17,6 +17,13 @@ export interface BeaverEvents {
         itemIds: number[];
         collectionId: number | null;
     };
+    readerSelectionAction: {
+        action: 'explain' | 'ask';
+        text: string;
+        page: number;
+        readerItemID: number;
+    };
+    focusInput: {};
 }
 
 export type BeaverEventName = keyof BeaverEvents;

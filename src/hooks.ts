@@ -14,6 +14,7 @@ import { disposeMuPDF } from "./utils/mupdf";
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { initContextMenus, cleanupContextMenus } from "./modules/zoteroContextMenu";
+import { initReaderIntegration, cleanupReaderIntegration } from "./modules/readerIntegration";
 
 /** Timeout for individual async shutdown operations to prevent hangs. */
 const SHUTDOWN_TIMEOUT_MS = 3000;
@@ -235,6 +236,9 @@ async function onStartup() {
         // -------- Register Zotero 8 context menus (no-op on Zotero 7) --------
         initContextMenus();
 
+        // -------- Register reader text selection popup & context menu --------
+        initReaderIntegration();
+
         // -------- Register Zotero preferences pane --------
         await Zotero.PreferencePanes.register({
             pluginID: addon.data.config.addonID,
@@ -437,7 +441,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 12. Unregister context menus
         cleanupContextMenus();
 
-        // 13. Unregister protocol handler
+        // 13. Unregister reader integration listeners
+        cleanupReaderIntegration();
+
+        // 14. Unregister protocol handler
         unregisterBeaverProtocolHandler();
 
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
@@ -552,6 +559,7 @@ async function onShutdown(): Promise<void> {
         
         unregisterQuitObserver();
         cleanupContextMenus();
+        cleanupReaderIntegration();
         unregisterBeaverProtocolHandler();
 
         ztoolkit.unregisterAll();
