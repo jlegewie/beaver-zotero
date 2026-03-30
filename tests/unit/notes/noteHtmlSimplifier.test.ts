@@ -2125,3 +2125,54 @@ describe('translatePageNumberToLabel', () => {
         expect(translatePageNumberToLabel(ITEM_ID, '3, 5')).toBe('340, 342');
     });
 });
+
+
+// =============================================================================
+// decodeHtmlEntities
+// =============================================================================
+
+import { decodeHtmlEntities } from '../../../src/utils/noteHtmlSimplifier';
+
+describe('decodeHtmlEntities', () => {
+    it('decodes &#x27; to apostrophe', () => {
+        expect(decodeHtmlEntities("Dashti&#x27;s")).toBe("Dashti's");
+    });
+
+    it('decodes &#39; (decimal) to apostrophe', () => {
+        expect(decodeHtmlEntities("Dashti&#39;s")).toBe("Dashti's");
+    });
+
+    it('decodes &apos; to apostrophe', () => {
+        expect(decodeHtmlEntities("Dashti&apos;s")).toBe("Dashti's");
+    });
+
+    it('decodes &quot; in text content but not in attributes', () => {
+        const input = 'said &quot;hello&quot; <a title="a &quot;b&quot;">link</a>';
+        const expected = 'said "hello" <a title="a &quot;b&quot;">link</a>';
+        expect(decodeHtmlEntities(input)).toBe(expected);
+    });
+
+    it('preserves &lt; &gt; &amp; (structural entities)', () => {
+        expect(decodeHtmlEntities('&lt;b&gt;bold&lt;/b&gt;')).toBe('&lt;b&gt;bold&lt;/b&gt;');
+        expect(decodeHtmlEntities('Smith &amp; Jones')).toBe('Smith &amp; Jones');
+    });
+
+    it('preserves numeric refs for structural chars (&#x3C; &#x3E; &#x26;)', () => {
+        expect(decodeHtmlEntities('&#x3C;b&#x3E;')).toBe('&#x3C;b&#x3E;');
+        expect(decodeHtmlEntities('&#60;b&#62;')).toBe('&#60;b&#62;');
+        expect(decodeHtmlEntities('&#x26;amp;')).toBe('&#x26;amp;');
+    });
+
+    it('handles supplementary-plane characters (above U+FFFF)', () => {
+        // 💡 = U+1F4A1
+        expect(decodeHtmlEntities('idea &#x1F4A1; here')).toBe('idea 💡 here');
+        // 😀 = U+1F600
+        expect(decodeHtmlEntities('&#x1F600;')).toBe('😀');
+    });
+
+    it('handles mixed entities in a realistic context anchor', () => {
+        const input = 'Dashti&#x27;s &quot;memoir&quot;</p>\n<p><a href="link" title="a &quot;b&quot;">text</a>';
+        const expected = "Dashti's \"memoir\"</p>\n<p><a href=\"link\" title=\"a &quot;b&quot;\">text</a>";
+        expect(decodeHtmlEntities(input)).toBe(expected);
+    });
+});

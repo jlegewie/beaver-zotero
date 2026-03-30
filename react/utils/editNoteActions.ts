@@ -23,6 +23,7 @@ import {
     findRangeByContexts,
     waitForPMNormalization,
     hasSchemaVersionWrapper,
+    decodeHtmlEntities,
 } from '../../src/utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from './sourceUtils';
 import { store } from '../store';
@@ -176,14 +177,19 @@ export async function executeEditNoteAction(
         old_string,
         new_string,
         replace_all,
-        target_before_context,
-        target_after_context,
     } = action.proposed_data as {
         library_id: number;
         zotero_key: string;
         old_string: string;
         new_string: string;
         replace_all?: boolean;
+        target_before_context?: string;
+        target_after_context?: string;
+    };
+    let {
+        target_before_context,
+        target_after_context,
+    } = action.proposed_data as {
         target_before_context?: string;
         target_after_context?: string;
     };
@@ -220,8 +226,20 @@ export async function executeEditNoteAction(
     // 6. Strip data-citation-items from raw HTML for matching
     const strippedHtml = stripDataCitationItems(oldHtml);
 
-    // 7. Count occurrences
-    const matchCount = countOccurrences(strippedHtml, expandedOld);
+    // 7. Count occurrences — if zero, retry with entity-decoded strings.
+    // PM may have decoded HTML entities (e.g. &#x27; → ') since the model
+    // last read the note, so the proposed old_string no longer matches.
+    let matchCount = countOccurrences(strippedHtml, expandedOld);
+    if (matchCount === 0) {
+        const decodedOld = decodeHtmlEntities(expandedOld);
+        if (decodedOld !== expandedOld && countOccurrences(strippedHtml, decodedOld) > 0) {
+            expandedOld = decodedOld;
+            expandedNew = decodeHtmlEntities(expandedNew);
+            if (target_before_context != null) target_before_context = decodeHtmlEntities(target_before_context);
+            if (target_after_context != null) target_after_context = decodeHtmlEntities(target_after_context);
+            matchCount = countOccurrences(strippedHtml, expandedOld);
+        }
+    }
 
     // 8. Zero matches
     if (matchCount === 0) {
@@ -435,15 +453,29 @@ export async function undoEditNoteAction(
 
     if (isDeletion) {
         // --- Deletion undo: use surrounding context to find insertion point ---
-        const beforeCtx = resultData?.undo_before_context;
-        const afterCtx = resultData?.undo_after_context;
-        const undoOldHtml = expandedOld!;
+        let beforeCtx = resultData?.undo_before_context;
+        let afterCtx = resultData?.undo_after_context;
+        let undoOldHtml = expandedOld!;
 
         if (beforeCtx === undefined && afterCtx === undefined) {
             throw new Error(
                 'Cannot undo deletion: no surrounding context stored in result_data. '
                 + 'This action was applied before deletion-undo support was added.'
             );
+        }
+
+        // PM may have decoded HTML entities (e.g. &#x27; → ') in the note.
+        // If context anchors aren't found as-is, try entity-decoded versions.
+        const seamRaw = (beforeCtx || '') + (afterCtx || '');
+        if (seamRaw && !strippedHtml.includes(seamRaw)) {
+            const decodedBefore = beforeCtx != null ? decodeHtmlEntities(beforeCtx) : undefined;
+            const decodedAfter = afterCtx != null ? decodeHtmlEntities(afterCtx) : undefined;
+            const seamDecoded = (decodedBefore || '') + (decodedAfter || '');
+            if (seamDecoded !== seamRaw && strippedHtml.includes(seamDecoded)) {
+                beforeCtx = decodedBefore;
+                afterCtx = decodedAfter;
+                undoOldHtml = decodeHtmlEntities(undoOldHtml);
+            }
         }
 
         // Check if already undone (old_string is back in the note) — context-aware
@@ -519,11 +551,24 @@ export async function undoEditNoteAction(
         }
     } else {
         // --- Non-deletion undo: reverse str-replace (new fragment → old fragment) ---
-        const undoOldHtml = expandedOld!;
-        const undoNewHtml = expandedNew!;
+        let undoOldHtml = expandedOld!;
+        let undoNewHtml = expandedNew!;
 
-        const beforeCtx = resultData?.undo_before_context;
-        const afterCtx = resultData?.undo_after_context;
+        let beforeCtx = resultData?.undo_before_context;
+        let afterCtx = resultData?.undo_after_context;
+
+        // PM may have decoded HTML entities (e.g. &#x27; → ') in the note
+        // since the undo data was stored. If the stored new_html isn't found,
+        // try entity-decoded versions so all subsequent matching works.
+        if (!strippedHtml.includes(undoNewHtml)) {
+            const decodedNew = decodeHtmlEntities(undoNewHtml);
+            if (decodedNew !== undoNewHtml && strippedHtml.includes(decodedNew)) {
+                undoNewHtml = decodedNew;
+                undoOldHtml = decodeHtmlEntities(undoOldHtml);
+                if (beforeCtx != null) beforeCtx = decodeHtmlEntities(beforeCtx);
+                if (afterCtx != null) afterCtx = decodeHtmlEntities(afterCtx);
+            }
+        }
 
         // 3-way detection — context-aware "already undone" check
         const newStringFound = strippedHtml.includes(undoNewHtml);

@@ -162,6 +162,18 @@ function simulatePMNormalization(html: string): string {
     // Unwrap single-<p> in <li>: <li>\n<p>text</p>\n</li> → <li>\ntext\n</li>
     result = result.replace(/<li>\n?<p>([\s\S]*?)<\/p>\n?<\/li>/g, '<li>\n$1\n</li>');
 
+    // HTML entity decoding: PM decodes numeric entities (&#x27; → ', &#39; → ')
+    // and named entities (&apos; → ', &quot; → ") within text content.
+    // Only decode inside text (not inside tags or attributes).
+    result = result.replace(/>([^<]+)</g, (_, text) => {
+        const decoded = text
+            .replace(/&#x([0-9a-fA-F]+);/g, (_: string, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+            .replace(/&#(\d+);/g, (_: string, dec: string) => String.fromCharCode(parseInt(dec, 10)))
+            .replace(/&apos;/g, "'")
+            .replace(/&quot;/g, '"');
+        return '>' + decoded + '<';
+    });
+
     // NFC normalization
     result = result.normalize('NFC');
 
@@ -1191,6 +1203,99 @@ describe('whitespace and special character edge cases', () => {
 
         const restored = await undoEdit(item, action);
         expect(restored).toBe(stripDataCitationItems(note));
+    });
+
+    it('undo works when PM decodes HTML entities (&#x27; → apostrophe)', async () => {
+        // Reproduces the bug: note contains &#x27; which PM decodes to literal '
+        // Edit is applied while the editor is NOT open (entities preserved in HTML),
+        // then PM normalizes the note afterward, decoding entities.
+        const note = wrap(
+            '<p>Sayeh Dashti&#x27;s memoir <em>You Belong</em> recounts her story.</p>'
+        );
+        const { item, action } = await applyEdit({
+            noteHtml: note,
+            oldString: 'Sayeh Dashti&#x27;s memoir',
+            newString: 'Sayeh Dashti&#x27;s MEMOIR',
+            // No PM normalization during apply — editor is closed
+        });
+
+        // Verify edit applied with entities intact
+        expect(item._getHtml()).toContain('Sayeh Dashti&#x27;s MEMOIR');
+
+        // Now simulate PM normalizing the note (editor opens, or Notifier fires)
+        item._setHtml(simulatePMNormalization(item._getHtml()));
+        expect(item._getHtml()).toContain("Sayeh Dashti's MEMOIR");
+        expect(item._getHtml()).not.toContain('&#x27;');
+
+        // Undo should work despite entity mismatch between stored undo data and note
+        invalidateSimplificationCache('1-TESTKEY');
+        const restored = await undoEdit(item, action);
+        expect(restored).toContain("Dashti's memoir");
+        expect(restored).not.toContain('MEMOIR');
+    });
+
+    it('re-apply works after undo when PM decoded entities', async () => {
+        // Full roundtrip: apply → PM normalizes → undo → re-apply
+        // Re-apply fails if old_string has &#x27; but note now has ' (decoded by PM)
+        const note = wrap(
+            '<p>Sayeh Dashti&#x27;s memoir <em>You Belong</em> recounts her story.</p>'
+        );
+        const { item, action } = await applyEdit({
+            noteHtml: note,
+            oldString: 'Sayeh Dashti&#x27;s memoir',
+            newString: 'Sayeh Dashti&#x27;s MEMOIR',
+        });
+
+        // Simulate PM normalizing the note
+        item._setHtml(simulatePMNormalization(item._getHtml()));
+        invalidateSimplificationCache('1-TESTKEY');
+
+        // Undo
+        await undoEdit(item, action);
+        expect(item._getHtml()).toContain("Dashti's memoir");
+
+        // Re-apply: action still has &#x27; in proposed_data, but note has '
+        action.status = 'pending';
+        action.result_data = undefined;
+        invalidateSimplificationCache('1-TESTKEY');
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+
+        const result2 = await executeEditNoteAction(action);
+        expect(result2.occurrences_replaced).toBe(1);
+        expect(item._getHtml()).toContain("Dashti's MEMOIR");
+    });
+
+    it('entity decode does not corrupt structural entities (&lt; &gt; &amp;)', async () => {
+        // Note contains &#x27; (decoded by PM) and &lt;b&gt; (preserved by PM)
+        const note = wrap(
+            '<p>Dashti&#x27;s note says &lt;b&gt;bold&lt;/b&gt; is important.</p>'
+        );
+        const { item, action } = await applyEdit({
+            noteHtml: note,
+            oldString: 'Dashti&#x27;s note says &lt;b&gt;bold&lt;/b&gt; is important',
+            newString: 'Dashti&#x27;s note says &lt;b&gt;BOLD&lt;/b&gt; is important',
+        });
+
+        // PM normalizes &#x27; → ' but keeps &lt;/&gt; intact
+        item._setHtml(simulatePMNormalization(item._getHtml()));
+        expect(item._getHtml()).toContain("Dashti's");
+        expect(item._getHtml()).toContain('&lt;b&gt;BOLD&lt;/b&gt;');
+
+        // Re-apply after undo should not corrupt &lt; into actual <b> tags
+        invalidateSimplificationCache('1-TESTKEY');
+        await undoEdit(item, action);
+        expect(item._getHtml()).toContain('&lt;b&gt;bold&lt;/b&gt;');
+
+        action.status = 'pending';
+        action.result_data = undefined;
+        invalidateSimplificationCache('1-TESTKEY');
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+
+        const result2 = await executeEditNoteAction(action);
+        expect(result2.occurrences_replaced).toBe(1);
+        // Structural entities must be preserved, not decoded to actual markup
+        expect(item._getHtml()).toContain('&lt;b&gt;BOLD&lt;/b&gt;');
+        expect(item._getHtml()).not.toMatch(/<b>BOLD<\/b>/);
     });
 
     it('edit with unicode characters', async () => {

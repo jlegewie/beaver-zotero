@@ -380,6 +380,44 @@ function unescapeAttr(s: string): string {
     return s.replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
 }
 
+/**
+ * Decode HTML entities that ProseMirror normalizes in text content.
+ * PM decodes quote/apostrophe entities (&#x27; → ', &quot; → ") but
+ * preserves structural entities (&lt;, &gt;, &amp;) since decoding
+ * those would create actual markup or bare ampersands.
+ *
+ * &quot; is only decoded in text segments (outside HTML tags) to avoid
+ * corrupting attribute values like title="a &quot;b&quot;".
+ * Numeric entities and &apos; are decoded globally since ' is safe
+ * inside double-quoted attributes.
+ */
+export function decodeHtmlEntities(s: string): string {
+    // Phase 1: Decode numeric entities (except structural: & < >) and &apos;
+    let result = s
+        .replace(/&#x([0-9a-fA-F]+);/g, (match, hex) => {
+            const code = parseInt(hex, 16);
+            // Preserve structural HTML characters: & (0x26), < (0x3C), > (0x3E)
+            if (code === 0x26 || code === 0x3C || code === 0x3E) return match;
+            return String.fromCodePoint(code);
+        })
+        .replace(/&#(\d+);/g, (match, dec) => {
+            const code = parseInt(dec, 10);
+            if (code === 38 || code === 60 || code === 62) return match;
+            return String.fromCodePoint(code);
+        })
+        .replace(/&apos;/g, "'");
+    // Note: &lt;, &gt;, &amp; intentionally NOT decoded — PM preserves these
+
+    // Phase 2: Decode &quot; only in text segments (between tags), not in
+    // attribute values where bare " would break the markup.
+    // split(/(<[^>]*>)/) puts text at even indices, tags at odd indices.
+    const parts = result.split(/(<[^>]*>)/);
+    for (let i = 0; i < parts.length; i += 2) {
+        parts[i] = parts[i].replace(/&quot;/g, '"');
+    }
+    return parts.join('');
+}
+
 /** Normalize whitespace: collapse runs to single space and trim */
 function normalizeWS(s: string): string {
     return s.replace(/\s+/g, ' ').trim();
@@ -1456,7 +1494,14 @@ export async function waitForPMNormalization(
             }
 
             // HTML changed — PM has normalized. Extract the actual fragment.
-            const range = findRangeByContexts(currentStripped, beforeCtx, afterCtx);
+            // PM may decode HTML entities (e.g. &#x27; → '), so if anchors
+            // don't match, retry with entity-decoded anchors.
+            let range = findRangeByContexts(currentStripped, beforeCtx, afterCtx);
+            if (!range) {
+                const decodedBefore = beforeCtx != null ? decodeHtmlEntities(beforeCtx) : undefined;
+                const decodedAfter = afterCtx != null ? decodeHtmlEntities(afterCtx) : undefined;
+                range = findRangeByContexts(currentStripped, decodedBefore, decodedAfter);
+            }
             if (!range) {
                 logger('waitForPMNormalization: context anchors not found in PM-normalized HTML, skipping refresh', 1);
                 return;
