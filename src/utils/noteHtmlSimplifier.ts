@@ -386,35 +386,41 @@ function unescapeAttr(s: string): string {
  * preserves structural entities (&lt;, &gt;, &amp;) since decoding
  * those would create actual markup or bare ampersands.
  *
- * &quot; is only decoded in text segments (outside HTML tags) to avoid
- * corrupting attribute values like title="a &quot;b&quot;".
- * Numeric entities and &apos; are decoded globally since ' is safe
- * inside double-quoted attributes.
+ * Double-quote entities are only decoded in text segments (outside HTML tags)
+ * to avoid corrupting attribute values like title="a &quot;b&quot;" or
+ * title="a &#34;b&#34;".
+ * Numeric entities other than structural chars and " are decoded globally
+ * since they do not change tag boundaries.
  */
 export function decodeHtmlEntities(s: string): string {
-    // Phase 1: Decode numeric entities (except structural: & < >) and &apos;
-    const result = s
+    const decodeNumericEntities = (segment: string, preserveDoubleQuote: boolean): string => segment
         .replace(/&#x([0-9a-fA-F]+);/g, (match, hex) => {
             const code = parseInt(hex, 16);
             // Preserve structural HTML characters: & (0x26), < (0x3C), > (0x3E)
             if (code === 0x26 || code === 0x3C || code === 0x3E) return match;
+            if (preserveDoubleQuote && code === 0x22) return match;
             return String.fromCodePoint(code);
         })
         .replace(/&#(\d+);/g, (match, dec) => {
             const code = parseInt(dec, 10);
             if (code === 38 || code === 60 || code === 62) return match;
+            if (preserveDoubleQuote && code === 34) return match;
             return String.fromCodePoint(code);
-        })
-        .replace(/&apos;/g, "'");
-    // Note: &lt;, &gt;, &amp; intentionally NOT decoded — PM preserves these
+        });
 
-    // Phase 2: Decode &quot; only in text segments (between tags), not in
-    // attribute values where bare " would break the markup.
+    // Decode text and tags separately so quote entities inside attributes stay encoded.
     // split(/(<[^>]*>)/) puts text at even indices, tags at odd indices.
-    const parts = result.split(/(<[^>]*>)/);
+    const parts = s.split(/(<[^>]*>)/);
     for (let i = 0; i < parts.length; i += 2) {
-        parts[i] = parts[i].replace(/&quot;/g, '"');
+        parts[i] = decodeNumericEntities(parts[i], false)
+            .replace(/&apos;/g, "'")
+            .replace(/&quot;/g, '"');
     }
+    for (let i = 1; i < parts.length; i += 2) {
+        parts[i] = decodeNumericEntities(parts[i], true)
+            .replace(/&apos;/g, "'");
+    }
+    // Note: &lt;, &gt;, &amp; intentionally NOT decoded — PM preserves these
     return parts.join('');
 }
 

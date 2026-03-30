@@ -2152,6 +2152,12 @@ describe('decodeHtmlEntities', () => {
         expect(decodeHtmlEntities(input)).toBe(expected);
     });
 
+    it('decodes numeric quote entities in text content but not in attributes', () => {
+        const input = 'said &#34;hello&#34; and &#x22;goodbye&#x22; <a title="a &#34;b&#34; and &#x22;c&#x22;">link</a>';
+        const expected = 'said "hello" and "goodbye" <a title="a &#34;b&#34; and &#x22;c&#x22;">link</a>';
+        expect(decodeHtmlEntities(input)).toBe(expected);
+    });
+
     it('preserves &lt; &gt; &amp; (structural entities)', () => {
         expect(decodeHtmlEntities('&lt;b&gt;bold&lt;/b&gt;')).toBe('&lt;b&gt;bold&lt;/b&gt;');
         expect(decodeHtmlEntities('Smith &amp; Jones')).toBe('Smith &amp; Jones');
@@ -2171,8 +2177,8 @@ describe('decodeHtmlEntities', () => {
     });
 
     it('handles mixed entities in a realistic context anchor', () => {
-        const input = 'Dashti&#x27;s &quot;memoir&quot;</p>\n<p><a href="link" title="a &quot;b&quot;">text</a>';
-        const expected = "Dashti's \"memoir\"</p>\n<p><a href=\"link\" title=\"a &quot;b&quot;\">text</a>";
+        const input = 'Dashti&#x27;s &quot;memoir&quot; and &#34;notes&#34;</p>\n<p><a href="link" title="a &quot;b&quot; and &#34;c&#34;">text</a>';
+        const expected = "Dashti's \"memoir\" and \"notes\"</p>\n<p><a href=\"link\" title=\"a &quot;b&quot; and &#34;c&#34;\">text</a>";
         expect(decodeHtmlEntities(input)).toBe(expected);
     });
 });
