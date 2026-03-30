@@ -55,6 +55,7 @@ vi.mock('../../../react/utils/stringUtils', () => ({
 // =============================================================================
 
 import {
+    openNoteAndSearchEdit,
     selectAndScrollInNoteEditor,
     buildEditorTextMap,
     resolveRangeInTextMap,
@@ -62,6 +63,7 @@ import {
     getNoteEditorView,
     stripEllipsis,
 } from '../../../react/utils/sourceUtils';
+import { computeDiff } from '../../../react/components/agentRuns/EditNotePreview';
 
 // =============================================================================
 // Helpers
@@ -963,6 +965,50 @@ describe('selectAndScrollInNoteEditor', () => {
         // But wait — the code checks uniqueness first, and "beta" IS unique,
         // so it goes to the "unique" branch directly.
         expect(result).toBe(true);
+    });
+});
+
+// =============================================================================
+// Tests: openNoteAndSearchEdit
+// =============================================================================
+
+describe('openNoteAndSearchEdit', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.mocked(computeDiff).mockReturnValue([]);
+        (globalThis as any).Zotero = {
+            ...(globalThis as any).Zotero,
+            Items: {
+                getIDFromLibraryAndKey: vi.fn(() => 1),
+            },
+            Notes: {},
+        };
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('uses target text context to select the intended duplicate citation occurrence', async () => {
+        const fullText = 'Intro citation. Methods citation target area.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            'citation',
+            'citation page 1',
+            false,
+            undefined,
+            undefined,
+            'Methods ',
+            ' target area.',
+        );
+
+        const secondCitationStart = fullText.indexOf('citation', fullText.indexOf('citation') + 1);
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(expect.anything(), secondCitationStart, secondCitationStart + 'citation'.length);
     });
 });
 

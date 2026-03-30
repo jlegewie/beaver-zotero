@@ -377,6 +377,8 @@ export async function openNoteAndSearchEdit(
     isApplied: boolean,
     undoBeforeContext?: string,
     undoAfterContext?: string,
+    targetBeforeContext?: string,
+    targetAfterContext?: string,
 ): Promise<void> {
     logger(`openNoteAndSearchEdit: called with libraryId=${libraryId}, zoteroKey=${zoteroKey}, isApplied=${isApplied}`, 1);
     logger(`openNoteAndSearchEdit: oldString (${oldString.length} chars): "${oldString.substring(0, 200)}"`, 1);
@@ -452,6 +454,26 @@ export async function openNoteAndSearchEdit(
             }
         }
         logger(`openNoteAndSearchEdit: fell back to fallback search: ${searchText ? `"${searchText}"` : 'null'}`, 1);
+    }
+
+    // When validation persisted explicit target context for an ambiguous raw
+    // match (e.g. duplicate citations with different refs), derive a text-level
+    // anchor for the editor search. The editor matcher operates on flattened
+    // plain text, so we convert the raw-note context to nearby text here
+    // instead of passing raw HTML into selectAndScrollInNoteEditor.
+    if (!endSearchText) {
+        const contextualSearch = extractTargetContextSearch(
+            targetBeforeContext,
+            isApplied ? newString : oldString,
+            targetAfterContext,
+            selectText,
+        );
+        if (contextualSearch) {
+            searchText = contextualSearch.searchText;
+            selectText = contextualSearch.selectText;
+            selectOffsetInSearch = contextualSearch.selectOffsetInSearch;
+            logger(`openNoteAndSearchEdit: using target-context search "${searchText.substring(0, 80)}"`, 1);
+        }
     }
 
     if (!searchText) {
@@ -715,6 +737,40 @@ function extractEditPointContext(oldHtml: string, newHtml: string): string | nul
 
     logger(`extractEditPointContext: editPoint=${prefixLen}, context="${term.substring(0, 80)}"`, 1);
     return term;
+}
+
+function normalizeSearchFragment(html: string | undefined): string {
+    if (!html) return '';
+    return stripEllipsis(stripHtmlTags(html).replace(/\s+/g, ' ').trim());
+}
+
+function extractTargetContextSearch(
+    beforeHtml: string | undefined,
+    targetHtml: string,
+    afterHtml: string | undefined,
+    preferredSelectText?: string,
+): { searchText: string; selectText: string; selectOffsetInSearch: number } | null {
+    const beforeText = normalizeSearchFragment(beforeHtml);
+    const afterText = normalizeSearchFragment(afterHtml);
+    if (!beforeText && !afterText) return null;
+
+    const selectText = normalizeSearchFragment(preferredSelectText || targetHtml);
+    if (!selectText || selectText.length < 2) return null;
+
+    const beforeTail = beforeText ? beforeText.slice(-80) : '';
+    const afterHead = afterText ? afterText.slice(0, 80) : '';
+    const parts = [beforeTail, selectText, afterHead].filter(Boolean);
+    if (parts.length === 0) return null;
+
+    const searchText = parts.join(' ').trim();
+    if (!searchText || searchText.length < 10) return null;
+
+    const selectOffsetInSearch = beforeTail ? beforeTail.length + 1 : 0;
+    return {
+        searchText,
+        selectText,
+        selectOffsetInSearch,
+    };
 }
 
 /**
