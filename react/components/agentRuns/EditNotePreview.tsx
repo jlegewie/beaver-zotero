@@ -617,6 +617,21 @@ export function recoverRawCitationLabel(encodedCitation: string): string | null 
 // ---- HTML stripping ----
 
 /**
+ * Extract the page attribute from a simplified citation tag and append it
+ * to the label text so page changes are visible in the diff preview.
+ */
+function appendCitationPage(tag: string, label: string): string {
+    const pageMatch = tag.match(/\bpage="([^"]*)"/);
+    if (!pageMatch || !pageMatch[1]) return label;
+    const page = pageMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+    // Insert before closing paren if label ends with ')'
+    if (label.endsWith(')')) {
+        return label.slice(0, -1) + ', p. ' + page + ')';
+    }
+    return label + ' p. ' + page;
+}
+
+/**
  * Strip HTML tags for display, converting special elements to readable text.
  * - Citations (simplified): <citation ... label="(Author, 2020)"/> → (Author, 2020)
  * - Citations (raw Zotero): <span class="citation" ...>(<span class="citation-item">Author, 2024</span>)</span> → (Author, 2024)
@@ -642,15 +657,17 @@ export function stripHtmlTags(html: string): string {
         )
         // Convert simplified self-closing citation tags to their label text.
         // When label is empty or "()", recover by looking up the item.
+        // Also appends page info from the page attribute when present.
         .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\blabel="([^"]*)"(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi,
             (match, label) => {
-                if (label && label !== '()') return label;
-                return recoverSimplifiedCitationLabel(match) || label || '[citation]';
+                const text = (label && label !== '()') ? label : (recoverSimplifiedCitationLabel(match) || label || '[citation]');
+                return appendCitationPage(match, text);
             })
         // Remove simplified self-closing citation tags without a label (fallback).
         // Try to recover a meaningful label by looking up the cited item.
         .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi, (match) => {
-            return recoverSimplifiedCitationLabel(match) || '[citation]';
+            const text = recoverSimplifiedCitationLabel(match) || '[citation]';
+            return appendCitationPage(match, text);
         })
         // Handle non-self-closing <citation> tags (preserve inner text)
         .replace(/<citation\b[^>]*>([\s\S]*?)<\/citation>/gi, '$1')
