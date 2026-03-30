@@ -882,7 +882,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     ...prev,
                     ...event.citations!.map(c => ({ ...c, run_id: event.run_id }))
                 ]);
-                set(updateCitationDataAtom);
+                await set(updateCitationDataAtom);
             }
 
             // Process agent actions from run complete event
