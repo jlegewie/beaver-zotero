@@ -1133,6 +1133,25 @@ describe('openNoteAndSearchEdit', () => {
             targetStart + '(Hommel et al., 2022, page 25)'.length
         );
     });
+
+    it('does not fall back to newString when the action is not applied', async () => {
+        vi.mocked(computeDiff).mockReturnValue([]);
+
+        const fullText = 'Only the new text is present here.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            'missing old text',
+            'new text',
+            false,
+        );
+
+        expect(TextSelectionClass.create).not.toHaveBeenCalled();
+    });
 });
 
 // =============================================================================

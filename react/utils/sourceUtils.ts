@@ -519,13 +519,11 @@ export async function openNoteAndSearchEdit(
         }
     }
 
-    // Fallback: if the primary search failed (e.g. applied edit but the
-    // editor DOM still has the old content — undo, manual revert, race
-    // condition), try the opposite text.
-    if (!found) {
-        const fallbackText = isApplied
-            ? extractSearchTerm(oldString)
-            : extractSearchTerm(newString);
+    // Fallback: only applied edits should try the opposite text. For pending,
+    // rejected, and undone actions the note is expected to contain oldString,
+    // so jumping to newString can select the wrong citation entirely.
+    if (!found && isApplied) {
+        const fallbackText = extractSearchTerm(oldString);
         if (fallbackText) {
             logger(`openNoteAndSearchEdit: primary search failed, trying fallback: "${fallbackText}"`, 1);
             await selectAndScrollInNoteEditor(itemId, fallbackText);
