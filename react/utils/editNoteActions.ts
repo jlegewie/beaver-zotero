@@ -25,6 +25,7 @@ import {
     hasSchemaVersionWrapper,
     decodeHtmlEntities,
     encodeTextEntities,
+    ENTITY_FORMS,
 } from '../../src/utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from './sourceUtils';
 import { store } from '../store';
@@ -243,14 +244,18 @@ export async function executeEditNoteAction(
         }
     }
     if (matchCount === 0) {
-        // Reverse: model used ' but note has &#x27; (pre-PM normalization)
-        const encodedOld = encodeTextEntities(expandedOld);
-        if (encodedOld !== expandedOld && countOccurrences(strippedHtml, encodedOld) > 0) {
-            expandedOld = encodedOld;
-            expandedNew = encodeTextEntities(expandedNew);
-            if (target_before_context != null) target_before_context = encodeTextEntities(target_before_context);
-            if (target_after_context != null) target_after_context = encodeTextEntities(target_after_context);
-            matchCount = countOccurrences(strippedHtml, expandedOld);
+        // Reverse: model used ' but note has entity-encoded form (pre-PM).
+        // Try all common entity spellings (&#x27;, &#39;, &apos;).
+        for (const form of ENTITY_FORMS) {
+            const encodedOld = encodeTextEntities(expandedOld, form);
+            if (encodedOld !== expandedOld && countOccurrences(strippedHtml, encodedOld) > 0) {
+                expandedOld = encodedOld;
+                expandedNew = encodeTextEntities(expandedNew, form);
+                if (target_before_context != null) target_before_context = encodeTextEntities(target_before_context, form);
+                if (target_after_context != null) target_after_context = encodeTextEntities(target_after_context, form);
+                matchCount = countOccurrences(strippedHtml, expandedOld);
+                break;
+            }
         }
     }
 

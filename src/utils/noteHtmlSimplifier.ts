@@ -424,17 +424,30 @@ export function decodeHtmlEntities(s: string): string {
     return parts.join('');
 }
 
+/** Entity encoding forms for apostrophe/quote characters */
+export type EntityForm = 'hex' | 'decimal' | 'named';
+/** All entity forms to try during reverse matching */
+export const ENTITY_FORMS: readonly EntityForm[] = ['hex', 'decimal', 'named'];
+
 /**
  * Encode apostrophes and quotes back to HTML entities in text segments.
- * This is the reverse of what PM normalizes: ' → &#x27; and " → &quot;
+ * This is the reverse of what PM normalizes: ' → entity and " → entity
  * (only in text content, not inside HTML tags).
  * Used when the model's old_string has literal chars but the note still
  * has entity-encoded forms (before PM normalization).
+ *
+ * Supports multiple entity spellings (hex, decimal, named) because
+ * imported/pasted HTML may use any form:
+ *   hex:     &#x27; / &quot;   (most common)
+ *   decimal: &#39;  / &#34;
+ *   named:   &apos; / &quot;   (HTML5; &quot; is the only named form for ")
  */
-export function encodeTextEntities(s: string): string {
+export function encodeTextEntities(s: string, form: EntityForm = 'hex'): string {
+    const apos = form === 'hex' ? '&#x27;' : form === 'decimal' ? '&#39;' : '&apos;';
+    const quot = form === 'hex' ? '&quot;' : form === 'decimal' ? '&#34;' : '&quot;';
     const parts = s.split(/(<[^>]*>)/);
     for (let i = 0; i < parts.length; i += 2) {
-        parts[i] = parts[i].replace(/'/g, '&#x27;').replace(/"/g, '&quot;');
+        parts[i] = parts[i].replace(/'/g, apos).replace(/"/g, quot);
     }
     return parts.join('');
 }

@@ -21,6 +21,9 @@ import {
     findFuzzyMatch,
     findUniqueRawMatchPosition,
     captureValidatedEditTargetContext,
+    decodeHtmlEntities,
+    encodeTextEntities,
+    ENTITY_FORMS,
 } from '../../utils/noteHtmlSimplifier';
 
 
@@ -1305,9 +1308,32 @@ async function validateEditNoteAction(
         };
     }
 
-    // 12. Count occurrences in raw HTML (authoritative for "found" and "count")
+    // 12. Count occurrences — if zero, retry with entity-decoded or entity-encoded
+    // strings. PM may have decoded entities (&#x27; → ') since the model read the
+    // note, or the model may have used literal chars while the note has entities.
     const strippedHtml = stripDataCitationItems(rawHtml);
-    const matchCount = countOccurrences(strippedHtml, expandedOld);
+    let matchCount = countOccurrences(strippedHtml, expandedOld);
+    if (matchCount === 0) {
+        // Forward: model used &#x27; but note has ' (PM decoded)
+        const decodedOld = decodeHtmlEntities(expandedOld);
+        if (decodedOld !== expandedOld && countOccurrences(strippedHtml, decodedOld) > 0) {
+            expandedOld = decodedOld;
+            expandedNew = decodeHtmlEntities(expandedNew);
+            matchCount = countOccurrences(strippedHtml, expandedOld);
+        }
+    }
+    if (matchCount === 0) {
+        // Reverse: model used ' but note has entity-encoded form (pre-PM).
+        for (const form of ENTITY_FORMS) {
+            const encodedOld = encodeTextEntities(expandedOld, form);
+            if (encodedOld !== expandedOld && countOccurrences(strippedHtml, encodedOld) > 0) {
+                expandedOld = encodedOld;
+                expandedNew = encodeTextEntities(expandedNew, form);
+                matchCount = countOccurrences(strippedHtml, expandedOld);
+                break;
+            }
+        }
+    }
 
     // 13. Zero matches — fuzzy match on simplified HTML
     if (matchCount === 0) {

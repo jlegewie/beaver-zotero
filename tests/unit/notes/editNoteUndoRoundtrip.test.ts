@@ -1315,6 +1315,31 @@ describe('whitespace and special character edge cases', () => {
         expect(item._getHtml()).not.toContain('memoir');
     });
 
+    it('apply works with decimal entity &#39; (non-canonical form)', async () => {
+        // Imported HTML may use &#39; instead of &#x27;
+        const note = wrap(
+            '<p>Sayeh Dashti&#39;s memoir <em>You Belong</em> recounts her story.</p>'
+        );
+        const { item } = await applyEdit({
+            noteHtml: note,
+            oldString: "Sayeh Dashti's memoir",
+            newString: "Sayeh Dashti's MEMOIR",
+        });
+        expect(item._getHtml()).toContain('MEMOIR');
+    });
+
+    it('apply works with named entity &apos; (non-canonical form)', async () => {
+        const note = wrap(
+            '<p>Sayeh Dashti&apos;s memoir recounts her story.</p>'
+        );
+        const { item } = await applyEdit({
+            noteHtml: note,
+            oldString: "Sayeh Dashti's memoir",
+            newString: "Sayeh Dashti's MEMOIR",
+        });
+        expect(item._getHtml()).toContain('MEMOIR');
+    });
+
     it('edit with unicode characters', async () => {
         const note = wrap('<p>Résumé of François and naïve coöperation.</p>');
         const { item, action } = await applyEdit({

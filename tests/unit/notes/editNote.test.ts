@@ -33,6 +33,7 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     hasSchemaVersionWrapper: vi.fn((html: string) => html.includes('data-schema-version=')),
     decodeHtmlEntities: vi.fn((s: string) => s),
     encodeTextEntities: vi.fn((s: string) => s),
+    ENTITY_FORMS: ['hex', 'decimal', 'named'],
 }));
 
 vi.mock('../../../src/services/supabaseClient', () => ({

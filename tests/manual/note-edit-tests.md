@@ -1303,6 +1303,63 @@ In this test, the prompt uses a literal `'` in the edit instruction, but after r
 - After the edit is applied, PM normalizes `&#x27;` to `'` in the note
 - Undo must handle the entity mismatch between stored undo data (`&#x27;`) and current note HTML (`'`)
 
+#### Additional variants that should also pass
+
+These are targeted regression checks for the validation and reverse-matching gaps. Run them as separate fresh-note cases under the same test.
+
+##### Variant A: Validation path must accept literal `'` when note HTML uses `&#x27;`
+1. Re-create the shared setup note exactly as written above, without opening it first in the editor
+2. Send this prompt:
+   ```
+   Please make the following edit to note `1-<KEY>`:
+   Replace "Sayeh Dashti's memoir" with "Sayeh Dashti's BOOK"
+   ```
+3. Confirm the agent run reaches an actionable `edit_note` preview instead of failing early with `old_string_not_found`
+4. Apply, Undo, and Re-Apply as in the base test
+
+Expected result:
+- Validation succeeds on the first attempt
+- No `old_string_not_found` error appears before the action preview
+- The edit roundtrip succeeds even though the prompt used literal `'` and the stored note HTML used `&#x27;`
+
+##### Variant B: Reverse matching must also handle `&#39;` and `&apos;`
+1. Create a fresh child note, but change the first paragraph in the setup HTML to use one of these alternative apostrophe encodings instead of `&#x27;`:
+   ```html
+   <p>Sayeh Dashti&#39;s memoir <em>You Belong</em> recounts her mother&#39;s encounter with African American women.</p>
+   ```
+   or
+   ```html
+   <p>Sayeh Dashti&apos;s memoir <em>You Belong</em> recounts her mother&apos;s encounter with African American women.</p>
+   ```
+2. Send this prompt:
+   ```
+   Please make the following edit to note `1-<KEY>`:
+   Replace "Sayeh Dashti's memoir" with "Sayeh Dashti's BOOK"
+   ```
+3. Verify the run reaches an `edit_note` preview and does not fail with `old_string_not_found`
+4. Apply, Undo, and Re-Apply
+
+Expected result:
+- The edit succeeds for both `&#39;` and `&apos;` note variants
+- Undo also succeeds after PM normalizes the note to literal apostrophes
+
+##### Variant C: Reverse matching must also handle `&#34;` for double quotes
+1. Create a fresh child note, but change the second paragraph in the setup HTML to use `&#34;` instead of `&quot;`:
+   ```html
+   <p>The mother declared: &#34;We love our blacks... Our blacks are members of our families&#34; (p. 9).</p>
+   ```
+2. Send this prompt:
+   ```
+   Please make the following edit to note `1-<KEY>`:
+   Replace "The mother declared: "We love our blacks... Our blacks are members of our families"" with "The mother declared: "We considered them part of the household""
+   ```
+3. Verify the run reaches an `edit_note` preview rather than failing with `old_string_not_found`
+4. Apply, Undo, and Re-Apply
+
+Expected result:
+- The edit succeeds even when the stored note uses `&#34;` instead of `&quot;`
+- Undo restores the original quoted sentence correctly
+
 #### Test result
 
 - **Date**: | **Result**:
