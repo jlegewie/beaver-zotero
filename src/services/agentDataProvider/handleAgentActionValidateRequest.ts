@@ -1220,11 +1220,11 @@ async function validateEditNoteAction(
             preference: 'always_ask',
         } as WSAgentActionValidateResponse;
         if (item.isRegularItem()) {
-            resp.error = `Item ${itemId} is a regular item and not a note. To create a new zotero note that is attached to the regular item ${itemId}, use the the <note item_id="${itemId}">...</note> tag in your response.`;
+            resp.error = `Item ${itemId} is a regular item and not a note. To create a new zotero note that is attached to the regular item ${itemId}, use the the <note title="..." item_id="${itemId}">...</note> tag in your response.`;
         } else if (item.isAttachment()) {
-            resp.error = `Item ${itemId} is an attachment and not a note. To create a new zotero note, use the the <note>...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
+            resp.error = `Item ${itemId} is an attachment and not a note. To create a new zotero note, use the the <note title="..." item_id="${itemId}">...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
         } else if (item.isAnnotation()) {
-            resp.error = `Item ${itemId} is an annotation and not a note. To create a new zotero note, use the the <note>...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
+            resp.error = `Item ${itemId} is an annotation and not a note. To create a new zotero note, use the the <note title="..." item_id="${itemId}">...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
         }
         return resp;
     }
