@@ -54,20 +54,21 @@ function onRenderTextSelectionPopup(event: any): void {
 
     const container = doc.createElement('div');
     container.className = 'beaver-selection-popup';
-    container.style.cssText = 'display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0;';
+    container.style.cssText = 'display: flex; flex-direction: column; gap: 2px;';
 
     // "Beaver" label
     const label = doc.createElement('span');
     label.textContent = 'Beaver';
-    label.style.cssText = 'font-size: 11px; color: #888; user-select: none;';
+    label.style.cssText = 'font-size: 11px; color: #888; user-select: none; padding-left: 4px;';
     container.appendChild(label);
 
-    // Button row
+    // Button row — match width/style of the highlight/underline row above
     const row = doc.createElement('div');
-    row.style.cssText = 'display: flex; gap: 6px;';
+    row.style.cssText = 'display: flex; gap: 4px;';
 
     const explainBtn = doc.createElement('button');
     explainBtn.className = 'toolbar-button wide-button';
+    explainBtn.style.cssText = 'flex: 1;';
     explainBtn.textContent = 'Explain';
     explainBtn.addEventListener('click', () => {
         dispatchReaderAction('explain', annotationText, page, readerItemID);
@@ -75,6 +76,7 @@ function onRenderTextSelectionPopup(event: any): void {
 
     const askBtn = doc.createElement('button');
     askBtn.className = 'toolbar-button wide-button';
+    askBtn.style.cssText = 'flex: 1;';
     askBtn.textContent = 'Ask...';
     askBtn.addEventListener('click', () => {
         dispatchReaderAction('ask', annotationText, page, readerItemID);
@@ -91,7 +93,7 @@ function onRenderTextSelectionPopup(event: any): void {
 // ---------------------------------------------------------------------------
 
 function onCreateViewContextMenu(event: any): void {
-    const { reader, params, append } = event;
+    const { reader, append } = event;
 
     // Only show for PDF readers
     if (reader?.type !== 'pdf') return;
