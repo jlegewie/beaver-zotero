@@ -17,6 +17,7 @@ import {
     invalidateSimplificationCache,
     checkDuplicateCitations,
     findFuzzyMatch,
+    findUniqueRawMatchPosition,
     preloadPageLabelsForNewCitations,
     findRangeByContexts,
     waitForPMNormalization,
@@ -220,21 +221,16 @@ export async function executeEditNoteAction(
         );
     }
 
-    // 9. Multiple matches without replace_all
-    if (matchCount > 1 && !replace_all) {
-        throw new Error(
-            `The string to replace was found ${matchCount} times in the note. `
-            + 'Use replace_all to replace all occurrences, or include more context.'
-        );
-    }
-
-    // 10. Perform replacement and capture context
+    // 9. Perform replacement and capture context
     let newHtml: string;
     let undoBeforeContext: string | undefined;
     let undoAfterContext: string | undefined;
     let undoOccurrenceContexts: Array<{ before: string; after: string }> | undefined;
+    let replacementCount: number;
 
     if (replace_all) {
+        replacementCount = matchCount;
+
         // Capture per-occurrence context anchors before replacing
         undoOccurrenceContexts = [];
         let searchFrom = 0;
@@ -252,15 +248,34 @@ export async function executeEditNoteAction(
         }
         newHtml = strippedHtml.split(expandedOld).join(expandedNew);
     } else {
-        const idx = strippedHtml.indexOf(expandedOld);
+        replacementCount = 1;
+        let rawPos = -1;
+
+        // When expandedOld matches multiple times in raw HTML (e.g. duplicate citations),
+        // try to disambiguate using simplified HTML where citation refs make old_string unique.
+        if (matchCount > 1) {
+            rawPos = findUniqueRawMatchPosition(
+                strippedHtml, simplified, old_string, expandedOld, metadata
+            ) ?? -1;
+        }
+
+        if (rawPos === -1) {
+            if (matchCount > 1) {
+                throw new Error(
+                    `The string to replace was found ${matchCount} times in the note. `
+                    + 'Use replace_all to replace all occurrences, or include more context.'
+                );
+            }
+            rawPos = strippedHtml.indexOf(expandedOld);
+        }
 
         // Capture surrounding context for robust undo of single-occurrence edits.
-        undoBeforeContext = strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx);
-        const afterStart = idx + expandedOld.length;
+        undoBeforeContext = strippedHtml.substring(Math.max(0, rawPos - UNDO_CONTEXT_LENGTH), rawPos);
+        const afterStart = rawPos + expandedOld.length;
         undoAfterContext = strippedHtml.substring(afterStart, afterStart + UNDO_CONTEXT_LENGTH);
 
-        newHtml = strippedHtml.substring(0, idx) + expandedNew
-            + strippedHtml.substring(idx + expandedOld.length);
+        newHtml = strippedHtml.substring(0, rawPos) + expandedNew
+            + strippedHtml.substring(afterStart);
     }
 
     // 10b. Add/update "Edited by Beaver" footer
@@ -282,7 +297,7 @@ export async function executeEditNoteAction(
     try {
         item.setNote(newHtml);
         await item.saveTx();
-        logger(`executeEditNoteAction: Saved note edit to ${noteId} (${matchCount} occurrence(s) replaced)`, 1);
+        logger(`executeEditNoteAction: Saved note edit to ${noteId} (${replacementCount} occurrence(s) replaced)`, 1);
     } catch (error) {
         // Restore in-memory state on save failure
         try {
@@ -306,7 +321,7 @@ export async function executeEditNoteAction(
     const result: EditNoteResultData = {
         library_id,
         zotero_key,
-        occurrences_replaced: matchCount,
+        occurrences_replaced: replacementCount,
         warnings,
         undo_old_html: expandedOld,
         undo_new_html: expandedNew,
@@ -578,7 +593,17 @@ export async function undoEditNoteAction(
             if (replace_all) {
                 restoredHtml = strippedHtml.split(undoNewHtml).join(undoOldHtml);
             } else {
-                const idx = strippedHtml.indexOf(undoNewHtml);
+                let idx = strippedHtml.indexOf(undoNewHtml);
+                // When undoNewHtml appears more than once (e.g. after a disambiguated
+                // duplicate-citation edit made the target look like another citation),
+                // indexOf alone picks the first match which may be the wrong one.
+                // Use context anchors to find the correct occurrence.
+                if (idx !== -1 && beforeCtx && strippedHtml.indexOf(undoNewHtml, idx + undoNewHtml.length) !== -1) {
+                    const ctxRange = findRangeByContexts(strippedHtml, beforeCtx, afterCtx);
+                    if (ctxRange) {
+                        idx = ctxRange.start;
+                    }
+                }
                 restoredHtml = strippedHtml.substring(0, idx) + undoOldHtml
                     + strippedHtml.substring(idx + undoNewHtml.length);
             }

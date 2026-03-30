@@ -1020,6 +1020,33 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         };
     }
 
+    function buildDuplicateCitationDisambiguationScenario() {
+        const duplicateCitation = rawCitation('DUP', 1, '', 'Mock Title');
+        const paragraphs = Array.from({ length: 12 }, (_, index) =>
+            index === 5
+                ? `<p>Target start ${duplicateCitation} target end.</p>`
+                : `<p>${duplicateCitation}</p>`
+        ).join('');
+        const originalHtml = wrap(paragraphs);
+        const { simplified } = simplifyNoteHtml(originalHtml, 1);
+        const targetCitationTag = simplified.match(/<citation [^>]*ref="c_DUP_5"[^>]*\/>/)?.[0];
+        if (!targetCitationTag) {
+            throw new Error('Expected duplicate citation to simplify to ref c_DUP_5');
+        }
+
+        return {
+            originalHtml,
+            action: makeAction({
+                proposed_data: {
+                    library_id: 1,
+                    zotero_key: 'NOTE0001',
+                    old_string: `Target start ${targetCitationTag} target end.`,
+                    new_string: 'Target start <citation item_id="1-DUP" page="42" label="Mock Title, p. 42" ref="c_DUP_5"/> target end.',
+                },
+            }),
+        };
+    }
+
     async function applySameItemRefShiftEdit() {
         const scenario = buildSameItemRefShiftScenario();
         const item = makeMockItem(scenario.originalHtml);
@@ -1186,6 +1213,58 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
 
         const { executeEditNoteAction } = await importEditNoteActions();
         await expect(executeEditNoteAction(makeAction())).rejects.toThrow(/found 3 times/);
+    });
+
+    it('execute rejects ref-only duplicate citation edits as ambiguous', async () => {
+        const duplicateCitation = rawCitation('DUP', 1, '', 'Mock Title');
+        const noteHtml = wrap(Array.from({ length: 12 }, () => `<p>${duplicateCitation}</p>`).join(''));
+        const { simplified } = simplifyNoteHtml(noteHtml, 1);
+        const targetCitationTag = simplified.match(/<citation [^>]*ref="c_DUP_10"[^>]*\/>/)?.[0];
+        if (!targetCitationTag) {
+            throw new Error('Expected duplicate citation to simplify to ref c_DUP_10');
+        }
+
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const { executeEditNoteAction } = await importEditNoteActions();
+        await expect(executeEditNoteAction(makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: targetCitationTag,
+                new_string: '<citation item_id="1-DUP" page="42" label="Mock Title, p. 42" ref="c_DUP_10"/>',
+            },
+        }))).rejects.toThrow(/found 12 times/);
+    });
+
+    it('execute disambiguates a unique duplicate citation ref and undo restores the original note', async () => {
+        const { originalHtml, action } = buildDuplicateCitationDisambiguationScenario();
+        const item = makeMockItem(originalHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const { executeEditNoteAction, undoEditNoteAction } = await importEditNoteActions();
+        const result = await executeEditNoteAction(action);
+
+        expect(result.occurrences_replaced).toBe(1);
+        const editedHtml = item.setNote.mock.calls[0][0];
+        expect((editedHtml.match(/class="citation"/g) || []).length).toBe(12);
+        expect(editedHtml).toContain('Mock Title, p. 42');
+
+        vi.clearAllMocks();
+        const undoItem = makeMockItem(editedHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(undoItem);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        await undoEditNoteAction({
+            ...action,
+            result_data: result,
+        });
+
+        const restoredHtml = undoItem.setNote.mock.calls[0][0];
+        expect(stripDataCitationItems(restoredHtml)).toBe(stripDataCitationItems(originalHtml));
     });
 
     it('execute with replace_all succeeds for multiple matches', async () => {

@@ -23,9 +23,24 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
     validateNewString: vi.fn(() => null),
     findFuzzyMatch: vi.fn(() => null),
+    findUniqueRawMatchPosition: vi.fn(() => null),
     invalidateSimplificationCache: vi.fn(),
     checkDuplicateCitations: vi.fn(() => null),
     preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
+    waitForPMNormalization: vi.fn().mockResolvedValue(undefined),
+    hasSchemaVersionWrapper: vi.fn((html: string) => html.includes('data-schema-version=')),
+}));
+
+vi.mock('../../../src/services/supabaseClient', () => ({
+    supabase: {
+        auth: {
+            getSession: vi.fn(),
+        },
+    },
+}));
+
+vi.mock('../../../react/utils/sourceUtils', () => ({
+    clearNoteEditorSelection: vi.fn(),
 }));
 
 vi.mock('../../../react/store', () => ({
@@ -82,6 +97,7 @@ import {
     getLatestNoteHtml,
     validateNewString,
     findFuzzyMatch,
+    findUniqueRawMatchPosition,
     invalidateSimplificationCache,
     checkDuplicateCitations,
     rebuildDataCitationItems,
@@ -134,6 +150,9 @@ function makeExecuteRequest(overrides: Partial<WSAgentActionExecuteRequest> = {}
 function makeMockItem(overrides: any = {}) {
     return {
         isNote: vi.fn(() => true),
+        isRegularItem: vi.fn(() => false),
+        isAttachment: vi.fn(() => false),
+        isAnnotation: vi.fn(() => false),
         itemType: 'note',
         libraryID: 1,
         key: 'NOTE0001',
@@ -340,6 +359,16 @@ describe('validateEditNoteAction — failures', () => {
         expect(response.error_code).toBe('ambiguous_match');
         expect(response.error).toContain('3 times');
     });
+
+    it('duplicate-citation match is accepted when simplified position disambiguates it', async () => {
+        vi.mocked(countOccurrences).mockReturnValueOnce(12);
+        vi.mocked(findUniqueRawMatchPosition).mockReturnValueOnce(123);
+
+        const response = await handleAgentActionValidateRequest(makeValidateRequest());
+
+        expect(response.valid).toBe(true);
+        expect(response.current_value?.match_count).toBe(12);
+    });
 });
 
 
@@ -429,6 +458,16 @@ describe('executeEditNoteAction — failures', () => {
         const response = await handleAgentActionExecuteRequest(makeExecuteRequest());
         expect(response.success).toBe(false);
         expect(response.error_code).toBe('ambiguous_match');
+    });
+
+    it('duplicate-citation match executes when simplified position disambiguates it', async () => {
+        vi.mocked(countOccurrences).mockReturnValueOnce(12);
+        vi.mocked(findUniqueRawMatchPosition).mockReturnValueOnce(123);
+
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest());
+
+        expect(response.success).toBe(true);
+        expect(response.result_data?.occurrences_replaced).toBe(1);
     });
 
     it('wrapper_removed (data-schema-version missing after replacement)', async () => {

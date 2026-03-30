@@ -1108,6 +1108,73 @@ export function countOccurrences(haystack: string, needle: string): number {
     return count;
 }
 
+function escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function findRefInsensitiveMatchPositions(haystack: string, needle: string): number[] {
+    const refAttrRegex = /\bref="[^"]*"/g;
+    let pattern = '';
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = refAttrRegex.exec(needle)) !== null) {
+        pattern += escapeRegex(needle.substring(lastIndex, match.index));
+        pattern += 'ref="[^"]*"';
+        lastIndex = match.index + match[0].length;
+    }
+    pattern += escapeRegex(needle.substring(lastIndex));
+
+    const regex = new RegExp(pattern, 'g');
+    const positions: number[] = [];
+    while ((match = regex.exec(haystack)) !== null) {
+        positions.push(match.index);
+    }
+    return positions;
+}
+
+/**
+ * Map a unique simplified old_string match back to its raw HTML position.
+ *
+ * This is used when the raw HTML fragment is duplicated due to equivalent
+ * citations. This helper is intentionally conservative: citation refs are only
+ * occurrence counters from the current document order, so ref values alone are
+ * not treated as a stable identity signal. Returns null if the match is
+ * missing, ambiguous after ref-masking, or cannot be verified against the raw
+ * HTML.
+ */
+export function findUniqueRawMatchPosition(
+    strippedHtml: string,
+    simplified: string,
+    oldString: string,
+    expandedOld: string,
+    metadata: SimplificationMetadata
+): number | null {
+    const matchPositions = findRefInsensitiveMatchPositions(simplified, oldString);
+    if (matchPositions.length !== 1) {
+        return null;
+    }
+    const simplifiedMatchPos = matchPositions[0];
+
+    try {
+        const expandedBefore = expandToRawHtml(
+            simplified.substring(0, simplifiedMatchPos), metadata, 'old'
+        );
+        // Simplified HTML strips the root wrapper div, so map the content-level
+        // offset back into the raw note HTML before verifying the match.
+        const unwrapped = stripNoteWrapperDiv(strippedHtml);
+        const wrapperPrefixLen = unwrapped !== strippedHtml
+            ? strippedHtml.indexOf('>') + 1 : 0;
+        const candidate = wrapperPrefixLen + expandedBefore.length;
+        return strippedHtml.substring(candidate, candidate + expandedOld.length) === expandedOld
+            ? candidate
+            : null;
+    } catch {
+        return null;
+    }
+}
+
+
 // =============================================================================
 // Context-Anchored Range Finding
 // =============================================================================

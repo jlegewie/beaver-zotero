@@ -19,6 +19,7 @@ import {
     getLatestNoteHtml,
     validateNewString,
     findFuzzyMatch,
+    findUniqueRawMatchPosition,
 } from '../../utils/noteHtmlSimplifier';
 
 
@@ -1302,7 +1303,7 @@ async function validateEditNoteAction(
         };
     }
 
-    // 12. Strip data-citation-items from raw HTML and count occurrences
+    // 12. Count occurrences in raw HTML (authoritative for "found" and "count")
     const strippedHtml = stripDataCitationItems(rawHtml);
     const matchCount = countOccurrences(strippedHtml, expandedOld);
 
@@ -1320,20 +1321,25 @@ async function validateEditNoteAction(
         };
     }
 
-    // 14. Multiple matches without replace_all
+    // 14. Multiple matches without replace_all — try simplified-HTML disambiguation
+    //     Must mirror the same logic as executeEditNoteAction.
     if (matchCount > 1 && !replace_all) {
-        return {
-            type: 'agent_action_validate_response',
-            request_id: request.request_id,
-            valid: false,
-            error: `The string to replace was found ${matchCount} times in the note. `
-                + 'Use replace_all to replace all occurrences, or include more context to make the match unique.',
-            error_code: 'ambiguous_match',
-            preference: 'always_ask',
-        };
+        if (findUniqueRawMatchPosition(
+            strippedHtml, simplified, old_string, expandedOld, metadata
+        ) === null) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `The string to replace was found ${matchCount} times in the note. `
+                    + 'Use replace_all to replace all occurrences, or include more context to make the match unique.',
+                error_code: 'ambiguous_match',
+                preference: 'always_ask',
+            };
+        }
     }
 
-    // 15. Valid — return current value
+    // 14. Valid — return current value
     const noteTitle = item.getNoteTitle() || '(untitled)';
     const totalLines = simplified.split('\n').length;
 
