@@ -53,6 +53,8 @@ export class AgentService {
     private connecting: boolean = false;
     /** Queue to serialize async message processing */
     private messageQueue: Promise<void> = Promise.resolve();
+    /** Queue to serialize action execution (prevents concurrent edits to the same resource) */
+    private actionExecutionQueue: Promise<void> = Promise.resolve();
     /** Monotonic counter incremented on close to invalidate stale queued messages */
     private connectionId: number = 0;
 
@@ -666,21 +668,32 @@ export class AgentService {
                         });
                     break;
 
-                case 'agent_action_execute':
+                case 'agent_action_execute': {
                     logger("AgentService: Received agent_action_execute", event, 1);
-                    handleAgentActionExecuteRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: agent_action_execute failed: ${err}`, 1);
-                            this.send({
-                                type: 'agent_action_execute_response',
-                                request_id: event.request_id,
-                                success: false,
-                                error: String(err),
-                                error_code: 'internal_error',
+                    // Chain onto actionExecutionQueue to serialize actions.
+                    // Without this, concurrent edit_note actions on the same note
+                    // race: each reads the original HTML and saves its own edit,
+                    // so only the last save survives.
+                    // Capture connectionId so stale queued actions are skipped
+                    // after a close/reconnect (same guard as messageQueue).
+                    const actionConnId = this.connectionId;
+                    this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
+                        if (this.connectionId !== actionConnId) return;
+                        return handleAgentActionExecuteRequest(event)
+                            .then(res => this.send(res))
+                            .catch(err => {
+                                logger(`AgentService: agent_action_execute failed: ${err}`, 1);
+                                this.send({
+                                    type: 'agent_action_execute_response',
+                                    request_id: event.request_id,
+                                    success: false,
+                                    error: String(err),
+                                    error_code: 'internal_error',
+                                });
                             });
-                        });
+                    });
                     break;
+                }
 
                 case 'deferred_approval_request':
                     logger("AgentService: Received deferred_approval_request", event, 1);
@@ -740,6 +753,7 @@ export class AgentService {
         this.callbacks = null;
         this.connectionId++;
         this.messageQueue = Promise.resolve();
+        this.actionExecutionQueue = Promise.resolve();
     }
 
     /**
