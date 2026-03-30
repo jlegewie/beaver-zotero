@@ -739,6 +739,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                                     isApplied,
                                                     action?.result_data?.undo_before_context,
                                                     action?.result_data?.undo_after_context,
+                                                    action?.proposed_data?.target_before_context,
+                                                    action?.proposed_data?.target_after_context,
                                                 );
                                             } else {
                                                 revealSource({ library_id: action?.proposed_data?.library_id, zotero_key: action?.proposed_data?.zotero_key });

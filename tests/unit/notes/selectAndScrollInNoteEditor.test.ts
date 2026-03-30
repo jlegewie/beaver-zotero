@@ -23,7 +23,28 @@ vi.mock('../../../react/atoms/auth', () => ({
 }));
 
 vi.mock('../../../react/components/agentRuns/EditNotePreview', () => ({
-    stripHtmlTags: vi.fn((s: string) => s),
+    stripHtmlTags: vi.fn((s: string) => s
+        .replace(
+            /<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\blabel="([^"]*)"(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi,
+            (match: string, label: string) => {
+                const pageMatch = match.match(/\bpage="([^"]*)"/);
+                if (!pageMatch || !pageMatch[1]) return label;
+                const suffix = `, page ${pageMatch[1]}`;
+                const locatorWithParen = /^(.*?)(,\s*(?:p{1,2}\.|page)\s+[^)]*)(\))$/i;
+                if (locatorWithParen.test(label)) {
+                    return label.replace(locatorWithParen, `$1${suffix}$3`);
+                }
+                const locatorPlain = /^(.*?)(,\s*(?:p{1,2}\.|page)\s+.*)$/i;
+                if (locatorPlain.test(label)) {
+                    return label.replace(locatorPlain, `$1${suffix}`);
+                }
+                return label.endsWith(')')
+                    ? label.slice(0, -1) + `${suffix})`
+                    : `${label}${suffix}`;
+            }
+        )
+        .replace(/<(?:[^>"']|"[^"]*"|'[^']*')+>/g, '')
+    ),
     computeDiff: vi.fn(),
 }));
 
@@ -55,6 +76,7 @@ vi.mock('../../../react/utils/stringUtils', () => ({
 // =============================================================================
 
 import {
+    openNoteAndSearchEdit,
     selectAndScrollInNoteEditor,
     buildEditorTextMap,
     resolveRangeInTextMap,
@@ -62,6 +84,7 @@ import {
     getNoteEditorView,
     stripEllipsis,
 } from '../../../react/utils/sourceUtils';
+import { computeDiff } from '../../../react/components/agentRuns/EditNotePreview';
 
 // =============================================================================
 // Helpers
@@ -93,6 +116,48 @@ function createMockDOMWithText(texts: string[]): HTMLElement {
     } as unknown as HTMLElement;
 
     return editorDOM;
+}
+
+/**
+ * Create a mock DOM tree with block elements containing text nodes.
+ * Each entry in `blocks` produces a separate `<p>` (or custom tag) element
+ * whose children are the specified text nodes.
+ *
+ * Example: createMockDOMWithBlocks([['Hello '], ['World']])
+ *   → <editorDOM><p>Hello </p><p>World</p></editorDOM>
+ */
+function createMockDOMWithBlocks(
+    blocks: Array<{ tag?: string; texts: string[] }>,
+): HTMLElement {
+    const editorDOM = { tagName: 'DIV' } as any;
+
+    // Build text nodes with proper parentNode references
+    const allTextNodes: any[] = [];
+    for (const block of blocks) {
+        const blockEl = { tagName: (block.tag || 'P').toUpperCase(), parentNode: editorDOM };
+        for (const t of block.texts) {
+            allTextNodes.push({
+                nodeType: 3,
+                textContent: t,
+                parentNode: blockEl,
+            });
+        }
+    }
+
+    let walkIdx = -1;
+    const mockTreeWalker = {
+        get currentNode() { return allTextNodes[walkIdx]; },
+        nextNode() {
+            walkIdx++;
+            return walkIdx < allTextNodes.length ? allTextNodes[walkIdx] : null;
+        },
+    };
+
+    editorDOM.ownerDocument = {
+        createTreeWalker: vi.fn(() => mockTreeWalker),
+    };
+
+    return editorDOM as unknown as HTMLElement;
 }
 
 /**
@@ -290,6 +355,56 @@ describe('buildEditorTextMap', () => {
         buildEditorTextMap(dom);
         expect(dom.ownerDocument.createTreeWalker).toHaveBeenCalledWith(dom, 4);
     });
+
+    it('inserts space separator between different block elements', () => {
+        const dom = createMockDOMWithBlocks([
+            { texts: ['Hello'] },
+            { texts: ['World'] },
+        ]);
+        const result = buildEditorTextMap(dom);
+        expect(result.fullText).toBe('Hello World');
+        expect(result.textNodes).toHaveLength(2);
+        // Second text node starts after "Hello" + virtual space
+        expect(result.textNodes[0].start).toBe(0);
+        expect(result.textNodes[1].start).toBe(6);
+    });
+
+    it('does not insert separator between text nodes in the same block', () => {
+        const dom = createMockDOMWithBlocks([
+            { texts: ['Hello ', 'World'] },
+        ]);
+        const result = buildEditorTextMap(dom);
+        expect(result.fullText).toBe('Hello World');
+        expect(result.textNodes).toHaveLength(2);
+        expect(result.textNodes[0].start).toBe(0);
+        expect(result.textNodes[1].start).toBe(6);
+    });
+
+    it('inserts separator between paragraph and heading blocks', () => {
+        const dom = createMockDOMWithBlocks([
+            { tag: 'P', texts: ['end of paragraph.'] },
+            { tag: 'H2', texts: ['Section Title'] },
+            { tag: 'P', texts: ['start of next.'] },
+        ]);
+        const result = buildEditorTextMap(dom);
+        expect(result.fullText).toBe('end of paragraph. Section Title start of next.');
+    });
+
+    it('handles citation at end of paragraph followed by new paragraph', () => {
+        // Simulates: <p>...analysis. (Hommel et al., 2022)</p><p>Content Validity:...</p>
+        const dom = createMockDOMWithBlocks([
+            { texts: ['analysis. ', '(Hommel et al., 2022)'] },
+            { texts: ['Content Validity: Two independent'] },
+        ]);
+        const result = buildEditorTextMap(dom);
+        expect(result.fullText).toBe(
+            'analysis. (Hommel et al., 2022) Content Validity: Two independent'
+        );
+        // The search text from extractTargetContextSearches would include
+        // a space between the citation and the next paragraph's content,
+        // which now matches the fullText.
+        expect(result.fullText.indexOf('(Hommel et al., 2022) Content')).toBeGreaterThan(-1);
+    });
 });
 
 // =============================================================================
@@ -365,6 +480,23 @@ describe('resolveRangeInTextMap', () => {
         expect(result!.startOffset).toBe(0);
         expect(result!.endNode).toBe(textNodes[1].node);
         expect(result!.endOffset).toBe(5);
+    });
+
+    it('clamps offset to 0 when startIdx falls on a virtual block separator', () => {
+        // Simulate: "Hello" (0-4) + virtual space at 5 + "World" (6-10)
+        const n1 = { textContent: 'Hello' };
+        const n2 = { textContent: 'World' };
+        const textNodes = [
+            { node: n1 as unknown as Node, start: 0 },
+            { node: n2 as unknown as Node, start: 6 },
+        ];
+        // startIdx=5 is the virtual separator — between nodes
+        const result = resolveRangeInTextMap(textNodes, 5, 10);
+        expect(result).not.toBeNull();
+        expect(result!.startNode).toBe(n2);
+        expect(result!.startOffset).toBe(0); // clamped from -1 to 0
+        expect(result!.endNode).toBe(n2);
+        expect(result!.endOffset).toBe(4);
     });
 });
 
@@ -963,6 +1095,171 @@ describe('selectAndScrollInNoteEditor', () => {
         // But wait — the code checks uniqueness first, and "beta" IS unique,
         // so it goes to the "unique" branch directly.
         expect(result).toBe(true);
+    });
+});
+
+// =============================================================================
+// Tests: openNoteAndSearchEdit
+// =============================================================================
+
+describe('openNoteAndSearchEdit', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.mocked(computeDiff).mockReturnValue([]);
+        (globalThis as any).Zotero = {
+            ...(globalThis as any).Zotero,
+            Items: {
+                getIDFromLibraryAndKey: vi.fn(() => 1),
+            },
+            Notes: {},
+        };
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('uses target text context to select the intended duplicate citation occurrence', async () => {
+        const fullText = 'Intro citation. Methods citation target area.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            'citation',
+            'citation page 1',
+            false,
+            undefined,
+            undefined,
+            'Methods ',
+            ' target area.',
+        );
+
+        const secondCitationStart = fullText.indexOf('citation', fullText.indexOf('citation') + 1);
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(expect.anything(), secondCitationStart, secondCitationStart + 'citation'.length);
+    });
+
+    it('uses full applied target text for context search while selecting the narrower changed fragment', async () => {
+        vi.mocked(computeDiff).mockReturnValue([
+            {
+                type: 'addition',
+                text: 'citation page 1',
+                segments: [
+                    { text: 'citation ', highlighted: false },
+                    { text: 'page 1', highlighted: true },
+                ],
+            },
+        ]);
+
+        const fullText = 'Intro citation. Methods citation page 1 target area.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            'citation',
+            'citation page 1',
+            true,
+            undefined,
+            undefined,
+            'Methods ',
+            ' target area.',
+        );
+
+        const editedSelectStart = fullText.indexOf('page 1');
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(
+            expect.anything(),
+            editedSelectStart,
+            editedSelectStart + 'page 1'.length
+        );
+    });
+
+    it('retries alternate citation page wording variants before falling back to old citation text', async () => {
+        vi.mocked(computeDiff).mockReturnValue([
+            {
+                type: 'addition',
+                text: 'citation p. 1',
+                segments: [
+                    { text: 'citation ', highlighted: false },
+                    { text: 'p. 1', highlighted: true },
+                ],
+            },
+        ]);
+
+        const fullText = 'Intro (Hommel et al., 2022). Target (Hommel et al., 2022, page 1) area.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            '<citation item_id="1-F8E4GHHW" label="(Hommel et al., 2022)" ref="c_F8E4GHHW_0"/>',
+            '<citation item_id="1-F8E4GHHW" label="(Hommel et al., 2022)" ref="c_F8E4GHHW_0" page="1"/>',
+            true,
+            undefined,
+            undefined,
+            'Target ',
+            ' area.',
+        );
+
+        const targetStart = fullText.indexOf('(Hommel et al., 2022, page 1)');
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(
+            expect.anything(),
+            targetStart,
+            targetStart + '(Hommel et al., 2022, page 1)'.length
+        );
+    });
+
+    it('replaces an existing trailing citation locator instead of appending a second one', async () => {
+        vi.mocked(computeDiff).mockReturnValue([]);
+
+        const fullText = 'Intro (Hommel et al., 2022, p. 10). Target (Hommel et al., 2022, page 25) area.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            '<citation item_id="1-F8E4GHHW" label="(Hommel et al., 2022, p. 10)" ref="c_F8E4GHHW_0"/>',
+            '<citation item_id="1-F8E4GHHW" label="(Hommel et al., 2022, p. 10)" ref="c_F8E4GHHW_0" page="25"/>',
+            true,
+            undefined,
+            undefined,
+            'Target ',
+            ' area.',
+        );
+
+        const targetStart = fullText.indexOf('(Hommel et al., 2022, page 25)');
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(
+            expect.anything(),
+            targetStart,
+            targetStart + '(Hommel et al., 2022, page 25)'.length
+        );
+    });
+
+    it('does not fall back to newString when the action is not applied', async () => {
+        vi.mocked(computeDiff).mockReturnValue([]);
+
+        const fullText = 'Only the new text is present here.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            'missing old text',
+            'new text',
+            false,
+        );
+
+        expect(TextSelectionClass.create).not.toHaveBeenCalled();
     });
 });
 

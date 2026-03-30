@@ -19,6 +19,11 @@ import {
     getLatestNoteHtml,
     validateNewString,
     findFuzzyMatch,
+    findUniqueRawMatchPosition,
+    captureValidatedEditTargetContext,
+    decodeHtmlEntities,
+    encodeTextEntities,
+    ENTITY_FORMS,
 } from '../../utils/noteHtmlSimplifier';
 
 
@@ -1270,7 +1275,8 @@ async function validateEditNoteAction(
     }
 
     // 9. Simplify note
-    const { simplified, metadata } = getOrSimplify(`${library_id}-${zotero_key}`, rawHtml, library_id);
+    const noteId = `${library_id}-${zotero_key}`;
+    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, library_id);
 
     // 10. Validate new_string tags
     const validationError = validateNewString(new_string, metadata);
@@ -1302,9 +1308,32 @@ async function validateEditNoteAction(
         };
     }
 
-    // 12. Strip data-citation-items from raw HTML and count occurrences
+    // 12. Count occurrences — if zero, retry with entity-decoded or entity-encoded
+    // strings. PM may have decoded entities (&#x27; → ') since the model read the
+    // note, or the model may have used literal chars while the note has entities.
     const strippedHtml = stripDataCitationItems(rawHtml);
-    const matchCount = countOccurrences(strippedHtml, expandedOld);
+    let matchCount = countOccurrences(strippedHtml, expandedOld);
+    if (matchCount === 0) {
+        // Forward: model used &#x27; but note has ' (PM decoded)
+        const decodedOld = decodeHtmlEntities(expandedOld);
+        if (decodedOld !== expandedOld && countOccurrences(strippedHtml, decodedOld) > 0) {
+            expandedOld = decodedOld;
+            expandedNew = decodeHtmlEntities(expandedNew);
+            matchCount = countOccurrences(strippedHtml, expandedOld);
+        }
+    }
+    if (matchCount === 0) {
+        // Reverse: model used ' but note has entity-encoded form (pre-PM).
+        for (const form of ENTITY_FORMS) {
+            const encodedOld = encodeTextEntities(expandedOld, form);
+            if (encodedOld !== expandedOld && countOccurrences(strippedHtml, encodedOld) > 0) {
+                expandedOld = encodedOld;
+                expandedNew = encodeTextEntities(expandedNew, form);
+                matchCount = countOccurrences(strippedHtml, expandedOld);
+                break;
+            }
+        }
+    }
 
     // 13. Zero matches — fuzzy match on simplified HTML
     if (matchCount === 0) {
@@ -1320,20 +1349,60 @@ async function validateEditNoteAction(
         };
     }
 
-    // 14. Multiple matches without replace_all
+    // 14. Multiple matches without replace_all — accept only when the match is
+    //     either uniquely identifiable without relying on ref stability, or
+    //     can be captured now and re-located later via surrounding context.
     if (matchCount > 1 && !replace_all) {
+        const rawPos = findUniqueRawMatchPosition(
+            strippedHtml, simplified, old_string, expandedOld, metadata
+        );
+        let normalizedActionData: EditNoteProposedData | undefined;
+
+        if (rawPos === null) {
+            const targetContext = captureValidatedEditTargetContext(
+                strippedHtml, simplified, old_string, expandedOld, metadata
+            );
+
+            if (targetContext) {
+                normalizedActionData = {
+                    ...request.action_data as EditNoteProposedData,
+                    target_before_context: targetContext.beforeContext,
+                    target_after_context: targetContext.afterContext,
+                };
+            }
+        }
+
+        if (rawPos === null && normalizedActionData === undefined) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `The string to replace was found ${matchCount} times in the note. `
+                    + 'Use replace_all to replace all occurrences, or include more context to make the match unique.',
+                error_code: 'ambiguous_match',
+                preference: 'always_ask',
+            };
+        }
+
+        const noteTitle = item.getNoteTitle() || '(untitled)';
+        const totalLines = simplified.split('\n').length;
+        const preference = getDeferredToolPreference('edit_note');
+
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
-            valid: false,
-            error: `The string to replace was found ${matchCount} times in the note. `
-                + 'Use replace_all to replace all occurrences, or include more context to make the match unique.',
-            error_code: 'ambiguous_match',
-            preference: 'always_ask',
+            valid: true,
+            current_value: {
+                note_title: noteTitle,
+                total_lines: totalLines,
+                match_count: matchCount,
+            },
+            normalized_action_data: normalizedActionData,
+            preference,
         };
     }
 
-    // 15. Valid — return current value
+    // 14. Valid — return current value
     const noteTitle = item.getNoteTitle() || '(untitled)';
     const totalLines = simplified.split('\n').length;
 

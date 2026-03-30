@@ -1253,3 +1253,140 @@ Apply an edit via Beaver, then modify the note externally (via Zotero editor or 
 #### Test result
 
 - **Date**: 2026-03-27 | **Result**: NOT RUN — Requires manual external modification + retry with modal dialog. Skipped for time.
+
+---
+
+## Category 14: HTML Entity Encoding Undo
+
+These tests verify that undo works correctly when a note contains HTML-encoded entities (e.g., `&#x27;` for apostrophe, `&quot;` for double quote). ProseMirror normalizes these entities to their literal characters when the note is opened in the editor, which can cause a mismatch between the stored undo data and the actual note HTML.
+
+### Setup (shared by both tests)
+
+Create a new child note with HTML entities via the Zotero MCP or API (the note must NOT be open in the editor when created, otherwise PM will normalize the entities immediately):
+
+```js
+const note = new Zotero.Item('note');
+note.libraryID = 1;
+note.parentKey = '<PARENT_KEY>'; // e.g., F8E4GHHW
+const html = `<div data-schema-version="9"><h1>Test Note: HTML Entity Encoding</h1>
+<p>Sayeh Dashti&#x27;s memoir <em>You Belong</em> recounts her mother&#x27;s encounter with African American women.</p>
+<p>The mother declared: &quot;We love our blacks... Our blacks are members of our families&quot; (p. 9).</p>
+<p>Yet, as Motlagh notes, Dashti&#x27;s own description reveals these individuals came into the family as part of her aunt&#x27;s dowry\u2014&quot;suggesting that the family understood them as property first and humans second&quot; (p. 10).</p>
+<p>The word &#x27;Persian&#x27; functions as a &quot;racial talisman&quot; that masks a long history.</p>
+</div>`;
+note.setNote(html);
+await note.saveTx();
+// Note the key for the prompt below
+```
+
+### Test 14.1: Edit with literal apostrophe — model uses entity-encoded form
+
+In this test, the prompt uses a literal `'` in the edit instruction, but after reading the note the model typically converts it to `&#x27;` to match the note HTML. This tests that undo works when the undo data contains `&#x27;` but PM has normalized the note to use `'`.
+
+#### Steps
+1. Make sure you are in **library view** (not reading a PDF)
+2. Create a new note using the setup above; note its key
+3. Send the following prompt:
+   ```
+   Please make the following edit to note `1-<KEY>`:
+   Replace "Sayeh Dashti's memoir" with "Sayeh Dashti's MEMOIR"
+   ```
+   (Note: the prompt uses literal `'`, not `&#x27;`)
+4. **Apply** the edit
+5. Verify the note now shows "MEMOIR" (uppercased)
+6. **Undo** the edit
+7. Verify the note is restored with "memoir" (lowercased)
+8. **Apply** again to confirm the full roundtrip works
+
+#### What this tests
+- The model often reads the note and uses `&#x27;` in its `old_string`/`new_string` to match the raw HTML
+- After the edit is applied, PM normalizes `&#x27;` to `'` in the note
+- Undo must handle the entity mismatch between stored undo data (`&#x27;`) and current note HTML (`'`)
+
+#### Additional variants that should also pass
+
+These are targeted regression checks for the validation and reverse-matching gaps. Run them as separate fresh-note cases under the same test.
+
+##### Variant A: Validation path must accept literal `'` when note HTML uses `&#x27;`
+1. Re-create the shared setup note exactly as written above, without opening it first in the editor
+2. Send this prompt:
+   ```
+   Please make the following edit to note `1-<KEY>`:
+   Replace "Sayeh Dashti's memoir" with "Sayeh Dashti's BOOK"
+   ```
+3. Confirm the agent run reaches an actionable `edit_note` preview instead of failing early with `old_string_not_found`
+4. Apply, Undo, and Re-Apply as in the base test
+
+Expected result:
+- Validation succeeds on the first attempt
+- No `old_string_not_found` error appears before the action preview
+- The edit roundtrip succeeds even though the prompt used literal `'` and the stored note HTML used `&#x27;`
+
+##### Variant B: Reverse matching must also handle `&#39;` and `&apos;`
+1. Create a fresh child note, but change the first paragraph in the setup HTML to use one of these alternative apostrophe encodings instead of `&#x27;`:
+   ```html
+   <p>Sayeh Dashti&#39;s memoir <em>You Belong</em> recounts her mother&#39;s encounter with African American women.</p>
+   ```
+   or
+   ```html
+   <p>Sayeh Dashti&apos;s memoir <em>You Belong</em> recounts her mother&apos;s encounter with African American women.</p>
+   ```
+2. Send this prompt:
+   ```
+   Please make the following edit to note `1-<KEY>`:
+   Replace "Sayeh Dashti's memoir" with "Sayeh Dashti's BOOK"
+   ```
+3. Verify the run reaches an `edit_note` preview and does not fail with `old_string_not_found`
+4. Apply, Undo, and Re-Apply
+
+Expected result:
+- The edit succeeds for both `&#39;` and `&apos;` note variants
+- Undo also succeeds after PM normalizes the note to literal apostrophes
+
+##### Variant C: Reverse matching must also handle `&#34;` for double quotes
+1. Create a fresh child note, but change the second paragraph in the setup HTML to use `&#34;` instead of `&quot;`:
+   ```html
+   <p>The mother declared: &#34;We love our blacks... Our blacks are members of our families&#34; (p. 9).</p>
+   ```
+2. Send this prompt:
+   ```
+   Please make the following edit to note `1-<KEY>`:
+   Replace "The mother declared: "We love our blacks... Our blacks are members of our families"" with "The mother declared: "We considered them part of the household""
+   ```
+3. Verify the run reaches an `edit_note` preview rather than failing with `old_string_not_found`
+4. Apply, Undo, and Re-Apply
+
+Expected result:
+- The edit succeeds even when the stored note uses `&#34;` instead of `&quot;`
+- Undo restores the original quoted sentence correctly
+
+#### Test result
+
+- **Date**: | **Result**:
+
+### Test 14.2: Edit with literal apostrophe — model forced to use literal form
+
+In this test, the prompt explicitly instructs the model to use a literal `'` (not escaped). This tests that the edit and undo work when the `old_string`/`new_string` use `'` but the note HTML contains `&#x27;`.
+
+#### Steps
+1. Make sure you are in **library view** (not reading a PDF)
+2. Create a new note using the setup above; note its key
+3. Send the following prompt:
+   ```
+   This is a test. Please make the following edit to note `1-<KEY>`. Make sure that you use `Dashti's` with `'` (not escaped), which is essential for the test to work. Here is the edit:
+   Replace "Sayeh Dashti's memoir" with "Sayeh Dashti's MEMOIR"
+   ```
+4. **Apply** the edit
+5. Verify the note now shows "MEMOIR" (uppercased)
+6. **Undo** the edit
+7. Verify the note is restored with "memoir" (lowercased)
+8. **Apply** again to confirm the full roundtrip works
+
+#### What this tests
+- The `old_string` uses literal `'` but the note HTML has `&#x27;` — the edit must still find and replace the target
+- After PM normalizes, undo data and note HTML should both use `'`, so undo should work straightforwardly
+- This is the complementary case to Test 14.1 (entity mismatch at edit time vs. at undo time)
+
+#### Test result
+
+- **Date**: | **Result**:

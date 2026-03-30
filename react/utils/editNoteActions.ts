@@ -17,10 +17,15 @@ import {
     invalidateSimplificationCache,
     checkDuplicateCitations,
     findFuzzyMatch,
+    findUniqueRawMatchPosition,
+    findTargetRawMatchPosition,
     preloadPageLabelsForNewCitations,
     findRangeByContexts,
     waitForPMNormalization,
     hasSchemaVersionWrapper,
+    decodeHtmlEntities,
+    encodeTextEntities,
+    ENTITY_FORMS,
 } from '../../src/utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from './sourceUtils';
 import { store } from '../store';
@@ -168,12 +173,27 @@ const UNDO_CONTEXT_LENGTH = 200;
 export async function executeEditNoteAction(
     action: AgentAction
 ): Promise<EditNoteResultData> {
-    const { library_id, zotero_key, old_string, new_string, replace_all } = action.proposed_data as {
+    const {
+        library_id,
+        zotero_key,
+        old_string,
+        new_string,
+        replace_all,
+    } = action.proposed_data as {
         library_id: number;
         zotero_key: string;
         old_string: string;
         new_string: string;
         replace_all?: boolean;
+        target_before_context?: string;
+        target_after_context?: string;
+    };
+    let {
+        target_before_context,
+        target_after_context,
+    } = action.proposed_data as {
+        target_before_context?: string;
+        target_after_context?: string;
     };
 
     // 1. Load item
@@ -208,8 +228,36 @@ export async function executeEditNoteAction(
     // 6. Strip data-citation-items from raw HTML for matching
     const strippedHtml = stripDataCitationItems(oldHtml);
 
-    // 7. Count occurrences
-    const matchCount = countOccurrences(strippedHtml, expandedOld);
+    // 7. Count occurrences — if zero, retry with entity-decoded or entity-encoded
+    // strings. PM may have decoded entities (&#x27; → ') since the model read the
+    // note, or the model may have used literal chars while the note has entities.
+    let matchCount = countOccurrences(strippedHtml, expandedOld);
+    if (matchCount === 0) {
+        // Forward: model used &#x27; but note has ' (PM decoded)
+        const decodedOld = decodeHtmlEntities(expandedOld);
+        if (decodedOld !== expandedOld && countOccurrences(strippedHtml, decodedOld) > 0) {
+            expandedOld = decodedOld;
+            expandedNew = decodeHtmlEntities(expandedNew);
+            if (target_before_context != null) target_before_context = decodeHtmlEntities(target_before_context);
+            if (target_after_context != null) target_after_context = decodeHtmlEntities(target_after_context);
+            matchCount = countOccurrences(strippedHtml, expandedOld);
+        }
+    }
+    if (matchCount === 0) {
+        // Reverse: model used ' but note has entity-encoded form (pre-PM).
+        // Try all common entity spellings (&#x27;, &#39;, &apos;).
+        for (const form of ENTITY_FORMS) {
+            const encodedOld = encodeTextEntities(expandedOld, form);
+            if (encodedOld !== expandedOld && countOccurrences(strippedHtml, encodedOld) > 0) {
+                expandedOld = encodedOld;
+                expandedNew = encodeTextEntities(expandedNew, form);
+                if (target_before_context != null) target_before_context = encodeTextEntities(target_before_context, form);
+                if (target_after_context != null) target_after_context = encodeTextEntities(target_after_context, form);
+                matchCount = countOccurrences(strippedHtml, expandedOld);
+                break;
+            }
+        }
+    }
 
     // 8. Zero matches
     if (matchCount === 0) {
@@ -220,21 +268,16 @@ export async function executeEditNoteAction(
         );
     }
 
-    // 9. Multiple matches without replace_all
-    if (matchCount > 1 && !replace_all) {
-        throw new Error(
-            `The string to replace was found ${matchCount} times in the note. `
-            + 'Use replace_all to replace all occurrences, or include more context.'
-        );
-    }
-
-    // 10. Perform replacement and capture context
+    // 9. Perform replacement and capture context
     let newHtml: string;
     let undoBeforeContext: string | undefined;
     let undoAfterContext: string | undefined;
     let undoOccurrenceContexts: Array<{ before: string; after: string }> | undefined;
+    let replacementCount: number;
 
     if (replace_all) {
+        replacementCount = matchCount;
+
         // Capture per-occurrence context anchors before replacing
         undoOccurrenceContexts = [];
         let searchFrom = 0;
@@ -252,15 +295,45 @@ export async function executeEditNoteAction(
         }
         newHtml = strippedHtml.split(expandedOld).join(expandedNew);
     } else {
-        const idx = strippedHtml.indexOf(expandedOld);
+        replacementCount = 1;
+        let rawPos = -1;
+
+        // When expandedOld matches multiple times in raw HTML (e.g. duplicate citations),
+        // first use the conservative matcher, then fall back to the exact target
+        // context captured during validation.
+        if (matchCount > 1) {
+            rawPos = findUniqueRawMatchPosition(
+                strippedHtml, simplified, old_string, expandedOld, metadata
+            ) ?? -1;
+            if (rawPos === -1 && (
+                target_before_context !== undefined || target_after_context !== undefined
+            )) {
+                rawPos = findTargetRawMatchPosition(
+                    strippedHtml,
+                    expandedOld,
+                    target_before_context,
+                    target_after_context
+                ) ?? -1;
+            }
+        }
+
+        if (rawPos === -1) {
+            if (matchCount > 1) {
+                throw new Error(
+                    `The string to replace was found ${matchCount} times in the note. `
+                    + 'Use replace_all to replace all occurrences, or include more context.'
+                );
+            }
+            rawPos = strippedHtml.indexOf(expandedOld);
+        }
 
         // Capture surrounding context for robust undo of single-occurrence edits.
-        undoBeforeContext = strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx);
-        const afterStart = idx + expandedOld.length;
+        undoBeforeContext = strippedHtml.substring(Math.max(0, rawPos - UNDO_CONTEXT_LENGTH), rawPos);
+        const afterStart = rawPos + expandedOld.length;
         undoAfterContext = strippedHtml.substring(afterStart, afterStart + UNDO_CONTEXT_LENGTH);
 
-        newHtml = strippedHtml.substring(0, idx) + expandedNew
-            + strippedHtml.substring(idx + expandedOld.length);
+        newHtml = strippedHtml.substring(0, rawPos) + expandedNew
+            + strippedHtml.substring(afterStart);
     }
 
     // 10b. Add/update "Edited by Beaver" footer
@@ -282,7 +355,7 @@ export async function executeEditNoteAction(
     try {
         item.setNote(newHtml);
         await item.saveTx();
-        logger(`executeEditNoteAction: Saved note edit to ${noteId} (${matchCount} occurrence(s) replaced)`, 1);
+        logger(`executeEditNoteAction: Saved note edit to ${noteId} (${replacementCount} occurrence(s) replaced)`, 1);
     } catch (error) {
         // Restore in-memory state on save failure
         try {
@@ -306,7 +379,7 @@ export async function executeEditNoteAction(
     const result: EditNoteResultData = {
         library_id,
         zotero_key,
-        occurrences_replaced: matchCount,
+        occurrences_replaced: replacementCount,
         warnings,
         undo_old_html: expandedOld,
         undo_new_html: expandedNew,
@@ -398,15 +471,29 @@ export async function undoEditNoteAction(
 
     if (isDeletion) {
         // --- Deletion undo: use surrounding context to find insertion point ---
-        const beforeCtx = resultData?.undo_before_context;
-        const afterCtx = resultData?.undo_after_context;
-        const undoOldHtml = expandedOld!;
+        let beforeCtx = resultData?.undo_before_context;
+        let afterCtx = resultData?.undo_after_context;
+        let undoOldHtml = expandedOld!;
 
         if (beforeCtx === undefined && afterCtx === undefined) {
             throw new Error(
                 'Cannot undo deletion: no surrounding context stored in result_data. '
                 + 'This action was applied before deletion-undo support was added.'
             );
+        }
+
+        // PM may have decoded HTML entities (e.g. &#x27; → ') in the note.
+        // If context anchors aren't found as-is, try entity-decoded versions.
+        const seamRaw = (beforeCtx || '') + (afterCtx || '');
+        if (seamRaw && !strippedHtml.includes(seamRaw)) {
+            const decodedBefore = beforeCtx != null ? decodeHtmlEntities(beforeCtx) : undefined;
+            const decodedAfter = afterCtx != null ? decodeHtmlEntities(afterCtx) : undefined;
+            const seamDecoded = (decodedBefore || '') + (decodedAfter || '');
+            if (seamDecoded !== seamRaw && strippedHtml.includes(seamDecoded)) {
+                beforeCtx = decodedBefore;
+                afterCtx = decodedAfter;
+                undoOldHtml = decodeHtmlEntities(undoOldHtml);
+            }
         }
 
         // Check if already undone (old_string is back in the note) — context-aware
@@ -482,11 +569,24 @@ export async function undoEditNoteAction(
         }
     } else {
         // --- Non-deletion undo: reverse str-replace (new fragment → old fragment) ---
-        const undoOldHtml = expandedOld!;
-        const undoNewHtml = expandedNew!;
+        let undoOldHtml = expandedOld!;
+        let undoNewHtml = expandedNew!;
 
-        const beforeCtx = resultData?.undo_before_context;
-        const afterCtx = resultData?.undo_after_context;
+        let beforeCtx = resultData?.undo_before_context;
+        let afterCtx = resultData?.undo_after_context;
+
+        // PM may have decoded HTML entities (e.g. &#x27; → ') in the note
+        // since the undo data was stored. If the stored new_html isn't found,
+        // try entity-decoded versions so all subsequent matching works.
+        if (!strippedHtml.includes(undoNewHtml)) {
+            const decodedNew = decodeHtmlEntities(undoNewHtml);
+            if (decodedNew !== undoNewHtml && strippedHtml.includes(decodedNew)) {
+                undoNewHtml = decodedNew;
+                undoOldHtml = decodeHtmlEntities(undoOldHtml);
+                if (beforeCtx != null) beforeCtx = decodeHtmlEntities(beforeCtx);
+                if (afterCtx != null) afterCtx = decodeHtmlEntities(afterCtx);
+            }
+        }
 
         // 3-way detection — context-aware "already undone" check
         const newStringFound = strippedHtml.includes(undoNewHtml);
@@ -578,7 +678,17 @@ export async function undoEditNoteAction(
             if (replace_all) {
                 restoredHtml = strippedHtml.split(undoNewHtml).join(undoOldHtml);
             } else {
-                const idx = strippedHtml.indexOf(undoNewHtml);
+                let idx = strippedHtml.indexOf(undoNewHtml);
+                // When undoNewHtml appears more than once (e.g. after a disambiguated
+                // duplicate-citation edit made the target look like another citation),
+                // indexOf alone picks the first match which may be the wrong one.
+                // Use context anchors to find the correct occurrence.
+                if (idx !== -1 && beforeCtx && strippedHtml.indexOf(undoNewHtml, idx + undoNewHtml.length) !== -1) {
+                    const ctxRange = findRangeByContexts(strippedHtml, beforeCtx, afterCtx);
+                    if (ctxRange) {
+                        idx = ctxRange.start;
+                    }
+                }
                 restoredHtml = strippedHtml.substring(0, idx) + undoOldHtml
                     + strippedHtml.substring(idx + undoNewHtml.length);
             }

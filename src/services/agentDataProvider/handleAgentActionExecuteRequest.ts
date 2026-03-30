@@ -15,9 +15,14 @@ import {
     invalidateSimplificationCache,
     checkDuplicateCitations,
     findFuzzyMatch,
+    findUniqueRawMatchPosition,
+    findTargetRawMatchPosition,
     preloadPageLabelsForNewCitations,
     waitForPMNormalization,
     hasSchemaVersionWrapper,
+    decodeHtmlEntities,
+    encodeTextEntities,
+    ENTITY_FORMS,
 } from '../../utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from '../../../react/utils/sourceUtils';
 import { store } from '../../../react/store';
@@ -757,7 +762,17 @@ async function executeEditNoteAction(
     request: WSAgentActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const { library_id, zotero_key, old_string, new_string, replace_all } = request.action_data as EditNoteProposedData;
+    const {
+        library_id,
+        zotero_key,
+        old_string,
+        new_string,
+        replace_all,
+    } = request.action_data as EditNoteProposedData;
+    let {
+        target_before_context,
+        target_after_context,
+    } = request.action_data as EditNoteProposedData;
 
     // 1. Load item
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
@@ -803,8 +818,36 @@ async function executeEditNoteAction(
     // 6. Strip data-citation-items from raw HTML for matching
     const strippedHtml = stripDataCitationItems(oldHtml);
 
-    // 7. Count occurrences
-    const matchCount = countOccurrences(strippedHtml, expandedOld);
+    // 7. Count occurrences — if zero, retry with entity-decoded or entity-encoded
+    // strings. PM may have decoded entities (&#x27; → ') since the model read the
+    // note, or the model may have used literal chars while the note has entities.
+    let matchCount = countOccurrences(strippedHtml, expandedOld);
+    if (matchCount === 0) {
+        // Forward: model used &#x27; but note has ' (PM decoded)
+        const decodedOld = decodeHtmlEntities(expandedOld);
+        if (decodedOld !== expandedOld && countOccurrences(strippedHtml, decodedOld) > 0) {
+            expandedOld = decodedOld;
+            expandedNew = decodeHtmlEntities(expandedNew);
+            if (target_before_context != null) target_before_context = decodeHtmlEntities(target_before_context);
+            if (target_after_context != null) target_after_context = decodeHtmlEntities(target_after_context);
+            matchCount = countOccurrences(strippedHtml, expandedOld);
+        }
+    }
+    if (matchCount === 0) {
+        // Reverse: model used ' but note has entity-encoded form (pre-PM).
+        // Try all common entity spellings (&#x27;, &#39;, &apos;).
+        for (const form of ENTITY_FORMS) {
+            const encodedOld = encodeTextEntities(expandedOld, form);
+            if (encodedOld !== expandedOld && countOccurrences(strippedHtml, encodedOld) > 0) {
+                expandedOld = encodedOld;
+                expandedNew = encodeTextEntities(expandedNew, form);
+                if (target_before_context != null) target_before_context = encodeTextEntities(target_before_context, form);
+                if (target_after_context != null) target_after_context = encodeTextEntities(target_after_context, form);
+                matchCount = countOccurrences(strippedHtml, expandedOld);
+                break;
+            }
+        }
+    }
 
     // 8. Zero matches
     if (matchCount === 0) {
@@ -819,26 +862,17 @@ async function executeEditNoteAction(
         };
     }
 
-    // 9. Multiple matches without replace_all
-    if (matchCount > 1 && !replace_all) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: `The string to replace was found ${matchCount} times in the note. `
-                + 'Use replace_all to replace all occurrences, or include more context.',
-            error_code: 'ambiguous_match',
-        };
-    }
-
-    // 10. Perform replacement and capture context
+    // 9. Perform replacement and capture context
     let newHtml: string;
     let undoBeforeContext: string | undefined;
     let undoAfterContext: string | undefined;
     let undoOccurrenceContexts: Array<{ before: string; after: string }> | undefined;
     const UNDO_CONTEXT_LENGTH = 200;
+    let replacementCount: number;
 
     if (replace_all) {
+        replacementCount = matchCount;
+
         // Capture per-occurrence context anchors before replacing
         undoOccurrenceContexts = [];
         let searchFrom = 0;
@@ -856,15 +890,50 @@ async function executeEditNoteAction(
         }
         newHtml = strippedHtml.split(expandedOld).join(expandedNew);
     } else {
-        const idx = strippedHtml.indexOf(expandedOld);
+        replacementCount = 1;
+        let rawPos = -1;
+
+        // When expandedOld matches multiple times in raw HTML (e.g. duplicate citations),
+        // first use the conservative matcher, then fall back to the exact target
+        // context captured during validation.
+        if (matchCount > 1) {
+            rawPos = findUniqueRawMatchPosition(
+                strippedHtml, simplified, old_string, expandedOld, metadata
+            ) ?? -1;
+            if (rawPos === -1 && (
+                target_before_context !== undefined || target_after_context !== undefined
+            )) {
+                rawPos = findTargetRawMatchPosition(
+                    strippedHtml,
+                    expandedOld,
+                    target_before_context,
+                    target_after_context
+                ) ?? -1;
+            }
+        }
+
+        // Single raw match or disambiguation succeeded
+        if (rawPos === -1) {
+            if (matchCount > 1) {
+                return {
+                    type: 'agent_action_execute_response',
+                    request_id: request.request_id,
+                    success: false,
+                    error: `The string to replace was found ${matchCount} times in the note. `
+                        + 'Use replace_all to replace all occurrences, or include more context.',
+                    error_code: 'ambiguous_match',
+                };
+            }
+            rawPos = strippedHtml.indexOf(expandedOld);
+        }
 
         // Capture surrounding context for robust undo of single-occurrence edits.
-        undoBeforeContext = strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx);
-        const afterStart = idx + expandedOld.length;
+        undoBeforeContext = strippedHtml.substring(Math.max(0, rawPos - UNDO_CONTEXT_LENGTH), rawPos);
+        const afterStart = rawPos + expandedOld.length;
         undoAfterContext = strippedHtml.substring(afterStart, afterStart + UNDO_CONTEXT_LENGTH);
 
-        newHtml = strippedHtml.substring(0, idx) + expandedNew
-            + strippedHtml.substring(idx + expandedOld.length);
+        newHtml = strippedHtml.substring(0, rawPos) + expandedNew
+            + strippedHtml.substring(afterStart);
     }
 
     // 10b. Add/update "Edited by Beaver" footer
@@ -895,7 +964,7 @@ async function executeEditNoteAction(
     try {
         item.setNote(newHtml);
         await item.saveTx();
-        logger(`executeEditNoteAction: Saved note edit to ${noteId} (${matchCount} occurrence(s) replaced)`, 1);
+        logger(`executeEditNoteAction: Saved note edit to ${noteId} (${replacementCount} occurrence(s) replaced)`, 1);
     } catch (error) {
         // Restore in-memory state on save failure
         try {
@@ -942,7 +1011,7 @@ async function executeEditNoteAction(
         result_data: {
             library_id,
             zotero_key,
-            occurrences_replaced: matchCount,
+            occurrences_replaced: replacementCount,
             warnings,
             undo_old_html: expandedOld,
             undo_new_html: undoData.undo_new_html,

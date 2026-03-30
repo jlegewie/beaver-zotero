@@ -921,6 +921,12 @@ export interface WSAgentActionValidateResponse {
     errors?: FieldValidationErrorInfo[];
     /** Current value for before/after tracking. Shape depends on action_type. */
     current_value?: any;
+    /**
+     * Optional normalized action payload returned by validation.
+     * When present, the backend should persist and later execute this data
+     * instead of the original request action_data.
+     */
+    normalized_action_data?: Record<string, any>;
     preference: DeferredToolPreference;
 }
 

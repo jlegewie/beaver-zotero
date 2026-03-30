@@ -458,6 +458,7 @@ async function handleAgentActionValidateHttpRequest(request: any) {
         error: response.error,
         error_code: response.error_code,
         current_value: response.current_value,
+        normalized_action_data: response.normalized_action_data,
         preference: response.preference,
     };
 }

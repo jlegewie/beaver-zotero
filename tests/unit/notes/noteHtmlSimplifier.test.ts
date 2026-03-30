@@ -40,6 +40,9 @@ import {
     validateNewString,
     findFuzzyMatch,
     countOccurrences,
+    findUniqueRawMatchPosition,
+    captureValidatedEditTargetContext,
+    findTargetRawMatchPosition,
     checkDuplicateCitations,
     isNoteInEditor,
     getLatestNoteHtml,
@@ -697,6 +700,191 @@ describe('citation round-trips', () => {
         expect(tags).toHaveLength(2);
         expect(expandToRawHtml(tags[0], metadata, 'old')).toBe(raw);
         expect(expandToRawHtml(tags[1], metadata, 'old')).toBe(raw);
+    });
+
+    it('expand-before position: disambiguates 12 identical duplicate citations', () => {
+        // 12 identical citations — same item, no page locator
+        const raw = rawCitation('DUP', 1, '', '(Hommel et al., 2022)');
+        const paragraphs = Array.from({ length: 12 }, () => `<p>${raw}</p>`).join('');
+        const html = wrap(paragraphs);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        // Use content without wrapper (same as what simplified represents)
+        const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(html));
+
+        // All 12 have distinct refs
+        for (let i = 0; i < 12; i++) {
+            expect(simplified).toContain(`ref="c_DUP_${i}"`);
+        }
+
+        // All expand to identical raw HTML
+        const expandedOld = expandToRawHtml(
+            '<citation item_id="1-DUP" label="(Hommel et al., 2022)" ref="c_DUP_0"/>', metadata, 'old'
+        );
+        expect(countOccurrences(contentHtml, expandedOld)).toBe(12);
+
+        // Each ref is unique in simplified HTML, so expand-before gives the correct raw position
+        for (let i = 0; i < 12; i++) {
+            const oldStr = `<citation item_id="1-DUP" label="(Hommel et al., 2022)" ref="c_DUP_${i}"/>`;
+            const pos = simplified.indexOf(oldStr);
+            expect(pos).toBeGreaterThanOrEqual(0); // unique match
+
+            // Expand text before the match → its length is the content-level raw position
+            const expandedBefore = expandToRawHtml(
+                simplified.substring(0, pos), metadata, 'old'
+            );
+            const rawPos = expandedBefore.length;
+
+            // Verify correct citation is at this position
+            expect(contentHtml.substring(rawPos, rawPos + expandedOld.length)).toBe(expandedOld);
+
+            // Verify it's the right occurrence (i-th) by counting matches before rawPos
+            expect(countOccurrences(contentHtml.substring(0, rawPos), expandedOld)).toBe(i);
+        }
+    });
+
+    it('findUniqueRawMatchPosition stays conservative for ref-only duplicate citation matches', () => {
+        const raw = rawCitation('DUP', 1, '', '(Hommel et al., 2022)');
+        const html = wrap(Array.from({ length: 12 }, () => `<p>${raw}</p>`).join(''));
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const strippedHtml = stripDataCitationItems(html);
+        for (const ref of ['c_DUP_5', 'c_DUP_10'] as const) {
+            const oldStr = `<citation item_id="1-DUP" label="(Hommel et al., 2022)" ref="${ref}"/>`;
+            const expandedOld = expandToRawHtml(oldStr, metadata, 'old');
+
+            expect(findUniqueRawMatchPosition(
+                strippedHtml,
+                simplified,
+                oldStr,
+                expandedOld,
+                metadata
+            )).toBeNull();
+        }
+    });
+
+    it('findUniqueRawMatchPosition returns null when simplified match is still ambiguous', () => {
+        const raw = rawCitation('AMB', 1, '', 'Author, 2024');
+        const html = wrap(`<p>${raw}</p><p>${raw}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const strippedHtml = stripDataCitationItems(html);
+        const expandedOld = expandToRawHtml(
+            '<citation item_id="1-AMB" label="Author, 2024" ref="c_AMB_0"/>', metadata, 'old'
+        );
+
+        expect(findUniqueRawMatchPosition(
+            strippedHtml,
+            simplified,
+            'Author, 2024',
+            expandedOld,
+            metadata
+        )).toBeNull();
+    });
+
+    it('validation target context can relocate the intended duplicate citation after refs shift', () => {
+        const raw = rawCitation('DUP', 1, '', '(Hommel et al., 2022)');
+        const originalHtml = wrap(`<p>alpha</p><p>${raw}</p><p>${raw}</p><p>omega</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(originalHtml, 1);
+        const strippedOriginal = stripDataCitationItems(originalHtml);
+        const oldStr = '<citation item_id="1-DUP" label="(Hommel et al., 2022)" ref="c_DUP_1"/>';
+        const expandedOriginal = expandToRawHtml(oldStr, metadata, 'old');
+
+        const targetContext = captureValidatedEditTargetContext(
+            strippedOriginal,
+            simplified,
+            oldStr,
+            expandedOriginal,
+            metadata
+        );
+        expect(targetContext).not.toBeNull();
+
+        const shiftedHtml = wrap(`<p>${raw}</p><p>alpha</p><p>${raw}</p><p>${raw}</p><p>omega</p>`);
+        const { metadata: shiftedMetadata } = simplifyNoteHtml(shiftedHtml, 1);
+        const strippedShifted = stripDataCitationItems(shiftedHtml);
+        const expandedShifted = expandToRawHtml(oldStr, shiftedMetadata, 'old');
+
+        const rawPos = findTargetRawMatchPosition(
+            strippedShifted,
+            expandedShifted,
+            targetContext!.beforeContext,
+            targetContext!.afterContext
+        );
+
+        expect(rawPos).not.toBeNull();
+        expect(strippedShifted.substring(rawPos!, rawPos! + expandedShifted.length)).toBe(expandedShifted);
+        expect(countOccurrences(strippedShifted.substring(0, rawPos!), expandedShifted)).toBe(2);
+    });
+
+    it('expand-before position: works with mixed page locators', () => {
+        const rawNoPage = rawCitation('MIX', 1, '', 'Author, 2024');
+        const rawPage10 = rawCitation('MIX', 1, '10', 'Author, 2024, p. 10');
+        const html = wrap(
+            `<p>${rawNoPage}</p><p>${rawPage10}</p><p>${rawNoPage}</p><p>${rawNoPage}</p>`
+        );
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(html));
+
+        // Each citation ref is unique in simplified, so each resolves to a distinct raw position
+        const refs = ['c_MIX_0', 'c_MIX_1', 'c_MIX_2', 'c_MIX_3'];
+        const rawPositions: number[] = [];
+        for (const ref of refs) {
+            const tagRe = new RegExp(`<citation [^/]*ref="${ref}"[^/]*/>`);
+            const match = simplified.match(tagRe);
+            expect(match).toBeTruthy();
+            const pos = simplified.indexOf(match![0]);
+            const expandedBefore = expandToRawHtml(simplified.substring(0, pos), metadata, 'old');
+            rawPositions.push(expandedBefore.length);
+        }
+
+        // Positions should be strictly increasing (document order)
+        for (let i = 1; i < rawPositions.length; i++) {
+            expect(rawPositions[i]).toBeGreaterThan(rawPositions[i - 1]);
+        }
+
+        // Each position should point to a citation in contentHtml
+        for (const pos of rawPositions) {
+            expect(contentHtml.substring(pos, pos + 30)).toContain('class="citation"');
+        }
+    });
+
+    it('expand-before position: handles citation with surrounding text context', () => {
+        const raw = rawCitation('CTX', 1, '', 'Author, 2024');
+        const html = wrap(
+            `<p>foo ${raw} bar</p><p>baz ${raw} qux</p><p>foo ${raw} bar</p>`
+        );
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(html));
+
+        const expandedRaw = expandToRawHtml(
+            '<citation item_id="1-CTX" label="Author, 2024" ref="c_CTX_0"/>', metadata, 'old'
+        );
+        const expandedFooBar = `foo ${expandedRaw} bar`;
+
+        // "foo <rawHtml> bar" appears twice (c_CTX_0 and c_CTX_2), not c_CTX_1
+        expect(countOccurrences(contentHtml, expandedFooBar)).toBe(2);
+
+        // old_string for c_CTX_2 with surrounding text — unique in simplified
+        const oldStr = 'foo <citation item_id="1-CTX" label="Author, 2024" ref="c_CTX_2"/> bar';
+        const pos = simplified.indexOf(oldStr);
+        expect(pos).toBeGreaterThanOrEqual(0);
+
+        // Expand-before gives the content-level position of the second "foo ... bar" match
+        const expandedBefore = expandToRawHtml(simplified.substring(0, pos), metadata, 'old');
+        const rawPos = expandedBefore.length;
+        expect(contentHtml.substring(rawPos, rawPos + expandedFooBar.length)).toBe(expandedFooBar);
+
+        // It's the second occurrence (one "foo ... bar" before it)
+        expect(countOccurrences(contentHtml.substring(0, rawPos), expandedFooBar)).toBe(1);
+    });
+
+    it('round-trip fidelity: expandToRawHtml(simplified) matches content without wrapper', () => {
+        const cit1 = rawCitation('FID1', 1, '', 'Author, 2024');
+        const cit2 = rawCitation('FID2', 1, '42', 'Other, 2023, p. 42');
+        const html = wrap(`<p>Text ${cit1} middle ${cit2} end</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        // Simplified HTML has the wrapper stripped; expanding should match content without wrapper
+        const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(html));
+
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toBe(contentHtml);
     });
 
     it('updating page locator: simplify then expand with changed page rebuilds', () => {
@@ -1935,5 +2123,93 @@ describe('translatePageNumberToLabel', () => {
         mockPageLabels(labels);
         // "3, 5" → "340, 342"
         expect(translatePageNumberToLabel(ITEM_ID, '3, 5')).toBe('340, 342');
+    });
+});
+
+
+// =============================================================================
+// decodeHtmlEntities
+// =============================================================================
+
+import { decodeHtmlEntities } from '../../../src/utils/noteHtmlSimplifier';
+
+describe('decodeHtmlEntities', () => {
+    it('decodes &#x27; to apostrophe', () => {
+        expect(decodeHtmlEntities("Dashti&#x27;s")).toBe("Dashti's");
+    });
+
+    it('decodes &#39; (decimal) to apostrophe', () => {
+        expect(decodeHtmlEntities("Dashti&#39;s")).toBe("Dashti's");
+    });
+
+    it('decodes &apos; to apostrophe', () => {
+        expect(decodeHtmlEntities("Dashti&apos;s")).toBe("Dashti's");
+    });
+
+    it('decodes &quot; in text content but not in attributes', () => {
+        const input = 'said &quot;hello&quot; <a title="a &quot;b&quot;">link</a>';
+        const expected = 'said "hello" <a title="a &quot;b&quot;">link</a>';
+        expect(decodeHtmlEntities(input)).toBe(expected);
+    });
+
+    it('decodes numeric quote entities in text content but not in attributes', () => {
+        const input = 'said &#34;hello&#34; and &#x22;goodbye&#x22; <a title="a &#34;b&#34; and &#x22;c&#x22;">link</a>';
+        const expected = 'said "hello" and "goodbye" <a title="a &#34;b&#34; and &#x22;c&#x22;">link</a>';
+        expect(decodeHtmlEntities(input)).toBe(expected);
+    });
+
+    it('preserves &lt; &gt; &amp; (structural entities)', () => {
+        expect(decodeHtmlEntities('&lt;b&gt;bold&lt;/b&gt;')).toBe('&lt;b&gt;bold&lt;/b&gt;');
+        expect(decodeHtmlEntities('Smith &amp; Jones')).toBe('Smith &amp; Jones');
+    });
+
+    it('preserves numeric refs for structural chars (&#x3C; &#x3E; &#x26;)', () => {
+        expect(decodeHtmlEntities('&#x3C;b&#x3E;')).toBe('&#x3C;b&#x3E;');
+        expect(decodeHtmlEntities('&#60;b&#62;')).toBe('&#60;b&#62;');
+        expect(decodeHtmlEntities('&#x26;amp;')).toBe('&#x26;amp;');
+    });
+
+    it('handles supplementary-plane characters (above U+FFFF)', () => {
+        // 💡 = U+1F4A1
+        expect(decodeHtmlEntities('idea &#x1F4A1; here')).toBe('idea 💡 here');
+        // 😀 = U+1F600
+        expect(decodeHtmlEntities('&#x1F600;')).toBe('😀');
+    });
+
+    it('handles mixed entities in a realistic context anchor', () => {
+        const input = 'Dashti&#x27;s &quot;memoir&quot; and &#34;notes&#34;</p>\n<p><a href="link" title="a &quot;b&quot; and &#34;c&#34;">text</a>';
+        const expected = "Dashti's \"memoir\" and \"notes\"</p>\n<p><a href=\"link\" title=\"a &quot;b&quot; and &#34;c&#34;\">text</a>";
+        expect(decodeHtmlEntities(input)).toBe(expected);
+    });
+});
+
+
+// =============================================================================
+// encodeTextEntities
+// =============================================================================
+
+import { encodeTextEntities } from '../../../src/utils/noteHtmlSimplifier';
+
+describe('encodeTextEntities', () => {
+    it('encodes apostrophe to &#x27; in text', () => {
+        expect(encodeTextEntities("Dashti's")).toBe("Dashti&#x27;s");
+    });
+
+    it('encodes double quote to &quot; in text', () => {
+        expect(encodeTextEntities('said "hello"')).toBe('said &quot;hello&quot;');
+    });
+
+    it('does not encode quotes inside HTML tags', () => {
+        const input = "Dashti's <a href=\"link\" title=\"thing\">text</a>";
+        const expected = "Dashti&#x27;s <a href=\"link\" title=\"thing\">text</a>";
+        expect(encodeTextEntities(input)).toBe(expected);
+    });
+
+    it('roundtrips with decodeHtmlEntities for text content', () => {
+        const original = "Dashti&#x27;s &quot;memoir&quot;";
+        const decoded = decodeHtmlEntities(original);
+        expect(decoded).toBe("Dashti's \"memoir\"");
+        const reencoded = encodeTextEntities(decoded);
+        expect(reencoded).toBe(original);
     });
 });
