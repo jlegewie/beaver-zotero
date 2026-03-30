@@ -16,6 +16,8 @@ import {
     checkDuplicateCitations,
     findFuzzyMatch,
     findUniqueRawMatchPosition,
+    consumeValidatedEditTargetRawPosition,
+    clearValidatedEditTargetContext,
     preloadPageLabelsForNewCitations,
     waitForPMNormalization,
     hasSchemaVersionWrapper,
@@ -852,11 +854,22 @@ async function executeEditNoteAction(
         let rawPos = -1;
 
         // When expandedOld matches multiple times in raw HTML (e.g. duplicate citations),
-        // try to disambiguate using simplified HTML where citation refs make old_string unique.
+        // first use the conservative matcher, then fall back to the exact target
+        // context captured during validation.
         if (matchCount > 1) {
             rawPos = findUniqueRawMatchPosition(
                 strippedHtml, simplified, old_string, expandedOld, metadata
             ) ?? -1;
+            if (rawPos === -1) {
+                rawPos = consumeValidatedEditTargetRawPosition(
+                    noteId,
+                    old_string,
+                    new_string,
+                    replace_all,
+                    strippedHtml,
+                    expandedOld
+                ) ?? -1;
+            }
         }
 
         // Single raw match or disambiguation succeeded
@@ -873,6 +886,8 @@ async function executeEditNoteAction(
             }
             rawPos = strippedHtml.indexOf(expandedOld);
         }
+
+        clearValidatedEditTargetContext(noteId, old_string, new_string, replace_all);
 
         // Capture surrounding context for robust undo of single-occurrence edits.
         undoBeforeContext = strippedHtml.substring(Math.max(0, rawPos - UNDO_CONTEXT_LENGTH), rawPos);

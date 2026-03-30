@@ -41,6 +41,9 @@ import {
     findFuzzyMatch,
     countOccurrences,
     findUniqueRawMatchPosition,
+    captureValidatedEditTargetContext,
+    cacheValidatedEditTargetContext,
+    consumeValidatedEditTargetRawPosition,
     checkDuplicateCitations,
     isNoteInEditor,
     getLatestNoteHtml,
@@ -740,12 +743,12 @@ describe('citation round-trips', () => {
         }
     });
 
-    it('findUniqueRawMatchPosition rejects ref-only duplicate citation matches', () => {
+    it('findUniqueRawMatchPosition stays conservative for ref-only duplicate citation matches', () => {
         const raw = rawCitation('DUP', 1, '', '(Hommel et al., 2022)');
         const html = wrap(Array.from({ length: 12 }, () => `<p>${raw}</p>`).join(''));
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         const strippedHtml = stripDataCitationItems(html);
-        for (const ref of ['c_DUP_5', 'c_DUP_10']) {
+        for (const ref of ['c_DUP_5', 'c_DUP_10'] as const) {
             const oldStr = `<citation item_id="1-DUP" label="(Hommel et al., 2022)" ref="${ref}"/>`;
             const expandedOld = expandToRawHtml(oldStr, metadata, 'old');
 
@@ -775,6 +778,50 @@ describe('citation round-trips', () => {
             expandedOld,
             metadata
         )).toBeNull();
+    });
+
+    it('validation target context can relocate the intended duplicate citation after refs shift', () => {
+        const raw = rawCitation('DUP', 1, '', '(Hommel et al., 2022)');
+        const originalHtml = wrap(`<p>alpha</p><p>${raw}</p><p>${raw}</p><p>omega</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(originalHtml, 1);
+        const strippedOriginal = stripDataCitationItems(originalHtml);
+        const oldStr = '<citation item_id="1-DUP" label="(Hommel et al., 2022)" ref="c_DUP_1"/>';
+        const expandedOriginal = expandToRawHtml(oldStr, metadata, 'old');
+
+        const targetContext = captureValidatedEditTargetContext(
+            strippedOriginal,
+            simplified,
+            oldStr,
+            expandedOriginal,
+            metadata
+        );
+        expect(targetContext).not.toBeNull();
+
+        cacheValidatedEditTargetContext(
+            '1-NOTE0001',
+            oldStr,
+            '<citation item_id="1-DUP" label="(Hommel et al., 2022, p. 10)" ref="c_DUP_1"/>',
+            false,
+            targetContext!
+        );
+
+        const shiftedHtml = wrap(`<p>${raw}</p><p>alpha</p><p>${raw}</p><p>${raw}</p><p>omega</p>`);
+        const { metadata: shiftedMetadata } = simplifyNoteHtml(shiftedHtml, 1);
+        const strippedShifted = stripDataCitationItems(shiftedHtml);
+        const expandedShifted = expandToRawHtml(oldStr, shiftedMetadata, 'old');
+
+        const rawPos = consumeValidatedEditTargetRawPosition(
+            '1-NOTE0001',
+            oldStr,
+            '<citation item_id="1-DUP" label="(Hommel et al., 2022, p. 10)" ref="c_DUP_1"/>',
+            false,
+            strippedShifted,
+            expandedShifted
+        );
+
+        expect(rawPos).not.toBeNull();
+        expect(strippedShifted.substring(rawPos!, rawPos! + expandedShifted.length)).toBe(expandedShifted);
+        expect(countOccurrences(strippedShifted.substring(0, rawPos!), expandedShifted)).toBe(2);
     });
 
     it('expand-before position: works with mixed page locators', () => {

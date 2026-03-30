@@ -1133,6 +1133,268 @@ function findRefInsensitiveMatchPositions(haystack: string, needle: string): num
     return positions;
 }
 
+function findExactSimplifiedRawMatchPosition(
+    strippedHtml: string,
+    simplified: string,
+    oldString: string,
+    expandedOld: string,
+    metadata: SimplificationMetadata
+): number | null {
+    const simplifiedMatchPos = simplified.indexOf(oldString);
+    if (simplifiedMatchPos === -1) return null;
+
+    if (simplified.indexOf(oldString, simplifiedMatchPos + oldString.length) !== -1) {
+        return null;
+    }
+
+    try {
+        const expandedBefore = expandToRawHtml(
+            simplified.substring(0, simplifiedMatchPos), metadata, 'old'
+        );
+        // Simplified HTML strips the root wrapper div, so map the content-level
+        // offset back into the raw note HTML before verifying the match.
+        const unwrapped = stripNoteWrapperDiv(strippedHtml);
+        const wrapperPrefixLen = unwrapped !== strippedHtml
+            ? strippedHtml.indexOf('>') + 1 : 0;
+        const candidate = wrapperPrefixLen + expandedBefore.length;
+        return strippedHtml.substring(candidate, candidate + expandedOld.length) === expandedOld
+            ? candidate
+            : null;
+    } catch {
+        return null;
+    }
+}
+
+export interface EditTargetContext {
+    beforeContext: string;
+    afterContext: string;
+}
+
+const EDIT_TARGET_CONTEXT_LENGTH = 200;
+const VALIDATED_EDIT_TARGET_CACHE_LIMIT = 128;
+
+interface CachedValidatedEditTarget extends EditTargetContext {
+    createdAt: number;
+}
+
+const validatedEditTargetCache = new Map<string, CachedValidatedEditTarget[]>();
+
+function makeValidatedEditTargetCacheKey(
+    noteId: string,
+    oldString: string,
+    newString: string,
+    replaceAll?: boolean
+): string {
+    return `${noteId}:${quickHash(JSON.stringify({
+        oldString,
+        newString,
+        replaceAll: Boolean(replaceAll),
+    }))}`;
+}
+
+function pruneValidatedEditTargetCache(): void {
+    while (validatedEditTargetCache.size > VALIDATED_EDIT_TARGET_CACHE_LIMIT) {
+        const oldestKey = validatedEditTargetCache.keys().next().value;
+        if (oldestKey === undefined) break;
+        validatedEditTargetCache.delete(oldestKey);
+    }
+}
+
+export function cacheValidatedEditTargetContext(
+    noteId: string,
+    oldString: string,
+    newString: string,
+    replaceAll: boolean | undefined,
+    context: EditTargetContext
+): void {
+    const key = makeValidatedEditTargetCacheKey(noteId, oldString, newString, replaceAll);
+    const existing = validatedEditTargetCache.get(key) ?? [];
+    const deduped = existing.filter(
+        entry => entry.beforeContext !== context.beforeContext || entry.afterContext !== context.afterContext
+    );
+
+    deduped.push({
+        ...context,
+        createdAt: Date.now(),
+    });
+    validatedEditTargetCache.set(key, deduped);
+    pruneValidatedEditTargetCache();
+}
+
+export function clearValidatedEditTargetContext(
+    noteId: string,
+    oldString: string,
+    newString: string,
+    replaceAll?: boolean
+): void {
+    validatedEditTargetCache.delete(
+        makeValidatedEditTargetCacheKey(noteId, oldString, newString, replaceAll)
+    );
+}
+
+export function captureValidatedEditTargetContext(
+    strippedHtml: string,
+    simplified: string,
+    oldString: string,
+    expandedOld: string,
+    metadata: SimplificationMetadata
+): EditTargetContext | null {
+    const rawPos = findExactSimplifiedRawMatchPosition(
+        strippedHtml, simplified, oldString, expandedOld, metadata
+    );
+    if (rawPos === null) return null;
+
+    return {
+        beforeContext: strippedHtml.substring(
+            Math.max(0, rawPos - EDIT_TARGET_CONTEXT_LENGTH),
+            rawPos
+        ),
+        afterContext: strippedHtml.substring(
+            rawPos + expandedOld.length,
+            rawPos + expandedOld.length + EDIT_TARGET_CONTEXT_LENGTH
+        ),
+    };
+}
+
+export function findUniqueRangeByContexts(
+    currentHtml: string,
+    beforeCtx?: string,
+    afterCtx?: string
+): { start: number; end: number } | null {
+    const hasBefore = beforeCtx != null && beforeCtx.length > 0;
+    const hasAfter = afterCtx != null && afterCtx.length > 0;
+    let found: { start: number; end: number } | null = null;
+
+    const recordMatch = (start: number, end: number): boolean => {
+        if (found && (found.start !== start || found.end !== end)) {
+            found = null;
+            return false;
+        }
+        found = { start, end };
+        return true;
+    };
+
+    if (hasBefore && hasAfter) {
+        let searchFrom = 0;
+        while (true) {
+            const beforeIdx = currentHtml.indexOf(beforeCtx!, searchFrom);
+            if (beforeIdx === -1) break;
+            const start = beforeIdx + beforeCtx!.length;
+            const afterIdx = currentHtml.indexOf(afterCtx!, start);
+            if (afterIdx !== -1 && afterIdx >= start && !recordMatch(start, afterIdx)) {
+                return null;
+            }
+            searchFrom = beforeIdx + 1;
+        }
+        return found;
+    }
+
+    if (hasBefore) {
+        let searchFrom = 0;
+        while (true) {
+            const beforeIdx = currentHtml.indexOf(beforeCtx!, searchFrom);
+            if (beforeIdx === -1) break;
+            const start = beforeIdx + beforeCtx!.length;
+            if (!recordMatch(start, currentHtml.length)) {
+                return null;
+            }
+            searchFrom = beforeIdx + 1;
+        }
+        return found;
+    }
+
+    if (hasAfter) {
+        let searchFrom = 0;
+        while (true) {
+            const afterIdx = currentHtml.indexOf(afterCtx!, searchFrom);
+            if (afterIdx === -1) break;
+            if (!recordMatch(0, afterIdx)) {
+                return null;
+            }
+            searchFrom = afterIdx + 1;
+        }
+        return found;
+    }
+
+    return null;
+}
+
+function findUniqueRawPositionByContext(
+    currentHtml: string,
+    expandedOld: string,
+    beforeCtx?: string,
+    afterCtx?: string
+): number | null {
+    const positions = new Set<number>();
+    const hasBefore = beforeCtx != null && beforeCtx.length > 0;
+    const hasAfter = afterCtx != null && afterCtx.length > 0;
+
+    if (hasBefore && hasAfter) {
+        const range = findUniqueRangeByContexts(currentHtml, beforeCtx, afterCtx);
+        if (range && currentHtml.substring(range.start, range.end) === expandedOld) {
+            positions.add(range.start);
+        }
+    }
+
+    if (hasBefore) {
+        let searchFrom = 0;
+        while (true) {
+            const beforeIdx = currentHtml.indexOf(beforeCtx!, searchFrom);
+            if (beforeIdx === -1) break;
+            const start = beforeIdx + beforeCtx!.length;
+            if (currentHtml.substring(start, start + expandedOld.length) === expandedOld) {
+                positions.add(start);
+            }
+            searchFrom = beforeIdx + 1;
+        }
+    }
+
+    if (hasAfter) {
+        let searchFrom = 0;
+        while (true) {
+            const afterIdx = currentHtml.indexOf(afterCtx!, searchFrom);
+            if (afterIdx === -1) break;
+            const start = afterIdx - expandedOld.length;
+            if (start >= 0 && currentHtml.substring(start, afterIdx) === expandedOld) {
+                positions.add(start);
+            }
+            searchFrom = afterIdx + 1;
+        }
+    }
+
+    return positions.size === 1 ? Array.from(positions)[0] : null;
+}
+
+export function consumeValidatedEditTargetRawPosition(
+    noteId: string,
+    oldString: string,
+    newString: string,
+    replaceAll: boolean | undefined,
+    currentHtml: string,
+    expandedOld: string
+): number | null {
+    const key = makeValidatedEditTargetCacheKey(noteId, oldString, newString, replaceAll);
+    const cached = validatedEditTargetCache.get(key);
+    validatedEditTargetCache.delete(key);
+
+    if (!cached || cached.length === 0) return null;
+
+    const positions = new Set<number>();
+    for (const entry of cached) {
+        const rawPos = findUniqueRawPositionByContext(
+            currentHtml,
+            expandedOld,
+            entry.beforeContext,
+            entry.afterContext
+        );
+        if (rawPos !== null) {
+            positions.add(rawPos);
+        }
+    }
+
+    return positions.size === 1 ? Array.from(positions)[0] : null;
+}
+
 /**
  * Map a unique simplified old_string match back to its raw HTML position.
  *

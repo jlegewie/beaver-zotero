@@ -24,6 +24,10 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     validateNewString: vi.fn(() => null),
     findFuzzyMatch: vi.fn(() => null),
     findUniqueRawMatchPosition: vi.fn(() => null),
+    captureValidatedEditTargetContext: vi.fn(() => null),
+    cacheValidatedEditTargetContext: vi.fn(),
+    consumeValidatedEditTargetRawPosition: vi.fn(() => null),
+    clearValidatedEditTargetContext: vi.fn(),
     invalidateSimplificationCache: vi.fn(),
     checkDuplicateCitations: vi.fn(() => null),
     preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
@@ -98,6 +102,10 @@ import {
     validateNewString,
     findFuzzyMatch,
     findUniqueRawMatchPosition,
+    captureValidatedEditTargetContext,
+    cacheValidatedEditTargetContext,
+    consumeValidatedEditTargetRawPosition,
+    clearValidatedEditTargetContext,
     invalidateSimplificationCache,
     checkDuplicateCitations,
     rebuildDataCitationItems,
@@ -362,12 +370,16 @@ describe('validateEditNoteAction — failures', () => {
 
     it('duplicate-citation match is accepted when simplified position disambiguates it', async () => {
         vi.mocked(countOccurrences).mockReturnValueOnce(12);
-        vi.mocked(findUniqueRawMatchPosition).mockReturnValueOnce(123);
+        vi.mocked(captureValidatedEditTargetContext).mockReturnValueOnce({
+            beforeContext: 'before',
+            afterContext: 'after',
+        });
 
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
 
         expect(response.valid).toBe(true);
         expect(response.current_value?.match_count).toBe(12);
+        expect(cacheValidatedEditTargetContext).toHaveBeenCalled();
     });
 });
 
@@ -462,12 +474,13 @@ describe('executeEditNoteAction — failures', () => {
 
     it('duplicate-citation match executes when simplified position disambiguates it', async () => {
         vi.mocked(countOccurrences).mockReturnValueOnce(12);
-        vi.mocked(findUniqueRawMatchPosition).mockReturnValueOnce(123);
+        vi.mocked(consumeValidatedEditTargetRawPosition).mockReturnValueOnce(123);
 
         const response = await handleAgentActionExecuteRequest(makeExecuteRequest());
 
         expect(response.success).toBe(true);
         expect(response.result_data?.occurrences_replaced).toBe(1);
+        expect(clearValidatedEditTargetContext).toHaveBeenCalled();
     });
 
     it('wrapper_removed (data-schema-version missing after replacement)', async () => {

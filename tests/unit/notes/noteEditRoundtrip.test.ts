@@ -71,6 +71,8 @@ import {
     validateNewString,
     getLatestNoteHtml,
     normalizePageLocator,
+    captureValidatedEditTargetContext,
+    cacheValidatedEditTargetContext,
     SimplificationMetadata,
 } from '../../../src/utils/noteHtmlSimplifier';
 import { createCitationHTML } from '../../../src/utils/zoteroUtils';
@@ -1215,14 +1217,30 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         await expect(executeEditNoteAction(makeAction())).rejects.toThrow(/found 3 times/);
     });
 
-    it('execute rejects ref-only duplicate citation edits as ambiguous', async () => {
+    it('execute still rejects ref-only duplicate citation edits when surrounding context is not unique', async () => {
         const duplicateCitation = rawCitation('DUP', 1, '', 'Mock Title');
         const noteHtml = wrap(Array.from({ length: 12 }, () => `<p>${duplicateCitation}</p>`).join(''));
-        const { simplified } = simplifyNoteHtml(noteHtml, 1);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
         const targetCitationTag = simplified.match(/<citation [^>]*ref="c_DUP_10"[^>]*\/>/)?.[0];
         if (!targetCitationTag) {
             throw new Error('Expected duplicate citation to simplify to ref c_DUP_10');
         }
+        const newString = '<citation item_id="1-DUP" page="42" label="Mock Title, p. 42" ref="c_DUP_10"/>';
+        const targetContext = captureValidatedEditTargetContext(
+            stripDataCitationItems(noteHtml),
+            simplified,
+            targetCitationTag,
+            expandToRawHtml(targetCitationTag, metadata, 'old'),
+            metadata
+        );
+        expect(targetContext).not.toBeNull();
+        cacheValidatedEditTargetContext(
+            '1-NOTE0001',
+            targetCitationTag,
+            newString,
+            false,
+            targetContext!
+        );
 
         const item = makeMockItem(noteHtml);
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
@@ -1234,7 +1252,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
                 library_id: 1,
                 zotero_key: 'NOTE0001',
                 old_string: targetCitationTag,
-                new_string: '<citation item_id="1-DUP" page="42" label="Mock Title, p. 42" ref="c_DUP_10"/>',
+                new_string: newString,
             },
         }))).rejects.toThrow(/found 12 times/);
     });

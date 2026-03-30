@@ -20,6 +20,8 @@ import {
     validateNewString,
     findFuzzyMatch,
     findUniqueRawMatchPosition,
+    captureValidatedEditTargetContext,
+    cacheValidatedEditTargetContext,
 } from '../../utils/noteHtmlSimplifier';
 
 
@@ -1271,7 +1273,8 @@ async function validateEditNoteAction(
     }
 
     // 9. Simplify note
-    const { simplified, metadata } = getOrSimplify(`${library_id}-${zotero_key}`, rawHtml, library_id);
+    const noteId = `${library_id}-${zotero_key}`;
+    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, library_id);
 
     // 10. Validate new_string tags
     const validationError = validateNewString(new_string, metadata);
@@ -1321,12 +1324,28 @@ async function validateEditNoteAction(
         };
     }
 
-    // 14. Multiple matches without replace_all — try simplified-HTML disambiguation
-    //     Must mirror the same logic as executeEditNoteAction.
+    // 14. Multiple matches without replace_all — accept only when the match is
+    //     either uniquely identifiable without relying on ref stability, or
+    //     can be captured now and re-located later via surrounding context.
     if (matchCount > 1 && !replace_all) {
-        if (findUniqueRawMatchPosition(
+        const rawPos = findUniqueRawMatchPosition(
             strippedHtml, simplified, old_string, expandedOld, metadata
-        ) === null) {
+        );
+        const targetContext = captureValidatedEditTargetContext(
+            strippedHtml, simplified, old_string, expandedOld, metadata
+        );
+
+        if (targetContext) {
+            cacheValidatedEditTargetContext(
+                noteId,
+                old_string,
+                new_string,
+                replace_all,
+                targetContext
+            );
+        }
+
+        if (rawPos === null && targetContext === null) {
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
