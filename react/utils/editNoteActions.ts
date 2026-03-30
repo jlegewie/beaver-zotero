@@ -24,6 +24,7 @@ import {
     waitForPMNormalization,
     hasSchemaVersionWrapper,
     decodeHtmlEntities,
+    encodeTextEntities,
 } from '../../src/utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from './sourceUtils';
 import { store } from '../store';
@@ -226,17 +227,29 @@ export async function executeEditNoteAction(
     // 6. Strip data-citation-items from raw HTML for matching
     const strippedHtml = stripDataCitationItems(oldHtml);
 
-    // 7. Count occurrences — if zero, retry with entity-decoded strings.
-    // PM may have decoded HTML entities (e.g. &#x27; → ') since the model
-    // last read the note, so the proposed old_string no longer matches.
+    // 7. Count occurrences — if zero, retry with entity-decoded or entity-encoded
+    // strings. PM may have decoded entities (&#x27; → ') since the model read the
+    // note, or the model may have used literal chars while the note has entities.
     let matchCount = countOccurrences(strippedHtml, expandedOld);
     if (matchCount === 0) {
+        // Forward: model used &#x27; but note has ' (PM decoded)
         const decodedOld = decodeHtmlEntities(expandedOld);
         if (decodedOld !== expandedOld && countOccurrences(strippedHtml, decodedOld) > 0) {
             expandedOld = decodedOld;
             expandedNew = decodeHtmlEntities(expandedNew);
             if (target_before_context != null) target_before_context = decodeHtmlEntities(target_before_context);
             if (target_after_context != null) target_after_context = decodeHtmlEntities(target_after_context);
+            matchCount = countOccurrences(strippedHtml, expandedOld);
+        }
+    }
+    if (matchCount === 0) {
+        // Reverse: model used ' but note has &#x27; (pre-PM normalization)
+        const encodedOld = encodeTextEntities(expandedOld);
+        if (encodedOld !== expandedOld && countOccurrences(strippedHtml, encodedOld) > 0) {
+            expandedOld = encodedOld;
+            expandedNew = encodeTextEntities(expandedNew);
+            if (target_before_context != null) target_before_context = encodeTextEntities(target_before_context);
+            if (target_after_context != null) target_after_context = encodeTextEntities(target_after_context);
             matchCount = countOccurrences(strippedHtml, expandedOld);
         }
     }

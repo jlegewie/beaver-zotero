@@ -2176,3 +2176,34 @@ describe('decodeHtmlEntities', () => {
         expect(decodeHtmlEntities(input)).toBe(expected);
     });
 });
+
+
+// =============================================================================
+// encodeTextEntities
+// =============================================================================
+
+import { encodeTextEntities } from '../../../src/utils/noteHtmlSimplifier';
+
+describe('encodeTextEntities', () => {
+    it('encodes apostrophe to &#x27; in text', () => {
+        expect(encodeTextEntities("Dashti's")).toBe("Dashti&#x27;s");
+    });
+
+    it('encodes double quote to &quot; in text', () => {
+        expect(encodeTextEntities('said "hello"')).toBe('said &quot;hello&quot;');
+    });
+
+    it('does not encode quotes inside HTML tags', () => {
+        const input = "Dashti's <a href=\"link\" title=\"thing\">text</a>";
+        const expected = "Dashti&#x27;s <a href=\"link\" title=\"thing\">text</a>";
+        expect(encodeTextEntities(input)).toBe(expected);
+    });
+
+    it('roundtrips with decodeHtmlEntities for text content', () => {
+        const original = "Dashti&#x27;s &quot;memoir&quot;";
+        const decoded = decodeHtmlEntities(original);
+        expect(decoded).toBe("Dashti's \"memoir\"");
+        const reencoded = encodeTextEntities(decoded);
+        expect(reencoded).toBe(original);
+    });
+});

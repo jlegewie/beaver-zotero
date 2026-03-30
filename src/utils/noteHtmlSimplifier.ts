@@ -393,7 +393,7 @@ function unescapeAttr(s: string): string {
  */
 export function decodeHtmlEntities(s: string): string {
     // Phase 1: Decode numeric entities (except structural: & < >) and &apos;
-    let result = s
+    const result = s
         .replace(/&#x([0-9a-fA-F]+);/g, (match, hex) => {
             const code = parseInt(hex, 16);
             // Preserve structural HTML characters: & (0x26), < (0x3C), > (0x3E)
@@ -414,6 +414,21 @@ export function decodeHtmlEntities(s: string): string {
     const parts = result.split(/(<[^>]*>)/);
     for (let i = 0; i < parts.length; i += 2) {
         parts[i] = parts[i].replace(/&quot;/g, '"');
+    }
+    return parts.join('');
+}
+
+/**
+ * Encode apostrophes and quotes back to HTML entities in text segments.
+ * This is the reverse of what PM normalizes: ' → &#x27; and " → &quot;
+ * (only in text content, not inside HTML tags).
+ * Used when the model's old_string has literal chars but the note still
+ * has entity-encoded forms (before PM normalization).
+ */
+export function encodeTextEntities(s: string): string {
+    const parts = s.split(/(<[^>]*>)/);
+    for (let i = 0; i < parts.length; i += 2) {
+        parts[i] = parts[i].replace(/'/g, '&#x27;').replace(/"/g, '&quot;');
     }
     return parts.join('');
 }

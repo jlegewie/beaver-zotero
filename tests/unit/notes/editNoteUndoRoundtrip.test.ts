@@ -1298,6 +1298,23 @@ describe('whitespace and special character edge cases', () => {
         expect(item._getHtml()).not.toMatch(/<b>BOLD<\/b>/);
     });
 
+    it('apply works when model uses literal apostrophe but note has &#x27; (reverse direction)', async () => {
+        // The model was instructed to use literal ' but the note has &#x27;
+        const note = wrap(
+            '<p>Sayeh Dashti&#x27;s memoir <em>You Belong</em> recounts her story.</p>'
+        );
+        const { item, action } = await applyEdit({
+            noteHtml: note,
+            // Model uses literal ' — doesn't match &#x27; without the encode fallback
+            oldString: "Sayeh Dashti's memoir",
+            newString: "Sayeh Dashti's MEMOIR",
+        });
+
+        // Edit should succeed via encodeTextEntities fallback
+        expect(item._getHtml()).toContain('MEMOIR');
+        expect(item._getHtml()).not.toContain('memoir');
+    });
+
     it('edit with unicode characters', async () => {
         const note = wrap('<p>Résumé of François and naïve coöperation.</p>');
         const { item, action } = await applyEdit({
