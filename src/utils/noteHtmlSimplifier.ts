@@ -1171,66 +1171,6 @@ export interface EditTargetContext {
 }
 
 const EDIT_TARGET_CONTEXT_LENGTH = 200;
-const VALIDATED_EDIT_TARGET_CACHE_LIMIT = 128;
-
-interface CachedValidatedEditTarget extends EditTargetContext {
-    createdAt: number;
-}
-
-const validatedEditTargetCache = new Map<string, CachedValidatedEditTarget[]>();
-
-function makeValidatedEditTargetCacheKey(
-    noteId: string,
-    oldString: string,
-    newString: string,
-    replaceAll?: boolean
-): string {
-    return `${noteId}:${quickHash(JSON.stringify({
-        oldString,
-        newString,
-        replaceAll: Boolean(replaceAll),
-    }))}`;
-}
-
-function pruneValidatedEditTargetCache(): void {
-    while (validatedEditTargetCache.size > VALIDATED_EDIT_TARGET_CACHE_LIMIT) {
-        const oldestKey = validatedEditTargetCache.keys().next().value;
-        if (oldestKey === undefined) break;
-        validatedEditTargetCache.delete(oldestKey);
-    }
-}
-
-export function cacheValidatedEditTargetContext(
-    noteId: string,
-    oldString: string,
-    newString: string,
-    replaceAll: boolean | undefined,
-    context: EditTargetContext
-): void {
-    const key = makeValidatedEditTargetCacheKey(noteId, oldString, newString, replaceAll);
-    const existing = validatedEditTargetCache.get(key) ?? [];
-    const deduped = existing.filter(
-        entry => entry.beforeContext !== context.beforeContext || entry.afterContext !== context.afterContext
-    );
-
-    deduped.push({
-        ...context,
-        createdAt: Date.now(),
-    });
-    validatedEditTargetCache.set(key, deduped);
-    pruneValidatedEditTargetCache();
-}
-
-export function clearValidatedEditTargetContext(
-    noteId: string,
-    oldString: string,
-    newString: string,
-    replaceAll?: boolean
-): void {
-    validatedEditTargetCache.delete(
-        makeValidatedEditTargetCacheKey(noteId, oldString, newString, replaceAll)
-    );
-}
 
 export function captureValidatedEditTargetContext(
     strippedHtml: string,
@@ -1365,34 +1305,13 @@ function findUniqueRawPositionByContext(
     return positions.size === 1 ? Array.from(positions)[0] : null;
 }
 
-export function consumeValidatedEditTargetRawPosition(
-    noteId: string,
-    oldString: string,
-    newString: string,
-    replaceAll: boolean | undefined,
+export function findTargetRawMatchPosition(
     currentHtml: string,
-    expandedOld: string
+    expandedOld: string,
+    beforeCtx?: string,
+    afterCtx?: string,
 ): number | null {
-    const key = makeValidatedEditTargetCacheKey(noteId, oldString, newString, replaceAll);
-    const cached = validatedEditTargetCache.get(key);
-    validatedEditTargetCache.delete(key);
-
-    if (!cached || cached.length === 0) return null;
-
-    const positions = new Set<number>();
-    for (const entry of cached) {
-        const rawPos = findUniqueRawPositionByContext(
-            currentHtml,
-            expandedOld,
-            entry.beforeContext,
-            entry.afterContext
-        );
-        if (rawPos !== null) {
-            positions.add(rawPos);
-        }
-    }
-
-    return positions.size === 1 ? Array.from(positions)[0] : null;
+    return findUniqueRawPositionByContext(currentHtml, expandedOld, beforeCtx, afterCtx);
 }
 
 /**

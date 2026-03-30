@@ -20,6 +20,18 @@ export interface EditNoteProposedData {
     new_string: string;
     /** If true, replace all occurrences (default: false) */
     replace_all?: boolean;
+    /**
+     * Raw-note context immediately before the target fragment, taken from the
+     * stripped raw HTML (`stripDataCitationItems(rawHtml)`).
+     * Used to disambiguate duplicate raw matches during execution.
+     */
+    target_before_context?: string;
+    /**
+     * Raw-note context immediately after the target fragment, taken from the
+     * stripped raw HTML (`stripDataCitationItems(rawHtml)`).
+     * Used to disambiguate duplicate raw matches during execution.
+     */
+    target_after_context?: string;
 }
 
 /**

@@ -42,8 +42,7 @@ import {
     countOccurrences,
     findUniqueRawMatchPosition,
     captureValidatedEditTargetContext,
-    cacheValidatedEditTargetContext,
-    consumeValidatedEditTargetRawPosition,
+    findTargetRawMatchPosition,
     checkDuplicateCitations,
     isNoteInEditor,
     getLatestNoteHtml,
@@ -797,26 +796,16 @@ describe('citation round-trips', () => {
         );
         expect(targetContext).not.toBeNull();
 
-        cacheValidatedEditTargetContext(
-            '1-NOTE0001',
-            oldStr,
-            '<citation item_id="1-DUP" label="(Hommel et al., 2022, p. 10)" ref="c_DUP_1"/>',
-            false,
-            targetContext!
-        );
-
         const shiftedHtml = wrap(`<p>${raw}</p><p>alpha</p><p>${raw}</p><p>${raw}</p><p>omega</p>`);
         const { metadata: shiftedMetadata } = simplifyNoteHtml(shiftedHtml, 1);
         const strippedShifted = stripDataCitationItems(shiftedHtml);
         const expandedShifted = expandToRawHtml(oldStr, shiftedMetadata, 'old');
 
-        const rawPos = consumeValidatedEditTargetRawPosition(
-            '1-NOTE0001',
-            oldStr,
-            '<citation item_id="1-DUP" label="(Hommel et al., 2022, p. 10)" ref="c_DUP_1"/>',
-            false,
+        const rawPos = findTargetRawMatchPosition(
             strippedShifted,
-            expandedShifted
+            expandedShifted,
+            targetContext!.beforeContext,
+            targetContext!.afterContext
         );
 
         expect(rawPos).not.toBeNull();

@@ -21,7 +21,6 @@ import {
     findFuzzyMatch,
     findUniqueRawMatchPosition,
     captureValidatedEditTargetContext,
-    cacheValidatedEditTargetContext,
 } from '../../utils/noteHtmlSimplifier';
 
 
@@ -1331,21 +1330,23 @@ async function validateEditNoteAction(
         const rawPos = findUniqueRawMatchPosition(
             strippedHtml, simplified, old_string, expandedOld, metadata
         );
-        const targetContext = captureValidatedEditTargetContext(
-            strippedHtml, simplified, old_string, expandedOld, metadata
-        );
+        let normalizedActionData: EditNoteProposedData | undefined;
 
-        if (targetContext) {
-            cacheValidatedEditTargetContext(
-                noteId,
-                old_string,
-                new_string,
-                replace_all,
-                targetContext
+        if (rawPos === null) {
+            const targetContext = captureValidatedEditTargetContext(
+                strippedHtml, simplified, old_string, expandedOld, metadata
             );
+
+            if (targetContext) {
+                normalizedActionData = {
+                    ...request.action_data as EditNoteProposedData,
+                    target_before_context: targetContext.beforeContext,
+                    target_after_context: targetContext.afterContext,
+                };
+            }
         }
 
-        if (rawPos === null && targetContext === null) {
+        if (rawPos === null && normalizedActionData === undefined) {
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
@@ -1356,6 +1357,23 @@ async function validateEditNoteAction(
                 preference: 'always_ask',
             };
         }
+
+        const noteTitle = item.getNoteTitle() || '(untitled)';
+        const totalLines = simplified.split('\n').length;
+        const preference = getDeferredToolPreference('edit_note');
+
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: true,
+            current_value: {
+                note_title: noteTitle,
+                total_lines: totalLines,
+                match_count: matchCount,
+            },
+            normalized_action_data: normalizedActionData,
+            preference,
+        };
     }
 
     // 14. Valid — return current value

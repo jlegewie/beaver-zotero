@@ -25,9 +25,7 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     findFuzzyMatch: vi.fn(() => null),
     findUniqueRawMatchPosition: vi.fn(() => null),
     captureValidatedEditTargetContext: vi.fn(() => null),
-    cacheValidatedEditTargetContext: vi.fn(),
-    consumeValidatedEditTargetRawPosition: vi.fn(() => null),
-    clearValidatedEditTargetContext: vi.fn(),
+    findTargetRawMatchPosition: vi.fn(() => null),
     invalidateSimplificationCache: vi.fn(),
     checkDuplicateCitations: vi.fn(() => null),
     preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
@@ -103,9 +101,7 @@ import {
     findFuzzyMatch,
     findUniqueRawMatchPosition,
     captureValidatedEditTargetContext,
-    cacheValidatedEditTargetContext,
-    consumeValidatedEditTargetRawPosition,
-    clearValidatedEditTargetContext,
+    findTargetRawMatchPosition,
     invalidateSimplificationCache,
     checkDuplicateCitations,
     rebuildDataCitationItems,
@@ -379,7 +375,14 @@ describe('validateEditNoteAction — failures', () => {
 
         expect(response.valid).toBe(true);
         expect(response.current_value?.match_count).toBe(12);
-        expect(cacheValidatedEditTargetContext).toHaveBeenCalled();
+        expect(response.normalized_action_data).toEqual({
+            library_id: 1,
+            zotero_key: 'NOTE0001',
+            old_string: 'Hello',
+            new_string: 'Goodbye',
+            target_before_context: 'before',
+            target_after_context: 'after',
+        });
     });
 });
 
@@ -474,13 +477,27 @@ describe('executeEditNoteAction — failures', () => {
 
     it('duplicate-citation match executes when simplified position disambiguates it', async () => {
         vi.mocked(countOccurrences).mockReturnValueOnce(12);
-        vi.mocked(consumeValidatedEditTargetRawPosition).mockReturnValueOnce(123);
+        vi.mocked(findTargetRawMatchPosition).mockReturnValueOnce(123);
 
-        const response = await handleAgentActionExecuteRequest(makeExecuteRequest());
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'Hello',
+                new_string: 'Goodbye',
+                target_before_context: 'before',
+                target_after_context: 'after',
+            },
+        }));
 
         expect(response.success).toBe(true);
         expect(response.result_data?.occurrences_replaced).toBe(1);
-        expect(clearValidatedEditTargetContext).toHaveBeenCalled();
+        expect(findTargetRawMatchPosition).toHaveBeenCalledWith(
+            NOTE_HTML,
+            'Hello',
+            'before',
+            'after'
+        );
     });
 
     it('wrapper_removed (data-schema-version missing after replacement)', async () => {

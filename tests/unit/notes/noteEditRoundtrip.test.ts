@@ -72,7 +72,6 @@ import {
     getLatestNoteHtml,
     normalizePageLocator,
     captureValidatedEditTargetContext,
-    cacheValidatedEditTargetContext,
     SimplificationMetadata,
 } from '../../../src/utils/noteHtmlSimplifier';
 import { createCitationHTML } from '../../../src/utils/zoteroUtils';
@@ -1234,13 +1233,6 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
             metadata
         );
         expect(targetContext).not.toBeNull();
-        cacheValidatedEditTargetContext(
-            '1-NOTE0001',
-            targetCitationTag,
-            newString,
-            false,
-            targetContext!
-        );
 
         const item = makeMockItem(noteHtml);
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
@@ -1253,6 +1245,8 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
                 zotero_key: 'NOTE0001',
                 old_string: targetCitationTag,
                 new_string: newString,
+                target_before_context: targetContext!.beforeContext,
+                target_after_context: targetContext!.afterContext,
             },
         }))).rejects.toThrow(/found 12 times/);
     });

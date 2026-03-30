@@ -18,8 +18,7 @@ import {
     checkDuplicateCitations,
     findFuzzyMatch,
     findUniqueRawMatchPosition,
-    consumeValidatedEditTargetRawPosition,
-    clearValidatedEditTargetContext,
+    findTargetRawMatchPosition,
     preloadPageLabelsForNewCitations,
     findRangeByContexts,
     waitForPMNormalization,
@@ -171,12 +170,22 @@ const UNDO_CONTEXT_LENGTH = 200;
 export async function executeEditNoteAction(
     action: AgentAction
 ): Promise<EditNoteResultData> {
-    const { library_id, zotero_key, old_string, new_string, replace_all } = action.proposed_data as {
+    const {
+        library_id,
+        zotero_key,
+        old_string,
+        new_string,
+        replace_all,
+        target_before_context,
+        target_after_context,
+    } = action.proposed_data as {
         library_id: number;
         zotero_key: string;
         old_string: string;
         new_string: string;
         replace_all?: boolean;
+        target_before_context?: string;
+        target_after_context?: string;
     };
 
     // 1. Load item
@@ -260,14 +269,14 @@ export async function executeEditNoteAction(
             rawPos = findUniqueRawMatchPosition(
                 strippedHtml, simplified, old_string, expandedOld, metadata
             ) ?? -1;
-            if (rawPos === -1) {
-                rawPos = consumeValidatedEditTargetRawPosition(
-                    noteId,
-                    old_string,
-                    new_string,
-                    replace_all,
+            if (rawPos === -1 && (
+                target_before_context !== undefined || target_after_context !== undefined
+            )) {
+                rawPos = findTargetRawMatchPosition(
                     strippedHtml,
-                    expandedOld
+                    expandedOld,
+                    target_before_context,
+                    target_after_context
                 ) ?? -1;
             }
         }
@@ -281,8 +290,6 @@ export async function executeEditNoteAction(
             }
             rawPos = strippedHtml.indexOf(expandedOld);
         }
-
-        clearValidatedEditTargetContext(noteId, old_string, new_string, replace_all);
 
         // Capture surrounding context for robust undo of single-occurrence edits.
         undoBeforeContext = strippedHtml.substring(Math.max(0, rawPos - UNDO_CONTEXT_LENGTH), rawPos);
