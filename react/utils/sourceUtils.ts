@@ -415,6 +415,7 @@ export async function openNoteAndSearchEdit(
     let selectText: string | undefined;
     let endSearchText: string | undefined;
     let selectOffsetInSearch: number | undefined;
+    let contextualSearches: Array<{ searchText: string; selectText: string; selectOffsetInSearch: number }> = [];
 
     // For applied edits, highlight the added text; for pending/undone edits,
     // highlight the text that will be replaced (the deleted portion).
@@ -462,12 +463,13 @@ export async function openNoteAndSearchEdit(
     // plain text, so we convert the raw-note context to nearby text here
     // instead of passing raw HTML into selectAndScrollInNoteEditor.
     if (!endSearchText) {
-        const contextualSearch = extractTargetContextSearch(
+        contextualSearches = extractTargetContextSearches(
             targetBeforeContext,
             isApplied ? newString : oldString,
             targetAfterContext,
             selectText,
         );
+        const contextualSearch = contextualSearches[0];
         if (contextualSearch) {
             searchText = contextualSearch.searchText;
             selectText = contextualSearch.selectText;
@@ -485,6 +487,22 @@ export async function openNoteAndSearchEdit(
     // Wait for the editor instance to be available and initialized,
     // then select the text and scroll to it.
     let found = await selectAndScrollInNoteEditor(itemId, searchText, selectText, endSearchText, selectOffsetInSearch);
+
+    // If the first target-context search variant failed, try alternate
+    // rendered variants before falling back to generic search terms.
+    if (!found && contextualSearches.length > 1) {
+        for (const candidate of contextualSearches.slice(1)) {
+            logger(`openNoteAndSearchEdit: retrying alternate target-context search "${candidate.searchText.substring(0, 80)}"`, 1);
+            found = await selectAndScrollInNoteEditor(
+                itemId,
+                candidate.searchText,
+                candidate.selectText,
+                undefined,
+                candidate.selectOffsetInSearch,
+            );
+            if (found) break;
+        }
+    }
 
     // Retry without placeholder tokens ([citation], [image]) that won't
     // match the editor DOM — citations render as formatted text and images
@@ -744,33 +762,73 @@ function normalizeSearchFragment(html: string | undefined): string {
     return stripEllipsis(stripHtmlTags(html).replace(/\s+/g, ' ').trim());
 }
 
-function extractTargetContextSearch(
+function appendCitationPageWithStyle(tag: string, label: string, style: 'short' | 'word'): string {
+    const pageMatch = tag.match(/\bpage="([^"]*)"/);
+    if (!pageMatch || !pageMatch[1]) return label;
+    const page = pageMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+    const suffix = style === 'word' ? `, page ${page}` : `, p. ${page}`;
+    if (label.endsWith(')')) {
+        return label.slice(0, -1) + suffix + ')';
+    }
+    return label + suffix;
+}
+
+function normalizeTargetSearchVariant(html: string, style: 'short' | 'word'): string {
+    const expandedCitations = html
+        .replace(
+            /<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\blabel="([^"]*)"(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi,
+            (match, label) => appendCitationPageWithStyle(match, label || '[citation]', style)
+        )
+        .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi, '[citation]');
+    return stripEllipsis(stripHtmlTags(expandedCitations).replace(/\s+/g, ' ').trim());
+}
+
+function extractTargetContextSearches(
     beforeHtml: string | undefined,
     targetHtml: string,
     afterHtml: string | undefined,
     preferredSelectText?: string,
-): { searchText: string; selectText: string; selectOffsetInSearch: number } | null {
+): Array<{ searchText: string; selectText: string; selectOffsetInSearch: number }> {
     const beforeText = normalizeSearchFragment(beforeHtml);
     const afterText = normalizeSearchFragment(afterHtml);
-    if (!beforeText && !afterText) return null;
+    if (!beforeText && !afterText) return [];
 
-    const selectText = normalizeSearchFragment(preferredSelectText || targetHtml);
-    if (!selectText || selectText.length < 2) return null;
+    const targetTextVariants = Array.from(new Set([
+        normalizeSearchFragment(targetHtml),
+        normalizeTargetSearchVariant(targetHtml, 'word'),
+        normalizeTargetSearchVariant(targetHtml, 'short'),
+    ].filter((text) => text && text.length >= 2)));
+    if (targetTextVariants.length === 0) return [];
 
+    const preferred = normalizeSearchFragment(preferredSelectText);
     const beforeTail = beforeText ? beforeText.slice(-80) : '';
     const afterHead = afterText ? afterText.slice(0, 80) : '';
-    const parts = [beforeTail, selectText, afterHead].filter(Boolean);
-    if (parts.length === 0) return null;
+    const searches: Array<{ searchText: string; selectText: string; selectOffsetInSearch: number }> = [];
 
-    const searchText = parts.join(' ').trim();
-    if (!searchText || searchText.length < 10) return null;
+    for (const targetText of targetTextVariants) {
+        const selectText = preferred && targetText.includes(preferred)
+            ? preferred
+            : targetText;
+        if (!selectText || selectText.length < 2) continue;
 
-    const selectOffsetInSearch = beforeTail ? beforeTail.length + 1 : 0;
-    return {
-        searchText,
-        selectText,
-        selectOffsetInSearch,
-    };
+        const parts = [beforeTail, targetText, afterHead].filter(Boolean);
+        if (parts.length === 0) continue;
+
+        const searchText = parts.join(' ').trim();
+        if (!searchText || searchText.length < 10) continue;
+
+        const selectOffsetInTarget = targetText.indexOf(selectText);
+        const selectOffsetInSearch = (beforeTail ? beforeTail.length + 1 : 0)
+            + (selectOffsetInTarget >= 0 ? selectOffsetInTarget : 0);
+
+        searches.push({
+            searchText,
+            selectText,
+            selectOffsetInSearch,
+        });
+    }
+
+    return searches;
 }
 
 /**

@@ -23,7 +23,19 @@ vi.mock('../../../react/atoms/auth', () => ({
 }));
 
 vi.mock('../../../react/components/agentRuns/EditNotePreview', () => ({
-    stripHtmlTags: vi.fn((s: string) => s),
+    stripHtmlTags: vi.fn((s: string) => s
+        .replace(
+            /<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\blabel="([^"]*)"(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi,
+            (match: string, label: string) => {
+                const pageMatch = match.match(/\bpage="([^"]*)"/);
+                if (!pageMatch || !pageMatch[1]) return label;
+                return label.endsWith(')')
+                    ? label.slice(0, -1) + `, page ${pageMatch[1]})`
+                    : `${label} page ${pageMatch[1]}`;
+            }
+        )
+        .replace(/<(?:[^>"']|"[^"]*"|'[^']*')+>/g, '')
+    ),
     computeDiff: vi.fn(),
 }));
 
@@ -1009,6 +1021,80 @@ describe('openNoteAndSearchEdit', () => {
 
         const secondCitationStart = fullText.indexOf('citation', fullText.indexOf('citation') + 1);
         expect(TextSelectionClass.create).toHaveBeenCalledWith(expect.anything(), secondCitationStart, secondCitationStart + 'citation'.length);
+    });
+
+    it('uses full applied target text for context search while selecting the narrower changed fragment', async () => {
+        vi.mocked(computeDiff).mockReturnValue([
+            {
+                type: 'addition',
+                text: 'citation page 1',
+                segments: [
+                    { text: 'citation ', highlighted: false },
+                    { text: 'page 1', highlighted: true },
+                ],
+            },
+        ]);
+
+        const fullText = 'Intro citation. Methods citation page 1 target area.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            'citation',
+            'citation page 1',
+            true,
+            undefined,
+            undefined,
+            'Methods ',
+            ' target area.',
+        );
+
+        const editedSelectStart = fullText.indexOf('page 1');
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(
+            expect.anything(),
+            editedSelectStart,
+            editedSelectStart + 'page 1'.length
+        );
+    });
+
+    it('retries alternate citation page wording variants before falling back to old citation text', async () => {
+        vi.mocked(computeDiff).mockReturnValue([
+            {
+                type: 'addition',
+                text: 'citation p. 1',
+                segments: [
+                    { text: 'citation ', highlighted: false },
+                    { text: 'p. 1', highlighted: true },
+                ],
+            },
+        ]);
+
+        const fullText = 'Intro (Hommel et al., 2022). Target (Hommel et al., 2022, page 1) area.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            '<citation item_id="1-F8E4GHHW" label="(Hommel et al., 2022)" ref="c_F8E4GHHW_0"/>',
+            '<citation item_id="1-F8E4GHHW" label="(Hommel et al., 2022)" ref="c_F8E4GHHW_0" page="1"/>',
+            true,
+            undefined,
+            undefined,
+            'Target ',
+            ' area.',
+        );
+
+        const targetStart = fullText.indexOf('(Hommel et al., 2022, page 1)');
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(
+            expect.anything(),
+            targetStart,
+            targetStart + '(Hommel et al., 2022, page 1)'.length
+        );
     });
 });
 
