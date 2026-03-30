@@ -40,6 +40,10 @@ function dispatchReaderAction(
 
 function onRenderTextSelectionPopup(event: any): void {
     const { reader, doc, params, append } = event;
+
+    // Only show for PDF readers
+    if (reader?.type !== 'pdf') return;
+
     const annotationText = params?.annotation?.text;
     if (!annotationText) return;
 
@@ -50,6 +54,17 @@ function onRenderTextSelectionPopup(event: any): void {
 
     const container = doc.createElement('div');
     container.className = 'beaver-selection-popup';
+    container.style.cssText = 'display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0;';
+
+    // "Beaver" label
+    const label = doc.createElement('span');
+    label.textContent = 'Beaver';
+    label.style.cssText = 'font-size: 11px; color: #888; user-select: none;';
+    container.appendChild(label);
+
+    // Button row
+    const row = doc.createElement('div');
+    row.style.cssText = 'display: flex; gap: 6px;';
 
     const explainBtn = doc.createElement('button');
     explainBtn.className = 'toolbar-button wide-button';
@@ -65,8 +80,9 @@ function onRenderTextSelectionPopup(event: any): void {
         dispatchReaderAction('ask', annotationText, page, readerItemID);
     });
 
-    container.appendChild(explainBtn);
-    container.appendChild(askBtn);
+    row.appendChild(explainBtn);
+    row.appendChild(askBtn);
+    container.appendChild(row);
     append(container);
 }
 
@@ -76,6 +92,10 @@ function onRenderTextSelectionPopup(event: any): void {
 
 function onCreateViewContextMenu(event: any): void {
     const { reader, params, append } = event;
+
+    // Only show for PDF readers
+    if (reader?.type !== 'pdf') return;
+
     const readerItemID = reader?.itemID;
 
     // Get selected text (same approach as readerUtils.ts getSelectedText)
@@ -88,7 +108,7 @@ function onCreateViewContextMenu(event: any): void {
                 .join('\n\n');
         }
     } catch (_e) {
-        // Graceful fallback — no selection available (EPUB, snapshot, etc.)
+        // Graceful fallback — no selection available
     }
 
     // Get current page (1-based) from PDF viewer
@@ -105,26 +125,30 @@ function onCreateViewContextMenu(event: any): void {
 
     const hasSelection = !!selectedText && selectedText.length > 0;
 
-    append(
-        {
-            label: 'Explain Selection',
-            disabled: !hasSelection,
-            onCommand: () => {
-                if (selectedText && readerItemID) {
-                    dispatchReaderAction('explain', selectedText, page, readerItemID);
-                }
+    // Use a "Beaver" submenu to group actions
+    append({
+        label: 'Beaver',
+        groups: [[
+            {
+                label: 'Explain Selection',
+                disabled: !hasSelection,
+                onCommand: () => {
+                    if (selectedText && readerItemID) {
+                        dispatchReaderAction('explain', selectedText, page, readerItemID);
+                    }
+                },
             },
-        },
-        {
-            label: 'Ask Beaver...',
-            disabled: !hasSelection,
-            onCommand: () => {
-                if (selectedText && readerItemID) {
-                    dispatchReaderAction('ask', selectedText, page, readerItemID);
-                }
+            {
+                label: 'Ask...',
+                disabled: !hasSelection,
+                onCommand: () => {
+                    if (selectedText && readerItemID) {
+                        dispatchReaderAction('ask', selectedText, page, readerItemID);
+                    }
+                },
             },
-        },
-    );
+        ]],
+    });
 }
 
 // ---------------------------------------------------------------------------
