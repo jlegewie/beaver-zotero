@@ -23,6 +23,7 @@ import { useMcpServer } from './hooks/useMcpServer';
 import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 import { useContextMenuActionHandler } from './hooks/useContextMenuActionHandler';
 import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActionHandler';
+import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationActionHandler';
 
 
 /**
@@ -75,6 +76,9 @@ const GlobalContextInitializer = () => {
 
     // Handle reader text selection actions (Explain / Ask)
     useReaderSelectionActionHandler();
+
+    // Handle reader annotation context menu actions (Explain / Ask)
+    useReaderAnnotationActionHandler();
 
     return null; // This component does not render any UI
 };

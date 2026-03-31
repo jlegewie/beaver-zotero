@@ -805,11 +805,7 @@ const PreferencePage: React.FC = () => {
 
             {/* ===== ACTIONS TAB ===== */}
             {activeTab === 'actions' && (
-                <>
-                    <CustomInstructionsSection />
-
-                    <ActionsPreferenceSection />
-                </>
+                <ActionsPreferenceSection />
             )}
 
             {/* ===== ADVANCED TAB ===== */}

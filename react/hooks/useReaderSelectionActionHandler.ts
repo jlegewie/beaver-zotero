@@ -13,6 +13,7 @@ import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
 import { store } from '../store';
 import { logger } from '../../src/utils/logger';
+import { getPref } from '../../src/utils/prefs';
 
 export function useReaderSelectionActionHandler() {
     const user = useAtomValue(userAtom);
@@ -47,9 +48,10 @@ export function useReaderSelectionActionHandler() {
 
                 // Either send explain prompt or focus input
                 if (action === 'explain') {
-                    const prompt = 'Explain the selected passage from this paper in plain language. '
+                    const defaultPrompt = 'Explain the selected passage from this paper in plain language. '
                         + 'Provide context for any technical terms, statistical methods, or domain-specific concepts. '
                         + 'If it references other work, briefly explain that context too.';
+                    const prompt = getPref('readerExplainPrompt') || defaultPrompt;
                     await sendWSMessage(prompt);
                 } else {
                     // Focus the input textarea for "Ask..."
