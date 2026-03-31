@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { citationDataByCitationKeyAtom } from '../../atoms/citations';
@@ -27,7 +27,7 @@ import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
 } from '../../atoms/ui';
-import { Icon, PdfIcon } from '../icons/icons';
+import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon } from '../icons/icons';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -248,6 +248,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 : formatted_citation || '';
         }
         
+        // Strip URLs from formatted citation and preview text (they clutter the tooltip)
+        const stripUrls = (s: string) => s.replace(/\s*https?:\/\/\S+/g, '').trim();
+        formatted_citation = stripUrls(formatted_citation);
+        previewText = stripUrls(previewText);
+
         const pages = [...new Set(getCitationPages(citationMetadata))];
         const firstPage = pages.length > 0 ? pages[0] : null;
         const finalUrl = firstPage ? `${url}?page=${firstPage}` : url;
@@ -514,16 +519,31 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 {previewText}
             </span>
             {isExternal && !mappedZoteroItem && (
-                <span className="px-3 py-15 text-xs font-color-tertiary border-top-quinary block">
-                    External reference
-                </span>
+                <div className="px-3 py-15 border-top-quinary block">
+                    <div className="display-flex flex-row items-center gap-15">
+                        <Icon icon={GlobalSearchIcon} className="font-color-tertiary" />
+                        <span className="text-sm font-color-tertiary">
+                            View details
+                        </span>
+                    </div>
+                </div>
             )}
-            {hasLocator && !isExternal && (
+            {hasLocator && (!isExternal || !!mappedZoteroItem) && (
                 <div className="px-3 py-15 border-top-quinary block">
                     <div className="display-flex flex-row items-center gap-15">
                         <Icon icon={PdfIcon} className="font-color-tertiary" />
                         <span className="text-sm font-color-tertiary">
                             Opens PDF on page {pages[0]}
+                        </span>
+                    </div>
+                </div>
+            )}
+            {!hasLocator && (!isExternal || !!mappedZoteroItem) && (
+                <div className="px-3 py-15 border-top-quinary block">
+                    <div className="display-flex flex-row items-center gap-15">
+                        <Icon icon={LibraryIcon} className="font-color-tertiary" />
+                        <span className="text-sm font-color-tertiary">
+                            Reveals item in library
                         </span>
                     </div>
                 </div>
