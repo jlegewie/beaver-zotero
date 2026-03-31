@@ -6,6 +6,8 @@ import { removePopupMessageAtom } from '../../../utils/popupMessageUtils';
 import PlanChangeMessageContent from './PlanChangeMessageContent';
 import IndexingCompleteMessageContent from './IndexingCompleteMessageContent';
 import VersionUpdateMessageContent from './VersionUpdateMessageContent';
+import WelcomeOnboardingContent from './WelcomeOnboardingContent';
+import ReaderTipContent from './ReaderTipContent';
 import EmbeddingIndexingMessageContent from './EmbeddingIndexingMessageContent';
 import Button from "../Button";
 import PopupMessageHeader from './PopupMessageHeader';
@@ -112,8 +114,8 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
             onMouseLeave={() => setIsHovering(false)}
         >
             <div className="p-3 display-flex flex-col items-start gap-2">
-                {/* Floating version_update renders its own header inside VersionUpdateMessageContent */}
-                {!(isFloating && message.type === 'version_update') && (
+                {/* Floating version_update/welcome_onboarding/reader_tip render their own headers */}
+                {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip')) && (
                     <PopupMessageHeader
                         icon={message.icon || getDefaultIcon()}
                         title={message.title}
@@ -175,6 +177,14 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
 
                 {message.type === 'version_update' && (
                     <VersionUpdateMessageContent message={message} onDismiss={handleDismiss} isFloating={isFloating} />
+                )}
+
+                {message.type === 'welcome_onboarding' && (
+                    <WelcomeOnboardingContent onDismiss={handleDismiss} />
+                )}
+
+                {message.type === 'reader_tip' && (
+                    <ReaderTipContent onDismiss={handleDismiss} />
                 )}
 
                 {message.type === 'embedding_indexing' && (

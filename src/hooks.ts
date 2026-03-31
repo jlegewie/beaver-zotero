@@ -131,6 +131,13 @@ function compareVersions(v1: string, v2: string): number {
  * @param currentVersion The current plugin version
  */
 async function handleUpgrade(lastVersion: string, currentVersion: string) {
+    // Mark welcome onboarding as shown for existing users who are upgrading.
+    // This prevents the first-install popup from showing to users who already have the plugin.
+    // The reader tip is intentionally NOT suppressed — existing users should see it once.
+    if (!getPref('onboardingWelcomeShown')) {
+        setPref('onboardingWelcomeShown', true);
+    }
+
     const knownVersions = getAllVersionUpdateMessageVersions();
     if (knownVersions.length && lastVersion) {
         const versionsToNotify = knownVersions

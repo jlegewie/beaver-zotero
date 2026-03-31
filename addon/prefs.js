@@ -71,6 +71,11 @@ pref("deletionJobs", "[]");
 // Items skipped during sync
 pref("skippedItems", "[]")
 
+// Onboarding popups
+pref("onboardingWelcomeShown", false);
+pref("onboardingReaderTipShown", false);
+pref("onboardingWelcomeShownAt", "");
+
 // MCP server
 pref("mcpServerEnabled", false);
 

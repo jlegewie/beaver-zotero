@@ -48,6 +48,9 @@ declare namespace _ZoteroTypes {
       "legacyPromptsImported": boolean;
       "deletionJobs": string;
       "skippedItems": string;
+      "onboardingWelcomeShown": boolean;
+      "onboardingReaderTipShown": boolean;
+      "onboardingWelcomeShownAt": string;
       "mcpServerEnabled": boolean;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;
