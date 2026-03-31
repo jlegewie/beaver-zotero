@@ -1008,6 +1008,23 @@
     color: var(--tag-blue);
 }
 
+/* With-locator citation styling - green for in-library citations that navigate to a specific location */
+[id^="beaver-pane-"] .markdown span.zotero-citation.with-locator {
+    background: var(--tag-green-quinary);
+    border-color: var(--tag-green-tertiary);
+    color: var(--tag-green-primary);
+}
+
+[id^="beaver-pane-"] .markdown span.zotero-citation.with-locator:hover {
+    background: var(--tag-green-quarternary);
+    color: var(--tag-green-primary);
+}
+
+[id^="beaver-pane-"] .markdown span.zotero-citation.with-locator.streaming:hover {
+    background: var(--tag-green-quinary);
+    color: var(--tag-green-primary);
+}
+
 [id^="beaver-pane-"] .markdown h1,
 [id^="beaver-pane-"] .markdown h2,
 [id^="beaver-pane-"] .markdown h3,

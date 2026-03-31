@@ -474,8 +474,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }
 
     // Determine the CSS class based on citation type and state
+    const hasLocator = pages.length > 0 || (citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0);
     const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
+        : hasLocator
+        ? "zotero-citation with-locator"
         : "zotero-citation";
     const citationClass = isStreaming
         ? `${citationClassBase} streaming`
@@ -512,6 +515,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             {isExternal && !mappedZoteroItem && (
                 <span className="px-3 py-15 text-xs font-color-tertiary border-top-quinary block">
                     External reference
+                </span>
+            )}
+            {hasLocator && !isExternal && (
+                <span className="px-3 py-15 text-sm font-color-tertiary border-top-quinary block">
+                    Click to open page {pages[0]}
                 </span>
             )}
         </span>
