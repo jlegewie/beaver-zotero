@@ -108,7 +108,6 @@ const WelcomeOnboardingContent: React.FC<WelcomeOnboardingContentProps> = ({ onD
                 <Button
                     variant="ghost-secondary"
                     onClick={onDismiss}
-                    // className="self-center"
                 >
                     Try it later
                 </Button>
