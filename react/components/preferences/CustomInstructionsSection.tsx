@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { SectionLabel, SettingsGroup } from "./components/SettingsElements";
+import { SectionLabel } from "./components/SettingsElements";
 import { getPref, setPref } from "../../../src/utils/prefs";
 import { logger } from "../../../src/utils/logger";
 
