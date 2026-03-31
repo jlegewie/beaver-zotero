@@ -533,7 +533,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     <div className="display-flex flex-row items-center gap-15">
                         <Icon icon={PdfIcon} className="font-color-tertiary" />
                         <span className="text-sm font-color-tertiary">
-                            Opens PDF on page {pages[0]}
+                            {pages[0] != null ? `Opens PDF on page ${pages[0]}` : 'Opens PDF at location'}
                         </span>
                     </div>
                 </div>
