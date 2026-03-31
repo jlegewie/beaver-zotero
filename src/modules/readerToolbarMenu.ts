@@ -25,6 +25,8 @@ let cachedIconSvg: string | null = null;
 const ICON_URL = 'chrome://beaver/content/icons/beaver_bw.png';
 
 // Inline SVG dropmarker matching the reader's IconChevronDown8 (8x8, currentColor)
+const BUTTON_CLASS = 'beaver-reader-toolbar-button';
+
 const DROPMARKER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" fill="none"><path fill="currentColor" d="m0 2.707 4 4 4-4L7.293 2 4 5.293.707 2z"/></svg>`;
 
 // ---------------------------------------------------------------------------
@@ -61,24 +63,46 @@ async function cacheIcon(): Promise<void> {
 // Toolbar handler
 // ---------------------------------------------------------------------------
 
-function onRenderToolbar(event: any): void {
-    const { reader, doc, append } = event;
-
-    // Create button using the same pattern as zotero-actions-tags:
-    // classList + innerHTML with inline SVG content
+/** Create the toolbar button element in the given document. */
+function createToolbarButton(reader: any, doc: Document): HTMLElement {
     const button = doc.createElement('button');
-    button.className = 'toolbar-button toolbar-dropdown-button';
+    button.className = `toolbar-button toolbar-dropdown-button ${BUTTON_CLASS}`;
     button.title = 'Beaver';
     button.tabIndex = -1;
-
-    // Inject icon + dropmarker as innerHTML (no <img> elements)
     button.innerHTML = `${cachedIconSvg || ''}${DROPMARKER_SVG}`;
-
     button.addEventListener('click', () => {
         openBeaverMenu(reader, button);
     });
+    return button;
+}
 
-    append(button);
+function onRenderToolbar(event: any): void {
+    const { reader, doc, append } = event;
+    append(createToolbarButton(reader, doc));
+}
+
+/** Inject the button into an already-open reader that missed the renderToolbar event. */
+function injectIntoExistingReader(reader: any): void {
+    try {
+        const iframeDoc = reader?._iframeWindow?.document;
+        if (!iframeDoc) return;
+
+        // Skip if already injected
+        if (iframeDoc.querySelector(`.${BUTTON_CLASS}`)) return;
+
+        // Find the custom-sections container inside the toolbar's .end section
+        const toolbar = iframeDoc.querySelector('.toolbar .end .custom-sections');
+        if (!toolbar) return;
+
+        const button = createToolbarButton(reader, iframeDoc);
+        // Wrap in a .section div to match what CustomSections does
+        const section = iframeDoc.createElement('div');
+        section.className = 'section';
+        section.appendChild(button);
+        toolbar.appendChild(section);
+    } catch (_e) {
+        // Best-effort — reader may not be fully initialized
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +232,15 @@ export async function initReaderToolbarMenu(): Promise<void> {
 
     toolbarHandler = onRenderToolbar;
     Zotero.Reader.registerEventListener('renderToolbar', toolbarHandler, addon.data.config.addonID);
+
+    // Inject into already-open readers (e.g. plugin re-enable while reader tabs are open)
+    const readers = (Zotero.Reader as any)?._readers;
+    if (Array.isArray(readers)) {
+        for (const reader of readers) {
+            injectIntoExistingReader(reader);
+        }
+    }
+
     ztoolkit.log('readerToolbarMenu: Registered renderToolbar listener');
 }
 
@@ -215,5 +248,20 @@ export function cleanupReaderToolbarMenu(): void {
     if (toolbarHandler) {
         removeListenerSafely('renderToolbar', toolbarHandler);
         toolbarHandler = null;
+    }
+
+    // Remove buttons already injected into open reader iframes
+    try {
+        const readers = (Zotero?.Reader as any)?._readers;
+        if (Array.isArray(readers)) {
+            for (const reader of readers) {
+                const iframeDoc = reader?._iframeWindow?.document;
+                if (!iframeDoc) continue;
+                const buttons = iframeDoc.querySelectorAll(`.${BUTTON_CLASS}`);
+                buttons.forEach((btn: Element) => btn.closest('.section')?.remove() ?? btn.remove());
+            }
+        }
+    } catch (_e) {
+        // Best-effort cleanup
     }
 }
