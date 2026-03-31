@@ -98,7 +98,7 @@ const WelcomeOnboardingContent: React.FC<WelcomeOnboardingContentProps> = ({ onD
                 <Button
                     variant="solid"
                     onClick={handleOpenBeaver}
-                    className="items-center font-"
+                    className="items-center"
                     style={{ padding: '5px 6px', width: '100%', alignItems: 'center', justifyContent: 'center', fontSize: "0.95rem" }}
                 >
                     Open Beaver &rarr;
