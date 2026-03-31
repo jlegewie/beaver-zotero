@@ -9,6 +9,7 @@ import { copyToClipboard } from "../../utils/clipboard";
 import { logger } from "../../../src/utils/logger";
 import { setPref } from "../../../src/utils/prefs";
 import { TickIcon, CopyIcon } from "../icons/icons";
+import CustomInstructionsSection from "./CustomInstructionsSection";
 
 
 const AdvancedSection: React.FC = () => {
@@ -79,6 +80,10 @@ const AdvancedSection: React.FC = () => {
 
     return (
         <>
+            {/* ===== CUSTOM INSTRUCTIONS ===== */}
+            <CustomInstructionsSection />
+           
+            {/* ===== MCP SERVER ===== */}
             <div className="display-flex flex-row items-center gap-2" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
                 <div className="text-lg font-color-primary font-bold">MCP Server</div>
                 <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">Experimental</span>
