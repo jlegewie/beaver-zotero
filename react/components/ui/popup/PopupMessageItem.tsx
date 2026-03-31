@@ -8,6 +8,7 @@ import IndexingCompleteMessageContent from './IndexingCompleteMessageContent';
 import VersionUpdateMessageContent from './VersionUpdateMessageContent';
 import WelcomeOnboardingContent from './WelcomeOnboardingContent';
 import ReaderTipContent from './ReaderTipContent';
+import { CitationTipContent } from '../../sources/CitationTipContent';
 import EmbeddingIndexingMessageContent from './EmbeddingIndexingMessageContent';
 import Button from "../Button";
 import PopupMessageHeader from './PopupMessageHeader';
@@ -185,6 +186,10 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
 
                 {message.type === 'reader_tip' && (
                     <ReaderTipContent onDismiss={handleDismiss} />
+                )}
+
+                {message.type === 'citation_tip' && (
+                    <CitationTipContent />
                 )}
 
                 {message.type === 'embedding_indexing' && (

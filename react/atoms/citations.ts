@@ -1,5 +1,4 @@
 import { atom } from 'jotai';
-import { createElement } from 'react';
 import { getDisplayNameFromItem, getReferenceFromItem } from '../utils/sourceUtils';
 import { createZoteroURI } from "../utils/zoteroURI";
 import { logger } from '../../src/utils/logger';
@@ -16,7 +15,6 @@ import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { externalReferenceMappingAtom, formatExternalCitation } from './externalReferences';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
-import { CitationTipContent } from '../components/sources/CitationTipContent';
 
 /**
  * Thread-scoped citation marker assignment.
@@ -209,9 +207,8 @@ function maybeTriggerCitationTip(set: (...args: any[]) => any) {
     setPref('onboardingCitationTipShown', true);
 
     set(addPopupMessageAtom, {
-        type: 'info' as const,
+        type: 'citation_tip' as const,
         title: 'Understanding Citations',
-        customContent: createElement(CitationTipContent),
         expire: false,
     });
 }
