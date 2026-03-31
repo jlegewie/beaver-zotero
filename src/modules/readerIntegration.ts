@@ -1,12 +1,12 @@
 /**
- * Reader integration: text selection popup and context menu.
+ * Reader integration: text selection popup, view context menu, and annotation context menu.
  *
- * Registers two Zotero.Reader event listeners:
+ * Registers three Zotero.Reader event listeners:
  * 1. renderTextSelectionPopup — adds "Explain" and "Ask..." buttons
  * 2. createViewContextMenu — adds "Explain Selection" and "Ask Beaver..." items
+ * 3. createAnnotationContextMenu — adds "Explain" and "Ask..." items for annotations
  *
- * Both dispatch a `readerSelectionAction` event via __beaverEventBus so the
- * webpack bundle (useReaderSelectionActionHandler) can orchestrate the UI flow.
+ * All dispatch events via __beaverEventBus so the webpack bundle can orchestrate the UI flow.
  *
  * Lives in the esbuild bundle — must NOT import from react/store or Jotai.
  */
@@ -14,6 +14,7 @@
 // Module-level references for cleanup
 let popupHandler: ((event: any) => void) | null = null;
 let contextMenuHandler: ((event: any) => void) | null = null;
+let annotationMenuHandler: ((event: any) => void) | null = null;
 
 // ---------------------------------------------------------------------------
 // Event dispatch helper
@@ -154,6 +155,54 @@ function onCreateViewContextMenu(event: any): void {
 }
 
 // ---------------------------------------------------------------------------
+// Annotation context menu handler
+// ---------------------------------------------------------------------------
+
+function dispatchAnnotationAction(
+    action: 'explain' | 'ask',
+    annotationIds: string[],
+    readerItemID: number,
+): void {
+    const win = Zotero.getMainWindow();
+    const eventBus = win?.__beaverEventBus;
+    if (!eventBus) return;
+
+    eventBus.dispatchEvent(new win.CustomEvent('readerAnnotationAction', {
+        detail: { action, annotationIds, readerItemID },
+    }));
+}
+
+function onCreateAnnotationContextMenu(event: any): void {
+    const { reader, params, append } = event;
+
+    if (reader?.type !== 'pdf') return;
+
+    const readerItemID = reader?.itemID;
+    if (!readerItemID) return;
+
+    const annotationIds: string[] = params?.ids ?? [];
+    if (annotationIds.length === 0) return;
+
+    // Flat items: disabled "Beaver" header + action items (submenus not supported here)
+    append(
+        {
+            label: 'Explain with Beaver...',
+            persistent: true,
+            onCommand: () => {
+                dispatchAnnotationAction('explain', annotationIds, readerItemID);
+            },
+        },
+        {
+            label: 'Ask Beaver...',
+            persistent: true,
+            onCommand: () => {
+                dispatchAnnotationAction('ask', annotationIds, readerItemID);
+            },
+        },
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Cleanup helper
 // ---------------------------------------------------------------------------
 
@@ -182,9 +231,11 @@ export function initReaderIntegration(): void {
 
     popupHandler = onRenderTextSelectionPopup;
     contextMenuHandler = onCreateViewContextMenu;
+    annotationMenuHandler = onCreateAnnotationContextMenu;
 
     Zotero.Reader.registerEventListener('renderTextSelectionPopup', popupHandler, addon.data.config.addonID);
     Zotero.Reader.registerEventListener('createViewContextMenu', contextMenuHandler, addon.data.config.addonID);
+    Zotero.Reader.registerEventListener('createAnnotationContextMenu', annotationMenuHandler, addon.data.config.addonID);
 
     ztoolkit.log('readerIntegration: Registered reader event listeners');
 }
@@ -197,5 +248,9 @@ export function cleanupReaderIntegration(): void {
     if (contextMenuHandler) {
         removeListenerSafely('createViewContextMenu', contextMenuHandler);
         contextMenuHandler = null;
+    }
+    if (annotationMenuHandler) {
+        removeListenerSafely('createAnnotationContextMenu', annotationMenuHandler);
+        annotationMenuHandler = null;
     }
 }
