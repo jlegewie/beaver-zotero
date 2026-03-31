@@ -15,6 +15,7 @@ import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { initContextMenus, cleanupContextMenus } from "./modules/zoteroContextMenu";
 import { initReaderIntegration, cleanupReaderIntegration } from "./modules/readerIntegration";
+import { initReaderToolbarMenu, cleanupReaderToolbarMenu } from "./modules/readerToolbarMenu";
 
 /** Timeout for individual async shutdown operations to prevent hangs. */
 const SHUTDOWN_TIMEOUT_MS = 3000;
@@ -246,6 +247,9 @@ async function onStartup() {
         // -------- Register reader text selection popup & context menu --------
         initReaderIntegration();
 
+        // -------- Register reader toolbar dropdown menu --------
+        await initReaderToolbarMenu();
+
         // -------- Register Zotero preferences pane --------
         await Zotero.PreferencePanes.register({
             pluginID: addon.data.config.addonID,
@@ -451,6 +455,9 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 13. Unregister reader integration listeners
         cleanupReaderIntegration();
 
+        // 13b. Unregister reader toolbar menu
+        cleanupReaderToolbarMenu();
+
         // 14. Unregister protocol handler
         unregisterBeaverProtocolHandler();
 
@@ -567,6 +574,7 @@ async function onShutdown(): Promise<void> {
         unregisterQuitObserver();
         cleanupContextMenus();
         cleanupReaderIntegration();
+        cleanupReaderToolbarMenu();
         unregisterBeaverProtocolHandler();
 
         ztoolkit.unregisterAll();
