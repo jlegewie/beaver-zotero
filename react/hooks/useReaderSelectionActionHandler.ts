@@ -4,7 +4,7 @@
  * new-thread → set-text-selection → send-message / focus-input flow.
  */
 
-import { useSetAtom, useAtomValue } from 'jotai';
+import { useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { newThreadAtom } from '../atoms/threads';
 import { readerTextSelectionAtom, currentReaderAttachmentAtom } from '../atoms/messageComposition';
@@ -13,9 +13,9 @@ import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
 import { store } from '../store';
 import { logger } from '../../src/utils/logger';
+import { getPref } from '../../src/utils/prefs';
 
 export function useReaderSelectionActionHandler() {
-    const user = useAtomValue(userAtom);
     const newThread = useSetAtom(newThreadAtom);
     const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
     const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
@@ -23,6 +23,9 @@ export function useReaderSelectionActionHandler() {
 
     useEventSubscription('readerSelectionAction', async (detail) => {
         const { action, text, page, readerItemID } = detail;
+
+        // Skip if not authenticated
+        if (!store.get(userAtom)) return;
 
         logger(`useReaderSelectionActionHandler: Received action "${action}" for item ${readerItemID}`);
 
@@ -47,9 +50,10 @@ export function useReaderSelectionActionHandler() {
 
                 // Either send explain prompt or focus input
                 if (action === 'explain') {
-                    const prompt = 'Explain the selected passage from this paper in plain language. '
+                    const defaultPrompt = 'Explain the selected passage from this paper in plain language. '
                         + 'Provide context for any technical terms, statistical methods, or domain-specific concepts. '
                         + 'If it references other work, briefly explain that context too.';
+                    const prompt = getPref('readerExplainPrompt') || defaultPrompt;
                     await sendWSMessage(prompt);
                 } else {
                     // Focus the input textarea for "Ask..."
@@ -59,5 +63,5 @@ export function useReaderSelectionActionHandler() {
                 logger(`useReaderSelectionActionHandler: Error: ${error}`, 1);
             }
         }, 0);
-    }, [user, newThread, setReaderTextSelection, setReaderAttachment, sendWSMessage]);
+    }, [newThread, setReaderTextSelection, setReaderAttachment, sendWSMessage]);
 }

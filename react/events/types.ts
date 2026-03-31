@@ -23,6 +23,11 @@ export interface BeaverEvents {
         page: number;
         readerItemID: number;
     };
+    readerAnnotationAction: {
+        action: 'explain' | 'ask';
+        annotationIds: string[];
+        readerItemID: number;
+    };
     focusInput: {};
 }
 

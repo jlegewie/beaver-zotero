@@ -20,6 +20,7 @@ declare namespace _ZoteroTypes {
       "addSelectedItemsOnNewThread": boolean;
       "annotationToolEnabled": boolean;
       "maxAddAttachmentToMessage": number;
+      "readerExplainPrompt": string;
       "maxFileSizeMB": number;
       "maxPageCount": number;
       "autoApplyAnnotations": boolean;
@@ -47,6 +48,10 @@ declare namespace _ZoteroTypes {
       "legacyPromptsImported": boolean;
       "deletionJobs": string;
       "skippedItems": string;
+      "onboardingWelcomeShown": boolean;
+      "onboardingReaderTipShown": boolean;
+      "onboardingCitationTipShown": boolean;
+      "onboardingWelcomeShownAt": string;
       "mcpServerEnabled": boolean;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;

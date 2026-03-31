@@ -9,6 +9,7 @@ import { copyToClipboard } from "../../utils/clipboard";
 import { logger } from "../../../src/utils/logger";
 import { setPref } from "../../../src/utils/prefs";
 import { TickIcon, CopyIcon } from "../icons/icons";
+import CustomInstructionsSection from "./CustomInstructionsSection";
 
 
 const AdvancedSection: React.FC = () => {
@@ -79,18 +80,18 @@ const AdvancedSection: React.FC = () => {
 
     return (
         <>
+            {/* ===== CUSTOM INSTRUCTIONS ===== */}
+            <CustomInstructionsSection />
+           
+            {/* ===== MCP SERVER ===== */}
             <div className="display-flex flex-row items-center gap-2" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
                 <div className="text-lg font-color-primary font-bold">MCP Server</div>
                 <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">Experimental</span>
             </div>
-            <SettingsGroup>
-                <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
-                    <div className="font-color-secondary text-base">
-                        The MCP server lets AI coding tools like Claude Code, Cursor, and Windsurf search and access your Zotero library.
-                        {' '}See our <DocLink path="mcp-server">MCP server guide</DocLink> for setup instructions.
-                    </div>
-                </div>
-            </SettingsGroup>
+            <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
+                The MCP server lets AI coding tools like Claude Code, Cursor, and Windsurf search and access your Zotero library.
+                {' '}See our <DocLink path="mcp-server">MCP server guide</DocLink> for setup instructions.
+            </div>
             <SettingsGroup>
                 <SettingsRow
                     title="Enable MCP Server"
