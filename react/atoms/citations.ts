@@ -202,14 +202,9 @@ export const citationDataListAtom = atom(
 
 /**
  * One-time citation tip: shown when the first external or page-locator citation
- * is processed. Module-level flag + persistent pref ensure it fires at most once.
+ * is processed. Persistent pref ensures it fires at most once.
  */
-let citationTipTriggered = false;
-
 function maybeTriggerCitationTip(set: (...args: any[]) => any) {
-    if (citationTipTriggered) return;
-    citationTipTriggered = true;
-
     if (getPref('onboardingCitationTipShown')) return;
     setPref('onboardingCitationTipShown', true);
 
