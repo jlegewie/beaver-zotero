@@ -11,7 +11,7 @@ const FloatingPopupRoot: React.FC = () => {
     // Dev-only: keyboard shortcut (Cmd+Shift+9 / Ctrl+Shift+9) and
     // global Zotero.__beaverTestFloatingPopup() for MCP testing.
     useEffect(() => {
-        if (process.env.NODE_ENV !== 'development') return;
+        if (!process?.env || process.env.NODE_ENV !== 'development') return;
 
         const win = getWindowFromElement(containerRef.current);
 
@@ -30,6 +30,18 @@ const FloatingPopupRoot: React.FC = () => {
         //   Zotero.__beaverTestFloatingPopup()
         //   Zotero.__beaverTestFloatingPopup({ type: 'error', title: 'Oops', expire: false })
         (Zotero as any).__beaverTestFloatingPopup = triggerTestPopup;
+        (Zotero as any).__beaverTestWelcome = () => {
+            triggerTestPopup({ type: 'welcome_onboarding', expire: false, cancelable: false });
+        };
+        (Zotero as any).__beaverTestReaderTip = () => {
+            triggerTestPopup({ type: 'reader_tip', expire: false, cancelable: false });
+        };
+        (Zotero as any).__beaverResetOnboarding = () => {
+            Zotero.Prefs.set('extensions.zotero.beaver.onboardingWelcomeShown', false, true);
+            Zotero.Prefs.set('extensions.zotero.beaver.onboardingReaderTipShown', false, true);
+            Zotero.Prefs.set('extensions.zotero.beaver.onboardingWelcomeShownAt', '', true);
+            Zotero.debug('[Beaver] Onboarding prefs reset — reload plugin to trigger popups');
+        };
 
         const handleKeyDown = (e: KeyboardEvent) => {
             const isShortcut =
@@ -48,6 +60,9 @@ const FloatingPopupRoot: React.FC = () => {
         return () => {
             win.removeEventListener('keydown', handleKeyDown);
             delete (Zotero as any).__beaverTestFloatingPopup;
+            delete (Zotero as any).__beaverTestWelcome;
+            delete (Zotero as any).__beaverTestReaderTip;
+            delete (Zotero as any).__beaverResetOnboarding;
         };
     }, [addMessage]);
 
