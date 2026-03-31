@@ -9,6 +9,7 @@ import { logger } from '../../src/utils/logger';
 const WELCOME_POPUP_ID = 'onboarding-welcome';
 const READER_TIP_POPUP_ID = 'onboarding-reader-tip';
 const ONE_HOUR_MS = 60 * 60 * 1000;
+const READER_TIP_DELAY_MS = 500;
 
 /**
  * Manages onboarding popups for first-time user engagement:
@@ -80,13 +81,17 @@ export function useOnboardingPopups() {
 
         readerTipShownThisSessionRef.current = true;
         setPref('onboardingReaderTipShown', true);
-        logger('useOnboardingPopups: Showing reader tip popup');
+        logger('useOnboardingPopups: Showing reader tip popup (after delay)');
 
-        addFloatingPopupMessage({
-            id: READER_TIP_POPUP_ID,
-            type: 'reader_tip',
-            expire: false,
-            cancelable: false,
-        });
+        const timerId = setTimeout(() => {
+            addFloatingPopupMessage({
+                id: READER_TIP_POPUP_ID,
+                type: 'reader_tip',
+                expire: false,
+                cancelable: false,
+            });
+        }, READER_TIP_DELAY_MS);
+
+        return () => clearTimeout(timerId);
     }, [isLibraryTab, isSidebarVisible, addFloatingPopupMessage]);
 }
