@@ -21,10 +21,10 @@ const ReaderTipContent: React.FC<ReaderTipContentProps> = ({ onDismiss }) => {
                 <div className="display-flex flex-row gap-2 items-center">
                     <img
                         src="chrome://beaver/content/icons/beaver.png"
-                        style={{ width: '1.25rem', height: '1.25rem' }}
+                        style={{ width: '2rem', height: '2rem' }}
                         alt="Beaver"
                     />
-                    <span className="font-color-primary text-base font-medium">
+                    <span className="font-color-primary text-xl font-medium">
                         Beaver
                     </span>
                 </div>
@@ -41,7 +41,7 @@ const ReaderTipContent: React.FC<ReaderTipContentProps> = ({ onDismiss }) => {
             </div>
 
             {/* Secondary text */}
-            <div className="font-color-tertiary text-sm">
+            <div className="font-color-tertiary text-base">
                 Select any text to get instant explanations.
             </div>
 
@@ -49,7 +49,8 @@ const ReaderTipContent: React.FC<ReaderTipContentProps> = ({ onDismiss }) => {
             <Button
                 variant="solid"
                 onClick={handleOpenBeaver}
-                className="w-full"
+                className="items-center font-"
+                style={{ padding: '4px 6px', width: '100%', alignItems: 'center', justifyContent: 'center', fontSize: "0.95rem" }}
             >
                 Open Beaver &rarr;
             </Button>
