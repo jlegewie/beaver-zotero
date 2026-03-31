@@ -36,18 +36,17 @@ export function useReaderAnnotationActionHandler() {
         // 3. Load annotation items, add to message, and send/focus
         setTimeout(async () => {
             try {
-                // Ensure reader attachment is set
-                const readerAttachment = store.get(currentReaderAttachmentAtom);
-                if (!readerAttachment || readerAttachment.id !== readerItemID) {
-                    const item = await Zotero.Items.getAsync(readerItemID);
-                    if (item) setReaderAttachment(item);
-                }
-
-                // Resolve the attachment to get its libraryID for key lookups
+                // Resolve the attachment (also used for libraryID in key lookups below)
                 const attachment = await Zotero.Items.getAsync(readerItemID);
                 if (!attachment) {
                     logger('useReaderAnnotationActionHandler: Could not resolve reader item', 1);
                     return;
+                }
+
+                // Ensure reader attachment is set
+                const readerAttachment = store.get(currentReaderAttachmentAtom);
+                if (!readerAttachment || readerAttachment.id !== readerItemID) {
+                    setReaderAttachment(attachment);
                 }
 
                 // Load annotation Zotero.Items by key

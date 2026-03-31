@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { SectionLabel, SettingsGroup } from "./components/SettingsElements";
+import { SectionLabel } from "./components/SettingsElements";
 import { getPref, setPref } from "../../../src/utils/prefs";
 import { logger } from "../../../src/utils/logger";
 
@@ -53,7 +53,7 @@ const CustomInstructionsSection: React.FC = () => {
 
             <SectionLabel>Reader Explain Prompt</SectionLabel>
             <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
-                The prompt sent when you click "Explain" on selected text in the PDF reader.
+                The prompt sent when you click "Explain" on selected text or annotations in the PDF reader.
             </div>
             <div className="custom-prompt-card" style={{ cursor: 'default' }}>
                 <textarea
