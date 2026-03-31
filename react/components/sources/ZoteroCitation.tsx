@@ -27,6 +27,7 @@ import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
 } from '../../atoms/ui';
+import { Icon, PdfIcon } from '../icons/icons';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -518,9 +519,14 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 </span>
             )}
             {hasLocator && !isExternal && (
-                <span className="px-3 py-15 text-sm font-color-tertiary border-top-quinary block">
-                    Click to open page {pages[0]}
-                </span>
+                <div className="px-3 py-15 border-top-quinary block">
+                    <div className="display-flex flex-row items-center gap-15">
+                        <Icon icon={PdfIcon} className="font-color-tertiary" />
+                        <span className="text-sm font-color-tertiary">
+                            Opens PDF on page {pages[0]}
+                        </span>
+                    </div>
+                </div>
             )}
         </span>
     )
