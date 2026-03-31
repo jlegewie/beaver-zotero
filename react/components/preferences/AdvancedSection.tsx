@@ -88,14 +88,10 @@ const AdvancedSection: React.FC = () => {
                 <div className="text-lg font-color-primary font-bold">MCP Server</div>
                 <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">Experimental</span>
             </div>
-            <SettingsGroup>
-                <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
-                    <div className="font-color-secondary text-base">
-                        The MCP server lets AI coding tools like Claude Code, Cursor, and Windsurf search and access your Zotero library.
-                        {' '}See our <DocLink path="mcp-server">MCP server guide</DocLink> for setup instructions.
-                    </div>
-                </div>
-            </SettingsGroup>
+            <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
+                The MCP server lets AI coding tools like Claude Code, Cursor, and Windsurf search and access your Zotero library.
+                {' '}See our <DocLink path="mcp-server">MCP server guide</DocLink> for setup instructions.
+            </div>
             <SettingsGroup>
                 <SettingsRow
                     title="Enable MCP Server"

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { SectionLabel } from "./components/SettingsElements";
+import { SectionLabel, SettingsGroup } from "./components/SettingsElements";
 import { getPref, setPref } from "../../../src/utils/prefs";
 import { logger } from "../../../src/utils/logger";
 
@@ -28,10 +28,10 @@ const CustomInstructionsSection: React.FC = () => {
     return (
         <>
             <SectionLabel>Custom Instructions</SectionLabel>
+            <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
+                Custom instructions are added to all chats and help steer responses. (Max ~250 words)
+            </div>
             <div className="custom-prompt-card" style={{ cursor: 'default' }}>
-                <div className="font-color-secondary text-text mb-2">
-                    Custom instructions are added to all chats and help steer responses. (Max ~250 words)
-                </div>
                 <textarea
                     value={customInstructions}
                     onChange={handleCustomInstructionsChange}
