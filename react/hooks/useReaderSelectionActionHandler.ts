@@ -4,7 +4,7 @@
  * new-thread → set-text-selection → send-message / focus-input flow.
  */
 
-import { useSetAtom, useAtomValue } from 'jotai';
+import { useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { newThreadAtom } from '../atoms/threads';
 import { readerTextSelectionAtom, currentReaderAttachmentAtom } from '../atoms/messageComposition';
@@ -16,7 +16,6 @@ import { logger } from '../../src/utils/logger';
 import { getPref } from '../../src/utils/prefs';
 
 export function useReaderSelectionActionHandler() {
-    const user = useAtomValue(userAtom);
     const newThread = useSetAtom(newThreadAtom);
     const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
     const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
@@ -24,6 +23,9 @@ export function useReaderSelectionActionHandler() {
 
     useEventSubscription('readerSelectionAction', async (detail) => {
         const { action, text, page, readerItemID } = detail;
+
+        // Skip if not authenticated
+        if (!store.get(userAtom)) return;
 
         logger(`useReaderSelectionActionHandler: Received action "${action}" for item ${readerItemID}`);
 
@@ -61,5 +63,5 @@ export function useReaderSelectionActionHandler() {
                 logger(`useReaderSelectionActionHandler: Error: ${error}`, 1);
             }
         }, 0);
-    }, [user, newThread, setReaderTextSelection, setReaderAttachment, sendWSMessage]);
+    }, [newThread, setReaderTextSelection, setReaderAttachment, sendWSMessage]);
 }

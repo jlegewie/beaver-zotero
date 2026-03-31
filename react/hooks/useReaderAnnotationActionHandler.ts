@@ -4,7 +4,7 @@
  * new-thread → add-annotations-to-message → send-message / focus-input flow.
  */
 
-import { useSetAtom, useAtomValue } from 'jotai';
+import { useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { newThreadAtom } from '../atoms/threads';
 import { currentReaderAttachmentAtom, addItemsToCurrentMessageItemsAtom } from '../atoms/messageComposition';
@@ -16,7 +16,6 @@ import { logger } from '../../src/utils/logger';
 import { getPref } from '../../src/utils/prefs';
 
 export function useReaderAnnotationActionHandler() {
-    const user = useAtomValue(userAtom);
     const newThread = useSetAtom(newThreadAtom);
     const setReaderAttachment = useSetAtom(currentReaderAttachmentAtom);
     const addItems = useSetAtom(addItemsToCurrentMessageItemsAtom);
@@ -24,6 +23,9 @@ export function useReaderAnnotationActionHandler() {
 
     useEventSubscription('readerAnnotationAction', async (detail) => {
         const { action, annotationIds, readerItemID } = detail;
+
+        // Skip if not authenticated
+        if (!store.get(userAtom)) return;
 
         logger(`useReaderAnnotationActionHandler: Received action "${action}" for ${annotationIds.length} annotation(s)`);
 
@@ -85,5 +87,5 @@ export function useReaderAnnotationActionHandler() {
                 logger(`useReaderAnnotationActionHandler: Error: ${error}`, 1);
             }
         }, 0);
-    }, [user, newThread, setReaderAttachment, addItems, sendWSMessage]);
+    }, [newThread, setReaderAttachment, addItems, sendWSMessage]);
 }
