@@ -128,30 +128,29 @@ function onCreateViewContextMenu(event: any): void {
 
     const hasSelection = !!selectedText && selectedText.length > 0;
 
-    // Use a "Beaver" submenu to group actions
-    append({
-        label: 'Beaver',
-        groups: [[
-            {
-                label: 'Explain Selection',
-                disabled: !hasSelection,
-                onCommand: () => {
-                    if (selectedText && readerItemID) {
-                        dispatchReaderAction('explain', selectedText, page, readerItemID);
-                    }
-                },
+    // Flat items — append does not support submenu/groups nesting
+    append(
+        {
+            label: 'Explain with Beaver',
+            disabled: !hasSelection,
+            persistent: true,
+            onCommand: () => {
+                if (selectedText && readerItemID) {
+                    dispatchReaderAction('explain', selectedText, page, readerItemID);
+                }
             },
-            {
-                label: 'Ask...',
-                disabled: !hasSelection,
-                onCommand: () => {
-                    if (selectedText && readerItemID) {
-                        dispatchReaderAction('ask', selectedText, page, readerItemID);
-                    }
-                },
+        },
+        {
+            label: 'Ask Beaver...',
+            disabled: !hasSelection,
+            persistent: true,
+            onCommand: () => {
+                if (selectedText && readerItemID) {
+                    dispatchReaderAction('ask', selectedText, page, readerItemID);
+                }
             },
-        ]],
-    });
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------
