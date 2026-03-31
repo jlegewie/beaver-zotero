@@ -8,9 +8,10 @@ const CustomInstructionsSection: React.FC = () => {
 
     // --- Atoms ---
     const [customInstructions, setCustomInstructions] = useState(() => getPref('customInstructions'));
+    const [readerExplainPrompt, setReaderExplainPrompt] = useState(() => getPref('readerExplainPrompt'));
 
     // --- Save Preferences ---
-    const handlePrefSave = (key: "googleGenerativeAiApiKey" | "openAiApiKey" | "anthropicApiKey" | "customInstructions", value: string) => {
+    const handlePrefSave = (key: "customInstructions" | "readerExplainPrompt", value: string) => {
         if (value !== getPref(key)) {
             setPref(key, value);
             logger(`Saved pref ${key}`);
@@ -22,6 +23,13 @@ const CustomInstructionsSection: React.FC = () => {
         const newValue = event.target.value;
         setCustomInstructions(newValue);
         handlePrefSave('customInstructions', newValue);
+    };
+
+    // --- Reader Explain Prompt Change Handler ---
+    const handleReaderExplainPromptChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const newValue = event.target.value;
+        setReaderExplainPrompt(newValue);
+        handlePrefSave('readerExplainPrompt', newValue);
     };
 
 
@@ -37,6 +45,22 @@ const CustomInstructionsSection: React.FC = () => {
                     onChange={handleCustomInstructionsChange}
                     placeholder="Enter custom instructions here..."
                     rows={5}
+                    className="chat-input custom-prompt-edit-textarea text-base"
+                    style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical' }}
+                    maxLength={1500}
+                />
+            </div>
+
+            <SectionLabel>Reader Explain Prompt</SectionLabel>
+            <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
+                The prompt sent when you click "Explain" on selected text in the PDF reader.
+            </div>
+            <div className="custom-prompt-card" style={{ cursor: 'default' }}>
+                <textarea
+                    value={readerExplainPrompt}
+                    onChange={handleReaderExplainPromptChange}
+                    placeholder="Explain the selected passage from this paper in plain language..."
+                    rows={4}
                     className="chat-input custom-prompt-edit-textarea text-base"
                     style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical' }}
                     maxLength={1500}
