@@ -4,11 +4,11 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { citationDataByCitationKeyAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { createZoteroURI } from '../../utils/zoteroURI';
-import { 
-    getCitationPages, 
-    getCitationBoundingBoxes, 
-    isExternalCitation, 
-    isZoteroCitation, 
+import {
+    getCitationPages,
+    getCitationBoundingBoxes,
+    isExternalCitation,
+    isZoteroCitation,
     parseItemReference,
     getCitationKey
 } from '../../types/citations';
