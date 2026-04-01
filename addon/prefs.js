@@ -74,6 +74,7 @@ pref("skippedItems", "[]")
 // Onboarding popups
 pref("onboardingWelcomeShown", false);
 pref("onboardingReaderTipShown", false);
+pref("onboardingNoteTipShown", false);
 pref("onboardingCitationTipShown", false);
 pref("onboardingWelcomeShownAt", "");
 
