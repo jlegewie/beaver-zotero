@@ -81,11 +81,19 @@ export const BUILTIN_ACTIONS: Action[] = [
     // ═══════════════════════════════════════════════════════════════════
 
     {
+        id: 'builtin-skim-paper',
+        title: 'Skim this paper',
+        text: 'Skim this document and create a structured skim note so I can quickly decide what to read closely. Start with a 2-3 sentence overview stating what the document is about, its central argument or contribution, and the main conclusion. Then provide a section-by-section walkthrough: for each major section or chapter, write one sentence summarizing its key point with a page citation <citation ... page="..."/>. Finish with 3-5 key takeaways. Save as a Zotero note attached to the parent item.',
+        targetType: 'attachment',
+        sortOrder: 200,
+    },
+
+    {
         id: 'builtin-key-findings',
         title: 'Extract key findings',
         text: 'Read this paper and extract the key findings as a numbered list. For each finding, include a citation with page number where it appears. Focus on empirical results and novel contributions, not background or literature review. Save as a Zotero note attached to the parent item.',
         targetType: 'attachment',
-        sortOrder: 200,
+        sortOrder: 210,
     },
 
     {
@@ -93,7 +101,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'How does this fit into my library?',
         text: 'How does this paper connect to the rest of my library? Does it support, challenge, or extend ideas in papers I already have? Write a short report that directly compares the paper to other research in my library including a comparison table. Use a Zotero note attached to the item.',
         targetType: 'attachment',
-        sortOrder: 210,
+        sortOrder: 220,
     },
 
     // {
@@ -101,7 +109,7 @@ export const BUILTIN_ACTIONS: Action[] = [
     //     title: 'Explain selected text',
     //     text: 'Explain the following passage from this paper in plain language. Provide context for any technical terms, statistical methods, or domain-specific concepts. If it references other work, briefly explain that context too.{{selected_text}}',
     //     targetType: 'attachment',
-    //     sortOrder: 210,
+    //     sortOrder: 220,
     // },
 
     {
@@ -109,7 +117,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'Find key references from this paper',
         text: 'Identify the 3-4 most important references cited in this paper. Focus on the ones that are foundational to its argument or method. For each, explain why it matters to this paper and search my library to check if I already have it. For any I am missing, search for them outside of my library and cite them as external references.',
         targetType: 'attachment',
-        sortOrder: 220,
+        sortOrder: 230,
     },
 
     // {

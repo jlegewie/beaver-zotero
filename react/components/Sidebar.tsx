@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import InputArea from "./input/InputArea"
 import Header from "./Header"
+import { useEventSubscription } from '../hooks/useEventSubscription';
 import { ThreadView } from "./agentRuns";
 import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
 import { allRunsAtom } from '../agents/atoms';
@@ -72,7 +73,12 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
     }, []);
-    
+
+    // Focus textarea when focusInput event is dispatched (e.g. reader "Ask..." button)
+    useEventSubscription('focusInput', () => {
+        setTimeout(() => inputRef.current?.focus(), 50);
+    });
+
     // Select the correct atoms based on whether we're in the separate window
     const scrolledAtom = isWindow ? windowUserScrolledAtom : userScrolledAtom;
     const scrollPositionAtom = isWindow ? windowScrollPositionAtom : currentThreadScrollPositionAtom;

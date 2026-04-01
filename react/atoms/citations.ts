@@ -2,16 +2,19 @@ import { atom } from 'jotai';
 import { getDisplayNameFromItem, getReferenceFromItem } from '../utils/sourceUtils';
 import { createZoteroURI } from "../utils/zoteroURI";
 import { logger } from '../../src/utils/logger';
-import { 
-    CitationMetadata, 
-    CitationData, 
-    isExternalCitation, 
-    getCitationKey, 
+import {
+    CitationMetadata,
+    CitationData,
+    isExternalCitation,
+    getCitationKey,
+    getCitationPages,
     getFullCitationKey,
     parseCitationAttributes
 } from '../types/citations';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { externalReferenceMappingAtom, formatExternalCitation } from './externalReferences';
+import { getPref, setPref } from '../../src/utils/prefs';
+import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 
 /**
  * Thread-scoped citation marker assignment.
@@ -196,6 +199,21 @@ export const citationDataListAtom = atom(
 );
 
 /**
+ * One-time citation tip: shown when the first external or page-locator citation
+ * is processed. Persistent pref ensures it fires at most once.
+ */
+function maybeTriggerCitationTip(set: (...args: any[]) => any) {
+    if (getPref('onboardingCitationTipShown')) return;
+    setPref('onboardingCitationTipShown', true);
+
+    set(addPopupMessageAtom, {
+        type: 'citation_tip' as const,
+        title: 'Understanding Citations',
+        expire: false,
+    });
+}
+
+/**
  * Tracks the current pending update promise for race condition handling.
  * This replaces the module-level version counter with a cleaner pattern.
  */
@@ -257,9 +275,11 @@ export const updateCitationDataAtom = atom(
 
             // Handle external citations differently
             if (isExternalCitation(citation)) {
+                maybeTriggerCitationTip(set);
+
                 // Look up additional data from external reference mapping
-                const externalRef = citation.external_source_id 
-                    ? externalReferenceMap[citation.external_source_id] 
+                const externalRef = citation.external_source_id
+                    ? externalReferenceMap[citation.external_source_id]
                     : undefined;
 
                 // Preview for external references
@@ -275,7 +295,7 @@ export const updateCitationDataAtom = atom(
                     citation: citation.author_year || null,
                     formatted_citation: externalFormattedCitation || null,
                     preview: citation.preview,
-                    url: null, 
+                    url: null,
                     numericCitation
                 };
                 continue;
@@ -287,13 +307,18 @@ export const updateCitationDataAtom = atom(
                     throw new Error(`Missing library_id or zotero_key for citation ${citation.citation_id}`);
                 }
 
+                // Trigger citation tip for Zotero citations with page locators (green)
+                if (getCitationPages(citation).length > 0) {
+                    maybeTriggerCitationTip(set);
+                }
+
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(citation.library_id, citation.zotero_key);
                 if (!item) throw new Error(`Item not found for citation ${citation.citation_id}`);
                 await loadFullItemDataWithAllTypes([item]);
 
                 const parentItem = item.parentItem;
                 const itemToCite = item.isNote() ? item : parentItem || item;
-                
+
                 newCitationDataMap[citation.citation_id] = {
                     ...citation,
                     type: item.isRegularItem() ? "item" : item.isAttachment() ? "attachment" : item.isNote() ? "note" : item.isAnnotation() ? "annotation" : "external",

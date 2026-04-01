@@ -1,14 +1,14 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { citationDataByCitationKeyAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { createZoteroURI } from '../../utils/zoteroURI';
-import { 
-    getCitationPages, 
-    getCitationBoundingBoxes, 
-    isExternalCitation, 
-    isZoteroCitation, 
+import {
+    getCitationPages,
+    getCitationBoundingBoxes,
+    isExternalCitation,
+    isZoteroCitation,
     parseItemReference,
     getCitationKey
 } from '../../types/citations';
@@ -27,6 +27,7 @@ import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
 } from '../../atoms/ui';
+import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon } from '../icons/icons';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -247,6 +248,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 : formatted_citation || '';
         }
         
+        // Strip URLs from formatted citation and preview text (they clutter the tooltip)
+        const stripUrls = (s: string) => s.replace(/\s*https?:\/\/\S+/g, '').trim();
+        formatted_citation = stripUrls(formatted_citation);
+        previewText = stripUrls(previewText);
+
         const pages = [...new Set(getCitationPages(citationMetadata))];
         const firstPage = pages.length > 0 ? pages[0] : null;
         const finalUrl = firstPage ? `${url}?page=${firstPage}` : url;
@@ -478,8 +484,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }
 
     // Determine the CSS class based on citation type and state
+    const hasLocator = pages.length > 0 || (citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0);
     const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
+        : hasLocator
+        ? "zotero-citation with-locator"
         : "zotero-citation";
     const citationClass = isStreaming
         ? `${citationClassBase} streaming`
@@ -514,9 +523,34 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 {previewText}
             </span>
             {isExternal && !mappedZoteroItem && (
-                <span className="px-3 py-15 text-xs font-color-tertiary border-top-quinary block">
-                    External reference
-                </span>
+                <div className="px-3 py-15 border-top-quinary block">
+                    <div className="display-flex flex-row items-center gap-15">
+                        <Icon icon={GlobalSearchIcon} className="font-color-tertiary" />
+                        <span className="text-sm font-color-tertiary">
+                            View details
+                        </span>
+                    </div>
+                </div>
+            )}
+            {hasLocator && (!isExternal || !!mappedZoteroItem) && (
+                <div className="px-3 py-15 border-top-quinary block">
+                    <div className="display-flex flex-row items-center gap-15">
+                        <Icon icon={PdfIcon} className="font-color-tertiary" />
+                        <span className="text-sm font-color-tertiary">
+                            {pages[0] != null ? `Opens PDF on page ${pages[0]}` : 'Opens PDF at location'}
+                        </span>
+                    </div>
+                </div>
+            )}
+            {!hasLocator && (!isExternal || !!mappedZoteroItem) && (
+                <div className="px-3 py-15 border-top-quinary block">
+                    <div className="display-flex flex-row items-center gap-15">
+                        <Icon icon={LibraryIcon} className="font-color-tertiary" />
+                        <span className="text-sm font-color-tertiary">
+                            Reveals item in library
+                        </span>
+                    </div>
+                </div>
             )}
             {citationMetadata?.type === 'note' && (
                 <span className="px-3 py-15 text-xs font-color-tertiary border-top-quinary block">

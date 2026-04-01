@@ -104,7 +104,7 @@ function getActionCustomizations(): ActionCustomizations {
     return { version: 1, overrides: {}, custom: [] };
 }
 
-function getMergedActions(): Action[] {
+export function getMergedActions(): Action[] {
     const c = getActionCustomizations();
     const actions: Action[] = [];
 
