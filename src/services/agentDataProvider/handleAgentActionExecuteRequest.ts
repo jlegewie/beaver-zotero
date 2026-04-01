@@ -790,15 +790,17 @@ async function executeEditNoteAction(
     // 2. Load note
     await item.loadDataType('note');
 
-    // 3. Get current note HTML (kept for rollback on save failure)
+    // 3. Pre-load page labels so new citations resolve page indices to labels.
+    //    Done before reading the note to avoid async gaps between read and write.
+    await preloadPageLabelsForNewCitations(new_string);
+
+    // 4. Get current note HTML (kept for rollback on save failure)
+    //    Avoid async operations between here and item.setNote() to preserve atomicity.
     const oldHtml = getLatestNoteHtml(item);
 
-    // 4. Get metadata from cache or re-simplify
+    // 5. Get metadata from cache or re-simplify
     const noteId = `${library_id}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
-
-    // 5. Pre-load page labels so new citations resolve page indices to labels
-    await preloadPageLabelsForNewCitations(new_string);
 
     // 6. Expand old_string and new_string to raw HTML
     let expandedOld: string;
