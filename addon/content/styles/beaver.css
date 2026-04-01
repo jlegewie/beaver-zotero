@@ -2335,7 +2335,7 @@
 }
 
 [id^="beaver-pane-"] .inline-diff-del {
-    background-color: rgba(186, 42, 41, 0.18);
+    background-color: rgba(210, 40, 40, 0.25);
     text-decoration: line-through;
     border-radius: 2px;
     padding: 1px 1px;
@@ -2344,7 +2344,7 @@
 }
 
 [id^="beaver-pane-"] .inline-diff-add {
-    background-color: rgba(20, 135, 85, 0.18);
+    background-color: rgba(16, 150, 72, 0.25);
     border-radius: 2px;
     padding: 1px 1px;
     color: var(--fill-primary);
