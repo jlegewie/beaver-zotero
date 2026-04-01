@@ -12,7 +12,7 @@ import { currentThreadIdAtom, currentThreadNameAtom, recentThreadsAtom, ThreadDa
 import { citationDataMapAtom } from '../../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
-import { selectItem } from '../../../../src/utils/selectItem';
+import { selectItem, selectItemById } from '../../../../src/utils/selectItem';
 import { store } from '../../../store';
 import { preloadPageLabelsForContent } from '../../../utils/pageLabels';
 
@@ -72,6 +72,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             externalReferencesMap
         });
         const context = getZoteroTargetContextSync();
+
         const threadId = store.get(currentThreadIdAtom);
         if (threadId) {
             htmlContent += getBeaverNoteFooterHTML(threadId);
@@ -84,14 +85,19 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         newNote.setNote(htmlContent);
         await newNote.saveTx();
 
-        if (context.collectionToAddTo) {
-            await context.collectionToAddTo.addItem(newNote.id);
+        // Always add to the current collection (even when items are selected)
+        const zp = Zotero.getActiveZoteroPane();
+        const selectedCollection = zp?.getSelectedCollection() || null;
+        if (selectedCollection) {
+            await Zotero.DB.executeTransaction(async () => {
+                selectedCollection.addItem(newNote.id);
+            });
         }
 
         const win = Zotero.getMainWindow();
         const isInReader = win.Zotero_Tabs?.selectedType === 'reader';
         if (!isInReader) {
-            selectItem(newNote);
+            await selectItemById(newNote.id, true, selectedCollection?.id);
         }
     };
 

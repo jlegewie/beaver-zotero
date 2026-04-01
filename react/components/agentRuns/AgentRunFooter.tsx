@@ -8,15 +8,15 @@ import MenuButton from '../ui/MenuButton';
 import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
-import { getBeaverNoteFooterHTML, wrapWithSchemaVersion } from '../../utils/noteActions';
+import { getBeaverNoteFooterHTML, wrapWithSchemaVersion, generateNoteTitle } from '../../utils/noteActions';
 import CopyButton from '../ui/buttons/CopyButton';
 import { citationDataMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
-import { selectItem } from '../../../src/utils/selectItem';
+import { selectItem, selectItemById } from '../../../src/utils/selectItem';
 import { CitationData, getCitationKey } from '../../types/citations';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
-import { toolResultsMapAtom } from '../../agents/atoms';
+import { toolResultsMapAtom, allRunsAtom } from '../../agents/atoms';
 import { extractRunResponseContent } from '../../utils/threadContent';
 import TokenUsageDisplay from './TokenUsageDisplay';
 import { regenerateFromRunAtom } from '../../atoms/agentRunAtoms';
@@ -41,6 +41,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
     const toolResultsMap = useAtomValue(toolResultsMapAtom);
     const citationMarkerMap = useAtomValue(citationKeyToMarkerAtom);
+    const allRuns = useAtomValue(allRunsAtom);
     
     // Force re-render when menu opens to get fresh context for disabled state
     const [, forceUpdate] = useState({});
@@ -172,6 +173,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         });
         const context = getZoteroTargetContextSync();
 
+        // Prepend a meaningful title
+        const responseIndex = allRuns.findIndex(r => r.id === run.id) + 1;
+        formattedContent = generateNoteTitle(responseIndex || undefined) + formattedContent;
+
         const threadId = store.get(currentThreadIdAtom);
         if (threadId) {
             formattedContent += getBeaverNoteFooterHTML(threadId, run.id);
@@ -184,16 +189,20 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         newNote.setNote(wrapWithSchemaVersion(formattedContent));
         await newNote.saveTx();
 
-        // Add to collection if one is selected
-        if (context.collectionToAddTo) {
-            await context.collectionToAddTo.addItem(newNote.id);
+        // Always add to the current collection (even when items are selected)
+        const zp = Zotero.getActiveZoteroPane();
+        const selectedCollection = zp?.getSelectedCollection() || null;
+        if (selectedCollection) {
+            await Zotero.DB.executeTransaction(async () => {
+                selectedCollection.addItem(newNote.id);
+            });
         }
-        
+
         // Only navigate to the item in library view, not in reader
         const win = Zotero.getMainWindow();
         const isInReader = win.Zotero_Tabs?.selectedType === 'reader';
         if (!isInReader) {
-            selectItem(newNote);
+            await selectItemById(newNote.id, true, selectedCollection?.id);
         }
     };
 
@@ -208,6 +217,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         const context = getZoteroTargetContextSync();
 
         if (!context.parentReference) return;
+
+        // Prepend a meaningful title
+        const responseIndex = allRuns.findIndex(r => r.id === run.id) + 1;
+        formattedContent = generateNoteTitle(responseIndex || undefined) + formattedContent;
 
         const threadId = store.get(currentThreadIdAtom);
         if (threadId) {
