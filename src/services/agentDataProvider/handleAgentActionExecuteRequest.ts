@@ -19,6 +19,7 @@ import {
     findTargetRawMatchPosition,
     preloadPageLabelsForNewCitations,
     waitForPMNormalization,
+    waitForNoteSaveStabilization,
     hasSchemaVersionWrapper,
     decodeHtmlEntities,
     encodeTextEntities,
@@ -982,6 +983,16 @@ async function executeEditNoteAction(
         };
     }
 
+    // 14b. Wait for the note to stabilize after save.
+    // saveTx() fires a Notifier event. When the note is open in an editor,
+    // ProseMirror receives the Notifier, normalizes the HTML (e.g. entity
+    // decoding, structural cleanup), and may save back a modified version
+    // via item.setNote() + item.saveTx().  This async save-back can
+    // overwrite a subsequent edit's save if it lands between two edits.
+    // Poll item.getNote() until it stops changing so the next queued edit
+    // reads the stabilized (PM-normalized) HTML as its base.
+    await waitForNoteSaveStabilization(item, newHtml);
+
     // 15. Clear editor selection so it doesn't shift to unrelated text
     clearNoteEditorSelection(library_id, zotero_key);
 
@@ -996,13 +1007,15 @@ async function executeEditNoteAction(
     // When the note is open in the editor, PM re-normalizes after saveTx(),
     // which can change the HTML structure (e.g. inline styles → semantic elements).
     // Without this, undo_new_html becomes stale and undo fails.
+    // Note: waitForNoteSaveStabilization above ensures PM's save-back is
+    // complete, so this reads the final PM-normalized HTML.
     const undoData = {
         undo_new_html: expandedNew,
         undo_before_context: undoBeforeContext,
         undo_after_context: undoAfterContext,
     };
     const savedStrippedHtml = stripDataCitationItems(newHtml);
-    await waitForPMNormalization(item, savedStrippedHtml, undoData);
+    await waitForPMNormalization(item, savedStrippedHtml, undoData, strippedHtml);
 
     return {
         type: 'agent_action_execute_response',

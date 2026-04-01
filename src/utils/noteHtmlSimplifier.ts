@@ -1494,11 +1494,17 @@ const PM_UNDO_CONTEXT_LENGTH = 200;
  * the actual PM-normalized fragment using context anchors and updates the
  * undoData object in-place before it is returned to the caller.
  *
+ * @param preEditStrippedHtml - The stripped HTML before the edit was applied.
+ *   When provided, polls where PM still shows this pre-edit state are treated
+ *   as "PM hasn't processed the save yet" and do NOT count toward the
+ *   early-exit threshold. This prevents a subsequent serialized edit from
+ *   reading stale HTML from PM's editor state.
  */
 export async function waitForPMNormalization(
     item: any,
     savedStrippedHtml: string,
-    undoData: { undo_new_html?: string; undo_before_context?: string; undo_after_context?: string }
+    undoData: { undo_new_html?: string; undo_before_context?: string; undo_after_context?: string },
+    preEditStrippedHtml?: string,
 ): Promise<void> {
     if (!undoData.undo_new_html) return;
 
@@ -1518,6 +1524,12 @@ export async function waitForPMNormalization(
         try {
             const currentHtml = getLatestNoteHtml(item);
             const currentStripped = stripDataCitationItems(currentHtml);
+
+            // If PM still shows the pre-edit HTML, it hasn't processed the
+            // save yet.  Keep waiting — do NOT count toward early-exit.
+            if (preEditStrippedHtml && currentStripped === preEditStrippedHtml) {
+                continue;
+            }
 
             // If HTML still matches what we saved, PM either hasn't processed
             // yet or produced identical output (common for plain-text edits).
@@ -1563,4 +1575,58 @@ export async function waitForPMNormalization(
         }
     }
     // Timeout — PM didn't change anything, keep original undo data
+}
+
+// =============================================================================
+// Post-save stabilization
+// =============================================================================
+
+/** Polling interval for stabilization check (ms). */
+const STABILIZE_POLL_MS = 50;
+/** Number of consecutive unchanged polls before we consider the note stable. */
+const STABILIZE_THRESHOLD = 3;
+/** Maximum time to wait for stabilization (ms). */
+const STABILIZE_MAX_WAIT_MS = 1500;
+
+/**
+ * Wait for `item.getNote()` to stop changing after a `saveTx()`.
+ *
+ * When a note is open in Zotero's editor, `saveTx()` fires a Notifier event.
+ * ProseMirror receives it, normalizes the HTML (entity decoding, structural
+ * cleanup), and asynchronously saves back the normalized version via
+ * `item.setNote()` + `item.saveTx()`.  If another edit saves before this
+ * save-back completes, PM's save-back overwrites the second edit.
+ *
+ * This function polls `item.getNote()` until the value hasn't changed for
+ * `STABILIZE_THRESHOLD` consecutive polls (~150 ms of stability), ensuring
+ * PM's save-back is complete before the next edit reads the note.
+ */
+export async function waitForNoteSaveStabilization(
+    item: any,
+    savedHtml: string,
+): Promise<void> {
+    let lastHtml = savedHtml;
+    let stableCount = 0;
+
+    for (let elapsed = 0; elapsed < STABILIZE_MAX_WAIT_MS; elapsed += STABILIZE_POLL_MS) {
+        await new Promise(resolve => setTimeout(resolve, STABILIZE_POLL_MS));
+
+        const currentHtml: string = item.getNote();
+        if (currentHtml === lastHtml) {
+            stableCount++;
+            if (stableCount >= STABILIZE_THRESHOLD) {
+                if (currentHtml !== savedHtml) {
+                    logger(`waitForNoteSaveStabilization: note was rewritten by editor `
+                        + `(saved len=${savedHtml.length}, stabilized len=${currentHtml.length})`, 1);
+                }
+                return;
+            }
+        } else {
+            logger(`waitForNoteSaveStabilization: note changed at ${elapsed}ms `
+                + `(len ${lastHtml.length} → ${currentHtml.length})`, 1);
+            lastHtml = currentHtml;
+            stableCount = 0;
+        }
+    }
+    logger(`waitForNoteSaveStabilization: timeout after ${STABILIZE_MAX_WAIT_MS}ms, proceeding`, 1);
 }

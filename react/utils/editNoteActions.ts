@@ -22,6 +22,7 @@ import {
     preloadPageLabelsForNewCitations,
     findRangeByContexts,
     waitForPMNormalization,
+    waitForNoteSaveStabilization,
     hasSchemaVersionWrapper,
     decodeHtmlEntities,
     encodeTextEntities,
@@ -366,7 +367,10 @@ export async function executeEditNoteAction(
         throw new Error(`Failed to save note: ${error}`);
     }
 
-    // 13b. Clear editor selection so it doesn't shift to unrelated text
+    // 13b. Wait for PM's async save-back to settle before any subsequent edit
+    await waitForNoteSaveStabilization(item, newHtml);
+
+    // 13c. Clear editor selection so it doesn't shift to unrelated text
     clearNoteEditorSelection(library_id, zotero_key);
 
     // 14. Invalidate cache
@@ -706,6 +710,9 @@ export async function undoEditNoteAction(
     } catch (error) {
         throw new Error(`Failed to save note after undo: ${error}`);
     }
+
+    // Wait for PM's async save-back to settle before any subsequent undo
+    await waitForNoteSaveStabilization(item, restoredHtml);
 
     // Clear editor selection so it doesn't shift to unrelated text
     clearNoteEditorSelection(library_id, zotero_key);
