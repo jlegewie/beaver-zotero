@@ -64,7 +64,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     };
 
     const handleSaveAsNote = async () => {
-        const content = getThreadContent();
+        const content = getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
         await preloadPageLabelsForContent(content);
         let htmlContent = renderToHTML(preprocessNoteContent(content), "markdown", {
             citationDataMap,
@@ -72,11 +72,16 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             externalReferencesMap
         });
         const context = getZoteroTargetContextSync();
-
         const threadId = store.get(currentThreadIdAtom);
-        if (threadId) {
-            htmlContent += getBeaverNoteFooterHTML(threadId);
+
+        // Insert header after <h1> title, append footer
+        const brandingHtml = threadId ? getBeaverNoteFooterHTML(threadId) : '';
+        const h1End = htmlContent.indexOf('</h1>');
+        if (h1End !== -1) {
+            const insertPos = h1End + '</h1>'.length;
+            htmlContent = htmlContent.slice(0, insertPos) + brandingHtml + '<hr>' + htmlContent.slice(insertPos);
         }
+        htmlContent += '<hr>' + brandingHtml;
 
         const newNote = new Zotero.Item('note');
         if (context.targetLibraryId !== undefined) {
@@ -102,7 +107,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     };
 
     const handleSaveAsChildNote = async () => {
-        const content = getThreadContent();
+        const content = getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
         await preloadPageLabelsForContent(content);
         let htmlContent = renderToHTML(preprocessNoteContent(content), "markdown", {
             citationDataMap,
@@ -113,9 +118,15 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         if (!context.parentReference) return;
 
         const threadId = store.get(currentThreadIdAtom);
-        if (threadId) {
-            htmlContent += getBeaverNoteFooterHTML(threadId);
+
+        // Insert header after <h1> title, append footer
+        const brandingHtml = threadId ? getBeaverNoteFooterHTML(threadId) : '';
+        const h1End = htmlContent.indexOf('</h1>');
+        if (h1End !== -1) {
+            const insertPos = h1End + '</h1>'.length;
+            htmlContent = htmlContent.slice(0, insertPos) + brandingHtml + '<hr>' + htmlContent.slice(insertPos);
         }
+        htmlContent += '<hr>' + brandingHtml;
 
         const newNote = new Zotero.Item('note');
         newNote.libraryID = context.parentReference.library_id;

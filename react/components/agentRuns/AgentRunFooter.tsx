@@ -165,22 +165,29 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     /** Save as standalone note to current library/collection */
     const saveToLibrary = async () => {
-        await preloadPageLabelsForContent(combinedContent);
-        let formattedContent = renderToHTML(preprocessNoteContent(combinedContent), "markdown", {
+        // Build note content: ## User (blockquote) + ## Beaver (response)
+        const userQuestion = run.user_prompt.content;
+        const sections: string[] = [];
+        if (userQuestion) {
+            sections.push(`## User\n\n> ${userQuestion.replace(/\n/g, '\n> ')}`);
+        }
+        sections.push(`## Beaver\n\n${combinedContent}`);
+        const noteMarkdown = sections.join('\n\n---\n\n');
+
+        await preloadPageLabelsForContent(noteMarkdown);
+        let formattedContent = renderToHTML(preprocessNoteContent(noteMarkdown), "markdown", {
             citationDataMap,
             externalMapping: externalReferenceMapping,
             externalReferencesMap
         });
         const context = getZoteroTargetContextSync();
-
-        // Prepend a meaningful title
-        const responseIndex = allRuns.findIndex(r => r.id === run.id) + 1;
-        formattedContent = generateNoteTitle(responseIndex || undefined) + formattedContent;
-
         const threadId = store.get(currentThreadIdAtom);
-        if (threadId) {
-            formattedContent += getBeaverNoteFooterHTML(threadId, run.id);
-        }
+
+        // Assemble: title + header + <hr> + content + <hr> + footer
+        const responseIndex = allRuns.findIndex(r => r.id === run.id) + 1;
+        const titleHtml = generateNoteTitle(responseIndex || undefined);
+        const brandingHtml = threadId ? getBeaverNoteFooterHTML(threadId, run.id) : '';
+        formattedContent = titleHtml + brandingHtml + '<hr>' + formattedContent + '<hr>' + brandingHtml;
 
         const newNote = new Zotero.Item('note');
         if (context.targetLibraryId !== undefined) {
@@ -208,8 +215,17 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     /** Save as child note attached to selected/current item */
     const saveToItem = async () => {
-        await preloadPageLabelsForContent(combinedContent);
-        let formattedContent = renderToHTML(preprocessNoteContent(combinedContent), "markdown", {
+        // Build note content: ## User (blockquote) + ## Beaver (response)
+        const userQuestion = run.user_prompt.content;
+        const sections: string[] = [];
+        if (userQuestion) {
+            sections.push(`## User\n\n> ${userQuestion.replace(/\n/g, '\n> ')}`);
+        }
+        sections.push(`## Beaver\n\n${combinedContent}`);
+        const noteMarkdown = sections.join('\n\n---\n\n');
+
+        await preloadPageLabelsForContent(noteMarkdown);
+        let formattedContent = renderToHTML(preprocessNoteContent(noteMarkdown), "markdown", {
             citationDataMap,
             externalMapping: externalReferenceMapping,
             externalReferencesMap
@@ -218,14 +234,12 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
         if (!context.parentReference) return;
 
-        // Prepend a meaningful title
-        const responseIndex = allRuns.findIndex(r => r.id === run.id) + 1;
-        formattedContent = generateNoteTitle(responseIndex || undefined) + formattedContent;
-
+        // Assemble: title + header + <hr> + content + <hr> + footer
         const threadId = store.get(currentThreadIdAtom);
-        if (threadId) {
-            formattedContent += getBeaverNoteFooterHTML(threadId, run.id);
-        }
+        const responseIndex = allRuns.findIndex(r => r.id === run.id) + 1;
+        const titleHtml = generateNoteTitle(responseIndex || undefined);
+        const brandingHtml = threadId ? getBeaverNoteFooterHTML(threadId, run.id) : '';
+        formattedContent = titleHtml + brandingHtml + '<hr>' + formattedContent + '<hr>' + brandingHtml;
 
         const newNote = new Zotero.Item('note');
         newNote.libraryID = context.parentReference.library_id;

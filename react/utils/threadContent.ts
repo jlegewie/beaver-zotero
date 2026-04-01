@@ -78,6 +78,8 @@ export interface ExtractThreadContentOptions {
     threadId?: string | null;
     /** Include per-run [↗] deep links (works in clipboard markdown, not in Zotero notes) */
     includeRunLinks?: boolean;
+    /** Wrap user messages in blockquotes (for note saves) */
+    userMessageAsBlockquote?: boolean;
 }
 
 /**
@@ -97,7 +99,7 @@ export function extractThreadContent(
     toolResultsMap: Map<string, any>,
     options: ExtractThreadContentOptions = {}
 ): string {
-    const { threadName, threadId, includeRunLinks = true } = options;
+    const { threadName, threadId, includeRunLinks = true, userMessageAsBlockquote = false } = options;
     const sections: string[] = [];
 
     if (threadName) {
@@ -112,7 +114,10 @@ export function extractThreadContent(
             const userHeading = includeRunLinks && threadId
                 ? ` [User ↗](zotero://beaver/thread/${threadId}/run/${run.id})`
                 : 'User';
-            sections.push(`## ${userHeading}\n\n${userMessage}`);
+            const formattedMessage = userMessageAsBlockquote
+                ? `> ${userMessage.replace(/\n/g, '\n> ')}`
+                : userMessage;
+            sections.push(`## ${userHeading}\n\n${formattedMessage}`);
         }
         if (responseContent) {
             sections.push(`## Beaver\n\n${responseContent}`);
