@@ -397,7 +397,7 @@ export async function executeEditNoteAction(
     // We poll until PM processes or timeout, then update undo_new_html in-place
     // so the returned result already has correct undo data.
     const savedStrippedHtml = stripDataCitationItems(newHtml);
-    await waitForPMNormalization(item, savedStrippedHtml, result);
+    await waitForPMNormalization(item, savedStrippedHtml, result, strippedHtml);
 
     return result;
 }
