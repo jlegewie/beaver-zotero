@@ -328,6 +328,55 @@ Use the close button (x) in the banner to dismiss the preview without approving 
   - Sidebar still shows the edit action with Apply/Reject buttons
   - User can still approve/reject via sidebar buttons after close
 
+### Test 4.4: Banner Approve/Reject Only Affects the Previewed Note
+
+Verify that the "Approve All" / "Reject All" banner buttons only act on edits for the note currently being previewed, not edits targeting other notes.
+
+#### Guidelines
+- Open two different notes in separate Zotero tabs (e.g., note A and note B)
+- Send a prompt that produces `edit_note` tool calls for **both** notes (e.g., "Make the following two separate edit_note tool calls: (1) In note A, change the title to 'Banner Scope A'. (2) In note B, change the title to 'Banner Scope B'.")
+- Wait for both deferred approvals to appear
+- The diff preview should appear in whichever note tab is currently selected (e.g., note A)
+- Click "Approve All" (or "Reject All") in the banner
+
+#### Verify — Approve All
+- [ ] Only edits for the previewed note (A) are approved (green checkmark in sidebar)
+- [ ] Edits for the other note (B) remain pending — still awaiting approval in sidebar
+- [ ] "N Pending Approval" bar still shows (count decremented but not zero)
+- [ ] Note A content reflects the approved edit
+- [ ] Note B content is unchanged
+- [ ] Switching to note B's tab and clicking "Preview" re-shows the diff preview for note B's pending edit
+
+#### Verify — Reject All (repeat with Reject All instead)
+- [ ] Only edits for the previewed note are rejected (red X in sidebar)
+- [ ] Edits for the other note remain pending
+- [ ] Note content for both notes is unchanged after rejection
+
+#### Test result
+
+- **Date**: (not yet run)
+- **Result**: NOT RUN
+
+### Test 4.5: Banner Approve/Reject with Mixed Action Types
+
+Verify that banner buttons only affect `edit_note` actions for the previewed note, leaving other action types (e.g., `edit_metadata`) untouched.
+
+#### Guidelines
+- Send a prompt that triggers both an `edit_note` for a specific note and an `edit_metadata` for a different item
+- Wait for both deferred approvals
+- The diff preview appears for the edit_note in the note editor
+- Click "Approve All" in the banner
+
+#### Verify
+- [ ] Only the `edit_note` action(s) for the previewed note are approved
+- [ ] The `edit_metadata` action remains pending in the sidebar
+- [ ] PendingActionsBar still shows the remaining approval
+
+#### Test result
+
+- **Date**: (not yet run)
+- **Result**: NOT RUN
+
 ---
 
 ## Category 5: "Apply All for This Note" (Auto-Approve)
