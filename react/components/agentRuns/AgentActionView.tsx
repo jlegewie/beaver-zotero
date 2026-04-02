@@ -295,6 +295,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
     const markExternalReferenceDeleted = useSetAtom(markExternalReferenceDeletedAtom);
     const addAutoApproveNoteKey = useSetAtom(addAutoApproveNoteKeyAtom);
+    const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
 
     // Item title state (shared across panes) - only for actions that have specific items
     // Use composite key with responseIndex to disambiguate duplicate tool_call_ids
@@ -406,7 +407,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
 
     // Handler: opt-in to auto-approve all edit_note calls for this note in this run
-    const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
     const handleApproveAllForNote = useCallback(() => {
         if (!pendingApproval) return;
         const { library_id, zotero_key } = pendingApproval.actionData || {};
