@@ -989,6 +989,9 @@ export function getLatestNoteHtml(item: any): string {
         if (!Array.isArray(instances)) return item.getNote();
         for (const instance of instances) {
             if (!instance._item || instance._item.id !== item.id) continue;
+            // Skip instances where saving is disabled (e.g., during diff
+            // preview) — their content is not authoritative.
+            if (instance._disableSaving) continue;
             try {
                 const frameElement = instance._iframeWindow?.frameElement;
                 if (frameElement?.isConnected !== true) continue;

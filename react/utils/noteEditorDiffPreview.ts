@@ -255,14 +255,20 @@ export async function showDiffPreview(
 }
 
 /**
- * Dismiss the preview: remove banner/styles, re-enable editing, and reinit
- * the editor from the item's current database state. No-op if no preview active.
+ * Dismiss the preview: remove banner/styles, re-enable editing, and restore
+ * the editor content from the item's current database state. No-op if no
+ * preview active.
+ *
+ * Uses applyIncrementalUpdate (not reinit) so ProseMirror preserves the
+ * scroll position.  reinit() would tear down and rebuild the entire editor,
+ * which resets scroll to top, loses _tabID, and risks saving diff HTML via
+ * uninit() → saveSync().
  */
 export function dismissDiffPreview(): void {
     generation++;
     if (!activePreview) return;
 
-    const { editorInstance: inst, wasSavingDisabled, pollTimer } = activePreview;
+    const { editorInstance: inst, wasSavingDisabled, pollTimer, itemId } = activePreview;
     activePreview = null;
 
     if (pollTimer) clearInterval(pollTimer);
@@ -279,19 +285,24 @@ export function dismissDiffPreview(): void {
             const view = getEditorView(inst);
             if (view?.dom) view.dom.contentEditable = 'true';
         } catch { /* best effort */ }
-        // Keep saving disabled during reinit so that uninit() → saveSync()
-        // does NOT persist the diff HTML to the database.  Restore only
-        // after reinit completes.
-        const savedTabID = inst._tabID;
-        inst.reinit()
-            .then(() => {
-                inst._disableSaving = wasSavingDisabled;
-                if (!inst._tabID && savedTabID) inst._tabID = savedTabID;
-            })
-            .catch(() => {
-                inst._disableSaving = wasSavingDisabled;
-            });
-        logger('dismissDiffPreview: restored via reinit', 1);
+
+        // Restore content from the item's current database state via an
+        // incremental update.  This preserves scroll position and avoids
+        // the side-effects of reinit() (tabID loss, saveSync of diff HTML).
+        //
+        // Keep _disableSaving true until the iframe processes the update.
+        // While _disableSaving is true, getLatestNoteHtml() skips this
+        // instance and falls back to item.getNote(), ensuring the server
+        // reads the correct DB content (not stale diff HTML) when
+        // executing an approved edit.
+        const item = Zotero.Items.get(itemId);
+        if (item) {
+            inst.applyIncrementalUpdate({ html: item.getNote() }, false);
+        }
+        setTimeout(() => {
+            try { inst._disableSaving = wasSavingDisabled; } catch { /* ignore */ }
+        }, 150);
+        logger('dismissDiffPreview: restored via incremental update', 1);
     } catch (e: any) {
         logger(`dismissDiffPreview: error: ${e.message}`, 1);
         try { inst._disableSaving = wasSavingDisabled; } catch { /* ignore */ }
