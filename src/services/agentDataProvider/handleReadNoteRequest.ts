@@ -167,6 +167,11 @@ export async function handleReadNoteRequest(
 
         // 3. Verify item is a note
         if (!item.isNote()) {
+            if (item.isPDFAttachment()) {
+                return errorResponse(
+                    `Item ${note_id} is a PDF attachment and not a note. You can read PDF attachments with the read_pages tool.`
+                );
+            }
             return errorResponse(
                 `Item ${note_id} is not a note (type: ${item.itemType})`
             );
