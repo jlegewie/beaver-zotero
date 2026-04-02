@@ -215,6 +215,10 @@ export class BeaverUIFactory {
             // state (activePreview, poll timer) lives in the webpack bundle.
             // After unmount, the bundle is gone and the preview artifacts
             // (banner, frozen editor, _disableSaving) would be stranded.
+            //
+            // NOTE: This duplicates cleanup logic from dismissDiffPreview() in
+            // react/utils/noteEditorDiffPreview.ts. If the cleanup steps change
+            // (e.g., new artifacts to remove), update both locations.
             try {
                 const instances: any[] = (Zotero as any).Notes?._editorInstances ?? [];
                 for (const inst of instances) {

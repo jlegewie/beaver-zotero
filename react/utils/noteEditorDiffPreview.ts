@@ -297,6 +297,10 @@ export async function showDiffPreview(
  * scroll position.  reinit() would tear down and rebuild the entire editor,
  * which resets scroll to top, loses _tabID, and risks saving diff HTML via
  * uninit() → saveSync().
+ *
+ * NOTE: src/ui/ui.ts → removeChatPanel() duplicates this cleanup for the
+ * case where the webpack bundle is unloaded before dismiss runs.  If the
+ * cleanup steps change, update both locations.
  */
 export function dismissDiffPreview(): void {
     generation++;
@@ -385,7 +389,7 @@ function findEditorInstance(itemId: number): any | null {
 
 function computeEditsHash(edits: EditOperation[]): string {
     return edits.map(e =>
-        `${e.oldString.length}:${e.newString.length}:${e.replaceAll ? '1' : '0'}:${e.oldString.slice(0, 50)}`,
+        `${e.oldString.length}:${e.newString.length}:${e.replaceAll ? '1' : '0'}:${e.oldString}`,
     ).join('|');
 }
 

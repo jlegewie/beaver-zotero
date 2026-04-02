@@ -9,8 +9,8 @@
  *   agentRunAtoms.ts ─→ (not imported directly)       ↓
  *                                                  noteHtmlSimplifier.ts
  *
- * Heavy dependencies (store, atoms) are lazy-loaded to avoid pulling Zotero
- * globals into unit tests that transitively import agentActions.
+ * store.ts is imported eagerly but is safe in tests (it guards on
+ * `typeof Zotero`).
  */
 
 import { atom } from 'jotai';
@@ -19,6 +19,7 @@ import {
     dismissDiffPreview,
     isDiffPreviewActive,
     isNoteInSelectedTab,
+    getPreviewNoteKey,
     setOnBannerAction,
     setOnDismiss,
     type EditOperation,
@@ -29,10 +30,9 @@ import { store } from '../store';
 import { pendingApprovalsAtom } from '../agents/agentActions';
 import { sendApprovalResponseAtom } from '../atoms/agentRunAtoms';
 
-// Lazy accessors — avoids pulling in store/atoms at module load time.
-// This is critical: agentActions.ts imports this file, and test files
-// import agentActions.ts. If we eagerly import store.ts here, its
-// Zotero.getMainWindow() call runs during test setup and crashes.
+// Accessor for the Jotai store. The store is imported eagerly above
+// (store.ts is safe in tests because it guards on `typeof Zotero`).
+// This wrapper keeps call-sites consistent and easy to grep.
 function getStore(): any {
     return store;
 }
@@ -108,11 +108,14 @@ function handleBannerAction(action: string): void {
     const approved = action === 'approveAll';
     const store = getStore();
 
+    // Capture the previewed note key BEFORE dismissing (dismiss clears activePreview)
+    const previewKey = getPreviewNoteKey();
+
     // Dismiss the preview immediately
     dismissDiffPreview();
     store.set(diffPreviewNoteKeyAtom, null);
 
-    // Collect all edit_note action IDs, send responses, then batch-remove
+    // Collect matching edit_note action IDs, send responses, then batch-remove
     // from the map in one update.  Using removePendingApprovalAtom per item
     // would trigger updateDiffPreviewForNote on each removal, which re-shows
     // the preview for the remaining (already-handled) edits.
@@ -120,6 +123,12 @@ function handleBannerAction(action: string): void {
     const editNoteIds: string[] = [];
     for (const [, pa] of allApprovals) {
         if (pa.actionType !== 'edit_note') continue;
+        // Only act on approvals for the previewed note
+        if (previewKey) {
+            const paLib = pa.actionData?.library_id;
+            const paKey = pa.actionData?.zotero_key;
+            if (paLib !== previewKey.libraryId || paKey !== previewKey.zoteroKey) continue;
+        }
         store.set(sendApprovalResponseAtom, { actionId: pa.actionId, approved });
         editNoteIds.push(pa.actionId);
     }
