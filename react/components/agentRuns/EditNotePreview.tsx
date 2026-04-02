@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useAtomValue } from 'jotai';
 import { diffWords, diffLines, diffChars } from 'diff';
-import { diffPreviewNoteKeyAtom } from '../../utils/diffPreviewCoordinator';
 import {
     getOrSimplify,
     getLatestNoteHtml,
@@ -155,10 +153,6 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     const isApplied = status === 'applied';
     const isDelete = newString === '';
 
-    // Derive editor preview state from the coordinator atom
-    const previewNoteKey = useAtomValue(diffPreviewNoteKeyAtom);
-    const editorPreviewActive = !!(libraryId != null && zoteroKey && previewNoteKey === `${libraryId}-${zoteroKey}`);
-
     const strippedOld = normalizeForInlineDiff(stripHtmlPreserveFormatting(oldString));
     const strippedNew = normalizeForInlineDiff(stripHtmlPreserveFormatting(newString));
 
@@ -232,12 +226,6 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
         <div className="edit-note-preview">
             <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1">
-                    {/* Editor preview indicator */}
-                    {editorPreviewActive && (
-                        <div className="editor-preview-indicator">
-                            Previewing in note editor
-                        </div>
-                    )}
                     {/* Only show header when replace_all is true (with occurrence count) */}
                     {replaceAll && (
                         <div className="text-sm font-color-primary font-medium px-3 py-1">

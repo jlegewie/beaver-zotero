@@ -2350,26 +2350,6 @@
     color: var(--fill-primary);
 }
 
-/* Editor diff preview indicator in sidebar */
-[id^="beaver-pane-"] .editor-preview-indicator {
-    font-size: 0.75rem;
-    color: #1a7f37;
-    background: rgba(16, 150, 72, 0.08);
-    border: 1px solid rgba(16, 150, 72, 0.2);
-    border-radius: 4px;
-    padding: 3px 10px;
-    margin: 0 10px 2px 10px;
-    text-align: center;
-    font-weight: 500;
-}
-@media (prefers-color-scheme: dark) {
-    [id^="beaver-pane-"] .editor-preview-indicator {
-        color: #3fb950;
-        background: rgba(16, 150, 72, 0.1);
-        border-color: rgba(16, 150, 72, 0.2);
-    }
-}
-
 /* Feature Tour Styles */
 [id^="beaver-pane-"] .feature-tour-content {
     max-width: 100%;

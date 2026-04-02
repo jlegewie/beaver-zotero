@@ -17,14 +17,12 @@ Each test is triggered by sending a prompt to the model through the Beaver sideb
 1. **Preview appears**: Red/strikethrough for deletions, green for additions in the note editor
 2. **Banner appears**: Green "Preview of Note Edits" banner at top of note editor with Close (x), Reject All, and Approve All buttons
 3. **Editor frozen**: Text in note editor is not editable (contentEditable=false, toolbar dimmed)
-4. **Sidebar indicator**: "Previewing in note editor" text appears in the edit action preview in the sidebar
-5. **Scroll to diff**: Editor auto-scrolls to the first diff location
+4. **Scroll to diff**: Editor auto-scrolls to the first diff location
 
 **Common verification steps for preview dismissal:**
 1. **Banner removed**: Green banner disappears from note editor
 2. **Editor restored**: Note editor is editable again (contentEditable=true, toolbar active)
 3. **Content restored**: Note editor shows the correct content (original if rejected, updated if approved)
-4. **Sidebar indicator removed**: "Previewing in note editor" text disappears from the sidebar
 
 ---
 
@@ -43,7 +41,6 @@ Approve a single `edit_note` action using the "Apply" button in the AgentActionV
 
 #### Verify
 - [ ] Diff preview appears in note editor (red/green highlighting, banner, frozen editor)
-- [ ] "Previewing in note editor" indicator shows in the sidebar
 - [ ] "N Pending Approval" bar appears above the input area
 - [ ] After clicking "Apply": preview dismissed, editor unfrozen
 - [ ] After agent completes: action shows green checkmark and "Undo" button
@@ -59,7 +56,7 @@ Approve a single `edit_note` action using the "Apply" button in the AgentActionV
 - **Result**: PASS
   - Diff preview appeared correctly: red/strikethrough old title, green new title in editor
   - Banner "Preview of Note Edits" with Close (×), Reject All, Approve All buttons
-  - "Previewing in note editor" indicator in sidebar, "1 Pending Approval" bar
+  - "1 Pending Approval" bar
   - Split Apply button with chevron dropdown visible
   - After clicking Apply: preview dismissed, editor unfrozen, title updated
   - API confirmed new title, green checkmark in sidebar
@@ -93,7 +90,7 @@ Approve multiple `edit_note` actions individually using the sidebar buttons.
 - **Prompt**: "Make exactly two separate edit_note tool calls: (1) Change the title to 'Test Title Alpha'. (2) Add bold formatting to the word 'Logan' in the first sentence."
 - **Result**: PASS
   - Both edits appeared simultaneously in editor preview (title + bold "Logan")
-  - "2 Pending Approvals" bar shown, both actions with "Previewing in note editor"
+  - "2 Pending Approvals" bar shown
   - After approving first (title): preview updated to show only second edit (bold Logan), count dropped to "1 Pending Approval"
   - After approving second (bold): preview fully dismissed, both green checkmarks
   - Title changed to "Test Title Alpha", "Logan" rendered bold in editor
@@ -329,7 +326,6 @@ Use the close button (x) in the banner to dismiss the preview without approving 
   - Banner removed from editor, editor content restored to original
   - **Pending approval still active** — "1 Pending Approval" bar still showing in sidebar
   - Sidebar still shows the edit action with Apply/Reject buttons
-  - "Previewing in note editor" indicator still visible in sidebar (minor cosmetic: indicator shows even though preview is dismissed)
   - User can still approve/reject via sidebar buttons after close
 
 ---
@@ -624,12 +620,12 @@ Verify that multiple pending edits are shown simultaneously in the preview.
 #### Verify
 - [ ] All edits visible simultaneously in the note editor (multiple red/green sections)
 - [ ] Editor scrolls to the first diff
-- [ ] Each edit has its own entry in the sidebar with "Previewing in note editor" indicator
+- [ ] Each edit has its own entry in the sidebar
 
 #### Test result
 
 - **Date**: 2026-04-01
-- **Result**: PASS (observed during Test 1.2) — Two edits (title change + bold "Logan") both visible simultaneously in editor. Title showed red/green at top, "Logan" showed green highlight in body text. Both actions had "Previewing in note editor" indicators in sidebar.
+- **Result**: PASS (observed during Test 1.2) — Two edits (title change + bold "Logan") both visible simultaneously in editor. Title showed red/green at top, "Logan" showed green highlight in body text.
 
 ### Test 9.5: Replace All Preview
 
@@ -663,7 +659,6 @@ Verify that the diff preview gracefully falls back when the note is not open in 
 
 #### Verify
 - [ ] No in-editor diff preview appears (note is not open)
-- [ ] "Previewing in note editor" indicator does NOT appear in sidebar
 - [ ] Sidebar diff preview still shows the change (inline diff)
 - [ ] Approve/Reject buttons work normally
 - [ ] Edit is applied correctly via API
@@ -675,7 +670,6 @@ Verify that the diff preview gracefully falls back when the note is not open in 
 - **Prompt**: "Change the title of note '1-72DUSPAN' from 'School Segregation and Performance Disparities' to 'No Preview Test'."
 - **Result**: PASS
   - No in-editor diff preview appeared (no banner, no highlighting — correct, note not open in a tab)
-  - No "Previewing in note editor" indicator in sidebar
   - Sidebar diff preview still showed the inline diff (old/new text)
   - Action appeared with pending/spinner icon
   - Note content unchanged in DB (original title) — awaiting post-run Apply
@@ -772,7 +766,6 @@ Verify cleanup when the note editor tab is closed while a preview is active.
 
 #### Verify
 - [ ] Preview auto-dismisses (detected by the 200ms liveness poll)
-- [ ] "Previewing in note editor" indicator disappears from sidebar
 - [ ] Pending approvals still available in sidebar (can approve/reject)
 - [ ] Note content not corrupted (editor was frozen during preview)
 - [ ] Log message: "editor became unavailable, auto-dismissing"
@@ -1010,7 +1003,6 @@ Expected: `hasDiffStyles: false`
 - [ ] Deletions: red background (`rgba(210,40,40,0.28)`) + strikethrough
 - [ ] Additions: green background (`rgba(16,150,72,0.28)`)
 - [ ] Editor frozen: `contentEditable=false`, toolbar dimmed (opacity 0.35), no text selection
-- [ ] "Previewing in note editor" indicator in sidebar
 - [ ] **Close (×)**: preview dismissed, pending approvals remain, editor unfreezes
 - [ ] **Approve All (banner)**: all edit_note actions approved, banner dismissed, editor unfreezes
 - [ ] **Reject All (banner)**: all edit_note actions rejected, banner dismissed, editor unfreezes
@@ -1031,7 +1023,6 @@ Expected: `hasDiffStyles: false`
 
 - [ ] No in-editor preview (no editor available)
 - [ ] Diff shown in sidebar EditNotePreview component
-- [ ] No "Previewing in note editor" indicator
 - [ ] Approve/Reject from sidebar works correctly
 - [ ] Backend timeout (5 min): approval removed, action left as "pending"
 - [ ] No Beaver-related errors in `zotero_read_errors`
@@ -1045,7 +1036,7 @@ Expected: `hasDiffStyles: false`
 | Editor stays frozen after dismiss | `contentEditable` not restored to `'true'` | Check error handling in `dismissDiffPreview()` |
 | Preview shows for auto-approved edit | `autoApproveNoteKeysAtom` check not running before `addPendingApprovalAtom` | Verify auto-approve logic in `onDeferredApprovalRequest` |
 | Banner buttons don't respond | Polling timer not started or `__beaverPreviewAction` not set on iframe | Check iframe communication; verify 200ms poll is running |
-| "Previewing in note editor" stuck | `diffPreviewNoteKeyAtom` not reset to `null` on dismiss | Check coordinator cleanup in `dismissDiffPreview()` path |
+| `diffPreviewNoteKeyAtom` stuck non-null | `onDismiss` callback not firing on dismiss | Check coordinator's `setOnDismiss` registration and `dismissDiffPreview()` path |
 | Multiple banners appear | Stale preview not dismissed before new one created | Check generation counter in `showDiffPreview()` |
 | Preview doesn't dismiss on timeout | `onToolReturn` can't match pending approval by `toolCallId` | Verify `toolcallId` in `PendingApproval` matches `tool_call_id` in `WSToolReturnEvent` |
 | Diff styles bleed after dismiss | `#beaver-diff-preview-style` not removed from iframe | Check CSS cleanup in `dismissDiffPreview()` |
