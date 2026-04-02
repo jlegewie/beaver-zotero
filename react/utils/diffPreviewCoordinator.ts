@@ -24,13 +24,16 @@ import {
 } from './noteEditorDiffPreview';
 import { makeNoteKey } from '../atoms/editNoteAutoApprove';
 import { logger } from '../../src/utils/logger';
+import { store } from '../store';
+import { pendingApprovalsAtom } from '../agents/agentActions';
+import { sendApprovalResponseAtom } from '../atoms/agentRunAtoms';
 
 // Lazy accessors — avoids pulling in store/atoms at module load time.
 // This is critical: agentActions.ts imports this file, and test files
 // import agentActions.ts. If we eagerly import store.ts here, its
 // Zotero.getMainWindow() call runs during test setup and crashes.
 function getStore(): any {
-    return require('../store').store;
+    return store;
 }
 
 // =============================================================================
@@ -56,7 +59,6 @@ export const diffPreviewNoteKeyAtom = atom<string | null>(null);
  */
 export function updateDiffPreviewForNote(libraryId: number, zoteroKey: string): void {
     const store = getStore();
-    const { pendingApprovalsAtom } = require('../agents/agentActions');
     const noteKey = makeNoteKey(libraryId, zoteroKey);
     const allApprovals: Map<string, any> = store.get(pendingApprovalsAtom);
 
@@ -104,23 +106,30 @@ function handleBannerAction(action: string): void {
 
     const approved = action === 'approveAll';
     const store = getStore();
-    const { pendingApprovalsAtom, removePendingApprovalAtom } = require('../agents/agentActions');
-    const { sendApprovalResponseAtom } = require('../atoms/agentRunAtoms');
 
     // Dismiss the preview immediately
     dismissDiffPreview();
     store.set(diffPreviewNoteKeyAtom, null);
 
-    // Read current approvals (fresh) and approve/reject all edit_note ones
+    // Collect all edit_note action IDs, send responses, then batch-remove
+    // from the map in one update.  Using removePendingApprovalAtom per item
+    // would trigger updateDiffPreviewForNote on each removal, which re-shows
+    // the preview for the remaining (already-handled) edits.
     const allApprovals: Map<string, any> = store.get(pendingApprovalsAtom);
-    let count = 0;
+    const editNoteIds: string[] = [];
     for (const [, pa] of allApprovals) {
         if (pa.actionType !== 'edit_note') continue;
         store.set(sendApprovalResponseAtom, { actionId: pa.actionId, approved });
-        store.set(removePendingApprovalAtom, pa.actionId);
-        count++;
+        editNoteIds.push(pa.actionId);
     }
-    logger(`diffPreviewCoordinator: banner ${action} — ${count} edit(s)`, 1);
+    if (editNoteIds.length > 0) {
+        store.set(pendingApprovalsAtom, (prev: Map<string, any>) => {
+            const next = new Map(prev);
+            for (const id of editNoteIds) next.delete(id);
+            return next;
+        });
+    }
+    logger(`diffPreviewCoordinator: banner ${action} — ${editNoteIds.length} edit(s)`, 1);
 }
 
 // Register the banner handler at module load
