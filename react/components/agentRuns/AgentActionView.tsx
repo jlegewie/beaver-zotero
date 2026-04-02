@@ -55,8 +55,11 @@ import {
     DocumentValidationIcon,
     DollarCircleIcon,
     GlobalSearchIcon,
+    FileDiffIcon,
 } from '../icons/icons';
-import { revealSource, openNoteAndSearchEdit } from '../../utils/sourceUtils';
+import { revealSource, openNoteAndSearchEdit, openNoteByKey } from '../../utils/sourceUtils';
+import { isNoteOpenInEditor, showDiffPreview } from '../../utils/noteEditorDiffPreview';
+import { updateDiffPreviewForNote } from '../../utils/diffPreviewCoordinator';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
@@ -659,11 +662,58 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
     }, [isUndoError, handleUndo, handleApplyPending]);
 
+    // Handler: open the note in editor and show diff preview.
+    // Always opens the note tab (focusing it if already open) and then
+    // shows the preview. The preview auto-dismisses when the user leaves
+    // the tab, so we must re-show it every time rather than short-circuiting.
+    const handlePreviewInEditor = useCallback(async () => {
+        const libraryId = pendingApproval?.actionData?.library_id ?? action?.proposed_data?.library_id;
+        const zoteroKey = pendingApproval?.actionData?.zotero_key ?? action?.proposed_data?.zotero_key;
+        if (libraryId == null || !zoteroKey) return;
+
+        // Open / focus the note tab
+        await openNoteByKey(libraryId, zoteroKey);
+
+        // Wait for the editor instance to be available (needed for newly
+        // opened tabs; no-op cost when the tab was already selected)
+        await new Promise<void>((resolve) => {
+            let attempts = 0;
+            const check = () => {
+                if (isNoteOpenInEditor(libraryId, zoteroKey) || ++attempts > 25) {
+                    resolve();
+                } else {
+                    setTimeout(check, 200);
+                }
+            };
+            setTimeout(check, 300);
+        });
+
+        // During an active run, pending approvals live in the approval map —
+        // updateDiffPreviewForNote reads that map and shows the combined diff.
+        if (pendingApproval) {
+            updateDiffPreviewForNote(libraryId, zoteroKey);
+        } else if (action?.proposed_data) {
+            // Post-run: the approval was already removed; build the edit from the action directly.
+            const oldStr = action.proposed_data.old_string ?? '';
+            if (oldStr) {
+                showDiffPreview(libraryId, zoteroKey, [{
+                    oldString: oldStr,
+                    newString: action.proposed_data.new_string ?? '',
+                    replaceAll: action.proposed_data.replace_all ?? false,
+                }]);
+            }
+        }
+    }, [pendingApproval, action]);
+
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
 
     // Build preview data from either pending approval or agent action
     const previewData = buildPreviewData(toolName, pendingApproval, action);
 
+    // Show the preview button when there's an unapplied edit that has an old_string to preview
+    const canShowPreview = toolName === 'edit_note'
+        && (isAwaitingApproval || status === 'pending' || status === 'rejected' || status === 'undone')
+        && !!(pendingApproval?.actionData?.old_string || action?.proposed_data?.old_string);
     // Determine what icon to show in header
     const getHeaderIcon = () => {
         const getToolIcon = () => {
@@ -858,10 +908,21 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )}
                         <div className="flex-1" />
 
+                        {canShowPreview && (
+                            <Button
+                                variant="ghost"
+                                rightIcon={FileDiffIcon}
+                                onClick={handlePreviewInEditor}
+                                style={{ padding: '3px 6px' }}
+                            >
+                                Preview
+                            </Button>
+                        )}
+
                         {/* Reject button - for awaiting and pending */}
                         {config.showReject && (!isProcessing || clickedButton === 'reject') && (
                             <Button
-                                variant="ghost-secondary"
+                                variant="ghost"
                                 onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                                 loading={isProcessing && clickedButton === 'reject'}
                                 disabled={isProcessing}
