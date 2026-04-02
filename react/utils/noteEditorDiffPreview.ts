@@ -99,6 +99,13 @@ let generation = 0;
  */
 let onBannerAction: ((action: string) => void) | null = null;
 
+/**
+ * Callback invoked whenever the preview is dismissed (for any reason: banner close,
+ * editor unavailable, explicit dismissDiffPreview call, etc.).
+ * Set by the coordinator via setOnDismiss to clear diffPreviewNoteKeyAtom.
+ */
+let onDismiss: (() => void) | null = null;
+
 // =============================================================================
 // Zotero Internal API Checks
 // =============================================================================
@@ -135,6 +142,15 @@ export function isNoteOpenInEditor(libraryId: number, zoteroKey: string): boolea
  */
 export function setOnBannerAction(handler: ((action: string) => void) | null): void {
     onBannerAction = handler;
+}
+
+/**
+ * Register a callback invoked whenever the preview is dismissed.
+ * Called by the coordinator to clear diffPreviewNoteKeyAtom when the preview
+ * is auto-dismissed (e.g., editor tab closed, sidebar closed).
+ */
+export function setOnDismiss(handler: (() => void) | null): void {
+    onDismiss = handler;
 }
 
 /**
@@ -272,6 +288,9 @@ export function dismissDiffPreview(): void {
     activePreview = null;
 
     if (pollTimer) clearInterval(pollTimer);
+
+    // Notify coordinator so it can clear diffPreviewNoteKeyAtom
+    onDismiss?.();
 
     try {
         if (!isEditorInstanceUsable(inst)) {

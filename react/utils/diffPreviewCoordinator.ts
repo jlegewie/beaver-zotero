@@ -20,6 +20,7 @@ import {
     isDiffPreviewActive,
     isNoteOpenInEditor,
     setOnBannerAction,
+    setOnDismiss,
     type EditOperation,
 } from './noteEditorDiffPreview';
 import { makeNoteKey } from '../atoms/editNoteAutoApprove';
@@ -134,3 +135,9 @@ function handleBannerAction(action: string): void {
 
 // Register the banner handler at module load
 setOnBannerAction(handleBannerAction);
+
+// Register dismiss handler so the atom is cleared when the preview is
+// auto-dismissed (e.g., editor tab closed, sidebar closed).
+setOnDismiss(() => {
+    getStore().set(diffPreviewNoteKeyAtom, null);
+});
