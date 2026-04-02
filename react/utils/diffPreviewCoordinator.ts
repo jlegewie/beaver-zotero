@@ -18,7 +18,7 @@ import {
     showDiffPreview,
     dismissDiffPreview,
     isDiffPreviewActive,
-    isNoteOpenInEditor,
+    isNoteInSelectedTab,
     setOnBannerAction,
     setOnDismiss,
     type EditOperation,
@@ -87,7 +87,7 @@ export function updateDiffPreviewForNote(libraryId: number, zoteroKey: string): 
         return;
     }
 
-    if (!isNoteOpenInEditor(libraryId, zoteroKey)) return;
+    if (!isNoteInSelectedTab(libraryId, zoteroKey)) return;
 
     showDiffPreview(libraryId, zoteroKey, edits)
         .then((shown) => {
