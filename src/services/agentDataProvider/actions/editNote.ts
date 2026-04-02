@@ -1,0 +1,581 @@
+import { logger } from '../../../utils/logger';
+import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
+import { EditNoteProposedData } from '../../../../react/types/agentActions/editNote';
+import {
+    getOrSimplify,
+    expandToRawHtml,
+    stripDataCitationItems,
+    rebuildDataCitationItems,
+    countOccurrences,
+    getLatestNoteHtml,
+    invalidateSimplificationCache,
+    checkDuplicateCitations,
+    findFuzzyMatch,
+    validateNewString,
+    findUniqueRawMatchPosition,
+    captureValidatedEditTargetContext,
+    findTargetRawMatchPosition,
+    preloadPageLabelsForNewCitations,
+    waitForPMNormalization,
+    waitForNoteSaveStabilization,
+    hasSchemaVersionWrapper,
+    decodeHtmlEntities,
+    encodeTextEntities,
+    ENTITY_FORMS,
+} from '../../../utils/noteHtmlSimplifier';
+import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
+import { store } from '../../../../react/store';
+import { currentThreadIdAtom } from '../../../../react/atoms/threads';
+import { addOrUpdateEditFooter } from '../../../utils/noteEditFooter';
+import {
+    WSAgentActionValidateRequest,
+    WSAgentActionValidateResponse,
+    WSAgentActionExecuteRequest,
+    WSAgentActionExecuteResponse,
+} from '../../agentProtocol';
+import { getDeferredToolPreference } from '../utils';
+import { TimeoutContext, checkAborted } from '../timeout';
+import { TimeoutError } from '../timeout';
+
+
+/**
+ * Validate an edit_note action.
+ * Checks the note exists, is editable, not in editor, and performs a dry-run
+ * expansion + match to verify the replacement will succeed.
+ */
+async function validateEditNoteAction(
+    request: WSAgentActionValidateRequest
+): Promise<WSAgentActionValidateResponse> {
+    const { library_id, zotero_key, old_string, new_string, replace_all } = request.action_data as EditNoteProposedData;
+
+    // 1. Validate library exists
+    const library = Zotero.Libraries.get(library_id);
+    if (!library) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library not found: ${library_id}`,
+            error_code: 'library_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    // 2. Check library is searchable
+    const searchableIds = store.get(searchableLibraryIdsAtom);
+    if (!searchableIds.includes(library_id)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library exists but is not synced with Beaver. The user can update this setting in Beaver Preferences. Library: ${library.name} (ID: ${library_id})`,
+            error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
+
+    // 3. Item exists
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Item not found: ${library_id}-${zotero_key}`,
+            error_code: 'item_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    // 4. Item is a note
+    if (!item.isNote()) {
+        const itemId = `${library_id}-${zotero_key}`;
+        const resp = {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Item ${itemId} is not a note`,
+            error_code: 'not_a_note',
+            preference: 'always_ask',
+        } as WSAgentActionValidateResponse;
+        if (item.isRegularItem()) {
+            resp.error = `Item ${itemId} is a regular item and not a note. To create a new zotero note that is attached to the regular item ${itemId}, use the the <note title="..." item_id="${itemId}">...</note> tag in your response.`;
+        } else if (item.isAttachment()) {
+            resp.error = `Item ${itemId} is an attachment and not a note. To create a new zotero note, use the the <note title="..." item_id="${itemId}">...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
+        } else if (item.isAnnotation()) {
+            resp.error = `Item ${itemId} is an annotation and not a note. To create a new zotero note, use the the <note title="..." item_id="${itemId}">...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
+        }
+        return resp;
+    }
+
+    // 5. Check library is editable (after item type, matching edit_metadata ordering)
+    if (!library.editable) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library '${library.name}' is read-only and cannot be edited`,
+            error_code: 'library_not_editable',
+            preference: 'always_ask',
+        };
+    }
+
+    // 6. Load note data
+    await item.loadDataType('note');
+    const rawHtml = getLatestNoteHtml(item);
+
+    // 7. Note not empty
+    if (!rawHtml || rawHtml.trim() === '') {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Note ${library_id}-${zotero_key} is empty`,
+            error_code: 'empty_note',
+            preference: 'always_ask',
+        };
+    }
+
+    // 8. Strings different
+    if (old_string === new_string) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'old_string and new_string are identical.',
+            error_code: 'no_changes',
+            preference: 'always_ask',
+        };
+    }
+
+    // 9. Simplify note
+    const noteId = `${library_id}-${zotero_key}`;
+    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, library_id);
+
+    // 10. Validate new_string tags
+    const validationError = validateNewString(new_string, metadata);
+    if (validationError) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: validationError,
+            error_code: 'invalid_new_string',
+            preference: 'always_ask',
+        };
+    }
+
+    // 11. Dry-run expansion
+    let expandedOld: string;
+    let expandedNew: string;
+    try {
+        expandedOld = expandToRawHtml(old_string, metadata, 'old');
+        expandedNew = expandToRawHtml(new_string, metadata, 'new');
+    } catch (e: any) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: e.message || String(e),
+            error_code: 'expansion_failed',
+            preference: 'always_ask',
+        };
+    }
+
+    // 12. Count occurrences — if zero, retry with entity-decoded or entity-encoded
+    // strings. PM may have decoded entities (&#x27; → ') since the model read the
+    // note, or the model may have used literal chars while the note has entities.
+    const strippedHtml = stripDataCitationItems(rawHtml);
+    let matchCount = countOccurrences(strippedHtml, expandedOld);
+    if (matchCount === 0) {
+        // Forward: model used &#x27; but note has ' (PM decoded)
+        const decodedOld = decodeHtmlEntities(expandedOld);
+        if (decodedOld !== expandedOld && countOccurrences(strippedHtml, decodedOld) > 0) {
+            expandedOld = decodedOld;
+            expandedNew = decodeHtmlEntities(expandedNew);
+            matchCount = countOccurrences(strippedHtml, expandedOld);
+        }
+    }
+    if (matchCount === 0) {
+        // Reverse: model used ' but note has entity-encoded form (pre-PM).
+        for (const form of ENTITY_FORMS) {
+            const encodedOld = encodeTextEntities(expandedOld, form);
+            if (encodedOld !== expandedOld && countOccurrences(strippedHtml, encodedOld) > 0) {
+                expandedOld = encodedOld;
+                expandedNew = encodeTextEntities(expandedNew, form);
+                matchCount = countOccurrences(strippedHtml, expandedOld);
+                break;
+            }
+        }
+    }
+
+    // 13. Zero matches — fuzzy match on simplified HTML
+    if (matchCount === 0) {
+        const fuzzy = findFuzzyMatch(simplified, old_string);
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'The string to replace was not found in the note.'
+                + (fuzzy ? ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\`` : ''),
+            error_code: 'old_string_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    // 14. Multiple matches without replace_all — accept only when the match is
+    //     either uniquely identifiable without relying on ref stability, or
+    //     can be captured now and re-located later via surrounding context.
+    if (matchCount > 1 && !replace_all) {
+        const rawPos = findUniqueRawMatchPosition(
+            strippedHtml, simplified, old_string, expandedOld, metadata
+        );
+        let normalizedActionData: EditNoteProposedData | undefined;
+
+        if (rawPos === null) {
+            const targetContext = captureValidatedEditTargetContext(
+                strippedHtml, simplified, old_string, expandedOld, metadata
+            );
+
+            if (targetContext) {
+                normalizedActionData = {
+                    ...request.action_data as EditNoteProposedData,
+                    target_before_context: targetContext.beforeContext,
+                    target_after_context: targetContext.afterContext,
+                };
+            }
+        }
+
+        if (rawPos === null && normalizedActionData === undefined) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `The string to replace was found ${matchCount} times in the note. `
+                    + 'Use replace_all to replace all occurrences, or include more context to make the match unique.',
+                error_code: 'ambiguous_match',
+                preference: 'always_ask',
+            };
+        }
+
+        const noteTitle = item.getNoteTitle() || '(untitled)';
+        const totalLines = simplified.split('\n').length;
+        const preference = getDeferredToolPreference('edit_note');
+
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: true,
+            current_value: {
+                note_title: noteTitle,
+                total_lines: totalLines,
+                match_count: matchCount,
+            },
+            normalized_action_data: normalizedActionData,
+            preference,
+        };
+    }
+
+    // 14. Valid — return current value
+    const noteTitle = item.getNoteTitle() || '(untitled)';
+    const totalLines = simplified.split('\n').length;
+
+    const preference = getDeferredToolPreference('edit_note');
+
+    return {
+        type: 'agent_action_validate_response',
+        request_id: request.request_id,
+        valid: true,
+        current_value: {
+            note_title: noteTitle,
+            total_lines: totalLines,
+            match_count: matchCount,
+        },
+        preference,
+    };
+}
+
+
+/**
+ * Execute an edit_note action.
+ * Performs the string replacement on the note's raw HTML via the simplified format.
+ */
+async function executeEditNoteAction(
+    request: WSAgentActionExecuteRequest,
+    ctx: TimeoutContext,
+): Promise<WSAgentActionExecuteResponse> {
+    const {
+        library_id,
+        zotero_key,
+        old_string,
+        new_string,
+        replace_all,
+    } = request.action_data as EditNoteProposedData;
+    let {
+        target_before_context,
+        target_after_context,
+    } = request.action_data as EditNoteProposedData;
+
+    // 1. Load item
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: `Item not found: ${library_id}-${zotero_key}`,
+            error_code: 'item_not_found',
+        };
+    }
+
+    // 2. Load note
+    await item.loadDataType('note');
+
+    // 3. Pre-load page labels so new citations resolve page indices to labels.
+    //    Done before reading the note to avoid async gaps between read and write.
+    await preloadPageLabelsForNewCitations(new_string);
+
+    // 4. Get current note HTML (kept for rollback on save failure)
+    //    Avoid async operations between here and item.setNote() to preserve atomicity.
+    const oldHtml = getLatestNoteHtml(item);
+
+    // 5. Get metadata from cache or re-simplify
+    const noteId = `${library_id}-${zotero_key}`;
+    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
+
+    // 6. Expand old_string and new_string to raw HTML
+    let expandedOld: string;
+    let expandedNew: string;
+    try {
+        expandedOld = expandToRawHtml(old_string, metadata, 'old');
+        expandedNew = expandToRawHtml(new_string, metadata, 'new');
+    } catch (e: any) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: e.message || String(e),
+            error_code: 'expansion_failed',
+        };
+    }
+
+    // 6. Strip data-citation-items from raw HTML for matching
+    const strippedHtml = stripDataCitationItems(oldHtml);
+
+    // 7. Count occurrences — if zero, retry with entity-decoded or entity-encoded
+    // strings. PM may have decoded entities (&#x27; → ') since the model read the
+    // note, or the model may have used literal chars while the note has entities.
+    let matchCount = countOccurrences(strippedHtml, expandedOld);
+    if (matchCount === 0) {
+        // Forward: model used &#x27; but note has ' (PM decoded)
+        const decodedOld = decodeHtmlEntities(expandedOld);
+        if (decodedOld !== expandedOld && countOccurrences(strippedHtml, decodedOld) > 0) {
+            expandedOld = decodedOld;
+            expandedNew = decodeHtmlEntities(expandedNew);
+            if (target_before_context != null) target_before_context = decodeHtmlEntities(target_before_context);
+            if (target_after_context != null) target_after_context = decodeHtmlEntities(target_after_context);
+            matchCount = countOccurrences(strippedHtml, expandedOld);
+        }
+    }
+    if (matchCount === 0) {
+        // Reverse: model used ' but note has entity-encoded form (pre-PM).
+        // Try all common entity spellings (&#x27;, &#39;, &apos;).
+        for (const form of ENTITY_FORMS) {
+            const encodedOld = encodeTextEntities(expandedOld, form);
+            if (encodedOld !== expandedOld && countOccurrences(strippedHtml, encodedOld) > 0) {
+                expandedOld = encodedOld;
+                expandedNew = encodeTextEntities(expandedNew, form);
+                if (target_before_context != null) target_before_context = encodeTextEntities(target_before_context, form);
+                if (target_after_context != null) target_after_context = encodeTextEntities(target_after_context, form);
+                matchCount = countOccurrences(strippedHtml, expandedOld);
+                break;
+            }
+        }
+    }
+
+    // 8. Zero matches
+    if (matchCount === 0) {
+        const fuzzy = findFuzzyMatch(simplified, old_string);
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: 'The string to replace was not found in the note.'
+                + (fuzzy ? ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\`` : ''),
+            error_code: 'old_string_not_found',
+        };
+    }
+
+    // 9. Perform replacement and capture context
+    let newHtml: string;
+    let undoBeforeContext: string | undefined;
+    let undoAfterContext: string | undefined;
+    let undoOccurrenceContexts: Array<{ before: string; after: string }> | undefined;
+    const UNDO_CONTEXT_LENGTH = 200;
+    let replacementCount: number;
+
+    if (replace_all) {
+        replacementCount = matchCount;
+
+        // Capture per-occurrence context anchors before replacing
+        undoOccurrenceContexts = [];
+        let searchFrom = 0;
+        while (true) {
+            const idx = strippedHtml.indexOf(expandedOld, searchFrom);
+            if (idx === -1) break;
+            undoOccurrenceContexts.push({
+                before: strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx),
+                after: strippedHtml.substring(
+                    idx + expandedOld.length,
+                    idx + expandedOld.length + UNDO_CONTEXT_LENGTH
+                ),
+            });
+            searchFrom = idx + expandedOld.length;
+        }
+        newHtml = strippedHtml.split(expandedOld).join(expandedNew);
+    } else {
+        replacementCount = 1;
+        let rawPos = -1;
+
+        // When expandedOld matches multiple times in raw HTML (e.g. duplicate citations),
+        // first use the conservative matcher, then fall back to the exact target
+        // context captured during validation.
+        if (matchCount > 1) {
+            rawPos = findUniqueRawMatchPosition(
+                strippedHtml, simplified, old_string, expandedOld, metadata
+            ) ?? -1;
+            if (rawPos === -1 && (
+                target_before_context !== undefined || target_after_context !== undefined
+            )) {
+                rawPos = findTargetRawMatchPosition(
+                    strippedHtml,
+                    expandedOld,
+                    target_before_context,
+                    target_after_context
+                ) ?? -1;
+            }
+        }
+
+        // Single raw match or disambiguation succeeded
+        if (rawPos === -1) {
+            if (matchCount > 1) {
+                return {
+                    type: 'agent_action_execute_response',
+                    request_id: request.request_id,
+                    success: false,
+                    error: `The string to replace was found ${matchCount} times in the note. `
+                        + 'Use replace_all to replace all occurrences, or include more context.',
+                    error_code: 'ambiguous_match',
+                };
+            }
+            rawPos = strippedHtml.indexOf(expandedOld);
+        }
+
+        // Capture surrounding context for robust undo of single-occurrence edits.
+        undoBeforeContext = strippedHtml.substring(Math.max(0, rawPos - UNDO_CONTEXT_LENGTH), rawPos);
+        const afterStart = rawPos + expandedOld.length;
+        undoAfterContext = strippedHtml.substring(afterStart, afterStart + UNDO_CONTEXT_LENGTH);
+
+        newHtml = strippedHtml.substring(0, rawPos) + expandedNew
+            + strippedHtml.substring(afterStart);
+    }
+
+    // 10b. Add/update "Edited by Beaver" footer
+    const threadId = store.get(currentThreadIdAtom);
+    if (threadId) {
+        newHtml = addOrUpdateEditFooter(newHtml, threadId);
+    }
+
+    // 11. Rebuild data-citation-items
+    newHtml = rebuildDataCitationItems(newHtml);
+
+    // 12. Wrapper div protection — only error if the edit removed it
+    const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
+    if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: 'The note wrapper <div data-schema-version="..."> must not be removed.',
+            error_code: 'wrapper_removed',
+        };
+    }
+
+    // 13. Checkpoint before save
+    checkAborted(ctx, 'edit_note:before_save');
+
+    // 14. Save
+    try {
+        item.setNote(newHtml);
+        await item.saveTx();
+        logger(`executeEditNoteAction: Saved note edit to ${noteId} (${replacementCount} occurrence(s) replaced)`, 1);
+    } catch (error) {
+        // Restore in-memory state on save failure
+        try {
+            item.setNote(oldHtml);
+        } catch (_) {
+            // Best-effort restoration
+        }
+        if (error instanceof TimeoutError) throw error;
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: `Failed to save note: ${error}`,
+            error_code: 'save_failed',
+        };
+    }
+
+    // 14b. Wait for the note to stabilize after save.
+    // saveTx() fires a Notifier event. When the note is open in an editor,
+    // ProseMirror receives the Notifier, normalizes the HTML (e.g. entity
+    // decoding, structural cleanup), and may save back a modified version
+    // via item.setNote() + item.saveTx().  This async save-back can
+    // overwrite a subsequent edit's save if it lands between two edits.
+    // Poll item.getNote() until it stops changing so the next queued edit
+    // reads the stabilized (PM-normalized) HTML as its base.
+    await waitForNoteSaveStabilization(item, newHtml);
+
+    // 15. Clear editor selection so it doesn't shift to unrelated text
+    clearNoteEditorSelection(library_id, zotero_key);
+
+    // 16. Invalidate cache
+    invalidateSimplificationCache(noteId);
+
+    // 17. Check for duplicate citation warnings
+    const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+    const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+
+    // 18. Wait for ProseMirror to normalize the note and update undo data.
+    // When the note is open in the editor, PM re-normalizes after saveTx(),
+    // which can change the HTML structure (e.g. inline styles → semantic elements).
+    // Without this, undo_new_html becomes stale and undo fails.
+    // Note: waitForNoteSaveStabilization above ensures PM's save-back is
+    // complete, so this reads the final PM-normalized HTML.
+    const undoData = {
+        undo_new_html: expandedNew,
+        undo_before_context: undoBeforeContext,
+        undo_after_context: undoAfterContext,
+    };
+    const savedStrippedHtml = stripDataCitationItems(newHtml);
+    await waitForPMNormalization(item, savedStrippedHtml, undoData, strippedHtml);
+
+    return {
+        type: 'agent_action_execute_response',
+        request_id: request.request_id,
+        success: true,
+        result_data: {
+            library_id,
+            zotero_key,
+            occurrences_replaced: replacementCount,
+            warnings,
+            undo_old_html: expandedOld,
+            undo_new_html: undoData.undo_new_html,
+            undo_before_context: undoData.undo_before_context,
+            undo_after_context: undoData.undo_after_context,
+            undo_occurrence_contexts: undoOccurrenceContexts,
+        },
+    };
+}
+
+export { validateEditNoteAction, executeEditNoteAction };
