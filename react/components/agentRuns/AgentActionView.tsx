@@ -55,8 +55,11 @@ import {
     DocumentValidationIcon,
     DollarCircleIcon,
     GlobalSearchIcon,
+    FileDiffIcon,
 } from '../icons/icons';
-import { revealSource, openNoteAndSearchEdit } from '../../utils/sourceUtils';
+import { revealSource, openNoteAndSearchEdit, openNoteByKey } from '../../utils/sourceUtils';
+import { isNoteOpenInEditor, showDiffPreview } from '../../utils/noteEditorDiffPreview';
+import { updateDiffPreviewForNote, DIFF_PREVIEW_ENABLED } from '../../utils/diffPreviewCoordinator';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
@@ -105,6 +108,8 @@ interface AgentActionViewProps {
     responseIndex: number;
     /** Pending approval request if awaiting user decision */
     pendingApproval: PendingApproval | null;
+    /** Whether a tool-return has been received for this tool call (backend completed processing) */
+    hasToolReturn?: boolean;
 }
 
 interface StatusConfig {
@@ -211,6 +216,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     runId,
     responseIndex,
     pendingApproval: pendingApprovalProp,
+    hasToolReturn = false,
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
@@ -295,6 +301,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
     const markExternalReferenceDeleted = useSetAtom(markExternalReferenceDeletedAtom);
     const addAutoApproveNoteKey = useSetAtom(addAutoApproveNoteKeyAtom);
+    const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
 
     // Item title state (shared across panes) - only for actions that have specific items
     // Use composite key with responseIndex to disambiguate duplicate tool_call_ids
@@ -339,23 +346,28 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     useEffect(() => {
         const wasAwaiting = prevPendingApprovalRef.current !== null;
         const isNoLongerAwaiting = pendingApproval === null;
-        
+
         // If approval was just removed externally (not by our local handleApprove/handleReject)
         // AND the run is still pending (not canceled via Stop button)
-        if (wasAwaiting && isNoLongerAwaiting && !isProcessingApproval && isRunPending) {
+        // AND no tool-return has arrived yet (if it has, the backend already completed this tool
+        // call — e.g., approval timeout — so no spinner is needed)
+        if (wasAwaiting && isNoLongerAwaiting && !isProcessingApproval && isRunPending && !hasToolReturn) {
             setIsExternallyProcessing(true);
             // Set clickedButton to 'approve' to show the loading state on the right button
             // We assume external removal is approval (reject would also work but approve is more common)
             setClickedButton('approve');
         }
-        
-        prevPendingApprovalRef.current = pendingApproval;
-    }, [pendingApproval, isProcessingApproval, isRunPending]);
 
-    // Clear processing state when action status changes from 'pending' to a final state
+        prevPendingApprovalRef.current = pendingApproval;
+    }, [pendingApproval, isProcessingApproval, isRunPending, hasToolReturn]);
+
+    // Clear processing state when:
+    // 1. Action status changes from 'pending' to a final state (normal approval flow)
+    // 2. Tool-return arrives while externally processing (backend completed — e.g., timeout)
+    // 3. Run is no longer pending (canceled/completed/errored — same pattern as
+    //    ToolCallPartView's isInProgress + runStatus guard)
     useEffect(() => {
         if ((isProcessingApproval || isExternallyProcessing) && action) {
-            // If action status is no longer 'pending', the backend has processed the approval
             if (action.status !== 'pending') {
                 setIsProcessingApproval(false);
                 setIsExternallyProcessing(false);
@@ -363,7 +375,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 processingActionIdRef.current = null;
             }
         }
-    }, [isProcessingApproval, isExternallyProcessing, action?.status, action?.id]);
+        if (isExternallyProcessing && (hasToolReturn || !isRunPending)) {
+            setIsExternallyProcessing(false);
+            setClickedButton(null);
+        }
+    }, [isProcessingApproval, isExternallyProcessing, action?.status, action?.id, hasToolReturn, isRunPending]);
 
     const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing;
     // Show 'awaiting' if we have a pending approval OR if we're processing
@@ -406,7 +422,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
 
     // Handler: opt-in to auto-approve all edit_note calls for this note in this run
-    const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
     const handleApproveAllForNote = useCallback(() => {
         if (!pendingApproval) return;
         const { library_id, zotero_key } = pendingApproval.actionData || {};
@@ -647,11 +662,59 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
     }, [isUndoError, handleUndo, handleApplyPending]);
 
+    // Handler: open the note in editor and show diff preview.
+    // Always opens the note tab (focusing it if already open) and then
+    // shows the preview. The preview auto-dismisses when the user leaves
+    // the tab, so we must re-show it every time rather than short-circuiting.
+    const handlePreviewInEditor = useCallback(async () => {
+        const libraryId = pendingApproval?.actionData?.library_id ?? action?.proposed_data?.library_id;
+        const zoteroKey = pendingApproval?.actionData?.zotero_key ?? action?.proposed_data?.zotero_key;
+        if (libraryId == null || !zoteroKey) return;
+
+        // Open / focus the note tab
+        await openNoteByKey(libraryId, zoteroKey);
+
+        // Wait for the editor instance to be available (needed for newly
+        // opened tabs; no-op cost when the tab was already selected)
+        await new Promise<void>((resolve) => {
+            let attempts = 0;
+            const check = () => {
+                if (isNoteOpenInEditor(libraryId, zoteroKey) || ++attempts > 25) {
+                    resolve();
+                } else {
+                    setTimeout(check, 200);
+                }
+            };
+            setTimeout(check, 300);
+        });
+
+        // During an active run, pending approvals live in the approval map —
+        // updateDiffPreviewForNote reads that map and shows the combined diff.
+        if (pendingApproval) {
+            updateDiffPreviewForNote(libraryId, zoteroKey);
+        } else if (action?.proposed_data) {
+            // Post-run: the approval was already removed; build the edit from the action directly.
+            const oldStr = action.proposed_data.old_string ?? '';
+            if (oldStr) {
+                showDiffPreview(libraryId, zoteroKey, [{
+                    oldString: oldStr,
+                    newString: action.proposed_data.new_string ?? '',
+                    replaceAll: action.proposed_data.replace_all ?? false,
+                }]);
+            }
+        }
+    }, [pendingApproval, action]);
+
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
 
     // Build preview data from either pending approval or agent action
     const previewData = buildPreviewData(toolName, pendingApproval, action);
 
+    // Show the preview button when there's an unapplied edit that has an old_string to preview
+    const canShowPreview = DIFF_PREVIEW_ENABLED
+        && toolName === 'edit_note'
+        && (isAwaitingApproval || status === 'pending' || status === 'rejected' || status === 'undone')
+        && !!(pendingApproval?.actionData?.old_string || action?.proposed_data?.old_string);
     // Determine what icon to show in header
     const getHeaderIcon = () => {
         const getToolIcon = () => {
@@ -846,10 +909,21 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )}
                         <div className="flex-1" />
 
+                        {canShowPreview && (
+                            <Button
+                                variant="ghost"
+                                rightIcon={FileDiffIcon}
+                                onClick={handlePreviewInEditor}
+                                style={{ padding: '3px 6px' }}
+                            >
+                                Preview
+                            </Button>
+                        )}
+
                         {/* Reject button - for awaiting and pending */}
                         {config.showReject && (!isProcessing || clickedButton === 'reject') && (
                             <Button
-                                variant="ghost-secondary"
+                                variant="ghost"
                                 onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                                 loading={isProcessing && clickedButton === 'reject'}
                                 disabled={isProcessing}

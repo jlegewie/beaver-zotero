@@ -1,5 +1,8 @@
 import { atom } from 'jotai';
 import { logger } from '../../src/utils/logger';
+import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
+import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
+import { makeNoteKey } from '../atoms/editNoteAutoApprove';
 import { agentActionsService, AckActionLink } from '../../src/services/agentActionsService';
 import { ZoteroItemReference } from '../types/zotero';
 import {
@@ -767,6 +770,14 @@ export const addPendingApprovalAtom = atom(
             });
             return next;
         });
+
+        // Trigger in-editor diff preview for edit_note approvals
+        if (event.action_type === 'edit_note') {
+            const { library_id, zotero_key } = event.action_data || {};
+            if (library_id != null && zotero_key) {
+                updateDiffPreviewForNote(library_id, zotero_key);
+            }
+        }
     }
 );
 
@@ -775,12 +786,25 @@ export const addPendingApprovalAtom = atom(
  */
 export const removePendingApprovalAtom = atom(
     null,
-    (_, set, actionId: string) => {
-        set(pendingApprovalsAtom, (prev) => {
-            const next = new Map(prev);
+    (get, set, actionId: string) => {
+        // Read the approval before removing so we know which note to update
+        const prev = get(pendingApprovalsAtom);
+        const removed = prev.get(actionId);
+
+        set(pendingApprovalsAtom, (p) => {
+            const next = new Map(p);
             next.delete(actionId);
             return next;
         });
+
+        // If the removed approval was edit_note, update/dismiss the preview
+        if (removed?.actionType === 'edit_note') {
+            const libId = removed.actionData?.library_id;
+            const zKey = removed.actionData?.zotero_key;
+            if (libId != null && zKey) {
+                updateDiffPreviewForNote(libId, zKey);
+            }
+        }
     }
 );
 
@@ -790,6 +814,8 @@ export const removePendingApprovalAtom = atom(
 export const clearAllPendingApprovalsAtom = atom(
     null,
     (_, set) => {
+        dismissDiffPreview();
+        set(diffPreviewNoteKeyAtom, null);
         set(pendingApprovalsAtom, new Map());
     }
 );

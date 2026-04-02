@@ -310,9 +310,13 @@ export async function openSource(source: SourceAttachment | CitationData) {
  * Uses Zotero.Notes.open() which respects the `extensions.zotero.openNoteInNewWindow` setting.
  */
 export async function openNoteById(itemId: number): Promise<void> {
-    try {
-        await (Zotero as any).Notes.open(itemId);
-    } catch {
+    if (typeof (Zotero as any).Notes?.open === 'function') {
+        try {
+            await (Zotero as any).Notes.open(itemId);
+        } catch (e) {
+            logger(`openNoteById: Notes.open failed for itemId=${itemId}: ${e}`, 1);
+        }
+    } else {
         // Fallback for older Zotero versions without Notes.open
         Zotero.getActiveZoteroPane()?.openNoteWindow?.(itemId);
     }

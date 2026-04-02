@@ -108,6 +108,7 @@ import {
     makeNoteKey,
 } from './editNoteAutoApprove';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
+import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
 import { syncingItemFilterAsync } from '../../src/utils/sync';
@@ -953,13 +954,15 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
             agentService.close();
             set(isWSChatPendingAtom, false);
+            // Dismiss the in-editor diff preview
+            dismissDiffPreview();
             // Clear per-run auto-approve state (keys only; IDs kept for UI labeling)
             set(clearAutoApproveNoteKeysAtom);
         },
 
         onError: (event: WSErrorEvent) => {
             logger('WS onError:', event, 1);
-    
+
             // Normal error handling
             set(wsErrorAtom, event);
             set(activeRunAtom, (prev) => prev ? {
@@ -978,6 +981,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(isWSChatPendingAtom, false);
             // Clear retry state on error
             set(wsRetryAtom, null);
+            // Clear pending approvals and dismiss diff preview (run failed)
+            set(clearAllPendingApprovalsAtom);
             // Clear per-run auto-approve state
             set(clearAutoApproveNoteKeysAtom);
         },
@@ -1135,6 +1140,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
             set(isWSChatPendingAtom, false);
+            // Clear pending approvals and dismiss diff preview (connection lost)
+            set(clearAllPendingApprovalsAtom);
             // Clear per-run auto-approve state if the socket drops before done/error.
             set(clearAutoApproveNoteKeysAtom);
         }

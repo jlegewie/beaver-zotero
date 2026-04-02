@@ -151,8 +151,6 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     zoteroKey,
 }) => {
     const isApplied = status === 'applied';
-    const isRejectedOrUndone = status === 'rejected' || status === 'undone';
-    const isError = status === 'error';
     const isDelete = newString === '';
 
     const strippedOld = normalizeForInlineDiff(stripHtmlPreserveFormatting(oldString));
