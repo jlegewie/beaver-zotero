@@ -105,6 +105,8 @@ interface AgentActionViewProps {
     responseIndex: number;
     /** Pending approval request if awaiting user decision */
     pendingApproval: PendingApproval | null;
+    /** Whether a tool-return has been received for this tool call (backend completed processing) */
+    hasToolReturn?: boolean;
 }
 
 interface StatusConfig {
@@ -211,6 +213,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     runId,
     responseIndex,
     pendingApproval: pendingApprovalProp,
+    hasToolReturn = false,
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
@@ -340,23 +343,28 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     useEffect(() => {
         const wasAwaiting = prevPendingApprovalRef.current !== null;
         const isNoLongerAwaiting = pendingApproval === null;
-        
+
         // If approval was just removed externally (not by our local handleApprove/handleReject)
         // AND the run is still pending (not canceled via Stop button)
-        if (wasAwaiting && isNoLongerAwaiting && !isProcessingApproval && isRunPending) {
+        // AND no tool-return has arrived yet (if it has, the backend already completed this tool
+        // call — e.g., approval timeout — so no spinner is needed)
+        if (wasAwaiting && isNoLongerAwaiting && !isProcessingApproval && isRunPending && !hasToolReturn) {
             setIsExternallyProcessing(true);
             // Set clickedButton to 'approve' to show the loading state on the right button
             // We assume external removal is approval (reject would also work but approve is more common)
             setClickedButton('approve');
         }
-        
-        prevPendingApprovalRef.current = pendingApproval;
-    }, [pendingApproval, isProcessingApproval, isRunPending]);
 
-    // Clear processing state when action status changes from 'pending' to a final state
+        prevPendingApprovalRef.current = pendingApproval;
+    }, [pendingApproval, isProcessingApproval, isRunPending, hasToolReturn]);
+
+    // Clear processing state when:
+    // 1. Action status changes from 'pending' to a final state (normal approval flow)
+    // 2. Tool-return arrives while externally processing (backend completed — e.g., timeout)
+    // 3. Run is no longer pending (canceled/completed/errored — same pattern as
+    //    ToolCallPartView's isInProgress + runStatus guard)
     useEffect(() => {
         if ((isProcessingApproval || isExternallyProcessing) && action) {
-            // If action status is no longer 'pending', the backend has processed the approval
             if (action.status !== 'pending') {
                 setIsProcessingApproval(false);
                 setIsExternallyProcessing(false);
@@ -364,7 +372,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 processingActionIdRef.current = null;
             }
         }
-    }, [isProcessingApproval, isExternallyProcessing, action?.status, action?.id]);
+        if (isExternallyProcessing && (hasToolReturn || !isRunPending)) {
+            setIsExternallyProcessing(false);
+            setClickedButton(null);
+        }
+    }, [isProcessingApproval, isExternallyProcessing, action?.status, action?.id, hasToolReturn, isRunPending]);
 
     const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing;
     // Show 'awaiting' if we have a pending approval OR if we're processing

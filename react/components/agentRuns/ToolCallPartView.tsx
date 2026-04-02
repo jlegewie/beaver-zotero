@@ -296,6 +296,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                 runId={runId}
                 responseIndex={responseIndex}
                 pendingApproval={pendingApproval}
+                hasToolReturn={hasResult}
             />
         );
     }
