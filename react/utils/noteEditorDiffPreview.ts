@@ -279,18 +279,22 @@ export function dismissDiffPreview(): void {
             const view = getEditorView(inst);
             if (view?.dom) view.dom.contentEditable = 'true';
         } catch { /* best effort */ }
-        inst._disableSaving = wasSavingDisabled;
-
-        // Use reinit() to reload from the item's current database state.
-        // We must NOT restore the stored originalHtml because an approved
-        // edit may have already been applied to the database — restoring
-        // originalHtml would revert the edit and auto-save the old content.
-        try { inst.reinit(); } catch { /* best effort */ }
+        // Keep saving disabled during reinit so that uninit() → saveSync()
+        // does NOT persist the diff HTML to the database.  Restore only
+        // after reinit completes.
+        const savedTabID = inst._tabID;
+        inst.reinit()
+            .then(() => {
+                inst._disableSaving = wasSavingDisabled;
+                if (!inst._tabID && savedTabID) inst._tabID = savedTabID;
+            })
+            .catch(() => {
+                inst._disableSaving = wasSavingDisabled;
+            });
         logger('dismissDiffPreview: restored via reinit', 1);
     } catch (e: any) {
         logger(`dismissDiffPreview: error: ${e.message}`, 1);
         try { inst._disableSaving = wasSavingDisabled; } catch { /* ignore */ }
-        try { inst.reinit(); } catch { /* ignore */ }
     }
 }
 
