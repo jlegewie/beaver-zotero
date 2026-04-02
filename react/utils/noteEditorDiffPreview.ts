@@ -342,9 +342,32 @@ export function dismissDiffPreview(): void {
         if (item) {
             inst.applyIncrementalUpdate({ html: item.getNote() }, false);
         }
-        setTimeout(() => {
+
+        // Wait for the iframe to confirm it processed the restore.
+        // applyExternalChanges marks the ProseMirror transaction with
+        // system=true, which posts an 'update' message back.  Listening
+        // for that message guarantees ProseMirror holds the clean HTML
+        // before saving resumes — unlike a fixed timeout.
+        let savingRestored = false;
+        const restoreSaving = () => {
+            if (savingRestored) return;
+            savingRestored = true;
+            try { inst._iframeWindow?.removeEventListener('message', onIframeMsg); } catch { /* ignore */ }
             try { inst._disableSaving = wasSavingDisabled; } catch { /* ignore */ }
-        }, 150);
+        };
+        const onIframeMsg = (e: any) => {
+            try {
+                if (e.data?.instanceID !== inst.instanceID) return;
+                const action = e.data?.message?.action;
+                if ((action === 'update' && e.data?.message?.system) || action === 'incrementalUpdateFailed') {
+                    restoreSaving();
+                }
+            } catch { /* ignore */ }
+        };
+        try { inst._iframeWindow.addEventListener('message', onIframeMsg); } catch { /* ignore */ }
+        // Fallback: restore after 1.5s if the message never arrives
+        // (e.g., iframe destroyed or update silently dropped).
+        setTimeout(restoreSaving, 1500);
         logger('dismissDiffPreview: restored via incremental update', 1);
     } catch (e: any) {
         logger(`dismissDiffPreview: error: ${e.message}`, 1);
