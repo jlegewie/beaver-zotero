@@ -1,43 +1,12 @@
 import { logger } from '../../utils/logger';
-import { sanitizeCreators } from '../../utils/zoteroUtils';
 import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '../agentProtocol';
-import type { MetadataEdit } from '../../../react/types/agentActions/base';
 import type { CreateItemProposedData, CreateItemResultData } from '../../../react/types/agentActions/items';
 import { applyCreateItemData } from '../../../react/utils/addItemActions';
 import { TimeoutContext, checkAborted, DEFAULT_TIMEOUT_SECONDS } from './timeout';
 import { TimeoutError } from './timeout';
 import { executeEditNoteAction } from './actions/editNote';
+import { executeEditMetadataAction } from './actions/editMetadata';
 
-
-/**
- * Restore in-memory field values on an item after a failed save or timeout.
- * Prevents dirty in-memory state from leaking into future saves.
- */
-function restoreFieldSnapshots(
-    item: any,
-    snapshots: Array<{ field: string; originalValue: any }>,
-): void {
-    for (const snap of snapshots) {
-        try {
-            item.setField(snap.field, snap.originalValue ?? '');
-        } catch (_) {
-            // Best-effort restoration — field may not be settable
-        }
-    }
-}
-
-/**
- * Restore in-memory creators on an item after a failed save or timeout.
- * Uses the internal format snapshot from item.getCreators().
- */
-function restoreCreatorSnapshots(item: any, originalCreators: any[] | null): void {
-    if (originalCreators === null) return;
-    try {
-        item.setCreators(originalCreators);
-    } catch (_) {
-        // Best-effort restoration — setCreators may fail if item is in bad state
-    }
-}
 
 /**
  * Restore in-memory tags and collections on items after a transaction rollback.
@@ -147,134 +116,6 @@ export async function handleAgentActionExecuteRequest(
         };
     } finally {
         clearTimeout(timer);
-    }
-}
-
-/**
- * Execute an edit_metadata action.
- * Applies the field edits to the Zotero item.
- */
-async function executeEditMetadataAction(
-    request: WSAgentActionExecuteRequest,
-    ctx: TimeoutContext,
-): Promise<WSAgentActionExecuteResponse> {
-    const { library_id, zotero_key, edits, creators } = request.action_data as {
-        library_id: number;
-        zotero_key: string;
-        edits: MetadataEdit[];
-        creators?: Array<{ firstName?: string; lastName?: string; name?: string; creatorType: string }> | null;
-    };
-
-    // Get the item
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: `Item not found: ${library_id}-${zotero_key}`,
-            error_code: 'item_not_found',
-        };
-    }
-
-    const appliedEdits: Array<{ field: string; old_value: string | null; new_value: string }> = [];
-    const failedEdits: Array<{ field: string; error: string }> = [];
-    // Snapshot original field values for in-memory rollback on failure
-    const fieldSnapshots: Array<{ field: string; originalValue: any }> = [];
-    // Snapshot original creators for in-memory rollback on failure
-    let creatorSnapshot: any[] | null = null;
-    let oldCreatorsJSON: any[] | null = null;
-    let creatorsApplied = false;
-
-    try {
-        // Apply each field edit (in-memory only, not persisted until saveTx)
-        for (const edit of edits) {
-            try {
-                // includeBaseMapped=true so base fields (e.g. 'publicationTitle')
-                // resolve to the type-specific field (e.g. 'bookTitle' on bookSection)
-                const oldValue = item.getField(edit.field, false, true);
-                fieldSnapshots.push({ field: edit.field, originalValue: oldValue });
-                item.setField(edit.field, edit.new_value);
-                appliedEdits.push({
-                    field: edit.field,
-                    old_value: oldValue ? String(oldValue) : null,
-                    new_value: edit.new_value,
-                });
-            } catch (error) {
-                // Re-throw TimeoutError so it propagates to the outer catch
-                if (error instanceof TimeoutError) throw error;
-                failedEdits.push({
-                    field: edit.field,
-                    error: String(error),
-                });
-            }
-        }
-
-        // Apply creators (in-memory only, not persisted until saveTx)
-        if (creators && creators.length > 0) {
-            try {
-                creatorSnapshot = item.getCreators();
-                oldCreatorsJSON = item.getCreatorsJSON();
-                // Type assertion: creatorType has been validated by the validate handler
-                item.setCreators(sanitizeCreators(creators) as any[]);
-                creatorsApplied = true;
-            } catch (error) {
-                if (error instanceof TimeoutError) throw error;
-                failedEdits.push({
-                    field: 'creators',
-                    error: String(error),
-                });
-            }
-        }
-
-        // Save the item if any changes were applied
-        if (appliedEdits.length > 0 || creatorsApplied) {
-            // Checkpoint: abort before persisting if timeout has fired
-            checkAborted(ctx, 'edit_metadata:before_save');
-            try {
-                await item.saveTx();
-                logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits${creatorsApplied ? ' + creators' : ''} to ${library_id}-${zotero_key}`, 1);
-            } catch (error) {
-                if (error instanceof TimeoutError) throw error;
-                // Save failed — restore in-memory state so dirty fields don't leak
-                restoreFieldSnapshots(item, fieldSnapshots);
-                restoreCreatorSnapshots(item, creatorSnapshot);
-                return {
-                    type: 'agent_action_execute_response',
-                    request_id: request.request_id,
-                    success: false,
-                    error: `Failed to save item: ${error}`,
-                    error_code: 'save_failed',
-                };
-            }
-        }
-
-        const allSucceeded = failedEdits.length === 0;
-
-        // Build result data
-        const resultData: Record<string, any> = {
-            applied_edits: appliedEdits,
-            failed_edits: failedEdits,
-        };
-
-        // Include creator change info in result
-        if (creatorsApplied) {
-            resultData.old_creators = oldCreatorsJSON;
-            resultData.new_creators = item.getCreatorsJSON();
-        }
-
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: allSucceeded,
-            error: allSucceeded ? undefined : `Some edits failed: ${failedEdits.map(e => e.field).join(', ')}`,
-            result_data: resultData,
-        };
-    } catch (error) {
-        // Restore in-memory state on any unhandled error (including TimeoutError)
-        restoreFieldSnapshots(item, fieldSnapshots);
-        restoreCreatorSnapshots(item, creatorSnapshot);
-        throw error;
     }
 }
 
