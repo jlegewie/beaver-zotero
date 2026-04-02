@@ -29,8 +29,10 @@ import {
 // Constants
 // =============================================================================
 
-const DEL_STYLE = 'background-color:rgba(210,40,40,0.28);text-decoration:line-through;border-radius:2px;padding:0 1px';
-const ADD_STYLE = 'background-color:rgba(16,150,72,0.28);border-radius:2px;padding:0 1px';
+const DEL_RGB = '210,40,40';
+const ADD_RGB = '16,150,72';
+const DEL_STYLE = `background-color:rgba(${DEL_RGB},0.28);text-decoration:line-through;border-radius:2px;padding:0 1px`;
+const ADD_STYLE = `background-color:rgba(${ADD_RGB},0.28);border-radius:2px;padding:0 1px`;
 const PREVIEW_STYLE_ID = 'beaver-diff-preview-style';
 const PREVIEW_BANNER_ID = 'beaver-preview-banner';
 /** Property set on iframe window by banner button clicks, polled by the timer. */
@@ -484,7 +486,7 @@ function scrollToDiff(inst: any): void {
         try {
             const view = getEditorView(inst);
             if (!view?.dom) return;
-            const diffSpan = view.dom.querySelector(`span[style*="background-color"]`);
+            const diffSpan = view.dom.querySelector(`span[style*="rgba(${ADD_RGB}"]`) || view.dom.querySelector(`span[style*="rgba(${DEL_RGB}"]`);
             if (!diffSpan) return;
             const container = findScrollContainer(view.dom as Element);
             if (!container) return;
