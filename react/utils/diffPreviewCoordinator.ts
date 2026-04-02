@@ -30,6 +30,12 @@ import { store } from '../store';
 import { pendingApprovalsAtom } from '../agents/agentActions';
 import { sendApprovalResponseAtom } from '../atoms/agentRunAtoms';
 
+/**
+ * Kill switch for the diff preview feature.
+ * Set to `false` to disable all in-editor diff previews.
+ */
+export const DIFF_PREVIEW_ENABLED = true;
+
 // Accessor for the Jotai store. The store is imported eagerly above
 // (store.ts is safe in tests because it guards on `typeof Zotero`).
 // This wrapper keeps call-sites consistent and easy to grep.
@@ -59,6 +65,7 @@ export const diffPreviewNoteKeyAtom = atom<string | null>(null);
  * Called from addPendingApprovalAtom and removePendingApprovalAtom.
  */
 export function updateDiffPreviewForNote(libraryId: number, zoteroKey: string): void {
+    if (!DIFF_PREVIEW_ENABLED) return;
     const store = getStore();
     const noteKey = makeNoteKey(libraryId, zoteroKey);
     const allApprovals: Map<string, any> = store.get(pendingApprovalsAtom);

@@ -59,7 +59,7 @@ import {
 } from '../icons/icons';
 import { revealSource, openNoteAndSearchEdit, openNoteByKey } from '../../utils/sourceUtils';
 import { isNoteOpenInEditor, showDiffPreview } from '../../utils/noteEditorDiffPreview';
-import { updateDiffPreviewForNote } from '../../utils/diffPreviewCoordinator';
+import { updateDiffPreviewForNote, DIFF_PREVIEW_ENABLED } from '../../utils/diffPreviewCoordinator';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
@@ -711,7 +711,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const previewData = buildPreviewData(toolName, pendingApproval, action);
 
     // Show the preview button when there's an unapplied edit that has an old_string to preview
-    const canShowPreview = toolName === 'edit_note'
+    const canShowPreview = DIFF_PREVIEW_ENABLED
+        && toolName === 'edit_note'
         && (isAwaitingApproval || status === 'pending' || status === 'rejected' || status === 'undone')
         && !!(pendingApproval?.actionData?.old_string || action?.proposed_data?.old_string);
     // Determine what icon to show in header
