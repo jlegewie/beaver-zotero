@@ -41,10 +41,10 @@ const PREVIEW_CSS = `
 .toolbar { opacity: 0.35; pointer-events: none; }
 .beaver-preview-banner {
     position: sticky; top: 0; z-index: 100; display: flex; align-items: center; gap: 8px;
-    background: rgba(16,150,72,0.10); border-bottom: 1px solid rgba(16,150,72,0.25);
-    padding: 6px 10px; font-size: 13px; color: #1a7f37; font-weight: 500; letter-spacing: 0.01em;
+    background: rgba(16,150,72,0.32); border-bottom: 1px solid rgba(16,150,72,0.45);
+    padding: 8px 11px; min-height: 40px; box-sizing: border-box; font-size: 13px; color: #1a7f37; font-weight: 500; letter-spacing: 0.01em;
 }
-.beaver-preview-banner .banner-title { flex: 1; text-align: center; }
+.beaver-preview-banner .banner-title { flex: 1; text-align: left; font-size: 15px; }
 .beaver-preview-banner button {
     border: none; border-radius: 4px; padding: 3px 10px; font-size: 12px;
     font-weight: 500; cursor: pointer; line-height: 1.4;
@@ -56,7 +56,7 @@ const PREVIEW_CSS = `
 .beaver-preview-banner .btn-approve { background: rgba(16,150,72,0.15); color: #1a7f37; }
 .beaver-preview-banner .btn-approve:hover { background: rgba(16,150,72,0.25); }
 @media (prefers-color-scheme: dark) {
-    .beaver-preview-banner { background: rgba(16,150,72,0.12); color: #3fb950; border-bottom-color: rgba(16,150,72,0.2); }
+    .beaver-preview-banner { background: rgba(16,150,72,0.18); color: #3fb950; border-bottom-color: rgba(16,150,72,0.6); }
     .beaver-preview-banner .btn-close { color: #3fb950; }
     .beaver-preview-banner .btn-close:hover { background: rgba(255,255,255,0.08); }
     .beaver-preview-banner .btn-reject { background: rgba(248,81,73,0.12); color: #f85149; }
@@ -458,10 +458,10 @@ function injectPreviewBanner(iframeWindow: any): void {
         approveBtn.textContent = 'Approve All';
         approveBtn.setAttribute('onclick', `window.${ACTION_PROP} = 'approveAll'`);
 
-        banner.appendChild(closeBtn);
         banner.appendChild(title);
         banner.appendChild(rejectBtn);
         banner.appendChild(approveBtn);
+        banner.appendChild(closeBtn);
         container.insertBefore(banner, container.firstChild);
     } catch { /* best effort */ }
 }
