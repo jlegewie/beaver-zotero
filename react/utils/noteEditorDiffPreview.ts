@@ -137,6 +137,24 @@ export function isNoteOpenInEditor(libraryId: number, zoteroKey: string): boolea
 }
 
 /**
+ * Returns true only if the note is open in an editor AND its tab is the
+ * currently selected tab.  Use this when you want to gate on visibility
+ * (e.g. the automatic diff-preview), as opposed to mere existence of an
+ * editor instance.
+ */
+export function isNoteInSelectedTab(libraryId: number, zoteroKey: string): boolean {
+    if (!areEditorApisAvailable()) return false;
+    const itemId = Zotero.Items.getIDFromLibraryAndKey(libraryId, zoteroKey);
+    if (!itemId) return false;
+    const inst = findEditorInstance(itemId);
+    if (!inst) return false;
+    const win = Zotero.getMainWindow();
+    const selectedTabId = win?.Zotero_Tabs?.selectedID;
+    if (!selectedTabId) return false;
+    return inst.tabID === selectedTabId;
+}
+
+/**
  * Register a callback for banner button actions ('close', 'approveAll', 'rejectAll').
  * Called by the coordinator to wire banner buttons to approval logic.
  */
