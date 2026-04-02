@@ -210,6 +210,45 @@ export class BeaverUIFactory {
                 return;
             }
 
+            // Dismiss any active diff preview in note editors.
+            // This must happen BEFORE React unmount because the preview module
+            // state (activePreview, poll timer) lives in the webpack bundle.
+            // After unmount, the bundle is gone and the preview artifacts
+            // (banner, frozen editor, _disableSaving) would be stranded.
+            try {
+                const instances: any[] = (Zotero as any).Notes?._editorInstances ?? [];
+                for (const inst of instances) {
+                    try {
+                        const doc = inst?._iframeWindow?.wrappedJSObject?.document
+                            ?? inst?._iframeWindow?.document;
+                        if (!doc) continue;
+                        const banner = doc.getElementById('beaver-preview-banner');
+                        if (!banner) continue;
+                        // This instance has an active preview — clean it up
+                        banner.remove();
+                        doc.getElementById('beaver-diff-preview-style')?.remove();
+                        // Unfreeze editor
+                        const view = inst._iframeWindow?.wrappedJSObject
+                            ?._currentEditorInstance?._editorCore?.view;
+                        if (view?.dom) view.dom.contentEditable = 'true';
+                        // Restore content from DB and re-enable saving
+                        const itemId = inst.itemID ?? inst._item?.id;
+                        if (itemId) {
+                            const item = Zotero.Items.get(itemId);
+                            if (item) {
+                                inst.applyIncrementalUpdate({ html: item.getNote() }, false);
+                            }
+                        }
+                        inst._disableSaving = false;
+                        ztoolkit.log(`removeChatPanel: cleaned up diff preview for editor ${itemId}`);
+                    } catch (e) {
+                        // Best effort — don't let preview cleanup block React unmount
+                    }
+                }
+            } catch (e) {
+                // Best effort
+            }
+
             // Unmount React components - CRITICAL for triggering cleanup effects
             if (win.BeaverReact && typeof win.BeaverReact.unmountFromElement === 'function') {
                 const elementIds = ["beaver-react-root-library", "beaver-react-root-reader", "beaver-global-initializer-root", "beaver-pane-floating-popup"];
