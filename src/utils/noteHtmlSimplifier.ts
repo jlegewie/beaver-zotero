@@ -1432,6 +1432,123 @@ export function findUniqueRawMatchPosition(
 
 
 // =============================================================================
+// Partial Simplified Element Stripping
+// =============================================================================
+
+/** Names of simplified-only elements (tags that don't exist in raw HTML). */
+const SIMPLIFIED_ELEMENT_NAMES = /^\/?(citation|annotation-image|annotation|image)\b/;
+
+export interface PartialElementStrip {
+    /** old_string with partial element boundary fragments removed */
+    strippedOld: string;
+    /** new_string with corresponding fragments removed */
+    strippedNew: string;
+    /** Number of characters stripped from the start of old_string */
+    leadingStrip: number;
+    /** Number of characters stripped from the end of old_string */
+    trailingStrip: number;
+}
+
+/**
+ * Detect and strip partial simplified-only element fragments at the boundaries
+ * of old_string/new_string.
+ *
+ * When a model crafts old_string from simplified note HTML, it may include a
+ * fragment of a simplified element tag at the boundary — e.g. `/>—ein` where
+ * `/>` is the tail of a `<citation …/>`. Such fragments don't expand back to
+ * raw HTML correctly because `expandToRawHtml` only handles complete tags.
+ *
+ * This function detects leading/trailing fragments of simplified-only elements
+ * (citation, annotation, annotation-image, image) and strips them from both
+ * old_string and new_string so the remaining text can be matched in raw HTML.
+ *
+ * @param oldString   The old_string from the edit request
+ * @param newString   The new_string from the edit request
+ * @param simplified  The full simplified note HTML
+ * @param simplifiedPos  Position of oldString in simplified (from indexOf)
+ * @returns Stripped strings and strip offsets, or null if no stripping needed
+ */
+export function stripPartialSimplifiedElements(
+    oldString: string,
+    newString: string,
+    simplified: string,
+    simplifiedPos: number,
+): PartialElementStrip | null {
+    const matchStart = simplifiedPos;
+    const matchEnd = simplifiedPos + oldString.length;
+    let leadingStrip = 0;
+    let trailingStrip = 0;
+
+    // --- Leading partial element ---
+    // Check if matchStart falls inside a simplified-only element tag.
+    // Scan backward for an unmatched '<' (one not closed by '>' before matchStart).
+    if (matchStart > 0) {
+        let openPos = -1;
+        for (let i = matchStart - 1; i >= Math.max(0, matchStart - 1500); i--) {
+            if (simplified[i] === '>') break;       // Found a close before any open
+            if (simplified[i] === '<') { openPos = i; break; }
+        }
+        if (openPos !== -1) {
+            const tagContent = simplified.substring(
+                openPos + 1,
+                Math.min(openPos + 30, simplified.length),
+            );
+            if (SIMPLIFIED_ELEMENT_NAMES.test(tagContent)) {
+                // Find the tag's closing '>' within old_string
+                const closeIdx = simplified.indexOf('>', matchStart);
+                if (closeIdx !== -1 && closeIdx < matchEnd) {
+                    leadingStrip = closeIdx - matchStart + 1;
+                }
+            }
+        }
+    }
+
+    // --- Trailing partial element ---
+    // Check if matchEnd falls inside a simplified-only element tag.
+    // Scan backward from matchEnd for an unmatched '<' within old_string.
+    if (matchEnd < simplified.length) {
+        let openPos = -1;
+        for (let i = matchEnd - 1; i >= matchStart + leadingStrip; i--) {
+            if (simplified[i] === '>') break;
+            if (simplified[i] === '<') { openPos = i; break; }
+        }
+        if (openPos !== -1) {
+            const tagContent = simplified.substring(
+                openPos + 1,
+                Math.min(openPos + 30, simplified.length),
+            );
+            if (SIMPLIFIED_ELEMENT_NAMES.test(tagContent)) {
+                trailingStrip = matchEnd - openPos;
+            }
+        }
+    }
+
+    if (leadingStrip === 0 && trailingStrip === 0) return null;
+
+    const strippedOld = oldString.substring(leadingStrip, oldString.length - trailingStrip);
+    if (!strippedOld.trim()) return null;   // Don't strip to empty
+
+    // Apply corresponding stripping to newString:
+    // Strip the same leading/trailing fragment if newString shares it.
+    let strippedNew = newString;
+    if (leadingStrip > 0) {
+        const leadingFragment = oldString.substring(0, leadingStrip);
+        if (newString.startsWith(leadingFragment)) {
+            strippedNew = strippedNew.substring(leadingStrip);
+        }
+    }
+    if (trailingStrip > 0) {
+        const trailingFragment = oldString.substring(oldString.length - trailingStrip);
+        if (strippedNew.endsWith(trailingFragment)) {
+            strippedNew = strippedNew.substring(0, strippedNew.length - trailingStrip);
+        }
+    }
+
+    return { strippedOld, strippedNew, leadingStrip, trailingStrip };
+}
+
+
+// =============================================================================
 // Context-Anchored Range Finding
 // =============================================================================
 

@@ -22,6 +22,8 @@ import {
     decodeHtmlEntities,
     encodeTextEntities,
     ENTITY_FORMS,
+    stripPartialSimplifiedElements,
+    stripNoteWrapperDiv,
 } from '../../../utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
@@ -258,7 +260,95 @@ async function validateEditNoteAction(
         }
     }
 
-    // 13. Zero matches — fuzzy match on simplified HTML
+    // 13. Zero matches — try stripping partial simplified-element fragments.
+    //     The model may include e.g. "/>" (tail of a <citation…/>) in old_string.
+    //     These fragments don't expand to raw HTML, but the text portion does.
+    //     Gate: old_string must appear exactly once in simplified HTML.
+    if (matchCount === 0) {
+        const simplifiedPos = simplified.indexOf(old_string ?? '');
+        const isUnique = simplifiedPos !== -1
+            && simplified.indexOf(old_string ?? '', simplifiedPos + 1) === -1;
+
+        if (isUnique) {
+            const stripped = stripPartialSimplifiedElements(
+                old_string ?? '', new_string, simplified, simplifiedPos,
+            );
+            if (stripped) {
+                try {
+                    expandedOld = expandToRawHtml(stripped.strippedOld, metadata, 'old');
+                    expandedNew = expandToRawHtml(stripped.strippedNew, metadata, 'new');
+                    matchCount = countOccurrences(strippedHtml, expandedOld);
+                } catch {
+                    // expansion failed — fall through to fuzzy error
+                }
+
+                if (matchCount >= 1) {
+                    // Build normalized_action_data with the stripped strings
+                    const normalizedActionData: EditNoteProposedData = {
+                        ...request.action_data as EditNoteProposedData,
+                        old_string: stripped.strippedOld,
+                        new_string: stripped.strippedNew,
+                    };
+
+                    if (matchCount > 1 && !replace_all) {
+                        // Disambiguate: we know old_string's unique position in simplified.
+                        // The stripped text starts at simplifiedPos + leadingStrip.
+                        // Expand simplified[0..strippedStart] to compute the raw position.
+                        const strippedStart = simplifiedPos + stripped.leadingStrip;
+                        let disambiguated = false;
+                        try {
+                            const expandedBefore = expandToRawHtml(
+                                simplified.substring(0, strippedStart), metadata, 'old',
+                            );
+                            const unwrapped = stripNoteWrapperDiv(strippedHtml);
+                            const wrapperPrefixLen = unwrapped !== strippedHtml
+                                ? strippedHtml.indexOf('>') + 1 : 0;
+                            const rawPos = wrapperPrefixLen + expandedBefore.length;
+
+                            if (strippedHtml.substring(rawPos, rawPos + expandedOld.length) === expandedOld) {
+                                normalizedActionData.target_before_context = strippedHtml.substring(
+                                    Math.max(0, rawPos - 200), rawPos,
+                                );
+                                normalizedActionData.target_after_context = strippedHtml.substring(
+                                    rawPos + expandedOld.length,
+                                    rawPos + expandedOld.length + 200,
+                                );
+                                disambiguated = true;
+                            }
+                        } catch {
+                            // prefix expansion failed
+                        }
+
+                        if (!disambiguated) {
+                            // Can't disambiguate — report ambiguous match on stripped string
+                            matchCount = 0; // fall through to fuzzy below
+                        }
+                    }
+
+                    if (matchCount >= 1) {
+                        const noteTitle = item.getNoteTitle() || '(untitled)';
+                        const totalLines = simplified.split('\n').length;
+                        const preference = getDeferredToolPreference('edit_note');
+
+                        return {
+                            type: 'agent_action_validate_response',
+                            request_id: request.request_id,
+                            valid: true,
+                            current_value: {
+                                note_title: noteTitle,
+                                total_lines: totalLines,
+                                match_count: matchCount,
+                            },
+                            normalized_action_data: normalizedActionData,
+                            preference,
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    // 13b. Zero matches — fuzzy match on simplified HTML
     if (matchCount === 0) {
         const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
         return {
@@ -537,7 +627,31 @@ async function executeEditNoteAction(
         }
     }
 
-    // 8. Zero matches
+    // 8. Zero matches — try stripping partial simplified-element fragments
+    //    (defense-in-depth: validation normally normalizes via normalized_action_data,
+    //     but the note may have changed between validation and execution)
+    if (matchCount === 0) {
+        const simplifiedPos = simplified.indexOf(old_string ?? '');
+        const isUnique = simplifiedPos !== -1
+            && simplified.indexOf(old_string ?? '', simplifiedPos + 1) === -1;
+
+        if (isUnique) {
+            const stripped = stripPartialSimplifiedElements(
+                old_string ?? '', new_string, simplified, simplifiedPos,
+            );
+            if (stripped) {
+                try {
+                    expandedOld = expandToRawHtml(stripped.strippedOld, metadata, 'old');
+                    expandedNew = expandToRawHtml(stripped.strippedNew, metadata, 'new');
+                    matchCount = countOccurrences(strippedHtml, expandedOld);
+                } catch {
+                    // expansion failed — fall through to fuzzy error
+                }
+            }
+        }
+    }
+
+    // 8b. Still zero matches — fuzzy error
     if (matchCount === 0) {
         const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
         return {

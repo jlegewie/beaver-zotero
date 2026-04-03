@@ -35,6 +35,14 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     decodeHtmlEntities: vi.fn((s: string) => s),
     encodeTextEntities: vi.fn((s: string) => s),
     ENTITY_FORMS: ['hex', 'decimal', 'named'],
+    stripPartialSimplifiedElements: vi.fn(() => null),
+    stripNoteWrapperDiv: vi.fn((html: string) => {
+        const trimmed = html.trim();
+        if (!trimmed.startsWith('<div') || !trimmed.endsWith('</div>')) return html;
+        const closeAngle = trimmed.indexOf('>');
+        if (closeAngle === -1) return html;
+        return trimmed.substring(closeAngle + 1, trimmed.length - 6);
+    }),
 }));
 
 vi.mock('../../../src/services/supabaseClient', () => ({
@@ -110,6 +118,7 @@ import {
     checkDuplicateCitations,
     rebuildDataCitationItems,
     preloadPageLabelsForNewCitations,
+    stripPartialSimplifiedElements,
 } from '../../../src/utils/noteHtmlSimplifier';
 import { getDeferredToolPreference } from '../../../src/services/agentDataProvider/utils';
 import { store } from '../../../react/store';
@@ -615,5 +624,265 @@ describe('unsupported action type', () => {
         const response = await handleAgentActionExecuteRequest(req);
         expect(response.success).toBe(false);
         expect(response.error_code).toBe('unsupported_action_type');
+    });
+});
+
+
+// =============================================================================
+// Partial Simplified Element Fallback
+// =============================================================================
+
+describe('validateEditNoteAction — partial element fallback', () => {
+    const CITATION_RAW = '<span class="citation" data-citation="...">(Legewie, 2018)</span>';
+    const CITATION_SIMPLIFIED = '<citation item_id="1-KEY" ref="c_KEY_0"/>';
+    const RAW_HTML = `<div data-schema-version="9">${CITATION_RAW}—ein theoretisch bildungsfördernder Effekt</div>`;
+    const SIMPLIFIED = `${CITATION_SIMPLIFIED}—ein theoretisch bildungsfördernder Effekt`;
+
+    function setupPartialElementMocks() {
+        const mockItem = makeMockItem({ getNote: vi.fn(() => RAW_HTML) });
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified: SIMPLIFIED,
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+        // expandToRawHtml returns input as-is (after stripping, there are no elements to expand)
+        vi.mocked(expandToRawHtml).mockImplementation((str: string) => str);
+        // countOccurrences: use real implementation
+        vi.mocked(countOccurrences).mockImplementation((haystack: string, needle: string) => {
+            if (!needle) return 0;
+            let count = 0; let pos = 0;
+            while ((pos = haystack.indexOf(needle, pos)) !== -1) { count++; pos += needle.length; }
+            return count;
+        });
+        // stripDataCitationItems: pass through
+        vi.mocked(stripDataCitationItems).mockImplementation((html: string) => html);
+        // getLatestNoteHtml: from mock item
+        vi.mocked(getLatestNoteHtml).mockImplementation((item: any) => item.getNote());
+    }
+
+    it('validates successfully when old_string has leading /> (unique stripped match)', async () => {
+        setupPartialElementMocks();
+
+        // stripPartialSimplifiedElements returns the stripped strings
+        vi.mocked(stripPartialSimplifiedElements).mockReturnValue({
+            strippedOld: '—ein theoretisch',
+            strippedNew: '. Ein theoretisch',
+            leadingStrip: 2,
+            trailingStrip: 0,
+        });
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '/>—ein theoretisch',
+                new_string: '/>. Ein theoretisch',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data!.old_string).toBe('—ein theoretisch');
+        expect(response.normalized_action_data!.new_string).toBe('. Ein theoretisch');
+    });
+
+    it('falls through to fuzzy error when stripPartialSimplifiedElements returns null', async () => {
+        setupPartialElementMocks();
+        vi.mocked(stripPartialSimplifiedElements).mockReturnValue(null);
+        vi.mocked(findFuzzyMatch).mockReturnValue('some fuzzy match');
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '/>—ein theoretisch',
+                new_string: '/>. Ein theoretisch',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('old_string_not_found');
+    });
+
+    it('adds context anchors when stripped match is ambiguous and disambiguation succeeds', async () => {
+        // Set up HTML where the stripped text appears twice but can be disambiguated.
+        // expandToRawHtml maps simplified prefix to raw prefix of the same length
+        // so the position verification succeeds.
+        const rawHtml = '<div data-schema-version="9">BEFORE —ein theoretisch BBB—ein theoretisch CCC</div>';
+        const simplified = 'BEFORE —ein theoretisch BBB—ein theoretisch CCC';
+
+        const mockItem = makeMockItem({ getNote: vi.fn(() => rawHtml) });
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified,
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+        // Identity expansion: simplified content has no elements to expand
+        vi.mocked(expandToRawHtml).mockImplementation((str: string) => str);
+        vi.mocked(countOccurrences).mockImplementation((haystack: string, needle: string) => {
+            if (!needle) return 0;
+            let count = 0; let pos = 0;
+            while ((pos = haystack.indexOf(needle, pos)) !== -1) { count++; pos += needle.length; }
+            return count;
+        });
+        vi.mocked(stripDataCitationItems).mockImplementation((html: string) => html);
+        vi.mocked(getLatestNoteHtml).mockImplementation((item: any) => item.getNote());
+
+        // old_string = "/>—ein theoretisch", which appears once in simplified
+        // (prepend "/>" to simulate a partial citation tail).
+        // After stripping leading "/>", strippedOld = "—ein theoretisch" appears
+        // twice in rawHtml — disambiguation uses prefix expansion to locate the
+        // correct occurrence and attach context anchors.
+        const oldString = '/>—ein theoretisch';
+        const simplifiedWithTag = `BEFORE <citation item_id="1-KEY" ref="c_KEY_0"/>${simplified.substring('BEFORE '.length)}`;
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified: simplifiedWithTag,
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+
+        vi.mocked(stripPartialSimplifiedElements).mockReturnValue({
+            strippedOld: '—ein theoretisch',
+            strippedNew: '. Ein theoretisch',
+            leadingStrip: 2,
+            trailingStrip: 0,
+        });
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: oldString,
+                new_string: '/>. Ein theoretisch',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        // expandToRawHtml is identity, so the prefix (simplified up to the
+        // stripped text start) expands to itself. The wrapper prefix is
+        // '<div data-schema-version="9">' (29 chars). The position verification
+        // checks strippedHtml at (29 + prefixLen) — but the prefix includes the
+        // citation tag text which doesn't exist in rawHtml, so the position
+        // won't match and disambiguation fails, falling through to fuzzy error.
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('old_string_not_found');
+    });
+
+    it('succeeds with context anchors when prefix expansion maps to correct raw position', async () => {
+        // Set up HTML where disambiguation succeeds: the simplified prefix
+        // (citation tag) gets expanded to the raw citation text, and the
+        // resulting raw position correctly locates the first occurrence.
+        const RAWCIT = '<span class="citation" data-citation="x">(Cite)</span>';
+        const CIT_TAG = '<citation item_id="1-KEY" ref="c_KEY_0"/>';
+        const rawHtml = `<div data-schema-version="9">${RAWCIT}—ein theoretisch BBB—ein theoretisch CCC</div>`;
+        const simplified = `${CIT_TAG}—ein theoretisch BBB—ein theoretisch CCC`;
+
+        const mockItem = makeMockItem({ getNote: vi.fn(() => rawHtml) });
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified,
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+        // Map the citation tag to its raw equivalent; leave other text unchanged.
+        vi.mocked(expandToRawHtml).mockImplementation((str: string) =>
+            str.replace(CIT_TAG, RAWCIT),
+        );
+        vi.mocked(countOccurrences).mockImplementation((haystack: string, needle: string) => {
+            if (!needle) return 0;
+            let count = 0; let pos = 0;
+            while ((pos = haystack.indexOf(needle, pos)) !== -1) { count++; pos += needle.length; }
+            return count;
+        });
+        vi.mocked(stripDataCitationItems).mockImplementation((html: string) => html);
+        vi.mocked(getLatestNoteHtml).mockImplementation((item: any) => item.getNote());
+
+        // old_string = "/>—ein theoretisch" is unique in simplified (the />
+        // is at the end of the citation tag). After stripping, strippedOld =
+        // "—ein theoretisch" appears twice in rawHtml.
+        // Disambiguation: strippedStart = simplifiedPos + leadingStrip.
+        // expandedBefore = expandToRawHtml(simplified[0..strippedStart]) maps
+        // the citation tag to RAWCIT. wrapperPrefixLen = 29. So:
+        //   rawPos = 29 + RAWCIT.length = 29 + 55 = 84
+        //   rawHtml[84..100] = "—ein theoretisch" ✓
+        vi.mocked(stripPartialSimplifiedElements).mockReturnValue({
+            strippedOld: '—ein theoretisch',
+            strippedNew: '. Ein theoretisch',
+            leadingStrip: 2,
+            trailingStrip: 0,
+        });
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '/>—ein theoretisch',
+                new_string: '/>. Ein theoretisch',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data!.target_before_context).toBeDefined();
+        expect(response.normalized_action_data!.target_after_context).toBeDefined();
+    });
+});
+
+describe('executeEditNoteAction — partial element fallback', () => {
+    it('executes successfully with stripped old_string when direct match fails', async () => {
+        // Raw HTML without citations (simple case for execution test)
+        const rawHtml = '<div data-schema-version="9">PREFIX—ein theoretisch SUFFIX</div>';
+        const simplified = 'CITATION_TAG/>—ein theoretisch SUFFIX';
+
+        const mockItem = makeMockItem({ getNote: vi.fn(() => rawHtml) });
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified,
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+        vi.mocked(expandToRawHtml).mockImplementation((str: string) => str);
+        vi.mocked(countOccurrences).mockImplementation((haystack: string, needle: string) => {
+            if (!needle) return 0;
+            let count = 0; let pos = 0;
+            while ((pos = haystack.indexOf(needle, pos)) !== -1) { count++; pos += needle.length; }
+            return count;
+        });
+        vi.mocked(stripDataCitationItems).mockImplementation((html: string) => html);
+        vi.mocked(getLatestNoteHtml).mockImplementation((item: any) => item.getNote());
+        vi.mocked(rebuildDataCitationItems).mockImplementation((html: string) => html);
+
+        // The old_string "/>—ein" doesn't exist in raw HTML, but "—ein" does
+        vi.mocked(stripPartialSimplifiedElements).mockReturnValue({
+            strippedOld: '—ein theoretisch',
+            strippedNew: '. Ein theoretisch',
+            leadingStrip: 2,
+            trailingStrip: 0,
+        });
+
+        const req = makeExecuteRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '/>—ein theoretisch',
+                new_string: '/>. Ein theoretisch',
+            },
+        });
+
+        const response = await handleAgentActionExecuteRequest(req);
+        expect(response.success).toBe(true);
+        expect(response.result_data?.occurrences_replaced).toBe(1);
+        // Verify the note was saved with the replaced text
+        expect(mockItem.setNote).toHaveBeenCalled();
+        const savedHtml = mockItem.setNote.mock.calls[0][0];
+        expect(savedHtml).toContain('. Ein theoretisch');
+        expect(savedHtml).not.toContain('—ein theoretisch');
     });
 });
