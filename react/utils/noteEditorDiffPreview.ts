@@ -31,6 +31,9 @@ import {
 
 const DEL_RGB = '210,40,40';
 const ADD_RGB = '16,150,72';
+/** Browser-normalized rgba strings (spaces after commas) for DOM queries */
+const DEL_RGB_SPACED = '210, 40, 40';
+const ADD_RGB_SPACED = '16, 150, 72';
 const DEL_STYLE = `background-color:rgba(${DEL_RGB},0.28);text-decoration:line-through;border-radius:2px;padding:0 1px`;
 const ADD_STYLE = `background-color:rgba(${ADD_RGB},0.28);border-radius:2px;padding:0 1px`;
 const PREVIEW_STYLE_ID = 'beaver-diff-preview-style';
@@ -199,12 +202,14 @@ export async function showDiffPreview(
 
         const hash = computeEditsHash(edits);
 
-        // Dedup: if already showing the same preview, skip
+        // Dedup: if already showing the same preview, just scroll to
+        // the first diff so it's visible (the user may have scrolled away)
         if (activePreview
             && activePreview.libraryId === libraryId
             && activePreview.zoteroKey === zoteroKey
             && activePreview.editsHash === hash
         ) {
+            scrollToDiff(activePreview.editorInstance);
             return true;
         }
 
@@ -548,7 +553,11 @@ function scrollToDiff(inst: any): void {
         try {
             const view = getEditorView(inst);
             if (!view?.dom) return;
-            const diffSpan = view.dom.querySelector(`span[style*="rgba(${ADD_RGB}"]`) || view.dom.querySelector(`span[style*="rgba(${DEL_RGB}"]`);
+            // Browsers normalize rgba() with spaces after commas, so query
+            // for the spaced format (the non-spaced originals never appear
+            // in the live DOM).
+            const diffSpan = view.dom.querySelector(`span[style*="rgba(${ADD_RGB_SPACED}"]`)
+                || view.dom.querySelector(`span[style*="rgba(${DEL_RGB_SPACED}"]`);
             if (!diffSpan) return;
             const container = findScrollContainer(view.dom as Element);
             if (!container) return;
