@@ -310,9 +310,19 @@ export async function showDiffPreview(
  * case where the webpack bundle is unloaded before dismiss runs.  If the
  * cleanup steps change, update both locations.
  */
-export function dismissDiffPreview(): void {
+/**
+ * Dismiss the preview and return a Promise that resolves once the editor's
+ * `_disableSaving` flag has been restored (i.e., the editor is fully usable
+ * again). Callers that need to edit the same note immediately after should
+ * `await` this to avoid racing with the iframe restore.
+ *
+ * For callers that don't need to wait (fire-and-forget), the returned
+ * promise can simply be ignored — the function still works synchronously
+ * for cleanup purposes.
+ */
+export function dismissDiffPreview(): Promise<void> {
     generation++;
-    if (!activePreview) return;
+    if (!activePreview) return Promise.resolve();
 
     const { editorInstance: inst, wasSavingDisabled, pollTimer, itemId } = activePreview;
     activePreview = null;
@@ -325,7 +335,7 @@ export function dismissDiffPreview(): void {
     try {
         if (!isEditorInstanceUsable(inst)) {
             try { inst._disableSaving = wasSavingDisabled; } catch { /* ignore */ }
-            return;
+            return Promise.resolve();
         }
         removePreviewBanner(inst._iframeWindow);
         removePreviewStyles(inst._iframeWindow);
@@ -354,30 +364,33 @@ export function dismissDiffPreview(): void {
         // system=true, which posts an 'update' message back.  Listening
         // for that message guarantees ProseMirror holds the clean HTML
         // before saving resumes — unlike a fixed timeout.
-        let savingRestored = false;
-        const restoreSaving = () => {
-            if (savingRestored) return;
-            savingRestored = true;
-            try { inst._iframeWindow?.removeEventListener('message', onIframeMsg); } catch { /* ignore */ }
-            try { inst._disableSaving = wasSavingDisabled; } catch { /* ignore */ }
-        };
-        const onIframeMsg = (e: any) => {
-            try {
-                if (e.data?.instanceID !== inst.instanceID) return;
-                const action = e.data?.message?.action;
-                if ((action === 'update' && e.data?.message?.system) || action === 'incrementalUpdateFailed') {
-                    restoreSaving();
-                }
-            } catch { /* ignore */ }
-        };
-        try { inst._iframeWindow.addEventListener('message', onIframeMsg); } catch { /* ignore */ }
-        // Fallback: restore after 1.5s if the message never arrives
-        // (e.g., iframe destroyed or update silently dropped).
-        setTimeout(restoreSaving, 1500);
-        logger('dismissDiffPreview: restored via incremental update', 1);
+        return new Promise<void>((resolve) => {
+            let savingRestored = false;
+            const restoreSaving = () => {
+                if (savingRestored) return;
+                savingRestored = true;
+                try { inst._iframeWindow?.removeEventListener('message', onIframeMsg); } catch { /* ignore */ }
+                try { inst._disableSaving = wasSavingDisabled; } catch { /* ignore */ }
+                resolve();
+            };
+            const onIframeMsg = (e: any) => {
+                try {
+                    if (e.data?.instanceID !== inst.instanceID) return;
+                    const action = e.data?.message?.action;
+                    if ((action === 'update' && e.data?.message?.system) || action === 'incrementalUpdateFailed') {
+                        restoreSaving();
+                    }
+                } catch { /* ignore */ }
+            };
+            try { inst._iframeWindow.addEventListener('message', onIframeMsg); } catch { /* ignore */ }
+            // Fallback: restore after 1.5s if the message never arrives
+            // (e.g., iframe destroyed or update silently dropped).
+            setTimeout(restoreSaving, 1500);
+        });
     } catch (e: any) {
         logger(`dismissDiffPreview: error: ${e.message}`, 1);
         try { inst._disableSaving = wasSavingDisabled; } catch { /* ignore */ }
+        return Promise.resolve();
     }
 }
 
@@ -396,6 +409,7 @@ export function getPreviewNoteKey(): { libraryId: number; zoteroKey: string } | 
     if (!activePreview) return null;
     return { libraryId: activePreview.libraryId, zoteroKey: activePreview.zoteroKey };
 }
+
 
 // =============================================================================
 // Internal Helpers

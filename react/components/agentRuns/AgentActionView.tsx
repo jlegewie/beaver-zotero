@@ -58,8 +58,8 @@ import {
     FileDiffIcon,
 } from '../icons/icons';
 import { revealSource, openNoteAndSearchEdit, openNoteByKey } from '../../utils/sourceUtils';
-import { isNoteOpenInEditor, showDiffPreview } from '../../utils/noteEditorDiffPreview';
-import { updateDiffPreviewForNote, DIFF_PREVIEW_ENABLED } from '../../utils/diffPreviewCoordinator';
+import { isNoteOpenInEditor, showDiffPreview, dismissDiffPreview, isDiffPreviewActive } from '../../utils/noteEditorDiffPreview';
+import { updateDiffPreviewForNote, DIFF_PREVIEW_ENABLED, diffPreviewNoteKeyAtom } from '../../utils/diffPreviewCoordinator';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
@@ -68,6 +68,7 @@ import ExtractionApprovalButton from '../ui/buttons/ExtractionApprovalButton';
 import ExternalSearchApprovalButton from '../ui/buttons/ExternalSearchApprovalButton';
 import SplitApplyButton from '../ui/buttons/SplitApplyButton';
 import { truncateText } from '../../utils/stringUtils';
+import { store } from '../../store';
 import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
 import {
     addAutoApproveNoteKeyAtom,
@@ -478,6 +479,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 }]);
                 logger(`AgentActionView: Applied organize_items action ${action!.id}`, 1);
             } else if (toolName === 'edit_note') {
+                // Dismiss any active diff preview before applying — the preview
+                // freezes the editor (_disableSaving + contentEditable=false), so
+                // it must be torn down for the edit to save and PM to normalize.
+                // Await so _disableSaving is fully restored before we proceed.
+                if (isDiffPreviewActive()) {
+                    await dismissDiffPreview();
+                    store.set(diffPreviewNoteKeyAtom, null);
+                }
                 const result = await executeEditNoteAction(action!);
                 await ackAgentActions(runId, [{
                     action_id: action!.id,
@@ -595,6 +604,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone organize_items action ${action.id}`, 1);
             } else if (toolName === 'edit_note') {
+                // Dismiss any active diff preview before undoing — same reason as apply.
+                if (isDiffPreviewActive()) {
+                    await dismissDiffPreview();
+                    store.set(diffPreviewNoteKeyAtom, null);
+                }
                 await undoEditNoteAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone edit_note action ${action.id}`, 1);
