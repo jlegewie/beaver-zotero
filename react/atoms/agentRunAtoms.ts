@@ -1224,6 +1224,9 @@ export const sendWSMessageAtom = atom(
             return;
         }
         
+        // Dismiss any open diff preview before sending
+        dismissDiffPreview();
+
         // Reset state
         set(resetWSStateAtom);
         set(isWSChatPendingAtom, true);
@@ -1504,6 +1507,9 @@ export const regenerateFromRunAtom = atom(
     async (get, set, runId: string) => {
         logger(`regenerateFromRunAtom: Regenerating from run ${runId}`, 1);
 
+        // Dismiss any open diff preview before regenerating
+        dismissDiffPreview();
+
         try {
             // Get current model
             const model = get(selectedModelAtom);
@@ -1687,6 +1693,9 @@ export const regenerateWithEditedPromptAtom = atom(
     async (get, set, params: { runId: string; editedPrompt: BeaverAgentPrompt }) => {
         const { runId, editedPrompt } = params;
         logger(`regenerateWithEditedPromptAtom: Regenerating run ${runId} with edited prompt`, 1);
+
+        // Dismiss any open diff preview before regenerating
+        dismissDiffPreview();
 
         try {
             // Get current model
