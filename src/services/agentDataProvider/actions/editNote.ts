@@ -46,7 +46,7 @@ import { TimeoutError } from '../timeout';
 async function validateEditNoteAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { library_id, zotero_key, old_string, new_string, replace_all } = request.action_data as EditNoteProposedData;
+    const { library_id, zotero_key, old_string, new_string, replace_all, replace_content } = request.action_data as EditNoteProposedData;
 
     // 1. Validate library exists
     const library = Zotero.Libraries.get(library_id);
@@ -136,7 +136,60 @@ async function validateEditNoteAction(
         };
     }
 
-    // 8. Strings different
+    // 8. Simplify note (needed for both modes)
+    const noteId = `${library_id}-${zotero_key}`;
+    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, library_id);
+
+    // ── replace_content mode: skip old_string matching, validate new_string only ──
+    if (replace_content) {
+        // Validate new_string tags
+        const validationError = validateNewString(new_string, metadata);
+        if (validationError) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: validationError,
+                error_code: 'invalid_new_string',
+                preference: 'always_ask',
+            };
+        }
+
+        // Dry-run expand new_string only
+        try {
+            expandToRawHtml(new_string, metadata, 'new');
+        } catch (e: any) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: e.message || String(e),
+                error_code: 'expansion_failed',
+                preference: 'always_ask',
+            };
+        }
+
+        const noteTitle = item.getNoteTitle() || '(untitled)';
+        const totalLines = simplified.split('\n').length;
+        const preference = getDeferredToolPreference('edit_note');
+
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: true,
+            current_value: {
+                note_title: noteTitle,
+                total_lines: totalLines,
+                match_count: 1,
+                old_content: simplified,
+            },
+            preference,
+        };
+    }
+
+    // ── String replacement mode (default) ──
+
+    // 9. Strings different
     if (old_string === new_string) {
         return {
             type: 'agent_action_validate_response',
@@ -147,10 +200,6 @@ async function validateEditNoteAction(
             preference: 'always_ask',
         };
     }
-
-    // 9. Simplify note
-    const noteId = `${library_id}-${zotero_key}`;
-    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, library_id);
 
     // 10. Validate new_string tags
     const validationError = validateNewString(new_string, metadata);
@@ -169,7 +218,7 @@ async function validateEditNoteAction(
     let expandedOld: string;
     let expandedNew: string;
     try {
-        expandedOld = expandToRawHtml(old_string, metadata, 'old');
+        expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
         expandedNew = expandToRawHtml(new_string, metadata, 'new');
     } catch (e: any) {
         return {
@@ -211,7 +260,7 @@ async function validateEditNoteAction(
 
     // 13. Zero matches — fuzzy match on simplified HTML
     if (matchCount === 0) {
-        const fuzzy = findFuzzyMatch(simplified, old_string);
+        const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -228,13 +277,13 @@ async function validateEditNoteAction(
     //     can be captured now and re-located later via surrounding context.
     if (matchCount > 1 && !replace_all) {
         const rawPos = findUniqueRawMatchPosition(
-            strippedHtml, simplified, old_string, expandedOld, metadata
+            strippedHtml, simplified, old_string ?? '', expandedOld, metadata
         );
         let normalizedActionData: EditNoteProposedData | undefined;
 
         if (rawPos === null) {
             const targetContext = captureValidatedEditTargetContext(
-                strippedHtml, simplified, old_string, expandedOld, metadata
+                strippedHtml, simplified, old_string ?? '', expandedOld, metadata
             );
 
             if (targetContext) {
@@ -276,7 +325,7 @@ async function validateEditNoteAction(
         };
     }
 
-    // 14. Valid — return current value
+    // 15. Valid — return current value
     const noteTitle = item.getNoteTitle() || '(untitled)';
     const totalLines = simplified.split('\n').length;
 
@@ -310,6 +359,7 @@ async function executeEditNoteAction(
         old_string,
         new_string,
         replace_all,
+        replace_content,
     } = request.action_data as EditNoteProposedData;
     let {
         target_before_context,
@@ -343,11 +393,105 @@ async function executeEditNoteAction(
     const noteId = `${library_id}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
 
+    // ── replace_content mode: replace entire note body ──
+    if (replace_content) {
+        let expandedNew: string;
+        try {
+            expandedNew = expandToRawHtml(new_string, metadata, 'new');
+        } catch (e: any) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: e.message || String(e),
+                error_code: 'expansion_failed',
+            };
+        }
+
+        const strippedHtml = stripDataCitationItems(oldHtml);
+
+        // Preserve wrapper div
+        const trimmed = strippedHtml.trim();
+        let wrapperOpen = '';
+        let wrapperClose = '';
+        if (trimmed.startsWith('<div') && trimmed.endsWith('</div>')) {
+            const closeAngle = trimmed.indexOf('>');
+            wrapperOpen = trimmed.substring(0, closeAngle + 1);
+            wrapperClose = '</div>';
+        }
+
+        let newHtml = wrapperOpen + expandedNew + wrapperClose;
+
+        // Add/update "Edited by Beaver" footer
+        const threadId = store.get(currentThreadIdAtom);
+        if (threadId) {
+            newHtml = addOrUpdateEditFooter(newHtml, threadId);
+        }
+
+        // Rebuild data-citation-items
+        newHtml = rebuildDataCitationItems(newHtml);
+
+        // Wrapper div protection
+        const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
+        if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: 'The note wrapper <div data-schema-version="..."> must not be removed.',
+                error_code: 'wrapper_removed',
+            };
+        }
+
+        // Checkpoint before save
+        checkAborted(ctx, 'edit_note:before_save');
+
+        // Save
+        try {
+            item.setNote(newHtml);
+            await item.saveTx();
+            logger(`executeEditNoteAction: Saved replace_content edit to ${noteId}`, 1);
+        } catch (error) {
+            try { item.setNote(oldHtml); } catch (_) { /* best-effort */ }
+            if (error instanceof TimeoutError) throw error;
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: `Failed to save note: ${error}`,
+                error_code: 'save_failed',
+            };
+        }
+
+        await waitForNoteSaveStabilization(item, newHtml);
+        clearNoteEditorSelection(library_id, zotero_key);
+        invalidateSimplificationCache(noteId);
+
+        // Check for duplicate citation warnings
+        const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+        const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: true,
+            result_data: {
+                library_id,
+                zotero_key,
+                occurrences_replaced: 1,
+                warnings,
+                undo_full_html: strippedHtml,
+            },
+        };
+    }
+
+    // ── String replacement mode (default) ──
+
     // 6. Expand old_string and new_string to raw HTML
     let expandedOld: string;
     let expandedNew: string;
     try {
-        expandedOld = expandToRawHtml(old_string, metadata, 'old');
+        expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
         expandedNew = expandToRawHtml(new_string, metadata, 'new');
     } catch (e: any) {
         return {
@@ -359,7 +503,7 @@ async function executeEditNoteAction(
         };
     }
 
-    // 6. Strip data-citation-items from raw HTML for matching
+    // 6b. Strip data-citation-items from raw HTML for matching
     const strippedHtml = stripDataCitationItems(oldHtml);
 
     // 7. Count occurrences — if zero, retry with entity-decoded or entity-encoded
@@ -395,7 +539,7 @@ async function executeEditNoteAction(
 
     // 8. Zero matches
     if (matchCount === 0) {
-        const fuzzy = findFuzzyMatch(simplified, old_string);
+        const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
@@ -442,7 +586,7 @@ async function executeEditNoteAction(
         // context captured during validation.
         if (matchCount > 1) {
             rawPos = findUniqueRawMatchPosition(
-                strippedHtml, simplified, old_string, expandedOld, metadata
+                strippedHtml, simplified, old_string ?? '', expandedOld, metadata
             ) ?? -1;
             if (rawPos === -1 && (
                 target_before_context !== undefined || target_after_context !== undefined

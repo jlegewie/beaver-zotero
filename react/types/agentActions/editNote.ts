@@ -14,12 +14,14 @@ export interface EditNoteProposedData {
     library_id: number;
     /** Zotero key of the note item */
     zotero_key: string;
-    /** The exact string to find (in simplified HTML format) */
-    old_string: string;
-    /** The replacement string (in simplified HTML format) */
+    /** The exact string to find (in simplified HTML format). Not needed when replace_content is true. */
+    old_string?: string;
+    /** The replacement string (in simplified HTML format). When replace_content is true, the full new note body. */
     new_string: string;
     /** If true, replace all occurrences (default: false) */
     replace_all?: boolean;
+    /** If true, replace the entire note body with new_string. old_string is ignored. */
+    replace_content?: boolean;
     /**
      * Raw-note context immediately before the target fragment, taken from the
      * stripped raw HTML (`stripDataCitationItems(rawHtml)`).
@@ -79,6 +81,12 @@ export interface EditNoteResultData {
      * individual-occurrence undo even when ProseMirror normalizes the HTML.
      */
     undo_occurrence_contexts?: Array<{ before: string; after: string }>;
+    /**
+     * Complete raw HTML of the note before a replace_content edit
+     * (data-citation-items stripped). Stored only for replace_content edits
+     * to enable full undo by restoring the entire previous note body.
+     */
+    undo_full_html?: string;
 }
 
 /** Typed proposed action for edit_note */

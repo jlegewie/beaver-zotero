@@ -710,11 +710,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Build preview data from either pending approval or agent action
     const previewData = buildPreviewData(toolName, pendingApproval, action);
 
-    // Show the preview button when there's an unapplied edit that has an old_string to preview
+    // Show the preview button when there's an unapplied edit that has an old_string to preview or replace_content
     const canShowPreview = DIFF_PREVIEW_ENABLED
         && toolName === 'edit_note'
         && (isAwaitingApproval || status === 'pending' || status === 'rejected' || status === 'undone')
-        && !!(pendingApproval?.actionData?.old_string || action?.proposed_data?.old_string);
+        && !!(pendingApproval?.actionData?.old_string || action?.proposed_data?.old_string || pendingApproval?.actionData?.replace_content || action?.proposed_data?.replace_content);
     // Determine what icon to show in header
     const getHeaderIcon = () => {
         const getToolIcon = () => {
@@ -1229,17 +1229,25 @@ const ActionPreview: React.FC<{
     }
 
     if (toolName === 'edit_note' || previewData.actionType === 'edit_note') {
-        const oldString = previewData.actionData.old_string || '';
+        const replaceContent = previewData.actionData.replace_content ?? false;
+        const oldString = replaceContent ? '' : (previewData.actionData.old_string || '');
         const newString = previewData.actionData.new_string || '';
         const replaceAll = previewData.actionData.replace_all ?? false;
         const occurrencesReplaced = previewData.resultData?.occurrences_replaced;
         const warnings = previewData.resultData?.warnings;
+        // For replace_content, get old content from validation's current_value
+        // or from undo_full_html in result_data (post-apply)
+        const oldContent = replaceContent
+            ? (previewData.currentValue?.old_content || previewData.resultData?.undo_full_html)
+            : undefined;
 
         return (
             <EditNotePreview
                 oldString={oldString}
                 newString={newString}
                 replaceAll={replaceAll}
+                replaceContent={replaceContent}
+                oldContent={oldContent}
                 occurrencesReplaced={occurrencesReplaced}
                 warnings={warnings}
                 status={status}

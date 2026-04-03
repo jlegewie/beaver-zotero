@@ -14,6 +14,10 @@ interface EditNotePreviewProps {
     newString: string;
     /** Whether all occurrences are replaced */
     replaceAll?: boolean;
+    /** Whether this is a full content replacement */
+    replaceContent?: boolean;
+    /** Full old content for diff display (used when replaceContent=true) */
+    oldContent?: string;
     /** Number of occurrences replaced (from result_data) */
     occurrencesReplaced?: number;
     /** Warnings from the edit */
@@ -144,6 +148,8 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     oldString,
     newString,
     replaceAll,
+    replaceContent,
+    oldContent,
     occurrencesReplaced,
     warnings,
     status = 'pending',
@@ -153,12 +159,42 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     const isApplied = status === 'applied';
     const isDelete = newString === '';
 
-    const strippedOld = normalizeForInlineDiff(stripHtmlPreserveFormatting(oldString));
+    // For replace_content mode when oldContent is missing (e.g. after undo),
+    // fetch the current note content — the note is back to its original state.
+    const needsOldContentFetch = replaceContent && !oldContent && libraryId != null && !!zoteroKey;
+    const [fetchedOldContent, setFetchedOldContent] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!needsOldContentFetch) return;
+
+        let cancelled = false;
+
+        (async () => {
+            try {
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId!, zoteroKey!);
+                if (!item || cancelled) return;
+                await item.loadDataType('note');
+                const rawHtml = getLatestNoteHtml(item);
+                const noteId = `${libraryId}-${zoteroKey}`;
+                const { simplified } = getOrSimplify(noteId, rawHtml, libraryId!);
+                if (!cancelled) setFetchedOldContent(simplified);
+            } catch {
+                // Fall back to no old content
+            }
+        })();
+
+        return () => { cancelled = true; };
+    }, [needsOldContentFetch, libraryId, zoteroKey]);
+
+    // For replace_content mode, use oldContent prop, fetched content, or fall back to oldString
+    const effectiveOld = replaceContent && (oldContent || fetchedOldContent) ? (oldContent || fetchedOldContent!) : oldString;
+    const strippedOld = normalizeForInlineDiff(stripHtmlPreserveFormatting(effectiveOld));
     const strippedNew = normalizeForInlineDiff(stripHtmlPreserveFormatting(newString));
 
     // When strippedOld is empty (old_string was pure HTML structure), fetch
     // surrounding visible text from the full note for context.
-    const needsNoteContext = strippedOld === '' && oldString !== '' && strippedNew !== '';
+    // Skip for replaceContent mode — we already have the full old content.
+    const needsNoteContext = !replaceContent && strippedOld === '' && effectiveOld !== '' && strippedNew !== '';
     const [noteContext, setNoteContext] = useState<{ before: string; after: string } | null>(null);
 
     useEffect(() => {
@@ -178,7 +214,7 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                 // After the edit is applied, the note contains newString instead
                 // of oldString. Search for the appropriate string so we get
                 // surrounding context rather than the inserted text itself.
-                const searchString = isApplied ? newString : oldString;
+                const searchString = isApplied ? newString : effectiveOld;
                 const idx = simplified.indexOf(searchString);
                 if (idx === -1 || cancelled) return;
 
@@ -204,7 +240,7 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
         })();
 
         return () => { cancelled = true; };
-    }, [needsNoteContext, libraryId, zoteroKey, oldString, isApplied, newString]);
+    }, [needsNoteContext, libraryId, zoteroKey, effectiveOld, isApplied, newString]);
 
     const inlineSegments = useMemo(() => {
         if (needsNoteContext && noteContext && (noteContext.before || noteContext.after)) {
@@ -226,8 +262,8 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
         <div className="edit-note-preview">
             <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1">
-                    {/* Only show header when replace_all is true (with occurrence count) */}
-                    {replaceAll && (
+                    {/* Show header for replace_content or replace_all modes */}
+                    {replaceAll && !replaceContent && (
                         <div className="text-sm font-color-primary font-medium px-3 py-1">
                             {isDelete ? 'Delete' : 'Replace'}
                             {' (all occurrences)'}

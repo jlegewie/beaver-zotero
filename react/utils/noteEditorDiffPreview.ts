@@ -76,6 +76,7 @@ export interface EditOperation {
     oldString: string;
     newString: string;
     replaceAll?: boolean;
+    replaceContent?: boolean;
 }
 
 interface DiffPreviewState {
@@ -219,12 +220,17 @@ export async function showDiffPreview(
         const { metadata } = getOrSimplify(noteId, rawHtml, libraryId);
 
         // Expand all edits
-        const expandedEdits: Array<{ expandedOld: string; expandedNew: string; replaceAll: boolean }> = [];
+        const expandedEdits: Array<{ expandedOld: string; expandedNew: string; replaceAll: boolean; replaceContent: boolean }> = [];
         for (const edit of edits) {
             try {
-                const expandedOld = edit.oldString ? expandToRawHtml(edit.oldString, metadata, 'old') : '';
-                const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new') : '';
-                if (expandedOld) expandedEdits.push({ expandedOld, expandedNew, replaceAll: edit.replaceAll ?? false });
+                if (edit.replaceContent) {
+                    const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new') : '';
+                    expandedEdits.push({ expandedOld: '', expandedNew, replaceAll: false, replaceContent: true });
+                } else {
+                    const expandedOld = edit.oldString ? expandToRawHtml(edit.oldString, metadata, 'old') : '';
+                    const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new') : '';
+                    if (expandedOld) expandedEdits.push({ expandedOld, expandedNew, replaceAll: edit.replaceAll ?? false, replaceContent: false });
+                }
             } catch (e: any) {
                 logger(`showDiffPreview: expansion failed for one edit: ${e.message}`, 1);
             }
@@ -542,9 +548,30 @@ function findScrollContainer(element: Element): Element | null {
 
 function constructMultiDiffHtml(
     fullHtml: string,
-    edits: Array<{ expandedOld: string; expandedNew: string; replaceAll: boolean }>,
+    edits: Array<{ expandedOld: string; expandedNew: string; replaceAll: boolean; replaceContent: boolean }>,
 ): string | null {
     const stripped = stripDataCitationItems(fullHtml);
+
+    // Handle replace_content: replace entire body with deletion-styled old + addition-styled new
+    const replaceContentEdit = edits.find(e => e.replaceContent);
+    if (replaceContentEdit) {
+        // Extract wrapper div and body content
+        const trimmed = stripped.trim();
+        let wrapperOpen = '';
+        let wrapperClose = '';
+        let bodyContent = trimmed;
+        if (trimmed.startsWith('<div') && trimmed.endsWith('</div>')) {
+            const closeAngle = trimmed.indexOf('>');
+            wrapperOpen = trimmed.substring(0, closeAngle + 1);
+            wrapperClose = '</div>';
+            bodyContent = trimmed.substring(closeAngle + 1, trimmed.length - 6);
+        }
+
+        const styledOld = bodyContent ? wrapTextNodesWithStyle(bodyContent, DEL_STYLE) : '';
+        const styledNew = replaceContentEdit.expandedNew ? wrapTextNodesWithStyle(replaceContentEdit.expandedNew, ADD_STYLE) : '';
+        return rebuildDataCitationItems(wrapperOpen + styledOld + styledNew + wrapperClose);
+    }
+
     const ops: Array<{ pos: number; oldLen: number; replacement: string }> = [];
 
     for (const edit of edits) {
