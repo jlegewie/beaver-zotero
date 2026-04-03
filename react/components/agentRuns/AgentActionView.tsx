@@ -714,10 +714,18 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     oldString: oldStr,
                     newString: action.proposed_data.new_string ?? '',
                     replaceAll: action.proposed_data.replace_all ?? false,
-                }]);
+                }], {
+                    onAction: (bannerAction) => {
+                        if (bannerAction === 'approve') {
+                            handleApplyPending();
+                        } else {
+                            handleRejectPending();
+                        }
+                    },
+                });
             }
         }
-    }, [pendingApproval, action]);
+    }, [pendingApproval, action, handleApplyPending, handleRejectPending]);
 
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
 

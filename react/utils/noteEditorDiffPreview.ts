@@ -79,6 +79,15 @@ export interface EditOperation {
     replaceContent?: boolean;
 }
 
+export interface DiffPreviewOptions {
+    /**
+     * Per-preview action handler. When set, banner Approve/Reject buttons
+     * call this instead of the global onBannerAction (coordinator).
+     * Used by AgentActionView for post-run single-edit previews.
+     */
+    onAction?: (action: 'approve' | 'reject') => void;
+}
+
 interface DiffPreviewState {
     itemId: number;
     libraryId: number;
@@ -87,6 +96,7 @@ interface DiffPreviewState {
     wasSavingDisabled: boolean;
     pollTimer: ReturnType<typeof setInterval> | null;
     editsHash: string;
+    onAction: ((action: 'approve' | 'reject') => void) | null;
 }
 
 let activePreview: DiffPreviewState | null = null;
@@ -182,6 +192,7 @@ export async function showDiffPreview(
     libraryId: number,
     zoteroKey: string,
     edits: EditOperation[],
+    options?: DiffPreviewOptions,
 ): Promise<boolean> {
     try {
         if (edits.length === 0) return false;
@@ -258,13 +269,14 @@ export async function showDiffPreview(
             if (view?.dom) view.dom.contentEditable = 'false';
         } catch { /* best effort */ }
         injectPreviewStyles(inst._iframeWindow);
-        injectPreviewBanner(inst._iframeWindow);
+        injectPreviewBanner(inst._iframeWindow, edits.length > 1);
         clearIframeAction(inst._iframeWindow);
 
         activePreview = {
             itemId, libraryId, zoteroKey,
             editorInstance: inst, wasSavingDisabled,
             pollTimer: null, editsHash: hash,
+            onAction: options?.onAction ?? null,
         };
 
         // Poll for banner button clicks + editor liveness
@@ -275,6 +287,11 @@ export async function showDiffPreview(
                 clearIframeAction(activePreview.editorInstance._iframeWindow);
                 if (action === 'close') {
                     dismissDiffPreview();
+                } else if (activePreview.onAction) {
+                    // Local handler (e.g., post-run single-edit preview)
+                    const handler = activePreview.onAction;
+                    dismissDiffPreview();
+                    handler(action === 'approveAll' ? 'approve' : 'reject');
                 } else {
                     // Delegate to coordinator (approveAll, rejectAll)
                     onBannerAction?.(action);
@@ -475,7 +492,7 @@ function removePreviewStyles(iframeWindow: any): void {
     catch { /* ignore */ }
 }
 
-function injectPreviewBanner(iframeWindow: any): void {
+function injectPreviewBanner(iframeWindow: any, multipleEdits: boolean): void {
     try {
         const doc = iframeWindow?.wrappedJSObject?.document ?? iframeWindow?.document;
         if (!doc) return;
@@ -497,14 +514,16 @@ function injectPreviewBanner(iframeWindow: any): void {
         title.className = 'banner-title';
         title.textContent = 'Preview of Note Edits';
 
+        const suffix = multipleEdits ? ' All' : '';
+
         const rejectBtn = doc.createElement('button');
         rejectBtn.className = 'btn-reject';
-        rejectBtn.textContent = 'Reject All';
+        rejectBtn.textContent = `Reject${suffix}`;
         rejectBtn.setAttribute('onclick', `window.${ACTION_PROP} = 'rejectAll'`);
 
         const approveBtn = doc.createElement('button');
         approveBtn.className = 'btn-approve';
-        approveBtn.textContent = 'Approve All';
+        approveBtn.textContent = `Approve${suffix}`;
         approveBtn.setAttribute('onclick', `window.${ACTION_PROP} = 'approveAll'`);
 
         banner.appendChild(title);
