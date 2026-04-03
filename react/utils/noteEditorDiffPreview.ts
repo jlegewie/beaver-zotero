@@ -294,9 +294,12 @@ export async function showDiffPreview(
                     dismissDiffPreview();
                 } else if (activePreview.onAction) {
                     // Local handler (e.g., post-run single-edit preview)
+                    // Must await dismiss so the editor fully restores original
+                    // content and re-enables saving before the handler applies
+                    // the edit — otherwise the in-flight restore overwrites it.
                     const handler = activePreview.onAction;
-                    dismissDiffPreview();
-                    handler(action === 'approveAll' ? 'approve' : 'reject');
+                    const mappedAction: 'approve' | 'reject' = action === 'approveAll' ? 'approve' : 'reject';
+                    dismissDiffPreview().then(() => handler(mappedAction));
                 } else {
                     // Delegate to coordinator (approveAll, rejectAll)
                     onBannerAction?.(action);
