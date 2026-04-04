@@ -660,6 +660,8 @@ export interface WSZoteroSearchRequest extends WSBaseEvent {
     limit: number;
     offset: number;
     fields?: string[] | null;
+    /** Post-filter: true = only items with attachments, false = only items without */
+    has_attachments?: boolean | null;
 }
 
 /** Regular (non-note) result item from zotero_search */
@@ -732,6 +734,8 @@ export interface WSListItemsRequest extends WSBaseEvent {
     sort_order: string;
     limit: number;
     offset: number;
+    /** Post-filter: true = only items with attachments, false = only items without */
+    has_attachments?: boolean | null;
 }
 
 /** Regular (non-note) result item from list_items */
