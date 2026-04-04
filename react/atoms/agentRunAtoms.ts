@@ -954,8 +954,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
             agentService.close();
             set(isWSChatPendingAtom, false);
-            // Dismiss the in-editor diff preview
-            dismissDiffPreview();
+            // Clear pending approvals and dismiss diff preview
+            set(clearAllPendingApprovalsAtom);
             // Clear per-run auto-approve state (keys only; IDs kept for UI labeling)
             set(clearAutoApproveNoteKeysAtom);
         },

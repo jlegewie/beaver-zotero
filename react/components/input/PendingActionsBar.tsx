@@ -1,7 +1,9 @@
 import React from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
+import { pendingApprovalsAtom } from '../../agents/agentActions';
 import { sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
+import { dismissDiffPreview } from '../../utils/noteEditorDiffPreview';
+import { diffPreviewNoteKeyAtom } from '../../utils/diffPreviewCoordinator';
 import Button from '../ui/Button';
 
 /**
@@ -11,7 +13,8 @@ import Button from '../ui/Button';
 const PendingActionsBar: React.FC = () => {
     const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
-    const removePendingApproval = useSetAtom(removePendingApprovalAtom);
+    const setPendingApprovals = useSetAtom(pendingApprovalsAtom);
+    const setDiffPreviewNoteKey = useSetAtom(diffPreviewNoteKeyAtom);
 
     const pendingCount = pendingApprovalsMap.size;
 
@@ -20,29 +23,35 @@ const PendingActionsBar: React.FC = () => {
         return null;
     }
 
-    const handleApproveAll = (e: React.FormEvent | React.MouseEvent) => {
+    const handleBatchAction = (e: React.FormEvent | React.MouseEvent, approved: boolean) => {
         e.preventDefault();
         e.stopPropagation();
+
+        // Dismiss the diff preview first to prevent re-showing during removal.
+        // Same batch pattern as handleBannerAction in diffPreviewCoordinator:
+        // send all responses, then remove all from the map in one update.
+        dismissDiffPreview();
+        setDiffPreviewNoteKey(null);
+
+        const idsToRemove: string[] = [];
         for (const pendingApproval of pendingApprovalsMap.values()) {
             sendApprovalResponse({
                 actionId: pendingApproval.actionId,
-                approved: true,
+                approved,
             });
-            removePendingApproval(pendingApproval.actionId);
+            idsToRemove.push(pendingApproval.actionId);
+        }
+        if (idsToRemove.length > 0) {
+            setPendingApprovals((prev) => {
+                const next = new Map(prev);
+                for (const id of idsToRemove) next.delete(id);
+                return next;
+            });
         }
     };
 
-    const handleRejectAll = (e: React.FormEvent | React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        for (const pendingApproval of pendingApprovalsMap.values()) {
-            sendApprovalResponse({
-                actionId: pendingApproval.actionId,
-                approved: false,
-            });
-            removePendingApproval(pendingApproval.actionId);
-        }
-    };
+    const handleApproveAll = (e: React.FormEvent | React.MouseEvent) => handleBatchAction(e, true);
+    const handleRejectAll = (e: React.FormEvent | React.MouseEvent) => handleBatchAction(e, false);
 
     const label = pendingCount === 1 
         ? '1 Pending Approval' 

@@ -514,10 +514,21 @@ describe('expandToRawHtml', () => {
 
     // ---- New citation: error cases ----
 
-    it('throws for unknown citation ref', () => {
+    it('throws for unknown citation ref in old context', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
         const input = '<citation item_id="1-NONEXIST" label="?" ref="c_NONEXIST_0"/>';
         expect(() => expandToRawHtml(input, metadata, 'old')).toThrow(/Unknown citation ref/);
+    });
+
+    it('treats fabricated ref as new citation in new context', () => {
+        // The model may increment from an existing ref (c_KEY_4 → c_KEY_5).
+        // In new_string context, this should fall through to new-citation
+        // handling instead of throwing.
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation item_id="1-FQSW6YKU" page="222" label="(Author, 2024)" ref="c_FQSW6YKU_5"/>';
+        const result = expandToRawHtml(input, metadata, 'new');
+        expect(createCitationHTML).toHaveBeenCalled();
+        expect(result).toContain('data-citation=');
     });
 
     it('throws for new compound citation (items without id)', () => {

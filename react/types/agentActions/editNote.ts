@@ -5,6 +5,9 @@
 
 import type { ProposedAction } from './base';
 
+/** Operation mode for edit_note actions. */
+export type EditNoteOperation = 'str_replace' | 'str_replace_all' | 'insert_after' | 'rewrite';
+
 /**
  * Proposed data for editing a note via string replacement.
  * Strings use the simplified HTML format (with <citation/>, <annotation/>, etc. tags).
@@ -14,14 +17,18 @@ export interface EditNoteProposedData {
     library_id: number;
     /** Zotero key of the note item */
     zotero_key: string;
-    /** The exact string to find (in simplified HTML format). Not needed when replace_content is true. */
+    /**
+     * Operation mode. Defaults to 'str_replace' if not set.
+     * - str_replace: Replace one unique match of old_string with new_string
+     * - str_replace_all: Replace ALL occurrences of old_string with new_string
+     * - insert_after: Insert new_string immediately after old_string (old_string kept unchanged)
+     * - rewrite: Replace the entire note body with new_string (old_string ignored)
+     */
+    operation?: EditNoteOperation;
+    /** The exact string to find (in simplified HTML format). Not needed when operation is 'rewrite'. */
     old_string?: string;
-    /** The replacement string (in simplified HTML format). When replace_content is true, the full new note body. */
+    /** The replacement string (in simplified HTML format). When operation is 'rewrite', the full new note body. */
     new_string: string;
-    /** If true, replace all occurrences (default: false) */
-    replace_all?: boolean;
-    /** If true, replace the entire note body with new_string. old_string is ignored. */
-    replace_content?: boolean;
     /**
      * Raw-note context immediately before the target fragment, taken from the
      * stripped raw HTML (`stripDataCitationItems(rawHtml)`).

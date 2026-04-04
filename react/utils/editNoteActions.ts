@@ -4,7 +4,7 @@
  */
 
 import { AgentAction } from '../agents/agentActions';
-import type { EditNoteResultData } from '../types/agentActions/editNote';
+import type { EditNoteResultData, EditNoteOperation } from '../types/agentActions/editNote';
 import { logger } from '../../src/utils/logger';
 import {
     getOrSimplify,
@@ -105,7 +105,7 @@ function findRangesByRawAnchors(
 }
 
 /**
- * Undo a replace_all edit by locating each occurrence via its stored context anchors.
+ * Undo a str_replace_all edit by locating each occurrence via its stored context anchors.
  * Returns the restored HTML, or undefined if any occurrence cannot be found.
  */
 function undoReplaceAllViaContexts(
@@ -179,18 +179,20 @@ export async function executeEditNoteAction(
         zotero_key,
         old_string,
         new_string,
-        replace_all,
-        replace_content,
+        operation: rawOp,
     } = action.proposed_data as {
         library_id: number;
         zotero_key: string;
         old_string?: string;
         new_string: string;
-        replace_all?: boolean;
-        replace_content?: boolean;
+        operation?: EditNoteOperation;
         target_before_context?: string;
         target_after_context?: string;
     };
+    // For insert_after, new_string is already normalized by validation to
+    // include old_string as a prefix (via normalized_action_data), so the
+    // rest of the function treats it as a regular str_replace.
+    const operation: EditNoteOperation = rawOp ?? 'str_replace';
     let {
         target_before_context,
         target_after_context,
@@ -218,8 +220,8 @@ export async function executeEditNoteAction(
     // 5. Pre-load page labels so new citations resolve page indices to labels
     await preloadPageLabelsForNewCitations(new_string);
 
-    // ── replace_content mode: replace entire note body ──
-    if (replace_content) {
+    // ── rewrite mode: replace entire note body ──
+    if (operation === 'rewrite') {
         let expandedNew: string;
         try {
             expandedNew = expandToRawHtml(new_string, metadata, 'new');
@@ -256,7 +258,7 @@ export async function executeEditNoteAction(
         try {
             item.setNote(newHtml);
             await item.saveTx();
-            logger(`executeEditNoteAction: Saved replace_content edit to ${noteId}`, 1);
+            logger(`executeEditNoteAction: Saved rewrite edit to ${noteId}`, 1);
         } catch (error) {
             try { item.setNote(oldHtml); } catch (_) { /* best-effort */ }
             throw new Error(`Failed to save note: ${error}`);
@@ -340,7 +342,7 @@ export async function executeEditNoteAction(
     let undoOccurrenceContexts: Array<{ before: string; after: string }> | undefined;
     let replacementCount: number;
 
-    if (replace_all) {
+    if (operation === 'str_replace_all') {
         replacementCount = matchCount;
 
         // Capture per-occurrence context anchors before replacing
@@ -386,7 +388,7 @@ export async function executeEditNoteAction(
             if (matchCount > 1) {
                 throw new Error(
                     `The string to replace was found ${matchCount} times in the note. `
-                    + 'Use replace_all to replace all occurrences, or include more context.'
+                    + 'Use operation str_replace_all to replace all occurrences, or include more context.'
                 );
             }
             rawPos = strippedHtml.indexOf(expandedOld);
@@ -484,17 +486,18 @@ export async function executeEditNoteAction(
 export async function undoEditNoteAction(
     action: AgentAction
 ): Promise<void> {
-    const { library_id, zotero_key, old_string, new_string, replace_all } = action.proposed_data as {
+    const { library_id, zotero_key, old_string, new_string, operation: rawOp } = action.proposed_data as {
         library_id: number;
         zotero_key: string;
         old_string?: string;
         new_string: string;
-        replace_all?: boolean;
+        operation?: EditNoteOperation;
     };
+    const operation: EditNoteOperation = rawOp ?? 'str_replace';
 
     const resultData = action.result_data as EditNoteResultData | undefined;
 
-    // ── replace_content undo: restore full note from undo_full_html ──
+    // ── rewrite undo: restore full note from undo_full_html ──
     if (resultData?.undo_full_html) {
         const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
         if (!item) {
@@ -688,8 +691,8 @@ export async function undoEditNoteAction(
 
         if (!newStringFound) {
             // Exact match failed — try fuzzy recovery via context anchors
-            if (replace_all) {
-                // replace_all: use per-occurrence contexts to locate and replace each occurrence
+            if (operation === 'str_replace_all') {
+                // str_replace_all: use per-occurrence contexts to locate and replace each occurrence
                 const occCtxs = resultData?.undo_occurrence_contexts;
                 if (occCtxs && occCtxs.length > 0) {
                     restoredHtml = undoReplaceAllViaContexts(
@@ -765,7 +768,7 @@ export async function undoEditNoteAction(
 
         if (!restoredHtml) {
             // Exact match path — undoNewHtml was found in strippedHtml
-            if (replace_all) {
+            if (operation === 'str_replace_all') {
                 restoredHtml = strippedHtml.split(undoNewHtml).join(undoOldHtml);
             } else {
                 let idx = strippedHtml.indexOf(undoNewHtml);

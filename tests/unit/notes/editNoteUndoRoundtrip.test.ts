@@ -215,7 +215,7 @@ function makeAction(
     zoteroKey: string,
     oldString: string,
     newString: string,
-    replaceAll = false,
+    operation: 'str_replace' | 'str_replace_all' = 'str_replace',
     resultData?: EditNoteResultData,
 ): AgentAction {
     return {
@@ -229,7 +229,7 @@ function makeAction(
             zotero_key: zoteroKey,
             old_string: oldString,
             new_string: newString,
-            replace_all: replaceAll,
+            operation,
         },
         result_data: resultData,
         created_at: new Date().toISOString(),
@@ -350,7 +350,7 @@ async function applyEdit(opts: {
     noteHtml: string;
     oldString: string;
     newString: string;
-    replaceAll?: boolean;
+    operation?: 'str_replace' | 'str_replace_all';
     applyPMNormalization?: boolean;
 }): Promise<{
     item: ReturnType<typeof createMockNoteItem>;
@@ -359,7 +359,7 @@ async function applyEdit(opts: {
     currentStripped: string;
 }> {
     const item = createMockNoteItem(opts.noteHtml);
-    const action = makeAction(1, 'TESTKEY', opts.oldString, opts.newString, opts.replaceAll);
+    const action = makeAction(1, 'TESTKEY', opts.oldString, opts.newString, opts.operation);
 
     // Set up mock editor BEFORE execute so waitForPMNormalization
     // can read PM-normalized HTML via getLatestNoteHtml during polling
@@ -518,7 +518,7 @@ describe('apply-undo roundtrip (no PM normalization)', () => {
             noteHtml: note,
             oldString: 'test',
             newString: 'exam',
-            replaceAll: true,
+            operation: 'str_replace_all',
         });
         expect(item._getHtml()).not.toContain('test');
 
@@ -957,7 +957,7 @@ describe('replace_all undo with PM normalization', () => {
             noteHtml: note,
             oldString: 'test',
             newString: '<b>exam</b>',
-            replaceAll: true,
+            operation: 'str_replace_all',
             applyPMNormalization: true,
         });
         expect(item._getHtml()).toContain('<strong>exam</strong>');
@@ -973,7 +973,7 @@ describe('replace_all undo with PM normalization', () => {
             + '<p>And this word too.</p>'
         );
         const { item, action } = await applyEdit({
-            noteHtml: note, oldString: 'word', newString: 'term', replaceAll: true,
+            noteHtml: note, oldString: 'word', newString: 'term', operation: 'str_replace_all',
         });
         expect(item._getHtml()).not.toContain('word');
 

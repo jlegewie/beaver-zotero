@@ -1,6 +1,6 @@
 import { logger } from '../../../utils/logger';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import { EditNoteProposedData } from '../../../../react/types/agentActions/editNote';
+import { EditNoteProposedData, type EditNoteOperation } from '../../../../react/types/agentActions/editNote';
 import {
     getOrSimplify,
     expandToRawHtml,
@@ -49,7 +49,8 @@ import { TimeoutError } from '../timeout';
 async function validateEditNoteAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { library_id, zotero_key, old_string, new_string, replace_all, replace_content } = request.action_data as EditNoteProposedData;
+    const { library_id, zotero_key, old_string, new_string, operation: rawOp } = request.action_data as EditNoteProposedData;
+    const operation: EditNoteOperation = rawOp ?? 'str_replace';
 
     // 1. Validate library exists
     const library = Zotero.Libraries.get(library_id);
@@ -143,8 +144,8 @@ async function validateEditNoteAction(
     const noteId = `${library_id}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, rawHtml, library_id);
 
-    // ── replace_content mode: skip old_string matching, validate new_string only ──
-    if (replace_content) {
+    // ── rewrite mode: skip old_string matching, validate new_string only ──
+    if (operation === 'rewrite') {
         // Validate new_string tags
         const validationError = validateNewString(new_string, metadata);
         if (validationError) {
@@ -192,8 +193,8 @@ async function validateEditNoteAction(
 
     // ── String replacement mode (default) ──
 
-    // 9. Strings different
-    if (old_string === new_string) {
+    // 9. Strings different (skip for insert_after — old_string is kept, new_string is appended)
+    if (operation !== 'insert_after' && old_string === new_string) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -288,10 +289,12 @@ async function validateEditNoteAction(
                     const normalizedActionData: EditNoteProposedData = {
                         ...request.action_data as EditNoteProposedData,
                         old_string: stripped.strippedOld,
-                        new_string: stripped.strippedNew,
+                        new_string: operation === 'insert_after'
+                            ? stripped.strippedOld + stripped.strippedNew
+                            : stripped.strippedNew,
                     };
 
-                    if (matchCount > 1 && !replace_all) {
+                    if (matchCount > 1 && operation !== 'str_replace_all') {
                         // Disambiguate: we know old_string's unique position in simplified.
                         // The stripped text starts at simplifiedPos + leadingStrip.
                         // Expand simplified[0..strippedStart] to compute the raw position.
@@ -367,11 +370,13 @@ async function validateEditNoteAction(
                     const normalizedActionData: EditNoteProposedData = {
                         ...request.action_data as EditNoteProposedData,
                         old_string: tagStrip.strippedOld,
-                        new_string: tagStrip.strippedNew,
+                        new_string: operation === 'insert_after'
+                            ? tagStrip.strippedOld + tagStrip.strippedNew
+                            : tagStrip.strippedNew,
                     };
 
                     let disambiguated = true;
-                    if (tagMatchCount > 1 && !replace_all) {
+                    if (tagMatchCount > 1 && operation !== 'str_replace_all') {
                         disambiguated = false;
                         const rawPos = findUniqueRawMatchPosition(
                             strippedHtml, simplified, tagStrip.strippedOld,
@@ -433,10 +438,10 @@ async function validateEditNoteAction(
         };
     }
 
-    // 14. Multiple matches without replace_all — accept only when the match is
+    // 14. Multiple matches without str_replace_all — accept only when the match is
     //     either uniquely identifiable without relying on ref stability, or
     //     can be captured now and re-located later via surrounding context.
-    if (matchCount > 1 && !replace_all) {
+    if (matchCount > 1 && operation !== 'str_replace_all') {
         const rawPos = findUniqueRawMatchPosition(
             strippedHtml, simplified, old_string ?? '', expandedOld, metadata
         );
@@ -462,10 +467,19 @@ async function validateEditNoteAction(
                 request_id: request.request_id,
                 valid: false,
                 error: `The string to replace was found ${matchCount} times in the note. `
-                    + 'Use replace_all to replace all occurrences, or include more context to make the match unique.',
+                    + 'Use operation str_replace_all to replace all occurrences, or include more context to make the match unique.',
                 error_code: 'ambiguous_match',
                 preference: 'always_ask',
             };
+        }
+
+        // insert_after normalization: prepend old_string to new_string so execution
+        // can treat it as a regular str_replace.
+        if (operation === 'insert_after') {
+            if (!normalizedActionData) {
+                normalizedActionData = { ...request.action_data as EditNoteProposedData };
+            }
+            normalizedActionData.new_string = (normalizedActionData.old_string ?? old_string ?? '') + new_string;
         }
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
@@ -486,7 +500,17 @@ async function validateEditNoteAction(
         };
     }
 
-    // 15. Valid — return current value
+    // 15. insert_after normalization: prepend old_string to new_string so
+    //     execution can treat it as a regular str_replace.
+    let normalizedActionData: EditNoteProposedData | undefined;
+    if (operation === 'insert_after') {
+        normalizedActionData = {
+            ...request.action_data as EditNoteProposedData,
+            new_string: (old_string ?? '') + new_string,
+        };
+    }
+
+    // 16. Valid — return current value
     const noteTitle = item.getNoteTitle() || '(untitled)';
     const totalLines = simplified.split('\n').length;
 
@@ -501,6 +525,7 @@ async function validateEditNoteAction(
             total_lines: totalLines,
             match_count: matchCount,
         },
+        normalized_action_data: normalizedActionData,
         preference,
     };
 }
@@ -519,9 +544,9 @@ async function executeEditNoteAction(
         zotero_key,
         old_string,
         new_string,
-        replace_all,
-        replace_content,
+        operation: rawOp,
     } = request.action_data as EditNoteProposedData;
+    const operation: EditNoteOperation = rawOp ?? 'str_replace';
     let {
         target_before_context,
         target_after_context,
@@ -554,8 +579,8 @@ async function executeEditNoteAction(
     const noteId = `${library_id}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
 
-    // ── replace_content mode: replace entire note body ──
-    if (replace_content) {
+    // ── rewrite mode: replace entire note body ──
+    if (operation === 'rewrite') {
         let expandedNew: string;
         try {
             expandedNew = expandToRawHtml(new_string, metadata, 'new');
@@ -611,7 +636,7 @@ async function executeEditNoteAction(
         try {
             item.setNote(newHtml);
             await item.saveTx();
-            logger(`executeEditNoteAction: Saved replace_content edit to ${noteId}`, 1);
+            logger(`executeEditNoteAction: Saved rewrite edit to ${noteId}`, 1);
         } catch (error) {
             try { item.setNote(oldHtml); } catch (_) { /* best-effort */ }
             if (error instanceof TimeoutError) throw error;
@@ -764,7 +789,7 @@ async function executeEditNoteAction(
     const UNDO_CONTEXT_LENGTH = 200;
     let replacementCount: number;
 
-    if (replace_all) {
+    if (operation === 'str_replace_all') {
         replacementCount = matchCount;
 
         // Capture per-occurrence context anchors before replacing
@@ -814,7 +839,7 @@ async function executeEditNoteAction(
                     request_id: request.request_id,
                     success: false,
                     error: `The string to replace was found ${matchCount} times in the note. `
-                        + 'Use replace_all to replace all occurrences, or include more context.',
+                        + 'Use operation str_replace_all to replace all occurrences, or include more context.',
                     error_code: 'ambiguous_match',
                 };
             }

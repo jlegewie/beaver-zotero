@@ -77,13 +77,12 @@ export function updateDiffPreviewForNote(libraryId: number, zoteroKey: string): 
         const paKey = pa.actionData?.zotero_key;
         if (paLib == null || !paKey || makeNoteKey(paLib, paKey) !== noteKey) continue;
         const oldStr = pa.actionData?.old_string ?? '';
-        const isReplaceContent = pa.actionData?.replace_content ?? false;
-        if (oldStr || isReplaceContent) {
+        const op = pa.actionData?.operation ?? 'str_replace';
+        if (oldStr || op === 'rewrite') {
             edits.push({
                 oldString: oldStr,
                 newString: pa.actionData?.new_string ?? '',
-                replaceAll: pa.actionData?.replace_all ?? false,
-                replaceContent: isReplaceContent,
+                operation: op,
             });
         }
     }

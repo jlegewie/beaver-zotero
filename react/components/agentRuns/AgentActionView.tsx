@@ -713,7 +713,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 showDiffPreview(libraryId, zoteroKey, [{
                     oldString: oldStr,
                     newString: action.proposed_data.new_string ?? '',
-                    replaceAll: action.proposed_data.replace_all ?? false,
+                    operation: action.proposed_data.operation ?? 'str_replace',
                 }], {
                     onAction: (bannerAction) => {
                         if (bannerAction === 'approve') {
@@ -732,11 +732,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Build preview data from either pending approval or agent action
     const previewData = buildPreviewData(toolName, pendingApproval, action);
 
-    // Show the preview button when there's an unapplied edit that has an old_string to preview or replace_content
+    // Show the preview button when there's an unapplied edit that has an old_string to preview or is a rewrite
     const canShowPreview = DIFF_PREVIEW_ENABLED
         && toolName === 'edit_note'
         && (isAwaitingApproval || status === 'pending' || status === 'rejected' || status === 'undone')
-        && !!(pendingApproval?.actionData?.old_string || action?.proposed_data?.old_string || pendingApproval?.actionData?.replace_content || action?.proposed_data?.replace_content);
+        && !!(pendingApproval?.actionData?.old_string || action?.proposed_data?.old_string
+            || (pendingApproval?.actionData?.operation ?? 'str_replace') === 'rewrite'
+            || (action?.proposed_data?.operation ?? 'str_replace') === 'rewrite');
     // Determine what icon to show in header
     const getHeaderIcon = () => {
         const getToolIcon = () => {
@@ -1251,15 +1253,15 @@ const ActionPreview: React.FC<{
     }
 
     if (toolName === 'edit_note' || previewData.actionType === 'edit_note') {
-        const replaceContent = previewData.actionData.replace_content ?? false;
-        const oldString = replaceContent ? '' : (previewData.actionData.old_string || '');
+        const op = (previewData.actionData.operation ?? 'str_replace') as import('../../types/agentActions/editNote').EditNoteOperation;
+        const isRewrite = op === 'rewrite';
+        const oldString = isRewrite ? '' : (previewData.actionData.old_string || '');
         const newString = previewData.actionData.new_string || '';
-        const replaceAll = previewData.actionData.replace_all ?? false;
         const occurrencesReplaced = previewData.resultData?.occurrences_replaced;
         const warnings = previewData.resultData?.warnings;
-        // For replace_content, get old content from validation's current_value
+        // For rewrite, get old content from validation's current_value
         // or from undo_full_html in result_data (post-apply)
-        const oldContent = replaceContent
+        const oldContent = isRewrite
             ? (previewData.currentValue?.old_content || previewData.resultData?.undo_full_html)
             : undefined;
 
@@ -1267,8 +1269,7 @@ const ActionPreview: React.FC<{
             <EditNotePreview
                 oldString={oldString}
                 newString={newString}
-                replaceAll={replaceAll}
-                replaceContent={replaceContent}
+                operation={op}
                 oldContent={oldContent}
                 occurrencesReplaced={occurrencesReplaced}
                 warnings={warnings}
