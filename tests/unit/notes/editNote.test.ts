@@ -251,7 +251,7 @@ describe('validateEditNoteAction — success', () => {
         });
     });
 
-    it('validates with replace_all for multiple matches', async () => {
+    it('validates with str_replace_all for multiple matches', async () => {
         vi.mocked(countOccurrences).mockReturnValueOnce(3);
         const req = makeValidateRequest({
             action_data: {
@@ -259,7 +259,7 @@ describe('validateEditNoteAction — success', () => {
                 zotero_key: 'NOTE0001',
                 old_string: 'Hello',
                 new_string: 'Goodbye',
-                replace_all: true,
+                operation: 'str_replace_all',
             },
         });
         const response = await handleAgentActionValidateRequest(req);
@@ -370,7 +370,7 @@ describe('validateEditNoteAction — failures', () => {
         expect(response.error).toContain('possible match here');
     });
 
-    it('ambiguous_match (multiple matches, no replace_all)', async () => {
+    it('ambiguous_match (multiple matches, no str_replace_all)', async () => {
         vi.mocked(countOccurrences).mockReturnValueOnce(3);
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
         expect(response.valid).toBe(false);
@@ -421,7 +421,7 @@ describe('executeEditNoteAction — success', () => {
         expect(item.saveTx).toHaveBeenCalled();
     });
 
-    it('replace_all replaces multiple occurrences', async () => {
+    it('str_replace_all replaces multiple occurrences', async () => {
         vi.mocked(countOccurrences).mockReturnValueOnce(3);
         const item = makeMockItem({
             getNote: vi.fn(() => '<div data-schema-version="9"><p>Hello Hello Hello</p></div>'),
@@ -434,7 +434,7 @@ describe('executeEditNoteAction — success', () => {
                 zotero_key: 'NOTE0001',
                 old_string: 'Hello',
                 new_string: 'Goodbye',
-                replace_all: true,
+                operation: 'str_replace_all',
             },
         });
         const response = await handleAgentActionExecuteRequest(req);

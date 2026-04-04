@@ -4,6 +4,7 @@ import {
     getOrSimplify,
     getLatestNoteHtml,
 } from '../../../src/utils/noteHtmlSimplifier';
+import type { EditNoteOperation } from '../../types/agentActions/editNote';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -12,11 +13,9 @@ interface EditNotePreviewProps {
     oldString: string;
     /** The new replacement string */
     newString: string;
-    /** Whether all occurrences are replaced */
-    replaceAll?: boolean;
-    /** Whether this is a full content replacement */
-    replaceContent?: boolean;
-    /** Full old content for diff display (used when replaceContent=true) */
+    /** Operation mode (defaults to 'str_replace') */
+    operation?: EditNoteOperation;
+    /** Full old content for diff display (used when operation is 'rewrite') */
     oldContent?: string;
     /** Number of occurrences replaced (from result_data) */
     occurrencesReplaced?: number;
@@ -147,8 +146,7 @@ function renderFormattedParagraph(segments: InlineSegment[]): React.ReactNode[] 
 export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     oldString,
     newString,
-    replaceAll,
-    replaceContent,
+    operation = 'str_replace',
     oldContent,
     occurrencesReplaced,
     warnings,
@@ -158,10 +156,12 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
 }) => {
     const isApplied = status === 'applied';
     const isDelete = newString === '';
+    const isRewrite = operation === 'rewrite';
+    const isInsertAfter = operation === 'insert_after';
 
-    // For replace_content mode when oldContent is missing (e.g. after undo),
+    // For rewrite mode when oldContent is missing (e.g. after undo),
     // fetch the current note content — the note is back to its original state.
-    const needsOldContentFetch = replaceContent && !oldContent && libraryId != null && !!zoteroKey;
+    const needsOldContentFetch = isRewrite && !oldContent && libraryId != null && !!zoteroKey;
     const [fetchedOldContent, setFetchedOldContent] = useState<string | null>(null);
 
     useEffect(() => {
@@ -186,15 +186,18 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
         return () => { cancelled = true; };
     }, [needsOldContentFetch, libraryId, zoteroKey]);
 
-    // For replace_content mode, use oldContent prop, fetched content, or fall back to oldString
-    const effectiveOld = replaceContent && (oldContent || fetchedOldContent) ? (oldContent || fetchedOldContent!) : oldString;
+    // For rewrite mode, use oldContent prop, fetched content, or fall back to oldString
+    const effectiveOld = isRewrite && (oldContent || fetchedOldContent) ? (oldContent || fetchedOldContent!) : oldString;
+    // For insert_after, new_string is already normalized by validation to include
+    // old_string as a prefix (via normalized_action_data), so diffWords will
+    // naturally show old_string as context and the appended text as addition.
     const strippedOld = normalizeForInlineDiff(stripHtmlPreserveFormatting(effectiveOld));
     const strippedNew = normalizeForInlineDiff(stripHtmlPreserveFormatting(newString));
 
     // When strippedOld is empty (old_string was pure HTML structure), fetch
     // surrounding visible text from the full note for context.
-    // Skip for replaceContent mode — we already have the full old content.
-    const needsNoteContext = !replaceContent && strippedOld === '' && effectiveOld !== '' && strippedNew !== '';
+    // Skip for rewrite mode — we already have the full old content.
+    const needsNoteContext = !isRewrite && !isInsertAfter && strippedOld === '' && effectiveOld !== '' && strippedNew !== '';
     const [noteContext, setNoteContext] = useState<{ before: string; after: string } | null>(null);
 
     useEffect(() => {
@@ -262,14 +265,19 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
         <div className="edit-note-preview">
             <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1">
-                    {/* Show header for replace_content or replace_all modes */}
-                    {replaceAll && !replaceContent && (
+                    {/* Show header for str_replace_all and insert_after modes */}
+                    {operation === 'str_replace_all' && (
                         <div className="text-sm font-color-primary font-medium px-3 py-1">
                             {isDelete ? 'Delete' : 'Replace'}
                             {' (all occurrences)'}
                             {occurrencesReplaced != null && occurrencesReplaced > 0
                                 ? ` — ${occurrencesReplaced} occurrence${occurrencesReplaced === 1 ? '' : 's'}`
                                 : ''}
+                        </div>
+                    )}
+                    {isInsertAfter && (
+                        <div className="text-sm font-color-primary font-medium px-3 py-1">
+                            Insert after
                         </div>
                     )}
                     <div className="inline-diff-container">

@@ -17,6 +17,7 @@
  */
 
 import { logger } from '../../src/utils/logger';
+import type { EditNoteOperation } from '../types/agentActions/editNote';
 import {
     getOrSimplify,
     expandToRawHtml,
@@ -78,8 +79,7 @@ const PREVIEW_CSS = `
 export interface EditOperation {
     oldString: string;
     newString: string;
-    replaceAll?: boolean;
-    replaceContent?: boolean;
+    operation?: EditNoteOperation;
 }
 
 export interface DiffPreviewOptions {
@@ -236,16 +236,22 @@ export async function showDiffPreview(
         const { metadata } = getOrSimplify(noteId, rawHtml, libraryId);
 
         // Expand all edits
-        const expandedEdits: Array<{ expandedOld: string; expandedNew: string; replaceAll: boolean; replaceContent: boolean }> = [];
+        const expandedEdits: Array<{ expandedOld: string; expandedNew: string; operation: EditNoteOperation }> = [];
         for (const edit of edits) {
+            const op = edit.operation ?? 'str_replace';
             try {
-                if (edit.replaceContent) {
+                if (op === 'rewrite') {
                     const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new') : '';
-                    expandedEdits.push({ expandedOld: '', expandedNew, replaceAll: false, replaceContent: true });
+                    expandedEdits.push({ expandedOld: '', expandedNew, operation: op });
                 } else {
                     const expandedOld = edit.oldString ? expandToRawHtml(edit.oldString, metadata, 'old') : '';
+                    // For insert_after, new_string is already normalized by
+                    // validation to include old_string as a prefix (via
+                    // normalized_action_data), so computeHtmlDiff will
+                    // naturally show the anchor as context and the insertion
+                    // as addition.
                     const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new') : '';
-                    if (expandedOld) expandedEdits.push({ expandedOld, expandedNew, replaceAll: edit.replaceAll ?? false, replaceContent: false });
+                    if (expandedOld) expandedEdits.push({ expandedOld, expandedNew, operation: op });
                 }
             } catch (e: any) {
                 logger(`showDiffPreview: expansion failed for one edit: ${e.message}`, 1);
@@ -459,7 +465,7 @@ function findEditorInstance(itemId: number): any | null {
 
 function computeEditsHash(edits: EditOperation[]): string {
     return edits.map(e =>
-        `${e.oldString.length}:${e.newString.length}:${e.replaceAll ? '1' : '0'}:${e.oldString}`,
+        `${e.oldString.length}:${e.newString.length}:${e.operation ?? 'str_replace'}:${e.oldString}`,
     ).join('|');
 }
 
@@ -593,13 +599,13 @@ function findScrollContainer(element: Element): Element | null {
 
 function constructMultiDiffHtml(
     fullHtml: string,
-    edits: Array<{ expandedOld: string; expandedNew: string; replaceAll: boolean; replaceContent: boolean }>,
+    edits: Array<{ expandedOld: string; expandedNew: string; operation: EditNoteOperation }>,
 ): string | null {
     const stripped = stripDataCitationItems(fullHtml);
 
-    // Handle replace_content: replace entire body with deletion-styled old + addition-styled new
-    const replaceContentEdit = edits.find(e => e.replaceContent);
-    if (replaceContentEdit) {
+    // Handle rewrite: replace entire body with deletion-styled old + addition-styled new
+    const rewriteEdit = edits.find(e => e.operation === 'rewrite');
+    if (rewriteEdit) {
         // Extract wrapper div and body content
         const trimmed = stripped.trim();
         let wrapperOpen = '';
@@ -613,7 +619,7 @@ function constructMultiDiffHtml(
         }
 
         const styledOld = bodyContent ? wrapTextNodesWithStyle(bodyContent, DEL_STYLE) : '';
-        const styledNew = replaceContentEdit.expandedNew ? wrapTextNodesWithStyle(replaceContentEdit.expandedNew, ADD_STYLE) : '';
+        const styledNew = rewriteEdit.expandedNew ? wrapTextNodesWithStyle(rewriteEdit.expandedNew, ADD_STYLE) : '';
         return rebuildDataCitationItems(wrapperOpen + styledOld + styledNew + wrapperClose);
     }
 
@@ -629,7 +635,7 @@ function constructMultiDiffHtml(
             const styledOld = oldMiddle ? wrapTextNodesWithStyle(oldMiddle, DEL_STYLE) : '';
             const styledNew = newMiddle ? wrapTextNodesWithStyle(newMiddle, ADD_STYLE) : '';
             ops.push({ pos: idx, oldLen: edit.expandedOld.length, replacement: prefix + styledOld + styledNew + suffix });
-            if (!edit.replaceAll) break;
+            if (edit.operation !== 'str_replace_all') break;
             searchFrom = idx + edit.expandedOld.length;
         }
     }

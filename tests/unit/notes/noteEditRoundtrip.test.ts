@@ -444,7 +444,7 @@ describe('edit + undo roundtrip', () => {
      * 4. Replace in stripped HTML
      * 5. Return both old (stripped) and new HTML
      */
-    function simulateEdit(rawHtml: string, libraryID: number, oldStr: string, newStr: string, replaceAll = false) {
+    function simulateEdit(rawHtml: string, libraryID: number, oldStr: string, newStr: string, operation: 'str_replace' | 'str_replace_all' = 'str_replace') {
         const strippedOriginal = stripDataCitationItems(rawHtml);
         const { simplified, metadata } = simplifyNoteHtml(rawHtml, libraryID);
         const expandedOld = expandToRawHtml(oldStr, metadata, 'old');
@@ -452,10 +452,10 @@ describe('edit + undo roundtrip', () => {
 
         const matchCount = countOccurrences(strippedOriginal, expandedOld);
         if (matchCount === 0) throw new Error('old_string not found');
-        if (matchCount > 1 && !replaceAll) throw new Error(`Ambiguous: found ${matchCount} times`);
+        if (matchCount > 1 && operation !== 'str_replace_all') throw new Error(`Ambiguous: found ${matchCount} times`);
 
         let newHtml: string;
-        if (replaceAll) {
+        if (operation === 'str_replace_all') {
             newHtml = strippedOriginal.split(expandedOld).join(expandedNew);
         } else {
             const idx = strippedOriginal.indexOf(expandedOld);
@@ -560,13 +560,13 @@ describe('edit + undo roundtrip', () => {
         expect(newHtml).toContain(citInLi);
     });
 
-    it('replace_all: replace a word that appears multiple times', () => {
+    it('str_replace_all: replace a word that appears multiple times', () => {
         // "improvement" appears in multiple list items
         const { strippedOriginal, newHtml, matchCount } = simulateEdit(
             FIXTURE_A, 1,
             'improvement',
             'gain',
-            true
+            'str_replace_all'
         );
 
         expect(matchCount).toBeGreaterThanOrEqual(2);
@@ -841,7 +841,7 @@ describe('data-citation-items through edit pipeline', () => {
 // =============================================================================
 
 describe('sequential edits and undo', () => {
-    function simulateEditOnHtml(html: string, oldStr: string, newStr: string, replaceAll = false) {
+    function simulateEditOnHtml(html: string, oldStr: string, newStr: string, operation: 'str_replace' | 'str_replace_all' = 'str_replace') {
         const stripped = stripDataCitationItems(html);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         const expandedOld = expandToRawHtml(oldStr, metadata, 'old');
@@ -851,7 +851,7 @@ describe('sequential edits and undo', () => {
         if (matchCount === 0) throw new Error('old_string not found');
 
         let result: string;
-        if (replaceAll) {
+        if (operation === 'str_replace_all') {
             result = stripped.split(expandedOld).join(expandedNew);
         } else {
             const idx = stripped.indexOf(expandedOld);
@@ -1206,7 +1206,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         await expect(executeEditNoteAction(makeAction())).rejects.toThrow('not found');
     });
 
-    it('execute throws for ambiguous match without replace_all', async () => {
+    it('execute throws for ambiguous match without str_replace_all', async () => {
         const noteHtml = wrap('<p>Hello Hello Hello</p>');
         const item = makeMockItem(noteHtml);
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
@@ -1279,7 +1279,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         expect(stripDataCitationItems(restoredHtml)).toBe(stripDataCitationItems(originalHtml));
     });
 
-    it('execute with replace_all succeeds for multiple matches', async () => {
+    it('execute with str_replace_all succeeds for multiple matches', async () => {
         const noteHtml = wrap('<p>Hello Hello Hello</p>');
         const item = makeMockItem(noteHtml);
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
@@ -1292,7 +1292,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
                 zotero_key: 'NOTE0001',
                 old_string: 'Hello',
                 new_string: 'Goodbye',
-                replace_all: true,
+                operation: 'str_replace_all',
             },
         }));
 
