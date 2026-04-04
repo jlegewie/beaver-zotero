@@ -537,7 +537,7 @@ function injectPreviewBanner(iframeWindow: any, multipleEdits: boolean): void {
 
         const approveBtn = doc.createElement('button');
         approveBtn.className = 'btn-approve';
-        approveBtn.textContent = `Approve${suffix}`;
+        approveBtn.textContent = `Apply${suffix}`;
         approveBtn.setAttribute('onclick', `window.${ACTION_PROP} = 'approveAll'`);
 
         banner.appendChild(title);
