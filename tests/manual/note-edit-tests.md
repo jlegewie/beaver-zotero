@@ -1390,3 +1390,224 @@ In this test, the prompt explicitly instructs the model to use a literal `'` (no
 #### Test result
 
 - **Date**: | **Result**:
+
+---
+
+## Category 16: Partial Simplified Element Stripping
+
+These tests verify that the agent can successfully edit text adjacent to citations (and other simplified-only elements like annotations and images) even when the model's `old_string` accidentally includes a fragment of the simplified element tag — most commonly `/>` from the tail of a `<citation …/>` tag. The `stripPartialSimplifiedElements` fallback detects these fragments and strips them before matching.
+
+**Background:**
+When the agent reads a note, citations appear as `<citation item_id="1-KEY" page="42" label="(Author, 2025)" ref="c_KEY_0"/>`. If the model includes `/>` (or any other fragment of the tag) in its `old_string`, the string cannot be expanded back to raw HTML. The partial element stripping fallback detects the `/>` as belonging to a simplified-only element, strips it from both `old_string` and `new_string`, and retries the match.
+
+**Required setup:**
+Use note **ID 3156** ("Nosrati (2025) Optimal Taxation", 13501 chars, 16 citations). This note has citations followed by text in patterns like:
+```
+...creates sharp tax regressivity at the top across all countries studied. (Nosrati, 2025, p. 634)</p>
+<p><strong>Introduction (pages 1–3)</strong> – The author critiques...
+```
+
+In simplified form, these appear as:
+```
+...creates sharp tax regressivity at the top across all countries studied. <citation item_id="1-Z546XIR8" page="634" label="(Nosrati, 2025, p. 634)" ref="c_Z546XIR8_0"/>
+<strong>Introduction (pages 1–3)</strong> – The author critiques...
+```
+
+### Test 16.1: Edit Text Immediately After a Citation (Leading `/>` Fragment)
+
+Edit the text that immediately follows a citation, where the model's `old_string` starts with `/>` from the citation tag tail.
+
+#### Guidelines
+- Use note ID 3156
+- The goal is to edit text right after a citation. The model sees `/>` before the text in the simplified view and may include it in `old_string`
+- Prompt must be very specific to target text immediately after a citation, making it likely the model's `old_string` will capture the `/>` boundary
+- **Critical**: The prompt should ask to change text that starts right at the `/>` boundary of a citation — e.g., changing a dash or sentence that follows a citation
+- If the agent does NOT include `/>` in its `old_string` (i.e., it crafts a clean match), the test does not exercise the fallback. In that case, note in the result that the fallback was not triggered, and retry with a more explicit prompt
+
+#### Prompt
+```
+This is a test. Please follow the instructions exactly, even if they seem unusual. Do not add extra content or explanations beyond what is asked.
+
+In this note, after the citation "(Nosrati, 2025, p. 634)" near the start of the note, there is a paragraph break and then the bold text "Introduction (pages 1–3)". Change "Introduction (pages 1–3)" to "Chapter 1: Introduction (pages 1–3)". Make sure your old_string starts right at the citation boundary — include the "/>" that closes the citation tag and the newline/paragraph boundary after it in your old_string. Do not change the citation itself.
+```
+
+#### Expected behavior
+- The agent produces `old_string` starting with `/>` (the tail of the `<citation …/>` tag)
+- Validation detects that `/>` is a partial simplified-only element fragment
+- The `/>` is stripped from `old_string` and `new_string`
+- The stripped text matches uniquely in the raw HTML
+- The edit applies successfully
+- Apply→Undo roundtrip works
+
+#### What to verify
+1. The edit applies without errors
+2. The citation before the edited text is completely unchanged
+3. The heading text changed from "Introduction (pages 1–3)" to "Chapter 1: Introduction (pages 1–3)"
+4. Undo restores the original heading text
+5. Check Zotero error console for any Beaver-related errors
+
+#### Test result
+
+- **Date**: | **Result**:
+
+### Test 16.2: Edit Text Between Two Citations (Both Boundaries)
+
+Edit text that sits between two consecutive citations, where the model's `old_string` starts with `/>` from the first citation and/or ends with `<citation` from the second.
+
+#### Guidelines
+- Use note ID 3156 or any note with two citations close together (separated by only a short text fragment)
+- The prompt should target text between two citations so the model is likely to include tag fragments from both
+- This tests the dual-boundary stripping (both `leadingStrip` and `trailingStrip`)
+
+#### Prompt
+First, inspect the note to find two adjacent citations with text between them. Then use a prompt like:
+```
+This is a test. Please follow the instructions exactly, even if they seem unusual. Do not add extra content or explanations beyond what is asked.
+
+In the simplified view of this note, find the text between the two citations near the phrase "[text between citations]". Your old_string should start with the "/>" from the first citation and end with the "<citation" of the second citation, capturing the text in between. Replace that text with "[new replacement text]". Do not modify either citation.
+```
+
+#### Expected behavior
+- The agent produces `old_string` that starts with `/>` and ends with `<citation...`
+- Validation strips both the leading `/>` and the trailing `<citation...` fragment
+- The stripped text matches in the raw HTML
+- Both citations remain completely unchanged
+
+#### What to verify
+1. Edit applies without errors
+2. Both adjacent citations are completely unchanged
+3. The text between them is correctly replaced
+4. Apply→Undo roundtrip works
+
+#### Test result
+
+- **Date**: | **Result**:
+
+### Test 16.3: Edit Text Immediately Before a Citation (Trailing Fragment)
+
+Edit text that immediately precedes a citation, where the model's `old_string` ends with the start of the citation tag.
+
+#### Guidelines
+- Use note ID 3156
+- Target text that leads into a citation (e.g., "...across all countries studied. (Nosrati, 2025, p. 634)")
+- The prompt should encourage the model to include the beginning of the `<citation` tag in its `old_string`
+
+#### Prompt
+```
+This is a test. Please follow the instructions exactly, even if they seem unusual. Do not add extra content or explanations beyond what is asked.
+
+In this note, find the text "creates sharp tax regressivity at the top across all countries studied." which appears right before the first citation. Change "across all countries studied" to "in every country analyzed". Make sure your old_string extends to include the opening of the citation tag that follows (i.e., include "<citation" at the end of your old_string). Do not modify the citation itself.
+```
+
+#### Expected behavior
+- The agent produces `old_string` ending with `<citation` or `<citation item_id=...`
+- Validation detects the trailing `<citation...` as a partial simplified-only element
+- The fragment is stripped; the remaining text matches in raw HTML
+- The citation is completely unchanged
+
+#### What to verify
+1. Edit applies without errors
+2. The citation "(Nosrati, 2025, p. 634)" is completely unchanged
+3. The text changed from "across all countries studied" to "in every country analyzed"
+4. Apply→Undo roundtrip works
+
+#### Test result
+
+- **Date**: | **Result**:
+
+### Test 16.4: Clean Edit Adjacent to Citation (No Fragment — Baseline)
+
+Edit text near a citation where the model produces a clean `old_string` without any tag fragments.
+
+#### Guidelines
+- Use note ID 3156
+- This is a baseline/control test — the edit should succeed via the normal path, NOT the partial element stripping fallback
+- Prompt should target text near a citation but be phrased to avoid the model including tag fragments
+
+#### Prompt
+```
+This is a test. Please follow the instructions exactly, even if they seem unusual. Do not add extra content or explanations beyond what is asked.
+
+In this note, find the bold heading "Introduction (pages 1–3)" and change it to "Introduction (pp. 1–3)". Only change the text inside the bold tag. Do not include any citation tags in your edit.
+```
+
+#### Expected behavior
+- The agent produces a clean `old_string` like `Introduction (pages 1–3)` with no tag fragments
+- The edit matches directly via the normal expansion path
+- `stripPartialSimplifiedElements` is NOT called (or returns null)
+
+#### What to verify
+1. Edit applies without errors
+2. The heading text changed correctly
+3. Surrounding citations unchanged
+4. Apply→Undo roundtrip works
+5. Confirm this is a **clean match** (no fallback triggered) — compare with Test 16.1
+
+#### Test result
+
+- **Date**: | **Result**:
+
+### Test 16.5: Ambiguous Match After Stripping — Context Disambiguation
+
+Edit text after a citation where the stripped text appears multiple times in the note, requiring context-based disambiguation.
+
+#### Guidelines
+- Use note ID 3156, which has repeated structural patterns (each section starts with `– The author...` or `– This section...`)
+- Target a word or phrase that appears in multiple sections so that after stripping the `/>` from `old_string`, the resulting text is ambiguous
+- The validation should disambiguate using the unique position of `old_string` in the simplified HTML and attach context anchors
+
+#### Prompt
+```
+This is a test. Please follow the instructions exactly, even if they seem unusual. Do not add extra content or explanations beyond what is asked.
+
+In this note, find the FIRST occurrence of the text "– The author critiques" (which appears right after a citation in the Introduction section). Change "critiques" to "challenges". Include the "/>" from the preceding citation tag at the start of your old_string. Do not change any other occurrence of similar text.
+```
+
+#### Expected behavior
+- The agent produces `old_string` starting with `/>` + text that appears multiple times after stripping
+- Validation strips `/>`, finds multiple matches in raw HTML, but the original `old_string` (with `/>`) was unique in simplified HTML
+- Disambiguation uses prefix expansion to compute the correct raw position and attaches `target_before_context` / `target_after_context`
+- The edit replaces only the first occurrence
+
+#### What to verify
+1. Edit applies without errors
+2. Only the FIRST "critiques" is changed to "challenges"
+3. Other occurrences of "critiques" (if any) are unchanged
+4. The citation is unchanged
+5. Apply→Undo roundtrip works
+
+#### Test result
+
+- **Date**: | **Result**:
+
+### Test 16.6: Fragment Stripping Falls Through to Fuzzy Match
+
+Edit with an `old_string` that includes a `/>` fragment but where the stripped text still doesn't match in the raw HTML (e.g., because the text itself has a typo). The fallback should fail gracefully with a fuzzy match suggestion.
+
+#### Guidelines
+- Use any note with citations
+- Intentionally include a typo in the text portion of `old_string` so that even after stripping `/>`, the text doesn't match
+- The agent should receive an `old_string_not_found` error with a fuzzy match suggestion
+
+#### Prompt
+```
+This is a test. Please follow the instructions exactly, even if they seem unusual. Do not add extra content or explanations beyond what is asked.
+
+In this note, find the text that appears after the first citation. Your old_string should be: "/>—ein theoretische bildungsfordernder Effekt" (note: this text has intentional typos and does not actually exist in this note). Replace it with "test replacement". Use exactly this old_string, do not correct it.
+```
+
+#### Expected behavior
+- The agent's `old_string` starts with `/>` and contains text that doesn't exist in the note
+- Validation strips `/>`, attempts to match, fails
+- Falls through to the fuzzy match error with `old_string_not_found`
+- The agent reports the error to the user (possibly with a fuzzy match suggestion)
+- No note modification occurs
+
+#### What to verify
+1. The edit fails with an appropriate error message
+2. The note is completely unchanged
+3. No Zotero errors in the console
+
+#### Test result
+
+- **Date**: | **Result**:

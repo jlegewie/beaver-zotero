@@ -180,12 +180,14 @@ export async function executeEditNoteAction(
         old_string,
         new_string,
         replace_all,
+        replace_content,
     } = action.proposed_data as {
         library_id: number;
         zotero_key: string;
-        old_string: string;
+        old_string?: string;
         new_string: string;
         replace_all?: boolean;
+        replace_content?: boolean;
         target_before_context?: string;
         target_after_context?: string;
     };
@@ -216,17 +218,79 @@ export async function executeEditNoteAction(
     // 5. Pre-load page labels so new citations resolve page indices to labels
     await preloadPageLabelsForNewCitations(new_string);
 
+    // ── replace_content mode: replace entire note body ──
+    if (replace_content) {
+        let expandedNew: string;
+        try {
+            expandedNew = expandToRawHtml(new_string, metadata, 'new');
+        } catch (e: any) {
+            throw new Error(e.message || String(e));
+        }
+
+        const strippedHtml = stripDataCitationItems(oldHtml);
+
+        // Preserve wrapper div
+        const trimmed = strippedHtml.trim();
+        let wrapperOpen = '';
+        let wrapperClose = '';
+        if (trimmed.startsWith('<div') && trimmed.endsWith('</div>')) {
+            const closeAngle = trimmed.indexOf('>');
+            wrapperOpen = trimmed.substring(0, closeAngle + 1);
+            wrapperClose = '</div>';
+        }
+
+        let newHtml = wrapperOpen + expandedNew + wrapperClose;
+
+        const threadId = store.get(currentThreadIdAtom);
+        if (threadId) {
+            newHtml = addOrUpdateEditFooter(newHtml, threadId);
+        }
+
+        newHtml = rebuildDataCitationItems(newHtml);
+
+        const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
+        if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
+            throw new Error('The note wrapper <div data-schema-version="..."> must not be removed.');
+        }
+
+        try {
+            item.setNote(newHtml);
+            await item.saveTx();
+            logger(`executeEditNoteAction: Saved replace_content edit to ${noteId}`, 1);
+        } catch (error) {
+            try { item.setNote(oldHtml); } catch (_) { /* best-effort */ }
+            throw new Error(`Failed to save note: ${error}`);
+        }
+
+        await waitForNoteSaveStabilization(item, newHtml);
+        clearNoteEditorSelection(library_id, zotero_key);
+        invalidateSimplificationCache(noteId);
+
+        const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+        const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+
+        return {
+            library_id,
+            zotero_key,
+            occurrences_replaced: 1,
+            warnings,
+            undo_full_html: strippedHtml,
+        };
+    }
+
+    // ── String replacement mode (default) ──
+
     // 6. Expand old_string and new_string to raw HTML
     let expandedOld: string;
     let expandedNew: string;
     try {
-        expandedOld = expandToRawHtml(old_string, metadata, 'old');
+        expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
         expandedNew = expandToRawHtml(new_string, metadata, 'new');
     } catch (e: any) {
         throw new Error(e.message || String(e));
     }
 
-    // 6. Strip data-citation-items from raw HTML for matching
+    // 6b. Strip data-citation-items from raw HTML for matching
     const strippedHtml = stripDataCitationItems(oldHtml);
 
     // 7. Count occurrences — if zero, retry with entity-decoded or entity-encoded
@@ -262,7 +326,7 @@ export async function executeEditNoteAction(
 
     // 8. Zero matches
     if (matchCount === 0) {
-        const fuzzy = findFuzzyMatch(simplified, old_string);
+        const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
         throw new Error(
             'The string to replace was not found in the note.'
             + (fuzzy ? ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\`` : '')
@@ -304,7 +368,7 @@ export async function executeEditNoteAction(
         // context captured during validation.
         if (matchCount > 1) {
             rawPos = findUniqueRawMatchPosition(
-                strippedHtml, simplified, old_string, expandedOld, metadata
+                strippedHtml, simplified, old_string ?? '', expandedOld, metadata
             ) ?? -1;
             if (rawPos === -1 && (
                 target_before_context !== undefined || target_after_context !== undefined
@@ -423,10 +487,33 @@ export async function undoEditNoteAction(
     const { library_id, zotero_key, old_string, new_string, replace_all } = action.proposed_data as {
         library_id: number;
         zotero_key: string;
-        old_string: string;
+        old_string?: string;
         new_string: string;
         replace_all?: boolean;
     };
+
+    const resultData = action.result_data as EditNoteResultData | undefined;
+
+    // ── replace_content undo: restore full note from undo_full_html ──
+    if (resultData?.undo_full_html) {
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+        if (!item) {
+            throw new Error(`Item not found: ${library_id}-${zotero_key}`);
+        }
+        await item.loadDataType('note');
+        const noteId = `${library_id}-${zotero_key}`;
+
+        let restoredHtml = rebuildDataCitationItems(resultData.undo_full_html);
+        item.setNote(restoredHtml);
+        await item.saveTx();
+        logger(`undoEditNoteAction: Restored full note content for ${noteId}`, 1);
+        await waitForNoteSaveStabilization(item, restoredHtml);
+        clearNoteEditorSelection(library_id, zotero_key);
+        invalidateSimplificationCache(noteId);
+        return;
+    }
+
+    // ── String replacement undo ──
 
     if (!old_string) {
         throw new Error('No undo data available: proposed_data.old_string is required');
@@ -443,7 +530,6 @@ export async function undoEditNoteAction(
     // 2. Load note data
     await item.loadDataType('note');
     const noteId = `${library_id}-${zotero_key}`;
-    const resultData = action.result_data as EditNoteResultData | undefined;
 
     // 3. Get current HTML
     const currentHtml = getLatestNoteHtml(item);

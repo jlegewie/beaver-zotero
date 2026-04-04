@@ -22,6 +22,9 @@ import {
     decodeHtmlEntities,
     encodeTextEntities,
     ENTITY_FORMS,
+    stripPartialSimplifiedElements,
+    stripNoteWrapperDiv,
+    stripSpuriousWrappingTags,
 } from '../../../utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
@@ -46,7 +49,7 @@ import { TimeoutError } from '../timeout';
 async function validateEditNoteAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { library_id, zotero_key, old_string, new_string, replace_all } = request.action_data as EditNoteProposedData;
+    const { library_id, zotero_key, old_string, new_string, replace_all, replace_content } = request.action_data as EditNoteProposedData;
 
     // 1. Validate library exists
     const library = Zotero.Libraries.get(library_id);
@@ -136,7 +139,60 @@ async function validateEditNoteAction(
         };
     }
 
-    // 8. Strings different
+    // 8. Simplify note (needed for both modes)
+    const noteId = `${library_id}-${zotero_key}`;
+    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, library_id);
+
+    // ── replace_content mode: skip old_string matching, validate new_string only ──
+    if (replace_content) {
+        // Validate new_string tags
+        const validationError = validateNewString(new_string, metadata);
+        if (validationError) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: validationError,
+                error_code: 'invalid_new_string',
+                preference: 'always_ask',
+            };
+        }
+
+        // Dry-run expand new_string only
+        try {
+            expandToRawHtml(new_string, metadata, 'new');
+        } catch (e: any) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: e.message || String(e),
+                error_code: 'expansion_failed',
+                preference: 'always_ask',
+            };
+        }
+
+        const noteTitle = item.getNoteTitle() || '(untitled)';
+        const totalLines = simplified.split('\n').length;
+        const preference = getDeferredToolPreference('edit_note');
+
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: true,
+            current_value: {
+                note_title: noteTitle,
+                total_lines: totalLines,
+                match_count: 1,
+                old_content: simplified,
+            },
+            preference,
+        };
+    }
+
+    // ── String replacement mode (default) ──
+
+    // 9. Strings different
     if (old_string === new_string) {
         return {
             type: 'agent_action_validate_response',
@@ -147,10 +203,6 @@ async function validateEditNoteAction(
             preference: 'always_ask',
         };
     }
-
-    // 9. Simplify note
-    const noteId = `${library_id}-${zotero_key}`;
-    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, library_id);
 
     // 10. Validate new_string tags
     const validationError = validateNewString(new_string, metadata);
@@ -169,7 +221,7 @@ async function validateEditNoteAction(
     let expandedOld: string;
     let expandedNew: string;
     try {
-        expandedOld = expandToRawHtml(old_string, metadata, 'old');
+        expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
         expandedNew = expandToRawHtml(new_string, metadata, 'new');
     } catch (e: any) {
         return {
@@ -209,9 +261,167 @@ async function validateEditNoteAction(
         }
     }
 
-    // 13. Zero matches — fuzzy match on simplified HTML
+    // 13. Zero matches — try stripping partial simplified-element fragments.
+    //     The model may include e.g. "/>" (tail of a <citation…/>) in old_string.
+    //     These fragments don't expand to raw HTML, but the text portion does.
+    //     Gate: old_string must appear exactly once in simplified HTML.
     if (matchCount === 0) {
-        const fuzzy = findFuzzyMatch(simplified, old_string);
+        const simplifiedPos = simplified.indexOf(old_string ?? '');
+        const isUnique = simplifiedPos !== -1
+            && simplified.indexOf(old_string ?? '', simplifiedPos + 1) === -1;
+
+        if (isUnique) {
+            const stripped = stripPartialSimplifiedElements(
+                old_string ?? '', new_string, simplified, simplifiedPos,
+            );
+            if (stripped) {
+                try {
+                    expandedOld = expandToRawHtml(stripped.strippedOld, metadata, 'old');
+                    expandedNew = expandToRawHtml(stripped.strippedNew, metadata, 'new');
+                    matchCount = countOccurrences(strippedHtml, expandedOld);
+                } catch {
+                    // expansion failed — fall through to fuzzy error
+                }
+
+                if (matchCount >= 1) {
+                    // Build normalized_action_data with the stripped strings
+                    const normalizedActionData: EditNoteProposedData = {
+                        ...request.action_data as EditNoteProposedData,
+                        old_string: stripped.strippedOld,
+                        new_string: stripped.strippedNew,
+                    };
+
+                    if (matchCount > 1 && !replace_all) {
+                        // Disambiguate: we know old_string's unique position in simplified.
+                        // The stripped text starts at simplifiedPos + leadingStrip.
+                        // Expand simplified[0..strippedStart] to compute the raw position.
+                        const strippedStart = simplifiedPos + stripped.leadingStrip;
+                        let disambiguated = false;
+                        try {
+                            const expandedBefore = expandToRawHtml(
+                                simplified.substring(0, strippedStart), metadata, 'old',
+                            );
+                            const unwrapped = stripNoteWrapperDiv(strippedHtml);
+                            const wrapperPrefixLen = unwrapped !== strippedHtml
+                                ? strippedHtml.indexOf('>') + 1 : 0;
+                            const rawPos = wrapperPrefixLen + expandedBefore.length;
+
+                            if (strippedHtml.substring(rawPos, rawPos + expandedOld.length) === expandedOld) {
+                                normalizedActionData.target_before_context = strippedHtml.substring(
+                                    Math.max(0, rawPos - 200), rawPos,
+                                );
+                                normalizedActionData.target_after_context = strippedHtml.substring(
+                                    rawPos + expandedOld.length,
+                                    rawPos + expandedOld.length + 200,
+                                );
+                                disambiguated = true;
+                            }
+                        } catch {
+                            // prefix expansion failed
+                        }
+
+                        if (!disambiguated) {
+                            // Can't disambiguate — report ambiguous match on stripped string
+                            matchCount = 0; // fall through to fuzzy below
+                        }
+                    }
+
+                    if (matchCount >= 1) {
+                        const noteTitle = item.getNoteTitle() || '(untitled)';
+                        const totalLines = simplified.split('\n').length;
+                        const preference = getDeferredToolPreference('edit_note');
+
+                        return {
+                            type: 'agent_action_validate_response',
+                            request_id: request.request_id,
+                            valid: true,
+                            current_value: {
+                                note_title: noteTitle,
+                                total_lines: totalLines,
+                                match_count: matchCount,
+                            },
+                            normalized_action_data: normalizedActionData,
+                            preference,
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    // 13a. Zero matches — try stripping spurious leading/trailing HTML tags.
+    //      LLMs tend to wrap old_string/new_string in matching tags (e.g. <p>…</p>)
+    //      to produce well-formed HTML, even when the selection starts mid-element.
+    //      Candidates are ordered to strip the least first (leading-only, then
+    //      trailing-only, then both) so we keep as much structural context as possible.
+    if (matchCount === 0) {
+        const tagCandidates = stripSpuriousWrappingTags(old_string ?? '', new_string);
+        for (const tagStrip of tagCandidates) {
+            try {
+                const tagExpandedOld = expandToRawHtml(tagStrip.strippedOld, metadata, 'old');
+                // Dry-run expand new_string to verify it's valid
+                expandToRawHtml(tagStrip.strippedNew, metadata, 'new');
+                const tagMatchCount = countOccurrences(strippedHtml, tagExpandedOld);
+
+                if (tagMatchCount >= 1) {
+                    const normalizedActionData: EditNoteProposedData = {
+                        ...request.action_data as EditNoteProposedData,
+                        old_string: tagStrip.strippedOld,
+                        new_string: tagStrip.strippedNew,
+                    };
+
+                    let disambiguated = true;
+                    if (tagMatchCount > 1 && !replace_all) {
+                        disambiguated = false;
+                        const rawPos = findUniqueRawMatchPosition(
+                            strippedHtml, simplified, tagStrip.strippedOld,
+                            tagExpandedOld, metadata,
+                        );
+                        if (rawPos !== null) {
+                            disambiguated = true;
+                        } else {
+                            const targetContext = captureValidatedEditTargetContext(
+                                strippedHtml, simplified, tagStrip.strippedOld,
+                                tagExpandedOld, metadata,
+                            );
+                            if (targetContext) {
+                                normalizedActionData.target_before_context =
+                                    targetContext.beforeContext;
+                                normalizedActionData.target_after_context =
+                                    targetContext.afterContext;
+                                disambiguated = true;
+                            }
+                        }
+                    }
+
+                    if (disambiguated) {
+                        const noteTitle = item.getNoteTitle() || '(untitled)';
+                        const totalLines = simplified.split('\n').length;
+                        const preference = getDeferredToolPreference('edit_note');
+
+                        return {
+                            type: 'agent_action_validate_response',
+                            request_id: request.request_id,
+                            valid: true,
+                            current_value: {
+                                note_title: noteTitle,
+                                total_lines: totalLines,
+                                match_count: tagMatchCount,
+                            },
+                            normalized_action_data: normalizedActionData,
+                            preference,
+                        };
+                    }
+                }
+            } catch {
+                // expansion failed for this candidate — try next
+            }
+        }
+    }
+
+    // 13b. Zero matches — fuzzy match on simplified HTML
+    if (matchCount === 0) {
+        const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -228,13 +438,13 @@ async function validateEditNoteAction(
     //     can be captured now and re-located later via surrounding context.
     if (matchCount > 1 && !replace_all) {
         const rawPos = findUniqueRawMatchPosition(
-            strippedHtml, simplified, old_string, expandedOld, metadata
+            strippedHtml, simplified, old_string ?? '', expandedOld, metadata
         );
         let normalizedActionData: EditNoteProposedData | undefined;
 
         if (rawPos === null) {
             const targetContext = captureValidatedEditTargetContext(
-                strippedHtml, simplified, old_string, expandedOld, metadata
+                strippedHtml, simplified, old_string ?? '', expandedOld, metadata
             );
 
             if (targetContext) {
@@ -276,7 +486,7 @@ async function validateEditNoteAction(
         };
     }
 
-    // 14. Valid — return current value
+    // 15. Valid — return current value
     const noteTitle = item.getNoteTitle() || '(untitled)';
     const totalLines = simplified.split('\n').length;
 
@@ -310,6 +520,7 @@ async function executeEditNoteAction(
         old_string,
         new_string,
         replace_all,
+        replace_content,
     } = request.action_data as EditNoteProposedData;
     let {
         target_before_context,
@@ -343,11 +554,105 @@ async function executeEditNoteAction(
     const noteId = `${library_id}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
 
+    // ── replace_content mode: replace entire note body ──
+    if (replace_content) {
+        let expandedNew: string;
+        try {
+            expandedNew = expandToRawHtml(new_string, metadata, 'new');
+        } catch (e: any) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: e.message || String(e),
+                error_code: 'expansion_failed',
+            };
+        }
+
+        const strippedHtml = stripDataCitationItems(oldHtml);
+
+        // Preserve wrapper div
+        const trimmed = strippedHtml.trim();
+        let wrapperOpen = '';
+        let wrapperClose = '';
+        if (trimmed.startsWith('<div') && trimmed.endsWith('</div>')) {
+            const closeAngle = trimmed.indexOf('>');
+            wrapperOpen = trimmed.substring(0, closeAngle + 1);
+            wrapperClose = '</div>';
+        }
+
+        let newHtml = wrapperOpen + expandedNew + wrapperClose;
+
+        // Add/update "Edited by Beaver" footer
+        const threadId = store.get(currentThreadIdAtom);
+        if (threadId) {
+            newHtml = addOrUpdateEditFooter(newHtml, threadId);
+        }
+
+        // Rebuild data-citation-items
+        newHtml = rebuildDataCitationItems(newHtml);
+
+        // Wrapper div protection
+        const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
+        if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: 'The note wrapper <div data-schema-version="..."> must not be removed.',
+                error_code: 'wrapper_removed',
+            };
+        }
+
+        // Checkpoint before save
+        checkAborted(ctx, 'edit_note:before_save');
+
+        // Save
+        try {
+            item.setNote(newHtml);
+            await item.saveTx();
+            logger(`executeEditNoteAction: Saved replace_content edit to ${noteId}`, 1);
+        } catch (error) {
+            try { item.setNote(oldHtml); } catch (_) { /* best-effort */ }
+            if (error instanceof TimeoutError) throw error;
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: `Failed to save note: ${error}`,
+                error_code: 'save_failed',
+            };
+        }
+
+        await waitForNoteSaveStabilization(item, newHtml);
+        clearNoteEditorSelection(library_id, zotero_key);
+        invalidateSimplificationCache(noteId);
+
+        // Check for duplicate citation warnings
+        const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+        const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: true,
+            result_data: {
+                library_id,
+                zotero_key,
+                occurrences_replaced: 1,
+                warnings,
+                undo_full_html: strippedHtml,
+            },
+        };
+    }
+
+    // ── String replacement mode (default) ──
+
     // 6. Expand old_string and new_string to raw HTML
     let expandedOld: string;
     let expandedNew: string;
     try {
-        expandedOld = expandToRawHtml(old_string, metadata, 'old');
+        expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
         expandedNew = expandToRawHtml(new_string, metadata, 'new');
     } catch (e: any) {
         return {
@@ -359,7 +664,7 @@ async function executeEditNoteAction(
         };
     }
 
-    // 6. Strip data-citation-items from raw HTML for matching
+    // 6b. Strip data-citation-items from raw HTML for matching
     const strippedHtml = stripDataCitationItems(oldHtml);
 
     // 7. Count occurrences — if zero, retry with entity-decoded or entity-encoded
@@ -393,9 +698,54 @@ async function executeEditNoteAction(
         }
     }
 
-    // 8. Zero matches
+    // 8. Zero matches — try stripping partial simplified-element fragments
+    //    (defense-in-depth: validation normally normalizes via normalized_action_data,
+    //     but the note may have changed between validation and execution)
     if (matchCount === 0) {
-        const fuzzy = findFuzzyMatch(simplified, old_string);
+        const simplifiedPos = simplified.indexOf(old_string ?? '');
+        const isUnique = simplifiedPos !== -1
+            && simplified.indexOf(old_string ?? '', simplifiedPos + 1) === -1;
+
+        if (isUnique) {
+            const stripped = stripPartialSimplifiedElements(
+                old_string ?? '', new_string, simplified, simplifiedPos,
+            );
+            if (stripped) {
+                try {
+                    expandedOld = expandToRawHtml(stripped.strippedOld, metadata, 'old');
+                    expandedNew = expandToRawHtml(stripped.strippedNew, metadata, 'new');
+                    matchCount = countOccurrences(strippedHtml, expandedOld);
+                } catch {
+                    // expansion failed — fall through to fuzzy error
+                }
+            }
+        }
+    }
+
+    // 8a. Zero matches — try stripping spurious wrapping tags
+    //     (defense-in-depth: validation normally normalizes via normalized_action_data)
+    if (matchCount === 0) {
+        const tagCandidates = stripSpuriousWrappingTags(old_string ?? '', new_string);
+        for (const tagStrip of tagCandidates) {
+            try {
+                const candidateOld = expandToRawHtml(tagStrip.strippedOld, metadata, 'old');
+                const candidateNew = expandToRawHtml(tagStrip.strippedNew, metadata, 'new');
+                const candidateCount = countOccurrences(strippedHtml, candidateOld);
+                if (candidateCount >= 1) {
+                    expandedOld = candidateOld;
+                    expandedNew = candidateNew;
+                    matchCount = candidateCount;
+                    break;
+                }
+            } catch {
+                // expansion failed for this candidate — try next
+            }
+        }
+    }
+
+    // 8b. Still zero matches — fuzzy error
+    if (matchCount === 0) {
+        const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
@@ -442,7 +792,7 @@ async function executeEditNoteAction(
         // context captured during validation.
         if (matchCount > 1) {
             rawPos = findUniqueRawMatchPosition(
-                strippedHtml, simplified, old_string, expandedOld, metadata
+                strippedHtml, simplified, old_string ?? '', expandedOld, metadata
             ) ?? -1;
             if (rawPos === -1 && (
                 target_before_context !== undefined || target_after_context !== undefined

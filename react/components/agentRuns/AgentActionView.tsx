@@ -58,8 +58,8 @@ import {
     FileDiffIcon,
 } from '../icons/icons';
 import { revealSource, openNoteAndSearchEdit, openNoteByKey } from '../../utils/sourceUtils';
-import { isNoteOpenInEditor, showDiffPreview } from '../../utils/noteEditorDiffPreview';
-import { updateDiffPreviewForNote, DIFF_PREVIEW_ENABLED } from '../../utils/diffPreviewCoordinator';
+import { isNoteOpenInEditor, showDiffPreview, dismissDiffPreview, isDiffPreviewActive } from '../../utils/noteEditorDiffPreview';
+import { updateDiffPreviewForNote, DIFF_PREVIEW_ENABLED, diffPreviewNoteKeyAtom } from '../../utils/diffPreviewCoordinator';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
@@ -68,6 +68,7 @@ import ExtractionApprovalButton from '../ui/buttons/ExtractionApprovalButton';
 import ExternalSearchApprovalButton from '../ui/buttons/ExternalSearchApprovalButton';
 import SplitApplyButton from '../ui/buttons/SplitApplyButton';
 import { truncateText } from '../../utils/stringUtils';
+import { store } from '../../store';
 import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
 import {
     addAutoApproveNoteKeyAtom,
@@ -478,6 +479,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 }]);
                 logger(`AgentActionView: Applied organize_items action ${action!.id}`, 1);
             } else if (toolName === 'edit_note') {
+                // Dismiss any active diff preview before applying — the preview
+                // freezes the editor (_disableSaving + contentEditable=false), so
+                // it must be torn down for the edit to save and PM to normalize.
+                // Await so _disableSaving is fully restored before we proceed.
+                if (isDiffPreviewActive()) {
+                    await dismissDiffPreview();
+                    store.set(diffPreviewNoteKeyAtom, null);
+                }
                 const result = await executeEditNoteAction(action!);
                 await ackAgentActions(runId, [{
                     action_id: action!.id,
@@ -595,6 +604,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone organize_items action ${action.id}`, 1);
             } else if (toolName === 'edit_note') {
+                // Dismiss any active diff preview before undoing — same reason as apply.
+                if (isDiffPreviewActive()) {
+                    await dismissDiffPreview();
+                    store.set(diffPreviewNoteKeyAtom, null);
+                }
                 await undoEditNoteAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone edit_note action ${action.id}`, 1);
@@ -700,21 +714,29 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     oldString: oldStr,
                     newString: action.proposed_data.new_string ?? '',
                     replaceAll: action.proposed_data.replace_all ?? false,
-                }]);
+                }], {
+                    onAction: (bannerAction) => {
+                        if (bannerAction === 'approve') {
+                            handleApplyPending();
+                        } else {
+                            handleRejectPending();
+                        }
+                    },
+                });
             }
         }
-    }, [pendingApproval, action]);
+    }, [pendingApproval, action, handleApplyPending, handleRejectPending]);
 
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
 
     // Build preview data from either pending approval or agent action
     const previewData = buildPreviewData(toolName, pendingApproval, action);
 
-    // Show the preview button when there's an unapplied edit that has an old_string to preview
+    // Show the preview button when there's an unapplied edit that has an old_string to preview or replace_content
     const canShowPreview = DIFF_PREVIEW_ENABLED
         && toolName === 'edit_note'
         && (isAwaitingApproval || status === 'pending' || status === 'rejected' || status === 'undone')
-        && !!(pendingApproval?.actionData?.old_string || action?.proposed_data?.old_string);
+        && !!(pendingApproval?.actionData?.old_string || action?.proposed_data?.old_string || pendingApproval?.actionData?.replace_content || action?.proposed_data?.replace_content);
     // Determine what icon to show in header
     const getHeaderIcon = () => {
         const getToolIcon = () => {
@@ -1229,17 +1251,25 @@ const ActionPreview: React.FC<{
     }
 
     if (toolName === 'edit_note' || previewData.actionType === 'edit_note') {
-        const oldString = previewData.actionData.old_string || '';
+        const replaceContent = previewData.actionData.replace_content ?? false;
+        const oldString = replaceContent ? '' : (previewData.actionData.old_string || '');
         const newString = previewData.actionData.new_string || '';
         const replaceAll = previewData.actionData.replace_all ?? false;
         const occurrencesReplaced = previewData.resultData?.occurrences_replaced;
         const warnings = previewData.resultData?.warnings;
+        // For replace_content, get old content from validation's current_value
+        // or from undo_full_html in result_data (post-apply)
+        const oldContent = replaceContent
+            ? (previewData.currentValue?.old_content || previewData.resultData?.undo_full_html)
+            : undefined;
 
         return (
             <EditNotePreview
                 oldString={oldString}
                 newString={newString}
                 replaceAll={replaceAll}
+                replaceContent={replaceContent}
+                oldContent={oldContent}
                 occurrencesReplaced={occurrencesReplaced}
                 warnings={warnings}
                 status={status}
