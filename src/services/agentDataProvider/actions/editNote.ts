@@ -24,6 +24,7 @@ import {
     ENTITY_FORMS,
     stripPartialSimplifiedElements,
     stripNoteWrapperDiv,
+    stripSpuriousWrappingTags,
 } from '../../../utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
@@ -348,6 +349,76 @@ async function validateEditNoteAction(
         }
     }
 
+    // 13a. Zero matches — try stripping spurious leading/trailing HTML tags.
+    //      LLMs tend to wrap old_string/new_string in matching tags (e.g. <p>…</p>)
+    //      to produce well-formed HTML, even when the selection starts mid-element.
+    //      Candidates are ordered to strip the least first (leading-only, then
+    //      trailing-only, then both) so we keep as much structural context as possible.
+    if (matchCount === 0) {
+        const tagCandidates = stripSpuriousWrappingTags(old_string ?? '', new_string);
+        for (const tagStrip of tagCandidates) {
+            try {
+                const tagExpandedOld = expandToRawHtml(tagStrip.strippedOld, metadata, 'old');
+                // Dry-run expand new_string to verify it's valid
+                expandToRawHtml(tagStrip.strippedNew, metadata, 'new');
+                const tagMatchCount = countOccurrences(strippedHtml, tagExpandedOld);
+
+                if (tagMatchCount >= 1) {
+                    const normalizedActionData: EditNoteProposedData = {
+                        ...request.action_data as EditNoteProposedData,
+                        old_string: tagStrip.strippedOld,
+                        new_string: tagStrip.strippedNew,
+                    };
+
+                    let disambiguated = true;
+                    if (tagMatchCount > 1 && !replace_all) {
+                        disambiguated = false;
+                        const rawPos = findUniqueRawMatchPosition(
+                            strippedHtml, simplified, tagStrip.strippedOld,
+                            tagExpandedOld, metadata,
+                        );
+                        if (rawPos !== null) {
+                            disambiguated = true;
+                        } else {
+                            const targetContext = captureValidatedEditTargetContext(
+                                strippedHtml, simplified, tagStrip.strippedOld,
+                                tagExpandedOld, metadata,
+                            );
+                            if (targetContext) {
+                                normalizedActionData.target_before_context =
+                                    targetContext.beforeContext;
+                                normalizedActionData.target_after_context =
+                                    targetContext.afterContext;
+                                disambiguated = true;
+                            }
+                        }
+                    }
+
+                    if (disambiguated) {
+                        const noteTitle = item.getNoteTitle() || '(untitled)';
+                        const totalLines = simplified.split('\n').length;
+                        const preference = getDeferredToolPreference('edit_note');
+
+                        return {
+                            type: 'agent_action_validate_response',
+                            request_id: request.request_id,
+                            valid: true,
+                            current_value: {
+                                note_title: noteTitle,
+                                total_lines: totalLines,
+                                match_count: tagMatchCount,
+                            },
+                            normalized_action_data: normalizedActionData,
+                            preference,
+                        };
+                    }
+                }
+            } catch {
+                // expansion failed for this candidate — try next
+            }
+        }
+    }
+
     // 13b. Zero matches — fuzzy match on simplified HTML
     if (matchCount === 0) {
         const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
@@ -647,6 +718,27 @@ async function executeEditNoteAction(
                 } catch {
                     // expansion failed — fall through to fuzzy error
                 }
+            }
+        }
+    }
+
+    // 8a. Zero matches — try stripping spurious wrapping tags
+    //     (defense-in-depth: validation normally normalizes via normalized_action_data)
+    if (matchCount === 0) {
+        const tagCandidates = stripSpuriousWrappingTags(old_string ?? '', new_string);
+        for (const tagStrip of tagCandidates) {
+            try {
+                const candidateOld = expandToRawHtml(tagStrip.strippedOld, metadata, 'old');
+                const candidateNew = expandToRawHtml(tagStrip.strippedNew, metadata, 'new');
+                const candidateCount = countOccurrences(strippedHtml, candidateOld);
+                if (candidateCount >= 1) {
+                    expandedOld = candidateOld;
+                    expandedNew = candidateNew;
+                    matchCount = candidateCount;
+                    break;
+                }
+            } catch {
+                // expansion failed for this candidate — try next
             }
         }
     }

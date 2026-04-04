@@ -36,6 +36,7 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     encodeTextEntities: vi.fn((s: string) => s),
     ENTITY_FORMS: ['hex', 'decimal', 'named'],
     stripPartialSimplifiedElements: vi.fn(() => null),
+    stripSpuriousWrappingTags: vi.fn(() => []),
     stripNoteWrapperDiv: vi.fn((html: string) => {
         const trimmed = html.trim();
         if (!trimmed.startsWith('<div') || !trimmed.endsWith('</div>')) return html;

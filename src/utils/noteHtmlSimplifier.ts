@@ -1549,6 +1549,110 @@ export function stripPartialSimplifiedElements(
 
 
 // =============================================================================
+// Spurious Wrapping-Tag Stripping
+// =============================================================================
+
+export interface WrappingTagStrip {
+    strippedOld: string;
+    strippedNew: string;
+}
+
+/**
+ * Generate candidate stripped versions of old_string / new_string where
+ * the LLM added a spurious leading opening tag and/or trailing closing tag
+ * to produce well-formed HTML.
+ *
+ * Common pattern: LLM selects text mid-paragraph but prepends `<p>` (or
+ * appends `</p>`) to "complete" the element, even though the real tag boundary
+ * is elsewhere in the note.  When both old_string and new_string share the
+ * same leading (or trailing) tag the addition is cosmetic — stripping it from
+ * both preserves the intended edit semantics.
+ *
+ * Only strips when both strings share the *same* tag at the same position, so
+ * intentional tag changes (e.g. `<p>` → `<h3>`) are never affected.
+ *
+ * Returns candidates in preference order — strip the least amount first to
+ * preserve the maximum structural context for matching:
+ *   1. Leading-only  (if applicable)
+ *   2. Trailing-only (if applicable)
+ *   3. Both          (if both are applicable)
+ *
+ * The caller should try each candidate until one produces a match.
+ */
+export function stripSpuriousWrappingTags(
+    oldString: string,
+    newString: string,
+): WrappingTagStrip[] {
+    // Detect shared leading opening tag
+    let leadingTag: string | null = null;
+    const leadingMatch = oldString.match(/^<([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/);
+    if (leadingMatch && newString.startsWith(leadingMatch[0])) {
+        leadingTag = leadingMatch[0];
+    }
+
+    // Detect shared trailing closing tag (+ optional whitespace)
+    let oldTrailingMatch: RegExpMatchArray | null = null;
+    let newTrailingMatch: RegExpMatchArray | null = null;
+    const trailingMatch = oldString.match(/<\/([a-zA-Z][a-zA-Z0-9]*)>\s*$/);
+    if (trailingMatch) {
+        const tagName = trailingMatch[1];
+        const newTrailing = newString.match(new RegExp(`</${tagName}>\\s*$`));
+        if (newTrailing) {
+            oldTrailingMatch = trailingMatch;
+            newTrailingMatch = newTrailing;
+        }
+    }
+
+    if (!leadingTag && !oldTrailingMatch) return [];
+
+    const candidates: WrappingTagStrip[] = [];
+
+    function addIfNonEmpty(strippedOld: string, strippedNew: string): void {
+        if (strippedOld.trim()) {
+            candidates.push({ strippedOld, strippedNew });
+        }
+    }
+
+    // 1. Leading-only
+    if (leadingTag) {
+        addIfNonEmpty(
+            oldString.substring(leadingTag.length),
+            newString.substring(leadingTag.length),
+        );
+    }
+
+    // 2. Trailing-only
+    if (oldTrailingMatch && newTrailingMatch) {
+        addIfNonEmpty(
+            oldString.substring(0, oldString.length - oldTrailingMatch[0].length),
+            newString.substring(0, newString.length - newTrailingMatch[0].length),
+        );
+    }
+
+    // 3. Both (only when both are applicable and would differ from either alone)
+    if (leadingTag && oldTrailingMatch && newTrailingMatch) {
+        const strippedOld = oldString.substring(leadingTag.length);
+        const strippedNew = newString.substring(leadingTag.length);
+        // Apply trailing strip to the already leading-stripped strings
+        const oldTrailOnStripped = strippedOld.match(
+            new RegExp(`</${oldTrailingMatch[1]}>\\s*$`),
+        );
+        const newTrailOnStripped = strippedNew.match(
+            new RegExp(`</${oldTrailingMatch[1]}>\\s*$`),
+        );
+        if (oldTrailOnStripped && newTrailOnStripped) {
+            addIfNonEmpty(
+                strippedOld.substring(0, strippedOld.length - oldTrailOnStripped[0].length),
+                strippedNew.substring(0, strippedNew.length - newTrailOnStripped[0].length),
+            );
+        }
+    }
+
+    return candidates;
+}
+
+
+// =============================================================================
 // Context-Anchored Range Finding
 // =============================================================================
 
