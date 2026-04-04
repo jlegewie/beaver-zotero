@@ -738,33 +738,41 @@ export function expandToRawHtml(
             // Case 1: Existing citation (has ref) — look up from metadata map
             if (ref) {
                 const stored = metadata.elements.get(ref);
-                if (!stored) {
+                if (stored) {
+                    // Compound citations are immutable — always return stored raw HTML
+                    if (stored.isCompound) {
+                        return stored.rawHtml;
+                    }
+                    // Single citation — check if attributes changed (e.g., page locator updated)
+                    if (itemId) {
+                        const newAttrs = parseSimplifiedCitationAttrs(attrStr);
+                        if (attrsChanged(stored.originalAttrs, newAttrs)) {
+                            // For existing citations, never translate the page. The agent
+                            // sees and edits page LABELS (from the original locator), not
+                            // 1-based page indices. Translation is only for NEW citations
+                            // where the agent provides a page index that needs conversion
+                            // to a label. Translating here corrupts the locator — e.g.,
+                            // label "15" gets treated as 1-based index and converted to
+                            // the PDF's physical page label at that index (e.g., "352").
+                            return buildCitationFromSimplifiedAttrs(newAttrs, false);
+                        }
+                    }
+                    return stored.rawHtml; // exact original
+                }
+                // Ref not found in metadata. In old_string context this is always an
+                // error — the model must reference existing citations to locate text.
+                // In new_string context the model likely fabricated the ref by
+                // incrementing from an existing one (e.g. c_KEY_4 → c_KEY_5).
+                // Fall through to new-citation handling below.
+                if (context === 'old') {
                     throw new Error(
                         `Unknown citation ref="${ref}". Cannot modify citation references not present in the note.`
                     );
                 }
-                // Compound citations are immutable — always return stored raw HTML
-                if (stored.isCompound) {
-                    return stored.rawHtml;
-                }
-                // Single citation — check if attributes changed (e.g., page locator updated)
-                if (itemId) {
-                    const newAttrs = parseSimplifiedCitationAttrs(attrStr);
-                    if (attrsChanged(stored.originalAttrs, newAttrs)) {
-                        // For existing citations, never translate the page. The agent
-                        // sees and edits page LABELS (from the original locator), not
-                        // 1-based page indices. Translation is only for NEW citations
-                        // where the agent provides a page index that needs conversion
-                        // to a label. Translating here corrupts the locator — e.g.,
-                        // label "15" gets treated as 1-based index and converted to
-                        // the PDF's physical page label at that index (e.g., "352").
-                        return buildCitationFromSimplifiedAttrs(newAttrs, false);
-                    }
-                }
-                return stored.rawHtml; // exact original
+                logger(`expandToRawHtml: Unknown ref="${ref}" in new_string — treating as new citation`, 1);
             }
 
-            // Case 2: New citation (no ref) — only allowed in new_string
+            // Case 2: New citation (no ref, or fabricated ref) — only allowed in new_string
             if (context === 'old') {
                 throw new Error(
                     'Error: New citations (without a ref) can only appear in new_string, not old_string. '
