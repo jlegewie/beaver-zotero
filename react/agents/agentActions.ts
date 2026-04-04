@@ -682,11 +682,15 @@ export const undoAgentActionAtom = atom(
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {
             return prev.map((action) => {
                 if (action.id !== actionId) return action;
-                // Preserve old_creators from result_data into proposed_data before clearing,
-                // so the preview can show the before/after diff in the "undone" state.
-                const proposed_data = (action.result_data?.old_creators && !action.proposed_data?.old_creators)
-                    ? { ...action.proposed_data, old_creators: action.result_data.old_creators }
-                    : action.proposed_data;
+                // Preserve undo-critical fields from result_data into proposed_data before
+                // clearing, so the preview can show the before/after diff in the "undone" state.
+                let proposed_data = action.proposed_data;
+                if (action.result_data?.old_creators && !proposed_data?.old_creators) {
+                    proposed_data = { ...proposed_data, old_creators: action.result_data.old_creators };
+                }
+                if (action.result_data?.undo_full_html && !proposed_data?.undo_full_html) {
+                    proposed_data = { ...proposed_data, undo_full_html: action.result_data.undo_full_html };
+                }
                 return { ...action, proposed_data, status: 'undone' as ActionStatus, result_data: undefined, error_message: undefined };
             });
         });

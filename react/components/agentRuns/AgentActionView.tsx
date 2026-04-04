@@ -683,37 +683,53 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const handlePreviewInEditor = useCallback(async () => {
         const libraryId = pendingApproval?.actionData?.library_id ?? action?.proposed_data?.library_id;
         const zoteroKey = pendingApproval?.actionData?.zotero_key ?? action?.proposed_data?.zotero_key;
-        if (libraryId == null || !zoteroKey) return;
+        logger(`[DiffPreview] handlePreviewInEditor called: libraryId=${libraryId}, zoteroKey=${zoteroKey}, hasPendingApproval=${!!pendingApproval}, hasAction=${!!action}, hasProposedData=${!!action?.proposed_data}`);
+        if (libraryId == null || !zoteroKey) {
+            logger(`[DiffPreview] Aborting: missing libraryId or zoteroKey`, 1);
+            return;
+        }
 
         // Open / focus the note tab
+        logger(`[DiffPreview] Opening note tab for ${libraryId}/${zoteroKey}`);
         await openNoteByKey(libraryId, zoteroKey);
 
         // Wait for the editor instance to be available (needed for newly
         // opened tabs; no-op cost when the tab was already selected)
-        await new Promise<void>((resolve) => {
+        const editorReady = await new Promise<boolean>((resolve) => {
             let attempts = 0;
             const check = () => {
-                if (isNoteOpenInEditor(libraryId, zoteroKey) || ++attempts > 25) {
-                    resolve();
+                if (isNoteOpenInEditor(libraryId, zoteroKey)) {
+                    resolve(true);
+                } else if (++attempts > 25) {
+                    resolve(false);
                 } else {
                     setTimeout(check, 200);
                 }
             };
             setTimeout(check, 300);
         });
+        logger(`[DiffPreview] Editor ready: ${editorReady} for ${libraryId}/${zoteroKey}`);
+        if (!editorReady) {
+            logger(`[DiffPreview] Editor not available after polling — cannot show preview`, 1);
+        }
 
         // During an active run, pending approvals live in the approval map —
         // updateDiffPreviewForNote reads that map and shows the combined diff.
         if (pendingApproval) {
+            logger(`[DiffPreview] Delegating to updateDiffPreviewForNote (pending approval path)`);
             updateDiffPreviewForNote(libraryId, zoteroKey);
         } else if (action?.proposed_data) {
             // Post-run: the approval was already removed; build the edit from the action directly.
             const oldStr = action.proposed_data.old_string ?? '';
-            if (oldStr) {
+            const operation = action.proposed_data.operation ?? 'str_replace';
+            const undoFullHtml = action.proposed_data.undo_full_html ?? action.result_data?.undo_full_html ?? '';
+            logger(`[DiffPreview] Post-run path: operation=${operation}, oldStr length=${oldStr.length}, newStr length=${(action.proposed_data.new_string ?? '').length}, hasUndoFullHtml=${!!undoFullHtml}`);
+            if (operation === 'rewrite' || oldStr) {
+                logger(`[DiffPreview] Calling showDiffPreview (operation=${operation})`);
                 showDiffPreview(libraryId, zoteroKey, [{
                     oldString: oldStr,
                     newString: action.proposed_data.new_string ?? '',
-                    operation: action.proposed_data.operation ?? 'str_replace',
+                    operation,
                 }], {
                     onAction: (bannerAction) => {
                         if (bannerAction === 'approve') {
@@ -723,7 +739,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         }
                     },
                 });
+            } else {
+                logger(`[DiffPreview] Skipping showDiffPreview: oldStr is empty and not a rewrite (operation=${operation})`, 1);
             }
+        } else {
+            logger(`[DiffPreview] No pendingApproval and no action.proposed_data — nothing to preview`, 1);
         }
     }, [pendingApproval, action, handleApplyPending, handleRejectPending]);
 
