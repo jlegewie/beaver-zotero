@@ -19,6 +19,10 @@ export interface CreateNoteResultData {
     zotero_key: string;
     parent_key?: string;
     collection_key?: string;
+    /** Simplified HTML content of the created note (same format as read_note) */
+    note_content?: string;
+    /** Formatted revision instructions from automated review (set by backend) */
+    revision_instructions?: string;
 }
 
 
