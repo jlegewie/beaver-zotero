@@ -26,7 +26,7 @@ export interface CreateNoteResultData {
  * Execute a create_note action from the UI (post-run manual apply).
  * Creates the Zotero note item from the action's proposed_data.
  */
-export async function executeCreateNoteAction(action: AgentAction): Promise<CreateNoteResultData> {
+export async function executeCreateNoteAction(action: AgentAction, runId?: string): Promise<CreateNoteResultData> {
     const proposed = action.proposed_data as {
         title: string;
         content: string;
@@ -86,10 +86,10 @@ export async function executeCreateNoteAction(action: AgentAction): Promise<Crea
         { citationDataMap, externalMapping, externalReferencesMap },
     );
 
-    // Add Beaver footer
+    // Add Beaver footer with thread/run link
     const threadId = store.get(currentThreadIdAtom);
     if (threadId) {
-        htmlContent += getBeaverNoteFooterHTML(threadId);
+        htmlContent += getBeaverNoteFooterHTML(threadId, runId);
     }
 
     // Create the Zotero note item

@@ -4,6 +4,7 @@ import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { citationDataMapAtom } from '../../../../react/atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../../react/atoms/externalReferences';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
+import { activeRunAtom } from '../../../../react/agents/atoms';
 import { renderToHTML } from '../../../../react/utils/citationRenderers';
 import { preloadPageLabelsForContent } from '../../../../react/utils/pageLabels';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from '../../../../react/utils/noteActions';
@@ -280,8 +281,9 @@ async function executeCreateNoteAction(
 
         // Add Beaver footer with thread/run link
         const threadId = store.get(currentThreadIdAtom);
+        const runId = store.get(activeRunAtom)?.id;
         if (threadId) {
-            htmlContent += getBeaverNoteFooterHTML(threadId);
+            htmlContent += getBeaverNoteFooterHTML(threadId, runId);
         }
 
         // Checkpoint: abort before creating the note

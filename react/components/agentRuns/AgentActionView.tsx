@@ -496,7 +496,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 }]);
                 logger(`AgentActionView: Applied edit_note action ${action!.id}`, 1);
             } else if (toolName === 'create_note') {
-                const result = await executeCreateNoteAction(action!);
+                const result = await executeCreateNoteAction(action!, runId);
                 await ackAgentActions(runId, [{
                     action_id: action!.id,
                     result_data: result,
