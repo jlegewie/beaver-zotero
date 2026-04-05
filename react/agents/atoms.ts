@@ -16,6 +16,7 @@ import {
     WSToolReturnEvent,
     WSRunCompleteEvent,
     WSToolCallProgressEvent,
+    WSToolCallArgsStreamEvent,
 } from "../../src/services/agentProtocol";
 import { MessageAttachment } from "../types/attachments/apiTypes";
 
@@ -279,6 +280,32 @@ export function updateRunWithToolCallProgress(run: AgentRun, event: WSToolCallPr
     }
     
     logger(`updateRunWithToolCallProgress: tool call ${event.tool_call_id} not found in any message`, 1);
+    return run;
+}
+
+/**
+ * Update an AgentRun with streaming tool call arguments.
+ * Adds parsed partial args to the ToolCallPart for live preview.
+ */
+export function updateRunWithToolCallArgsStream(run: AgentRun, event: WSToolCallArgsStreamEvent): AgentRun {
+    for (let i = 0; i < run.model_messages.length; i++) {
+        const message = run.model_messages[i];
+        if (message.kind === 'response') {
+            const hasToolCall = message.parts.some(
+                part => part.part_kind === 'tool-call' && part.tool_call_id === event.tool_call_id
+            );
+            if (hasToolCall) {
+                const newParts = message.parts.map(part =>
+                    part.part_kind === 'tool-call' && part.tool_call_id === event.tool_call_id
+                        ? { ...part, streaming_args: event.args }
+                        : part
+                );
+                const newMessages = [...run.model_messages];
+                newMessages[i] = { ...message, parts: newParts };
+                return { ...run, model_messages: newMessages };
+            }
+        }
+    }
     return run;
 }
 

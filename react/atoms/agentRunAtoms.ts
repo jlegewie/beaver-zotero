@@ -21,6 +21,7 @@ import {
     WSRetryEvent,
     WSAgentActionsEvent,
     WSToolCallProgressEvent,
+    WSToolCallArgsStreamEvent,
     WSMissingZoteroDataEvent,
     WSDeferredApprovalRequest,
     WSThreadNameEvent,
@@ -63,6 +64,7 @@ import {
     updateRunWithToolReturn,
     updateRunComplete,
     updateRunWithToolCallProgress,
+    updateRunWithToolCallArgsStream,
     allUserAttachmentKeysAtom,
     resetRunMessages,
 } from '../agents/atoms';
@@ -852,6 +854,10 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         onToolCallProgress: (event: WSToolCallProgressEvent) => {
             logger(`WS onToolCallProgress: ${event.run_id} - ${event.tool_call_id} - ${event.progress}`, 1);
             set(activeRunAtom, (prev) => prev ? updateRunWithToolCallProgress(prev, event) : prev);
+        },
+
+        onToolCallArgsStream: (event: WSToolCallArgsStreamEvent) => {
+            set(activeRunAtom, (prev) => prev ? updateRunWithToolCallArgsStream(prev, event) : prev);
         },
 
         onRunComplete: async (event: WSRunCompleteEvent) => {

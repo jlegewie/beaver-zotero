@@ -135,6 +135,8 @@ export interface ToolCallPart {
     provider_details?: Record<string, any>;
     /** Optional progress message during tool execution (e.g., "Searching OpenAlex...") */
     progress?: string;
+    /** Partially-parsed tool call arguments for live streaming preview (set by WSToolCallArgsStreamEvent) */
+    streaming_args?: Record<string, any>;
 }
 
 // ============================================================================

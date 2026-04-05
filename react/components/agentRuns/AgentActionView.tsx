@@ -113,6 +113,8 @@ interface AgentActionViewProps {
     pendingApproval: PendingApproval | null;
     /** Whether a tool-return has been received for this tool call (backend completed processing) */
     hasToolReturn?: boolean;
+    /** Pre-parsed partial tool call arguments for streaming preview */
+    streamingArgs?: Record<string, any> | null;
 }
 
 interface StatusConfig {
@@ -220,6 +222,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     responseIndex,
     pendingApproval: pendingApprovalProp,
     hasToolReturn = false,
+    streamingArgs,
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
@@ -237,6 +240,46 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const actionInFinalState = action && action.status !== 'pending';
     const pendingApproval = actionInFinalState ? null : pendingApprovalProp;
     const isAwaitingApproval = pendingApproval !== null;
+
+    // Streaming mode: show live preview without action buttons while LLM generates args
+    const isStreaming = !action && !pendingApproval && streamingArgs
+        && Object.keys(streamingArgs).length > 0;
+
+    if (isStreaming && streamingArgs) {
+        const streamingTitle = getActionTitle(toolName, streamingArgs, null, undefined);
+        const streamingPreviewData: PreviewData = {
+            actionType: toolName,
+            actionData: streamingArgs,
+        };
+
+        return (
+            <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
+                {/* Header with spinner + shimmer title */}
+                <div className="display-flex flex-row py-15 bg-senary border-bottom-quinary">
+                    <div
+                        className="variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left mt-015"
+                        style={{ background: 'transparent', border: 0, padding: 0 }}
+                    >
+                        <div className="display-flex flex-row px-3 gap-2">
+                            <div className="flex-1 display-flex mt-010">
+                                <Icon icon={Spinner} />
+                            </div>
+                            <div className="display-flex shimmer-text">
+                                {streamingTitle || 'Creating note...'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {/* Always-expanded preview */}
+                <ActionPreview
+                    toolName={toolName}
+                    previewData={streamingPreviewData}
+                    status="pending"
+                    isStreaming={true}
+                />
+            </div>
+        );
+    }
 
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
     // Include responseIndex to disambiguate duplicate tool_call_ids within the same run
@@ -1173,7 +1216,9 @@ const ActionPreview: React.FC<{
     status: ActionStatus | 'awaiting';
     /** All actions for the tool call (for multi-item create_items) */
     actions?: AgentAction[];
-}> = ({ toolName, previewData, status, actions }) => {
+    /** Whether tool call arguments are actively streaming */
+    isStreaming?: boolean;
+}> = ({ toolName, previewData, status, actions, isStreaming }) => {
     if (toolName === 'edit_metadata' || previewData.actionType === 'edit_metadata') {
         const edits = previewData.actionData.edits || [];
         
@@ -1328,6 +1373,7 @@ const ActionPreview: React.FC<{
                 content={noteContent}
                 resultData={previewData.resultData}
                 status={status}
+                isStreaming={isStreaming}
             />
         );
     }

@@ -59,6 +59,15 @@ export interface WSToolCallProgressEvent extends WSBaseEvent {
     progress: string;
 }
 
+/** Streaming tool call arguments for live preview (e.g., create_note content) */
+export interface WSToolCallArgsStreamEvent extends WSBaseEvent {
+    event: 'tool_call_args_stream';
+    run_id: string;
+    tool_call_id: string;
+    tool_name: string;
+    args: Record<string, any>;
+}
+
 /** Run complete event signaling the agent run finished */
 export interface WSRunCompleteEvent extends WSBaseEvent {
     event: 'run_complete';
@@ -983,6 +992,7 @@ export type WSEvent =
     | WSPartEvent
     | WSToolReturnEvent
     | WSToolCallProgressEvent
+    | WSToolCallArgsStreamEvent
     | WSRunCompleteEvent
     | WSDoneEvent
     | WSThreadEvent
@@ -1167,6 +1177,12 @@ export interface WSCallbacks {
      * @param event The tool call progress event with run_id, message_index, and part data
      */
     onToolCallProgress: (event: WSToolCallProgressEvent) => void;
+
+    /**
+     * Called when streaming tool call arguments are received for live preview.
+     * @param event The tool call args stream event with partially-parsed arguments
+     */
+    onToolCallArgsStream: (event: WSToolCallArgsStreamEvent) => void;
 
     /**
      * Called when the agent run completes.

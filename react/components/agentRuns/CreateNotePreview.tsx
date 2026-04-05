@@ -1,6 +1,5 @@
 import React from 'react';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
-import { openNoteByKey } from '../../utils/sourceUtils';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -11,39 +10,28 @@ interface CreateNotePreviewProps {
     resultData?: Record<string, any>;
     /** Current status of the action */
     status?: ActionStatus;
+    /** Whether tool call arguments are actively streaming */
+    isStreaming?: boolean;
 }
 
 export const CreateNotePreview: React.FC<CreateNotePreviewProps> = ({
     content,
     resultData,
     status,
+    isStreaming,
 }) => {
     const trimmedContent = content.replace(/^\n+/, '');
 
     return (
         <div className="display-flex flex-col">
             <div className="display-flex flex-col px-25 pt-2 pb-2 gap-2">
-                <div className="markdown note-body">
+                <div className={`markdown note-body ${isStreaming ? 'streaming-content' : ''}`}>
                     <MarkdownRenderer
-                        content={trimmedContent || '_No content yet._'}
+                        content={trimmedContent || (isStreaming ? '_Generating..._' : '_No content yet._')}
                         enableNoteBlocks={false}
                     />
                 </div>
             </div>
-            {resultData?.zotero_key && status === 'applied' && (
-                <div
-                    className="font-color-link text-xs px-3 pb-2 cursor-pointer"
-                    onClick={() => {
-                        const libId = resultData.library_id;
-                        const key = resultData.zotero_key;
-                        if (libId && key) {
-                            openNoteByKey(libId, key);
-                        }
-                    }}
-                >
-                    Open note
-                </div>
-            )}
         </div>
     );
 };

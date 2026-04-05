@@ -89,6 +89,9 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     read_file: TextAlignLeftIcon,
 };
 
+/** Tools that support streaming argument preview */
+const STREAMING_PREVIEW_TOOLS = new Set(['create_note']);
+
 /**
  * Detect the type of file being read by the read_file tool.
  * Simplified version of detectReadFileType from toolLabels.ts
@@ -288,6 +291,25 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
 
     const hasExpandedResult = effectiveExpanded && canExpand;
     const isShimmering = isInProgress && !hasResult && runStatus === 'in_progress';
+
+    // Streaming argument preview for tools that support live preview (e.g., create_note)
+    const streamingArgs = part.streaming_args;
+    const showStreamingPreview = !!streamingArgs && runStatus === 'in_progress'
+        && STREAMING_PREVIEW_TOOLS.has(part.tool_name) && !showAgentActionView;
+
+    if (showStreamingPreview && streamingArgs) {
+        return (
+            <AgentActionView
+                toolcallId={part.tool_call_id}
+                toolName={part.tool_name}
+                runId={runId}
+                responseIndex={responseIndex}
+                pendingApproval={null}
+                hasToolReturn={false}
+                streamingArgs={streamingArgs}
+            />
+        );
+    }
 
     // For agent action tools, show the AgentActionView instead of normal tool result
     if (showAgentActionView) {
