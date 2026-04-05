@@ -25,6 +25,7 @@ import { CreateItemsPreview } from './CreateItemsPreview';
 import { ConfirmExtractionPreview } from './ConfirmExtractionPreview';
 import { ConfirmExternalSearchPreview } from './ConfirmExternalSearchPreview';
 import { EditNotePreview } from './EditNotePreview';
+import { CreateNotePreview } from './CreateNotePreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
@@ -1320,56 +1321,14 @@ const ActionPreview: React.FC<{
     }
 
     if (toolName === 'create_note' || previewData.actionType === 'create_note') {
-        const noteTitle = previewData.actionData.title || '(untitled)';
         const noteContent = previewData.actionData.content || '';
-        const libraryName = previewData.currentValue?.library_name;
-        const parentKey = previewData.currentValue?.parent_key || previewData.actionData.parent_key || previewData.actionData.parent_item_id;
-        const collectionKey = previewData.currentValue?.collection_key || previewData.actionData.collection_key;
-        const resultData = previewData.resultData;
-
-        // Show a simple preview of the note content
-        const truncatedContent = noteContent.length > 300
-            ? noteContent.substring(0, 300) + '...'
-            : noteContent;
 
         return (
-            <div className="text-sm px-3 py-2">
-                <div className="font-color-primary font-medium mb-1">{noteTitle}</div>
-                {libraryName && (
-                    <div className="font-color-secondary text-xs mb-1">Library: {libraryName}</div>
-                )}
-                {parentKey && (
-                    <div className="font-color-secondary text-xs mb-1">Child note of parent item</div>
-                )}
-                {collectionKey && (
-                    <div className="font-color-secondary text-xs mb-1">Added to collection</div>
-                )}
-                <div
-                    className="font-color-secondary text-xs mt-1 p-2 rounded overflow-auto"
-                    style={{
-                        maxHeight: '150px',
-                        backgroundColor: 'var(--fill-quinary)',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                    }}
-                >
-                    {truncatedContent}
-                </div>
-                {resultData?.zotero_key && status === 'applied' && (
-                    <div
-                        className="font-color-link text-xs mt-1 cursor-pointer"
-                        onClick={() => {
-                            const libId = resultData.library_id;
-                            const key = resultData.zotero_key;
-                            if (libId && key) {
-                                openNoteByKey(libId, key);
-                            }
-                        }}
-                    >
-                        Open note
-                    </div>
-                )}
-            </div>
+            <CreateNotePreview
+                content={noteContent}
+                resultData={previewData.resultData}
+                status={status}
+            />
         );
     }
 
