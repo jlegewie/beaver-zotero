@@ -102,6 +102,9 @@ function confirmOverwriteManualChanges(modifiedFields: string[]): boolean {
     return buttonIndex === 0;
 }
 
+/** Tools that should remain expanded after approval resolves (never auto-collapse) */
+const NEVER_AUTO_COLLAPSE_TOOLS = new Set(['create_note']);
+
 interface AgentActionViewProps {
     toolcallId: string;
     toolName: string;
@@ -290,29 +293,33 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     // Check if state exists at render time (not in effect) to avoid dependency on entire expansionState
     const hasExistingState = expansionState[expansionKey] !== undefined;
-    const isExpanded = expansionState[expansionKey] ?? isAwaitingApproval;
+    const neverAutoCollapse = NEVER_AUTO_COLLAPSE_TOOLS.has(toolName);
+    const isExpanded = expansionState[expansionKey] ?? (isAwaitingApproval || neverAutoCollapse);
 
     // Track previous values to detect actual changes vs re-mounts
     const prevAwaitingRef = useRef(isAwaitingApproval);
     const hasInitializedRef = useRef(false);
 
-    // Sync isExpanded with isAwaitingApproval, but avoid resetting on re-mount
+    // Sync isExpanded with isAwaitingApproval, but avoid resetting on re-mount.
+    // Tools in NEVER_AUTO_COLLAPSE_TOOLS stay expanded when approval resolves.
     useEffect(() => {
         if (!hasInitializedRef.current) {
             hasInitializedRef.current = true;
             // On first mount, only set if there's no existing state (preserves state from other pane)
             if (!hasExistingState) {
-                setExpanded({ key: expansionKey, expanded: isAwaitingApproval });
+                setExpanded({ key: expansionKey, expanded: isAwaitingApproval || neverAutoCollapse });
             }
             return;
         }
 
         // After first mount, sync when isAwaitingApproval actually changes
         if (prevAwaitingRef.current !== isAwaitingApproval) {
-            setExpanded({ key: expansionKey, expanded: isAwaitingApproval });
+            // For never-auto-collapse tools, only expand (never collapse automatically)
+            const shouldExpand = neverAutoCollapse ? true : isAwaitingApproval;
+            setExpanded({ key: expansionKey, expanded: shouldExpand });
         }
         prevAwaitingRef.current = isAwaitingApproval;
-    }, [isAwaitingApproval, expansionKey, hasExistingState, setExpanded]);
+    }, [isAwaitingApproval, expansionKey, hasExistingState, neverAutoCollapse, setExpanded]);
 
     // Track when we're waiting for approval response from backend
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
