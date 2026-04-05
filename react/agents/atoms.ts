@@ -207,9 +207,18 @@ export function updateRunWithPart(run: AgentRun, event: WSPartEvent): AgentRun {
         return run;
     }
 
-    // Update the part at part_index
+    // Update the part at part_index, preserving client-side streaming_args
     const parts = [...message.parts];
-    parts[event.part_index] = event.part as TextPart | ThinkingPart | ToolCallPart;
+    let newPart = event.part as TextPart | ThinkingPart | ToolCallPart;
+    const existingPart = parts[event.part_index];
+    if (
+        newPart.part_kind === 'tool-call' &&
+        existingPart?.part_kind === 'tool-call' &&
+        existingPart.streaming_args
+    ) {
+        newPart = { ...newPart, streaming_args: existingPart.streaming_args };
+    }
+    parts[event.part_index] = newPart;
 
     // Update the message
     messages[event.message_index] = {

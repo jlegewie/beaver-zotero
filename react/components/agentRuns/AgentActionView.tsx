@@ -248,42 +248,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isStreaming = !action && !pendingApproval && streamingArgs
         && Object.keys(streamingArgs).length > 0;
 
-    if (isStreaming && streamingArgs) {
-        const streamingTitle = getActionTitle(toolName, streamingArgs, null, undefined);
-        const streamingPreviewData: PreviewData = {
-            actionType: toolName,
-            actionData: streamingArgs,
-        };
-
-        return (
-            <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
-                {/* Header with spinner + shimmer title */}
-                <div className="display-flex flex-row py-15 bg-senary border-bottom-quinary">
-                    <div
-                        className="variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left mt-015"
-                        style={{ background: 'transparent', border: 0, padding: 0 }}
-                    >
-                        <div className="display-flex flex-row px-3 gap-2">
-                            <div className="flex-1 display-flex mt-010">
-                                <Icon icon={Spinner} />
-                            </div>
-                            <div className="display-flex shimmer-text">
-                                {streamingTitle || 'Creating note...'}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                {/* Always-expanded preview */}
-                <ActionPreview
-                    toolName={toolName}
-                    previewData={streamingPreviewData}
-                    status="pending"
-                    isStreaming={true}
-                />
-            </div>
-        );
-    }
-
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
     // Include responseIndex to disambiguate duplicate tool_call_ids within the same run
     // (some providers reuse tool_call_ids across responses, e.g., when retrying failed calls)
@@ -852,6 +816,44 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     };
 
     const actionTitle = getActionTitle(toolName, action?.proposed_data, itemTitle, actions);
+
+    // Streaming mode: show live preview without action buttons while LLM generates args.
+    // This must be after all hooks to satisfy Rules of Hooks.
+    if (isStreaming && streamingArgs) {
+        const streamingTitle = getActionTitle(toolName, streamingArgs, null, undefined);
+        const streamingPreviewData: PreviewData = {
+            actionType: toolName,
+            actionData: streamingArgs,
+        };
+
+        return (
+            <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
+                {/* Header with spinner + shimmer title */}
+                <div className="display-flex flex-row py-15 bg-senary border-bottom-quinary">
+                    <div
+                        className="variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left mt-015"
+                        style={{ background: 'transparent', border: 0, padding: 0 }}
+                    >
+                        <div className="display-flex flex-row px-3 gap-2">
+                            <div className="flex-1 display-flex mt-010">
+                                <Icon icon={Spinner} />
+                            </div>
+                            <div className="display-flex shimmer-text">
+                                {streamingTitle || 'Creating note...'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {/* Always-expanded preview */}
+                <ActionPreview
+                    toolName={toolName}
+                    previewData={streamingPreviewData}
+                    status="pending"
+                    isStreaming={true}
+                />
+            </div>
+        );
+    }
 
     return (
         <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
