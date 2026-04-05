@@ -30,6 +30,7 @@ import { executeCreateCollectionAction, undoCreateCollectionAction } from '../..
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
 import { executeCreateItemActions, undoCreateItemActions } from '../../utils/createItemActions';
 import { executeEditNoteAction, undoEditNoteAction } from '../../utils/editNoteActions';
+import { executeCreateNoteAction, undoCreateNoteAction } from '../../utils/createNoteActions';
 import type { CreateItemProposedData } from '../../types/agentActions/items';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
@@ -493,6 +494,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     result_data: result,
                 }]);
                 logger(`AgentActionView: Applied edit_note action ${action!.id}`, 1);
+            } else if (toolName === 'create_note') {
+                const result = await executeCreateNoteAction(action!);
+                await ackAgentActions(runId, [{
+                    action_id: action!.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied create_note action ${action!.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
                 // Handle batch operations for multiple items
                 const actionsToApply = actions.filter(a => a.status !== 'applied');
@@ -612,6 +620,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 await undoEditNoteAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone edit_note action ${action.id}`, 1);
+            } else if (toolName === 'create_note') {
+                await undoCreateNoteAction(action);
+                undoAgentAction(action.id);
+                logger(`AgentActionView: Undone create_note action ${action.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
                 // Handle batch undo for multiple items
                 const actionsToUndo = actions.filter(a => a.status === 'applied');
@@ -765,6 +777,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             if (toolName === 'edit_metadata') return PropertyEditIcon;
             if (toolName === 'edit_item') return PropertyEditIcon;
             if (toolName === 'edit_note') return EditIcon;
+            if (toolName === 'create_note') return FileDiffIcon;
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
             if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
@@ -828,7 +841,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         >
                             <span className="font-color-primary font-medium">{getActionLabel(toolName)}</span>
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
-                            {action?.proposed_data?.library_id && action?.proposed_data?.zotero_key && (<>{'\u00A0'}<Tooltip content={toolName === 'edit_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
+                            {action?.proposed_data?.library_id && action?.proposed_data?.zotero_key && (<>{'\u00A0'}<Tooltip content={toolName === 'edit_note' || toolName === 'create_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
                                     <span
                                         className="font-color-secondary scale-11"
                                         style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
@@ -836,7 +849,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                         onClick={(e) => {
                                             e.stopPropagation();
                                             e.preventDefault();
-                                            if (toolName === 'edit_note') {
+                                            if (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key) {
+                                                openNoteByKey(action.result_data.library_id, action.result_data.zotero_key);
+                                            } else if (toolName === 'edit_note') {
                                                 const isApplied = action?.status === 'applied';
                                                 openNoteAndSearchEdit(
                                                     action?.proposed_data?.library_id,
@@ -1046,6 +1061,8 @@ function getActionLabel(toolName: string): string {
             return 'Edit';
         case 'edit_note':
             return 'Edit Note';
+        case 'create_note':
+            return 'Create Note';
         case 'create_item':
         case 'create_items':
             return 'Import';
@@ -1073,6 +1090,8 @@ function getActionTitle(
         case 'edit_item':
         case 'edit_note':
             return itemTitle ? itemTitle : null;
+        case 'create_note':
+            return actionData?.title ?? null;
         case 'create_collection':
             return actionData?.name ?? actionData?.proposed_data?.name ?? null;
         case 'organize_items': {
@@ -1297,6 +1316,60 @@ const ActionPreview: React.FC<{
                 libraryId={previewData.actionData.library_id}
                 zoteroKey={previewData.actionData.zotero_key}
             />
+        );
+    }
+
+    if (toolName === 'create_note' || previewData.actionType === 'create_note') {
+        const noteTitle = previewData.actionData.title || '(untitled)';
+        const noteContent = previewData.actionData.content || '';
+        const libraryName = previewData.currentValue?.library_name;
+        const parentKey = previewData.currentValue?.parent_key || previewData.actionData.parent_key || previewData.actionData.parent_item_id;
+        const collectionKey = previewData.currentValue?.collection_key || previewData.actionData.collection_key;
+        const resultData = previewData.resultData;
+
+        // Show a simple preview of the note content
+        const truncatedContent = noteContent.length > 300
+            ? noteContent.substring(0, 300) + '...'
+            : noteContent;
+
+        return (
+            <div className="text-sm px-3 py-2">
+                <div className="font-color-primary font-medium mb-1">{noteTitle}</div>
+                {libraryName && (
+                    <div className="font-color-secondary text-xs mb-1">Library: {libraryName}</div>
+                )}
+                {parentKey && (
+                    <div className="font-color-secondary text-xs mb-1">Child note of parent item</div>
+                )}
+                {collectionKey && (
+                    <div className="font-color-secondary text-xs mb-1">Added to collection</div>
+                )}
+                <div
+                    className="font-color-secondary text-xs mt-1 p-2 rounded overflow-auto"
+                    style={{
+                        maxHeight: '150px',
+                        backgroundColor: 'var(--fill-quinary)',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                    }}
+                >
+                    {truncatedContent}
+                </div>
+                {resultData?.zotero_key && status === 'applied' && (
+                    <div
+                        className="font-color-link text-xs mt-1 cursor-pointer"
+                        onClick={() => {
+                            const libId = resultData.library_id;
+                            const key = resultData.zotero_key;
+                            if (libId && key) {
+                                openNoteByKey(libId, key);
+                            }
+                        }}
+                    >
+                        Open note
+                    </div>
+                )}
+            </div>
         );
     }
 

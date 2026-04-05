@@ -7,6 +7,7 @@ import { TimeoutError } from './timeout';
 import { executeEditNoteAction } from './actions/editNote';
 import { executeEditMetadataAction } from './actions/editMetadata';
 import { executeOrganizeItemsAction } from './actions/organizeItems';
+import { executeCreateNoteAction } from './actions/createNote';
 
 
 /**
@@ -52,6 +53,8 @@ export async function handleAgentActionExecuteRequest(
             result = await executeCreateItemAction(request, ctx);
         } else if (request.action_type === 'edit_note') {
             result = await executeEditNoteAction(request, ctx);
+        } else if (request.action_type === 'create_note') {
+            result = await executeCreateNoteAction(request, ctx);
         } else {
             return {
                 type: 'agent_action_execute_response',

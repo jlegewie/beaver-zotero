@@ -80,6 +80,13 @@ export const isZoteroNoteAgentAction = (action: AgentAction): boolean => {
 };
 
 /**
+ * Type guard for create note actions (via create_note tool)
+ */
+export const isCreateNoteAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'create_note';
+};
+
+/**
  * Type guard for create item actions
  */
 export const isCreateItemAgentAction = (action: AgentAction): action is CreateItemAgentAction => {
