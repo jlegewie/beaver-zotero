@@ -626,19 +626,6 @@
     }
 }
 
-/* Streaming content cursor — shown while tool call args are being generated */
-.streaming-content > :last-child::after {
-    content: '▋';
-    animation: blink-cursor 1s step-end infinite;
-    color: var(--fill-tertiary);
-    margin-left: 2px;
-}
-
-@keyframes blink-cursor {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0; }
-}
-
 
 /* Spacing */
 [id^="beaver-pane-"] .gap-05 { column-gap: 0.125rem; row-gap: 0.125rem; }
