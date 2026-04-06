@@ -13,14 +13,29 @@ import { ZoteroItemReference } from '../../../../react/types/zotero';
 
 
 /**
+ * Result of extracting citation references from content.
+ */
+export interface ExtractedCitationReferences {
+    /** Valid references to look up in Zotero */
+    references: ZoteroItemReference[];
+    /** Keys that failed format validation (fabricated by the model) */
+    invalidKeys: string[];
+}
+
+
+/**
  * Extract unique ZoteroItemReferences from citation tags in content.
  *
+ * Also reports invalid keys separately so the backend can provide
+ * feedback to the model about fabricated citations.
+ *
  * @param content Content (markdown or HTML) containing citation tags
- * @returns Deduplicated array of ZoteroItemReference
+ * @returns Valid references and any invalid keys
  */
-export function extractCitationReferences(content: string): ZoteroItemReference[] {
+export function extractCitationReferences(content: string): ExtractedCitationReferences {
     const seen = new Set<string>();
     const references: ZoteroItemReference[] = [];
+    const invalidKeys: string[] = [];
 
     // Reset regex lastIndex for fresh matching
     CITATION_TAG_PATTERN.lastIndex = 0;
@@ -34,17 +49,23 @@ export function extractCitationReferences(content: string): ZoteroItemReference[
         if (!refStr) continue;  // external_id only, or no identifier
 
         const parsed = parseItemReference(refStr);
-        if (!parsed) continue;  // invalid format
+        if (!parsed) continue;  // completely unparseable format
 
         const key = `${parsed.libraryID}-${parsed.itemKey}`;
         if (seen.has(key)) continue;  // duplicate
-
         seen.add(key);
+
+        // Validate Zotero key format — track invalid keys separately
+        if (!Zotero.Utilities.isValidObjectKey(parsed.itemKey)) {
+            invalidKeys.push(key);
+            continue;
+        }
+
         references.push({
             library_id: parsed.libraryID,
             zotero_key: parsed.itemKey,
         });
     }
 
-    return references;
+    return { references, invalidKeys };
 }

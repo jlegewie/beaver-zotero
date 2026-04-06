@@ -335,8 +335,10 @@ async function executeCreateNoteAction(
 
         // Resolve citation references for backend validation
         let citedItemsData: LookupZoteroReferencesResult | null = null;
+        let invalidCitationKeys: string[] = [];
         try {
-            const citationRefs = extractCitationReferences(content);
+            const { references: citationRefs, invalidKeys } = extractCitationReferences(content);
+            invalidCitationKeys = invalidKeys;
             if (citationRefs.length > 0) {
                 logger(`executeCreateNoteAction: Resolving ${citationRefs.length} citation reference(s)`, 1);
                 citedItemsData = await lookupZoteroReferences(citationRefs, {
@@ -344,6 +346,9 @@ async function executeCreateNoteAction(
                     include_parents: true,
                     file_status_level: 'none',  // metadata only
                 });
+            }
+            if (invalidKeys.length > 0) {
+                logger(`executeCreateNoteAction: Found ${invalidKeys.length} invalid citation key(s): ${invalidKeys.join(', ')}`, 1);
             }
         } catch (citationError: any) {
             logger(`executeCreateNoteAction: Citation resolution failed (non-fatal): ${citationError.message}`, 1);
@@ -360,12 +365,18 @@ async function executeCreateNoteAction(
                 ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {}),
                 ...(collectionKey ? { collection_key: collectionKey } : {}),
                 ...(noteContent ? { note_content: noteContent } : {}),
-                ...(citedItemsData ? {
+                ...((citedItemsData || invalidCitationKeys.length > 0) ? {
                     cited_items_data: {
-                        items: citedItemsData.items,
-                        attachments: citedItemsData.attachments,
-                        ...(citedItemsData.notes.length > 0 ? { notes: citedItemsData.notes } : {}),
-                        ...(citedItemsData.errors.length > 0 ? { errors: citedItemsData.errors } : {}),
+                        ...(citedItemsData ? {
+                            items: citedItemsData.items,
+                            attachments: citedItemsData.attachments,
+                            ...(citedItemsData.notes.length > 0 ? { notes: citedItemsData.notes } : {}),
+                            ...(citedItemsData.errors.length > 0 ? { errors: citedItemsData.errors } : {}),
+                        } : {
+                            items: [],
+                            attachments: [],
+                        }),
+                        ...(invalidCitationKeys.length > 0 ? { invalid_keys: invalidCitationKeys } : {}),
                     }
                 } : {}),
             },
