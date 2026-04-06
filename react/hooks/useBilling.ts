@@ -82,11 +82,12 @@ export function useBilling() {
         }
     }, []);
 
-    const upgradeSubscription = useCallback(async () => {
+    const upgradeSubscription = useCallback(async (targetSku: string) => {
         setIsLoading(true);
         setError(null);
         try {
             const { portal_url } = await accountService.createUpgradeSession(
+                targetSku,
                 `${WEBAPP_BASE_URL}/checkout/return`
             );
             Zotero.launchURL(portal_url);

@@ -182,8 +182,12 @@ const BillingSection: React.FC = () => {
     const profileBalance = useAtomValue(profileBalanceAtom);
     const isPastDue = useAtomValue(isCreditPlanPastDueAtom);
     const hasPlan = useAtomValue(hasCreditPlanAtom);
-    const { subscribe, buyCredits, manageSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
+    const { subscribe, buyCredits, manageSubscription, upgradeSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
     const creditPacks = plans.filter(p => !p.interval);
+    const upgradePlan = hasPlan && !creditPlan.cancelAtPeriodEnd
+        ? plans.filter(p => p.interval && p.monthly_credits > (creditPlan.monthlyCredits || 0))
+            .sort((a, b) => a.monthly_credits - b.monthly_credits)[0] ?? null
+        : null;
 
     // --- Fetch plans when billing tab is active and user has no plan ---
     useEffect(() => {
@@ -288,7 +292,12 @@ const BillingSection: React.FC = () => {
                                 )}
                             </div>
                             <div className="flex-1" />
-                            <Button variant="outline" onClick={manageSubscription} disabled={isBillingLoading}>
+                            {upgradePlan && (
+                                <Button variant="outline" onClick={() => upgradeSubscription(upgradePlan.sku)} loading={isBillingLoading}>
+                                    Upgrade
+                                </Button>
+                            )}
+                            <Button variant="surface-light" onClick={manageSubscription} disabled={isBillingLoading} style={{ padding: '2px 6px' }}>
                                 {creditPlan.cancelAtPeriodEnd ? 'Resubscribe' : 'Manage'}
                             </Button>
                         </div>

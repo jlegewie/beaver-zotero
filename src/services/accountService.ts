@@ -88,6 +88,11 @@ interface PortalSessionResponse {
     portal_url: string;
 }
 
+interface UpgradeSessionRequest {
+    target_sku: string;
+    return_url: string;
+}
+
 interface UpgradeSessionResponse {
     portal_url: string;
 }
@@ -353,10 +358,11 @@ export class AccountService extends ApiService {
     /**
      * Creates a Stripe Customer Portal deep link for upgrading an existing subscription.
      */
-    async createUpgradeSession(returnUrl: string): Promise<UpgradeSessionResponse> {
+    async createUpgradeSession(targetSku: string, returnUrl: string): Promise<UpgradeSessionResponse> {
         return this.post<UpgradeSessionResponse>('/api/v1/billing/create-upgrade-session', {
+            target_sku: targetSku,
             return_url: returnUrl
-        } as PortalSessionRequest);
+        } as UpgradeSessionRequest);
     }
 
     /**
