@@ -296,7 +296,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Track when approval was removed externally (e.g., via PendingActionsBar "Apply All")
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
     // Track which specific button was clicked ('approve' | 'reject' | null)
-    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | null>(null);
+    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
     // Track the action ID we're processing to detect status changes
     const processingActionIdRef = useRef<string | null>(null);
     // Track previous pending approval to detect external removals
@@ -589,6 +589,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
         setUndoError(null);
         setIsProcessingAction(true);
+        setClickedButton('undo');
         try {
             if (toolName === 'edit_metadata') {
                 // First pass: check what needs to be reverted without forcing
@@ -689,6 +690,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             }
         } finally {
             setIsProcessingAction(false);
+            setClickedButton(null);
         }
     }, [action, actions, isProcessing, toolName, undoAgentAction, setAgentActionsToError, markExternalReferenceDeleted]);
 
@@ -935,7 +937,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
                 <div 
                     className="display-flex flex-row items-center gap-25 mr-2 mt-015"
-                    style={{ visibility: !(isAwaitingApproval || status === 'pending' || isProcessing) ? 'visible' : 'hidden' }}
+                    style={{ visibility: !(isAwaitingApproval || status === 'pending') ? 'visible' : 'hidden' }}
                 >
                     <Tooltip content="Expand" showArrow singleLine>
                         <IconButton
@@ -1047,11 +1049,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )}
 
                         {/* Undo button - for applied */}
-                        {config.showUndo && (
+                        {(config.showUndo || (isProcessing && clickedButton === 'undo')) && (
                             <Button
                                 variant="outline"
                                 onClick={handleUndo}
-                                loading={isProcessing}
+                                loading={isProcessing && clickedButton === 'undo'}
+                                disabled={isProcessing}
                             >
                                 Undo
                             </Button>
