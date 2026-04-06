@@ -523,34 +523,34 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 {previewText}
             </span>
             {isExternal && !mappedZoteroItem && (
-                <div className="px-3 py-15 border-top-quinary block">
-                    <div className="display-flex flex-row items-center gap-15">
+                <span className="px-3 py-15 border-top-quinary block">
+                    <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={GlobalSearchIcon} className="font-color-tertiary" />
                         <span className="text-sm font-color-tertiary">
                             View details
                         </span>
-                    </div>
-                </div>
+                    </span>
+                </span>
             )}
             {hasLocator && (!isExternal || !!mappedZoteroItem) && (
-                <div className="px-3 py-15 border-top-quinary block">
-                    <div className="display-flex flex-row items-center gap-15">
+                <span className="px-3 py-15 border-top-quinary block">
+                    <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={PdfIcon} className="font-color-tertiary" />
                         <span className="text-sm font-color-tertiary">
                             {pages[0] != null ? `Opens PDF on page ${pages[0]}` : 'Opens PDF at location'}
                         </span>
-                    </div>
-                </div>
+                    </span>
+                </span>
             )}
             {!hasLocator && (!isExternal || !!mappedZoteroItem) && (
-                <div className="px-3 py-15 border-top-quinary block">
-                    <div className="display-flex flex-row items-center gap-15">
+                <span className="px-3 py-15 border-top-quinary block">
+                    <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={LibraryIcon} className="font-color-tertiary" />
                         <span className="text-sm font-color-tertiary">
                             Reveals item in library
                         </span>
-                    </div>
-                </div>
+                    </span>
+                </span>
             )}
             {citationMetadata?.type === 'note' && (
                 <span className="px-3 py-15 text-xs font-color-tertiary border-top-quinary block">
