@@ -190,7 +190,7 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
                     onMouseLeave={() => setIsHovered(false)}
                     onClick={isApplied ? handleReveal : undefined}
                 >
-                    <div className="display-flex mt-010" style={{ flexShrink: 0 }}>
+                    <div className="display-flex mt-015" style={{ flexShrink: 0 }}>
                         <Icon icon={getHeaderIcon()} className={getIconClassName()} />
                     </div>
                     <div
