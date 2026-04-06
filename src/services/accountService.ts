@@ -63,6 +63,7 @@ export interface PlanInfo {
     currency: string;
     interval: string | null;
     highlight: boolean;
+    label: string | null;
 }
 
 interface PlansResponse {

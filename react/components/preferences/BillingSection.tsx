@@ -119,6 +119,11 @@ const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promi
                             <div className="display-flex flex-row items-center gap-2" style={{ marginBottom: '4px' }}>
                                 <span className="text-base font-color-primary font-bold">{plan.name}</span>
                             </div>
+                            {plan.label && (
+                                <div className="text-sm font-color-secondary" style={{ marginBottom: '8px', marginTop: '-4px' }}>
+                                    {plan.label}
+                                </div>
+                            )}
                             <div className="text-xl font-color-primary font-bold">
                                 {price}<span className="text-sm font-normal font-color-secondary">/{plan.interval || 'mo'}</span>
                             </div>
