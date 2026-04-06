@@ -33,33 +33,6 @@ interface CreateNoteActionData {
 }
 
 
-// =============================================================================
-// Post-Creation Review
-// =============================================================================
-
-/**
- * Review a newly created note and return feedback messages.
- *
- * Called after the note is saved. Each message is a plain string describing
- * one issue (e.g., citation not found, content concern). Messages are
- * returned in result_data.review_feedback and the backend formats them
- * into revision_instructions for the model.
- *
- * TODO: Implement review logic. For now returns an empty array — the
- * wiring is in place so that when checks are added, feedback flows
- * automatically to the model.
- */
-async function reviewCreatedNote(
-    _noteLibraryId: number,
-    _noteZoteroKey: string,
-): Promise<string[]> {
-    // TODO: Implement review checks, e.g.:
-    // - Parse <citation> elements in the saved note HTML
-    // - Verify each cited item exists and matches
-    // - Check for unresolved or fabricated references
-    return [];
-}
-
 
 /**
  * Validate a create_note action.
@@ -360,18 +333,6 @@ async function executeCreateNoteAction(
             logger(`executeCreateNoteAction: Failed to simplify note content (non-fatal): ${simplifyError.message}`, 1);
         }
 
-        // Post-creation review
-        let reviewFeedback: string[] = [];
-        try {
-            reviewFeedback = await reviewCreatedNote(zoteroNote.libraryID, zoteroNote.key);
-            if (reviewFeedback.length > 0) {
-                logger(`executeCreateNoteAction: Review found ${reviewFeedback.length} issue(s) in note ${zoteroNote.key}`, 1);
-            }
-        } catch (reviewError: any) {
-            logger(`executeCreateNoteAction: Review failed (non-fatal): ${reviewError.message}`, 1);
-            // Review failure is non-fatal — note was created successfully
-        }
-
         // Resolve citation references for backend validation
         let citedItemsData: LookupZoteroReferencesResult | null = null;
         try {
@@ -399,7 +360,6 @@ async function executeCreateNoteAction(
                 ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {}),
                 ...(collectionKey ? { collection_key: collectionKey } : {}),
                 ...(noteContent ? { note_content: noteContent } : {}),
-                ...(reviewFeedback.length > 0 ? { review_feedback: reviewFeedback } : {}),
                 ...(citedItemsData ? {
                     cited_items_data: {
                         items: citedItemsData.items,
