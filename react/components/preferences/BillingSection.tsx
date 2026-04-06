@@ -266,12 +266,19 @@ const BillingSection: React.FC = () => {
                                     <div className="text-2xl font-color-primary font-bold">
                                         {formatPlanName(creditPlan.plan ?? undefined)}
                                     </div>
-                                    {creditPlan.cancelAtPeriodEnd && (
+                                    {creditPlan.cancelAtPeriodEnd ? (
                                         <span
                                             className="text-xs px-15 py-05 rounded-md"
                                             style={{ color: 'var(--tag-orange-secondary)', border: '1px solid var(--tag-orange-tertiary)', background: 'var(--tag-orange-quinary)' }}
                                         >
                                             Cancellation pending
+                                        </span>
+                                    ) : creditPlan.pendingDowngrade && (
+                                        <span
+                                            className="text-xs px-15 py-05 rounded-md"
+                                            style={{ color: 'var(--tag-orange-secondary)', border: '1px solid var(--tag-orange-tertiary)', background: 'var(--tag-orange-quinary)' }}
+                                        >
+                                            Downgrade pending
                                         </span>
                                     )}
                                     {creditPlan.status === 'past_due' && (
