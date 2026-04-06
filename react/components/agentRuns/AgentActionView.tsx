@@ -894,7 +894,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         >
                             <span className="font-color-primary font-medium">{getActionLabel(toolName)}</span>
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
-                            {action?.proposed_data?.library_id && action?.proposed_data?.zotero_key && (<>{'\u00A0'}<Tooltip content={toolName === 'edit_note' || toolName === 'create_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
+                            {((action?.proposed_data?.library_id && action?.proposed_data?.zotero_key) || (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key)) && (<>{'\u00A0'}<Tooltip content={toolName === 'edit_note' || toolName === 'create_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
                                     <span
                                         className="font-color-secondary scale-11"
                                         style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
@@ -1011,20 +1011,22 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     )}
 
                     {/* Action buttons */}
-                    <div className="display-flex flex-row gap-1 px-2 py-2 mt-1">
-                        {isConfirmExtraction ? (
-                            <ExtractionApprovalButton onAlwaysApprove={handleApprove} />
-                        ) : isConfirmExternalSearch ? (
-                            <ExternalSearchApprovalButton onAlwaysApprove={handleApprove} />
-                        ) : (
-                            <DeferredToolPreferenceButton toolName={toolName} />
+                    <div className="display-flex flex-row gap-2 px-2 py-2">
+                        {(isAwaitingApproval || status === 'pending') && (
+                            isConfirmExtraction ? (
+                                <ExtractionApprovalButton onAlwaysApprove={handleApprove} />
+                            ) : isConfirmExternalSearch ? (
+                                <ExternalSearchApprovalButton onAlwaysApprove={handleApprove} />
+                            ) : (
+                                <DeferredToolPreferenceButton toolName={toolName} />
+                            )
                         )}
                         <div className="flex-1" />
 
                         {canShowPreview && (
                             <Button
                                 variant="ghost"
-                                rightIcon={FileDiffIcon}
+                                icon={FileDiffIcon}
                                 onClick={handlePreviewInEditor}
                                 style={{ padding: '3px 6px' }}
                             >
@@ -1035,7 +1037,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         {/* Reject button - for awaiting and pending */}
                         {config.showReject && (!isProcessing || clickedButton === 'reject') && (
                             <Button
-                                variant="ghost"
+                                variant="outline"
                                 onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                                 loading={isProcessing && clickedButton === 'reject'}
                                 disabled={isProcessing}
@@ -1047,7 +1049,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         {/* Undo button - for applied */}
                         {config.showUndo && (
                             <Button
-                                variant="ghost-secondary"
+                                variant="outline"
                                 onClick={handleUndo}
                                 loading={isProcessing}
                             >
@@ -1078,7 +1080,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 />
                             ) : (
                                 <Button
-                                    variant={isAwaitingApproval ? 'solid' : 'ghost-secondary'}
+                                    variant='solid'
                                     onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                                     loading={isProcessing && clickedButton === 'approve'}
                                     disabled={isProcessing}
