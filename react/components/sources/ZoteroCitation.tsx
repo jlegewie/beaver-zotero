@@ -469,13 +469,14 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 properties: {}
             };
             const formatted = Zotero.EditorInstanceUtilities.formatCitation(citationObj);
+            // Use dangerouslySetInnerHTML because formatCitation() returns HTML
+            // (e.g., "(<span class="citation-item">Author, 2024</span>)").
             return (
                 <span
-                    className="citation" 
+                    className="citation"
                     data-citation={encodeURIComponent(JSON.stringify(citationObj))}
-                >
-                    {formatted}
-                </span>
+                    dangerouslySetInnerHTML={{ __html: formatted }}
+                />
             );
         } catch (e) {
             logger(`ZoteroCitation: Item not loaded for ${effectiveLibraryID}/${effectiveItemKey}: ${e}`);
