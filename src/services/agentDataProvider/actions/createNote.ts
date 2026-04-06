@@ -17,6 +17,8 @@ import {
 } from '../../agentProtocol';
 import { getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
+import { extractCitationReferences } from './extractCitationReferences';
+import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
 
 
 /**
@@ -370,6 +372,23 @@ async function executeCreateNoteAction(
             // Review failure is non-fatal — note was created successfully
         }
 
+        // Resolve citation references for backend validation
+        let citedItemsData: LookupZoteroReferencesResult | null = null;
+        try {
+            const citationRefs = extractCitationReferences(content);
+            if (citationRefs.length > 0) {
+                logger(`executeCreateNoteAction: Resolving ${citationRefs.length} citation reference(s)`, 1);
+                citedItemsData = await lookupZoteroReferences(citationRefs, {
+                    include_attachments: true,
+                    include_parents: true,
+                    file_status_level: 'none',  // metadata only
+                });
+            }
+        } catch (citationError: any) {
+            logger(`executeCreateNoteAction: Citation resolution failed (non-fatal): ${citationError.message}`, 1);
+            // Citation resolution failure is non-fatal — note was created successfully
+        }
+
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
@@ -381,6 +400,14 @@ async function executeCreateNoteAction(
                 ...(collectionKey ? { collection_key: collectionKey } : {}),
                 ...(noteContent ? { note_content: noteContent } : {}),
                 ...(reviewFeedback.length > 0 ? { review_feedback: reviewFeedback } : {}),
+                ...(citedItemsData ? {
+                    cited_items_data: {
+                        items: citedItemsData.items,
+                        attachments: citedItemsData.attachments,
+                        ...(citedItemsData.notes.length > 0 ? { notes: citedItemsData.notes } : {}),
+                        ...(citedItemsData.errors.length > 0 ? { errors: citedItemsData.errors } : {}),
+                    }
+                } : {}),
             },
         };
     } catch (error: any) {
