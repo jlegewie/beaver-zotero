@@ -163,6 +163,13 @@ const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promi
     );
 };
 
+const formatPlanName = (plan: string | undefined): string => {
+    if (!plan) return '';
+    const isAnnual = plan.includes('annual');
+    const base = plan.replace('_annual', '').split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    return isAnnual ? `${base} (Annual)` : base;
+};
+
 const formatTimeRemaining = (periodEnd: string, isAnnual: boolean): string => {
     const days = Math.max(0, Math.ceil((new Date(periodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
     if (isAnnual && days > 60) {
@@ -257,9 +264,7 @@ const BillingSection: React.FC = () => {
                             <div className="display-flex flex-col">
                                 <div className="display-flex flex-row items-center gap-3">
                                     <div className="text-2xl font-color-primary font-bold">
-                                        {creditPlan.plan?.includes('annual')
-                                            ? creditPlan.plan.replace('_annual', '').charAt(0).toUpperCase() + creditPlan.plan.replace('_annual', '').slice(1) + ' (Annual)'
-                                            : creditPlan.plan ? creditPlan.plan.charAt(0).toUpperCase() + creditPlan.plan.slice(1) : ''}
+                                        {formatPlanName(creditPlan.plan ?? undefined)}
                                     </div>
                                     {creditPlan.cancelAtPeriodEnd && (
                                         <span
