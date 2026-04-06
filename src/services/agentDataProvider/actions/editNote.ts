@@ -12,6 +12,7 @@ import {
     checkDuplicateCitations,
     findFuzzyMatch,
     validateNewString,
+    checkNewCitationItemsExist,
     findUniqueRawMatchPosition,
     captureValidatedEditTargetContext,
     findTargetRawMatchPosition,
@@ -159,6 +160,19 @@ async function validateEditNoteAction(
             };
         }
 
+        // Check new citation items exist
+        const citationError = checkNewCitationItemsExist(new_string, metadata);
+        if (citationError) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: citationError,
+                error_code: 'citation_item_not_found',
+                preference: 'always_ask',
+            };
+        }
+
         // Dry-run expand new_string only
         try {
             expandToRawHtml(new_string, metadata, 'new');
@@ -214,6 +228,19 @@ async function validateEditNoteAction(
             valid: false,
             error: validationError,
             error_code: 'invalid_new_string',
+            preference: 'always_ask',
+        };
+    }
+
+    // 10b. Check new citation items exist
+    const citationError = checkNewCitationItemsExist(new_string, metadata);
+    if (citationError) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: citationError,
+            error_code: 'citation_item_not_found',
             preference: 'always_ask',
         };
     }
