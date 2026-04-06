@@ -15,10 +15,12 @@ import {
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
 } from '../../agentProtocol';
+import { ItemDataWithStatus, AttachmentDataWithStatus } from '../../../../react/types/zotero';
 import { getDeferredToolPreference, getLibraryByIdOrName, getCollectionByIdOrName } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { extractCitationReferences } from './extractCitationReferences';
 import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
+import { WSDataError, NoteResultItem } from '../../agentProtocol';
 
 
 /**
@@ -30,6 +32,33 @@ interface CreateNoteActionData {
     parent_item_id?: string | null;
     library?: string | null;
     collection?: string | null;
+}
+
+
+/**
+ * Citation resolution data included in result_data.
+ * Mirrors the WSZoteroDataResponse shape plus invalid_keys.
+ */
+interface CitedItemsData {
+    items: ItemDataWithStatus[];
+    attachments: AttachmentDataWithStatus[];
+    notes?: NoteResultItem[];
+    errors?: WSDataError[];
+    /** Citation IDs with invalid Zotero key format (fabricated by the model) */
+    invalid_keys?: string[];
+}
+
+
+/**
+ * Typed shape of result_data returned by executeCreateNoteAction.
+ */
+interface CreateNoteResultData {
+    library_id: number;
+    zotero_key: string;
+    parent_key?: string;
+    collection_key?: string;
+    note_content?: string;
+    cited_items_data?: CitedItemsData;
 }
 
 
@@ -355,31 +384,31 @@ async function executeCreateNoteAction(
             // Citation resolution failure is non-fatal — note was created successfully
         }
 
+        // Build typed result_data
+        const resultData: CreateNoteResultData = {
+            library_id: zoteroNote.libraryID,
+            zotero_key: zoteroNote.key,
+            ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {}),
+            ...(collectionKey ? { collection_key: collectionKey } : {}),
+            ...(noteContent ? { note_content: noteContent } : {}),
+        };
+
+        if (citedItemsData || invalidCitationKeys.length > 0) {
+            const cited: CitedItemsData = {
+                items: citedItemsData?.items ?? [],
+                attachments: citedItemsData?.attachments ?? [],
+                ...(citedItemsData && citedItemsData.notes.length > 0 ? { notes: citedItemsData.notes } : {}),
+                ...(citedItemsData && citedItemsData.errors.length > 0 ? { errors: citedItemsData.errors } : {}),
+                ...(invalidCitationKeys.length > 0 ? { invalid_keys: invalidCitationKeys } : {}),
+            };
+            resultData.cited_items_data = cited;
+        }
+
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: true,
-            result_data: {
-                library_id: zoteroNote.libraryID,
-                zotero_key: zoteroNote.key,
-                ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {}),
-                ...(collectionKey ? { collection_key: collectionKey } : {}),
-                ...(noteContent ? { note_content: noteContent } : {}),
-                ...((citedItemsData || invalidCitationKeys.length > 0) ? {
-                    cited_items_data: {
-                        ...(citedItemsData ? {
-                            items: citedItemsData.items,
-                            attachments: citedItemsData.attachments,
-                            ...(citedItemsData.notes.length > 0 ? { notes: citedItemsData.notes } : {}),
-                            ...(citedItemsData.errors.length > 0 ? { errors: citedItemsData.errors } : {}),
-                        } : {
-                            items: [],
-                            attachments: [],
-                        }),
-                        ...(invalidCitationKeys.length > 0 ? { invalid_keys: invalidCitationKeys } : {}),
-                    }
-                } : {}),
-            },
+            result_data: resultData,
         };
     } catch (error: any) {
         // Re-throw TimeoutError so it propagates to the main handler
