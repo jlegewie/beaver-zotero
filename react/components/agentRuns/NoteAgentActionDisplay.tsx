@@ -5,6 +5,7 @@ import {
     ackAgentActionsAtom,
     rejectAgentActionAtom,
     undoAgentActionAtom,
+    isCreateNoteAgentAction,
 } from '../../agents/agentActions';
 import { NoteProposedData } from '../../types/agentActions/base';
 import { AgentRun } from '../../agents/types';
@@ -290,7 +291,8 @@ const NoteAgentActionDisplay: React.FC<NoteAgentActionDisplayProps> = ({ run, ac
     const visibleActions = actions.filter(a =>
         // FOR NOW: Only show for auto-applied notes
         // a.status === 'pending' || a.status === 'error' || (a.status === 'applied' && isNoteAutoApplied(a.id))
-        (a.status === 'applied' && isNoteAutoApplied(a.id))
+        (a.status === 'applied' && isNoteAutoApplied(a.id)) ||
+        (a.status === 'applied' && isCreateNoteAgentAction(a))
     );
 
     // Pre-extract note blocks from run messages for content matching
