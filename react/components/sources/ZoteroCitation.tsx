@@ -22,7 +22,7 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { ZoteroItemReference } from '../../types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
-import { resolvePageLabel } from '../../utils/pageLabels';
+import { resolvePageLabel, translatePageNumberToLabel } from '../../utils/pageLabels';
 import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
@@ -457,8 +457,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             const item = Zotero.Items.getByLibraryAndKey(effectiveLibraryID, effectiveItemKey);
             if (!item) return null;
             const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
-            const startPage = Array.isArray(pages) ? pages[0] : pages;
-            const navLocator = startPage ? resolvePageLabel(item.id, startPage) : undefined;
+            const startPage = pages.length > 0 ? pages[0] : undefined;
+            // Fallback: use page prop directly when metadata doesn't provide pages
+            const navLocator = startPage
+                ? resolvePageLabel(item.id, startPage)
+                : (page ? translatePageNumberToLabel(item.id, page) : undefined);
             const citationObj = {
                 citationItems: [{
                     uris: [Zotero.URI.getItemURI(item.parentItem || item)],
