@@ -36,10 +36,26 @@ import {
     WSAgentActionValidateResponse,
     WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
+    DeferredToolPreference,
 } from '../../agentProtocol';
 import { getDeferredToolPreference } from '../utils';
+import { autoApproveNoteKeysAtom, makeNoteKey } from '../../../../react/atoms/editNoteAutoApprove';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
+
+/**
+ * Get the effective preference for an edit_note action.
+ * Returns 'always_apply' if the note has been auto-approved for this run,
+ * otherwise falls back to the user's stored deferred-tool preference.
+ */
+function getEditNotePreference(library_id: number, zotero_key: string): DeferredToolPreference {
+    const noteKey = makeNoteKey(library_id, zotero_key);
+    const autoApproveKeys = store.get(autoApproveNoteKeysAtom);
+    if (autoApproveKeys.has(noteKey)) {
+        return 'always_apply';
+    }
+    return getDeferredToolPreference('edit_note');
+}
 
 
 /**
@@ -189,7 +205,7 @@ async function validateEditNoteAction(
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
         const totalLines = simplified.split('\n').length;
-        const preference = getDeferredToolPreference('edit_note');
+        const preference = getEditNotePreference(library_id, zotero_key);
 
         return {
             type: 'agent_action_validate_response',
@@ -359,7 +375,7 @@ async function validateEditNoteAction(
                     if (matchCount >= 1) {
                         const noteTitle = item.getNoteTitle() || '(untitled)';
                         const totalLines = simplified.split('\n').length;
-                        const preference = getDeferredToolPreference('edit_note');
+                        const preference = getEditNotePreference(library_id, zotero_key);
 
                         return {
                             type: 'agent_action_validate_response',
@@ -429,7 +445,7 @@ async function validateEditNoteAction(
                     if (disambiguated) {
                         const noteTitle = item.getNoteTitle() || '(untitled)';
                         const totalLines = simplified.split('\n').length;
-                        const preference = getDeferredToolPreference('edit_note');
+                        const preference = getEditNotePreference(library_id, zotero_key);
 
                         return {
                             type: 'agent_action_validate_response',
@@ -511,7 +527,7 @@ async function validateEditNoteAction(
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
         const totalLines = simplified.split('\n').length;
-        const preference = getDeferredToolPreference('edit_note');
+        const preference = getEditNotePreference(library_id, zotero_key);
 
         return {
             type: 'agent_action_validate_response',
@@ -541,7 +557,7 @@ async function validateEditNoteAction(
     const noteTitle = item.getNoteTitle() || '(untitled)';
     const totalLines = simplified.split('\n').length;
 
-    const preference = getDeferredToolPreference('edit_note');
+    const preference = getEditNotePreference(library_id, zotero_key);
 
     return {
         type: 'agent_action_validate_response',
