@@ -227,12 +227,12 @@ export interface NormalizedCitationAttrs {
  */
 export function parseCitationAttributes(attributesStr: string): NormalizedCitationAttrs {
     const attrs: NormalizedCitationAttrs = {};
-    const attrRegex = /(\w+)="([^"]*)"/g;
+    const attrRegex = /(\w+)=(?:"([^"]*)"|'([^']*)')/g;
     let match: RegExpExecArray | null;
     
     while ((match = attrRegex.exec(attributesStr)) !== null) {
         let name = match[1];
-        const value = match[2];
+        const value = match[2] ?? match[3];
         
         // Normalize attribute names
         if (name === 'attachment_id') {

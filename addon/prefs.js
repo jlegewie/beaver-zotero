@@ -32,9 +32,9 @@ pref("pauseLongRunningAgent", true);
 pref("requestPlusTools", false);
 
 // Deferred tool preferences: maps tool group to preference (always_ask, always_apply, continue_without_applying)
-// toolToGroup maps tool names to group names (allows renaming tools while preserving preference)
-// groupPreferences maps group names to the actual preference value
-pref("deferredToolPreferences", '{"toolToGroup":{"edit_metadata":"metadata_edits","edit_item":"metadata_edits","create_collection":"library_modifications","organize_items":"library_modifications","create_item":"create_items","create_items":"create_items"},"groupPreferences":{"metadata_edits":"always_ask","create_items":"always_ask","library_modifications":"always_ask"}}');
+// Defaults are defined in react/atoms/deferredToolPreferences.ts and merged at load time.
+// This pref only stores user overrides.
+pref("deferredToolPreferences", "");
 
 // AI settings
 pref("customInstructions", "");

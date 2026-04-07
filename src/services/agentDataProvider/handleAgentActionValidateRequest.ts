@@ -10,6 +10,7 @@ import { getDeferredToolPreference } from './utils';
 import { validateEditNoteAction } from './actions/editNote';
 import { validateEditMetadataAction } from './actions/editMetadata';
 import { validateOrganizeItemsAction } from './actions/organizeItems';
+import { validateCreateNoteAction } from './actions/createNote';
 
 
 /**
@@ -41,6 +42,10 @@ export async function handleAgentActionValidateRequest(
 
         if (request.action_type === 'edit_note') {
             return await validateEditNoteAction(request);
+        }
+
+        if (request.action_type === 'create_note') {
+            return await validateCreateNoteAction(request);
         }
 
         // Unsupported action type.

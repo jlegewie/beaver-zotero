@@ -356,6 +356,10 @@ export class AgentService {
                     this.callbacks.onToolCallProgress(event);
                     break;
 
+                case 'tool_call_args_stream':
+                    this.callbacks.onToolCallArgsStream(event);
+                    break;
+
                 case 'run_complete':
                     await this.callbacks.onRunComplete(event);
                     break;

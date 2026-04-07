@@ -12,6 +12,7 @@ import { MuPDFService } from '../pdf/MuPDFService';
 import { EXTRACTION_VERSION } from '../attachmentFileCache';
 import type { AttachmentFileCacheRecord } from '../attachmentFileCache';
 import { DeferredToolPreference } from '../agentProtocol';
+import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
 import { isSupportedItem } from '../../utils/sync';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
@@ -1203,23 +1204,18 @@ export function validateLibraryAccess(libraryIdOrName: number | string | null | 
  * Reads from Zotero prefs with a two-level structure:
  * - toolToGroup: Maps tool names to group names
  * - groupPreferences: Maps group names to preference values
+ *
+ * Merges stored prefs with the defaults from deferredToolPreferences.ts
+ * so that newly added tools (e.g. create_note) use their configured
+ * default even before the user saves any preference change.
  */
 export function getDeferredToolPreference(toolName: string): DeferredToolPreference {
     try {
-        const prefString = getPref('deferredToolPreferences');
-        if (prefString && typeof prefString === 'string') {
-            const data = JSON.parse(prefString);
-            const toolToGroup = data.toolToGroup || {};
-            const groupPreferences = data.groupPreferences || {};
-            
-            // Get the group for this tool (fallback to tool name itself)
-            const group = toolToGroup[toolName] ?? toolName;
-            
-            // Get the preference for this group (fallback to 'always_ask')
-            const preference = groupPreferences[group];
-            if (preference === 'always_ask' || preference === 'always_apply' || preference === 'continue_without_applying') {
-                return preference;
-            }
+        const data = store.get(deferredToolPreferencesAtom);
+        const group = data.toolToGroup[toolName] ?? toolName;
+        const preference = data.groupPreferences[group];
+        if (preference === 'always_ask' || preference === 'always_apply' || preference === 'continue_without_applying') {
+            return preference;
         }
     } catch (error) {
         logger(`getDeferredToolPreference: Failed to read preference for ${toolName}: ${error}`, 1);

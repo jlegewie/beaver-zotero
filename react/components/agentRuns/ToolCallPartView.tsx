@@ -66,6 +66,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     // Note tools
     read_note: TextAlignLeftIcon,
     edit_note: PropertyEditIcon,
+    create_note: DocumentValidationIcon,
 
     // Extract tool
     extract: TaskDailyIcon,
@@ -87,6 +88,12 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     // Read tool result
     read_file: TextAlignLeftIcon,
 };
+
+/** Tools that return pages */
+const UNIT_PAGES_TOOLS = new Set(['read_pages', 'read_attachment', 'view_page_images', 'view_pages']);
+
+/** Tools that support streaming argument preview */
+const STREAMING_PREVIEW_TOOLS = new Set(['create_note']);
 
 /**
  * Detect the type of file being read by the read_file tool.
@@ -192,7 +199,8 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         part.tool_name === 'create_collection' ||
         part.tool_name === 'organize_items' ||
         part.tool_name === 'create_items' ||
-        part.tool_name === 'edit_note';
+        part.tool_name === 'edit_note' ||
+        part.tool_name === 'create_note';
     const isExtractConfirmApproval =
         part.tool_name === 'extract' &&
         pendingApproval?.actionType === 'confirm_extraction';
@@ -227,9 +235,10 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             ? result?.metadata?.summary?.result_count ?? null
             : null;
 
+    const unit = UNIT_PAGES_TOOLS.has(part.tool_name) ? 'page' : 'result';
     const label =
         status === 'completed' && resultCount !== null
-            ? `${baseLabel} (${resultCount} result${resultCount === 1 ? '' : 's'})`
+            ? `${baseLabel} (${resultCount} ${unit}${resultCount === 1 ? '' : 's'})`
             : baseLabel;
 
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
@@ -286,6 +295,25 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
 
     const hasExpandedResult = effectiveExpanded && canExpand;
     const isShimmering = isInProgress && !hasResult && runStatus === 'in_progress';
+
+    // Streaming argument preview for tools that support live preview (e.g., create_note)
+    const streamingArgs = part.streaming_args;
+    const showStreamingPreview = !!streamingArgs && runStatus === 'in_progress'
+        && STREAMING_PREVIEW_TOOLS.has(part.tool_name) && !showAgentActionView;
+
+    if (showStreamingPreview && streamingArgs) {
+        return (
+            <AgentActionView
+                toolcallId={part.tool_call_id}
+                toolName={part.tool_name}
+                runId={runId}
+                responseIndex={responseIndex}
+                pendingApproval={null}
+                hasToolReturn={false}
+                streamingArgs={streamingArgs}
+            />
+        );
+    }
 
     // For agent action tools, show the AgentActionView instead of normal tool result
     if (showAgentActionView) {

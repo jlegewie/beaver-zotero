@@ -25,11 +25,13 @@ import { CreateItemsPreview } from './CreateItemsPreview';
 import { ConfirmExtractionPreview } from './ConfirmExtractionPreview';
 import { ConfirmExternalSearchPreview } from './ConfirmExternalSearchPreview';
 import { EditNotePreview } from './EditNotePreview';
+import { CreateNotePreview } from './CreateNotePreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
 import { executeCreateItemActions, undoCreateItemActions } from '../../utils/createItemActions';
 import { executeEditNoteAction, undoEditNoteAction } from '../../utils/editNoteActions';
+import { executeCreateNoteAction, undoCreateNoteAction } from '../../utils/createNoteActions';
 import type { CreateItemProposedData } from '../../types/agentActions/items';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
@@ -100,6 +102,9 @@ function confirmOverwriteManualChanges(modifiedFields: string[]): boolean {
     return buttonIndex === 0;
 }
 
+/** Tools that should remain expanded after approval resolves (never auto-collapse) */
+const NEVER_AUTO_COLLAPSE_TOOLS = new Set(['create_note']);
+
 interface AgentActionViewProps {
     toolcallId: string;
     toolName: string;
@@ -111,6 +116,8 @@ interface AgentActionViewProps {
     pendingApproval: PendingApproval | null;
     /** Whether a tool-return has been received for this tool call (backend completed processing) */
     hasToolReturn?: boolean;
+    /** Pre-parsed partial tool call arguments for streaming preview */
+    streamingArgs?: Record<string, any> | null;
 }
 
 interface StatusConfig {
@@ -218,6 +225,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     responseIndex,
     pendingApproval: pendingApprovalProp,
     hasToolReturn = false,
+    streamingArgs,
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
@@ -236,6 +244,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const pendingApproval = actionInFinalState ? null : pendingApprovalProp;
     const isAwaitingApproval = pendingApproval !== null;
 
+    // Streaming mode: show live preview without action buttons while LLM generates args
+    const isStreaming = !action && !pendingApproval && streamingArgs
+        && Object.keys(streamingArgs).length > 0;
+
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
     // Include responseIndex to disambiguate duplicate tool_call_ids within the same run
     // (some providers reuse tool_call_ids across responses, e.g., when retrying failed calls)
@@ -245,29 +257,33 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     // Check if state exists at render time (not in effect) to avoid dependency on entire expansionState
     const hasExistingState = expansionState[expansionKey] !== undefined;
-    const isExpanded = expansionState[expansionKey] ?? isAwaitingApproval;
+    const neverAutoCollapse = NEVER_AUTO_COLLAPSE_TOOLS.has(toolName);
+    const isExpanded = expansionState[expansionKey] ?? (isAwaitingApproval || neverAutoCollapse);
 
     // Track previous values to detect actual changes vs re-mounts
     const prevAwaitingRef = useRef(isAwaitingApproval);
     const hasInitializedRef = useRef(false);
 
-    // Sync isExpanded with isAwaitingApproval, but avoid resetting on re-mount
+    // Sync isExpanded with isAwaitingApproval, but avoid resetting on re-mount.
+    // Tools in NEVER_AUTO_COLLAPSE_TOOLS stay expanded when approval resolves.
     useEffect(() => {
         if (!hasInitializedRef.current) {
             hasInitializedRef.current = true;
             // On first mount, only set if there's no existing state (preserves state from other pane)
             if (!hasExistingState) {
-                setExpanded({ key: expansionKey, expanded: isAwaitingApproval });
+                setExpanded({ key: expansionKey, expanded: isAwaitingApproval || neverAutoCollapse });
             }
             return;
         }
 
         // After first mount, sync when isAwaitingApproval actually changes
         if (prevAwaitingRef.current !== isAwaitingApproval) {
-            setExpanded({ key: expansionKey, expanded: isAwaitingApproval });
+            // For never-auto-collapse tools, only expand (never collapse automatically)
+            const shouldExpand = neverAutoCollapse ? true : isAwaitingApproval;
+            setExpanded({ key: expansionKey, expanded: shouldExpand });
         }
         prevAwaitingRef.current = isAwaitingApproval;
-    }, [isAwaitingApproval, expansionKey, hasExistingState, setExpanded]);
+    }, [isAwaitingApproval, expansionKey, hasExistingState, neverAutoCollapse, setExpanded]);
 
     // Track when we're waiting for approval response from backend
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
@@ -280,7 +296,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Track when approval was removed externally (e.g., via PendingActionsBar "Apply All")
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
     // Track which specific button was clicked ('approve' | 'reject' | null)
-    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | null>(null);
+    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
     // Track the action ID we're processing to detect status changes
     const processingActionIdRef = useRef<string | null>(null);
     // Track previous pending approval to detect external removals
@@ -493,6 +509,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     result_data: result,
                 }]);
                 logger(`AgentActionView: Applied edit_note action ${action!.id}`, 1);
+            } else if (toolName === 'create_note') {
+                const result = await executeCreateNoteAction(action!, runId);
+                await ackAgentActions(runId, [{
+                    action_id: action!.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied create_note action ${action!.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
                 // Handle batch operations for multiple items
                 const actionsToApply = actions.filter(a => a.status !== 'applied');
@@ -566,6 +589,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
         setUndoError(null);
         setIsProcessingAction(true);
+        setClickedButton('undo');
         try {
             if (toolName === 'edit_metadata') {
                 // First pass: check what needs to be reverted without forcing
@@ -612,6 +636,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 await undoEditNoteAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone edit_note action ${action.id}`, 1);
+            } else if (toolName === 'create_note') {
+                await undoCreateNoteAction(action);
+                undoAgentAction(action.id);
+                logger(`AgentActionView: Undone create_note action ${action.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
                 // Handle batch undo for multiple items
                 const actionsToUndo = actions.filter(a => a.status === 'applied');
@@ -662,6 +690,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             }
         } finally {
             setIsProcessingAction(false);
+            setClickedButton(null);
         }
     }, [action, actions, isProcessing, toolName, undoAgentAction, setAgentActionsToError, markExternalReferenceDeleted]);
 
@@ -765,6 +794,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             if (toolName === 'edit_metadata') return PropertyEditIcon;
             if (toolName === 'edit_item') return PropertyEditIcon;
             if (toolName === 'edit_note') return EditIcon;
+            if (toolName === 'create_note') return FileDiffIcon;
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
             if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
@@ -788,6 +818,45 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     };
 
     const actionTitle = getActionTitle(toolName, action?.proposed_data, itemTitle, actions);
+
+    // Streaming mode: show live preview without action buttons while LLM generates args.
+    // This must be after all hooks to satisfy Rules of Hooks.
+    if (isStreaming && streamingArgs) {
+        const streamingTitle = getActionTitle(toolName, streamingArgs, null, undefined);
+        const streamingPreviewData: PreviewData = {
+            actionType: toolName,
+            actionData: streamingArgs,
+        };
+
+        return (
+            <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
+                {/* Header with spinner + shimmer title */}
+                <div className="display-flex flex-row py-15 bg-senary border-bottom-quinary">
+                    <div
+                        className="variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left mt-015"
+                        style={{ background: 'transparent', border: 0, padding: 0 }}
+                    >
+                        <div className="display-flex flex-row px-3 gap-2">
+                            <div className="flex-1 display-flex mt-010">
+                                <Icon icon={Spinner} />
+                            </div>
+                            <div className="two-line-header shimmer-text">
+                                <span className="font-color-primary font-medium" style={{ fontWeight: '500' }}>{getActionLabel(toolName)}</span>
+                                {streamingTitle && <span className="font-color-secondary ml-15" style={{ fontWeight: '400' }}>{streamingTitle}</span>}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {/* Always-expanded preview */}
+                <ActionPreview
+                    toolName={toolName}
+                    previewData={streamingPreviewData}
+                    status="pending"
+                    isStreaming={true}
+                />
+            </div>
+        );
+    }
 
     return (
         <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
@@ -815,28 +884,20 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         <div className={`flex-1 display-flex mt-010 font-color-primary`}>
                             <Icon icon={getHeaderIcon()} className={shouldShowStatusIcon() ? config.iconClassName : undefined} />
                         </div>
-                        <div
-                            className="flex-wrap"
-                            style={{
-                                display: '-webkit-box',
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: 'vertical',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                wordBreak: 'break-word'
-                            }}
-                        >
+                        <div className="two-line-header">
                             <span className="font-color-primary font-medium">{getActionLabel(toolName)}</span>
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
-                            {action?.proposed_data?.library_id && action?.proposed_data?.zotero_key && (<>{'\u00A0'}<Tooltip content={toolName === 'edit_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
+                            {((action?.proposed_data?.library_id && action?.proposed_data?.zotero_key) || (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key)) && (<>{'\u00A0'}<Tooltip content={toolName === 'edit_note' || toolName === 'create_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
                                     <span
-                                        className="font-color-secondary scale-11"
+                                        className="font-color-secondary scale-10"
                                         style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
                                         role="button"
                                         onClick={(e) => {
                                             e.stopPropagation();
                                             e.preventDefault();
-                                            if (toolName === 'edit_note') {
+                                            if (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key) {
+                                                openNoteByKey(action.result_data.library_id, action.result_data.zotero_key);
+                                            } else if (toolName === 'edit_note') {
                                                 const isApplied = action?.status === 'applied';
                                                 openNoteAndSearchEdit(
                                                     action?.proposed_data?.library_id,
@@ -867,7 +928,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
                 <div 
                     className="display-flex flex-row items-center gap-25 mr-2 mt-015"
-                    style={{ visibility: !(isAwaitingApproval || status === 'pending' || isProcessing) ? 'visible' : 'hidden' }}
+                    style={{ visibility: !(isAwaitingApproval || status === 'pending') ? 'visible' : 'hidden' }}
                 >
                     <Tooltip content="Expand" showArrow singleLine>
                         <IconButton
@@ -943,20 +1004,22 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     )}
 
                     {/* Action buttons */}
-                    <div className="display-flex flex-row gap-1 px-2 py-2 mt-1">
-                        {isConfirmExtraction ? (
-                            <ExtractionApprovalButton onAlwaysApprove={handleApprove} />
-                        ) : isConfirmExternalSearch ? (
-                            <ExternalSearchApprovalButton onAlwaysApprove={handleApprove} />
-                        ) : (
-                            <DeferredToolPreferenceButton toolName={toolName} />
+                    <div className="display-flex flex-row gap-2 px-2 py-2">
+                        {(isAwaitingApproval || status === 'pending') && (
+                            isConfirmExtraction ? (
+                                <ExtractionApprovalButton onAlwaysApprove={handleApprove} />
+                            ) : isConfirmExternalSearch ? (
+                                <ExternalSearchApprovalButton onAlwaysApprove={handleApprove} />
+                            ) : (
+                                <DeferredToolPreferenceButton toolName={toolName} />
+                            )
                         )}
                         <div className="flex-1" />
 
                         {canShowPreview && (
                             <Button
                                 variant="ghost"
-                                rightIcon={FileDiffIcon}
+                                icon={FileDiffIcon}
                                 onClick={handlePreviewInEditor}
                                 style={{ padding: '3px 6px' }}
                             >
@@ -967,7 +1030,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         {/* Reject button - for awaiting and pending */}
                         {config.showReject && (!isProcessing || clickedButton === 'reject') && (
                             <Button
-                                variant="ghost"
+                                variant="outline"
                                 onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                                 loading={isProcessing && clickedButton === 'reject'}
                                 disabled={isProcessing}
@@ -977,11 +1040,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )}
 
                         {/* Undo button - for applied */}
-                        {config.showUndo && (
+                        {(config.showUndo || (isProcessing && clickedButton === 'undo')) && (
                             <Button
-                                variant="ghost-secondary"
+                                variant="outline"
                                 onClick={handleUndo}
-                                loading={isProcessing}
+                                loading={isProcessing && clickedButton === 'undo'}
+                                disabled={isProcessing}
                             >
                                 Undo
                             </Button>
@@ -1010,7 +1074,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 />
                             ) : (
                                 <Button
-                                    variant={isAwaitingApproval ? 'solid' : 'ghost-secondary'}
+                                    variant='solid'
                                     onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                                     loading={isProcessing && clickedButton === 'approve'}
                                     disabled={isProcessing}
@@ -1046,6 +1110,8 @@ function getActionLabel(toolName: string): string {
             return 'Edit';
         case 'edit_note':
             return 'Edit Note';
+        case 'create_note':
+            return 'Create Note';
         case 'create_item':
         case 'create_items':
             return 'Import';
@@ -1073,6 +1139,8 @@ function getActionTitle(
         case 'edit_item':
         case 'edit_note':
             return itemTitle ? itemTitle : null;
+        case 'create_note':
+            return actionData?.title ?? null;
         case 'create_collection':
             return actionData?.name ?? actionData?.proposed_data?.name ?? null;
         case 'organize_items': {
@@ -1153,7 +1221,9 @@ const ActionPreview: React.FC<{
     status: ActionStatus | 'awaiting';
     /** All actions for the tool call (for multi-item create_items) */
     actions?: AgentAction[];
-}> = ({ toolName, previewData, status, actions }) => {
+    /** Whether tool call arguments are actively streaming */
+    isStreaming?: boolean;
+}> = ({ toolName, previewData, status, actions, isStreaming }) => {
     if (toolName === 'edit_metadata' || previewData.actionType === 'edit_metadata') {
         const edits = previewData.actionData.edits || [];
         
@@ -1296,6 +1366,19 @@ const ActionPreview: React.FC<{
                 status={status}
                 libraryId={previewData.actionData.library_id}
                 zoteroKey={previewData.actionData.zotero_key}
+            />
+        );
+    }
+
+    if (toolName === 'create_note' || previewData.actionType === 'create_note') {
+        const noteContent = previewData.actionData.content || '';
+
+        return (
+            <CreateNotePreview
+                content={noteContent}
+                resultData={previewData.resultData}
+                status={status}
+                isStreaming={isStreaming}
             />
         );
     }

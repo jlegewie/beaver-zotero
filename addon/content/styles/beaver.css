@@ -2628,3 +2628,15 @@
 [id^="beaver-pane-"] .file-status-bar:hover {
     color: var(--fill-secondary);
 }
+
+
+[id^="beaver-pane-"] .two-line-header {
+    flex-wrap: wrap;
+    display: '-webkit-box';
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-break: break-word;
+}

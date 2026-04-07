@@ -123,6 +123,7 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     // Note tools
     read_note: 'Reading note',
     edit_note: 'Edit note',
+    create_note: 'Create note',
 
     // Organization tools
     organize_items: 'Organize items',

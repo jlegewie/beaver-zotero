@@ -612,14 +612,44 @@ export function lookupCitationItem(itemId: string): { itemData: any } | null {
 }
 
 /**
+ * Look up a Zotero attachment by "libraryID-key" string, resolve to its parent
+ * item, and return a citation-item object with CSL-JSON itemData.
+ * Returns null if the attachment or parent can't be found.
+ */
+export function lookupCitationItemFromAttachment(attId: string): { itemData: any } | null {
+    try {
+        const dashIdx = attId.indexOf('-');
+        if (dashIdx === -1) return null;
+        const libraryID = parseInt(attId.substring(0, dashIdx), 10);
+        const key = attId.substring(dashIdx + 1);
+        const attachment = Zotero.Items.getByLibraryAndKey(libraryID, key);
+        if (!attachment) return null;
+        // Resolve to parent item for citation formatting
+        const parentID = attachment.parentItemID;
+        const item = parentID ? Zotero.Items.get(parentID) : attachment;
+        if (!item) return null;
+        return { itemData: Zotero.Utilities.Item.itemToCSLJSON(item) };
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Recover a citation label from a simplified <citation> tag's attributes
- * (item_id for single citations, items for compound citations).
+ * (item_id for single citations, att_id for attachment-based citations,
+ * items for compound citations).
  */
 export function recoverSimplifiedCitationLabel(tag: string): string | null {
     // Single citation: item_id="1-KEY"
     const itemIdMatch = tag.match(/\bitem_id="([^"]*)"/);
     if (itemIdMatch) {
         const ci = lookupCitationItem(itemIdMatch[1]);
+        return ci ? formatCitationText([ci]) : null;
+    }
+    // Attachment-based citation: att_id="1-KEY" — resolve to parent item
+    const attIdMatch = tag.match(/\batt_id="([^"]*)"/);
+    if (attIdMatch) {
+        const ci = lookupCitationItemFromAttachment(attIdMatch[1]);
         return ci ? formatCitationText([ci]) : null;
     }
     // Compound citation: items="1-KEY1:page=P1, 1-KEY2"

@@ -1097,6 +1097,47 @@ export function validateNewString(
     return null;
 }
 
+/**
+ * Check that all new citation tags in `newString` reference Zotero items that
+ * actually exist.  Citations with a `ref` that maps to a known element in
+ * metadata are treated as existing and skipped.  Citations with an unknown
+ * `ref` are treated as new (the model likely fabricated the ref).
+ *
+ * Returns an error string if any cited item is missing, or `null` if all OK.
+ */
+export function checkNewCitationItemsExist(
+    newString: string,
+    metadata: SimplificationMetadata,
+): string | null {
+    const citationRegex = /<citation\s+([^/]*?)\s*\/>/g;
+    let m;
+    while ((m = citationRegex.exec(newString)) !== null) {
+        const attrStr = m[1];
+        const ref = extractAttr(attrStr, 'ref');
+
+        // Existing citation whose ref is in the metadata map — skip
+        if (ref && metadata.elements.has(ref)) continue;
+
+        // New citation (no ref) or unknown ref — validate the item exists
+        const itemId = extractAttr(attrStr, 'item_id');
+        const attId = extractAttr(attrStr, 'att_id');
+        const id = itemId || attId;
+        if (!id) continue; // will fail later in expansion with a proper error
+
+        const dashIdx = id.indexOf('-');
+        if (dashIdx === -1) continue; // will fail later in expansion
+
+        const libId = parseInt(id.substring(0, dashIdx), 10);
+        const key = id.substring(dashIdx + 1);
+        const item = Zotero.Items.getByLibraryAndKey(libId, key);
+        if (!item) {
+            const label = itemId ? 'item_id' : 'att_id';
+            return `Citation references a Zotero item that does not exist: ${label}="${id}". Verify the item ID is correct.`;
+        }
+    }
+    return null;
+}
+
 // =============================================================================
 // Fuzzy Matching
 // =============================================================================
