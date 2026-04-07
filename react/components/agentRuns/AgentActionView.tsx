@@ -889,7 +889,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
                             {((action?.proposed_data?.library_id && action?.proposed_data?.zotero_key) || (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key)) && (<>{'\u00A0'}<Tooltip content={toolName === 'edit_note' || toolName === 'create_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
                                     <span
-                                        className="font-color-secondary scale-11"
+                                        className="font-color-secondary scale-10"
                                         style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
                                         role="button"
                                         onClick={(e) => {

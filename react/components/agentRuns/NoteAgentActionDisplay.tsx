@@ -212,8 +212,8 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
                             {title}
                         </span>
                         {isApplied && (
-                            <span style={{ display: 'inline-flex', verticalAlign: 'start', marginLeft: '2px' }}>
-                                <Icon icon={ArrowUpRightIcon} className="font-color-secondary" size={10} />
+                            <span className="font-color-secondary scale-10" style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer', marginLeft: '1px' }}>
+                                <Icon icon={ArrowUpRightIcon} />
                             </span>
                         )}
                     </div>
