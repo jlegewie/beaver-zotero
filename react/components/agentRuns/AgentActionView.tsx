@@ -410,6 +410,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isConfirmExtraction = toolName === 'confirm_extraction';
     const isConfirmExternalSearch = toolName === 'confirm_external_search';
     const isConfirmAction = isConfirmExtraction || isConfirmExternalSearch;
+    // No action data yet and not awaiting approval — buttons would be no-ops, so hide them
+    const hasNoActionData = !action && !pendingApproval && !isStreaming;
     const baseConfig = STATUS_CONFIGS[status];
     const config = (isConfirmAction && status !== 'awaiting')
         ? { ...baseConfig, showApply: false, showReject: false, showUndo: false, showRetry: false }
@@ -941,7 +943,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 </div>
 
                 {/* Reject and Apply buttons - show during awaiting, pending, or processing */}
-                {((isAwaitingApproval || status === 'pending') && !isProcessing && !isConfirmAction) && (
+                {((isAwaitingApproval || status === 'pending') && !isProcessing && !isConfirmAction && !hasNoActionData) && (
                     <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
                         {/* Show Reject button only if not processing or if Reject was clicked */}
                         {(!isProcessing || clickedButton === 'reject') && (
@@ -1005,7 +1007,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
                     {/* Action buttons */}
                     <div className="display-flex flex-row gap-2 px-2 py-2">
-                        {(isAwaitingApproval || status === 'pending') && (
+                        {(isAwaitingApproval || status === 'pending') && !hasNoActionData && (
                             isConfirmExtraction ? (
                                 <ExtractionApprovalButton onAlwaysApprove={handleApprove} />
                             ) : isConfirmExternalSearch ? (
