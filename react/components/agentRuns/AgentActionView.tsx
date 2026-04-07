@@ -840,8 +840,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             <div className="flex-1 display-flex mt-010">
                                 <Icon icon={Spinner} />
                             </div>
-                            <div className="display-flex shimmer-text">
-                                {streamingTitle || 'Creating note...'}
+                            <div className="two-line-header shimmer-text">
+                                <span className="font-color-primary font-medium" style={{ fontWeight: '500' }}>{getActionLabel(toolName)}</span>
+                                {streamingTitle && <span className="font-color-secondary ml-15" style={{ fontWeight: '400' }}>{streamingTitle}</span>}
                             </div>
                         </div>
                     </div>
@@ -883,17 +884,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         <div className={`flex-1 display-flex mt-010 font-color-primary`}>
                             <Icon icon={getHeaderIcon()} className={shouldShowStatusIcon() ? config.iconClassName : undefined} />
                         </div>
-                        <div
-                            className="flex-wrap"
-                            style={{
-                                display: '-webkit-box',
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: 'vertical',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                wordBreak: 'break-word'
-                            }}
-                        >
+                        <div className="two-line-header">
                             <span className="font-color-primary font-medium">{getActionLabel(toolName)}</span>
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
                             {((action?.proposed_data?.library_id && action?.proposed_data?.zotero_key) || (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key)) && (<>{'\u00A0'}<Tooltip content={toolName === 'edit_note' || toolName === 'create_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
