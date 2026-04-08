@@ -196,8 +196,21 @@ export function normalizeNoteHtml(html: string): string {
     result = result.replace(/<i(\s[^>]*)?>/gi, '<em$1>');
     result = result.replace(/<\/i>/gi, '</em>');
     // <s>, <del>, <strike> → <span style="text-decoration: line-through">
+    // If the element has an existing style attribute, merge text-decoration into it;
+    // otherwise just add the new style. This avoids producing duplicate style= attributes.
     result = result.replace(/<(s|del|strike)(\s[^>]*)?>([\s\S]*?)<\/\1>/gi,
-        '<span style="text-decoration: line-through"$2>$3</span>');
+        (_match, _tag, attrs, content) => {
+            const attrStr = attrs || '';
+            const styleMatch = attrStr.match(/\sstyle="([^"]*)"/i);
+            if (styleMatch) {
+                // Merge: prepend text-decoration to existing style value
+                const existingStyle = styleMatch[1];
+                const mergedStyle = `text-decoration: line-through; ${existingStyle}`;
+                const otherAttrs = attrStr.replace(/\sstyle="[^"]*"/i, '');
+                return `<span${otherAttrs} style="${mergedStyle}">${content}</span>`;
+            }
+            return `<span style="text-decoration: line-through"${attrStr}>${content}</span>`;
+        });
 
     // Step 3: Hex→RGB color conversion in style attributes only
     result = result.replace(/style="([^"]*)"/gi, (_match, styleValue: string) => {

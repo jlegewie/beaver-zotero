@@ -131,6 +131,42 @@ describe('normalizeNoteHtml', () => {
             const expected = '<strong><em>bold italic</em></strong>';
             expect(normalizeNoteHtml(input)).toBe(expected);
         });
+
+        it('merges existing style when converting <s> with style attribute', () => {
+            const input = '<s style="color:red">struck</s>';
+            const result = normalizeNoteHtml(input);
+            // Step 2 merges into one span, then step 5 splits combined styles.
+            // After full normalization: nested single-property spans.
+            expect(result).toContain('text-decoration: line-through');
+            expect(result).toContain('color: red');
+            // No duplicate style= attributes on any single element
+            const spans = result.match(/<span[^>]*>/g) || [];
+            for (const span of spans) {
+                expect((span.match(/style="/g) || []).length).toBeLessThanOrEqual(1);
+            }
+        });
+
+        it('merges existing style when converting <del> with style attribute', () => {
+            const input = '<del style="color: blue; font-size: 14px">deleted</del>';
+            const result = normalizeNoteHtml(input);
+            // Step 2 merges into combined style, then step 5 splits into nested spans
+            expect(result).toContain('text-decoration: line-through');
+            expect(result).toContain('color: blue');
+            expect(result).toContain('font-size: 14px');
+            expect(result).toContain('deleted');
+            // No duplicate style= on any single span
+            const spans = result.match(/<span[^>]*>/g) || [];
+            for (const span of spans) {
+                expect((span.match(/style="/g) || []).length).toBeLessThanOrEqual(1);
+            }
+        });
+
+        it('preserves non-style attributes on strike elements', () => {
+            const input = '<s class="custom">struck</s>';
+            const result = normalizeNoteHtml(input);
+            expect(result).toContain('class="custom"');
+            expect(result).toContain('text-decoration: line-through');
+        });
     });
 
     // -------------------------------------------------------------------------

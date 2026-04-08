@@ -26,6 +26,7 @@ import {
     stripPartialSimplifiedElements,
     stripNoteWrapperDiv,
     stripSpuriousWrappingTags,
+    normalizeNoteHtml,
 } from '../../../utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
@@ -281,7 +282,9 @@ async function validateEditNoteAction(
     // 12. Count occurrences — if zero, retry with entity-decoded or entity-encoded
     // strings. PM may have decoded entities (&#x27; → ') since the model read the
     // note, or the model may have used literal chars while the note has entities.
-    const strippedHtml = stripDataCitationItems(rawHtml);
+    // Normalize rawHtml to match what simplifyNoteHtml exposes to the model,
+    // so expanded old_string (based on normalized simplified) finds a match.
+    const strippedHtml = stripDataCitationItems(normalizeNoteHtml(rawHtml));
     let matchCount = countOccurrences(strippedHtml, expandedOld);
     if (matchCount === 0) {
         // Forward: model used &#x27; but note has ' (PM decoded)
@@ -307,6 +310,7 @@ async function validateEditNoteAction(
 
     // 12b. Zero matches — try trimming trailing newlines from old_string.
     //      LLMs often add extra trailing \n characters to old_string.
+    //      Emit normalized_action_data so execution uses the trimmed strings.
     if (matchCount === 0 && old_string) {
         const trimmedOld = old_string.replace(/\n+$/, '');
         if (trimmedOld !== old_string) {
@@ -314,13 +318,36 @@ async function validateEditNoteAction(
                 const trimmedExpandedOld = expandToRawHtml(trimmedOld, metadata, 'old');
                 const trimmedCount = countOccurrences(strippedHtml, trimmedExpandedOld);
                 if (trimmedCount > 0) {
-                    expandedOld = trimmedExpandedOld;
-                    const trimmedNew = new_string.replace(/\n+$/, '');
-                    expandedNew = expandToRawHtml(
-                        operation === 'insert_after' ? new_string : trimmedNew,
-                        metadata, 'new'
-                    );
-                    matchCount = trimmedCount;
+                    const trimmedNew = operation === 'insert_after'
+                        ? new_string
+                        : new_string.replace(/\n+$/, '');
+                    // Dry-run expand new_string to verify
+                    expandToRawHtml(trimmedNew, metadata, 'new');
+
+                    const normalizedActionData: EditNoteProposedData = {
+                        ...request.action_data as EditNoteProposedData,
+                        old_string: trimmedOld,
+                        new_string: operation === 'insert_after'
+                            ? trimmedOld + trimmedNew
+                            : trimmedNew,
+                    };
+
+                    const noteTitle = item.getNoteTitle() || '(untitled)';
+                    const totalLines = simplified.split('\n').length;
+                    const preference = getEditNotePreference(library_id, zotero_key);
+
+                    return {
+                        type: 'agent_action_validate_response',
+                        request_id: request.request_id,
+                        valid: true,
+                        current_value: {
+                            note_title: noteTitle,
+                            total_lines: totalLines,
+                            match_count: trimmedCount,
+                        },
+                        normalized_action_data: normalizedActionData,
+                        preference,
+                    };
                 }
             } catch {
                 // expansion failed — fall through
@@ -660,7 +687,7 @@ async function executeEditNoteAction(
             };
         }
 
-        const strippedHtml = stripDataCitationItems(oldHtml);
+        const strippedHtml = stripDataCitationItems(normalizeNoteHtml(oldHtml));
 
         // Preserve wrapper div
         const trimmed = strippedHtml.trim();
@@ -755,8 +782,8 @@ async function executeEditNoteAction(
         };
     }
 
-    // 6b. Strip data-citation-items from raw HTML for matching
-    const strippedHtml = stripDataCitationItems(oldHtml);
+    // 6b. Normalize + strip data-citation-items from raw HTML for matching
+    const strippedHtml = stripDataCitationItems(normalizeNoteHtml(oldHtml));
 
     // 7. Count occurrences — if zero, retry with entity-decoded or entity-encoded
     // strings. PM may have decoded entities (&#x27; → ') since the model read the

@@ -37,6 +37,7 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     ENTITY_FORMS: ['hex', 'decimal', 'named'],
     stripPartialSimplifiedElements: vi.fn(() => null),
     stripSpuriousWrappingTags: vi.fn(() => []),
+    normalizeNoteHtml: vi.fn((html: string) => html),
     stripNoteWrapperDiv: vi.fn((html: string) => {
         const trimmed = html.trim();
         if (!trimmed.startsWith('<div') || !trimmed.endsWith('</div>')) return html;
@@ -904,7 +905,7 @@ describe('trailing whitespace normalization in matching', () => {
         vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
     });
 
-    it('matches old_string with trailing \\n\\n when note has \\n', async () => {
+    it('matches old_string with trailing \\n\\n when note has \\n and emits normalized_action_data', async () => {
         const req = makeValidateRequest({
             action_data: {
                 library_id: 1,
@@ -917,6 +918,10 @@ describe('trailing whitespace normalization in matching', () => {
 
         const response = await handleAgentActionValidateRequest(req);
         expect(response.valid).toBe(true);
+        // Must emit normalized_action_data so execution uses the trimmed strings
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data.old_string).toBe('<p>Hello world</p>');
+        expect(response.normalized_action_data.new_string).toBe('<p>Goodbye world</p>');
     });
 
     it('does not trim non-trailing whitespace', async () => {
