@@ -24,6 +24,7 @@ import {
     WSToolCallArgsStreamEvent,
     WSMissingZoteroDataEvent,
     WSDeferredApprovalRequest,
+    WSStreamingDoneEvent,
     WSThreadNameEvent,
     CurrentLibrary,
     CurrentCollection,
@@ -674,6 +675,9 @@ async function handleMissingZoteroData(
 /** Whether a WebSocket chat request is currently in progress */
 export const isWSChatPendingAtom = atom(false);
 
+/** Run IDs where LLM streaming finished but post-processing (citations) is still in progress */
+export const streamingDoneRunIdsAtom = atom<Set<string>>(new Set<string>());
+
 /** Whether the WebSocket is currently connected */
 export const isWSConnectedAtom = atom(false);
 
@@ -718,6 +722,7 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
     set(wsErrorAtom, null);
     set(wsWarningAtom, null);
     set(wsRetryAtom, null);
+    set(streamingDoneRunIdsAtom, new Set<string>());
 });
 
 /**
@@ -866,6 +871,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(activeRunAtom, (prev) => prev ? updateRunWithToolCallArgsStream(prev, event) : prev);
         },
 
+        onStreamingDone: (event: WSStreamingDoneEvent) => {
+            logger('WS onStreamingDone:', { runId: event.run_id }, 1);
+            set(streamingDoneRunIdsAtom, (prev) => new Set([...prev, event.run_id]));
+        },
+
         onRunComplete: async (event: WSRunCompleteEvent) => {
             logger('WS onRunComplete:', {
                 runId: event.run_id,
@@ -877,6 +887,12 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 softCapTriggered: event.soft_cap_triggered,
             }, 1);
             set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
+            // Clear streaming-done state now that citations are resolved
+            set(streamingDoneRunIdsAtom, (prev) => {
+                const next = new Set(prev);
+                next.delete(event.run_id);
+                return next;
+            });
             // Clear retry state when run completes
             set(wsRetryAtom, null);
 
@@ -951,6 +967,9 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         onDone: () => {
             logger('WS onDone: Request fully complete', 1);
 
+            // Clear any remaining streaming-done state (safety net)
+            set(streamingDoneRunIdsAtom, new Set<string>());
+
             // Move active run to completed runs
             set(activeRunAtom, (prev) => {
                 if (prev) {
@@ -974,6 +993,9 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
         onError: (event: WSErrorEvent) => {
             logger('WS onError:', event, 1);
+
+            // Clear streaming-done state
+            set(streamingDoneRunIdsAtom, new Set<string>());
 
             // Normal error handling
             set(wsErrorAtom, event);
@@ -1152,6 +1174,8 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
             set(isWSChatPendingAtom, false);
+            // Clear streaming-done state (connection lost during post-processing)
+            set(streamingDoneRunIdsAtom, new Set<string>());
             // Clear pending approvals and dismiss diff preview (connection lost)
             set(clearAllPendingApprovalsAtom);
             // Clear per-run auto-approve state if the socket drops before done/error.
@@ -2034,7 +2058,10 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
         set(threadRunsAtom, (runs) => [...runs, canceledRun]);
         set(activeRunAtom, null);
     }
-    
+
+    // Clear streaming-done state (user canceled during post-processing)
+    set(streamingDoneRunIdsAtom, new Set<string>());
+
     // Send cancel message and close connection
     await agentService.cancel();
     set(isWSConnectedAtom, false);

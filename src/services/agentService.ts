@@ -364,6 +364,10 @@ export class AgentService {
                     await this.callbacks.onRunComplete(event);
                     break;
 
+                case 'streaming_done':
+                    this.callbacks.onStreamingDone?.(event);
+                    break;
+
                 case 'done':
                     this.callbacks.onDone();
                     break;

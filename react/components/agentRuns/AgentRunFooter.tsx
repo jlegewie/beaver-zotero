@@ -19,10 +19,11 @@ import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
 import { toolResultsMapAtom, allRunsAtom } from '../../agents/atoms';
 import { extractRunResponseContent } from '../../utils/threadContent';
 import TokenUsageDisplay from './TokenUsageDisplay';
-import { regenerateFromRunAtom } from '../../atoms/agentRunAtoms';
+import { regenerateFromRunAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { currentThreadIdAtom } from '../../atoms/threads';
 import { store } from '../../store';
 import Tooltip from '../ui/Tooltip';
+import Spinner from '../icons/Spinner';
 import { preloadPageLabelsForContent } from '../../utils/pageLabels';
 
 interface AgentRunFooterProps {
@@ -127,12 +128,13 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
             },
             {
                 label: 'Save as note',
-                onClick: () => saveToLibrary()
+                onClick: () => saveToLibrary(),
+                disabled: isResolvingCitations
             },
             {
                 label: 'Save as child note',
                 onClick: () => saveToItem(),
-                disabled: !hasParent
+                disabled: !hasParent || isResolvingCitations
             },
             {
                 label: 'Copy link to message',
@@ -282,8 +284,10 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         await regenerateFromRun(runId);
     };
 
-    // Hide during streaming
-    const isStreaming = run.status === 'in_progress';
+    // Hide during streaming (but show during post-processing when citations are resolving)
+    const streamingDoneRunIds = useAtomValue(streamingDoneRunIdsAtom);
+    const isResolvingCitations = streamingDoneRunIds.has(run.id);
+    const isStreaming = run.status === 'in_progress' && !isResolvingCitations;
 
     return (
         <div className="px-4">
@@ -293,9 +297,14 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                     ${isStreaming ? 'hidden' : ''}
                 `}
             >
-                {/* Sources button */}
+                {/* Sources button or resolving spinner */}
                 <div className="flex-1">
-                    {uniqueCitations.length > 0 && (
+                    {isResolvingCitations && uniqueCitations.length === 0 ? (
+                        <div className="display-flex items-center gap-2 font-color-secondary">
+                            <Spinner size={12} />
+                            <span className="text-sm font-color-secondary">Linking sources...</span>
+                        </div>
+                    ) : uniqueCitations.length > 0 ? (
                         <Button
                             variant="ghost"
                             onClick={toggleSources}
@@ -306,7 +315,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                                 {uniqueCitations.length} Source{uniqueCitations.length === 1 ? '' : 's'}
                             </span>
                         </Button>
-                    )}
+                    ) : null}
                 </div>
                 
                 {/* Action buttons */}

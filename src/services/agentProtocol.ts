@@ -87,6 +87,12 @@ export interface WSDoneEvent extends WSBaseEvent {
     event: 'done';
 }
 
+/** Streaming done event: all LLM tokens sent, post-processing (citations) still in progress */
+export interface WSStreamingDoneEvent extends WSBaseEvent {
+    event: 'streaming_done';
+    run_id: string;
+}
+
 /** Thread event sent when a thread is initialized or created */
 export interface WSThreadEvent extends WSBaseEvent {
     event: 'thread';
@@ -994,6 +1000,7 @@ export type WSEvent =
     | WSToolCallProgressEvent
     | WSToolCallArgsStreamEvent
     | WSRunCompleteEvent
+    | WSStreamingDoneEvent
     | WSDoneEvent
     | WSThreadEvent
     | WSThreadNameEvent
@@ -1190,6 +1197,12 @@ export interface WSCallbacks {
      * @param event The run complete event with usage and cost info
      */
     onRunComplete: (event: WSRunCompleteEvent) => void | Promise<void>;
+
+    /**
+     * Called when LLM streaming ends but post-processing (citations) is still running.
+     * Use to show footer with loading state before citations are resolved.
+     */
+    onStreamingDone?: (event: WSStreamingDoneEvent) => void;
 
     /**
      * Called when the full request is done (after persistence, usage logging, etc.)
