@@ -4,7 +4,7 @@ import type { CreateItemProposedData, CreateItemResultData } from '../../../reac
 import { applyCreateItemData } from '../../../react/utils/addItemActions';
 import { TimeoutContext, checkAborted, DEFAULT_TIMEOUT_SECONDS } from './timeout';
 import { TimeoutError } from './timeout';
-import { executeEditNoteAction } from './actions/editNote';
+import { executeEditNoteAction, executeBatchEditNoteActions } from './actions/editNote';
 import { executeEditMetadataAction } from './actions/editMetadata';
 import { executeOrganizeItemsAction } from './actions/organizeItems';
 import { executeCreateNoteAction } from './actions/createNote';
@@ -352,5 +352,96 @@ async function executeCreateItemAction(
             error: errorMsg,
             error_code: 'create_failed',
         };
+    }
+}
+
+
+/**
+ * Handle a batch of edit_note execute requests for the same note.
+ *
+ * Applies all edits to the same in-memory HTML string, saves once,
+ * and returns individual responses for each edit. This avoids
+ * intermediate ProseMirror normalizations that can restructure
+ * the HTML between edits, breaking subsequent old_string matches.
+ *
+ * @param requests - Array of edit_note execute requests all targeting the same note
+ * @returns Array of {request, response} pairs in the same order as input
+ */
+export async function handleBatchEditNoteExecuteRequests(
+    requests: WSAgentActionExecuteRequest[],
+): Promise<Array<{ request: WSAgentActionExecuteRequest; response: WSAgentActionExecuteResponse }>> {
+    // Use the minimum effective timeout across all requests.  Each
+    // request's timeout_seconds is a contract ("complete within X seconds"),
+    // so the batch must finish within the shortest deadline to avoid any
+    // request overrunning its own timeout.  Requests that omit timeout_seconds
+    // are treated as DEFAULT_TIMEOUT_SECONDS — not skipped — so an explicit
+    // 60s value cannot promote a default-timeout request past 25s.
+    let timeoutSeconds = Infinity;
+    for (const req of requests) {
+        const t = req.timeout_seconds;
+        const effective = (typeof t === 'number' && t > 0) ? t : DEFAULT_TIMEOUT_SECONDS;
+        timeoutSeconds = Math.min(timeoutSeconds, effective);
+    }
+    if (!isFinite(timeoutSeconds)) {
+        timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
+    }
+    const startTime = Date.now();
+
+    logger(`handleBatchEditNoteExecuteRequests: Executing batch of ${requests.length} edits `
+        + `with timeout ${timeoutSeconds}s`, 1);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+
+    try {
+        const ctx: TimeoutContext = {
+            signal: controller.signal,
+            timeoutSeconds,
+            startTime,
+        };
+
+        return await executeBatchEditNoteActions(requests, ctx);
+    } catch (error) {
+        const elapsedMs = Date.now() - startTime;
+
+        if (error instanceof TimeoutError) {
+            logger(`handleBatchEditNoteExecuteRequests: Timeout after ${error.elapsedMs}ms`, 1);
+            return requests.map(req => ({
+                request: req,
+                response: {
+                    type: 'agent_action_execute_response' as const,
+                    request_id: req.request_id,
+                    success: false,
+                    error: `Operation timed out after ${error.timeoutSeconds} seconds`,
+                    error_code: 'timeout',
+                    result_data: {
+                        started_at: startTime,
+                        elapsed_ms: error.elapsedMs,
+                        phase: error.phase,
+                        action_type: 'edit_note',
+                        timeout_seconds: error.timeoutSeconds,
+                    },
+                },
+            }));
+        }
+
+        logger(`handleBatchEditNoteExecuteRequests: Error after ${elapsedMs}ms: ${error}`, 1);
+        return requests.map(req => ({
+            request: req,
+            response: {
+                type: 'agent_action_execute_response' as const,
+                request_id: req.request_id,
+                success: false,
+                error: String(error),
+                error_code: 'execution_failed',
+                result_data: {
+                    started_at: startTime,
+                    elapsed_ms: elapsedMs,
+                    action_type: 'edit_note',
+                },
+            },
+        }));
+    } finally {
+        clearTimeout(timer);
     }
 }

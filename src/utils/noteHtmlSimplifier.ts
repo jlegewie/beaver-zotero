@@ -552,7 +552,10 @@ function getBestPDFAttachment(item: any): any {
  * that have page attributes. Must be called (and awaited) before expandToRawHtml()
  * so that synchronous translatePageNumberToLabel lookups succeed.
  */
-export async function preloadPageLabelsForNewCitations(str: string): Promise<void> {
+export async function preloadPageLabelsForNewCitations(
+    str: string,
+    signal?: AbortSignal,
+): Promise<void> {
     const cache = Zotero.Beaver?.attachmentFileCache;
     if (!cache) return;
 
@@ -561,6 +564,7 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<voi
     let match: RegExpExecArray | null;
 
     while ((match = regex.exec(str)) !== null) {
+        if (signal?.aborted) return;
         const attrStr = match[1];
         const pageAttr = extractAttr(attrStr, 'page');
         if (!pageAttr) continue;

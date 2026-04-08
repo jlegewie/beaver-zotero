@@ -22,6 +22,6 @@ export { handleListCollectionsRequest } from './agentDataProvider/handleListColl
 export { handleListTagsRequest } from './agentDataProvider/handleListTagsRequest';
 export { handleListLibrariesRequest } from './agentDataProvider/handleListLibrariesRequest';
 export { handleAgentActionValidateRequest } from './agentDataProvider/handleAgentActionValidateRequest';
-export { handleAgentActionExecuteRequest } from './agentDataProvider/handleAgentActionExecuteRequest';
+export { handleAgentActionExecuteRequest, handleBatchEditNoteExecuteRequests } from './agentDataProvider/handleAgentActionExecuteRequest';
 export { handleDeleteItemsRequest } from './agentDataProvider/handleDeleteItemsRequest';
 export { handleReadNoteRequest } from './agentDataProvider/handleReadNoteRequest';

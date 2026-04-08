@@ -29,6 +29,7 @@ import {
     handleGetMetadataRequest,
     handleAgentActionValidateRequest,
     handleAgentActionExecuteRequest,
+    handleBatchEditNoteExecuteRequests,
     handleReadNoteRequest,
 } from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
@@ -39,6 +40,7 @@ import {
     WSAuthMessage,
     WSReadyData,
     WSRequestAckData,
+    WSAgentActionExecuteRequest,
 } from './agentProtocol';
 
 
@@ -57,6 +59,16 @@ export class AgentService {
     private actionExecutionQueue: Promise<void> = Promise.resolve();
     /** Monotonic counter incremented on close to invalidate stale queued messages */
     private connectionId: number = 0;
+
+    // ── Edit-note batch debounce state ──
+    /** Buffered edit_note execute requests keyed by noteId, awaiting batch flush */
+    private editNoteBatchBuffer: Map<string, WSAgentActionExecuteRequest[]> = new Map();
+    /** Debounce timer IDs keyed by noteId */
+    private editNoteBatchTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+    /** Connection ID captured when the batch was started, for staleness checks */
+    private editNoteBatchConnId: number = 0;
+    /** Debounce window in ms — long enough to collect parallel edits, short enough to be imperceptible */
+    private static readonly EDIT_NOTE_BATCH_DEBOUNCE_MS = 80;
 
     constructor(baseUrl: string) {
         this.baseUrl = baseUrl;
@@ -678,10 +690,27 @@ export class AgentService {
 
                 case 'agent_action_execute': {
                     logger("AgentService: Received agent_action_execute", event, 1);
+
+                    // ── edit_note batching ──
+                    // When multiple edit_note execute requests arrive in rapid
+                    // succession (parallel toolcalls from "Approve All" or
+                    // "always_apply"), batch them by noteId. All edits in a batch
+                    // apply to the same in-memory HTML before a single save,
+                    // avoiding intermediate ProseMirror normalizations that
+                    // restructure malformed HTML and break subsequent old_string
+                    // matches.
+                    //
+                    // Rewrite operations act as a barrier: any buffered edits
+                    // for that note are flushed first, then the rewrite runs
+                    // standalone through the serialized queue.
+                    if (event.action_type === 'edit_note' && event.action_data) {
+                        const noteId = `${event.action_data.library_id}-${event.action_data.zotero_key}`;
+                        this.bufferEditNoteForBatch(noteId, event as WSAgentActionExecuteRequest);
+                        break;
+                    }
+
+                    // ── Non-edit_note actions: execute immediately via queue ──
                     // Chain onto actionExecutionQueue to serialize actions.
-                    // Without this, concurrent edit_note actions on the same note
-                    // race: each reads the original HTML and saves its own edit,
-                    // so only the last save survives.
                     // Capture connectionId so stale queued actions are skipped
                     // after a close/reconnect (same guard as messageQueue).
                     const actionConnId = this.connectionId;
@@ -762,6 +791,159 @@ export class AgentService {
         this.connectionId++;
         this.messageQueue = Promise.resolve();
         this.actionExecutionQueue = Promise.resolve();
+        // Clear any pending edit_note batches
+        for (const timer of this.editNoteBatchTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.editNoteBatchTimers.clear();
+        this.editNoteBatchBuffer.clear();
+    }
+
+    // =========================================================================
+    // Edit-note batch debounce
+    // =========================================================================
+
+    /**
+     * Buffer an edit_note execute request for batch processing.
+     *
+     * Multiple edit_note requests for the same note arriving within
+     * EDIT_NOTE_BATCH_DEBOUNCE_MS are collected and applied as a single
+     * batch — all edits hit the same raw HTML string, one save, one PM
+     * normalization pass. This prevents intermediate PM normalizations from
+     * restructuring malformed HTML and breaking subsequent old_string matches.
+     */
+    private bufferEditNoteForBatch(
+        noteId: string,
+        request: WSAgentActionExecuteRequest,
+    ): void {
+        const isRewrite = (request.action_data as any)?.operation === 'rewrite';
+
+        if (isRewrite) {
+            // ── Barrier: rewrite flushes any pending edits first ──
+            // 1. Cancel the debounce timer for this note
+            const existingTimer = this.editNoteBatchTimers.get(noteId);
+            if (existingTimer) clearTimeout(existingTimer);
+            this.editNoteBatchTimers.delete(noteId);
+
+            // 2. Flush any buffered edits so they execute before the rewrite
+            const buffered = this.editNoteBatchBuffer.get(noteId);
+            this.editNoteBatchBuffer.delete(noteId);
+            if (buffered && buffered.length > 0) {
+                this.flushEditNoteBatchImmediate(noteId, buffered);
+            }
+
+            // 3. Queue the rewrite itself through the normal serialized path
+            const connId = this.connectionId;
+            this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
+                if (this.connectionId !== connId) return;
+                return handleAgentActionExecuteRequest(request)
+                    .then(res => this.send(res))
+                    .catch(err => {
+                        logger(`AgentService: edit_note rewrite execute failed: ${err}`, 1);
+                        this.send({
+                            type: 'agent_action_execute_response',
+                            request_id: request.request_id,
+                            success: false,
+                            error: String(err),
+                            error_code: 'internal_error',
+                        });
+                    });
+            });
+            return;
+        }
+
+        // ── Non-rewrite: buffer for batching ──
+        if (!this.editNoteBatchBuffer.has(noteId)) {
+            this.editNoteBatchBuffer.set(noteId, []);
+        }
+        this.editNoteBatchBuffer.get(noteId)!.push(request);
+        this.editNoteBatchConnId = this.connectionId;
+
+        // Reset debounce timer — flush when requests stop arriving
+        const existingTimer = this.editNoteBatchTimers.get(noteId);
+        if (existingTimer) clearTimeout(existingTimer);
+
+        this.editNoteBatchTimers.set(noteId, setTimeout(() => {
+            this.flushEditNoteBatch(noteId);
+        }, AgentService.EDIT_NOTE_BATCH_DEBOUNCE_MS));
+    }
+
+    /**
+     * Flush a buffered edit_note batch (called by debounce timer).
+     * Drains the buffer for the given noteId and submits to the queue.
+     */
+    private flushEditNoteBatch(noteId: string): void {
+        this.editNoteBatchTimers.delete(noteId);
+        const requests = this.editNoteBatchBuffer.get(noteId);
+        this.editNoteBatchBuffer.delete(noteId);
+
+        if (!requests || requests.length === 0) return;
+
+        // Stale connection check
+        if (this.connectionId !== this.editNoteBatchConnId) {
+            logger(`AgentService: Skipping stale edit_note batch for ${noteId}`, 1);
+            return;
+        }
+
+        this.flushEditNoteBatchImmediate(noteId, requests);
+    }
+
+    /**
+     * Submit a set of edit_note requests to the execution queue — either as
+     * a batch (2+ edits) or as a single edit (1 edit, normal path).
+     *
+     * Called from flushEditNoteBatch (debounce timer) and from
+     * bufferEditNoteForBatch when a rewrite acts as a barrier.
+     */
+    private flushEditNoteBatchImmediate(
+        noteId: string,
+        requests: WSAgentActionExecuteRequest[],
+    ): void {
+        const batchConnId = this.connectionId;
+
+        if (requests.length === 1) {
+            // Single edit — use the normal execution path (no behavioral change)
+            logger(`AgentService: Flushing single edit_note for ${noteId}`, 1);
+            this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
+                if (this.connectionId !== batchConnId) return;
+                return handleAgentActionExecuteRequest(requests[0])
+                    .then(res => this.send(res))
+                    .catch(err => {
+                        logger(`AgentService: agent_action_execute failed: ${err}`, 1);
+                        this.send({
+                            type: 'agent_action_execute_response',
+                            request_id: requests[0].request_id,
+                            success: false,
+                            error: String(err),
+                            error_code: 'internal_error',
+                        });
+                    });
+            });
+        } else {
+            // Batch — apply all edits to the same HTML, save once
+            logger(`AgentService: Flushing batch of ${requests.length} edit_note requests for ${noteId}`, 1);
+            this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
+                if (this.connectionId !== batchConnId) return;
+                return handleBatchEditNoteExecuteRequests(requests)
+                    .then(results => {
+                        for (const { response } of results) {
+                            this.send(response);
+                        }
+                    })
+                    .catch(err => {
+                        logger(`AgentService: batch edit_note execute failed: ${err}`, 1);
+                        for (const req of requests) {
+                            this.send({
+                                type: 'agent_action_execute_response',
+                                request_id: req.request_id,
+                                success: false,
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        }
+                    });
+            });
+        }
     }
 
     /**

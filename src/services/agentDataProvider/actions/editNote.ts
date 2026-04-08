@@ -26,6 +26,7 @@ import {
     stripPartialSimplifiedElements,
     stripNoteWrapperDiv,
     stripSpuriousWrappingTags,
+    findRangeByContexts,
 } from '../../../utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
@@ -612,7 +613,8 @@ async function executeEditNoteAction(
 
     // 3. Pre-load page labels so new citations resolve page indices to labels.
     //    Done before reading the note to avoid async gaps between read and write.
-    await preloadPageLabelsForNewCitations(new_string);
+    await preloadPageLabelsForNewCitations(new_string, ctx.signal);
+    checkAborted(ctx, 'edit_note:after_preload');
 
     // 4. Get current note HTML (kept for rollback on save failure)
     //    Avoid async operations between here and item.setNote() to preserve atomicity.
@@ -996,4 +998,482 @@ async function executeEditNoteAction(
     };
 }
 
-export { validateEditNoteAction, executeEditNoteAction };
+// =============================================================================
+// Batch Execution — apply N edits to the same note in one save
+// =============================================================================
+
+/**
+ * Result for a single edit within a batch.
+ * Each edit gets its own response so the backend can report per-toolcall results.
+ */
+interface BatchEditResult {
+    request: WSAgentActionExecuteRequest;
+    response: WSAgentActionExecuteResponse;
+}
+
+/**
+ * Apply a single str_replace/str_replace_all/insert_after edit to the in-memory
+ * HTML string. Returns the updated HTML on success, or null + error response on
+ * failure.
+ *
+ * This is a pure-string operation — no saving, no PM interaction.
+ * Extracted from executeEditNoteAction so that batch execution can call it
+ * in a loop on the same HTML string.
+ */
+function applySingleEditToHtml(
+    request: WSAgentActionExecuteRequest,
+    currentHtml: string,
+    libraryId: number,
+    noteId: string,
+): { newHtml: string; resultData: Record<string, any> } | { error: WSAgentActionExecuteResponse } {
+    const {
+        old_string,
+        new_string,
+        operation: rawOp,
+    } = request.action_data as EditNoteProposedData;
+    const operation: EditNoteOperation = rawOp ?? 'str_replace';
+    let {
+        target_before_context,
+        target_after_context,
+    } = request.action_data as EditNoteProposedData;
+
+    // Simplify (cheap in-memory operation — no PM involved)
+    const { simplified, metadata } = getOrSimplify(noteId, currentHtml, libraryId);
+
+    // Expand old_string and new_string to raw HTML
+    let expandedOld: string;
+    let expandedNew: string;
+    try {
+        expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
+        expandedNew = expandToRawHtml(new_string, metadata, 'new');
+    } catch (e: any) {
+        return {
+            error: {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: e.message || String(e),
+                error_code: 'expansion_failed',
+            },
+        };
+    }
+
+    // Strip data-citation-items for matching
+    const strippedHtml = stripDataCitationItems(currentHtml);
+
+    // Count occurrences — with entity fallbacks
+    let matchCount = countOccurrences(strippedHtml, expandedOld);
+    if (matchCount === 0) {
+        const decodedOld = decodeHtmlEntities(expandedOld);
+        if (decodedOld !== expandedOld && countOccurrences(strippedHtml, decodedOld) > 0) {
+            expandedOld = decodedOld;
+            expandedNew = decodeHtmlEntities(expandedNew);
+            if (target_before_context != null) target_before_context = decodeHtmlEntities(target_before_context);
+            if (target_after_context != null) target_after_context = decodeHtmlEntities(target_after_context);
+            matchCount = countOccurrences(strippedHtml, expandedOld);
+        }
+    }
+    if (matchCount === 0) {
+        for (const form of ENTITY_FORMS) {
+            const encodedOld = encodeTextEntities(expandedOld, form);
+            if (encodedOld !== expandedOld && countOccurrences(strippedHtml, encodedOld) > 0) {
+                expandedOld = encodedOld;
+                expandedNew = encodeTextEntities(expandedNew, form);
+                if (target_before_context != null) target_before_context = encodeTextEntities(target_before_context, form);
+                if (target_after_context != null) target_after_context = encodeTextEntities(target_after_context, form);
+                matchCount = countOccurrences(strippedHtml, expandedOld);
+                break;
+            }
+        }
+    }
+
+    // Partial element stripping fallback
+    if (matchCount === 0) {
+        const simplifiedPos = simplified.indexOf(old_string ?? '');
+        const isUnique = simplifiedPos !== -1
+            && simplified.indexOf(old_string ?? '', simplifiedPos + 1) === -1;
+
+        if (isUnique) {
+            const stripped = stripPartialSimplifiedElements(
+                old_string ?? '', new_string, simplified, simplifiedPos,
+            );
+            if (stripped) {
+                try {
+                    expandedOld = expandToRawHtml(stripped.strippedOld, metadata, 'old');
+                    expandedNew = expandToRawHtml(stripped.strippedNew, metadata, 'new');
+                    matchCount = countOccurrences(strippedHtml, expandedOld);
+                } catch {
+                    // fall through
+                }
+            }
+        }
+    }
+
+    // Spurious tag stripping fallback
+    if (matchCount === 0) {
+        const tagCandidates = stripSpuriousWrappingTags(old_string ?? '', new_string);
+        for (const tagStrip of tagCandidates) {
+            try {
+                const candidateOld = expandToRawHtml(tagStrip.strippedOld, metadata, 'old');
+                expandToRawHtml(tagStrip.strippedNew, metadata, 'new');
+                const candidateCount = countOccurrences(strippedHtml, candidateOld);
+                if (candidateCount >= 1) {
+                    expandedOld = candidateOld;
+                    expandedNew = expandToRawHtml(tagStrip.strippedNew, metadata, 'new');
+                    matchCount = candidateCount;
+                    break;
+                }
+            } catch {
+                // try next candidate
+            }
+        }
+    }
+
+    // Still zero matches — error
+    if (matchCount === 0) {
+        const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
+        return {
+            error: {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: 'The string to replace was not found in the note.'
+                    + (fuzzy ? ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\`` : ''),
+                error_code: 'old_string_not_found',
+            },
+        };
+    }
+
+    // Perform replacement
+    let newHtml: string;
+    let undoBeforeContext: string | undefined;
+    let undoAfterContext: string | undefined;
+    let undoOccurrenceContexts: Array<{ before: string; after: string }> | undefined;
+    const UNDO_CONTEXT_LENGTH = 200;
+    let replacementCount: number;
+
+    if (operation === 'str_replace_all') {
+        replacementCount = matchCount;
+        undoOccurrenceContexts = [];
+        let searchFrom = 0;
+        while (true) {
+            const idx = strippedHtml.indexOf(expandedOld, searchFrom);
+            if (idx === -1) break;
+            undoOccurrenceContexts.push({
+                before: strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx),
+                after: strippedHtml.substring(
+                    idx + expandedOld.length,
+                    idx + expandedOld.length + UNDO_CONTEXT_LENGTH
+                ),
+            });
+            searchFrom = idx + expandedOld.length;
+        }
+        newHtml = strippedHtml.split(expandedOld).join(expandedNew);
+    } else {
+        replacementCount = 1;
+        let rawPos = -1;
+
+        if (matchCount > 1) {
+            rawPos = findUniqueRawMatchPosition(
+                strippedHtml, simplified, old_string ?? '', expandedOld, metadata
+            ) ?? -1;
+            if (rawPos === -1 && (
+                target_before_context !== undefined || target_after_context !== undefined
+            )) {
+                rawPos = findTargetRawMatchPosition(
+                    strippedHtml,
+                    expandedOld,
+                    target_before_context,
+                    target_after_context
+                ) ?? -1;
+            }
+        }
+
+        if (rawPos === -1) {
+            if (matchCount > 1) {
+                return {
+                    error: {
+                        type: 'agent_action_execute_response',
+                        request_id: request.request_id,
+                        success: false,
+                        error: `The string to replace was found ${matchCount} times in the note. `
+                            + 'Use operation str_replace_all to replace all occurrences, or include more context.',
+                        error_code: 'ambiguous_match',
+                    },
+                };
+            }
+            rawPos = strippedHtml.indexOf(expandedOld);
+        }
+
+        undoBeforeContext = strippedHtml.substring(Math.max(0, rawPos - UNDO_CONTEXT_LENGTH), rawPos);
+        const afterStart = rawPos + expandedOld.length;
+        undoAfterContext = strippedHtml.substring(afterStart, afterStart + UNDO_CONTEXT_LENGTH);
+
+        newHtml = strippedHtml.substring(0, rawPos) + expandedNew
+            + strippedHtml.substring(afterStart);
+    }
+
+    // Wrapper div protection
+    const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
+    if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
+        return {
+            error: {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: 'The note wrapper <div data-schema-version="..."> must not be removed.',
+                error_code: 'wrapper_removed',
+            },
+        };
+    }
+
+    // Check for duplicate citation warnings
+    const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+    const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+
+    return {
+        newHtml,
+        resultData: {
+            library_id: libraryId,
+            zotero_key: noteId.split('-').slice(1).join('-'),
+            occurrences_replaced: replacementCount,
+            warnings,
+            undo_old_html: expandedOld,
+            undo_new_html: expandedNew,
+            undo_before_context: undoBeforeContext,
+            undo_after_context: undoAfterContext,
+            undo_occurrence_contexts: undoOccurrenceContexts,
+        },
+    };
+}
+
+/**
+ * Execute a batch of edit_note actions on the same note.
+ *
+ * All edits are applied to the same in-memory HTML string, then saved once.
+ * This avoids intermediate ProseMirror normalizations that can restructure
+ * the HTML between edits, causing subsequent old_string matches to fail.
+ *
+ * Each edit gets its own response so the backend can track per-toolcall results.
+ * Edits that fail (e.g., old_string not found) are skipped — remaining edits
+ * still apply.
+ */
+async function executeBatchEditNoteActions(
+    requests: WSAgentActionExecuteRequest[],
+    ctx: TimeoutContext,
+): Promise<BatchEditResult[]> {
+    // All requests target the same note — extract from the first one
+    const { library_id, zotero_key } = requests[0].action_data as EditNoteProposedData;
+    const noteId = `${library_id}-${zotero_key}`;
+
+    // 1. Load item
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) {
+        return requests.map(req => ({
+            request: req,
+            response: {
+                type: 'agent_action_execute_response' as const,
+                request_id: req.request_id,
+                success: false,
+                error: `Item not found: ${noteId}`,
+                error_code: 'item_not_found',
+            },
+        }));
+    }
+
+    // 2. Load note data
+    await item.loadDataType('note');
+
+    // 3. Pre-load page labels for all new citations across all edits
+    for (const req of requests) {
+        checkAborted(ctx, 'edit_note_batch:preload_citations');
+        const { new_string } = req.action_data as EditNoteProposedData;
+        await preloadPageLabelsForNewCitations(new_string, ctx.signal);
+    }
+
+    // 4. Get current note HTML
+    const originalHtml = getLatestNoteHtml(item);
+    let currentHtml = originalHtml;
+
+    // 5. Apply each edit to the in-memory HTML
+    const results: BatchEditResult[] = [];
+    let anySucceeded = false;
+
+    for (const req of requests) {
+        checkAborted(ctx, 'edit_note_batch:apply_edit');
+        const { operation: rawOp } = req.action_data as EditNoteProposedData;
+        const operation: EditNoteOperation = rawOp ?? 'str_replace';
+
+        // Defensive guard: rewrite operations should have been excluded from
+        // batching at the agentService level. If one slips through, skip it
+        // with an error — rewrite replaces the entire note body and conflicts
+        // with other edits in the batch.
+        if (operation === 'rewrite') {
+            results.push({
+                request: req,
+                response: {
+                    type: 'agent_action_execute_response',
+                    request_id: req.request_id,
+                    success: false,
+                    error: 'Cannot batch a rewrite operation with other edits. '
+                        + 'Rewrite replaces the entire note body.',
+                    error_code: 'batch_rewrite_conflict',
+                },
+            });
+            continue;
+        }
+
+        const editResult = applySingleEditToHtml(req, currentHtml, library_id, noteId);
+
+        if ('error' in editResult) {
+            results.push({ request: req, response: editResult.error });
+        } else {
+            // Success — advance currentHtml for the next edit
+            currentHtml = editResult.newHtml;
+            anySucceeded = true;
+            results.push({
+                request: req,
+                response: {
+                    type: 'agent_action_execute_response',
+                    request_id: req.request_id,
+                    success: true,
+                    result_data: editResult.resultData,
+                },
+            });
+        }
+
+        // Invalidate simplification cache between edits so the next edit
+        // re-simplifies based on the updated in-memory HTML.
+        invalidateSimplificationCache(noteId);
+    }
+
+    // 6. Save once if any edit succeeded
+    if (anySucceeded) {
+        // Add/update "Edited by Beaver" footer
+        const threadId = store.get(currentThreadIdAtom);
+        if (threadId) {
+            currentHtml = addOrUpdateEditFooter(currentHtml, threadId);
+        }
+
+        // Rebuild data-citation-items
+        currentHtml = rebuildDataCitationItems(currentHtml);
+
+        // Checkpoint before save
+        checkAborted(ctx, 'edit_note_batch:before_save');
+
+        try {
+            item.setNote(currentHtml);
+            await item.saveTx();
+            logger(`executeBatchEditNoteActions: Saved ${results.filter(r => r.response.success).length} `
+                + `edits to ${noteId} in one save`, 1);
+        } catch (error) {
+            // Restore original HTML on save failure
+            try { item.setNote(originalHtml); } catch (_) { /* best-effort */ }
+            if (error instanceof TimeoutError) throw error;
+
+            // Mark previously-successful edits as save_failed, but preserve
+            // the original error for edits that already failed (e.g.,
+            // old_string_not_found, ambiguous_match) — those never reached
+            // the save step and their error is the accurate reason.
+            for (const entry of results) {
+                if (entry.response.success) {
+                    entry.response.success = false;
+                    entry.response.error = `Failed to save note: ${error}`;
+                    entry.response.error_code = 'save_failed';
+                    entry.response.result_data = undefined;
+                }
+            }
+            return results;
+        }
+
+        // 7. Wait for PM stabilization once
+        await waitForNoteSaveStabilization(item, currentHtml);
+        clearNoteEditorSelection(library_id, zotero_key);
+        invalidateSimplificationCache(noteId);
+
+        // 8. Wait for PM normalization and update undo data for ALL successful edits.
+        //
+        // After stabilization the HTML may have been rewritten by PM (entity
+        // decoding, structural cleanup).  We need to refresh each successful
+        // edit's undo_new_html so standalone undo still works.
+        //
+        // Strategy: use the first successful edit for the polling phase (it has
+        // anchors closest to the original HTML), then read the final HTML once
+        // and update every successful edit via findRangeByContexts.
+        const savedStrippedHtml = stripDataCitationItems(currentHtml);
+        const preEditStrippedHtml = stripDataCitationItems(originalHtml);
+
+        // 8a. Run the polling phase once via waitForPMNormalization — this waits
+        // until PM is done normalizing (or times out / sees no changes).
+        //
+        // We need a successful edit that has context anchors (undo_before_context
+        // or undo_after_context) so that waitForPMNormalization can locate the
+        // fragment in PM-normalized HTML.  str_replace_all edits intentionally
+        // leave those anchors undefined, so using one would cause the helper to
+        // return immediately and leave finalHtml stale.
+        const anchoredSuccess = results.find(r =>
+            r.response.success
+            && r.response.result_data
+            && (r.response.result_data.undo_before_context !== undefined
+                || r.response.result_data.undo_after_context !== undefined)
+        );
+        if (anchoredSuccess?.response.result_data) {
+            const pollUndoData = {
+                undo_new_html: anchoredSuccess.response.result_data.undo_new_html,
+                undo_before_context: anchoredSuccess.response.result_data.undo_before_context,
+                undo_after_context: anchoredSuccess.response.result_data.undo_after_context,
+            };
+            await waitForPMNormalization(item, savedStrippedHtml, pollUndoData, preEditStrippedHtml);
+        } else {
+            // All successful edits are str_replace_all (no anchors).
+            // Fall back to waitForNoteSaveStabilization which already ran,
+            // so just give PM one more chance to settle.
+            await waitForNoteSaveStabilization(item, currentHtml);
+        }
+
+        // 8b. Read the final PM-normalized HTML and update each successful edit's
+        // undo data in-place.
+        const finalHtml = getLatestNoteHtml(item);
+        const finalStripped = stripDataCitationItems(finalHtml);
+        const PM_UNDO_CONTEXT_LENGTH = 200;
+
+        if (finalStripped !== savedStrippedHtml) {
+            // PM changed the HTML — refresh undo data for every successful edit
+            for (const entry of results) {
+                const rd = entry.response.result_data;
+                if (!entry.response.success || !rd?.undo_new_html) continue;
+
+                const beforeCtx = rd.undo_before_context as string | undefined;
+                const afterCtx = rd.undo_after_context as string | undefined;
+                if (beforeCtx === undefined && afterCtx === undefined) continue;
+
+                // Try original anchors, then entity-decoded anchors
+                let range = findRangeByContexts(finalStripped, beforeCtx, afterCtx);
+                if (!range) {
+                    const decodedBefore = beforeCtx != null ? decodeHtmlEntities(beforeCtx) : undefined;
+                    const decodedAfter = afterCtx != null ? decodeHtmlEntities(afterCtx) : undefined;
+                    range = findRangeByContexts(finalStripped, decodedBefore, decodedAfter);
+                }
+                if (range) {
+                    const actualFragment = finalStripped.substring(range.start, range.end);
+                    if (actualFragment !== rd.undo_new_html) {
+                        rd.undo_new_html = actualFragment;
+                        rd.undo_before_context = finalStripped.substring(
+                            Math.max(0, range.start - PM_UNDO_CONTEXT_LENGTH), range.start,
+                        );
+                        rd.undo_after_context = finalStripped.substring(
+                            range.end, range.end + PM_UNDO_CONTEXT_LENGTH,
+                        );
+                    }
+                } else {
+                    logger(`executeBatchEditNoteActions: could not locate undo fragment for `
+                        + `request ${entry.request.request_id} after PM normalization`, 1);
+                }
+            }
+        }
+    }
+
+    return results;
+}
+
+export { validateEditNoteAction, executeEditNoteAction, executeBatchEditNoteActions };
