@@ -657,6 +657,131 @@ describe('handleBatchEditNoteExecuteRequests', () => {
             // At least 2 calls — one per successful edit
             expect(calls.length).toBeGreaterThanOrEqual(2);
         });
+
+        it('reanchors earlier edits against the final saved HTML even when PM does not rewrite it', async () => {
+            const html = '<div data-schema-version="9"><p>AAA BBB CCC DDD</p></div>';
+            const mockItem = makeMockItem(html);
+            (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(mockItem);
+
+            const defaultFindRangeByContexts = (currentHtml: string, before?: string, after?: string) => {
+                const hasBefore = before != null && before.length > 0;
+                const hasAfter = after != null && after.length > 0;
+                if (hasBefore && hasAfter) {
+                    const beforeIdx = currentHtml.indexOf(before!);
+                    if (beforeIdx === -1) return null;
+                    const start = beforeIdx + before!.length;
+                    const afterIdx = currentHtml.indexOf(after!, start);
+                    if (afterIdx === -1) return null;
+                    return { start, end: afterIdx };
+                } else if (hasBefore) {
+                    const beforeIdx = currentHtml.indexOf(before!);
+                    if (beforeIdx === -1) return null;
+                    return { start: beforeIdx + before!.length, end: currentHtml.length };
+                } else if (hasAfter) {
+                    const afterIdx = currentHtml.indexOf(after!);
+                    if (afterIdx === -1) return null;
+                    return { start: 0, end: afterIdx };
+                }
+                return null;
+            };
+
+            vi.mocked(findRangeByContexts).mockImplementation((currentHtml: string, before?: string, after?: string) => {
+                const recoveredEarlierEdit = currentHtml.includes('AAA XXX CCC YYY')
+                    && before?.includes('AAA ')
+                    && after?.includes('CCC DDD');
+                if (recoveredEarlierEdit) {
+                    const start = currentHtml.indexOf('XXX');
+                    return { start, end: start + 'XXX'.length };
+                }
+                return defaultFindRangeByContexts(currentHtml, before, after);
+            });
+
+            const requests = [
+                makeExecuteRequest({
+                    request_id: 'exe-1',
+                    action_data: { old_string: 'BBB', new_string: 'XXX' },
+                }),
+                makeExecuteRequest({
+                    request_id: 'exe-2',
+                    action_data: { old_string: 'DDD', new_string: 'YYY' },
+                }),
+            ];
+
+            const results = await handleBatchEditNoteExecuteRequests(requests);
+
+            expect(results[0].response.success).toBe(true);
+            expect(results[1].response.success).toBe(true);
+            expect(findRangeByContexts).toHaveBeenCalled();
+
+            const firstUndo = results[0].response.result_data!;
+            expect(firstUndo.undo_new_html).toBe('XXX');
+            expect(firstUndo.undo_after_context).toContain('CCC YYY');
+            expect(firstUndo.undo_after_context).not.toContain('CCC DDD');
+        });
+
+        it('preserves the original undo target when a later batch edit rewrites it', async () => {
+            const html = '<div data-schema-version="9"><p>AAA BBB CCC</p></div>';
+            const mockItem = makeMockItem(html);
+            (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(mockItem);
+
+            const requests = [
+                makeExecuteRequest({
+                    request_id: 'exe-1',
+                    action_data: { old_string: 'BBB', new_string: 'XXX' },
+                }),
+                makeExecuteRequest({
+                    request_id: 'exe-2',
+                    action_data: { old_string: 'XXX', new_string: 'YYY' },
+                }),
+            ];
+
+            const results = await handleBatchEditNoteExecuteRequests(requests);
+
+            expect(results[0].response.success).toBe(true);
+            expect(results[1].response.success).toBe(true);
+
+            const firstUndo = results[0].response.result_data!;
+            expect(firstUndo.undo_new_html).toBe('XXX');
+            expect(firstUndo.undo_before_context).toContain('AAA ');
+            expect(firstUndo.undo_after_context).toContain(' CCC');
+
+            const secondUndo = results[1].response.result_data!;
+            expect(secondUndo.undo_new_html).toBe('YYY');
+        });
+
+        it('keeps the original undo fragment for one-sided anchors during batch re-anchoring', async () => {
+            const html = '<p>AAA</p><p>BBB</p>';
+            const mockItem = makeMockItem(html);
+            (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(mockItem);
+
+            const requests = [
+                makeExecuteRequest({
+                    request_id: 'exe-1',
+                    action_data: {
+                        old_string: '<p>AAA</p>',
+                        new_string: '<p>FIRST</p><p>AAA</p>',
+                    },
+                }),
+                makeExecuteRequest({
+                    request_id: 'exe-2',
+                    action_data: {
+                        old_string: '<p>BBB</p>',
+                        new_string: '<p>MID</p><p>BBB</p>',
+                    },
+                }),
+            ];
+
+            const results = await handleBatchEditNoteExecuteRequests(requests);
+
+            expect(results[0].response.success).toBe(true);
+            expect(results[1].response.success).toBe(true);
+
+            const firstUndo = results[0].response.result_data!;
+            expect(firstUndo.undo_before_context).toBe('');
+            expect(firstUndo.undo_new_html).toBe('<p>FIRST</p><p>AAA</p>');
+            expect(firstUndo.undo_new_html).not.toContain('<p>MID</p>');
+            expect(firstUndo.undo_after_context).toContain('<p>BBB</p>');
+        });
     });
 
 

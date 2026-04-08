@@ -48,6 +48,15 @@ import {
 // Agent Service
 // =============================================================================
 
+interface EditNoteBatchState {
+    requests: WSAgentActionExecuteRequest[];
+    timer: ReturnType<typeof setTimeout> | null;
+    connectionId: number;
+    readyPromise: Promise<void>;
+    releaseReady: () => void;
+    released: boolean;
+}
+
 export class AgentService {
     private baseUrl: string;
     private ws: WebSocket | null = null;
@@ -61,12 +70,8 @@ export class AgentService {
     private connectionId: number = 0;
 
     // ── Edit-note batch debounce state ──
-    /** Buffered edit_note execute requests keyed by noteId, awaiting batch flush */
-    private editNoteBatchBuffer: Map<string, WSAgentActionExecuteRequest[]> = new Map();
-    /** Debounce timer IDs keyed by noteId */
-    private editNoteBatchTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
-    /** Connection ID captured when the batch was started, for staleness checks */
-    private editNoteBatchConnId: number = 0;
+    /** Buffered edit_note batches keyed by noteId, each with a reserved queue slot */
+    private editNoteBatchStates: Map<string, EditNoteBatchState> = new Map();
     /** Debounce window in ms — long enough to collect parallel edits, short enough to be imperceptible */
     private static readonly EDIT_NOTE_BATCH_DEBOUNCE_MS = 80;
 
@@ -655,20 +660,28 @@ export class AgentService {
                     break;
 
                 // Note tools
-                case 'read_note_request':
+                case 'read_note_request': {
                     logger("AgentService: Received read_note_request", event, 1);
-                    handleReadNoteRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: read_note_request failed: ${err}`, 1);
-                            this.send({
-                                type: 'read_note',
-                                request_id: event.request_id,
-                                success: false,
-                                error: String(err),
+                    // Serialize reads behind actionExecutionQueue so they cannot
+                    // overtake buffered edit_note batches that already reserved
+                    // an execution slot.
+                    const readConnId = this.connectionId;
+                    this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
+                        if (this.connectionId !== readConnId) return;
+                        return handleReadNoteRequest(event)
+                            .then(res => this.send(res))
+                            .catch(err => {
+                                logger(`AgentService: read_note_request failed: ${err}`, 1);
+                                this.send({
+                                    type: 'read_note',
+                                    request_id: event.request_id,
+                                    success: false,
+                                    error: String(err),
+                                });
                             });
-                        });
+                    });
                     break;
+                }
 
                 // Deferred tool events
                 case 'agent_action_validate':
@@ -792,11 +805,17 @@ export class AgentService {
         this.messageQueue = Promise.resolve();
         this.actionExecutionQueue = Promise.resolve();
         // Clear any pending edit_note batches
-        for (const timer of this.editNoteBatchTimers.values()) {
-            clearTimeout(timer);
+        for (const batch of this.editNoteBatchStates.values()) {
+            if (batch.timer) {
+                clearTimeout(batch.timer);
+                batch.timer = null;
+            }
+            if (!batch.released) {
+                batch.released = true;
+                batch.releaseReady();
+            }
         }
-        this.editNoteBatchTimers.clear();
-        this.editNoteBatchBuffer.clear();
+        this.editNoteBatchStates.clear();
     }
 
     // =========================================================================
@@ -817,22 +836,17 @@ export class AgentService {
         request: WSAgentActionExecuteRequest,
     ): void {
         const isRewrite = (request.action_data as any)?.operation === 'rewrite';
+        const existingBatch = this.editNoteBatchStates.get(noteId);
 
         if (isRewrite) {
             // ── Barrier: rewrite flushes any pending edits first ──
-            // 1. Cancel the debounce timer for this note
-            const existingTimer = this.editNoteBatchTimers.get(noteId);
-            if (existingTimer) clearTimeout(existingTimer);
-            this.editNoteBatchTimers.delete(noteId);
-
-            // 2. Flush any buffered edits so they execute before the rewrite
-            const buffered = this.editNoteBatchBuffer.get(noteId);
-            this.editNoteBatchBuffer.delete(noteId);
-            if (buffered && buffered.length > 0) {
-                this.flushEditNoteBatchImmediate(noteId, buffered);
+            // 1. Release any buffered batch for this note so its reserved queue
+            //    slot executes before the rewrite.
+            if (existingBatch) {
+                this.releaseEditNoteBatch(noteId, existingBatch);
             }
 
-            // 3. Queue the rewrite itself through the normal serialized path
+            // 2. Queue the rewrite itself through the normal serialized path
             const connId = this.connectionId;
             this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
                 if (this.connectionId !== connId) return;
@@ -853,97 +867,132 @@ export class AgentService {
         }
 
         // ── Non-rewrite: buffer for batching ──
-        if (!this.editNoteBatchBuffer.has(noteId)) {
-            this.editNoteBatchBuffer.set(noteId, []);
+        let batch = existingBatch;
+        if (!batch) {
+            batch = this.createEditNoteBatchState();
+            this.editNoteBatchStates.set(noteId, batch);
+            this.reserveEditNoteBatch(noteId, batch);
         }
-        this.editNoteBatchBuffer.get(noteId)!.push(request);
-        this.editNoteBatchConnId = this.connectionId;
-
-        // Reset debounce timer — flush when requests stop arriving
-        const existingTimer = this.editNoteBatchTimers.get(noteId);
-        if (existingTimer) clearTimeout(existingTimer);
-
-        this.editNoteBatchTimers.set(noteId, setTimeout(() => {
-            this.flushEditNoteBatch(noteId);
-        }, AgentService.EDIT_NOTE_BATCH_DEBOUNCE_MS));
+        batch.requests.push(request);
+        this.resetEditNoteBatchTimer(noteId, batch);
     }
 
     /**
-     * Flush a buffered edit_note batch (called by debounce timer).
-     * Drains the buffer for the given noteId and submits to the queue.
+     * Create batch state for a note's buffered edit requests.
      */
-    private flushEditNoteBatch(noteId: string): void {
-        this.editNoteBatchTimers.delete(noteId);
-        const requests = this.editNoteBatchBuffer.get(noteId);
-        this.editNoteBatchBuffer.delete(noteId);
-
-        if (!requests || requests.length === 0) return;
-
-        // Stale connection check
-        if (this.connectionId !== this.editNoteBatchConnId) {
-            logger(`AgentService: Skipping stale edit_note batch for ${noteId}`, 1);
-            return;
-        }
-
-        this.flushEditNoteBatchImmediate(noteId, requests);
+    private createEditNoteBatchState(): EditNoteBatchState {
+        let releaseReady!: () => void;
+        const readyPromise = new Promise<void>(resolve => {
+            releaseReady = resolve;
+        });
+        return {
+            requests: [],
+            timer: null,
+            connectionId: this.connectionId,
+            readyPromise,
+            releaseReady,
+            released: false,
+        };
     }
 
     /**
-     * Submit a set of edit_note requests to the execution queue — either as
-     * a batch (2+ edits) or as a single edit (1 edit, normal path).
-     *
-     * Called from flushEditNoteBatch (debounce timer) and from
-     * bufferEditNoteForBatch when a rewrite acts as a barrier.
+     * Reserve the batch's position in actionExecutionQueue immediately so
+     * later reads/actions cannot overtake buffered edit_note requests.
      */
-    private flushEditNoteBatchImmediate(
+    private reserveEditNoteBatch(
         noteId: string,
-        requests: WSAgentActionExecuteRequest[],
+        batch: EditNoteBatchState,
     ): void {
-        const batchConnId = this.connectionId;
+        this.actionExecutionQueue = this.actionExecutionQueue.then(async () => {
+            if (this.connectionId !== batch.connectionId) return;
+            await batch.readyPromise;
+            if (this.connectionId !== batch.connectionId) return;
+            await this.executeBufferedEditNoteBatch(noteId, batch);
+        });
+    }
+
+    /**
+     * Reset the debounce timer for a buffered edit_note batch.
+     */
+    private resetEditNoteBatchTimer(
+        noteId: string,
+        batch: EditNoteBatchState,
+    ): void {
+        if (batch.timer) clearTimeout(batch.timer);
+        batch.timer = setTimeout(() => {
+            this.releaseEditNoteBatch(noteId, batch);
+        }, AgentService.EDIT_NOTE_BATCH_DEBOUNCE_MS);
+    }
+
+    /**
+     * Mark a buffered batch ready to execute and detach it from the active map
+     * so later edit_note requests form a new, ordered batch.
+     */
+    private releaseEditNoteBatch(
+        noteId: string,
+        batch: EditNoteBatchState,
+    ): void {
+        if (batch.released) return;
+        batch.released = true;
+        if (batch.timer) {
+            clearTimeout(batch.timer);
+            batch.timer = null;
+        }
+        if (this.editNoteBatchStates.get(noteId) === batch) {
+            this.editNoteBatchStates.delete(noteId);
+        }
+        batch.releaseReady();
+    }
+
+    /**
+     * Execute a released edit_note batch in its reserved queue position.
+     */
+    private executeBufferedEditNoteBatch(
+        noteId: string,
+        batch: EditNoteBatchState,
+    ): Promise<void> {
+        const requests = batch.requests;
+        if (requests.length === 0) {
+            return Promise.resolve();
+        }
 
         if (requests.length === 1) {
             // Single edit — use the normal execution path (no behavioral change)
             logger(`AgentService: Flushing single edit_note for ${noteId}`, 1);
-            this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
-                if (this.connectionId !== batchConnId) return;
-                return handleAgentActionExecuteRequest(requests[0])
-                    .then(res => this.send(res))
-                    .catch(err => {
-                        logger(`AgentService: agent_action_execute failed: ${err}`, 1);
-                        this.send({
-                            type: 'agent_action_execute_response',
-                            request_id: requests[0].request_id,
-                            success: false,
-                            error: String(err),
-                            error_code: 'internal_error',
-                        });
+            return handleAgentActionExecuteRequest(requests[0])
+                .then(res => this.send(res))
+                .catch(err => {
+                    logger(`AgentService: agent_action_execute failed: ${err}`, 1);
+                    this.send({
+                        type: 'agent_action_execute_response',
+                        request_id: requests[0].request_id,
+                        success: false,
+                        error: String(err),
+                        error_code: 'internal_error',
                     });
-            });
-        } else {
-            // Batch — apply all edits to the same HTML, save once
-            logger(`AgentService: Flushing batch of ${requests.length} edit_note requests for ${noteId}`, 1);
-            this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
-                if (this.connectionId !== batchConnId) return;
-                return handleBatchEditNoteExecuteRequests(requests)
-                    .then(results => {
-                        for (const { response } of results) {
-                            this.send(response);
-                        }
-                    })
-                    .catch(err => {
-                        logger(`AgentService: batch edit_note execute failed: ${err}`, 1);
-                        for (const req of requests) {
-                            this.send({
-                                type: 'agent_action_execute_response',
-                                request_id: req.request_id,
-                                success: false,
-                                error: String(err),
-                                error_code: 'internal_error',
-                            });
-                        }
-                    });
-            });
+                });
         }
+
+        // Batch — apply all edits to the same HTML, save once
+        logger(`AgentService: Flushing batch of ${requests.length} edit_note requests for ${noteId}`, 1);
+        return handleBatchEditNoteExecuteRequests(requests)
+            .then(results => {
+                for (const { response } of results) {
+                    this.send(response);
+                }
+            })
+            .catch(err => {
+                logger(`AgentService: batch edit_note execute failed: ${err}`, 1);
+                for (const req of requests) {
+                    this.send({
+                        type: 'agent_action_execute_response',
+                        request_id: req.request_id,
+                        success: false,
+                        error: String(err),
+                        error_code: 'internal_error',
+                    });
+                }
+            });
     }
 
     /**

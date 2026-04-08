@@ -1011,6 +1011,45 @@ interface BatchEditResult {
     response: WSAgentActionExecuteResponse;
 }
 
+interface BatchAppliedReplacement {
+    start: number;
+    oldEnd: number;
+    newLength: number;
+}
+
+interface BatchTrackedUndoRange {
+    start: number;
+    end: number;
+    superseded: boolean;
+}
+
+function transformTrackedUndoRange(
+    range: BatchTrackedUndoRange,
+    replacements: BatchAppliedReplacement[],
+): BatchTrackedUndoRange {
+    const originalStart = range.start;
+    const originalEnd = range.end;
+    let { start, end } = range;
+
+    for (const replacement of replacements) {
+        if (replacement.oldEnd <= originalStart) {
+            const oldLength = replacement.oldEnd - replacement.start;
+            const delta = replacement.newLength - oldLength;
+            start += delta;
+            end += delta;
+            continue;
+        }
+
+        if (replacement.start >= originalEnd) {
+            break;
+        }
+
+        return { start, end, superseded: true };
+    }
+
+    return { start, end, superseded: false };
+}
+
 /**
  * Apply a single str_replace/str_replace_all/insert_after edit to the in-memory
  * HTML string. Returns the updated HTML on success, or null + error response on
@@ -1025,7 +1064,12 @@ function applySingleEditToHtml(
     currentHtml: string,
     libraryId: number,
     noteId: string,
-): { newHtml: string; resultData: Record<string, any> } | { error: WSAgentActionExecuteResponse } {
+): {
+    newHtml: string;
+    resultData: Record<string, any>;
+    appliedReplacements: BatchAppliedReplacement[];
+    trackedUndoRange?: { start: number; end: number };
+} | { error: WSAgentActionExecuteResponse } {
     const {
         old_string,
         new_string,
@@ -1151,6 +1195,8 @@ function applySingleEditToHtml(
     let undoOccurrenceContexts: Array<{ before: string; after: string }> | undefined;
     const UNDO_CONTEXT_LENGTH = 200;
     let replacementCount: number;
+    const appliedReplacements: BatchAppliedReplacement[] = [];
+    let trackedUndoRange: { start: number; end: number } | undefined;
 
     if (operation === 'str_replace_all') {
         replacementCount = matchCount;
@@ -1159,6 +1205,11 @@ function applySingleEditToHtml(
         while (true) {
             const idx = strippedHtml.indexOf(expandedOld, searchFrom);
             if (idx === -1) break;
+            appliedReplacements.push({
+                start: idx,
+                oldEnd: idx + expandedOld.length,
+                newLength: expandedNew.length,
+            });
             undoOccurrenceContexts.push({
                 before: strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx),
                 after: strippedHtml.substring(
@@ -1208,6 +1259,17 @@ function applySingleEditToHtml(
         undoBeforeContext = strippedHtml.substring(Math.max(0, rawPos - UNDO_CONTEXT_LENGTH), rawPos);
         const afterStart = rawPos + expandedOld.length;
         undoAfterContext = strippedHtml.substring(afterStart, afterStart + UNDO_CONTEXT_LENGTH);
+        appliedReplacements.push({
+            start: rawPos,
+            oldEnd: afterStart,
+            newLength: expandedNew.length,
+        });
+        if (expandedNew.length > 0) {
+            trackedUndoRange = {
+                start: rawPos,
+                end: rawPos + expandedNew.length,
+            };
+        }
 
         newHtml = strippedHtml.substring(0, rawPos) + expandedNew
             + strippedHtml.substring(afterStart);
@@ -1244,6 +1306,8 @@ function applySingleEditToHtml(
             undo_after_context: undoAfterContext,
             undo_occurrence_contexts: undoOccurrenceContexts,
         },
+        appliedReplacements,
+        trackedUndoRange,
     };
 }
 
@@ -1297,6 +1361,7 @@ async function executeBatchEditNoteActions(
 
     // 5. Apply each edit to the in-memory HTML
     const results: BatchEditResult[] = [];
+    const trackedUndoRanges = new Map<string, BatchTrackedUndoRange>();
     let anySucceeded = false;
 
     for (const req of requests) {
@@ -1328,6 +1393,14 @@ async function executeBatchEditNoteActions(
         if ('error' in editResult) {
             results.push({ request: req, response: editResult.error });
         } else {
+            for (const [requestId, trackedRange] of trackedUndoRanges.entries()) {
+                if (trackedRange.superseded) continue;
+                trackedUndoRanges.set(
+                    requestId,
+                    transformTrackedUndoRange(trackedRange, editResult.appliedReplacements),
+                );
+            }
+
             // Success — advance currentHtml for the next edit
             currentHtml = editResult.newHtml;
             anySucceeded = true;
@@ -1340,6 +1413,12 @@ async function executeBatchEditNoteActions(
                     result_data: editResult.resultData,
                 },
             });
+            if (editResult.trackedUndoRange) {
+                trackedUndoRanges.set(req.request_id, {
+                    ...editResult.trackedUndoRange,
+                    superseded: false,
+                });
+            }
         }
 
         // Invalidate simplification cache between edits so the next edit
@@ -1436,39 +1515,56 @@ async function executeBatchEditNoteActions(
         const finalHtml = getLatestNoteHtml(item);
         const finalStripped = stripDataCitationItems(finalHtml);
         const PM_UNDO_CONTEXT_LENGTH = 200;
+        const supersededUndoRequestIds = new Set(
+            Array.from(trackedUndoRanges.entries())
+                .filter(([, state]) => state.superseded)
+                .map(([requestId]) => requestId),
+        );
 
-        if (finalStripped !== savedStrippedHtml) {
-            // PM changed the HTML — refresh undo data for every successful edit
-            for (const entry of results) {
-                const rd = entry.response.result_data;
-                if (!entry.response.success || !rd?.undo_new_html) continue;
+        // Refresh undo data for every successful anchored edit, even when PM
+        // leaves the saved HTML unchanged. Earlier edits captured their anchors
+        // before later batch edits ran, so their contexts must be re-anchored
+        // against the final saved HTML. If a later batch edit rewrote an
+        // earlier replacement itself, preserve that earlier action's original
+        // undo_new_html so standalone undo reports it as superseded.
+        for (const entry of results) {
+            const rd = entry.response.result_data;
+            if (!entry.response.success || !rd?.undo_new_html) continue;
 
-                const beforeCtx = rd.undo_before_context as string | undefined;
-                const afterCtx = rd.undo_after_context as string | undefined;
-                if (beforeCtx === undefined && afterCtx === undefined) continue;
+            const beforeCtx = rd.undo_before_context as string | undefined;
+            const afterCtx = rd.undo_after_context as string | undefined;
+            if (beforeCtx === undefined && afterCtx === undefined) continue;
+            const hasBeforeAnchor = beforeCtx != null && beforeCtx.length > 0;
+            const hasAfterAnchor = afterCtx != null && afterCtx.length > 0;
+            const canRefreshUndoFragment = hasBeforeAnchor && hasAfterAnchor;
 
-                // Try original anchors, then entity-decoded anchors
-                let range = findRangeByContexts(finalStripped, beforeCtx, afterCtx);
-                if (!range) {
-                    const decodedBefore = beforeCtx != null ? decodeHtmlEntities(beforeCtx) : undefined;
-                    const decodedAfter = afterCtx != null ? decodeHtmlEntities(afterCtx) : undefined;
-                    range = findRangeByContexts(finalStripped, decodedBefore, decodedAfter);
+            // Try original anchors, then entity-decoded anchors
+            let range = findRangeByContexts(finalStripped, beforeCtx, afterCtx);
+            if (!range) {
+                const decodedBefore = beforeCtx != null ? decodeHtmlEntities(beforeCtx) : undefined;
+                const decodedAfter = afterCtx != null ? decodeHtmlEntities(afterCtx) : undefined;
+                range = findRangeByContexts(finalStripped, decodedBefore, decodedAfter);
+            }
+            if (range) {
+                const actualFragment = finalStripped.substring(range.start, range.end);
+                if (canRefreshUndoFragment && !supersededUndoRequestIds.has(entry.request.request_id)) {
+                    rd.undo_new_html = actualFragment;
+                } else if (actualFragment !== rd.undo_new_html) {
+                    const preserveReason = canRefreshUndoFragment
+                        ? 'a later batch edit rewrote that fragment'
+                        : 'only one undo context anchor was usable';
+                    logger(`executeBatchEditNoteActions: preserving original undo target for `
+                        + `request ${entry.request.request_id} because ${preserveReason}`, 1);
                 }
-                if (range) {
-                    const actualFragment = finalStripped.substring(range.start, range.end);
-                    if (actualFragment !== rd.undo_new_html) {
-                        rd.undo_new_html = actualFragment;
-                        rd.undo_before_context = finalStripped.substring(
-                            Math.max(0, range.start - PM_UNDO_CONTEXT_LENGTH), range.start,
-                        );
-                        rd.undo_after_context = finalStripped.substring(
-                            range.end, range.end + PM_UNDO_CONTEXT_LENGTH,
-                        );
-                    }
-                } else {
-                    logger(`executeBatchEditNoteActions: could not locate undo fragment for `
-                        + `request ${entry.request.request_id} after PM normalization`, 1);
-                }
+                rd.undo_before_context = finalStripped.substring(
+                    Math.max(0, range.start - PM_UNDO_CONTEXT_LENGTH), range.start,
+                );
+                rd.undo_after_context = finalStripped.substring(
+                    range.end, range.end + PM_UNDO_CONTEXT_LENGTH,
+                );
+            } else {
+                logger(`executeBatchEditNoteActions: could not locate undo fragment for `
+                    + `request ${entry.request.request_id} after PM normalization`, 1);
             }
         }
     }
