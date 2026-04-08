@@ -105,6 +105,241 @@ export function invalidateSimplificationCache(noteId: string): void {
 }
 
 // =============================================================================
+// HTML Normalization (pre-simplification)
+// =============================================================================
+
+/**
+ * Convert a CSS hex color to rgb()/rgba() notation.
+ * Handles 3-digit (#RGB), 4-digit (#RGBA), 6-digit (#RRGGBB), 8-digit (#RRGGBBAA).
+ */
+export function hexToRgb(hex: string): string {
+    const h = hex.replace('#', '');
+    let r: number, g: number, b: number, a: number | undefined;
+
+    if (h.length === 3) {
+        r = parseInt(h[0] + h[0], 16);
+        g = parseInt(h[1] + h[1], 16);
+        b = parseInt(h[2] + h[2], 16);
+    } else if (h.length === 4) {
+        r = parseInt(h[0] + h[0], 16);
+        g = parseInt(h[1] + h[1], 16);
+        b = parseInt(h[2] + h[2], 16);
+        a = parseInt(h[3] + h[3], 16);
+    } else if (h.length === 6) {
+        r = parseInt(h.substring(0, 2), 16);
+        g = parseInt(h.substring(2, 4), 16);
+        b = parseInt(h.substring(4, 6), 16);
+    } else if (h.length === 8) {
+        r = parseInt(h.substring(0, 2), 16);
+        g = parseInt(h.substring(2, 4), 16);
+        b = parseInt(h.substring(4, 6), 16);
+        a = parseInt(h.substring(6, 8), 16);
+    } else {
+        return hex; // unrecognized format — return as-is
+    }
+
+    if (a !== undefined) {
+        // Round alpha to 3 decimal places to match browser output
+        return `rgba(${r}, ${g}, ${b}, ${+(a / 255).toFixed(3)})`;
+    }
+    return `rgb(${r}, ${g}, ${b})`;
+}
+
+/**
+ * Parse a CSS style string into individual property-value pairs.
+ * Returns array of { prop, value } objects.
+ */
+function parseStyleProperties(style: string): { prop: string; value: string }[] {
+    const result: { prop: string; value: string }[] = [];
+    // Split on semicolons, but not inside parentheses (e.g., rgb(1, 2, 3))
+    const parts = style.split(';');
+    for (const part of parts) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        const colonIdx = trimmed.indexOf(':');
+        if (colonIdx === -1) continue;
+        const prop = trimmed.substring(0, colonIdx).trim();
+        const value = trimmed.substring(colonIdx + 1).trim();
+        if (prop && value) {
+            result.push({ prop, value });
+        }
+    }
+    return result;
+}
+
+/**
+ * Normalize note HTML to a canonical format matching Zotero's ProseMirror output.
+ *
+ * Applied before simplification so that `read_note` always returns stable HTML
+ * that won't change when ProseMirror re-serializes the note after an edit.
+ *
+ * Normalizations (in order):
+ * 1. Strip <font> tags (preserve content)
+ * 2. Convert legacy elements (<b>→<strong>, <i>→<em>, <s>/<del>/<strike>→strikethrough span)
+ * 3. Convert hex colors to rgb() in style attributes
+ * 4. Normalize whitespace in style attribute values
+ * 5. Split combined-style <span>s into nested single-property <span>s
+ * 6. Normalize self-closing void elements (<br/> → <br>)
+ * 7. Collapse horizontal whitespace between tags
+ */
+export function normalizeNoteHtml(html: string): string {
+    let result = html;
+
+    // Step 1: Strip <font> tags (preserve content)
+    result = result.replace(/<font[^>]*>/gi, '');
+    result = result.replace(/<\/font>/gi, '');
+
+    // Step 2: Legacy element conversion
+    // <b> → <strong>, <i> → <em>
+    result = result.replace(/<b(\s[^>]*)?>/gi, '<strong$1>');
+    result = result.replace(/<\/b>/gi, '</strong>');
+    result = result.replace(/<i(\s[^>]*)?>/gi, '<em$1>');
+    result = result.replace(/<\/i>/gi, '</em>');
+    // <s>, <del>, <strike> → <span style="text-decoration: line-through">
+    result = result.replace(/<(s|del|strike)(\s[^>]*)?>([\s\S]*?)<\/\1>/gi,
+        '<span style="text-decoration: line-through"$2>$3</span>');
+
+    // Step 3: Hex→RGB color conversion in style attributes only
+    result = result.replace(/style="([^"]*)"/gi, (_match, styleValue: string) => {
+        const converted = styleValue.replace(
+            /#([0-9a-fA-F]{3,8})\b/g,
+            (_m, hex) => hexToRgb('#' + hex)
+        );
+        return `style="${converted}"`;
+    });
+
+    // Step 4: Style value whitespace normalization
+    result = result.replace(/style="([^"]*)"/gi, (_match, styleValue: string) => {
+        let normalized = styleValue;
+        // Normalize whitespace around colons: "color:    red" → "color: red"
+        normalized = normalized.replace(/\s*:\s*/g, ': ');
+        // Normalize whitespace around semicolons: "color: red ;  " → "color: red; "
+        normalized = normalized.replace(/\s*;\s*/g, '; ');
+        // Remove trailing semicolon-space
+        normalized = normalized.replace(/;\s*$/, '');
+        // Normalize rgb/rgba spacing: "rgb(1,2,3)" → "rgb(1, 2, 3)"
+        normalized = normalized.replace(
+            /\b(rgba?)\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([0-9.]+)\s*)?\)/g,
+            (_m, fn, r, g, b, a) => a !== undefined ? `${fn}(${r}, ${g}, ${b}, ${a})` : `${fn}(${r}, ${g}, ${b})`
+        );
+        return `style="${normalized}"`;
+    });
+
+    // Step 5: Split combined-style <span> into nested single-property <span>s
+    result = splitCombinedStyleSpans(result);
+
+    // Step 6: Self-closing void element normalization
+    // <br/>, <br />, <hr/>, <hr /> → <br>, <hr>
+    // For img: <img ... /> → <img ...>
+    result = result.replace(/<(br|hr|img)(\s[^>]*)?\s*\/>/gi,
+        (_match, tag, attrs) => {
+            // Trim trailing whitespace from captured attributes
+            const cleanAttrs = attrs ? attrs.replace(/\s+$/, '') : '';
+            return `<${tag.toLowerCase()}${cleanAttrs}>`;
+        });
+
+    // Step 7: Collapse horizontal whitespace between tags
+    // ">   <" → "><" (only spaces/tabs, preserve newlines)
+    result = result.replace(/>[ \t]+</g, '><');
+
+    return result;
+}
+
+/**
+ * Split <span> elements with multiple CSS properties into nested single-property <span>s.
+ *
+ * Example:
+ *   <span style="color: X; background-color: Y">content</span>
+ * → <span style="color: X"><span style="background-color: Y">content</span></span>
+ *
+ * Uses a depth counter to find the matching </span> for correct tag balancing.
+ */
+function splitCombinedStyleSpans(html: string): string {
+    // Pattern to find <span ...style="..."...> with the style containing 2+ properties
+    const spanOpenRegex = /<span(\s[^>]*)?\s+style="([^"]*)"([^>]*)>/gi;
+    // We need to process iteratively since splitting changes positions
+    let result = '';
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    // Reset regex state
+    spanOpenRegex.lastIndex = 0;
+
+    while ((match = spanOpenRegex.exec(html)) !== null) {
+        const fullMatch = match[0];
+        const preStyleAttrs = match[1] || '';
+        const styleValue = match[2];
+        const postStyleAttrs = match[3] || '';
+        const matchStart = match.index;
+
+        const properties = parseStyleProperties(styleValue);
+
+        // Skip if single or zero properties — nothing to split
+        if (properties.length <= 1) continue;
+
+        // Build the other (non-style) attributes string
+        const otherAttrs = (preStyleAttrs + postStyleAttrs).trim();
+        const otherAttrsStr = otherAttrs ? ' ' + otherAttrs : '';
+
+        // Build nested opening tags: outermost gets other attrs, each gets one style prop
+        let openingTags = '';
+        for (let i = 0; i < properties.length; i++) {
+            const p = properties[i];
+            const attrs = i === 0 ? otherAttrsStr : '';
+            openingTags += `<span${attrs} style="${p.prop}: ${p.value}">`;
+        }
+
+        // Find matching </span> using depth counter
+        const afterOpen = matchStart + fullMatch.length;
+        let depth = 1;
+        let pos = afterOpen;
+        let foundClose = -1;
+
+        while (pos < html.length && depth > 0) {
+            // Find next <span or </span>
+            const nextOpenIdx = html.indexOf('<span', pos);
+            const nextCloseIdx = html.indexOf('</span>', pos);
+
+            if (nextCloseIdx === -1) break; // No more closing tags — malformed
+
+            if (nextOpenIdx !== -1 && nextOpenIdx < nextCloseIdx) {
+                // Check it's actually an opening span tag (not e.g. <spanning>)
+                const afterTag = html[nextOpenIdx + 5];
+                if (afterTag === '>' || afterTag === ' ' || afterTag === '\t' || afterTag === '\n') {
+                    depth++;
+                }
+                pos = nextOpenIdx + 5;
+            } else {
+                depth--;
+                if (depth === 0) {
+                    foundClose = nextCloseIdx;
+                } else {
+                    pos = nextCloseIdx + 7; // '</span>'.length
+                }
+            }
+        }
+
+        if (foundClose === -1) continue; // Couldn't find matching close — skip
+
+        // Assemble: content between opening and matching close, then closing tags
+        const innerContent = html.substring(afterOpen, foundClose);
+        const closingTags = '</span>'.repeat(properties.length);
+
+        result += html.substring(lastIndex, matchStart);
+        result += openingTags;
+        result += innerContent;
+        result += closingTags;
+
+        lastIndex = foundClose + 7; // Skip past original </span>
+        // Reset regex to continue from after our replacement
+        spanOpenRegex.lastIndex = lastIndex;
+    }
+
+    result += html.substring(lastIndex);
+    return result;
+}
+
+// =============================================================================
 // Simplification: Raw HTML → Simplified + Metadata
 // =============================================================================
 
@@ -133,7 +368,9 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
 
     // Use regex-based approach to avoid DOMParser re-serialization issues.
     // DOMParser + innerHTML can change attribute order, whitespace, and entity encoding.
-    let simplified = rawHtml;
+    // Pre-normalize to ProseMirror-canonical format so the simplified output is stable
+    // across PM re-serializations (hex→rgb, style splitting, legacy elements, etc.).
+    let simplified = normalizeNoteHtml(rawHtml);
 
     // 1. Strip data-citation-items from wrapper div
     simplified = stripDataCitationItems(simplified);

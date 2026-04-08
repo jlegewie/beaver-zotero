@@ -305,6 +305,29 @@ async function validateEditNoteAction(
         }
     }
 
+    // 12b. Zero matches — try trimming trailing newlines from old_string.
+    //      LLMs often add extra trailing \n characters to old_string.
+    if (matchCount === 0 && old_string) {
+        const trimmedOld = old_string.replace(/\n+$/, '');
+        if (trimmedOld !== old_string) {
+            try {
+                const trimmedExpandedOld = expandToRawHtml(trimmedOld, metadata, 'old');
+                const trimmedCount = countOccurrences(strippedHtml, trimmedExpandedOld);
+                if (trimmedCount > 0) {
+                    expandedOld = trimmedExpandedOld;
+                    const trimmedNew = new_string.replace(/\n+$/, '');
+                    expandedNew = expandToRawHtml(
+                        operation === 'insert_after' ? new_string : trimmedNew,
+                        metadata, 'new'
+                    );
+                    matchCount = trimmedCount;
+                }
+            } catch {
+                // expansion failed — fall through
+            }
+        }
+    }
+
     // 13. Zero matches — try stripping partial simplified-element fragments.
     //     The model may include e.g. "/>" (tail of a <citation…/>) in old_string.
     //     These fragments don't expand to raw HTML, but the text portion does.

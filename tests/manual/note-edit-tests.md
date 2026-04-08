@@ -1611,3 +1611,64 @@ In this note, find the text that appears after the first citation. Your old_stri
 #### Test result
 
 - **Date**: | **Result**:
+
+---
+
+## Category 10: HTML Re-serialization Resilience
+
+These tests verify that notes with non-standard HTML (hex colors, combined-style spans, legacy elements) can be edited correctly by Beaver, even when ProseMirror re-serializes the HTML after the first edit. The normalization layer in `simplifyNoteHtml` should make the format stable.
+
+### Test 10.1: Edit note with hex color styles (sequential edits)
+
+Create or find a note with hex color styles in the HTML (e.g., `style="color: #5686bf"`). Make two sequential edits via Beaver targeting different sections. Verify both edits succeed without the model needing to re-read.
+
+#### Guidelines
+- Create a note with hex colors using `zotero_execute_js`: `item.setNote('<div data-schema-version="9"><h2 style="color: #ff0000">Section One</h2><p>Content A</p><h2 style="color: #0000ff">Section Two</h2><p>Content B</p></div>')`
+- First prompt: "Change 'Content A' to 'Updated A'. Do not change anything else."
+- Second prompt (same chat): "Change 'Content B' to 'Updated B'. Do not change anything else."
+- Both edits should succeed — the first edit triggers PM normalization (hex→rgb), but since `read_note` already returns rgb format, the second edit's old_string still matches.
+
+#### Test result
+
+- **Date**: | **Result**:
+
+### Test 10.2: Edit note with combined-style spans
+
+Find or create a note with `<span style="color: X; background-color: Y">`. Make two sequential edits targeting different sections.
+
+#### Guidelines
+- Create a note: `<div data-schema-version="9"><p><span style="color: #e0ffff; background-color: #66cdaa">Styled Section A</span></p><p>Plain text</p><p><span style="color: #004d99; background-color: #87cefa">Styled Section B</span></p></div>`
+- First prompt: "Change 'Plain text' to 'Modified text'."
+- Second prompt: "Change 'Styled Section B' to 'Updated Section B'."
+- Verify both succeed. The combined-style spans are split by normalization before the model sees them.
+
+#### Test result
+
+- **Date**: | **Result**:
+
+### Test 10.3: Edit note with legacy elements
+
+Create a note with `<b>`, `<i>`, `<font>` tags. Make an edit and verify the content is preserved.
+
+#### Guidelines
+- Create a note: `<div data-schema-version="9"><h1><font size="6">Title</font></h1><p><b>Bold</b> and <i>italic</i> and <s>struck</s> text</p><p>Second paragraph</p></div>`
+- Prompt: "Change 'Second paragraph' to 'Changed paragraph'."
+- Verify the edit succeeds and the bold/italic/strikethrough formatting is preserved in the note.
+- Verify via `read_note` that the model sees `<strong>`, `<em>`, and `<span style="text-decoration: line-through">` (not `<b>`, `<i>`, `<s>`).
+
+#### Test result
+
+- **Date**: | **Result**:
+
+### Test 10.4: Parallel edits on non-overlapping sections
+
+Send a prompt that triggers multiple parallel `edit_note` calls targeting different sections of a note with non-standard HTML. Verify all edits succeed.
+
+#### Guidelines
+- Create a note with multiple sections using hex colors and combined styles
+- Send a single prompt asking to fill in multiple sections simultaneously (e.g., "Fill in all the empty sections with appropriate content based on the paper")
+- Verify that the model issues multiple parallel `edit_note` calls and they all succeed (or at least most succeed without needing to re-read)
+
+#### Test result
+
+- **Date**: | **Result**:

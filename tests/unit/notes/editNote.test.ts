@@ -887,3 +887,51 @@ describe('executeEditNoteAction — partial element fallback', () => {
         expect(savedHtml).not.toContain('—ein theoretisch');
     });
 });
+
+
+// =============================================================================
+// Trailing whitespace normalization in matching
+// =============================================================================
+
+describe('trailing whitespace normalization in matching', () => {
+    let mockItem: any;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        const noteHtml = '<div data-schema-version="9"><p>Hello world</p>\n<p>Second para</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+    });
+
+    it('matches old_string with trailing \\n\\n when note has \\n', async () => {
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                // old_string has trailing double newline that doesn't exist in note
+                old_string: '<p>Hello world</p>\n\n',
+                new_string: '<p>Goodbye world</p>\n',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(true);
+    });
+
+    it('does not trim non-trailing whitespace', async () => {
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                // Whitespace in the middle — should not match
+                old_string: 'Hello\n\nworld',
+                new_string: 'Goodbye world',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        // "Hello\n\nworld" is not in the note, and trimming trailing \n won't help
+        expect(response.valid).toBe(false);
+    });
+});

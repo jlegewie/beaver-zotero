@@ -1536,7 +1536,7 @@ describe('Math simplification', () => {
         const { simplified } = simplifyNoteHtml(html, 1);
         // highlight is handled separately (as annotation with data-annotation), plain highlight without data-annotation passes through
         expect(simplified).toContain('class="highlight"');
-        expect(simplified).toContain('style="color:red"');
+        expect(simplified).toContain('style="color: red"');
     });
 
     it('leaves math without dollar delimiters unchanged', () => {
@@ -2222,5 +2222,74 @@ describe('encodeTextEntities', () => {
         expect(decoded).toBe("Dashti's \"memoir\"");
         const reencoded = encodeTextEntities(decoded);
         expect(reencoded).toBe(original);
+    });
+});
+
+
+// =============================================================================
+// simplifyNoteHtml with pre-normalization
+// =============================================================================
+
+describe('simplifyNoteHtml with pre-normalization', () => {
+    it('hex colors are converted to rgb before simplification', () => {
+        const rawHtml = wrap('<p style="color: #ff0000">Red text</p>');
+        const { simplified } = simplifyNoteHtml(rawHtml, 1);
+        expect(simplified).toContain('rgb(255, 0, 0)');
+        expect(simplified).not.toContain('#ff0000');
+    });
+
+    it('combined-style spans are split before citation extraction', () => {
+        const citation = rawCitation('ABC');
+        const rawHtml = wrap(
+            '<span style="color: #ff0000; background-color: #00ff00">'
+            + `Text with ${citation}`
+            + '</span>'
+        );
+        const { simplified } = simplifyNoteHtml(rawHtml, 1);
+        // Styles should be split
+        expect(simplified).toContain('style="color: rgb(255, 0, 0)"');
+        expect(simplified).toContain('style="background-color: rgb(0, 255, 0)"');
+        // Citation should be simplified
+        expect(simplified).toContain('<citation');
+    });
+
+    it('legacy <b>/<i> converted before simplification', () => {
+        const rawHtml = wrap('<p><b>bold</b> and <i>italic</i></p>');
+        const { simplified } = simplifyNoteHtml(rawHtml, 1);
+        expect(simplified).toContain('<strong>bold</strong>');
+        expect(simplified).toContain('<em>italic</em>');
+        expect(simplified).not.toContain('<b>');
+        expect(simplified).not.toContain('<i>');
+    });
+
+    it('<font> tags stripped before simplification', () => {
+        const rawHtml = wrap('<h1><font size="6">Title</font></h1>');
+        const { simplified } = simplifyNoteHtml(rawHtml, 1);
+        expect(simplified).toContain('<h1>Title</h1>');
+        expect(simplified).not.toContain('<font');
+    });
+
+    it('normalization + simplification roundtrip preserves citations', () => {
+        const citation = rawCitation('KEY1', 1, '5', 'Author, 2024');
+        const rawHtml = wrap(`<p style="color: #ff0000">Text ${citation} more</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(rawHtml, 1);
+        // Citation simplified
+        expect(simplified).toContain('<citation');
+        // Expand back
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        // Should contain the citation data
+        expect(expanded).toContain('data-citation=');
+    });
+
+    it('normalization + simplification roundtrip preserves annotations', () => {
+        const annotation = rawAnnotation('ANN1', 'ATT1', 'highlighted text');
+        const rawHtml = wrap(`<p>${annotation}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(rawHtml, 1);
+        // Annotation simplified
+        expect(simplified).toContain('<annotation');
+        expect(simplified).toContain('highlighted text');
+        // Expand back
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toContain('data-annotation=');
     });
 });

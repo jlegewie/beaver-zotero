@@ -72,6 +72,7 @@ import {
     getLatestNoteHtml,
     normalizePageLocator,
     captureValidatedEditTargetContext,
+    normalizeNoteHtml,
     SimplificationMetadata,
 } from '../../../src/utils/noteHtmlSimplifier';
 import { createCitationHTML } from '../../../src/utils/zoteroUtils';
@@ -103,7 +104,9 @@ function rawCitation(key: string, libraryID = 1, page = '', label = 'Author, 202
  * now strips the wrapper from its output, expandToRawHtml can't restore it).
  */
 function roundtripExpected(html: string): string {
-    return stripNoteWrapperDiv(stripDataCitationItems(html));
+    // Since simplifyNoteHtml now normalizes HTML before simplification,
+    // the expanded output will be the normalized version of the original HTML.
+    return stripNoteWrapperDiv(stripDataCitationItems(normalizeNoteHtml(html)));
 }
 
 function stripInlineItemDataFromDataCitationsForTest(html: string): string {
