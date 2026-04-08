@@ -33,3 +33,4 @@ reactBundle.js.map
 
 # Zotero documentation
 docs-zotero
+/tests/manual/*
