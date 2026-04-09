@@ -2321,7 +2321,7 @@
 [id^="beaver-pane-"] .inline-diff-container {
     font-size: 0.875rem;
     line-height: 1.45;
-    padding: 4px 10px;
+    padding: 4px 6px;
     word-break: break-word;
     border-radius: 1px;
 }

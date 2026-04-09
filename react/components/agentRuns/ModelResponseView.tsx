@@ -1,12 +1,129 @@
 import React, { useRef } from 'react';
-import { AgentRunStatus, ModelResponse } from '../../agents/types';
+import { AgentRunStatus, ModelResponse, ToolCallPart } from '../../agents/types';
 import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
 import { ToolCallPartView } from './ToolCallPartView';
 import { AnnotationToolCallView } from './AnnotationToolCallView';
+import { EditNoteGroupView } from './EditNoteGroupView';
 import { isAnnotationToolResult } from '../../agents/toolResultTypes';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
+
+/**
+ * Render item for the tool-call iteration in a model response.
+ *
+ * Consecutive `edit_note` parts targeting the same note are folded into one
+ * `edit-note-group` so the chat shows a single "X Edits · Note Title" row
+ * instead of one row per parallel tool call.
+ */
+type RenderItem =
+    | { kind: 'single'; part: ToolCallPart }
+    | {
+        kind: 'edit-note-group';
+        libraryId: number;
+        zoteroKey: string;
+        parts: ToolCallPart[];
+    };
+
+/**
+ * Extract `(library_id, zotero_key)` from a `ToolCallPart`'s args. Returns
+ * null when the args aren't a complete edit_note payload (e.g. mid-stream
+ * unparseable JSON, or missing fields).
+ *
+ * The `edit_note` tool schema uses a combined `note_id` field of the form
+ * `"<library_id>-<zotero_key>"`. We also accept the separate
+ * `library_id` / `zotero_key` shape as a fallback in case the backend
+ * normalizes one form to the other in the future.
+ */
+function getEditNoteTarget(part: ToolCallPart): { libraryId: number; zoteroKey: string } | null {
+    if (part.tool_name !== 'edit_note') return null;
+    if (isAnnotationToolResult(part.tool_name)) return null;
+
+    let args: Record<string, unknown> | undefined;
+    try {
+        args = typeof part.args === 'string'
+            ? (part.args ? JSON.parse(part.args) : undefined)
+            : (part.args as Record<string, unknown> | undefined) ?? undefined;
+    } catch {
+        return null;
+    }
+
+    if (!args) return null;
+
+    // Preferred: combined note_id of the form "<libraryId>-<zoteroKey>"
+    const noteId = args.note_id;
+    if (typeof noteId === 'string' && noteId) {
+        const dashIdx = noteId.indexOf('-');
+        if (dashIdx > 0 && dashIdx < noteId.length - 1) {
+            const libraryId = parseInt(noteId.substring(0, dashIdx), 10);
+            const zoteroKey = noteId.substring(dashIdx + 1);
+            if (Number.isFinite(libraryId) && zoteroKey) {
+                return { libraryId, zoteroKey };
+            }
+        }
+    }
+
+    // Fallback: separate library_id / zotero_key fields
+    const libRaw = args.library_id;
+    const keyRaw = args.zotero_key;
+    const libraryId = typeof libRaw === 'number'
+        ? libRaw
+        : (typeof libRaw === 'string' ? parseInt(libRaw, 10) : NaN);
+    if (Number.isFinite(libraryId) && typeof keyRaw === 'string' && keyRaw) {
+        return { libraryId, zoteroKey: keyRaw };
+    }
+
+    return null;
+}
+
+/**
+ * Walk the tool-call parts left-to-right, folding consecutive `edit_note`
+ * parts that target the same note into a group. A run of length 1 stays as
+ * a `single` item so single edits render exactly as before.
+ */
+function buildRenderItems(parts: ToolCallPart[]): RenderItem[] {
+    const items: RenderItem[] = [];
+    let runParts: ToolCallPart[] = [];
+    let runLib: number | null = null;
+    let runKey: string | null = null;
+
+    const flushRun = () => {
+        if (runParts.length === 0) return;
+        if (runParts.length >= 2 && runLib !== null && runKey !== null) {
+            items.push({
+                kind: 'edit-note-group',
+                libraryId: runLib,
+                zoteroKey: runKey,
+                parts: runParts,
+            });
+        } else {
+            for (const p of runParts) items.push({ kind: 'single', part: p });
+        }
+        runParts = [];
+        runLib = null;
+        runKey = null;
+    };
+
+    for (const part of parts) {
+        const target = getEditNoteTarget(part);
+        if (target) {
+            if (runLib === target.libraryId && runKey === target.zoteroKey) {
+                runParts.push(part);
+            } else {
+                flushRun();
+                runParts = [part];
+                runLib = target.libraryId;
+                runKey = target.zoteroKey;
+            }
+        } else {
+            flushRun();
+            items.push({ kind: 'single', part });
+        }
+    }
+    flushRun();
+
+    return items;
+}
 
 interface ModelResponseViewProps {
     /** The model response */
@@ -93,9 +210,23 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
             {/* Tool call parts */}
             {toolCallParts.length > 0 && (
                 <div className="display-flex flex-col py-2 gap-1">
-                    {toolCallParts.map((part) => {
-                        if (part.part_kind !== 'tool-call') return null;
-                        
+                    {buildRenderItems(toolCallParts as ToolCallPart[]).map((item) => {
+                        if (item.kind === 'edit-note-group') {
+                            return (
+                                <EditNoteGroupView
+                                    key={`edit-note-group-${item.libraryId}-${item.zoteroKey}-${item.parts[0].tool_call_id}`}
+                                    parts={item.parts}
+                                    libraryId={item.libraryId}
+                                    zoteroKey={item.zoteroKey}
+                                    runId={runId}
+                                    responseIndex={responseIndex}
+                                    runStatus={runStatus}
+                                />
+                            );
+                        }
+
+                        const part = item.part;
+
                         // Use specialized view for annotation tools
                         if (isAnnotationToolResult(part.tool_name)) {
                             return (
@@ -107,7 +238,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
                                 />
                             );
                         }
-                        
+
                         // Default view for other tools
                         return (
                             <ToolCallPartView

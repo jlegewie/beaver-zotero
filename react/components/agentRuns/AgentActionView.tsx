@@ -58,6 +58,7 @@ import {
     DollarCircleIcon,
     GlobalSearchIcon,
     FileDiffIcon,
+    UndoIcon,
 } from '../icons/icons';
 import { revealSource, openNoteAndSearchEdit, openNoteByKey } from '../../utils/sourceUtils';
 import { isNoteOpenInEditor, showDiffPreview, dismissDiffPreview, isDiffPreviewActive } from '../../utils/noteEditorDiffPreview';
@@ -77,7 +78,7 @@ import {
     makeNoteKey,
 } from '../../atoms/editNoteAutoApprove';
 
-type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
+export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
 /**
  * Prompt user to confirm overwriting manually modified fields during undo.
@@ -118,6 +119,13 @@ interface AgentActionViewProps {
     hasToolReturn?: boolean;
     /** Pre-parsed partial tool call arguments for streaming preview */
     streamingArgs?: Record<string, any> | null;
+    /**
+     * When true, render in compact in-group mode: skip the tool/title header
+     * (it lives on the parent group), always show the preview, drop the outer
+     * card border, and show a small status icon in the footer instead of the
+     * deferred-tool-preference button. Used by EditNoteGroupView.
+     */
+    isInGroup?: boolean;
 }
 
 interface StatusConfig {
@@ -130,7 +138,7 @@ interface StatusConfig {
     showRetry: boolean;
 }
 
-const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
+export const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
     awaiting: {
         icon: Spinner,
         label: 'Awaiting approval',
@@ -194,7 +202,7 @@ const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
  * Note: We prioritize 'applied' over 'error' when there are mixed results,
  * so users can still undo successfully applied items even if some failed.
  */
-function getOverallStatus(actions: AgentAction[]): ActionStatus {
+export function getOverallStatus(actions: AgentAction[]): ActionStatus {
     if (actions.length === 0) return 'pending';
     
     const statuses = actions.map(a => a.status);
@@ -226,6 +234,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     pendingApproval: pendingApprovalProp,
     hasToolReturn = false,
     streamingArgs,
+    isInGroup = false,
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
@@ -823,7 +832,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     // Streaming mode: show live preview without action buttons while LLM generates args.
     // This must be after all hooks to satisfy Rules of Hooks.
-    if (isStreaming && streamingArgs) {
+    // Skip the streaming-specific full-card layout when rendered inside a group —
+    // the parent group owns the header, and the body will render once args complete.
+    if (isStreaming && streamingArgs && !isInGroup) {
         const streamingTitle = getActionTitle(toolName, streamingArgs, null, undefined);
         const streamingPreviewData: PreviewData = {
             actionType: toolName,
@@ -856,6 +867,123 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     status="pending"
                     isStreaming={true}
                 />
+            </div>
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // In-group rendering: thin left bar (status + per-edit action icons)
+    // and the diff preview taking the rest of the row.
+    // -----------------------------------------------------------------
+    if (isInGroup) {
+        const StatusIcon = config.icon;
+        return (
+            <div
+                className="agent-action-view rounded-md flex flex-col min-w-0"
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
+            >
+                <div className="display-flex flex-row min-w-0">
+                    {/* Left action bar: status icon stacked above per-state icons */}
+                    <div
+                        className="display-flex flex-col items-center gap-25 px-2 py-2 flex-shrink-0 ml-05"
+                        // style={{ minWidth: '28px' }}
+                    >
+                        {StatusIcon && (
+                            <div className="display-flex items-center mt-010">
+                                {StatusIcon === Spinner ? (
+                                    <Spinner size={13} className={`${config.iconClassName} scale-10`} style={{ marginLeft: '0.185rem' }} />
+                                ) : (
+                                    <Icon icon={StatusIcon} className={`${config.iconClassName} scale-10`} />
+                                )}
+                            </div>
+                        )}
+
+                        {/* Apply (awaiting/pending/rejected/undone) */}
+                        {config.showApply && !isProcessing && (
+                            <Tooltip content="Apply" showArrow singleLine>
+                                <IconButton
+                                    icon={TickIcon}
+                                    variant="ghost-secondary"
+                                    iconClassName="font-color-green scale-12"
+                                    onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
+                                    disabled={isProcessing}
+                                    loading={isProcessing && clickedButton === 'approve'}
+                                />
+                            </Tooltip>
+                        )}
+
+                        {/* Reject (awaiting/pending) */}
+                        {config.showReject && !isProcessing && (
+                            <Tooltip content="Reject" showArrow singleLine>
+                                <IconButton
+                                    icon={CancelIcon}
+                                    variant="ghost-secondary"
+                                    iconClassName="font-color-red scale-90"
+                                    onClick={isAwaitingApproval ? handleReject : handleRejectPending}
+                                    disabled={isProcessing}
+                                    loading={isProcessing && clickedButton === 'reject'}
+                                />
+                            </Tooltip>
+                        )}
+
+                        {/* Undo (applied) */}
+                        {config.showUndo && !isProcessing && (
+                            <Tooltip content="Undo" showArrow singleLine>
+                                <IconButton
+                                    icon={UndoIcon}
+                                    variant="ghost-secondary"
+                                    iconClassName="scale-10"
+                                    onClick={handleUndo}
+                                    disabled={isProcessing}
+                                    loading={isProcessing && clickedButton === 'undo'}
+                                />
+                            </Tooltip>
+                        )}
+
+                        {/* Retry (error) */}
+                        {config.showRetry && !isProcessing && (
+                            <Tooltip content={isUndoError ? 'Retry undo' : 'Try again'} showArrow singleLine>
+                                <IconButton
+                                    icon={RepeatIcon}
+                                    variant="ghost-secondary"
+                                    iconClassName="scale-90"
+                                    onClick={handleRetry}
+                                    disabled={isProcessing}
+                                    loading={isProcessing}
+                                />
+                            </Tooltip>
+                        )}
+                    </div>
+
+                    {/* Right side: diff preview */}
+                    <div className="flex-1 min-w-0">
+                        {previewData ? (
+                            <ActionPreview
+                                toolName={toolName}
+                                previewData={previewData}
+                                status={status}
+                                actions={actions}
+                            />
+                        ) : (
+                            <div className="text-sm font-color-secondary px-3 py-2">
+                                No preview available
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Inline undo error banner */}
+                {undoError && (
+                    <div className="display-flex flex-row items-start gap-2 mx-3 mb-2 px-3 py-2 rounded-md bg-senary">
+                        <div className="mt-010 flex-shrink-0">
+                            <Icon icon={AlertIcon} className="font-color-secondary scale-90" />
+                        </div>
+                        <div className="text-sm font-color-secondary" style={{ lineHeight: '1.4' }}>
+                            Could not undo automatically. The note may have been modified since this edit was applied. You can revert manually in the note editor.
+                        </div>
+                    </div>
+                )}
             </div>
         );
     }
@@ -1105,13 +1233,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 /**
  * Get human-readable label for the action
  */
-function getActionLabel(toolName: string): string {
+export function getActionLabel(toolName: string): string {
     switch (toolName) {
         case 'edit_metadata':
         case 'edit_item':
             return 'Edit';
         case 'edit_note':
-            return 'Edit Note';
+            return 'Note Edit';
         case 'create_note':
             return 'Create Note';
         case 'create_item':
