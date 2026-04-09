@@ -7,6 +7,7 @@
  */
 
 import { vi } from 'vitest';
+import { JSDOM } from 'jsdom';
 
 // ---------------------------------------------------------------------------
 // IOUtils — Mozilla's async file I/O
@@ -45,6 +46,17 @@ const pathUtils = {
 };
 
 // ---------------------------------------------------------------------------
+// jsdom window — lazy-initialized for ProseMirror normalization DOM access
+// ---------------------------------------------------------------------------
+let _jsdomWindow: any = null;
+function getJsdomWindow() {
+    if (!_jsdomWindow) {
+        _jsdomWindow = new JSDOM('').window;
+    }
+    return _jsdomWindow;
+}
+
+// ---------------------------------------------------------------------------
 // Zotero namespace (minimal)
 // ---------------------------------------------------------------------------
 (globalThis as any).Zotero = {
@@ -70,6 +82,7 @@ const pathUtils = {
         clear: vi.fn(),
     },
     debug: vi.fn(),
+    getMainWindow: vi.fn(() => getJsdomWindow()),
 };
 
 // ---------------------------------------------------------------------------
