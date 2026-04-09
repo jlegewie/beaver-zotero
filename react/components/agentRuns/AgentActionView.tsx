@@ -126,6 +126,23 @@ interface AgentActionViewProps {
      * deferred-tool-preference button. Used by EditNoteGroupView.
      */
     isInGroup?: boolean;
+    /**
+     * In-group only: an undo error message provided by the parent group view.
+     * When set (and `isInGroup`), the inline "Could not undo automatically..."
+     * banner is rendered using this value instead of the local `undoError`
+     * state. Lets the parent's "Undo All" surface failures inside the exact
+     * child row that failed.
+     */
+    externalUndoError?: string | null;
+    /**
+     * In-group only: callback fired when the child's per-action undo handler
+     * starts (with `null` to clear) or fails (with the error message). The
+     * parent group view uses this to keep its per-action error map in sync
+     * with errors produced by the child's own Undo button — so the per-edit
+     * banner is the single source of truth no matter which entry point
+     * triggered the undo.
+     */
+    onUndoErrorChange?: (toolcallId: string, error: string | null) => void;
 }
 
 interface StatusConfig {
@@ -235,6 +252,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     hasToolReturn = false,
     streamingArgs,
     isInGroup = false,
+    externalUndoError = null,
+    onUndoErrorChange,
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
@@ -598,7 +617,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const handleUndo = useCallback(async () => {
         if (!action || isProcessing) return;
 
-        setUndoError(null);
+        // Clear any prior undo error before retrying. In group mode the
+        // canonical store is the parent's per-action map, so notify it; out of
+        // group mode we own the local state.
+        if (isInGroup && onUndoErrorChange) {
+            onUndoErrorChange(toolcallId, null);
+        } else {
+            setUndoError(null);
+        }
         setIsProcessingAction(true);
         setClickedButton('undo');
         try {
@@ -686,8 +712,15 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             logger(`AgentActionView: Failed to undo actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
 
             if (toolName === 'edit_note') {
-                // For edit_note: keep action in 'applied' state, show inline error banner
-                setUndoError(errorMessage);
+                // For edit_note: keep action in 'applied' state, show inline error banner.
+                // In group mode the parent owns the error map (so the banner
+                // shows up in the right child row regardless of whether the
+                // user clicked the per-edit Undo or the group's Undo All).
+                if (isInGroup && onUndoErrorChange) {
+                    onUndoErrorChange(toolcallId, errorMessage);
+                } else {
+                    setUndoError(errorMessage);
+                }
             } else {
                 // For other action types: set error status but track that it came from undo
                 setIsUndoError(true);
@@ -703,7 +736,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             setIsProcessingAction(false);
             setClickedButton(null);
         }
-    }, [action, actions, isProcessing, toolName, undoAgentAction, setAgentActionsToError, markExternalReferenceDeleted]);
+    }, [action, actions, isProcessing, toolName, isInGroup, toolcallId, onUndoErrorChange, undoAgentAction, setAgentActionsToError, markExternalReferenceDeleted]);
 
     const handleRetry = useCallback(async () => {
         if (isUndoError) {
@@ -973,8 +1006,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     </div>
                 </div>
 
-                {/* Inline undo error banner */}
-                {undoError && (
+                {/* Inline undo error banner — in-group mode prefers the
+                    parent-provided error so the banner reflects failures from
+                    both the per-edit Undo button and the group's "Undo All". */}
+                {(externalUndoError ?? undoError) && (
                     <div className="display-flex flex-row items-start gap-2 mx-3 mb-2 px-3 py-2 rounded-md bg-senary">
                         <div className="mt-010 flex-shrink-0">
                             <Icon icon={AlertIcon} className="font-color-secondary scale-90" />

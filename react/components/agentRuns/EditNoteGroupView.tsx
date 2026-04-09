@@ -179,6 +179,11 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     // Local processing state
     const [isProcessing, setIsProcessing] = useState(false);
     const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
+    // Per-edit undo errors keyed by toolcall_id. Both the group's "Undo All"
+    // and each child's per-edit Undo button funnel failures through this map
+    // so the friendly "revert manually" banner appears in the exact child row
+    // that failed — letting the user see exactly which edit couldn't be undone.
+    const [perEditUndoErrors, setPerEditUndoErrors] = useState<Record<string, string>>({});
 
     // ---------------------------------------------------------------------
     // Handlers
@@ -330,6 +335,16 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
         setIsProcessing(true);
         setClickedButton('undo');
+        // Clear any prior errors for the actions we're about to retry so the
+        // banners disappear during the attempt; failures will repopulate them.
+        setPerEditUndoErrors((prev) => {
+            const next = { ...prev };
+            for (const a of appliedActions) {
+                if (a.toolcall_id) delete next[a.toolcall_id];
+            }
+            return next;
+        });
+        const newFailures: Record<string, string> = {};
         try {
             // Dismiss any active diff preview before undoing
             if (isDiffPreviewActive()) {
@@ -348,22 +363,88 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                     const errorMessage = error?.message || 'Failed to undo edit_note';
                     const stackTrace = error?.stack || '';
                     logger(`EditNoteGroupView: Failed to undo edit_note action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
-                    setAgentActionsToError([action.id], errorMessage, {
-                        stack_trace: stackTrace,
-                        error_name: error?.name,
-                    });
+                    // Mirror AgentActionView.handleUndo: for edit_note we keep
+                    // the action in 'applied' state and surface a friendly
+                    // banner instead of flipping it to 'error'. The note may
+                    // have been modified externally — the action is still
+                    // semantically applied, and the user can retry or revert
+                    // manually in the editor.
+                    if (action.toolcall_id) {
+                        newFailures[action.toolcall_id] = errorMessage;
+                    }
                 }
             }
         } finally {
             setIsProcessing(false);
             setClickedButton(null);
+            const failureCount = Object.keys(newFailures).length;
+            if (failureCount > 0) {
+                setPerEditUndoErrors((prev) => ({ ...prev, ...newFailures }));
+                // Auto-expand so the per-edit banners are visible — otherwise
+                // a collapsed group would silently swallow the failures.
+                setExpanded({ key: expansionKey, expanded: true });
+                logger(`EditNoteGroupView: ${failureCount} edit_note undo(s) failed for ${libraryId}-${zoteroKey}`, 1);
+            }
         }
     }, [
         isProcessing,
         allActions,
+        libraryId,
+        zoteroKey,
         undoAgentAction,
-        setAgentActionsToError,
+        setExpanded,
+        expansionKey,
     ]);
+
+    /**
+     * Receives undo error updates from child AgentActionViews when the user
+     * uses the per-edit Undo button. Keeps the parent's error map as the
+     * single source of truth so failures from either entry point land in the
+     * same place.
+     */
+    const handleChildUndoErrorChange = useCallback(
+        (childToolcallId: string, error: string | null) => {
+            setPerEditUndoErrors((prev) => {
+                if (error === null) {
+                    if (!(childToolcallId in prev)) return prev;
+                    const next = { ...prev };
+                    delete next[childToolcallId];
+                    return next;
+                }
+                if (prev[childToolcallId] === error) return prev;
+                return { ...prev, [childToolcallId]: error };
+            });
+            if (error !== null) {
+                // Make sure the failing row is visible.
+                setExpanded({ key: expansionKey, expanded: true });
+            }
+        },
+        [setExpanded, expansionKey],
+    );
+
+    // Prune stale per-edit undo errors when actions are no longer 'applied'
+    // (e.g. a child's undo eventually succeeded after a previous failure).
+    useEffect(() => {
+        setPerEditUndoErrors((prev) => {
+            const keys = Object.keys(prev);
+            if (keys.length === 0) return prev;
+            const stillApplied = new Set(
+                allActions
+                    .filter((a) => a.status === 'applied' && a.toolcall_id)
+                    .map((a) => a.toolcall_id as string),
+            );
+            let changed = false;
+            const next: Record<string, string> = {};
+            for (const key of keys) {
+                if (stillApplied.has(key)) {
+                    next[key] = prev[key];
+                } else {
+                    changed = true;
+                }
+            }
+            return changed ? next : prev;
+        });
+    }, [allActions]);
 
     /**
      * Open the note in editor and show the aggregated diff preview for all
@@ -542,6 +623,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                     pendingApproval={getPendingApproval(part.tool_call_id)}
                                     hasToolReturn={false}
                                     isInGroup={true}
+                                    externalUndoError={perEditUndoErrors[part.tool_call_id] ?? null}
+                                    onUndoErrorChange={handleChildUndoErrorChange}
                                 />
                             </div>
                         ))}
