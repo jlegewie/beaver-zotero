@@ -8,6 +8,7 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
         isStale: false,
     })),
     getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
+    normalizeNoteHtml: vi.fn((html: string) => html),
 }));
 
 // Mock logger

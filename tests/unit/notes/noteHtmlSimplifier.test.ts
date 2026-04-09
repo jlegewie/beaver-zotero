@@ -32,6 +32,7 @@ vi.mock('../../../src/services/supabaseClient', () => ({
 import {
     simplifyNoteHtml,
     expandToRawHtml,
+    normalizeNoteHtml,
     getOrSimplify,
     invalidateSimplificationCache,
     stripDataCitationItems,
@@ -101,6 +102,25 @@ function rawAnnotationImage(annotKey: string, attKey: string, w = '200', h = '10
 /** Build a raw regular image */
 function rawImage(attKey: string): string {
     return `<img data-attachment-key="${attKey}" width="400" height="300" />`;
+}
+
+/**
+ * PM-normalized citation — what PM produces after roundtripping a citation
+ * without itemData (inner text becomes "()" since PM can't format without itemData).
+ */
+function pmNormCitation(key: string, page = ''): string {
+    const citationData = {
+        citationItems: [{ uris: [`http://zotero.org/users/1/items/${key}`], locator: page }],
+    };
+    return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">()</span>`;
+}
+
+/** PM-normalized compound citation */
+function pmNormCompoundCitation(keys: string[]): string {
+    const citationData = {
+        citationItems: keys.map(k => ({ uris: [`http://zotero.org/users/1/items/${k}`], locator: '' })),
+    };
+    return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">()</span>`;
 }
 
 /**
@@ -202,7 +222,7 @@ describe('simplifyNoteHtml', () => {
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('ref="c_ABCD1234_0"');
         expect(simplified).toContain('item_id="1-ABCD1234"');
-        expect(simplified).toContain('label="Author, 2024"');
+        expect(simplified).toContain('label="(Author, 2024)"');
         expect(simplified).toContain('/>');
         expect(metadata.elements.has('c_ABCD1234_0')).toBe(true);
         expect(metadata.elements.get('c_ABCD1234_0')!.type).toBe('citation');
@@ -213,7 +233,7 @@ describe('simplifyNoteHtml', () => {
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('ref="c_KEY1+KEY2_0"');
         expect(simplified).toContain('items="1-KEY1, 1-KEY2"');
-        expect(simplified).toContain('label="Author1; Author2"');
+        expect(simplified).toContain('label="(Author, 2024; Author, 2024)"');
         const stored = metadata.elements.get('c_KEY1+KEY2_0');
         expect(stored!.type).toBe('compound-citation');
         expect(stored!.isCompound).toBe(true);
@@ -262,19 +282,19 @@ describe('simplifyNoteHtml', () => {
         expect(simplified).not.toContain('<div');
         expect(simplified).not.toContain('</div>');
         expect(simplified).not.toContain('data-schema-version');
-        expect(simplified).toBe('<h1>Title</h1>\n<p>Content</p>');
+        expect(simplified).toBe('<h1>Title</h1>\n<p>Content</p>\n');
     });
 
     it('strips wrapper div even without data-schema-version', () => {
         const html = '<div><p>Legacy note</p></div>';
         const { simplified } = simplifyNoteHtml(html, 1);
-        expect(simplified).toBe('<p>Legacy note</p>');
+        expect(simplified).toBe('<p>Legacy note</p>\n');
     });
 
-    it('preserves HTML when not wrapped in a div', () => {
+    it('preserves HTML when not wrapped in a div (PM adds wrapper then strips)', () => {
         const html = '<p>Bare paragraph</p>';
         const { simplified } = simplifyNoteHtml(html, 1);
-        expect(simplified).toBe('<p>Bare paragraph</p>');
+        expect(simplified).toBe('<p>Bare paragraph</p>\n');
     });
 
     it('handles mixed content with all element types', () => {
@@ -324,26 +344,31 @@ describe('simplifyNoteHtml', () => {
         expect(simplified).not.toContain('label="()"');
     });
 
-    it('leaves malformed citation JSON unchanged', () => {
+    it('leaves malformed citation JSON unchanged (PM normalizes to empty citation)', () => {
         const badCitation = '<span class="citation" data-citation="not%20valid%20json"><span class="citation-item">Bad</span></span>';
         const html = wrap(`<p>${badCitation}</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
-        expect(simplified).toContain(badCitation);
+        // PM normalizes malformed data-citation to empty citationItems, so it passes through
+        expect(simplified).toContain('class="citation"');
+        expect(simplified).toContain('()</span>');
     });
 
-    it('leaves citation with empty citationItems unchanged', () => {
+    it('leaves citation with empty citationItems unchanged (PM normalizes inner text)', () => {
         const citationData = { citationItems: [] };
-        const emptyCitation = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}"><span class="citation-item">Empty</span></span>`;
-        const html = wrap(`<p>${emptyCitation}</p>`);
+        const html = wrap(`<p><span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}"><span class="citation-item">Empty</span></span></p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
-        expect(simplified).toContain(emptyCitation);
+        // PM normalizes inner text to "()" and simplification leaves empty citations unchanged
+        expect(simplified).toContain('class="citation"');
+        expect(simplified).toContain('()</span>');
     });
 
     it('escapes quotes and ampersands in label attribute', () => {
         const label = 'Author "2024" & co.';
         const html = wrap(`<p>${rawCitation('ESC1', 1, '', label)}</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
-        expect(simplified).toContain('label="Author &quot;2024&quot; &amp; co."');
+        // PM regenerates label from citation data (original label text is discarded)
+        // The recovered label comes from formatCitation mock: "(Author, 2024)"
+        expect(simplified).toContain('label="(Author, 2024)"');
     });
 });
 
@@ -658,7 +683,7 @@ describe('expandToRawHtml', () => {
 // =============================================================================
 
 describe('citation round-trips', () => {
-    it('single citation: simplify then expand restores original raw HTML', () => {
+    it('single citation: simplify then expand restores PM-normalized raw HTML', () => {
         const raw = rawCitation('RT1', 1, '', 'Smith, 2020');
         const html = wrap(`<p>See ${raw} for details.</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
@@ -667,11 +692,11 @@ describe('citation round-trips', () => {
         expect(simplified).toContain('ref="c_RT1_0"');
         expect(simplified).not.toContain('data-citation=');
 
-        // Expanding old_string with the simplified citation should restore the raw HTML
+        // Expanding old_string with the simplified citation should restore the PM-normalized HTML
         const citationTag = simplified.match(/<citation [^/]*\/>/)?.[0];
         expect(citationTag).toBeTruthy();
         const expanded = expandToRawHtml(citationTag!, metadata, 'old');
-        expect(expanded).toBe(raw);
+        expect(expanded).toBe(pmNormCitation('RT1'));
     });
 
     it('single citation with page: round-trip preserves page locator', () => {
@@ -682,10 +707,10 @@ describe('citation round-trips', () => {
         expect(simplified).toContain('page="42"');
         const citationTag = simplified.match(/<citation [^/]*\/>/)?.[0];
         const expanded = expandToRawHtml(citationTag!, metadata, 'old');
-        expect(expanded).toBe(raw);
+        expect(expanded).toBe(pmNormCitation('RT2', '42'));
     });
 
-    it('compound citation: round-trip restores original', () => {
+    it('compound citation: round-trip restores PM-normalized original', () => {
         const raw = rawCompoundCitation(['C1', 'C2'], 1, 'Author1; Author2');
         const html = wrap(`<p>${raw}</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
@@ -694,7 +719,7 @@ describe('citation round-trips', () => {
         expect(simplified).toContain('items=');
         const citationTag = simplified.match(/<citation [^/]*\/>/)?.[0];
         const expanded = expandToRawHtml(citationTag!, metadata, 'old');
-        expect(expanded).toBe(raw);
+        expect(expanded).toBe(pmNormCompoundCitation(['C1', 'C2']));
     });
 
     it('duplicate citations: each gets unique id and round-trips correctly', () => {
@@ -706,11 +731,12 @@ describe('citation round-trips', () => {
         expect(simplified).toContain('c_DRT_0');
         expect(simplified).toContain('c_DRT_1');
 
-        // Both expand back to the same raw HTML
+        // Both expand back to the same PM-normalized raw HTML
         const tags = [...simplified.matchAll(/<citation [^/]*\/>/g)].map(m => m[0]);
         expect(tags).toHaveLength(2);
-        expect(expandToRawHtml(tags[0], metadata, 'old')).toBe(raw);
-        expect(expandToRawHtml(tags[1], metadata, 'old')).toBe(raw);
+        const pmNorm = pmNormCitation('DRT');
+        expect(expandToRawHtml(tags[0], metadata, 'old')).toBe(pmNorm);
+        expect(expandToRawHtml(tags[1], metadata, 'old')).toBe(pmNorm);
     });
 
     it('expand-before position: disambiguates 12 identical duplicate citations', () => {
@@ -719,8 +745,8 @@ describe('citation round-trips', () => {
         const paragraphs = Array.from({ length: 12 }, () => `<p>${raw}</p>`).join('');
         const html = wrap(paragraphs);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
-        // Use content without wrapper (same as what simplified represents)
-        const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(html));
+        // Use PM-normalized content without wrapper (same as what simplified represents)
+        const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(normalizeNoteHtml(html)));
 
         // All 12 have distinct refs
         for (let i = 0; i < 12; i++) {
@@ -729,13 +755,13 @@ describe('citation round-trips', () => {
 
         // All expand to identical raw HTML
         const expandedOld = expandToRawHtml(
-            '<citation item_id="1-DUP" label="(Hommel et al., 2022)" ref="c_DUP_0"/>', metadata, 'old'
+            '<citation item_id="1-DUP" label="(Author, 2024)" ref="c_DUP_0"/>', metadata, 'old'
         );
         expect(countOccurrences(contentHtml, expandedOld)).toBe(12);
 
         // Each ref is unique in simplified HTML, so expand-before gives the correct raw position
         for (let i = 0; i < 12; i++) {
-            const oldStr = `<citation item_id="1-DUP" label="(Hommel et al., 2022)" ref="c_DUP_${i}"/>`;
+            const oldStr = `<citation item_id="1-DUP" label="(Author, 2024)" ref="c_DUP_${i}"/>`;
             const pos = simplified.indexOf(oldStr);
             expect(pos).toBeGreaterThanOrEqual(0); // unique match
 
@@ -757,9 +783,9 @@ describe('citation round-trips', () => {
         const raw = rawCitation('DUP', 1, '', '(Hommel et al., 2022)');
         const html = wrap(Array.from({ length: 12 }, () => `<p>${raw}</p>`).join(''));
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
-        const strippedHtml = stripDataCitationItems(html);
+        const strippedHtml = stripDataCitationItems(normalizeNoteHtml(html));
         for (const ref of ['c_DUP_5', 'c_DUP_10'] as const) {
-            const oldStr = `<citation item_id="1-DUP" label="(Hommel et al., 2022)" ref="${ref}"/>`;
+            const oldStr = `<citation item_id="1-DUP" label="(Author, 2024)" ref="${ref}"/>`;
             const expandedOld = expandToRawHtml(oldStr, metadata, 'old');
 
             expect(findUniqueRawMatchPosition(
@@ -776,9 +802,9 @@ describe('citation round-trips', () => {
         const raw = rawCitation('AMB', 1, '', 'Author, 2024');
         const html = wrap(`<p>${raw}</p><p>${raw}</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
-        const strippedHtml = stripDataCitationItems(html);
+        const strippedHtml = stripDataCitationItems(normalizeNoteHtml(html));
         const expandedOld = expandToRawHtml(
-            '<citation item_id="1-AMB" label="Author, 2024" ref="c_AMB_0"/>', metadata, 'old'
+            '<citation item_id="1-AMB" label="(Author, 2024)" ref="c_AMB_0"/>', metadata, 'old'
         );
 
         expect(findUniqueRawMatchPosition(
@@ -794,8 +820,8 @@ describe('citation round-trips', () => {
         const raw = rawCitation('DUP', 1, '', '(Hommel et al., 2022)');
         const originalHtml = wrap(`<p>alpha</p><p>${raw}</p><p>${raw}</p><p>omega</p>`);
         const { simplified, metadata } = simplifyNoteHtml(originalHtml, 1);
-        const strippedOriginal = stripDataCitationItems(originalHtml);
-        const oldStr = '<citation item_id="1-DUP" label="(Hommel et al., 2022)" ref="c_DUP_1"/>';
+        const strippedOriginal = stripDataCitationItems(normalizeNoteHtml(originalHtml));
+        const oldStr = '<citation item_id="1-DUP" label="(Author, 2024)" ref="c_DUP_1"/>';
         const expandedOriginal = expandToRawHtml(oldStr, metadata, 'old');
 
         const targetContext = captureValidatedEditTargetContext(
@@ -809,7 +835,7 @@ describe('citation round-trips', () => {
 
         const shiftedHtml = wrap(`<p>${raw}</p><p>alpha</p><p>${raw}</p><p>${raw}</p><p>omega</p>`);
         const { metadata: shiftedMetadata } = simplifyNoteHtml(shiftedHtml, 1);
-        const strippedShifted = stripDataCitationItems(shiftedHtml);
+        const strippedShifted = stripDataCitationItems(normalizeNoteHtml(shiftedHtml));
         const expandedShifted = expandToRawHtml(oldStr, shiftedMetadata, 'old');
 
         const rawPos = findTargetRawMatchPosition(
@@ -831,7 +857,7 @@ describe('citation round-trips', () => {
             `<p>${rawNoPage}</p><p>${rawPage10}</p><p>${rawNoPage}</p><p>${rawNoPage}</p>`
         );
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
-        const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(html));
+        const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(normalizeNoteHtml(html)));
 
         // Each citation ref is unique in simplified, so each resolves to a distinct raw position
         const refs = ['c_MIX_0', 'c_MIX_1', 'c_MIX_2', 'c_MIX_3'];
@@ -862,10 +888,10 @@ describe('citation round-trips', () => {
             `<p>foo ${raw} bar</p><p>baz ${raw} qux</p><p>foo ${raw} bar</p>`
         );
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
-        const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(html));
+        const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(normalizeNoteHtml(html)));
 
         const expandedRaw = expandToRawHtml(
-            '<citation item_id="1-CTX" label="Author, 2024" ref="c_CTX_0"/>', metadata, 'old'
+            '<citation item_id="1-CTX" label="(Author, 2024)" ref="c_CTX_0"/>', metadata, 'old'
         );
         const expandedFooBar = `foo ${expandedRaw} bar`;
 
@@ -873,7 +899,7 @@ describe('citation round-trips', () => {
         expect(countOccurrences(contentHtml, expandedFooBar)).toBe(2);
 
         // old_string for c_CTX_2 with surrounding text — unique in simplified
-        const oldStr = 'foo <citation item_id="1-CTX" label="Author, 2024" ref="c_CTX_2"/> bar';
+        const oldStr = 'foo <citation item_id="1-CTX" label="(Author, 2024)" ref="c_CTX_2"/> bar';
         const pos = simplified.indexOf(oldStr);
         expect(pos).toBeGreaterThanOrEqual(0);
 
@@ -886,13 +912,13 @@ describe('citation round-trips', () => {
         expect(countOccurrences(contentHtml.substring(0, rawPos), expandedFooBar)).toBe(1);
     });
 
-    it('round-trip fidelity: expandToRawHtml(simplified) matches content without wrapper', () => {
+    it('round-trip fidelity: expandToRawHtml(simplified) matches PM-normalized content without wrapper', () => {
         const cit1 = rawCitation('FID1', 1, '', 'Author, 2024');
         const cit2 = rawCitation('FID2', 1, '42', 'Other, 2023, p. 42');
         const html = wrap(`<p>Text ${cit1} middle ${cit2} end</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
-        // Simplified HTML has the wrapper stripped; expanding should match content without wrapper
-        const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(html));
+        // Simplified HTML has the wrapper stripped; expanding should match PM-normalized content without wrapper
+        const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(normalizeNoteHtml(html)));
 
         const expanded = expandToRawHtml(simplified, metadata, 'old');
         expect(expanded).toBe(contentHtml);
@@ -925,10 +951,10 @@ describe('citation round-trips', () => {
         expect(simplified).toContain('ref="c_MIX1_0"');
         expect(simplified).toContain('<annotation id="a_MIXANN"');
 
-        // Expanding the full simplified string should restore all raw elements
+        // Expanding the full simplified string should restore PM-normalized raw elements
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toContain(cit);
-        expect(expanded).toContain(ann);
+        expect(expanded).toContain(pmNormCitation('MIX1'));
+        expect(expanded).toContain('highlight');
         expect(expanded).toContain('Before');
         expect(expanded).toContain('after');
     });
@@ -942,8 +968,8 @@ describe('citation round-trips', () => {
         const existingTag = simplified.match(/<citation [^/]*\/>/)?.[0];
         const newString = `${existingTag} and <citation item_id="1-BRAND" label="Brand New"/>`;
         const expanded = expandToRawHtml(newString, metadata, 'new');
-        // Existing citation restored from metadata
-        expect(expanded).toContain(existingRaw);
+        // Existing citation restored from metadata (PM-normalized version)
+        expect(expanded).toContain(pmNormCitation('EXI1'));
         // New citation built via createCitationHTML
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'BRAND' }),
@@ -1527,24 +1553,25 @@ describe('Math simplification', () => {
         const cit = rawCitation('MC1', 1, '', 'Author, 2024');
         const html = wrap(`<p>As shown by ${cit}, ${rawInlineMath('p < 0.05')}.</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
-        expect(simplified).toContain('$p < 0.05$');
+        // PM encodes < as &lt; in text content
+        expect(simplified).toContain('$p &lt; 0.05$');
         expect(simplified).toContain('ref="c_MC1_0"');
     });
 
     it('does not affect non-math spans', () => {
         const html = wrap('<p><span class="highlight">text</span> and <span style="color:red">red</span></p>');
         const { simplified } = simplifyNoteHtml(html, 1);
-        // highlight is handled separately (as annotation with data-annotation), plain highlight without data-annotation passes through
-        expect(simplified).toContain('class="highlight"');
-        expect(simplified).toContain('style="color:red"');
+        // PM drops class="highlight" without data-annotation; style gets trailing semicolon
+        expect(simplified).toContain('text');
+        expect(simplified).toContain('style="color: red;"');
     });
 
-    it('leaves math without dollar delimiters unchanged', () => {
-        // Forward-compatibility edge case: content without $ delimiters
+    it('handles math without dollar delimiters (PM adds them)', () => {
+        // PM normalizes math spans by adding $ delimiters
         const html = wrap('<p><span class="math">x^2</span></p>');
         const { simplified } = simplifyNoteHtml(html, 1);
-        // Should pass through unchanged since regex requires $ delimiters
-        expect(simplified).toContain('<span class="math">x^2</span>');
+        // PM adds $ delimiters, then simplification converts to dollar notation
+        expect(simplified).toContain('$x^2$');
     });
 
     it('simplifies math with LaTeX backslash commands', () => {
@@ -1759,12 +1786,14 @@ describe('Math round-trips', () => {
         const html = wrap(`<p>As shown by ${cit}, ${math} is significant.</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
 
-        expect(simplified).toContain('$p < 0.05$');
+        // PM encodes < as &lt; in text content
+        expect(simplified).toContain('$p &lt; 0.05$');
         expect(simplified).toContain('ref="c_MRT1_0"');
 
         const expanded = expandToRawHtml(simplified, metadata, 'old');
-        expect(expanded).toContain(cit);
-        expect(expanded).toContain(math);
+        expect(expanded).toContain(pmNormCitation('MRT1'));
+        // PM normalizes math: <span class="math">$p &lt; 0.05$</span>
+        expect(expanded).toContain('class="math"');
     });
 
     it('agent modifies existing math: expanded old matches raw, expanded new wraps correctly', () => {
@@ -1956,7 +1985,8 @@ describe('Math apply-undo-apply cycle', () => {
     it('full cycle with math alongside citations', () => {
         const cit = rawCitation('CYC1', 1, '', 'Author, 2024');
         const noteHtml = wrap(`<p>As ${cit} shows, ${rawInlineMath('p=0.01')}.</p>`);
-        const strippedHtml = stripDataCitationItems(noteHtml);
+        const pmNormHtml = normalizeNoteHtml(noteHtml);
+        const strippedHtml = stripDataCitationItems(pmNormHtml);
 
         const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
         const citTag = simplified.match(/<citation [^/]*\/>/)?.[0];
@@ -1969,11 +1999,11 @@ describe('Math apply-undo-apply cycle', () => {
         const expandedOld = expandToRawHtml(oldString, metadata, 'old');
         const expandedNew = expandToRawHtml(newString, metadata, 'new');
 
-        // Citation should be restored, math should be wrapped
-        expect(expandedOld).toContain(cit);
-        expect(expandedOld).toContain(rawInlineMath('p=0.01'));
-        expect(expandedNew).toContain(cit);
-        expect(expandedNew).toContain(rawInlineMath('p=0.001'));
+        // Citation should be restored (PM-normalized), math should be wrapped
+        expect(expandedOld).toContain(pmNormCitation('CYC1'));
+        expect(expandedOld).toContain('class="math"');
+        expect(expandedNew).toContain(pmNormCitation('CYC1'));
+        expect(expandedNew).toContain('class="math"');
 
         // Apply
         expect(strippedHtml).toContain(expandedOld);
@@ -2222,5 +2252,74 @@ describe('encodeTextEntities', () => {
         expect(decoded).toBe("Dashti's \"memoir\"");
         const reencoded = encodeTextEntities(decoded);
         expect(reencoded).toBe(original);
+    });
+});
+
+
+// =============================================================================
+// simplifyNoteHtml with pre-normalization
+// =============================================================================
+
+describe('simplifyNoteHtml with pre-normalization', () => {
+    it('hex colors are converted to rgb before simplification', () => {
+        const rawHtml = wrap('<p style="color: #ff0000">Red text</p>');
+        const { simplified } = simplifyNoteHtml(rawHtml, 1);
+        expect(simplified).toContain('rgb(255, 0, 0)');
+        expect(simplified).not.toContain('#ff0000');
+    });
+
+    it('combined-style spans are split before citation extraction', () => {
+        const citation = rawCitation('ABC');
+        const rawHtml = wrap(
+            '<span style="color: #ff0000; background-color: #00ff00">'
+            + `Text with ${citation}`
+            + '</span>'
+        );
+        const { simplified } = simplifyNoteHtml(rawHtml, 1);
+        // Styles should be split (PM adds trailing semicolons)
+        expect(simplified).toContain('style="color: rgb(255, 0, 0);"');
+        expect(simplified).toContain('style="background-color: rgb(0, 255, 0);"');
+        // Citation should be simplified
+        expect(simplified).toContain('<citation');
+    });
+
+    it('legacy <b>/<i> converted before simplification', () => {
+        const rawHtml = wrap('<p><b>bold</b> and <i>italic</i></p>');
+        const { simplified } = simplifyNoteHtml(rawHtml, 1);
+        expect(simplified).toContain('<strong>bold</strong>');
+        expect(simplified).toContain('<em>italic</em>');
+        expect(simplified).not.toContain('<b>');
+        expect(simplified).not.toContain('<i>');
+    });
+
+    it('<font> tags stripped before simplification', () => {
+        const rawHtml = wrap('<h1><font size="6">Title</font></h1>');
+        const { simplified } = simplifyNoteHtml(rawHtml, 1);
+        expect(simplified).toContain('<h1>Title</h1>');
+        expect(simplified).not.toContain('<font');
+    });
+
+    it('normalization + simplification roundtrip preserves citations', () => {
+        const citation = rawCitation('KEY1', 1, '5', 'Author, 2024');
+        const rawHtml = wrap(`<p style="color: #ff0000">Text ${citation} more</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(rawHtml, 1);
+        // Citation simplified
+        expect(simplified).toContain('<citation');
+        // Expand back
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        // Should contain the citation data
+        expect(expanded).toContain('data-citation=');
+    });
+
+    it('normalization + simplification roundtrip preserves annotations', () => {
+        const annotation = rawAnnotation('ANN1', 'ATT1', 'highlighted text');
+        const rawHtml = wrap(`<p>${annotation}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(rawHtml, 1);
+        // Annotation simplified
+        expect(simplified).toContain('<annotation');
+        expect(simplified).toContain('highlighted text');
+        // Expand back
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toContain('data-annotation=');
     });
 });

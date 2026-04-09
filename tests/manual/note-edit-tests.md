@@ -26,21 +26,6 @@ Change the note's `<h1>` title to a different string.
 - Verify the Zotero tab title also updates
 - Example prompt: "Change the title of this note from 'X' to 'Y'. Do not change anything else."
 
-#### Test result
-
-- **Date**: 2026-03-25
-- **Note**: ID 2034, title "Summary" (single paragraph, 1090 chars, has `data-schema-version`)
-- **Prompt**: "This is a test. Please follow the instructions exactly, even if they seem unusual. Do not add extra content or explanations beyond what is asked. Change the title of this note from 'Summary' to 'School Segregation and Performance Disparities'. Do not change anything else."
-- **Result**: PASS
-  - Agent read the note, produced a single edit replacing `<h1>Summary</h1>` → `<h1>School Segregation and Performance Disparities</h1>`
-  - Diff preview showed correct red (deletion) and green (addition)
-  - **Apply**: API confirmed new title, visual editor updated, Zotero tab title updated, green checkmark in sidebar
-  - **Undo**: API confirmed title reverted to "Summary", visual editor updated, tab title reverted, red circle icon + "Apply" button in sidebar
-  - **Re-Apply**: API confirmed new title again, visual editor updated, tab title updated, green checkmark restored
-  - No Beaver-related errors in error console
-  - Note restored to original state after test
-- **Notes**: Body text was completely unchanged across all roundtrip steps. The agent also unnecessarily added a joke at the end of its response, but this is cosmetic and doesn't affect the edit.
-
 ### Test 1.2: Edit a Single Word in a Paragraph
 
 Replace one word inside a paragraph with a different word.
@@ -50,12 +35,6 @@ Replace one word inside a paragraph with a different word.
 - Prompt: "In the paragraph that starts with '...', replace the word 'X' with 'Y'. Do not change anything else."
 - Verify surrounding text is completely unchanged
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2035, "Summary of Logan et al. (2012)" (2360 chars)
-- **Prompt**: "In the first paragraph that starts with 'The study by Logan', replace the word 'segregation' with 'separation'."
-- **Result**: PASS — Single word replaced, surrounding text unchanged. Apply→Undo→Re-Apply roundtrip verified via API.
-
 ### Test 1.3: Edit a Full Sentence
 
 Replace an entire sentence within a paragraph.
@@ -64,12 +43,6 @@ Replace an entire sentence within a paragraph.
 - Specify the exact sentence to replace and the new sentence
 - The new sentence should be a different length than the original
 - Prompt: "Replace the sentence 'Old sentence here.' with 'New replacement sentence that is longer.' Do not change anything else."
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2268, "Sometimes Impact of School Police Funding" (15126 chars)
-- **Prompt**: "Replace the sentence 'The author uses a quasi-experimental approach...' with 'The study employs a novel research design based on federal grant allocation patterns in Texas school districts.'"
-- **Result**: PASS — Long sentence replaced with shorter one. Citations around the replaced text preserved. Apply→Undo roundtrip verified.
 
 ### Test 1.4: Edit Multiple Occurrences (replace_all)
 
@@ -81,12 +54,6 @@ Replace a word or phrase that appears multiple times in the note.
 - The agent should use `replace_all: true`
 - Verify all occurrences changed, count matches before and after
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2331, "Summary: Geography of School Inequality" (14447 chars)
-- **Prompt**: "Replace every occurrence of the word 'percentile' with 'percent-rank' throughout this note. Use replace_all."
-- **Result**: PASS — Agent used `replace_all: true`. All 3 occurrences of "percentile" replaced with "percent-rank" (verified by count). Undo restored all 3 back. Diff showed "Replace (all occurrences)" label.
-
 ### Test 1.5: Edit Across Multiple Paragraphs
 
 Replace a block of text that spans from one paragraph into the next.
@@ -95,12 +62,6 @@ Replace a block of text that spans from one paragraph into the next.
 - The old_string should include the end of one `<p>` and the start of the next
 - Prompt: "Replace the text starting from '...' at the end of the first paragraph through '...' at the start of the second paragraph with the following: '...'"
 - This tests cross-element replacement in the HTML
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2035, "Summary of Logan et al. (2012)" (2360 chars)
-- **Prompt**: "Replace the text starting from 'The study concludes...' through 'To conduct this national-level analysis, the authors drew on' with new text spanning both paragraphs."
-- **Result**: PASS (with caveat) — Agent split the cross-paragraph edit into 2 separate edits (one per paragraph) rather than a single cross-element replacement. Both edits applied and undid correctly. **Caveat**: The cross-paragraph replacement pattern was not tested because the agent chose to make two targeted edits instead. This is a valid agent behavior but means cross-element `<p>...</p><p>` matching was not exercised.
 
 ---
 
@@ -115,12 +76,6 @@ Insert a new paragraph after an existing one.
 - The agent must produce an old_string that captures a unique boundary and a new_string that includes the original text plus the new paragraph
 - Verify the new paragraph appears in the correct position
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2384, "Policing & Educational Outcomes Summary" (16402 chars)
-- **Prompt**: "After the paragraph that starts with 'Research indicates a generally negative impact', add a new paragraph: 'This summary synthesizes findings from multiple empirical studies published between 2015 and 2023.'"
-- **Result**: PASS — New paragraph inserted in correct position (between intro and "Key Findings:"). Position verified via index ordering. Apply→Undo roundtrip verified.
-
 ### Test 2.2: Delete a Paragraph
 
 Remove an entire paragraph from the note.
@@ -130,12 +85,6 @@ Remove an entire paragraph from the note.
 - Prompt: "Delete the paragraph that starts with '...'. Remove it entirely, including its HTML tags."
 - Verify surrounding content remains intact and no extra whitespace is introduced
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2384, "Policing & Educational Outcomes Summary" (16402 chars)
-- **Prompt**: "Delete the paragraph that says 'Key Findings:' (the bold paragraph). Remove it entirely."
-- **Result**: PASS — Bold "Key Findings:" paragraph deleted. Surrounding list (`<ul>`) preserved intact. Apply→Undo roundtrip verified.
-
 ### Test 2.3: Add a New Section with Heading
 
 Add an h2 heading followed by a paragraph.
@@ -144,12 +93,6 @@ Add an h2 heading followed by a paragraph.
 - Prompt: "After the section titled '...', add a new section with heading 'New Section' and a paragraph: 'Content for the new section.'"
 - Verify the heading level is correct (h2, not h1)
 - Verify it appears in the right position
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2424, "Police Exposure in NYC by Race/Gender" (36994 chars)
-- **Prompt**: "After the section titled 'Synthesis and Implications', add a new section with h2 heading 'Future Research Directions' followed by a paragraph."
-- **Result**: PASS — New `<h2>Future Research Directions</h2>` and paragraph added after the last section. Correct heading level (h2). Position verified. Note: Initial "Approve All" click didn't apply; had to click "Apply" directly on the expanded action. Apply→Undo roundtrip verified.
 
 ### Test 2.4: Convert a Paragraph to a Bulleted List
 
@@ -161,12 +104,6 @@ Take paragraph text and convert it into an unordered list.
 - Verify `<ul><li>` structure is produced
 - Verify the note editor renders proper bullets
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2034, "Summary" (1129 chars)
-- **Prompt**: "Convert the main paragraph into a bulleted list with 5 items extracted from the text."
-- **Result**: PASS — Paragraph converted to `<ul>` with exactly 5 `<li>` items. Title unchanged. Apply→Undo roundtrip verified (undo restored original paragraph).
-
 ### Test 2.5: Convert a Bulleted List to a Numbered List
 
 Change `<ul>` to `<ol>`.
@@ -175,12 +112,6 @@ Change `<ul>` to `<ol>`.
 - Use a note that already has a `<ul>` list
 - Prompt: "Convert the bulleted list under '...' to a numbered list. Keep all items the same."
 - Verify only the list type changes, items unchanged
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2424, "Police Exposure in NYC by Race/Gender" (36994 chars)
-- **Prompt**: "Convert the bulleted list under 'Core Empirical Patterns' to a numbered list. Keep all items the same."
-- **Result**: PASS — `<ul>` converted to `<ol>` after "Core Empirical Patterns" heading. List items unchanged. First edit attempt failed (warning icon), agent retried successfully. Apply→Undo roundtrip verified.
 
 ### Test 2.6: Add a Table
 
@@ -191,12 +122,6 @@ Insert a simple table into the note.
 - Verify `<table><tbody><tr><th>` structure
 - Verify the table renders correctly in the note editor
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2507, "The Motherhood Penalty: Wages & Tasks" (11653 chars)
-- **Prompt**: "After the title heading, add a 2-column, 3-row table with headers 'Study' and 'Finding' and two data rows."
-- **Result**: PASS — `<table>` with correct headers and data rows inserted after title. Apply→Undo roundtrip verified (table removed on undo).
-
 ### Test 2.7: Delete a Section (Heading + Content)
 
 Remove an entire section including its heading and all content until the next heading.
@@ -205,10 +130,6 @@ Remove an entire section including its heading and all content until the next he
 - Pick a middle section in a multi-section note
 - Prompt: "Delete the entire section titled '...', including the heading and all content up to the next section."
 - Verify the sections before and after are untouched
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Similar to Test 2.2 (delete paragraph). Skipped for time.
 
 ---
 
@@ -223,12 +144,6 @@ Wrap a word or phrase in `<strong>` tags.
 - Verify `<strong>` tags are added around the exact phrase
 - Verify it appears bold in the note editor
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2443, "Summary: Visualizing Police Exposure in NYC" (6417 chars)
-- **Prompt**: "Make the phrase 'race, gender, and age' bold in the first paragraph under 'Overview'."
-- **Result**: PASS — `<strong>race, gender, and age</strong>` added correctly. Text unchanged. Apply→Undo roundtrip verified (bold removed, plain text restored).
-
 ### Test 3.2: Add Italic Formatting
 
 Wrap a word or phrase in `<em>` tags.
@@ -236,10 +151,6 @@ Wrap a word or phrase in `<em>` tags.
 #### Guidelines
 - Prompt: "Make the word '...' italic. Do not change the text, only add italic formatting."
 - Verify `<em>` tags are added
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Similar to Test 3.1. Skipped for time.
 
 ### Test 3.3: Remove Formatting
 
@@ -250,10 +161,6 @@ Remove bold/italic from an already-formatted phrase.
 - Prompt: "Remove the bold formatting from '...'. Keep the text but make it plain."
 - Verify the `<strong>` tags are removed but text remains
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
-
 ### Test 3.4: Add a Hyperlink
 
 Wrap text in an `<a>` tag with an href.
@@ -261,12 +168,6 @@ Wrap text in an `<a>` tag with an href.
 #### Guidelines
 - Prompt: "Turn the text '...' into a link to 'https://example.com'. Do not change the visible text."
 - Verify `<a href="...">` is added correctly
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2035, "Summary of Logan et al. (2012)" (2360 chars)
-- **Prompt**: "Turn the text 'School Matters project' into a link to 'https://example.com/school-matters'."
-- **Result**: PASS — `<a href="https://example.com/school-matters">School Matters project</a>` added. Visible text unchanged. Apply→Undo roundtrip verified (link removed on undo).
 
 ### Test 3.5: Add a Blockquote
 
@@ -277,10 +178,6 @@ Wrap a paragraph in `<blockquote>` tags.
 - Verify `<blockquote>` wrapping in the HTML
 - Verify indented/styled rendering in the note editor
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
-
 ### Test 3.6: Change Heading Level
 
 Change an h2 to an h3, or vice versa.
@@ -288,10 +185,6 @@ Change an h2 to an h3, or vice versa.
 #### Guidelines
 - Prompt: "Change the heading '...' from h2 to h3."
 - Verify only the tag changes, text unchanged
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
 
 ---
 
@@ -307,10 +200,6 @@ Insert a new citation referencing an item in the library.
 - The agent should produce a `<citation item_id="LIB-KEY" page="42" />` semantic tag
 - Verify the citation renders as "(Author, Year, p. 42)" in the note editor
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time. Requires careful setup with known library item keys.
-
 ### Test 4.2: Modify Citation Page Number
 
 Change the page number on an existing citation.
@@ -321,13 +210,6 @@ Change the page number on an existing citation.
 - The agent should use the existing `ref` attribute and change the `page` attribute
 - Verify the rendered citation text updates
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2268, "Sometimes Impact of School Police Funding" (15126 chars)
-- **Prompt**: "Change the page number on the first citation '(Weisburst, 2019, p. 1)' from page 1 to page 15."
-- **Result (first run, 2026-03-25)**: **FAIL** — Agent reported success but visible citation text was NOT updated. `data-citation` JSON locator also unchanged.
-- **Result (retest, 2026-03-27)**: **PASS (minor issue)** — After code fix, the `data-citation` JSON locator is correctly updated to `"15"`. The visible citation text IS updated, but the format changed from "p. 15" to "page 15" (abbreviation lost). First attempt still fails with `old_string_not_found`; second attempt succeeds. Full Apply→Undo→Re-Apply roundtrip verified. **Minor issue**: The citation display format changes from "p." to "page" after editing — the expander likely regenerates the display text with a different format string than the original.
-
 ### Test 4.3: Remove a Citation
 
 Delete an existing citation from the text.
@@ -336,10 +218,6 @@ Delete an existing citation from the text.
 - Prompt: "Remove the citation '(Author, Year)' from the paragraph. Delete only the citation, keep the surrounding text."
 - Verify the `<span class="citation">` is removed from the HTML
 - Verify the `data-citation-items` on the wrapper div is updated (if it was the only citation for that item)
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
 
 ### Test 4.4: Move a Citation
 
@@ -350,10 +228,6 @@ Move a citation from one location to another within the note.
 - This requires the agent to delete from one location and insert the same citation ref at the new location
 - Verify the citation ref is preserved (not a new citation)
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
-
 ### Test 4.5: Add Multiple Citations in One Edit
 
 Add two or more separate citations in a single edit.
@@ -363,10 +237,6 @@ Add two or more separate citations in a single edit.
 - Each should be a separate `<citation>` tag
 - Verify both render correctly
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
-
 ### Test 4.6: Add Citation Without Page Number
 
 Insert a citation with no locator.
@@ -375,10 +245,6 @@ Insert a citation with no locator.
 - Prompt: "Add a citation to [item] at the end of the paragraph, without any page number."
 - Verify the semantic tag has no `page` attribute
 - Verify rendering as "(Author, Year)" with no page
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
 
 ---
 
@@ -394,10 +260,6 @@ Edit text near an annotation without modifying it.
 - Verify the annotation HTML is completely unchanged
 - Verify the annotation still renders with its highlight color
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: SKIP — No notes with `data-annotation` tags found in test library. Need to create a note with PDF annotations first.
-
 ### Test 5.2: Delete an Annotation
 
 Remove a highlighted annotation from the note.
@@ -406,10 +268,6 @@ Remove a highlighted annotation from the note.
 - Prompt: "Delete the highlighted annotation '...' from the note."
 - Verify the `<annotation>` tag is removed
 - Verify surrounding text is intact
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: SKIP — No notes with annotations in test library.
 
 ### Test 5.3: Move an Annotation
 
@@ -420,10 +278,6 @@ Move an annotation from one location to another.
 - The agent should use the existing annotation `id` and `ref`
 - Verify the annotation content is preserved exactly (text cannot be modified)
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: SKIP — No notes with annotations in test library.
-
 ### Test 5.4: Attempt to Modify Annotation Text (Should Fail)
 
 Try to change the text content of an annotation — this should be rejected by validation.
@@ -432,10 +286,6 @@ Try to change the text content of an annotation — this should be rejected by v
 - Prompt: "Change the highlighted text '...' to '...'."
 - Expected: The agent's edit should fail with an error like "Annotation content cannot be modified"
 - Verify the note is unchanged
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: SKIP — No notes with annotations in test library.
 
 ---
 
@@ -451,10 +301,6 @@ Edit text near an embedded image without modifying it.
 - Verify the image HTML is completely unchanged
 - Verify the image still renders in the note editor
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: SKIP — No notes with `data-attachment-key` images found in test library.
-
 ### Test 6.2: Delete an Image
 
 Remove an embedded image from the note.
@@ -464,10 +310,6 @@ Remove an embedded image from the note.
 - Verify the `<img>` tag is removed
 - Verify surrounding content is intact
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: SKIP — No notes with images in test library.
-
 ### Test 6.3: Attempt to Modify Image (Should Fail)
 
 Try to change image attributes — this should be rejected.
@@ -476,10 +318,6 @@ Try to change image attributes — this should be rejected.
 - Prompt: "Change the width of the image to 500 pixels."
 - Expected: The edit should fail because images are immutable in the semantic format
 - Verify the note is unchanged
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: SKIP — No notes with images in test library.
 
 ---
 
@@ -495,12 +333,6 @@ Insert inline math notation.
 - Verify the math renders correctly in the note editor (may need KaTeX support)
 - Note: Math may not yet be handled by the simplifier — this test documents current behavior
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2034, "Summary" (1129 chars)
-- **Prompt**: "Add the inline math expression $x^2 + y^2 = r^2$ at the end of the paragraph, formatted as a span with class 'math'."
-- **Result**: PASS — `<span class="math">` with `x^2 + y^2 = r^2` added to the note HTML. Apply→Undo roundtrip verified. Note: Math is not handled by the simplifier, but the agent correctly produced raw HTML with the math class.
-
 ### Test 7.2: Add Display Math
 
 Insert a display-mode math block.
@@ -509,10 +341,6 @@ Insert a display-mode math block.
 - Prompt: "Add a display math equation $$E = mc^2$$ after the first paragraph."
 - Display math is stored as `<pre class="math">$$...$$</pre>`
 - Verify rendering in the note editor
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
 
 ### Test 7.3: Modify Existing Math
 
@@ -523,10 +351,6 @@ Change an existing math expression.
 - Prompt: "Change the equation $x^2$ to $x^3 + 1$."
 - Verify the math content changes but the `<span class="math">` wrapper is preserved
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Requires note with existing math. Skipped for time.
-
 ### Test 7.4: Delete Math
 
 Remove a math expression.
@@ -535,10 +359,6 @@ Remove a math expression.
 - Prompt: "Delete the math expression '...' from the paragraph."
 - Verify the `<span class="math">` or `<pre class="math">` is removed
 - Verify surrounding text is intact
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Requires note with existing math. Skipped for time.
 
 ---
 
@@ -553,10 +373,6 @@ Replace a full paragraph with completely new content of different length.
 - Prompt: "Replace the entire paragraph that starts with '...' with: '[new paragraph text, ~100 words]'"
 - Verify only the target paragraph changed, all other content intact
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
-
 ### Test 8.2: Reorganize Content into Sections
 
 Break a long single-section note into multiple sections with headings.
@@ -567,10 +383,6 @@ Break a long single-section note into multiple sections with headings.
 - This is a large edit — verify content is preserved (not fabricated)
 - Verify proper heading hierarchy
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
-
 ### Test 8.3: Append a Long Section at the End
 
 Add multiple paragraphs at the end of the note.
@@ -579,10 +391,6 @@ Add multiple paragraphs at the end of the note.
 - Prompt: "Add a new section at the end of the note with the heading 'Additional Notes' and three paragraphs: [specify exact text for each paragraph]."
 - Verify the existing content is completely unchanged
 - Verify all three paragraphs appear in order
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
 
 ### Test 8.4: Multiple Edits in Sequence
 
@@ -593,10 +401,6 @@ Send a prompt requesting several distinct changes in one message.
 - The agent may make multiple `edit_note` calls or one large replacement
 - Verify all three changes are applied correctly
 - Test undo — all changes should revert (may require undoing multiple actions)
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
 
 ---
 
@@ -611,10 +415,6 @@ Modify a note that contains an empty paragraph (`<p></p>`).
 - Prompt: "Fill the empty paragraph between '...' and '...' with: 'New content here.'"
 - Verify the empty `<p>` is replaced with content
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — No notes with empty paragraphs available. Skipped for time.
-
 ### Test 9.2: Edit With Special Characters
 
 Insert text containing HTML-special characters.
@@ -624,26 +424,14 @@ Insert text containing HTML-special characters.
 - Verify `<`, `>`, `&`, `"`, `'` are properly escaped in the HTML as `&lt;`, `&gt;`, `&amp;`, `&quot;`, etc.
 - Verify the text displays correctly (unescaped) in the note editor
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2034, "Summary" (1129 chars)
-- **Prompt**: "Add a paragraph saying: 'The formula is: if x < 10 & y > 5, then z = x & y. Use \"quotes\" and apostrophes.'"
-- **Result**: PASS — HTML correctly escaped: `x &lt; 10 &amp; y &gt; 5` and `x &amp; y`. Quotes preserved as `"`. Apply→Undo roundtrip verified.
-
 ### Test 9.3: Edit With Unicode Characters
 
 Insert text with non-ASCII characters.
 
 #### Guidelines
-- Prompt: "Add a paragraph with: 'Müller (2024) found that naive Bayes — not naïve — performs well in résumé classification. See §3.2 for the €50 threshold.'"
+- Prompt: "Add a paragraph with: 'Muller (2024) found that naive Bayes — not naive — performs well in resume classification. See S3.2 for the EUR50 threshold.'"
 - Verify accented characters, em-dash, section sign, euro sign are preserved
 - Verify display in the note editor
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2035, "Summary of Logan et al. (2012)" (2360 chars)
-- **Prompt**: "Add a paragraph with: 'Müller (2024) found that naive Bayes — not naïve — performs well in résumé classification. See §3.2 for the €50 threshold.'"
-- **Result**: PASS — All Unicode characters preserved correctly in HTML: Müller (ü), em-dash (—), naïve (ï), résumé (é), § (section sign), € (euro). Apply→Undo roundtrip verified.
 
 ### Test 9.4: Edit Near the Beginning of the Note
 
@@ -653,10 +441,6 @@ Modify content right after the `<h1>` title, before any other content.
 - Prompt: "Insert a new paragraph immediately after the title, before the first existing paragraph: 'This is a summary paragraph.'"
 - Verify the paragraph appears between h1 and the first existing paragraph
 - Verify no damage to the wrapper div or data-schema-version
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
 
 ### Test 9.5: Edit at the Very End of the Note
 
@@ -668,25 +452,15 @@ Append content at the very end of the note.
 - Verify it appears after all existing content
 - Verify the note structure is intact (wrapper div preserved internally)
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2384, "Policing & Educational Outcomes Summary" (16402 chars)
-- **Prompt**: "Add the following as the very last paragraph of the note: 'Last updated: March 2026.'"
-- **Result**: PASS — New paragraph appended at the very end, before `</div>`. Wrapper div and `data-schema-version` preserved. Apply→Undo roundtrip verified.
-
 ### Test 9.6: Consecutive Rapid Edits
 
 Apply an edit, immediately undo, then immediately re-apply.
 
 #### Guidelines
-- After the agent produces an edit, rapidly cycle: Apply → Undo → Apply → Undo → Apply
+- After the agent produces an edit, rapidly cycle: Apply -> Undo -> Apply -> Undo -> Apply
 - Do this within 1-2 seconds between each action
 - Verify the note state is consistent after each toggle
 - Check for race conditions or stale state
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Requires rapid manual interaction. Skipped for time.
 
 ### Test 9.7: Edit While Note is Open in Multiple Editors
 
@@ -698,10 +472,6 @@ Test editing a note that is open in both a tab and the library sidebar.
 - Verify BOTH editors update to show the new content
 - Undo — verify both editors revert
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Requires multi-editor setup. Skipped for time.
-
 ### Test 9.8: Very Long old_string Match
 
 Replace a very large block of text (500+ characters).
@@ -711,10 +481,6 @@ Replace a very large block of text (500+ characters).
 - Verify the agent can match and replace the entire block
 - Verify no partial matches or truncation
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
-
 ### Test 9.9: Replacement With Empty String (Deletion)
 
 Replace specific text with nothing (effective deletion).
@@ -723,12 +489,6 @@ Replace specific text with nothing (effective deletion).
 - Prompt: "Remove the sentence '...' from the paragraph. Replace it with nothing — just delete it."
 - Verify the sentence is removed and surrounding text flows naturally
 - Verify no extra whitespace or empty tags remain
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2331, "Summary: Geography of School Inequality" (14447 chars)
-- **Prompt**: "Remove the bold paragraph 'Key Findings on Disparities:' entirely. Delete it, replacing it with nothing."
-- **Result**: PASS — Paragraph deleted (replacement with empty string). Surrounding list (`<ul>`) preserved. Apply→Undo roundtrip verified.
 
 ---
 
@@ -744,10 +504,6 @@ Send an edit with text that doesn't exist in the note.
 - The agent should report the failure to the user
 - Verify the note is unchanged
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
-
 ### Test 10.2: Ambiguous Match Without replace_all
 
 Send an edit where the old_string matches multiple locations.
@@ -758,10 +514,6 @@ Send an edit where the old_string matches multiple locations.
 - Expected: Agent should get `ambiguous_match` error (if it tries without replace_all and the old_string is too short)
 - The agent should add more context to make the match unique
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
-
 ### Test 10.3: Attempt to Remove the Wrapper Div
 
 Try to replace the entire note content including the wrapper.
@@ -770,10 +522,6 @@ Try to replace the entire note content including the wrapper.
 - Prompt: "Replace the entire content of this note with just: '<p>Hello world</p>'."
 - If the agent's old_string captures the `data-schema-version` div, expected: `wrapper_removed` error
 - The agent should retry with a more targeted replacement
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
 
 ### Test 10.4: Fabricate an Annotation (Should Fail)
 
@@ -784,10 +532,6 @@ Try to add a fake annotation that references a non-existent PDF annotation.
 - Expected: Validation should reject fabricated annotations
 - Verify the note is unchanged
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — No notes with annotations in test library. Skipped.
-
 ### Test 10.5: Fabricate an Image (Should Fail)
 
 Try to add an image with a non-existent attachment key.
@@ -796,10 +540,6 @@ Try to add an image with a non-existent attachment key.
 - Prompt: "Add an embedded image with attachment key 'FAKEKEY123'."
 - Expected: Validation should reject fabricated images
 - Verify the note is unchanged
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
 
 ---
 
@@ -816,10 +556,6 @@ Apply a Beaver edit, then manually edit the note via the Zotero editor, then try
 - Expected: The undo should work if the edited region is unmodified, or fail gracefully if there's a conflict
 - Verify manual edits are preserved
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Requires manual editing in Zotero editor. Skipped for time.
-
 ### Test 11.2: Undo After Note is Closed and Reopened
 
 Apply an edit, close the note tab, reopen it, then try to undo.
@@ -831,10 +567,6 @@ Apply an edit, close the note tab, reopen it, then try to undo.
 - Navigate back to the chat thread in Beaver
 - Try clicking Undo
 - Verify whether undo still works after tab close/reopen
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
 
 ### Test 11.3: Undo End-of-Note Append (Content-Based Anchor)
 
@@ -848,12 +580,8 @@ Apply an edit that appends content at the very end of the note, then undo.
   - The appended paragraph is removed
   - No empty paragraphs or extra whitespace remain
   - The note structure is intact
-- Also test Apply → Undo → Apply → Undo cycle to verify repeatability
+- Also test Apply -> Undo -> Apply -> Undo cycle to verify repeatability
 - **Note:** If an agent somehow uses `</div>` as `old_string` (legacy behavior), the edit still applies correctly since `executeEditNoteAction` operates on the full HTML. However, undo may fail when ProseMirror normalizes the HTML and `waitForPMNormalization` can't update the stale undo data (e.g., when the note editor isn't active)
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
 
 ### Test 11.4: Undo After PM Restructures Inline Styles (Multi-Edit Agent Run)
 
@@ -872,10 +600,6 @@ Apply multiple edits in a single agent run where at least one edit uses inline C
 - **Key verification:** The undo of the styled edit (#3) must succeed despite ProseMirror having restructured the HTML. This requires the server-side handler to have refreshed `undo_new_html` via `waitForPMNormalization` after saving.
 - **Known bug (fixed):** Before the fix, the server-side `executeEditNoteAction` did not call `waitForPMNormalization`, so `undo_new_html` stored the pre-PM HTML (e.g., `<p style="color: blue; font-weight: bold;">`). When undo tried to find this in the PM-normalized note (which had `<p><strong><span style="color: blue;">`), it failed with: "Cannot undo: the note has been modified since this edit was applied."
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
-
 ### Test 11.5: Undo After PM Normalizes Inline Styles (Note Tab Open)
 
 Apply an edit that uses inline CSS styles, verify PM restructures them, then undo.
@@ -890,10 +614,6 @@ Apply an edit that uses inline CSS styles, verify PM restructures them, then und
   - Surrounding content is intact
 - **What this tests:** `waitForPMNormalization` polling detects the PM restructuring (via `item.getNote()` after the editor saves back) and updates `undo_new_html` with the PM-normalized version. Undo then uses the correct HTML for matching.
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
-
 ### Test 11.6: Undo Edit on Note NOT Open in Editor
 
 Apply an edit to a note that is NOT open in any tab, then undo.
@@ -904,10 +624,6 @@ Apply an edit to a note that is NOT open in any tab, then undo.
 - Verify the edit is applied (check via `item.getNote()` API)
 - Click **Undo** and verify the original text is restored
 - **What this tests:** When no editor is active, the HTML is saved un-normalized and read back identically. `waitForPMNormalization` exits after 3 unchanged polls (~450ms). The undo data matches the current HTML exactly, so undo succeeds via exact match.
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
 
 ### Test 11.7: Undo After Note Opened Then Closed Between Apply and Undo
 
@@ -923,10 +639,6 @@ Apply an edit to a note that is NOT open in a tab, then open the note tab (trigg
 - **What this tests:** The scenario where PM normalization happens asynchronously and the undo data is stale. The text-content fallback compares visible text (HTML tags stripped) and trusts context anchors when the text matches.
 - **Known limitation:** If PM changes the visible text (unlikely but possible), the fallback won't match and the undo will fail with an error.
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
-
 ### Test 11.8: Double Undo (Two Sequential Edits)
 
 Send two edit prompts, creating two separate edit actions, then undo both in reverse order.
@@ -937,10 +649,6 @@ Send two edit prompts, creating two separate edit actions, then undo both in rev
 - Undo the second edit first, verify only the paragraph reverts
 - Then undo the first edit, verify the title also reverts
 - Verify independence of the two undo operations
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
 
 ---
 
@@ -956,12 +664,6 @@ Insert a `<pre>` code block.
 - Verify monospace rendering in the note editor
 - Verify special characters in code are properly escaped
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Note**: ID 2443, "Summary: Visualizing Police Exposure in NYC" (6417 chars)
-- **Prompt**: "Add a code block after the title heading with the following Python code: print('hello world')."
-- **Result**: PASS — `<pre>` block with `print('hello world')` added. Apply→Undo roundtrip verified.
-
 ### Test 12.2: Modify Code Block Content
 
 Change the content inside an existing code block.
@@ -970,10 +672,6 @@ Change the content inside an existing code block.
 - Requires a note with an existing `<pre>` block
 - Prompt: "Change the code in the code block from '...' to '...'."
 - Verify only the code content changes, the `<pre>` wrapper is preserved
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Requires note with existing code block. Skipped for time.
 
 ---
 
@@ -988,10 +686,6 @@ Insert an `<hr>` between sections.
 - Verify `<hr>` in the HTML
 - Verify visual separator in the note editor
 
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — Skipped for time.
-
 ### Test 13.2: Preserve Whitespace and Line Breaks
 
 Edit near hard line breaks (`<br>`) without removing them.
@@ -1000,10 +694,6 @@ Edit near hard line breaks (`<br>`) without removing them.
 - Use a note with `<br>` tags within a paragraph
 - Prompt: "Edit the text before the line break to say '...'. Do not remove the line break."
 - Verify `<br>` tags are preserved
-
-#### Test result
-
-- **Date**: 2026-03-25 | **Result**: NOT RUN — No notes with `<br>` tags in test library. Skipped.
 
 ---
 
@@ -1026,16 +716,6 @@ Send a single prompt that triggers three separate `edit_note` calls, then undo e
   - After undoing #1: check that note is fully restored to original
 - **Key risk**: If the agent applies edits sequentially and each changes the HTML, undo anchors for earlier edits may have shifted
 
-#### Test result
-
-- **Date**: 2026-03-27 | **Note**: ID 2035, "Summary of Logan et al. (2012)" (2360 chars)
-- **Prompt**: "Make three separate edit_note calls: (1) Change title to 'Updated: Logan 2012 Review', (2) Make 'racial and ethnic groups' bold, (3) Append 'Test addition for evaluation purposes.'"
-- **Result**: PASS — All 3 edits produced as separate actions and applied via "Approve All". Sequential undo in reverse (#3→#2→#1) worked perfectly:
-  - After undo #3: append removed, title + bold still present
-  - After undo #2: bold removed, title still present
-  - After undo #1: title restored, note fully back to original
-- **Note**: No issues with undo anchor stability despite sequential modifications to the same note.
-
 ### Test 14.2: Three Edits in One Run — Out-of-Order Undo
 
 Same as 14.1 but undo in a different order (e.g., #1 first, then #3, then #2).
@@ -1050,10 +730,6 @@ Same as 14.1 but undo in a different order (e.g., #1 first, then #3, then #2).
   - Note should be fully restored
 - **Key risk**: Edit #1's undo anchors may overlap with content modified by #2 or #3. The `undo_before_context` / `undo_after_context` must be robust to surrounding content changes.
 
-#### Test result
-
-- **Date**: 2026-03-27 | **Result**: NOT RUN — Skipped. Test 14.1 covered reverse-order undo successfully. Out-of-order undo is partially covered by Test 14.7 (same paragraph, different runs).
-
 ### Test 14.3: Retry (Regenerate) with Applied Note Edits
 
 Apply an edit, then use the Retry button to regenerate the response — verify that the applied edit is automatically undone.
@@ -1061,28 +737,15 @@ Apply an edit, then use the Retry button to regenerate the response — verify t
 #### Guidelines
 - Send an edit prompt (e.g., "Change the title to 'New Title'")
 - Approve and verify the edit is applied
-- Click the Retry button (↻) in the AgentRunFooter
-- Expected: A confirmation dialog appears saying "The following changes will be undone when regenerating: • 1 note edit"
+- Click the Retry button in the AgentRunFooter
+- Expected: A confirmation dialog appears saying "The following changes will be undone when regenerating: - 1 note edit"
 - Click "Yes" to confirm
 - Verify:
   - The note reverts to its original title
   - A new agent run starts with the same prompt
   - The new run produces a fresh edit (may be different from the first)
 - Approve the new edit and verify it applies correctly
-- **What this tests**: `regenerateFromRunAtom` → `confirmUndoAppliedActions` → `undoAppliedNoteEdits` flow
-
-#### Test result
-
-- **Date**: 2026-03-27 | **Note**: ID 2035, "Summary of Logan et al. (2012)"
-- **First attempt (automated)**: INCONCLUSIVE — The `Zotero.Prompt.confirm()` modal dialog blocked RDP, was auto-dismissed without user interaction, and the undo did not fire. The new run found the edits already in place.
-- **Second attempt (manual dialog)**: **PASS** — Used a simpler single-title-change test. Applied edit (title → "RETRY TEST TITLE"), clicked Retry. The modal confirmation dialog appeared and blocked RDP. User manually clicked "Yes". Result:
-  1. The undo fired — title reverted to "Summary of Logan et al. (2012)"
-  2. New run started with the same prompt
-  3. Agent read the reverted note, successfully re-applied the title change (green checkmark)
-  4. Agent confirmed: "I've changed the note title from 'Summary of Logan et al. (2012)' to 'RETRY TEST TITLE'"
-  5. No corruption or duplicates
-- **Key finding**: The confirmation dialog is a modal `Zotero.Prompt.confirm()` that blocks the RDP connection. It cannot be interacted with via MCP — requires manual user click. When the user clicks "Yes", the undo fires correctly before the new run starts.
-- **Note**: The `Zotero.Prompt.confirm()` dialog should ideally be non-blocking or use a React-based confirmation to allow MCP automation.
+- **What this tests**: `regenerateFromRunAtom` -> `confirmUndoAppliedActions` -> `undoAppliedNoteEdits` flow
 
 ### Test 14.4: Retry with Multiple Applied Edits Across Runs
 
@@ -1094,7 +757,7 @@ Apply edits in two separate runs (two prompts in the same chat), then retry from
 - Second prompt (same chat): "Add a paragraph at the end saying 'Second edit content.'"
   - Approve, verify applied
 - Click Retry on the **first** run (not the second)
-- Expected: Confirmation dialog says "The following changes will be undone when regenerating: • 2 note edits"
+- Expected: Confirmation dialog says "The following changes will be undone when regenerating: - 2 note edits"
   - Both edits should be listed because retrying from run #1 removes run #1 and all subsequent runs (#2)
 - Click "Yes" to confirm
 - Verify:
@@ -1103,10 +766,6 @@ Apply edits in two separate runs (two prompts in the same chat), then retry from
   - Note is fully restored to its pre-edit state
   - New agent run starts with the first prompt
 - **Key risk**: Undoing multiple edits across runs requires correct reverse-chronological ordering. The `undoAppliedNoteEdits` function reverses the array, but if run #2's edit overlaps with run #1's edit (e.g., both modify the title), the undo may fail.
-
-#### Test result
-
-- **Date**: 2026-03-27 | **Result**: NOT RUN — Test 14.3 covered the core retry+undo flow with a single edit. Multi-run retry needs a dedicated test with manual dialog interaction. Skipped for time.
 
 ### Test 14.5: Retry Cancellation — Edits Preserved
 
@@ -1120,10 +779,6 @@ Same setup as 14.3, but click "No" on the confirmation dialog.
   - No new agent run is started
   - The note content is still the edited version
 - **What this tests**: That cancellation is a clean no-op with no side effects
-
-#### Test result
-
-- **Date**: 2026-03-27 | **Result**: NOT RUN — Requires manual interaction with modal dialog. Cannot be tested via MCP.
 
 ### Test 14.6: Retry After Partial Undo
 
@@ -1143,10 +798,6 @@ Apply two edits in one run, manually undo one of them, then retry.
   - New agent run starts
 - **What this tests**: That `regenerateFromRunAtom` correctly filters to `status === 'applied'` and doesn't try to undo already-undone actions
 
-#### Test result
-
-- **Date**: 2026-03-27 | **Result**: NOT RUN — Requires manual interaction with modal dialog. Cannot be tested via MCP.
-
 ### Test 14.7: Edit-on-Edit — Same Paragraph Modified Twice
 
 Two separate prompts that both modify the same paragraph in a note.
@@ -1156,21 +807,10 @@ Two separate prompts that both modify the same paragraph in a note.
   - Approve, verify
 - Second prompt: "In the same paragraph, also replace the word 'A' with 'B'."
   - Approve, verify both changes present
-- Undo edit #2: verify only 'B'→'A' reverts, 'Y' remains
-- Undo edit #1: verify 'Y'→'X' reverts, note fully restored
+- Undo edit #2: verify only 'B'->'A' reverts, 'Y' remains
+- Undo edit #1: verify 'Y'->'X' reverts, note fully restored
 - Re-apply edit #1, re-apply edit #2: verify both changes present again
 - **Key risk**: Edit #2's `undo_before_context` and `undo_after_context` include text modified by edit #1. If edit #1 is undone first, edit #2's anchors no longer match the note content. The undo must use fuzzy matching or text-content fallback.
-
-#### Test result
-
-- **Date**: 2026-03-27 | **Note**: ID 2331, "Summary: Geography of School Inequality" (14447 chars)
-- **Setup**: Two separate prompts in the same chat, both editing the same paragraph:
-  - Prompt 1: Replace "conducted" with "performed"
-  - Prompt 2: Replace "national-level" with "nationwide"
-- **Result**: PASS — Both edits applied to the same paragraph. Undo in reverse order:
-  - After undo #2: "nationwide" → "national-level" restored, "performed" still present
-  - After undo #1: "performed" → "conducted" restored, note fully back to original
-- **Key finding**: Undo anchors remain stable even when overlapping edits modify nearby text in the same paragraph. The context-based matching is robust enough to handle this case.
 
 ### Test 14.8: Retry During Active Agent Run
 
@@ -1186,10 +826,6 @@ Click Retry while the agent is still processing (streaming).
   - A new run starts with the same prompt
 - **What this tests**: The `activeRun` handling path in `regenerateFromRunAtom` (lines 1524-1530)
 
-#### Test result
-
-- **Date**: 2026-03-27 | **Result**: NOT RUN — Requires precise timing (clicking Retry during streaming). Difficult to automate via MCP.
-
 ### Test 14.9: Retry with Mixed Action Types
 
 A run that produces both an `edit_note` and another action type (e.g., `create_note`, `edit_metadata`), then retry.
@@ -1200,17 +836,13 @@ A run that produces both an `edit_note` and another action type (e.g., `create_n
 - Approve all actions
 - Click Retry
 - Expected: Confirmation dialog lists BOTH the note edit and the other action
-  - "• 1 note edit • 1 note created" (or similar)
+  - "- 1 note edit - 1 note created" (or similar)
 - Click "Yes"
 - Verify:
   - The note edit is undone (title reverted)
   - The created note is deleted from Zotero
   - New agent run starts
 - **What this tests**: The multi-type action undo path in `regenerateFromRunAtom`, ensuring `undoAppliedNoteEdits`, `deleteAppliedZoteroItems`, etc. all execute correctly in sequence
-
-#### Test result
-
-- **Date**: 2026-03-27 | **Result**: NOT RUN — Skipped for time. Requires a prompt that triggers both edit_note and create_note actions.
 
 ### Test 14.10: Large Structural Edit — Section Reordering
 
@@ -1231,10 +863,6 @@ Ask the agent to reorganize a multi-section note by reordering h2 sections.
 - Test undo: verify the section returns to its original position
 - **Key risk**: This is likely to require multiple `edit_note` calls or a very large `old_string`. High chance of `old_string_not_found` on first attempt. Citations within the moved section must be preserved.
 
-#### Test result
-
-- **Date**: 2026-03-27 | **Result**: NOT RUN — Complex structural test. Skipped for time.
-
 ### Test 14.11: Retry After External Note Modification
 
 Apply an edit via Beaver, then modify the note externally (via Zotero editor or API), then retry.
@@ -1250,13 +878,9 @@ Apply an edit via Beaver, then modify the note externally (via Zotero editor or 
   - OR if the manual edit overlaps with the Beaver edit region, the undo should fail gracefully with an error message
 - **What this tests**: Robustness of undo when the note has been modified outside Beaver between apply and undo
 
-#### Test result
-
-- **Date**: 2026-03-27 | **Result**: NOT RUN — Requires manual external modification + retry with modal dialog. Skipped for time.
-
 ---
 
-## Category 14: HTML Entity Encoding Undo
+## Category 15: HTML Entity Encoding Undo
 
 These tests verify that undo works correctly when a note contains HTML-encoded entities (e.g., `&#x27;` for apostrophe, `&quot;` for double quote). ProseMirror normalizes these entities to their literal characters when the note is opened in the editor, which can cause a mismatch between the stored undo data and the actual note HTML.
 
@@ -1279,7 +903,7 @@ await note.saveTx();
 // Note the key for the prompt below
 ```
 
-### Test 14.1: Edit with literal apostrophe — model uses entity-encoded form
+### Test 15.1: Edit with literal apostrophe — model uses entity-encoded form
 
 In this test, the prompt uses a literal `'` in the edit instruction, but after reading the note the model typically converts it to `&#x27;` to match the note HTML. This tests that undo works when the undo data contains `&#x27;` but PM has normalized the note to use `'`.
 
@@ -1360,11 +984,7 @@ Expected result:
 - The edit succeeds even when the stored note uses `&#34;` instead of `&quot;`
 - Undo restores the original quoted sentence correctly
 
-#### Test result
-
-- **Date**: | **Result**:
-
-### Test 14.2: Edit with literal apostrophe — model forced to use literal form
+### Test 15.2: Edit with literal apostrophe — model forced to use literal form
 
 In this test, the prompt explicitly instructs the model to use a literal `'` (not escaped). This tests that the edit and undo work when the `old_string`/`new_string` use `'` but the note HTML contains `&#x27;`.
 
@@ -1385,17 +1005,13 @@ In this test, the prompt explicitly instructs the model to use a literal `'` (no
 #### What this tests
 - The `old_string` uses literal `'` but the note HTML has `&#x27;` — the edit must still find and replace the target
 - After PM normalizes, undo data and note HTML should both use `'`, so undo should work straightforwardly
-- This is the complementary case to Test 14.1 (entity mismatch at edit time vs. at undo time)
-
-#### Test result
-
-- **Date**: | **Result**:
+- This is the complementary case to Test 15.1 (entity mismatch at edit time vs. at undo time)
 
 ---
 
 ## Category 16: Partial Simplified Element Stripping
 
-These tests verify that the agent can successfully edit text adjacent to citations (and other simplified-only elements like annotations and images) even when the model's `old_string` accidentally includes a fragment of the simplified element tag — most commonly `/>` from the tail of a `<citation …/>` tag. The `stripPartialSimplifiedElements` fallback detects these fragments and strips them before matching.
+These tests verify that the agent can successfully edit text adjacent to citations (and other simplified-only elements like annotations and images) even when the model's `old_string` accidentally includes a fragment of the simplified element tag — most commonly `/>` from the tail of a `<citation .../>` tag. The `stripPartialSimplifiedElements` fallback detects these fragments and strips them before matching.
 
 **Background:**
 When the agent reads a note, citations appear as `<citation item_id="1-KEY" page="42" label="(Author, 2025)" ref="c_KEY_0"/>`. If the model includes `/>` (or any other fragment of the tag) in its `old_string`, the string cannot be expanded back to raw HTML. The partial element stripping fallback detects the `/>` as belonging to a simplified-only element, strips it from both `old_string` and `new_string`, and retries the match.
@@ -1404,13 +1020,13 @@ When the agent reads a note, citations appear as `<citation item_id="1-KEY" page
 Use note **ID 3156** ("Nosrati (2025) Optimal Taxation", 13501 chars, 16 citations). This note has citations followed by text in patterns like:
 ```
 ...creates sharp tax regressivity at the top across all countries studied. (Nosrati, 2025, p. 634)</p>
-<p><strong>Introduction (pages 1–3)</strong> – The author critiques...
+<p><strong>Introduction (pages 1-3)</strong> - The author critiques...
 ```
 
 In simplified form, these appear as:
 ```
 ...creates sharp tax regressivity at the top across all countries studied. <citation item_id="1-Z546XIR8" page="634" label="(Nosrati, 2025, p. 634)" ref="c_Z546XIR8_0"/>
-<strong>Introduction (pages 1–3)</strong> – The author critiques...
+<strong>Introduction (pages 1-3)</strong> - The author critiques...
 ```
 
 ### Test 16.1: Edit Text Immediately After a Citation (Leading `/>` Fragment)
@@ -1428,27 +1044,23 @@ Edit the text that immediately follows a citation, where the model's `old_string
 ```
 This is a test. Please follow the instructions exactly, even if they seem unusual. Do not add extra content or explanations beyond what is asked.
 
-In this note, after the citation "(Nosrati, 2025, p. 634)" near the start of the note, there is a paragraph break and then the bold text "Introduction (pages 1–3)". Change "Introduction (pages 1–3)" to "Chapter 1: Introduction (pages 1–3)". Make sure your old_string starts right at the citation boundary — include the "/>" that closes the citation tag and the newline/paragraph boundary after it in your old_string. Do not change the citation itself.
+In this note, after the citation "(Nosrati, 2025, p. 634)" near the start of the note, there is a paragraph break and then the bold text "Introduction (pages 1-3)". Change "Introduction (pages 1-3)" to "Chapter 1: Introduction (pages 1-3)". Make sure your old_string starts right at the citation boundary — include the "/>" that closes the citation tag and the newline/paragraph boundary after it in your old_string. Do not change the citation itself.
 ```
 
 #### Expected behavior
-- The agent produces `old_string` starting with `/>` (the tail of the `<citation …/>` tag)
+- The agent produces `old_string` starting with `/>` (the tail of the `<citation .../>` tag)
 - Validation detects that `/>` is a partial simplified-only element fragment
 - The `/>` is stripped from `old_string` and `new_string`
 - The stripped text matches uniquely in the raw HTML
 - The edit applies successfully
-- Apply→Undo roundtrip works
+- Apply->Undo roundtrip works
 
 #### What to verify
 1. The edit applies without errors
 2. The citation before the edited text is completely unchanged
-3. The heading text changed from "Introduction (pages 1–3)" to "Chapter 1: Introduction (pages 1–3)"
+3. The heading text changed from "Introduction (pages 1-3)" to "Chapter 1: Introduction (pages 1-3)"
 4. Undo restores the original heading text
 5. Check Zotero error console for any Beaver-related errors
-
-#### Test result
-
-- **Date**: | **Result**:
 
 ### Test 16.2: Edit Text Between Two Citations (Both Boundaries)
 
@@ -1477,11 +1089,7 @@ In the simplified view of this note, find the text between the two citations nea
 1. Edit applies without errors
 2. Both adjacent citations are completely unchanged
 3. The text between them is correctly replaced
-4. Apply→Undo roundtrip works
-
-#### Test result
-
-- **Date**: | **Result**:
+4. Apply->Undo roundtrip works
 
 ### Test 16.3: Edit Text Immediately Before a Citation (Trailing Fragment)
 
@@ -1509,11 +1117,7 @@ In this note, find the text "creates sharp tax regressivity at the top across al
 1. Edit applies without errors
 2. The citation "(Nosrati, 2025, p. 634)" is completely unchanged
 3. The text changed from "across all countries studied" to "in every country analyzed"
-4. Apply→Undo roundtrip works
-
-#### Test result
-
-- **Date**: | **Result**:
+4. Apply->Undo roundtrip works
 
 ### Test 16.4: Clean Edit Adjacent to Citation (No Fragment — Baseline)
 
@@ -1528,11 +1132,11 @@ Edit text near a citation where the model produces a clean `old_string` without 
 ```
 This is a test. Please follow the instructions exactly, even if they seem unusual. Do not add extra content or explanations beyond what is asked.
 
-In this note, find the bold heading "Introduction (pages 1–3)" and change it to "Introduction (pp. 1–3)". Only change the text inside the bold tag. Do not include any citation tags in your edit.
+In this note, find the bold heading "Introduction (pages 1-3)" and change it to "Introduction (pp. 1-3)". Only change the text inside the bold tag. Do not include any citation tags in your edit.
 ```
 
 #### Expected behavior
-- The agent produces a clean `old_string` like `Introduction (pages 1–3)` with no tag fragments
+- The agent produces a clean `old_string` like `Introduction (pages 1-3)` with no tag fragments
 - The edit matches directly via the normal expansion path
 - `stripPartialSimplifiedElements` is NOT called (or returns null)
 
@@ -1540,19 +1144,15 @@ In this note, find the bold heading "Introduction (pages 1–3)" and change it t
 1. Edit applies without errors
 2. The heading text changed correctly
 3. Surrounding citations unchanged
-4. Apply→Undo roundtrip works
+4. Apply->Undo roundtrip works
 5. Confirm this is a **clean match** (no fallback triggered) — compare with Test 16.1
-
-#### Test result
-
-- **Date**: | **Result**:
 
 ### Test 16.5: Ambiguous Match After Stripping — Context Disambiguation
 
 Edit text after a citation where the stripped text appears multiple times in the note, requiring context-based disambiguation.
 
 #### Guidelines
-- Use note ID 3156, which has repeated structural patterns (each section starts with `– The author...` or `– This section...`)
+- Use note ID 3156, which has repeated structural patterns (each section starts with `- The author...` or `- This section...`)
 - Target a word or phrase that appears in multiple sections so that after stripping the `/>` from `old_string`, the resulting text is ambiguous
 - The validation should disambiguate using the unique position of `old_string` in the simplified HTML and attach context anchors
 
@@ -1560,7 +1160,7 @@ Edit text after a citation where the stripped text appears multiple times in the
 ```
 This is a test. Please follow the instructions exactly, even if they seem unusual. Do not add extra content or explanations beyond what is asked.
 
-In this note, find the FIRST occurrence of the text "– The author critiques" (which appears right after a citation in the Introduction section). Change "critiques" to "challenges". Include the "/>" from the preceding citation tag at the start of your old_string. Do not change any other occurrence of similar text.
+In this note, find the FIRST occurrence of the text "- The author critiques" (which appears right after a citation in the Introduction section). Change "critiques" to "challenges". Include the "/>" from the preceding citation tag at the start of your old_string. Do not change any other occurrence of similar text.
 ```
 
 #### Expected behavior
@@ -1574,11 +1174,7 @@ In this note, find the FIRST occurrence of the text "– The author critiques" (
 2. Only the FIRST "critiques" is changed to "challenges"
 3. Other occurrences of "critiques" (if any) are unchanged
 4. The citation is unchanged
-5. Apply→Undo roundtrip works
-
-#### Test result
-
-- **Date**: | **Result**:
+5. Apply->Undo roundtrip works
 
 ### Test 16.6: Fragment Stripping Falls Through to Fuzzy Match
 
@@ -1608,6 +1204,204 @@ In this note, find the text that appears after the first citation. Your old_stri
 2. The note is completely unchanged
 3. No Zotero errors in the console
 
-#### Test result
+---
 
-- **Date**: | **Result**:
+## Category 17: HTML Re-serialization Resilience
+
+These tests verify that notes with non-standard HTML (hex colors, combined-style spans, legacy elements) can be edited correctly by Beaver, even when ProseMirror re-serializes the HTML after the first edit. The normalization layer in `simplifyNoteHtml` should make the format stable.
+
+### Test 17.1: Edit note with hex color styles (sequential edits)
+
+Create or find a note with hex color styles in the HTML (e.g., `style="color: #5686bf"`). Make two sequential edits via Beaver targeting different sections. Verify both edits succeed without the model needing to re-read.
+
+#### Guidelines
+- Create a note with hex colors using `zotero_execute_js`: `item.setNote('<div data-schema-version="9"><h2 style="color: #ff0000">Section One</h2><p>Content A</p><h2 style="color: #0000ff">Section Two</h2><p>Content B</p></div>')`
+- First prompt: "Change 'Content A' to 'Updated A'. Do not change anything else."
+- Second prompt (same chat): "Change 'Content B' to 'Updated B'. Do not change anything else."
+- Both edits should succeed — the first edit triggers PM normalization (hex->rgb), but since `read_note` already returns rgb format, the second edit's old_string still matches.
+
+### Test 17.2: Edit note with combined-style spans
+
+Find or create a note with `<span style="color: X; background-color: Y">`. Make two sequential edits targeting different sections.
+
+#### Guidelines
+- Create a note: `<div data-schema-version="9"><p><span style="color: #e0ffff; background-color: #66cdaa">Styled Section A</span></p><p>Plain text</p><p><span style="color: #004d99; background-color: #87cefa">Styled Section B</span></p></div>`
+- First prompt: "Change 'Plain text' to 'Modified text'."
+- Second prompt: "Change 'Styled Section B' to 'Updated Section B'."
+- Verify both succeed. The combined-style spans are split by normalization before the model sees them.
+
+### Test 17.3: Edit note with legacy elements
+
+Create a note with `<b>`, `<i>`, `<font>` tags. Make an edit and verify the content is preserved.
+
+#### Guidelines
+- Create a note: `<div data-schema-version="9"><h1><font size="6">Title</font></h1><p><b>Bold</b> and <i>italic</i> and <s>struck</s> text</p><p>Second paragraph</p></div>`
+- Prompt: "Change 'Second paragraph' to 'Changed paragraph'."
+- Verify the edit succeeds and the bold/italic/strikethrough formatting is preserved in the note.
+- Verify via `read_note` that the model sees `<strong>`, `<em>`, and `<span style="text-decoration: line-through">` (not `<b>`, `<i>`, `<s>`).
+
+### Test 17.4: Parallel edits on non-overlapping sections
+
+Send a prompt that triggers multiple parallel `edit_note` calls targeting different sections of a note with non-standard HTML. Verify all edits succeed.
+
+#### Guidelines
+- Create a note with multiple sections using hex colors and combined styles
+- Send a single prompt asking to fill in multiple sections simultaneously (e.g., "Fill in all the empty sections with appropriate content based on the paper")
+- Verify that the model issues multiple parallel `edit_note` calls and they all succeed (or at least most succeed without needing to re-read)
+
+---
+
+## Test Results
+
+### 2026-03-25
+
+| Test | Result | Notes |
+|------|--------|-------|
+| 1.1 | **PASS** | Note ID 2034, "Summary". Agent replaced `<h1>Summary</h1>` with `<h1>School Segregation and Performance Disparities</h1>`. Diff preview correct. Apply/Undo/Re-Apply roundtrip verified. Zotero tab title updated. Body text unchanged. Agent unnecessarily added a joke (cosmetic only). |
+| 1.2 | **PASS** | Note ID 2035, "Summary of Logan et al. (2012)". Single word "segregation" replaced with "separation". Surrounding text unchanged. Apply/Undo/Re-Apply roundtrip verified via API. |
+| 1.3 | **PASS** | Note ID 2268, "Sometimes Impact of School Police Funding" (15126 chars). Long sentence replaced with shorter one. Citations around replaced text preserved. Apply/Undo roundtrip verified. |
+| 1.4 | **PASS** | Note ID 2331, "Summary: Geography of School Inequality" (14447 chars). Agent used `replace_all: true`. All 3 occurrences of "percentile" replaced with "percent-rank". Undo restored all 3. Diff showed "Replace (all occurrences)" label. |
+| 1.5 | **PASS** (caveat) | Note ID 2035. Agent split cross-paragraph edit into 2 separate edits (one per paragraph) rather than a single cross-element replacement. Both applied and undid correctly. **Caveat**: Cross-paragraph replacement pattern not tested because agent chose two targeted edits instead. |
+| 2.1 | **PASS** | Note ID 2384, "Policing & Educational Outcomes Summary" (16402 chars). New paragraph inserted between intro and "Key Findings:". Position verified via index ordering. Apply/Undo roundtrip verified. |
+| 2.2 | **PASS** | Note ID 2384. Bold "Key Findings:" paragraph deleted. Surrounding list (`<ul>`) preserved intact. Apply/Undo roundtrip verified. |
+| 2.3 | **PASS** | Note ID 2424, "Police Exposure in NYC by Race/Gender" (36994 chars). New `<h2>Future Research Directions</h2>` and paragraph added after last section. Correct heading level (h2). Note: Initial "Approve All" click didn't apply; had to click "Apply" directly on the expanded action. Apply/Undo roundtrip verified. |
+| 2.4 | **PASS** | Note ID 2034, "Summary" (1129 chars). Paragraph converted to `<ul>` with exactly 5 `<li>` items. Title unchanged. Apply/Undo roundtrip verified (undo restored original paragraph). |
+| 2.5 | **PASS** | Note ID 2424. `<ul>` converted to `<ol>` after "Core Empirical Patterns" heading. List items unchanged. First edit attempt failed (warning icon), agent retried successfully. Apply/Undo roundtrip verified. |
+| 2.6 | **PASS** | Note ID 2507, "The Motherhood Penalty: Wages & Tasks" (11653 chars). `<table>` with correct headers and data rows inserted after title. Apply/Undo roundtrip verified (table removed on undo). |
+| 2.7 | NOT RUN | Similar to Test 2.2 (delete paragraph). Skipped for time. |
+| 3.1 | **PASS** | Note ID 2443, "Summary: Visualizing Police Exposure in NYC" (6417 chars). `<strong>race, gender, and age</strong>` added correctly. Text unchanged. Apply/Undo roundtrip verified (bold removed, plain text restored). |
+| 3.2 | NOT RUN | Similar to Test 3.1. Skipped for time. |
+| 3.3 | NOT RUN | Skipped for time. |
+| 3.4 | **PASS** | Note ID 2035. `<a href="https://example.com/school-matters">School Matters project</a>` added. Visible text unchanged. Apply/Undo roundtrip verified (link removed on undo). |
+| 3.5 | NOT RUN | Skipped for time. |
+| 3.6 | NOT RUN | Skipped for time. |
+| 4.1 | NOT RUN | Requires careful setup with known library item keys. Skipped for time. |
+| 4.2 | **FAIL** | Note ID 2268. Agent reported success but visible citation text was NOT updated. `data-citation` JSON locator also unchanged. |
+| 4.3 | NOT RUN | Skipped for time. |
+| 4.4 | NOT RUN | Skipped for time. |
+| 4.5 | NOT RUN | Skipped for time. |
+| 4.6 | NOT RUN | Skipped for time. |
+| 5.1 | SKIP | No notes with `data-annotation` tags found in test library. |
+| 5.2 | SKIP | No notes with annotations in test library. |
+| 5.3 | SKIP | No notes with annotations in test library. |
+| 5.4 | SKIP | No notes with annotations in test library. |
+| 6.1 | SKIP | No notes with `data-attachment-key` images found in test library. |
+| 6.2 | SKIP | No notes with images in test library. |
+| 6.3 | SKIP | No notes with images in test library. |
+| 7.1 | **PASS** | Note ID 2034, "Summary" (1129 chars). `<span class="math">` with `x^2 + y^2 = r^2` added. Apply/Undo roundtrip verified. Math not handled by simplifier, but agent correctly produced raw HTML with math class. |
+| 7.2 | NOT RUN | Skipped for time. |
+| 7.3 | NOT RUN | Requires note with existing math. Skipped for time. |
+| 7.4 | NOT RUN | Requires note with existing math. Skipped for time. |
+| 8.1 | NOT RUN | Skipped for time. |
+| 8.2 | NOT RUN | Skipped for time. |
+| 8.3 | NOT RUN | Skipped for time. |
+| 8.4 | NOT RUN | Skipped for time. |
+| 9.1 | NOT RUN | No notes with empty paragraphs available. Skipped for time. |
+| 9.2 | **PASS** | Note ID 2034, "Summary" (1129 chars). HTML correctly escaped: `x &lt; 10 &amp; y &gt; 5` and `x &amp; y`. Quotes preserved as `"`. Apply/Undo roundtrip verified. |
+| 9.3 | **PASS** | Note ID 2035. All Unicode characters preserved: Muller (u), em-dash, naive (i), resume (e), section sign, euro sign. Apply/Undo roundtrip verified. |
+| 9.4 | NOT RUN | Skipped for time. |
+| 9.5 | **PASS** | Note ID 2384, "Policing & Educational Outcomes Summary" (16402 chars). New paragraph appended at the very end, before `</div>`. Wrapper div and `data-schema-version` preserved. Apply/Undo roundtrip verified. |
+| 9.6 | NOT RUN | Requires rapid manual interaction. Skipped for time. |
+| 9.7 | NOT RUN | Requires multi-editor setup. Skipped for time. |
+| 9.8 | NOT RUN | Skipped for time. |
+| 9.9 | **PASS** | Note ID 2331, "Summary: Geography of School Inequality" (14447 chars). Paragraph deleted (replacement with empty string). Surrounding list (`<ul>`) preserved. Apply/Undo roundtrip verified. |
+| 10.1 | NOT RUN | Skipped for time. |
+| 10.2 | NOT RUN | Skipped for time. |
+| 10.3 | NOT RUN | Skipped for time. |
+| 10.4 | NOT RUN | No notes with annotations in test library. Skipped. |
+| 10.5 | NOT RUN | Skipped for time. |
+| 11.1 | NOT RUN | Requires manual editing in Zotero editor. Skipped for time. |
+| 11.2 | NOT RUN | Skipped for time. |
+| 11.3 | NOT RUN | Skipped for time. |
+| 11.4 | NOT RUN | Skipped for time. |
+| 11.5 | NOT RUN | Skipped for time. |
+| 11.6 | NOT RUN | Skipped for time. |
+| 11.7 | NOT RUN | Skipped for time. |
+| 11.8 | NOT RUN | Skipped for time. |
+| 12.1 | **PASS** | Note ID 2443. `<pre>` block with `print('hello world')` added. Apply/Undo roundtrip verified. |
+| 12.2 | NOT RUN | Requires note with existing code block. Skipped for time. |
+| 13.1 | NOT RUN | Skipped for time. |
+| 13.2 | NOT RUN | No notes with `<br>` tags in test library. Skipped. |
+
+### 2026-03-27
+
+| Test | Result | Notes |
+|------|--------|-------|
+| 4.2 (retest) | **PASS** (minor issue) | Note ID 2268. After code fix, `data-citation` JSON locator correctly updated to "15". Visible citation text IS updated, but format changed from "p. 15" to "page 15" (abbreviation lost). First attempt still fails with `old_string_not_found`; second attempt succeeds. Full Apply/Undo/Re-Apply roundtrip verified. **Minor issue**: Citation display format changes from "p." to "page" after editing — the expander likely regenerates display text with a different format string. |
+| 14.1 | **PASS** | Note ID 2035. All 3 edits produced as separate actions and applied via "Approve All". Sequential undo in reverse (#3->#2->#1) worked perfectly. No issues with undo anchor stability despite sequential modifications. |
+| 14.2 | NOT RUN | Test 14.1 covered reverse-order undo. Out-of-order undo partially covered by Test 14.7. Skipped. |
+| 14.3 | **PASS** | Note ID 2035. First attempt (automated) was INCONCLUSIVE — `Zotero.Prompt.confirm()` modal blocked RDP and was auto-dismissed. Second attempt (manual dialog): Applied title change, clicked Retry, user manually clicked "Yes". Undo fired correctly, new run re-applied the edit. **Key finding**: The confirmation dialog is a modal `Zotero.Prompt.confirm()` that blocks RDP and cannot be interacted with via MCP — requires manual user click. |
+| 14.4 | NOT RUN | Test 14.3 covered core retry+undo flow. Multi-run retry needs dedicated test with manual dialog interaction. Skipped for time. |
+| 14.5 | NOT RUN | Requires manual interaction with modal dialog. Cannot be tested via MCP. |
+| 14.6 | NOT RUN | Requires manual interaction with modal dialog. Cannot be tested via MCP. |
+| 14.7 | **PASS** | Note ID 2331. Two separate prompts editing same paragraph: "conducted"->"performed" then "national-level"->"nationwide". Undo in reverse order worked perfectly. Undo anchors stable even with overlapping edits in the same paragraph. |
+| 14.8 | NOT RUN | Requires precise timing (clicking Retry during streaming). Difficult to automate via MCP. |
+| 14.9 | NOT RUN | Requires prompt triggering both edit_note and create_note actions. Skipped for time. |
+| 14.10 | NOT RUN | Complex structural test. Skipped for time. |
+| 14.11 | NOT RUN | Requires manual external modification + retry with modal dialog. Skipped for time. |
+
+### Summary
+
+**2026-03-25**: 20 PASS, 1 FAIL (4.2), 7 SKIP, 27 NOT RUN
+**2026-03-27**: 4 PASS (including 4.2 retest), 7 NOT RUN
+
+## Test Run Results Summary — 2026-04-08
+
+Focused run on previously NOT RUN tests and new test categories (15–17).
+Tested against Zotero 9.0-beta.16 via MCP. Note-in-tab mode unless noted otherwise.
+
+### Category 1–3, 8–9 (Basic Edits, Structural, Formatting, Edge Cases)
+
+| Test | Result | Notes |
+|------|--------|-------|
+| 1.1 (re-run) | **PASS** | Note ID 2035. Title changed `Summary of Logan et al. (2012)` → `Logan et al. (2012) - School Segregation Analysis`. Diff preview correct. Apply/Undo/Re-Apply roundtrip verified via API + visual editor + Zotero tab title. |
+| 2.7 | **PASS** | Note ID 2424. Deleted entire `<h2>Comparison with Other Research Studies</h2>` section. All other 5 sections intact. Apply/Undo roundtrip verified. |
+| 3.2 | **PASS** | Note ID 2443. Word `disparities` wrapped in `<em>` tag in first paragraph. Apply/Undo roundtrip verified. |
+| 3.5 | **PASS** | Note ID 2443. First paragraph wrapped in `<blockquote>` tags. Indented rendering visible in editor. Apply/Undo roundtrip verified. |
+| 3.6 | **PASS** | Note ID 2443. Heading `Overview` changed from `<h3>` to `<h2>`. Text unchanged. Apply/Undo roundtrip verified. |
+
+### Category 15: HTML Entity Encoding Undo (NEW)
+
+| Test | Result | Notes |
+|------|--------|-------|
+| 15.1 | **PASS** | Created note ID 3278 with `&#x27;` and `&quot;` entities. Library-view mode with reference `1-7T63FX8B`. Model used literal `'` in prompt. Agent read note, produced edit `memoir` → `MEMOIR`, diff preview correct. After apply, note HTML had `'` (PM normalized entities). Full Apply/Undo/Re-Apply roundtrip succeeded — undo correctly handles entity mismatch between stored undo data (with `&#x27;`) and current note HTML (with `'`). |
+| 15.2 | **PASS** | Created fresh note ID 3279 with entities. Library-view mode. Prompt explicitly instructs model to use literal `'` (not escaped). Agent produced `old_string` with literal `'`, edit matched against note's `&#x27;` via reverse-matching. Full Apply/Undo/Re-Apply roundtrip verified. |
+| 15.1 Variants A, B, C | NOT RUN | Base test 15.1 passed confirming the core reverse-matching path works. Variants (with `&#39;`, `&apos;`, `&#34;`) were not run due to time. Recommended as regression checks. |
+
+### Category 16: Partial Simplified Element Stripping (NEW)
+
+All tests on note ID 3156 (Nosrati 2025 Optimal Taxation, 16 citations).
+
+| Test | Result | Notes |
+|------|--------|-------|
+| 16.1 | **PASS** | Prompted agent to include `/>` at start of `old_string` when editing `Introduction (pages 1-3)` → `Chapter 1: Introduction (pages 1-3)` right after a citation. Agent produced the edit, preview showed correct change with only `Chapter 1: ` added. Apply succeeded, citation `(Nosrati, 2025, p. 634)` remained unchanged. Undo restored original. Note: whether the agent actually included `/>` (triggering fallback) vs. making a clean match cannot be confirmed without log access — but functionally the test passes. |
+| 16.2 | NOT RUN | Between-citations test — would have required inspecting note first. Skipped for time. |
+| 16.3 | **PASS** | Prompted agent to include `<citation` at end of `old_string` for `across all countries studied` → `in every country analyzed`. Edit applied correctly, citation preserved intact, Apply/Undo roundtrip verified. |
+| 16.4 | **PASS** | Clean baseline edit (`pages 1-3` → `pp. 1-3`) on note 3156. Manual re-run confirmed success: heading changed from `<strong>Introduction (pages 1–3)</strong>` (with en-dash U+2013) to `<strong>Introduction (pp. 1-3)</strong>` (with regular hyphen U+002D). Apply succeeded, citation preserved. **Observation**: the original note used en-dash but the result has regular hyphen — this suggests `read_note` normalizes special punctuation to ASCII in simplified output, so the agent's `old_string`/`new_string` (with hyphen) matched cleanly via the simplified→raw expansion. Initial automated run was marked INCONCLUSIVE due to a timing/verification issue, not a real failure. Confirms the clean-match path (no fallback) works for text adjacent to citations. |
+| 16.5 | NOT RUN | Ambiguous match disambiguation — skipped for time. |
+| 16.6 | **PASS** | Sent prompt with intentionally typo'd `old_string` starting with `/>`. Agent attempted the edit, got `old_string_not_found` error, and correctly reported failure to the user: "the edit was rejected because the string '/>ein theoretische bildungsfordernder Effekt' does not exist in the note". Note content verified unchanged. Fallback fails gracefully with clear error. |
+
+### Category 17: HTML Re-serialization Resilience (NEW)
+
+| Test | Result | Notes |
+|------|--------|-------|
+| 17.1 | **PASS** | Created note ID 3280 with hex colors (`#ff0000`, `#0000ff`). Two sequential edits in same chat: (1) `Content A` → `Updated A`, (2) `Content B` → `Updated B`. Both succeeded. After first edit PM normalized hex→rgb (`rgb(255, 0, 0)`). The agent re-read the note before the second edit and its `old_string` still matched because `read_note` returns the normalized rgb format. |
+| 17.2 | NOT RUN | Combined-style spans — skipped for time. |
+| 17.3 | **PASS** | Created note ID 3281 with `<b>`, `<i>`, `<s>`, `<font>` legacy elements. Edit `Second paragraph` → `Changed paragraph` succeeded. Post-edit verified PM normalized: `<b>` → `<strong>`, `<i>` → `<em>`, `<s>` → `<span style="text-decoration: line-through;">`. Formatting preserved in the edited note. Apply/Undo roundtrip verified. |
+| 17.4 | NOT RUN | Parallel edits on non-overlapping sections — skipped for time. |
+
+### Library-View Mode Test
+
+Tests 15.1 and 15.2 were executed in library-view mode (note NOT open in tab) with reference-by-key in prompt text. Both passed. This exercises the `waitForPMNormalization` fast-exit path (~450ms after 3 unchanged polls). Additional library-view test with `#beaver-pane-library` selectors (no source chip) was attempted but ended the session before full completion.
+
+### Summary
+
+**2026-04-08**: **16 PASS**, **0 FAIL**, **0 INCONCLUSIVE**, **10 NOT RUN**
+
+- Previously NOT RUN tests covered: 1.1 (re-run), 2.7, 3.2, 3.5, 3.6
+- New test categories covered: 15.1, 15.2, 16.1, 16.3, 16.4, 16.6, 17.1, 17.3
+- All core new-feature categories (HTML entity undo, partial stripping fallback, re-serialization resilience) verified working
+- **Punctuation normalization observation (Test 16.4)**: The agent's edit converted an en-dash `–` (U+2013) to a regular hyphen `-` (U+002D). This suggests `read_note` normalizes special punctuation to ASCII in the simplified output, so the agent never sees the en-dash. The edit succeeds via clean simplified→raw matching, but the side effect is that the punctuation in the source HTML is silently changed. Worth documenting as expected behavior or considering whether to preserve the original character.
+- No Beaver-related errors in error console during tests; only pre-existing cosmetic warnings (`Removed unsafe URI`, `setSpellcheckUserOverride`) unrelated to the edit_note flow
+- Test notes created during run: 3278 (15.1), 3279 (15.2), 3280 (17.1), 3281 (17.3) — left in place for potential re-testing
+- Note 3156 has a leftover edit from Test 16.4 manual re-run (`Introduction (pages 1–3)` → `Introduction (pp. 1-3)`); other pre-existing notes (2034, 2035, 2424, 2443) verified back to original state

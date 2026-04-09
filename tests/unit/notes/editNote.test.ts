@@ -37,6 +37,8 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     ENTITY_FORMS: ['hex', 'decimal', 'named'],
     stripPartialSimplifiedElements: vi.fn(() => null),
     stripSpuriousWrappingTags: vi.fn(() => []),
+    normalizeNoteHtml: vi.fn((html: string) => html),
+    checkNewCitationItemsExist: vi.fn(() => null),
     stripNoteWrapperDiv: vi.fn((html: string) => {
         const trimmed = html.trim();
         if (!trimmed.startsWith('<div') || !trimmed.endsWith('</div>')) return html;
@@ -68,6 +70,11 @@ vi.mock('../../../react/atoms/profile', () => ({
 
 vi.mock('../../../react/atoms/threads', () => ({
     currentThreadIdAtom: Symbol('currentThreadIdAtom'),
+}));
+
+vi.mock('../../../react/atoms/editNoteAutoApprove', () => ({
+    autoApproveNoteKeysAtom: Symbol('autoApproveNoteKeysAtom'),
+    makeNoteKey: vi.fn((libId: number, key: string) => `${libId}-${key}`),
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
@@ -207,8 +214,15 @@ beforeEach(() => {
         },
     };
 
-    // Reset store.get to return searchable library IDs including 1
-    vi.mocked(store.get).mockReturnValue([1, 2]);
+    // Reset store.get to return appropriate values per atom
+    vi.mocked(store.get).mockImplementation((atom: any) => {
+        // autoApproveNoteKeysAtom returns a Set
+        if (typeof atom === 'symbol' && atom.description === 'autoApproveNoteKeysAtom') {
+            return new Set<string>();
+        }
+        // searchableLibraryIdsAtom and others return [1, 2]
+        return [1, 2];
+    });
 
     // Reset mocks to default behavior
     vi.mocked(getOrSimplify).mockReturnValue({
@@ -885,5 +899,57 @@ describe('executeEditNoteAction — partial element fallback', () => {
         const savedHtml = mockItem.setNote.mock.calls[0][0];
         expect(savedHtml).toContain('. Ein theoretisch');
         expect(savedHtml).not.toContain('—ein theoretisch');
+    });
+});
+
+
+// =============================================================================
+// Trailing whitespace normalization in matching
+// =============================================================================
+
+describe('trailing whitespace normalization in matching', () => {
+    let mockItem: any;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        const noteHtml = '<div data-schema-version="9"><p>Hello world</p>\n<p>Second para</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+    });
+
+    it('matches old_string with trailing \\n\\n when note has \\n and emits normalized_action_data', async () => {
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                // old_string has trailing double newline that doesn't exist in note
+                old_string: '<p>Hello world</p>\n\n',
+                new_string: '<p>Goodbye world</p>\n',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(true);
+        // Must emit normalized_action_data so execution uses the trimmed strings
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data.old_string).toBe('<p>Hello world</p>');
+        expect(response.normalized_action_data.new_string).toBe('<p>Goodbye world</p>');
+    });
+
+    it('does not trim non-trailing whitespace', async () => {
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                // Whitespace in the middle — should not match
+                old_string: 'Hello\n\nworld',
+                new_string: 'Goodbye world',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        // "Hello\n\nworld" is not in the note, and trimming trailing \n won't help
+        expect(response.valid).toBe(false);
     });
 });

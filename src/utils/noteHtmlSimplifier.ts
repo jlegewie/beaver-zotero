@@ -105,6 +105,55 @@ export function invalidateSimplificationCache(noteId: string): void {
 }
 
 // =============================================================================
+// HTML Normalization (pre-simplification)
+// =============================================================================
+
+/**
+ * ProseMirror-based normalization: roundtrips HTML through Zotero's note-editor
+ * schema to produce the exact same canonical HTML that Zotero's note-editor
+ * would produce when loading and saving a note.
+ */
+import { normalizeNoteHtml } from '../prosemirror/normalize';
+export { normalizeNoteHtml };
+
+/**
+ * Convert a CSS hex color to rgb()/rgba() notation.
+ * Handles 3-digit (#RGB), 4-digit (#RGBA), 6-digit (#RRGGBB), 8-digit (#RRGGBBAA).
+ */
+export function hexToRgb(hex: string): string {
+    const h = hex.replace('#', '');
+    let r: number, g: number, b: number, a: number | undefined;
+
+    if (h.length === 3) {
+        r = parseInt(h[0] + h[0], 16);
+        g = parseInt(h[1] + h[1], 16);
+        b = parseInt(h[2] + h[2], 16);
+    } else if (h.length === 4) {
+        r = parseInt(h[0] + h[0], 16);
+        g = parseInt(h[1] + h[1], 16);
+        b = parseInt(h[2] + h[2], 16);
+        a = parseInt(h[3] + h[3], 16);
+    } else if (h.length === 6) {
+        r = parseInt(h.substring(0, 2), 16);
+        g = parseInt(h.substring(2, 4), 16);
+        b = parseInt(h.substring(4, 6), 16);
+    } else if (h.length === 8) {
+        r = parseInt(h.substring(0, 2), 16);
+        g = parseInt(h.substring(2, 4), 16);
+        b = parseInt(h.substring(4, 6), 16);
+        a = parseInt(h.substring(6, 8), 16);
+    } else {
+        return hex; // unrecognized format — return as-is
+    }
+
+    if (a !== undefined) {
+        // Round alpha to 3 decimal places to match browser output
+        return `rgba(${r}, ${g}, ${b}, ${+(a / 255).toFixed(3)})`;
+    }
+    return `rgb(${r}, ${g}, ${b})`;
+}
+
+// =============================================================================
 // Simplification: Raw HTML → Simplified + Metadata
 // =============================================================================
 
@@ -133,7 +182,9 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
 
     // Use regex-based approach to avoid DOMParser re-serialization issues.
     // DOMParser + innerHTML can change attribute order, whitespace, and entity encoding.
-    let simplified = rawHtml;
+    // Pre-normalize to ProseMirror-canonical format so the simplified output is stable
+    // across PM re-serializations (hex→rgb, style splitting, legacy elements, etc.).
+    let simplified = normalizeNoteHtml(rawHtml);
 
     // 1. Strip data-citation-items from wrapper div
     simplified = stripDataCitationItems(simplified);
