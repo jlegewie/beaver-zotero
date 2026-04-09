@@ -38,6 +38,7 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     stripPartialSimplifiedElements: vi.fn(() => null),
     stripSpuriousWrappingTags: vi.fn(() => []),
     normalizeNoteHtml: vi.fn((html: string) => html),
+    checkNewCitationItemsExist: vi.fn(() => null),
     stripNoteWrapperDiv: vi.fn((html: string) => {
         const trimmed = html.trim();
         if (!trimmed.startsWith('<div') || !trimmed.endsWith('</div>')) return html;
@@ -69,6 +70,11 @@ vi.mock('../../../react/atoms/profile', () => ({
 
 vi.mock('../../../react/atoms/threads', () => ({
     currentThreadIdAtom: Symbol('currentThreadIdAtom'),
+}));
+
+vi.mock('../../../react/atoms/editNoteAutoApprove', () => ({
+    autoApproveNoteKeysAtom: Symbol('autoApproveNoteKeysAtom'),
+    makeNoteKey: vi.fn((libId: number, key: string) => `${libId}-${key}`),
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
@@ -208,8 +214,15 @@ beforeEach(() => {
         },
     };
 
-    // Reset store.get to return searchable library IDs including 1
-    vi.mocked(store.get).mockReturnValue([1, 2]);
+    // Reset store.get to return appropriate values per atom
+    vi.mocked(store.get).mockImplementation((atom: any) => {
+        // autoApproveNoteKeysAtom returns a Set
+        if (typeof atom === 'symbol' && atom.description === 'autoApproveNoteKeysAtom') {
+            return new Set<string>();
+        }
+        // searchableLibraryIdsAtom and others return [1, 2]
+        return [1, 2];
+    });
 
     // Reset mocks to default behavior
     vi.mocked(getOrSimplify).mockReturnValue({
