@@ -143,6 +143,15 @@ interface AgentActionViewProps {
      * triggered the undo.
      */
     onUndoErrorChange?: (toolcallId: string, error: string | null) => void;
+    /**
+     * In-group only: when true, disable all per-edit action buttons. Used by
+     * `EditNoteGroupView` to prevent the user from triggering a per-child
+     * apply/undo while the parent's group-level handler is mid-loop — the
+     * parent's `isProcessing` doesn't propagate via the atom layer, so
+     * children would otherwise happily fire a parallel
+     * `executeEditNoteAction` against the same action.
+     */
+    disabled?: boolean;
 }
 
 interface StatusConfig {
@@ -254,6 +263,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     isInGroup = false,
     externalUndoError = null,
     onUndoErrorChange,
+    disabled = false,
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
@@ -918,10 +928,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             >
                 <div className="display-flex flex-row min-w-0">
                     {/* Left action bar: status icon stacked above per-state icons */}
-                    <div
-                        className="display-flex flex-col items-center gap-25 px-2 py-2 flex-shrink-0 ml-05"
-                        // style={{ minWidth: '28px' }}
-                    >
+                    <div className="display-flex flex-col items-center gap-25 px-2 py-2 flex-shrink-0 ml-05">
                         {StatusIcon && (
                             <div className="display-flex items-center mt-010">
                                 {StatusIcon === Spinner ? (
@@ -932,64 +939,80 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             </div>
                         )}
 
+                        {/*
+                            Each per-edit action button uses the inner spinner
+                            pattern from the single AgentActionView footer:
+                            outer guard is `config.showX`, inner guard is
+                            `(!isProcessing || clickedButton === 'X')` so the
+                            *active* button stays mounted with `loading={true}`
+                            while the OTHER buttons disappear during processing.
+
+                            `disabled` is OR'd in from the parent group so a
+                            mid-loop "Apply All" / "Undo All" can't fan out into
+                            parallel per-child clicks on the same action.
+                        */}
+
                         {/* Apply (awaiting/pending/rejected/undone) */}
-                        {config.showApply && !isProcessing && (
+                        {config.showApply && (!isProcessing || clickedButton === 'approve') && (
                             <Tooltip content="Apply" showArrow singleLine>
                                 <IconButton
                                     icon={TickIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-green scale-12"
                                     onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                    disabled={isProcessing}
+                                    disabled={isProcessing || disabled}
                                     loading={isProcessing && clickedButton === 'approve'}
                                 />
                             </Tooltip>
                         )}
 
                         {/* Reject (awaiting/pending) */}
-                        {config.showReject && !isProcessing && (
+                        {config.showReject && (!isProcessing || clickedButton === 'reject') && (
                             <Tooltip content="Reject" showArrow singleLine>
                                 <IconButton
                                     icon={CancelIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-red scale-90"
                                     onClick={isAwaitingApproval ? handleReject : handleRejectPending}
-                                    disabled={isProcessing}
+                                    disabled={isProcessing || disabled}
                                     loading={isProcessing && clickedButton === 'reject'}
                                 />
                             </Tooltip>
                         )}
 
                         {/* Undo (applied) */}
-                        {config.showUndo && !isProcessing && (
+                        {(config.showUndo || (isProcessing && clickedButton === 'undo')) && (
                             <Tooltip content="Undo" showArrow singleLine>
                                 <IconButton
                                     icon={UndoIcon}
                                     variant="ghost-secondary"
                                     iconClassName="scale-10"
                                     onClick={handleUndo}
-                                    disabled={isProcessing}
+                                    disabled={isProcessing || disabled}
                                     loading={isProcessing && clickedButton === 'undo'}
                                 />
                             </Tooltip>
                         )}
 
                         {/* Retry (error) */}
-                        {config.showRetry && !isProcessing && (
+                        {config.showRetry && (
                             <Tooltip content={isUndoError ? 'Retry undo' : 'Try again'} showArrow singleLine>
                                 <IconButton
                                     icon={RepeatIcon}
                                     variant="ghost-secondary"
                                     iconClassName="scale-90"
                                     onClick={handleRetry}
-                                    disabled={isProcessing}
+                                    disabled={isProcessing || disabled}
                                     loading={isProcessing}
                                 />
                             </Tooltip>
                         )}
                     </div>
 
-                    {/* Right side: diff preview */}
+                    {/* Right side: diff preview. While the part has arrived
+                        but no action / pending approval has landed yet, render
+                        an empty placeholder rather than the literal "No preview
+                        available" text — the row would otherwise flash garbage. */}
                     <div className="flex-1 min-w-0">
                         {previewData ? (
                             <ActionPreview
@@ -999,9 +1022,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 actions={actions}
                             />
                         ) : (
-                            <div className="text-sm font-color-secondary px-3 py-2">
-                                No preview available
-                            </div>
+                            <div className="px-3 py-2" style={{ minHeight: '1.4em' }} aria-hidden />
                         )}
                     </div>
                 </div>

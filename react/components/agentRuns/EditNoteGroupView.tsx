@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { ToolCallPart, AgentRunStatus } from '../../agents/types';
+import { ToolCallPart } from '../../agents/types';
 import {
     AgentAction,
     PendingApproval,
@@ -36,6 +36,7 @@ import {
     EditIcon,
     FileDiffIcon,
     Icon,
+    RepeatIcon,
     TickIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
@@ -66,7 +67,6 @@ interface EditNoteGroupViewProps {
     runId: string;
     /** Index of the parent response message within the run. */
     responseIndex: number;
-    runStatus: AgentRunStatus;
 }
 
 /**
@@ -82,7 +82,6 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     zoteroKey,
     runId,
     responseIndex,
-    runStatus,
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
@@ -151,6 +150,19 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         [allActions],
     );
 
+    /**
+     * Actions in `error` state. These are not part of `reapplicableActions`
+     * (matches single AgentActionView, where the Apply button is hidden for
+     * `error` and only the Retry button is shown). The group exposes these
+     * via a separate "Retry All" footer button so an all-errored group is
+     * still recoverable from the collapsed view.
+     */
+    const errorActions = useMemo(
+        () => allActions.filter((a) => a.status === 'error'),
+        [allActions],
+    );
+    const errorCount = errorActions.length;
+
     // Aggregate status (uses the same priority logic as single-action multi mode)
     const aggregateStatus: ActionStatus | 'awaiting' = hasPendingApprovals
         ? 'awaiting'
@@ -163,16 +175,50 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const expansionState = useAtomValue(toolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
     const hasExistingExpandState = expansionState[expansionKey] !== undefined;
-    // Default: expanded while approval is pending so users can see what they're approving
-    const isExpanded = expansionState[expansionKey] ?? hasPendingApprovals;
+    // Default: expanded while approval is pending so users can see what they're
+    // approving, and expanded when the group is in aggregate error so the
+    // per-child Retry icons are visible.
+    const isExpanded =
+        expansionState[expansionKey]
+        ?? (hasPendingApprovals || (errorCount > 0 && reapplicableActions.length === 0 && appliedCount === 0));
 
-    // Initialize expansion state on first mount if not already set elsewhere
+    // Track previous values to detect transitions vs re-mounts.
+    // - Auto-collapse on `hasPendingApprovals` true → false (user resolved
+    //   the approval flow). Mirrors single AgentActionView lines 295–314.
+    // - Auto-expand on aggregate `error` so per-child Retry icons are
+    //   reachable for an all-errored collapsed group.
+    const prevHasPendingApprovalsRef = useRef(hasPendingApprovals);
+    const hasInitializedRef = useRef(false);
     useEffect(() => {
-        if (!hasExistingExpandState) {
-            setExpanded({ key: expansionKey, expanded: hasPendingApprovals });
+        if (!hasInitializedRef.current) {
+            hasInitializedRef.current = true;
+            // First mount: only seed if there's no existing state (preserves
+            // state from another pane sharing the same Jotai store).
+            if (!hasExistingExpandState) {
+                const seedExpanded =
+                    hasPendingApprovals
+                    || (errorCount > 0 && reapplicableActions.length === 0 && appliedCount === 0);
+                setExpanded({ key: expansionKey, expanded: seedExpanded });
+            }
+            prevHasPendingApprovalsRef.current = hasPendingApprovals;
+            return;
         }
-        // Run only when group identity changes
-    }, [expansionKey]);
+
+        // After first mount, sync when hasPendingApprovals actually transitions.
+        if (prevHasPendingApprovalsRef.current && !hasPendingApprovals) {
+            // Approval flow just finished — collapse the group.
+            setExpanded({ key: expansionKey, expanded: false });
+        }
+        prevHasPendingApprovalsRef.current = hasPendingApprovals;
+    }, [
+        hasPendingApprovals,
+        errorCount,
+        reapplicableActions.length,
+        appliedCount,
+        expansionKey,
+        hasExistingExpandState,
+        setExpanded,
+    ]);
 
     // Fetch note title once for the group
     useEffect(() => {
@@ -195,7 +241,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
     // Local processing state
     const [isProcessing, setIsProcessing] = useState(false);
-    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
+    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | 'retry' | null>(null);
     // Per-edit undo errors keyed by toolcall_id. Both the group's "Undo All"
     // and each child's per-edit Undo button funnel failures through this map
     // so the friendly "revert manually" banner appears in the exact child row
@@ -420,6 +466,57 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     ]);
 
     /**
+     * Retry all errored edits in the group. Mirrors single
+     * `AgentActionView.handleRetry` for the apply-error case: re-runs
+     * `executeEditNoteAction` for each action in `'error'` state. Successes
+     * flip to `'applied'`; persistent failures stay in `'error'` so the
+     * user can retry again.
+     */
+    const handleRetryAll = useCallback(async () => {
+        if (isProcessing) return;
+        if (errorActions.length === 0) return;
+
+        setIsProcessing(true);
+        setClickedButton('retry');
+        try {
+            // Dismiss any active diff preview before retrying — same reason
+            // as the single edit_note path: the preview freezes the editor.
+            if (isDiffPreviewActive()) {
+                await dismissDiffPreview();
+                store.set(diffPreviewNoteKeyAtom, null);
+            }
+
+            for (const action of errorActions) {
+                try {
+                    const result = await executeEditNoteAction(action);
+                    await ackAgentActions(runId, [{
+                        action_id: action.id,
+                        result_data: result,
+                    }]);
+                    logger(`EditNoteGroupView: Retried + applied edit_note action ${action.id}`, 1);
+                } catch (error: any) {
+                    const errorMessage = error?.message || 'Failed to retry edit_note';
+                    const stackTrace = error?.stack || '';
+                    logger(`EditNoteGroupView: Retry failed for edit_note action ${action.id}: ${errorMessage}\n${stackTrace}`, 1);
+                    setAgentActionsToError([action.id], errorMessage, {
+                        stack_trace: stackTrace,
+                        error_name: error?.name,
+                    });
+                }
+            }
+        } finally {
+            setIsProcessing(false);
+            setClickedButton(null);
+        }
+    }, [
+        isProcessing,
+        errorActions,
+        runId,
+        ackAgentActions,
+        setAgentActionsToError,
+    ]);
+
+    /**
      * Receives undo error updates from child AgentActionViews when the user
      * uses the per-edit Undo button. Keeps the parent's error map as the
      * single source of truth so failures from either entry point land in the
@@ -573,9 +670,12 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const groupLabel = editCount === 1 ? 'Note Edit' : `${editCount} Note Edits`;
 
     // Collapsed-header right slot only shows during the active approval flow
-    // (mirrors single AgentActionView's collapsed-header buttons).
+    // (mirrors single AgentActionView's collapsed-header buttons). Outer
+    // `!isProcessing` is intentionally OMITTED — the inner per-button gate
+    // `(!isProcessing || clickedButton === 'X')` keeps the active button
+    // mounted with its loading spinner.
     const showCollapsedHeaderActions =
-        (aggregateStatus === 'awaiting' || aggregateStatus === 'pending') && !isProcessing;
+        aggregateStatus === 'awaiting' || aggregateStatus === 'pending';
 
     // Footer button visibility — driven by *what is available in the group*
     // instead of by aggregate status. This is the key difference from single
@@ -590,6 +690,13 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     //   approvals (mid-run) or pending actions (post-run). Already-rejected
     //   and undone actions can't be re-rejected (matches single edit).
     // - Undo All: visible whenever any child is currently applied.
+    // - Retry All: visible whenever any child is in `error` state.
+    //
+    // The outer `!isProcessing` guard is intentionally absent here — the
+    // inner per-button `(!isProcessing || clickedButton === 'X')` gate keeps
+    // the *active* button mounted with `loading={true}` while the OTHER
+    // buttons disappear during processing. Without this, clicking Apply All
+    // unmounts the button immediately and the spinner never renders.
     const rejectableActionCount = useMemo(
         () =>
             pendingApprovalsForGroup.length +
@@ -598,11 +705,10 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     );
 
     const showFooterApply =
-        (reapplicableActions.length > 0 || hasPendingApprovals) && !isProcessing;
-    const showFooterReject = rejectableActionCount > 0 && !isProcessing;
-    const showFooterUndo =
-        (appliedCount > 0 && !isProcessing) ||
-        (isProcessing && clickedButton === 'undo');
+        reapplicableActions.length > 0 || hasPendingApprovals;
+    const showFooterReject = rejectableActionCount > 0;
+    const showFooterUndo = appliedCount > 0;
+    const showFooterRetry = errorCount > 0;
 
     // Preview button: visible whenever there's an unapplied edit to preview.
     // Includes mid-run pending approvals AND post-run rejected/undone.
@@ -645,34 +751,38 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                         </div>
                         <div className="two-line-header">
                             <span className="font-color-primary font-medium">{groupLabel}</span>
-                            {noteTitle && <span className="font-color-secondary ml-15">{noteTitle}</span>}
-                            {'\u00A0'}
-                            <Tooltip content="Open note" singleLine>
-                                <span
-                                    className="font-color-secondary scale-10"
-                                    style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
-                                    role="button"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        e.preventDefault();
-                                        openNoteByKey(libraryId, zoteroKey);
-                                    }}
-                                >
-                                    <Icon icon={ArrowUpRightIcon} />
-                                </span>
-                            </Tooltip>
+                            {noteTitle && (
+                                <>
+                                    <span className="font-color-secondary ml-15">{noteTitle}</span>
+                                    {'\u00A0'}
+                                    <Tooltip content="Open note" singleLine>
+                                        <span
+                                            className="font-color-secondary scale-10"
+                                            style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
+                                            role="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                e.preventDefault();
+                                                openNoteByKey(libraryId, zoteroKey);
+                                            }}
+                                        >
+                                            <Icon icon={ArrowUpRightIcon} />
+                                        </span>
+                                    </Tooltip>
+                                </>
+                            )}
                         </div>
                     </div>
                 </button>
 
                 <div className="flex-1" />
 
-                {/* Expand chevron — visible when not awaiting/pending */}
+                {/* Expand/Collapse chevron — visible when not awaiting/pending */}
                 <div
                     className="display-flex flex-row items-center gap-25 mr-2 mt-015"
                     style={{ visibility: !(aggregateStatus === 'awaiting' || aggregateStatus === 'pending') ? 'visible' : 'hidden' }}
                 >
-                    <Tooltip content="Expand" showArrow singleLine>
+                    <Tooltip content={isExpanded ? 'Collapse' : 'Expand'} showArrow singleLine>
                         <IconButton
                             icon={ChevronIcon}
                             variant="ghost-secondary"
@@ -730,6 +840,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                     pendingApproval={getPendingApproval(part.tool_call_id)}
                                     hasToolReturn={false}
                                     isInGroup={true}
+                                    disabled={isProcessing}
                                     externalUndoError={perEditUndoErrors[part.tool_call_id] ?? null}
                                     onUndoErrorChange={handleChildUndoErrorChange}
                                 />
@@ -737,8 +848,15 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                         ))}
                     </div>
 
-                    {/* Group action footer */}
-                    {(showFooterApply || showFooterReject || showFooterUndo || canShowPreview) && (
+                    {/* Group action footer.
+
+                        Each per-button visibility uses the inner spinner
+                        pattern: outer guard is `showFooterX` (driven by
+                        availability), inner guard is
+                        `(!isProcessing || clickedButton === 'X')` so the
+                        active button stays mounted with `loading={true}`
+                        while the OTHERS disappear during processing. */}
+                    {(showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || canShowPreview) && (
                         <div className="display-flex flex-row gap-2 px-2 py-2">
                             <div className="flex-1" />
 
@@ -748,6 +866,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                     icon={FileDiffIcon}
                                     onClick={handlePreviewInEditor}
                                     style={{ padding: '3px 6px' }}
+                                    disabled={isProcessing}
                                 >
                                     Preview
                                 </Button>
@@ -764,7 +883,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                 </Button>
                             )}
 
-                            {showFooterUndo && (
+                            {showFooterUndo && (!isProcessing || clickedButton === 'undo') && (
                                 <Button
                                     variant="outline"
                                     onClick={handleUndoAll}
@@ -775,6 +894,18 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                 </Button>
                             )}
 
+                            {showFooterRetry && (!isProcessing || clickedButton === 'retry') && (
+                                <Button
+                                    variant="outline"
+                                    icon={RepeatIcon}
+                                    onClick={handleRetryAll}
+                                    loading={isProcessing && clickedButton === 'retry'}
+                                    disabled={isProcessing}
+                                >
+                                    Retry All
+                                </Button>
+                            )}
+
                             {showFooterApply && (!isProcessing || clickedButton === 'approve') && (
                                 hasPendingApprovals ? (
                                     <SplitApplyButton
@@ -782,6 +913,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                         onApplyAll={handleApproveAllForNote}
                                         loading={isProcessing && clickedButton === 'approve'}
                                         disabled={isProcessing}
+                                        primaryLabel="Apply All"
+                                        applyAllLabel="Always apply for this note"
                                     />
                                 ) : (
                                     <Button

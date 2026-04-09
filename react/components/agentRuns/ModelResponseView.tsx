@@ -34,6 +34,14 @@ type RenderItem =
  * `"<library_id>-<zotero_key>"`. We also accept the separate
  * `library_id` / `zotero_key` shape as a fallback in case the backend
  * normalizes one form to the other in the future.
+ *
+ * Note: `edit_note` is intentionally NOT in `STREAMING_PREVIEW_TOOLS` (see
+ * `ToolCallPartView.tsx`), so partially-parsed `streaming_args` never reach
+ * this path. We only see fully-parsed args (or a JSON string that hasn't
+ * been parsed yet, which falls into the `JSON.parse` try/catch below). That
+ * means a mid-stream `note_id` value of e.g. `"0-AB"` shouldn't appear here
+ * — if it does, the dash-split would group with a temporary key and the
+ * group would re-form once the args complete.
  */
 function getEditNoteTarget(part: ToolCallPart): { libraryId: number; zoteroKey: string } | null {
     if (part.tool_name !== 'edit_note') return null;
@@ -220,7 +228,6 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
                                     zoteroKey={item.zoteroKey}
                                     runId={runId}
                                     responseIndex={responseIndex}
-                                    runStatus={runStatus}
                                 />
                             );
                         }
