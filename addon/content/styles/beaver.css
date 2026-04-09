@@ -890,6 +890,7 @@
 [id^="beaver-pane-"] .border-right-quinary { border-right: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-top-quinary { border-top: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-bottom-quinary { border-bottom: 1px solid var(--fill-quinary); }
+[id^="beaver-pane-"] .border-bottom-quarternary { border-bottom: 1px solid var(--fill-quarternary); }
 [id^="beaver-pane-"] .border-quinary { border: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-quarternary { border: 1px solid var(--material-mix-quarternary); }
 [id^="beaver-pane-"] .border-popup { border: 1px solid var(--fill-quarternary); }

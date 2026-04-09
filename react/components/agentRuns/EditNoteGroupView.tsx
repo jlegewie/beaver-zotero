@@ -125,7 +125,6 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         return out;
         // We need to recompute when allPendingApprovals changes too, since
         // getPendingApproval is a snapshot reader.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [parts, allPendingApprovals, getPendingApproval]);
 
     const pendingApprovalCount = pendingApprovalsForGroup.length;
@@ -156,7 +155,6 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             setExpanded({ key: expansionKey, expanded: hasPendingApprovals });
         }
         // Run only when group identity changes
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [expansionKey]);
 
     // Fetch note title once for the group
@@ -434,7 +432,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             <div
                 className={`
                     display-flex flex-row py-15 bg-senary items-start
-                    ${isExpanded ? 'border-bottom-quinary' : ''}
+                    ${isExpanded ? 'border-bottom-quarternary' : ''}
                 `}
             >
                 <button
