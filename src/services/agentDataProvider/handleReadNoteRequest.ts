@@ -6,7 +6,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { getOrSimplify, getLatestNoteHtml } from '../../utils/noteHtmlSimplifier';
+import { getOrSimplify, getLatestNoteHtml, normalizeNoteHtml } from '../../utils/noteHtmlSimplifier';
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,
@@ -17,7 +17,6 @@ import { prepareBatchAttachmentData, processAttachmentsWithBatchData, toAttachme
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
-
 
 /**
  * Extract unique cited item references from simplified note HTML.
@@ -195,7 +194,7 @@ export async function handleReadNoteRequest(
         }
 
         // 6. Simplify (also warms cache for subsequent edit_note calls)
-        const { simplified } = getOrSimplify(note_id, rawHtml, item.libraryID);
+        const { simplified } = getOrSimplify(note_id, normalizeNoteHtml(rawHtml), item.libraryID);
 
         // 7. Apply offset/limit pagination
         const lines = simplified.split('\n');
