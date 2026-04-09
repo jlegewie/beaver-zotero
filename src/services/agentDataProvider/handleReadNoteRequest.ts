@@ -6,7 +6,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { getOrSimplify, getLatestNoteHtml, normalizeNoteHtml } from '../../utils/noteHtmlSimplifier';
+import { getOrSimplify, getLatestNoteHtml } from '../../utils/noteHtmlSimplifier';
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,
@@ -193,8 +193,11 @@ export async function handleReadNoteRequest(
             };
         }
 
-        // 6. Simplify (also warms cache for subsequent edit_note calls)
-        const { simplified } = getOrSimplify(note_id, normalizeNoteHtml(rawHtml), item.libraryID);
+        // 6. Simplify (also warms cache for subsequent edit_note calls).
+        // Pass raw HTML so the cache key matches edit_note's getOrSimplify
+        // calls — simplifyNoteHtml normalizes internally, so the cached
+        // simplified output is identical either way.
+        const { simplified } = getOrSimplify(note_id, rawHtml, item.libraryID);
 
         // 7. Apply offset/limit pagination
         const lines = simplified.split('\n');
