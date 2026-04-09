@@ -355,6 +355,51 @@ async function validateEditNoteAction(
         }
     }
 
+    // 12c. Zero matches — try stripping JSON-style backslash escapes.
+    //      LLMs sometimes double-escape quotes when constructing JSON tool call
+    //      parameters, producing literal \" in the string instead of plain ".
+    if (matchCount === 0 && old_string && /\\["\\/]/.test(old_string)) {
+        const unescapedOld = old_string.replace(/\\"/g, '"').replace(/\\\\/g, '\\').replace(/\\\//g, '/');
+        if (unescapedOld !== old_string) {
+            try {
+                const unescapedExpandedOld = expandToRawHtml(unescapedOld, metadata, 'old');
+                const unescapedCount = countOccurrences(strippedHtml, unescapedExpandedOld);
+                if (unescapedCount > 0) {
+                    const unescapedNew = new_string.replace(/\\"/g, '"').replace(/\\\\/g, '\\').replace(/\\\//g, '/');
+                    // Dry-run expand new_string to verify
+                    expandToRawHtml(unescapedNew, metadata, 'new');
+
+                    const normalizedActionData: EditNoteProposedData = {
+                        ...request.action_data as EditNoteProposedData,
+                        old_string: unescapedOld,
+                        new_string: operation === 'insert_after'
+                            ? unescapedOld + unescapedNew
+                            : unescapedNew,
+                    };
+
+                    const noteTitle = item.getNoteTitle() || '(untitled)';
+                    const totalLines = simplified.split('\n').length;
+                    const preference = getEditNotePreference(library_id, zotero_key);
+
+                    return {
+                        type: 'agent_action_validate_response',
+                        request_id: request.request_id,
+                        valid: true,
+                        current_value: {
+                            note_title: noteTitle,
+                            total_lines: totalLines,
+                            match_count: unescapedCount,
+                        },
+                        normalized_action_data: normalizedActionData,
+                        preference,
+                    };
+                }
+            } catch {
+                // expansion failed — fall through
+            }
+        }
+    }
+
     // 13. Zero matches — try stripping partial simplified-element fragments.
     //     The model may include e.g. "/>" (tail of a <citation…/>) in old_string.
     //     These fragments don't expand to raw HTML, but the text portion does.
