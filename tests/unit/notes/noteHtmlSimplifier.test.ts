@@ -45,6 +45,7 @@ import {
     captureValidatedEditTargetContext,
     findTargetRawMatchPosition,
     checkDuplicateCitations,
+    enrichOldStringCitationRefs,
     isNoteInEditor,
     getLatestNoteHtml,
     findRangeByContexts,
@@ -1246,6 +1247,214 @@ describe('checkDuplicateCitations', () => {
         const result = checkDuplicateCitations(newStr, metadata);
         expect(result).toContain('already cited');
         expect(result).toContain('c_DUP_0');
+    });
+});
+
+
+// =============================================================================
+// enrichOldStringCitationRefs
+// =============================================================================
+
+describe('enrichOldStringCitationRefs', () => {
+    /** Convenience: build metadata with a single citation entry. */
+    function makeCitationMetadata(
+        entries: Array<[string, { item_id: string; page?: string; rawHtml?: string }]>,
+    ): SimplificationMetadata {
+        return {
+            elements: new Map(
+                entries.map(([ref, attrs]) => [
+                    ref,
+                    {
+                        rawHtml: attrs.rawHtml ?? '',
+                        type: 'citation' as const,
+                        originalAttrs: {
+                            item_id: attrs.item_id,
+                            ...(attrs.page ? { page: attrs.page } : {}),
+                        },
+                    },
+                ]),
+            ),
+        };
+    }
+
+    it('returns null when old_string is empty', () => {
+        const metadata = makeCitationMetadata([['c_X_0', { item_id: '1-X' }]]);
+        expect(enrichOldStringCitationRefs('', metadata)).toBeNull();
+    });
+
+    it('returns null when old_string has no citation tags', () => {
+        const metadata = makeCitationMetadata([['c_X_0', { item_id: '1-X' }]]);
+        expect(enrichOldStringCitationRefs('<p>no citations here</p>', metadata)).toBeNull();
+    });
+
+    it('returns null when every citation already has a ref', () => {
+        const metadata = makeCitationMetadata([['c_X_0', { item_id: '1-X' }]]);
+        const input = '<p>See <citation item_id="1-X" label="X" ref="c_X_0"/></p>';
+        expect(enrichOldStringCitationRefs(input, metadata)).toBeNull();
+    });
+
+    it('enriches a single no-ref citation when exactly one metadata candidate exists', () => {
+        const metadata = makeCitationMetadata([['c_HPDPU3J5_0', { item_id: '1-HPDPU3J5' }]]);
+        const input = '<p>See <citation item_id="1-HPDPU3J5"/></p>';
+        const result = enrichOldStringCitationRefs(input, metadata);
+        expect(result).toBe('<p>See <citation item_id="1-HPDPU3J5" ref="c_HPDPU3J5_0"/></p>');
+    });
+
+    it('preserves surrounding whitespace and attribute ordering', () => {
+        const metadata = makeCitationMetadata([['c_X_0', { item_id: '1-X' }]]);
+        const input = '<li>\n<strong>Parabolic pattern</strong>: <citation item_id="1-X"/>\n</li>';
+        const result = enrichOldStringCitationRefs(input, metadata);
+        expect(result).toBe(
+            '<li>\n<strong>Parabolic pattern</strong>: <citation item_id="1-X" ref="c_X_0"/>\n</li>',
+        );
+    });
+
+    it('enriches multiple no-ref citations in a single old_string', () => {
+        const metadata = makeCitationMetadata([
+            ['c_HPDPU3J5_0', { item_id: '1-HPDPU3J5' }],
+            ['c_78XAANZP_0', { item_id: '1-78XAANZP' }],
+            ['c_VIAT6WU4_0', { item_id: '1-VIAT6WU4' }],
+        ]);
+        const input =
+            '<li>first <citation item_id="1-HPDPU3J5"/></li>' +
+            '<li>second <citation item_id="1-78XAANZP"/></li>' +
+            '<li>third <citation item_id="1-VIAT6WU4"/></li>';
+        const result = enrichOldStringCitationRefs(input, metadata);
+        expect(result).toContain('<citation item_id="1-HPDPU3J5" ref="c_HPDPU3J5_0"/>');
+        expect(result).toContain('<citation item_id="1-78XAANZP" ref="c_78XAANZP_0"/>');
+        expect(result).toContain('<citation item_id="1-VIAT6WU4" ref="c_VIAT6WU4_0"/>');
+    });
+
+    it('leaves ref-ful citations untouched while enriching sibling no-ref ones', () => {
+        const metadata = makeCitationMetadata([
+            ['c_A_0', { item_id: '1-A' }],
+            ['c_B_0', { item_id: '1-B' }],
+        ]);
+        const input =
+            '<p><citation item_id="1-A" label="A" ref="c_A_0"/> and <citation item_id="1-B"/></p>';
+        const result = enrichOldStringCitationRefs(input, metadata);
+        // Ref-ful citation unchanged
+        expect(result).toContain('<citation item_id="1-A" label="A" ref="c_A_0"/>');
+        // No-ref citation enriched
+        expect(result).toContain('<citation item_id="1-B" ref="c_B_0"/>');
+    });
+
+    it('returns null when multiple metadata entries share the same item_id and page', () => {
+        // Two entries with same originalAttrs → ambiguous, leave unchanged.
+        const metadata = makeCitationMetadata([
+            ['c_X_0', { item_id: '1-X' }],
+            ['c_X_1', { item_id: '1-X' }],
+        ]);
+        const input = '<p><citation item_id="1-X"/></p>';
+        expect(enrichOldStringCitationRefs(input, metadata)).toBeNull();
+    });
+
+    it('returns null when no metadata candidate exists for the item_id', () => {
+        const metadata = makeCitationMetadata([['c_Y_0', { item_id: '1-Y' }]]);
+        const input = '<p><citation item_id="1-MISSING"/></p>';
+        expect(enrichOldStringCitationRefs(input, metadata)).toBeNull();
+    });
+
+    it('only matches when page attribute agrees (both absent)', () => {
+        const metadata = makeCitationMetadata([
+            ['c_X_paged', { item_id: '1-X', page: '5' }],
+        ]);
+        // old_string citation has no page, metadata has page=5 → no match.
+        const input = '<p><citation item_id="1-X"/></p>';
+        expect(enrichOldStringCitationRefs(input, metadata)).toBeNull();
+    });
+
+    it('only matches when page attribute agrees (both present and equal)', () => {
+        const metadata = makeCitationMetadata([
+            ['c_X_paged', { item_id: '1-X', page: '5' }],
+        ]);
+        const input = '<p><citation item_id="1-X" page="5"/></p>';
+        const result = enrichOldStringCitationRefs(input, metadata);
+        expect(result).toBe('<p><citation item_id="1-X" page="5" ref="c_X_paged"/></p>');
+    });
+
+    it('disambiguates by page when two entries share an item_id', () => {
+        const metadata = makeCitationMetadata([
+            ['c_X_0', { item_id: '1-X' }],              // no page
+            ['c_X_1', { item_id: '1-X', page: '10' }], // page=10
+        ]);
+        // Model's old_string has page=10 → matches c_X_1 uniquely.
+        const pagedInput = '<p><citation item_id="1-X" page="10"/></p>';
+        expect(enrichOldStringCitationRefs(pagedInput, metadata)).toBe(
+            '<p><citation item_id="1-X" page="10" ref="c_X_1"/></p>',
+        );
+
+        // Model's old_string has no page → matches c_X_0 uniquely.
+        const unpagedInput = '<p><citation item_id="1-X"/></p>';
+        expect(enrichOldStringCitationRefs(unpagedInput, metadata)).toBe(
+            '<p><citation item_id="1-X" ref="c_X_0"/></p>',
+        );
+    });
+
+    it('skips att_id citations (reverse lookup not supported)', () => {
+        // att_id maps to parent item_id during simplification, so enrichment
+        // cannot uniquely resolve back. We leave them alone.
+        const metadata = makeCitationMetadata([['c_X_0', { item_id: '1-X' }]]);
+        const input = '<p><citation att_id="1-ATT1"/></p>';
+        expect(enrichOldStringCitationRefs(input, metadata)).toBeNull();
+    });
+
+    it('ignores non-citation metadata entries (annotations, images)', () => {
+        const metadata: SimplificationMetadata = {
+            elements: new Map([
+                // item_id here doesn't exist on annotations, but be robust anyway.
+                ['a_A1', { rawHtml: '', type: 'annotation', originalText: 'foo' }],
+                ['c_X_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: '1-X' } }],
+            ]),
+        };
+        const input = '<p><citation item_id="1-X"/></p>';
+        const result = enrichOldStringCitationRefs(input, metadata);
+        expect(result).toBe('<p><citation item_id="1-X" ref="c_X_0"/></p>');
+    });
+
+    it('partially enriches: unique citations get refs, ambiguous ones are left alone', () => {
+        const metadata = makeCitationMetadata([
+            ['c_UNIQUE_0', { item_id: '1-UNIQUE' }],
+            ['c_DUP_0', { item_id: '1-DUP' }],
+            ['c_DUP_1', { item_id: '1-DUP' }],
+        ]);
+        const input =
+            '<p><citation item_id="1-UNIQUE"/> and <citation item_id="1-DUP"/></p>';
+        const result = enrichOldStringCitationRefs(input, metadata);
+        // Unique citation enriched
+        expect(result).toContain('<citation item_id="1-UNIQUE" ref="c_UNIQUE_0"/>');
+        // Ambiguous citation left as-is (no ref injected)
+        expect(result).toContain('<citation item_id="1-DUP"/>');
+    });
+
+    it('integration: enriched old_string roundtrips through expandToRawHtml', () => {
+        // Simulates the full flow: the model writes old_string without a ref,
+        // enrichment injects the ref, then expandToRawHtml uses the ref to
+        // look up the stored rawHtml instead of throwing.
+        const storedRaw = rawCitation('EX1', 1, '', 'Author, 2024');
+        const metadata: SimplificationMetadata = {
+            elements: new Map([
+                [
+                    'c_EX1_0',
+                    {
+                        rawHtml: storedRaw,
+                        type: 'citation',
+                        originalAttrs: { item_id: '1-EX1' },
+                    },
+                ],
+            ]),
+        };
+
+        // Without enrichment: expansion throws.
+        const bareOld = '<p>See <citation item_id="1-EX1"/></p>';
+        expect(() => expandToRawHtml(bareOld, metadata, 'old'))
+            .toThrow(/old_string/);
+
+        // With enrichment: expansion succeeds and returns the stored raw HTML.
+        const enriched = enrichOldStringCitationRefs(bareOld, metadata);
+        expect(enriched).not.toBeNull();
+        const expanded = expandToRawHtml(enriched!, metadata, 'old');
+        expect(expanded).toContain(storedRaw);
     });
 });
 

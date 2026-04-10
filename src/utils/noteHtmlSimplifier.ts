@@ -1405,6 +1405,80 @@ export function findInlineTagDriftMatch(
 }
 
 // =============================================================================
+// Old-String Citation Ref Enrichment
+// =============================================================================
+
+/**
+ * Enrich no-ref citations in `old_string` with the `ref` attribute from the
+ * metadata map.
+ *
+ * Returns the enriched `oldString`, or `null` if no citations were
+ * enriched (caller should continue with the original `old_string`).
+ */
+export function enrichOldStringCitationRefs(
+    oldString: string,
+    metadata: SimplificationMetadata,
+): string | null {
+    if (!oldString) return null;
+
+    interface Replacement { start: number; end: number; replacement: string; }
+    const replacements: Replacement[] = [];
+
+    const citationRe = /<citation\s+([^/]*?)\s*\/>/g;
+    let m: RegExpExecArray | null;
+    while ((m = citationRe.exec(oldString)) !== null) {
+        const attrStr = m[1];
+        // Skip if it already has a ref — enrichment not needed
+        if (extractAttr(attrStr, 'ref') !== undefined) continue;
+        // Only enrich item_id citations; att_id maps to parent item_id at
+        // simplification time so the reverse lookup isn't unique.
+        const itemId = extractAttr(attrStr, 'item_id');
+        if (!itemId) continue;
+        const page = extractAttr(attrStr, 'page') || undefined;
+
+        // Find metadata entries whose originalAttrs match exactly.
+        let candidateRef: string | null = null;
+        let candidateCount = 0;
+        for (const [ref, el] of metadata.elements) {
+            if (el.type !== 'citation') continue;
+            if (el.originalAttrs?.item_id !== itemId) continue;
+            const storedPage = el.originalAttrs.page || undefined;
+            if (storedPage !== page) continue;
+            candidateRef = ref;
+            candidateCount++;
+            if (candidateCount > 1) break;
+        }
+
+        // Unique candidate only — ambiguous or missing citations fall through.
+        if (candidateCount !== 1 || candidateRef === null) continue;
+
+        // Inject ` ref="..."` before the self-closing `/>`, preserving all
+        // existing attributes verbatim. extractAttr's word-boundary guard
+        // requires the attribute to be preceded by a non-word character, so
+        // we always prepend a space.
+        const trimmedAttrs = attrStr.replace(/\s+$/, '');
+        const enrichedTag = `<citation ${trimmedAttrs} ref="${candidateRef}"/>`;
+
+        replacements.push({
+            start: m.index,
+            end: m.index + m[0].length,
+            replacement: enrichedTag,
+        });
+    }
+
+    if (replacements.length === 0) return null;
+
+    // Apply replacements in reverse order so earlier indices stay valid.
+    let result = oldString;
+    for (let i = replacements.length - 1; i >= 0; i--) {
+        const r = replacements[i];
+        result = result.substring(0, r.start) + r.replacement + result.substring(r.end);
+    }
+    return result;
+}
+
+
+// =============================================================================
 // Duplicate Citation Check
 // =============================================================================
 
