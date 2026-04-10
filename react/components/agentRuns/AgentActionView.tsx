@@ -19,14 +19,6 @@ import {
     toolExpandedAtom,
     setToolExpandedAtom,
 } from '../../atoms/messageUIState';
-import { EditMetadataPreview } from './EditMetadataPreview';
-import { CreateCollectionPreview } from './CreateCollectionPreview';
-import { OrganizeItemsPreview } from './OrganizeItemsPreview';
-import { CreateItemsPreview } from './CreateItemsPreview';
-import { ConfirmExtractionPreview } from './ConfirmExtractionPreview';
-import { ConfirmExternalSearchPreview } from './ConfirmExternalSearchPreview';
-import { EditNotePreview } from './EditNotePreview';
-import { CreateNotePreview } from './CreateNotePreview';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
@@ -36,13 +28,10 @@ import { executeCreateNoteAction, undoCreateNoteAction } from '../../utils/creat
 import type { CreateItemProposedData } from '../../types/agentActions/items';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
-import type { OrganizeItemsResultData } from '../../types/agentActions/base';
 import {
     TickIcon,
     CancelIcon,
-    CheckmarkCircleIcon,
     ChevronIcon,
-    CancelCircleIcon,
     AlertIcon,
     ClockIcon,
     Spinner,
@@ -71,41 +60,29 @@ import DeferredToolPreferenceButton from '../ui/buttons/DeferredToolPreferenceBu
 import ExtractionApprovalButton from '../ui/buttons/ExtractionApprovalButton';
 import ExternalSearchApprovalButton from '../ui/buttons/ExternalSearchApprovalButton';
 import SplitApplyButton from '../ui/buttons/SplitApplyButton';
-import { truncateText } from '../../utils/stringUtils';
 import { store } from '../../store';
 import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
 import {
     addAutoApproveNoteKeyAtom,
     makeNoteKey,
 } from '../../atoms/editNoteAutoApprove';
+import {
+    ActionStatus,
+    STATUS_CONFIGS,
+    NEVER_AUTO_COLLAPSE_TOOLS,
+    confirmOverwriteManualChanges,
+    getOverallStatus,
+    getActionLabel,
+    getActionTitle,
+    buildPreviewData,
+    PreviewData,
+} from './AgentActionView.helpers';
+import { ActionPreview } from './ActionPreview';
 
-export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
-
-/**
- * Prompt user to confirm overwriting manually modified fields during undo.
- * Returns true if user confirms, false otherwise.
- */
-function confirmOverwriteManualChanges(modifiedFields: string[]): boolean {
-    const fieldList = modifiedFields.join(', ');
-    const title = 'Overwrite manual changes?';
-    const message = modifiedFields.length === 1
-        ? `The field "${fieldList}" has been manually modified since the edit was applied. Do you want to overwrite your changes and revert to the original value?`
-        : `The following fields have been manually modified since the edit was applied: ${fieldList}. Do you want to overwrite your changes and revert to the original values?`;
-
-    const buttonIndex = Zotero.Prompt.confirm({
-        window: Zotero.getMainWindow(),
-        title,
-        text: message,
-        button0: Zotero.Prompt.BUTTON_TITLE_YES,
-        button1: Zotero.Prompt.BUTTON_TITLE_NO,
-        defaultButton: 1,
-    });
-
-    return buttonIndex === 0;
-}
-
-/** Tools that should remain expanded after approval resolves (never auto-collapse) */
-const NEVER_AUTO_COLLAPSE_TOOLS = new Set(['create_note']);
+// Re-export helpers so external consumers (e.g. EditNoteGroupView) keep
+// importing from './AgentActionView' as before.
+export { STATUS_CONFIGS, getOverallStatus } from './AgentActionView.helpers';
+export type { ActionStatus } from './AgentActionView.helpers';
 
 interface AgentActionViewProps {
     toolcallId: string;
@@ -162,100 +139,6 @@ interface AgentActionViewProps {
      * `executeEditNoteAction` against the same action.
      */
     disabled?: boolean;
-}
-
-interface StatusConfig {
-    icon: React.FC<React.SVGProps<SVGSVGElement>> | null;
-    label: string;
-    iconClassName?: string;
-    showApply: boolean;
-    showReject: boolean;
-    showUndo: boolean;
-    showRetry: boolean;
-}
-
-export const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
-    awaiting: {
-        icon: Spinner,
-        label: 'Awaiting approval',
-        showApply: true,
-        showReject: true,
-        showUndo: false,
-        showRetry: false,
-    },
-    pending: {
-        icon: null,
-        label: 'Pending',
-        iconClassName: 'font-color-secondary',
-        showApply: true,
-        showReject: true,
-        showUndo: false,
-        showRetry: false,
-    },
-    applied: {
-        icon: CheckmarkCircleIcon,
-        label: 'Applied',
-        iconClassName: 'font-color-green scale-11',
-        showApply: false,
-        showReject: false,
-        showUndo: true,
-        showRetry: false,
-    },
-    rejected: {
-        icon: CancelCircleIcon,
-        label: 'Rejected',
-        iconClassName: 'font-color-red scale-11',
-        showApply: true,
-        showReject: false,
-        showUndo: false,
-        showRetry: false,
-    },
-    undone: {
-        icon: CancelCircleIcon,
-        label: 'Undone',
-        iconClassName: 'font-color-red scale-11',
-        showApply: true,
-        showReject: false,
-        showUndo: false,
-        showRetry: false,
-    },
-    error: {
-        icon: AlertIcon,
-        label: 'Failed',
-        iconClassName: 'color-error',
-        showApply: false,
-        showReject: false,
-        showUndo: false,
-        showRetry: true,
-    },
-};
-
-/**
- * Compute the overall status for a group of actions.
- * Used for batch operations where we need a single status to display.
- * Priority: pending > applied (even partial) > error (only if none applied) > rejected/undone
- * 
- * Note: We prioritize 'applied' over 'error' when there are mixed results,
- * so users can still undo successfully applied items even if some failed.
- */
-export function getOverallStatus(actions: AgentAction[]): ActionStatus {
-    if (actions.length === 0) return 'pending';
-    
-    const statuses = actions.map(a => a.status);
-    const hasApplied = statuses.some(s => s === 'applied');
-    const hasPending = statuses.some(s => s === 'pending');
-    const hasError = statuses.some(s => s === 'error');
-    
-    // If any is pending, show pending (still waiting)
-    if (hasPending) return 'pending';
-    // If any are applied, show applied (enables Undo for partial success)
-    if (hasApplied) return 'applied';
-    // If all have errors (none applied), show error
-    if (hasError) return 'error';
-    // If all are rejected or undone
-    if (statuses.every(s => s === 'rejected' || s === 'undone')) return 'rejected';
-    
-    return 'pending';
 }
 
 /**
@@ -1376,300 +1259,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     </div>
                 </div>
             )}
-        </div>
-    );
-};
-
-/**
- * Get human-readable label for the action
- */
-export function getActionLabel(toolName: string): string {
-    switch (toolName) {
-        case 'edit_metadata':
-        case 'edit_item':
-            return 'Edit';
-        case 'edit_note':
-            return 'Note Edit';
-        case 'create_note':
-            return 'Create Note';
-        case 'create_item':
-        case 'create_items':
-            return 'Import';
-        case 'create_collection':
-            return 'Create';
-        case 'organize_items':
-            return 'Organize';
-        case 'confirm_extraction':
-            return 'Extract';
-        case 'confirm_external_search':
-            return 'Search';
-        default:
-            return toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    }
-}
-
-function getActionTitle(
-    toolName: string,
-    actionData: Record<string, any> | undefined,
-    itemTitle: string | null,
-    actions: AgentAction[] | undefined
-): string | null {
-    switch (toolName) {
-        case 'edit_metadata':
-        case 'edit_item':
-        case 'edit_note':
-            return itemTitle ? itemTitle : null;
-        case 'create_note':
-            return actionData?.title ?? null;
-        case 'create_collection':
-            return actionData?.name ?? actionData?.proposed_data?.name ?? null;
-        case 'organize_items': {
-            const itemCount = actionData?.item_ids?.length ?? 0;
-            if (itemCount === 0) return null;
-            return itemCount === 1 && itemTitle
-                ? itemTitle
-                : `${itemCount} item${itemCount !== 1 ? 's' : ''}`;
-        }
-        case 'confirm_extraction': {
-            const count = actionData?.attachment_count ?? 0;
-            return `Confirm ${count} Item Batch Processing`;
-        }
-        case 'confirm_external_search': {
-            return 'Confirm External Search';
-        }
-        case 'create_item':
-        case 'create_items': {
-            // For create_item, get title from the item data
-            // Check actions first, then fall back to actionData (for pending approvals where actions may be empty)
-            if (actions && actions.length === 1) {
-                const item = actions[0].proposed_data?.item ?? actionData?.item;
-                if (item?.title) {
-                    return truncateText(item.title, 70);
-                }
-            } else if ((!actions || actions.length === 0) && actionData?.item?.title) {
-                // Pending approval case: actions not yet stored, but we have item data
-                return truncateText(actionData.item.title, 60);
-            }
-            return `${actions && actions.length > 1 ? `${actions.length} ` : ''}Item${actions && actions.length > 1 ? 's' : ''}`;
-        }
-        default:
-            return null;
-    }
-}
-
-/**
- * Build preview data from either pending approval or agent action
- */
-interface PreviewData {
-    actionType: string;
-    actionData: Record<string, any>;
-    currentValue?: any;
-    resultData?: Record<string, any>;
-}
-
-function buildPreviewData(
-    toolName: string,
-    pendingApproval: PendingApproval | null,
-    action: AgentAction | null
-): PreviewData | null {
-    if (pendingApproval) {
-        return {
-            actionType: pendingApproval.actionType,
-            actionData: pendingApproval.actionData,
-            currentValue: pendingApproval.currentValue,
-        };
-    }
-    
-    if (action) {
-        return {
-            actionType: action.action_type,
-            actionData: action.proposed_data,
-            currentValue: undefined, // We don't have this for stored actions
-            resultData: action.result_data,
-        };
-    }
-    
-    return null;
-}
-
-/**
- * Dispatches to action-specific preview components
- */
-const ActionPreview: React.FC<{
-    toolName: string;
-    previewData: PreviewData;
-    status: ActionStatus | 'awaiting';
-    /** All actions for the tool call (for multi-item create_items) */
-    actions?: AgentAction[];
-    /** Whether tool call arguments are actively streaming */
-    isStreaming?: boolean;
-}> = ({ toolName, previewData, status, actions, isStreaming }) => {
-    if (toolName === 'edit_metadata' || previewData.actionType === 'edit_metadata') {
-        const edits = previewData.actionData.edits || [];
-        
-        // Get current values from previewData.currentValue (pending approval)
-        // or extract from edits[].old_value (stored actions)
-        let currentValues = previewData.currentValue || {};
-        if (Object.keys(currentValues).length === 0 && edits.length > 0) {
-            currentValues = {};
-            for (const edit of edits) {
-                if (edit.old_value !== undefined) {
-                    currentValues[edit.field] = edit.old_value;
-                }
-            }
-        }
-        
-        // For applied actions, show the applied values if available
-        const appliedEdits = previewData.resultData?.applied_edits;
-
-        // Creator data: old from resultData, proposed_data, or currentValue
-        const oldCreators = previewData.resultData?.old_creators
-            ?? previewData.actionData.old_creators
-            ?? previewData.currentValue?.current_creators
-            ?? null;
-        const newCreators = previewData.resultData?.new_creators
-            ?? previewData.actionData.creators
-            ?? null;
-
-        return (
-            <EditMetadataPreview
-                edits={edits}
-                currentValues={currentValues}
-                appliedEdits={appliedEdits}
-                status={status}
-                oldCreators={oldCreators}
-                newCreators={newCreators}
-            />
-        );
-    }
-
-    if (toolName === 'create_collection' || previewData.actionType === 'create_collection') {
-        const name = previewData.actionData.name || '';
-        const parentKey = previewData.actionData.parent_key;
-        const itemIds = previewData.actionData.item_ids || [];
-        
-        // Get library name and item count from current_value
-        const libraryName = previewData.currentValue?.library_name;
-        const itemCount = previewData.currentValue?.item_count ?? itemIds.length;
-        
-        return (
-            <CreateCollectionPreview
-                name={name}
-                libraryName={libraryName}
-                parentKey={parentKey}
-                itemCount={itemCount}
-                status={status}
-                resultData={previewData.resultData}
-            />
-        );
-    }
-
-    if (toolName === 'organize_items' || previewData.actionType === 'organize_items') {
-        const itemIds = previewData.actionData.item_ids || [];
-        const tags = previewData.actionData.tags;
-        const collections = previewData.actionData.collections;
-        
-        return (
-            <OrganizeItemsPreview
-                itemIds={itemIds}
-                tags={tags}
-                collections={collections}
-                status={status}
-                resultData={previewData.resultData as OrganizeItemsResultData | undefined}
-            />
-        );
-    }
-
-    if (toolName === 'confirm_extraction' || previewData.actionType === 'confirm_extraction') {
-        return (
-            <ConfirmExtractionPreview
-                attachmentCount={previewData.actionData.attachment_count ?? 0}
-                extraCredits={previewData.actionData.extra_credits ?? 0}
-                totalCredits={previewData.actionData.total_credits ?? 0}
-                includedFree={previewData.actionData.included_free ?? 0}
-                label={previewData.actionData.label}
-                status={status}
-            />
-        );
-    }
-
-    if (toolName === 'confirm_external_search' || previewData.actionType === 'confirm_external_search') {
-        return (
-            <ConfirmExternalSearchPreview
-                extraCredits={previewData.actionData.extra_credits ?? 0}
-                totalCredits={previewData.actionData.total_credits ?? 0}
-                label={previewData.actionData.label}
-                status={status}
-            />
-        );
-    }
-
-    if (toolName === 'create_items' || toolName === 'create_item' || previewData.actionType === 'create_item') {
-        // If no actions array provided, return fallback
-        if (!actions || actions.length === 0) {
-            return (
-                <div className="text-sm font-color-secondary px-3 py-2">
-                    No item data available
-                </div>
-            );
-        }
-
-        return (
-            <CreateItemsPreview
-                actions={actions}
-                status={status}
-            />
-        );
-    }
-
-    if (toolName === 'edit_note' || previewData.actionType === 'edit_note') {
-        const op = (previewData.actionData.operation ?? 'str_replace') as import('../../types/agentActions/editNote').EditNoteOperation;
-        const isRewrite = op === 'rewrite';
-        const oldString = isRewrite ? '' : (previewData.actionData.old_string || '');
-        const newString = previewData.actionData.new_string || '';
-        const occurrencesReplaced = previewData.resultData?.occurrences_replaced;
-        const warnings = previewData.resultData?.warnings;
-        // For rewrite, get old content from validation's current_value
-        // or from undo_full_html in result_data (post-apply)
-        const oldContent = isRewrite
-            ? (previewData.currentValue?.old_content || previewData.resultData?.undo_full_html)
-            : undefined;
-
-        return (
-            <EditNotePreview
-                oldString={oldString}
-                newString={newString}
-                operation={op}
-                oldContent={oldContent}
-                occurrencesReplaced={occurrencesReplaced}
-                warnings={warnings}
-                status={status}
-                libraryId={previewData.actionData.library_id}
-                zoteroKey={previewData.actionData.zotero_key}
-            />
-        );
-    }
-
-    if (toolName === 'create_note' || previewData.actionType === 'create_note') {
-        const noteContent = previewData.actionData.content || '';
-
-        return (
-            <CreateNotePreview
-                content={noteContent}
-                resultData={previewData.resultData}
-                status={status}
-                isStreaming={isStreaming}
-            />
-        );
-    }
-
-    // Fallback for unsupported action types
-    return (
-        <div className="text-sm font-color-secondary">
-            <div className="font-medium mb-1">Action: {previewData.actionType}</div>
-            <pre className="text-xs overflow-auto max-h-32 p-2 rounded">
-                {JSON.stringify(previewData.actionData, null, 2)}
-            </pre>
         </div>
     );
 };
