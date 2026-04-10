@@ -5,7 +5,6 @@ import {
     AgentAction,
     PendingApproval,
     getAgentActionsByToolcallAtom,
-    pendingApprovalsAtom,
     removePendingApprovalAtom,
     undoAgentActionAtom,
     ackAgentActionsAtom,
@@ -23,7 +22,6 @@ import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '.
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
 import { executeCreateItemActions, undoCreateItemActions } from '../../utils/createItemActions';
-import { executeEditNoteAction, undoEditNoteAction } from '../../utils/editNoteActions';
 import { executeCreateNoteAction, undoCreateNoteAction } from '../../utils/createNoteActions';
 import type { CreateItemProposedData } from '../../types/agentActions/items';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
@@ -32,7 +30,6 @@ import {
     TickIcon,
     CancelIcon,
     ChevronIcon,
-    AlertIcon,
     ClockIcon,
     Spinner,
     Icon,
@@ -43,29 +40,19 @@ import {
     ArrowUpRightIcon,
     FolderAddIcon,
     TaskDoneIcon,
-    EditIcon,
     DocumentValidationIcon,
     DollarCircleIcon,
     GlobalSearchIcon,
     FileDiffIcon,
-    UndoIcon,
 } from '../icons/icons';
-import { revealSource, openNoteAndSearchEdit, openNoteByKey } from '../../utils/sourceUtils';
-import { isNoteOpenInEditor, showDiffPreview, dismissDiffPreview, isDiffPreviewActive } from '../../utils/noteEditorDiffPreview';
-import { updateDiffPreviewForNote, DIFF_PREVIEW_ENABLED, diffPreviewNoteKeyAtom } from '../../utils/diffPreviewCoordinator';
+import { revealSource, openNoteByKey } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import DeferredToolPreferenceButton from '../ui/buttons/DeferredToolPreferenceButton';
 import ExtractionApprovalButton from '../ui/buttons/ExtractionApprovalButton';
 import ExternalSearchApprovalButton from '../ui/buttons/ExternalSearchApprovalButton';
-import SplitApplyButton from '../ui/buttons/SplitApplyButton';
-import { store } from '../../store';
 import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
-import {
-    addAutoApproveNoteKeyAtom,
-    makeNoteKey,
-} from '../../atoms/editNoteAutoApprove';
 import {
     ActionStatus,
     STATUS_CONFIGS,
@@ -79,72 +66,20 @@ import {
 } from './AgentActionView.helpers';
 import { ActionPreview } from './ActionPreview';
 
-// Re-export helpers so external consumers (e.g. EditNoteGroupView) keep
-// importing from './AgentActionView' as before.
 export { STATUS_CONFIGS, getOverallStatus } from './AgentActionView.helpers';
 export type { ActionStatus } from './AgentActionView.helpers';
 
 interface AgentActionViewProps {
     toolcallId: string;
     toolName: string;
-    /** Run ID for persisting action state to backend */
     runId: string;
-    /** Index of the parent response message within the run (disambiguates duplicate tool_call_ids) */
     responseIndex: number;
-    /** Pending approval request if awaiting user decision */
     pendingApproval: PendingApproval | null;
-    /** Whether a tool-return has been received for this tool call (backend completed processing) */
     hasToolReturn?: boolean;
-    /** Pre-parsed partial tool call arguments for streaming preview */
     streamingArgs?: Record<string, any> | null;
-    /**
-     * Status of the run this action belongs to. Used to gate streaming-state
-     * rendering: an edit_note row should only show the "still arriving"
-     * spinner placeholder while the run is actively in progress. After the
-     * run is canceled / completed / errored, orphan tool-call parts (ones
-     * that never produced an action or pending approval) should render as
-     * a terminal error instead of a permanent spinner.
-     */
     runStatus?: AgentRunStatus;
-    /**
-     * When true, render in compact in-group mode: skip the tool/title header
-     * (it lives on the parent group), always show the preview, drop the outer
-     * card border, and show a small status icon in the footer instead of the
-     * deferred-tool-preference button. Used by EditNoteGroupView.
-     */
-    isInGroup?: boolean;
-    /**
-     * In-group only: an undo error message provided by the parent group view.
-     * When set (and `isInGroup`), the inline "Could not undo automatically..."
-     * banner is rendered using this value instead of the local `undoError`
-     * state. Lets the parent's "Undo All" surface failures inside the exact
-     * child row that failed.
-     */
-    externalUndoError?: string | null;
-    /**
-     * In-group only: callback fired when the child's per-action undo handler
-     * starts (with `null` to clear) or fails (with the error message). The
-     * parent group view uses this to keep its per-action error map in sync
-     * with errors produced by the child's own Undo button — so the per-edit
-     * banner is the single source of truth no matter which entry point
-     * triggered the undo.
-     */
-    onUndoErrorChange?: (toolcallId: string, error: string | null) => void;
-    /**
-     * In-group only: when true, disable all per-edit action buttons. Used by
-     * `EditNoteGroupView` to prevent the user from triggering a per-child
-     * apply/undo while the parent's group-level handler is mid-loop — the
-     * parent's `isProcessing` doesn't propagate via the atom layer, so
-     * children would otherwise happily fire a parallel
-     * `executeEditNoteAction` against the same action.
-     */
-    disabled?: boolean;
 }
 
-/**
- * Unified component for displaying agent action states.
- * Handles all states: awaiting approval, applied, rejected, undone, error, and pending.
- */
 export const AgentActionView: React.FC<AgentActionViewProps> = ({
     toolcallId,
     toolName,
@@ -154,103 +89,61 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     hasToolReturn = false,
     streamingArgs,
     runStatus,
-    isInGroup = false,
-    externalUndoError = null,
-    onUndoErrorChange,
-    disabled = false,
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
-    // Get agent actions for this tool call, scoped to this run
-    // (tool_call_ids can collide across runs, so we filter by run_id)
     const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
-    const actions = getAgentActionsByToolcall(toolcallId, a => a.run_id === runId);
-
-    // Primary action for backward compatibility (used for single-action tools)
+    const actions = getAgentActionsByToolcall(toolcallId, (a) => a.run_id === runId);
     const action = actions.length > 0 ? actions[0] : null;
 
-    // Guard against cross-run tool_call_id collision:
-    // If this run already has an action in a final state (applied/rejected/undone/error),
-    // ignore any pending approval (it belongs to a different run with the same tool_call_id)
     const actionInFinalState = action && action.status !== 'pending';
     const pendingApproval = actionInFinalState ? null : pendingApprovalProp;
     const isAwaitingApproval = pendingApproval !== null;
 
-    // Streaming mode: show live preview without action buttons
     const runIsStreamable = runStatus === undefined || runStatus === 'in_progress';
-    const isStreamingEditNotePlaceholder =
-        toolName === 'edit_note' && !action && !pendingApproval && !hasToolReturn && runIsStreamable;
-    const isStreaming = (!action && !pendingApproval && !!streamingArgs
-        && Object.keys(streamingArgs).length > 0 && runIsStreamable)
-        || isStreamingEditNotePlaceholder;
-    const isOrphanedEditNote =
-        toolName === 'edit_note'
-        && !action
+    const isStreaming = !action
         && !pendingApproval
-        && !hasToolReturn
-        && !runIsStreamable;
+        && !!streamingArgs
+        && Object.keys(streamingArgs).length > 0
+        && runIsStreamable;
 
-    // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
-    // Include responseIndex to disambiguate duplicate tool_call_ids within the same run
-    // (some providers reuse tool_call_ids across responses, e.g., when retrying failed calls)
     const expansionKey = `${runId}:${responseIndex}:${toolcallId}`;
     const expansionState = useAtomValue(toolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
-
-    // Check if state exists at render time (not in effect) to avoid dependency on entire expansionState
     const hasExistingState = expansionState[expansionKey] !== undefined;
     const neverAutoCollapse = NEVER_AUTO_COLLAPSE_TOOLS.has(toolName);
     const isExpanded = expansionState[expansionKey] ?? (isAwaitingApproval || neverAutoCollapse);
 
-    // Track previous values to detect actual changes vs re-mounts
     const prevAwaitingRef = useRef(isAwaitingApproval);
     const hasInitializedRef = useRef(false);
-
-    // Sync isExpanded with isAwaitingApproval, but avoid resetting on re-mount.
-    // Tools in NEVER_AUTO_COLLAPSE_TOOLS stay expanded when approval resolves.
     useEffect(() => {
         if (!hasInitializedRef.current) {
             hasInitializedRef.current = true;
-            // On first mount, only set if there's no existing state (preserves state from other pane)
             if (!hasExistingState) {
                 setExpanded({ key: expansionKey, expanded: isAwaitingApproval || neverAutoCollapse });
             }
             return;
         }
 
-        // After first mount, sync when isAwaitingApproval actually changes
         if (prevAwaitingRef.current !== isAwaitingApproval) {
-            // For never-auto-collapse tools, only expand (never collapse automatically)
-            const shouldExpand = neverAutoCollapse ? true : isAwaitingApproval;
-            setExpanded({ key: expansionKey, expanded: shouldExpand });
+            setExpanded({
+                key: expansionKey,
+                expanded: neverAutoCollapse ? true : isAwaitingApproval,
+            });
         }
         prevAwaitingRef.current = isAwaitingApproval;
     }, [isAwaitingApproval, expansionKey, hasExistingState, neverAutoCollapse, setExpanded]);
 
-    // Track when we're waiting for approval response from backend
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
-    // Track when we're processing a post-run action (apply/undo/retry)
     const [isProcessingAction, setIsProcessingAction] = useState(false);
-    // Track whether the last error came from an undo attempt (so retry calls undo, not apply)
     const [isUndoError, setIsUndoError] = useState(false);
-    // Inline undo error for edit_note: keeps action in 'applied' state with a warning banner
-    const [undoError, setUndoError] = useState<string | null>(null);
-    // Track when approval was removed externally (e.g., via PendingActionsBar "Apply All")
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
-    // Track which specific button was clicked ('approve' | 'reject' | null)
     const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
-    // Track the action ID we're processing to detect status changes
-    const processingActionIdRef = useRef<string | null>(null);
-    // Track previous pending approval to detect external removals
     const prevPendingApprovalRef = useRef<PendingApproval | null>(pendingApproval);
 
-    // Track if the run is still pending (needed to detect cancel vs external approval)
     const isRunPending = useAtomValue(isWSChatPendingAtom);
-
-    // Determine if this is a multi-action tool call (create_items with multiple items)
     const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
 
-    // Atoms for state management
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
@@ -259,180 +152,92 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
     const markExternalReferenceDeleted = useSetAtom(markExternalReferenceDeletedAtom);
-    const addAutoApproveNoteKey = useSetAtom(addAutoApproveNoteKeyAtom);
-    const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
 
-    // Item title state (shared across panes) - only for actions that have specific items
-    // Use composite key with responseIndex to disambiguate duplicate tool_call_ids
     const itemTitleKey = `${responseIndex}:${toolcallId}`;
     const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
     const itemTitle = itemTitleMap[itemTitleKey] ?? null;
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
 
-    // Determine if this action type has an associated item
     const hasAssociatedItem =
         toolName === 'edit_metadata' ||
-        toolName === 'edit_item' ||
-        toolName === 'edit_note';
+        toolName === 'edit_item';
 
-    // Fetch item title for actions that have specific items
     useEffect(() => {
         if (!hasAssociatedItem || itemTitle) return;
 
         const fetchTitle = async () => {
-            // Get item info from action, pending approval, or — for an
-            // edit_note placeholder rendered while the part is still
-            // streaming — partial streamingArgs (which may contain
-            // `note_id` or `library_id`/`zotero_key` once enough JSON
-            // has arrived).
-            let libraryId: number | undefined =
+            const libraryId: number | undefined =
                 action?.proposed_data?.library_id ?? pendingApproval?.actionData?.library_id;
-            let zoteroKey: string | undefined =
+            const zoteroKey: string | undefined =
                 action?.proposed_data?.zotero_key ?? pendingApproval?.actionData?.zotero_key;
-
-            if ((libraryId == null || !zoteroKey) && toolName === 'edit_note' && streamingArgs) {
-                const noteId = streamingArgs.note_id;
-                if (typeof noteId === 'string' && noteId) {
-                    const dashIdx = noteId.indexOf('-');
-                    if (dashIdx > 0 && dashIdx < noteId.length - 1) {
-                        const lib = parseInt(noteId.substring(0, dashIdx), 10);
-                        if (Number.isFinite(lib)) {
-                            libraryId = lib;
-                            zoteroKey = noteId.substring(dashIdx + 1);
-                        }
-                    }
-                }
-                if (libraryId == null && typeof streamingArgs.library_id === 'number') {
-                    libraryId = streamingArgs.library_id;
-                }
-                if (!zoteroKey && typeof streamingArgs.zotero_key === 'string') {
-                    zoteroKey = streamingArgs.zotero_key;
-                }
-            }
 
             if (!libraryId || !zoteroKey) return;
 
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
             if (item) {
-                let title: string;
-                if (toolName === 'edit_note' && item.isNote?.()) {
-                    title = item.getNoteTitle?.() || '(untitled)';
-                } else {
-                    title = await shortItemTitle(item);
-                }
+                const title = await shortItemTitle(item);
                 setItemTitle({ key: itemTitleKey, title });
             }
         };
 
         fetchTitle();
-    }, [action, pendingApproval, streamingArgs, itemTitle, itemTitleKey, hasAssociatedItem, toolName, setItemTitle]);
+    }, [action, pendingApproval, itemTitle, itemTitleKey, hasAssociatedItem, setItemTitle]);
 
-    // Detect when pending approval is removed externally (e.g., via PendingActionsBar "Apply All")
     useEffect(() => {
         const wasAwaiting = prevPendingApprovalRef.current !== null;
         const isNoLongerAwaiting = pendingApproval === null;
 
-        // If approval was just removed externally (not by our local handleApprove/handleReject)
-        // AND the run is still pending (not canceled via Stop button)
-        // AND no tool-return has arrived yet (if it has, the backend already completed this tool
-        // call — e.g., approval timeout — so no spinner is needed)
         if (wasAwaiting && isNoLongerAwaiting && !isProcessingApproval && isRunPending && !hasToolReturn) {
             setIsExternallyProcessing(true);
-            // Set clickedButton to 'approve' to show the loading state on the right button
-            // We assume external removal is approval (reject would also work but approve is more common)
             setClickedButton('approve');
         }
 
         prevPendingApprovalRef.current = pendingApproval;
     }, [pendingApproval, isProcessingApproval, isRunPending, hasToolReturn]);
 
-    // Clear processing state when:
-    // 1. Action status changes from 'pending' to a final state (normal approval flow)
-    // 2. Tool-return arrives while externally processing (backend completed — e.g., timeout)
-    // 3. Run is no longer pending (canceled/completed/errored — same pattern as
-    //    ToolCallPartView's isInProgress + runStatus guard)
     useEffect(() => {
-        if ((isProcessingApproval || isExternallyProcessing) && action) {
-            if (action.status !== 'pending') {
-                setIsProcessingApproval(false);
-                setIsExternallyProcessing(false);
-                setClickedButton(null);
-                processingActionIdRef.current = null;
-            }
+        if ((isProcessingApproval || isExternallyProcessing) && action && action.status !== 'pending') {
+            setIsProcessingApproval(false);
+            setIsExternallyProcessing(false);
+            setClickedButton(null);
         }
         if (isExternallyProcessing && (hasToolReturn || !isRunPending)) {
             setIsExternallyProcessing(false);
             setClickedButton(null);
         }
-    }, [isProcessingApproval, isExternallyProcessing, action?.status, action?.id, hasToolReturn, isRunPending]);
+    }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action]);
 
     const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing;
-    // Show 'awaiting' if we have a pending approval OR if we're processing
-    // For multi-action, compute overall status from all actions
     const status: ActionStatus | 'awaiting' = (isAwaitingApproval || isProcessing)
-        ? 'awaiting' 
-        : isMultiAction 
+        ? 'awaiting'
+        : isMultiAction
             ? getOverallStatus(actions)
             : (action?.status ?? 'pending');
-    // For confirmation actions, hide post-run Apply/Undo/Reject/Retry — only approval during awaiting is meaningful
     const isConfirmExtraction = toolName === 'confirm_extraction';
     const isConfirmExternalSearch = toolName === 'confirm_external_search';
     const isConfirmAction = isConfirmExtraction || isConfirmExternalSearch;
-    // No action data yet and not awaiting approval — buttons would be no-ops, so hide them
     const hasNoActionData = !action && !pendingApproval && !isStreaming;
     const baseConfig = STATUS_CONFIGS[status];
     const config = (isConfirmAction && status !== 'awaiting')
         ? { ...baseConfig, showApply: false, showReject: false, showUndo: false, showRetry: false }
         : baseConfig;
 
-    // Handlers for awaiting approval (during agent run)
     const handleApprove = useCallback(() => {
-        if (pendingApproval) {
-            // Start processing state before sending response
-            setIsProcessingApproval(true);
-            setClickedButton('approve');
-            processingActionIdRef.current = pendingApproval.actionId;
-            sendApprovalResponse({ actionId: pendingApproval.actionId, approved: true });
-            removePendingApproval(pendingApproval.actionId);
-        }
+        if (!pendingApproval) return;
+        setIsProcessingApproval(true);
+        setClickedButton('approve');
+        sendApprovalResponse({ actionId: pendingApproval.actionId, approved: true });
+        removePendingApproval(pendingApproval.actionId);
     }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
 
     const handleReject = useCallback(() => {
-        if (pendingApproval) {
-            // Start processing state before sending response
-            setIsProcessingApproval(true);
-            setClickedButton('reject');
-            processingActionIdRef.current = pendingApproval.actionId;
-            sendApprovalResponse({ actionId: pendingApproval.actionId, approved: false });
-            removePendingApproval(pendingApproval.actionId);
-        }
+        if (!pendingApproval) return;
+        setIsProcessingApproval(true);
+        setClickedButton('reject');
+        sendApprovalResponse({ actionId: pendingApproval.actionId, approved: false });
+        removePendingApproval(pendingApproval.actionId);
     }, [pendingApproval, sendApprovalResponse, removePendingApproval]);
 
-    // Handler: opt-in to auto-approve all edit_note calls for this note in this run
-    const handleApproveAllForNote = useCallback(() => {
-        if (!pendingApproval) return;
-        const { library_id, zotero_key } = pendingApproval.actionData || {};
-        if (library_id != null && zotero_key) {
-            const noteKey = makeNoteKey(library_id, zotero_key);
-            addAutoApproveNoteKey(noteKey);
-
-            // Auto-approve any other already-pending approvals for the same note
-            for (const [, pa] of allPendingApprovals) {
-                if (pa.actionId === pendingApproval.actionId) continue;
-                if (pa.actionType !== 'edit_note') continue;
-                const paLib = pa.actionData?.library_id;
-                const paKey = pa.actionData?.zotero_key;
-                if (paLib != null && paKey && makeNoteKey(paLib, paKey) === noteKey) {
-                    sendApprovalResponse({ actionId: pa.actionId, approved: true });
-                    removePendingApproval(pa.actionId);
-                }
-            }
-        }
-        // Approve the current action via the normal path
-        handleApprove();
-    }, [pendingApproval, allPendingApprovals, addAutoApproveNoteKey, sendApprovalResponse, removePendingApproval, handleApprove]);
-
-    // Handlers for post-run actions (after agent run is complete)
     const handleApplyPending = useCallback(async () => {
         if (actions.length === 0 || isProcessing) return;
 
@@ -442,7 +247,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         try {
             if (toolName === 'edit_metadata') {
                 const result = await executeEditMetadataAction(action!);
-                // Acknowledge the action as applied with result data
                 await ackAgentActions(runId, [{
                     action_id: action!.id,
                     result_data: result,
@@ -450,7 +254,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 logger(`AgentActionView: Applied edit_metadata action ${action!.id}`, 1);
             } else if (toolName === 'create_collection') {
                 const result = await executeCreateCollectionAction(action!);
-                // Acknowledge the action as applied with result data
                 await ackAgentActions(runId, [{
                     action_id: action!.id,
                     result_data: result,
@@ -458,27 +261,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 logger(`AgentActionView: Applied create_collection action ${action!.id}`, 1);
             } else if (toolName === 'organize_items') {
                 const result = await executeOrganizeItemsAction(action!);
-                // Acknowledge the action as applied with result data
                 await ackAgentActions(runId, [{
                     action_id: action!.id,
                     result_data: result,
                 }]);
                 logger(`AgentActionView: Applied organize_items action ${action!.id}`, 1);
-            } else if (toolName === 'edit_note') {
-                // Dismiss any active diff preview before applying — the preview
-                // freezes the editor (_disableSaving + contentEditable=false), so
-                // it must be torn down for the edit to save and PM to normalize.
-                // Await so _disableSaving is fully restored before we proceed.
-                if (isDiffPreviewActive()) {
-                    await dismissDiffPreview();
-                    store.set(diffPreviewNoteKeyAtom, null);
-                }
-                const result = await executeEditNoteAction(action!);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied edit_note action ${action!.id}`, 1);
             } else if (toolName === 'create_note') {
                 const result = await executeCreateNoteAction(action!, runId);
                 await ackAgentActions(runId, [{
@@ -487,33 +274,28 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 }]);
                 logger(`AgentActionView: Applied create_note action ${action!.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
-                // Handle batch operations for multiple items
-                const actionsToApply = actions.filter(a => a.status !== 'applied');
+                const actionsToApply = actions.filter((candidate) => candidate.status !== 'applied');
                 if (actionsToApply.length === 0) return;
-                
+
                 const batchResult = await executeCreateItemActions(actionsToApply);
-                
-                // Acknowledge successful actions
                 if (batchResult.successes.length > 0) {
-                    await ackAgentActions(runId, batchResult.successes.map(s => ({
-                        action_id: s.action.id,
-                        result_data: s.result,
+                    await ackAgentActions(runId, batchResult.successes.map((success) => ({
+                        action_id: success.action.id,
+                        result_data: success.result,
                     })));
                     logger(`AgentActionView: Applied ${batchResult.successes.length} create_item actions`, 1);
-                    
-                    // Update external reference mapping for imported items
+
                     for (const success of batchResult.successes) {
                         const proposedData = success.action.proposed_data as CreateItemProposedData;
                         if (proposedData?.item?.source_id) {
                             markExternalReferenceImported(proposedData.item.source_id, {
                                 library_id: success.result.library_id,
-                                zotero_key: success.result.zotero_key
+                                zotero_key: success.result.zotero_key,
                             });
                         }
                     }
                 }
-                
-                // Set error status for failed actions
+
                 if (batchResult.failures.length > 0) {
                     for (const failure of batchResult.failures) {
                         setAgentActionsToError([failure.action.id], failure.error, failure.errorDetails);
@@ -525,9 +307,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             const errorMessage = error?.message || 'Failed to apply action';
             const stackTrace = error?.stack || '';
             logger(`AgentActionView: Failed to apply actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
-            // Set error on all actions
-            const actionIds = actions.map(a => a.id);
-            setAgentActionsToError(actionIds, errorMessage, {
+            setAgentActionsToError(actions.map((candidate) => candidate.id), errorMessage, {
                 stack_trace: stackTrace,
                 error_name: error?.name,
             });
@@ -535,65 +315,52 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             setIsProcessingAction(false);
             setClickedButton(null);
         }
-    }, [action, actions, isProcessing, toolName, runId, ackAgentActions, setAgentActionsToError, markExternalReferenceImported]);
+    }, [
+        action,
+        actions,
+        isProcessing,
+        toolName,
+        runId,
+        ackAgentActions,
+        setAgentActionsToError,
+        markExternalReferenceImported,
+    ]);
 
     const handleRejectPending = useCallback(() => {
         if (actions.length === 0 || isProcessing) return;
-        
+
         setClickedButton('reject');
-        // For multi-action, reject all actions
         if (isMultiAction) {
-            for (const act of actions) {
-                rejectAgentAction(act.id);
+            for (const candidate of actions) {
+                rejectAgentAction(candidate.id);
             }
             logger(`AgentActionView: Rejected ${actions.length} create_item actions`, 1);
         } else {
             rejectAgentAction(action!.id);
         }
-        // Reset clicked button state after a short delay (rejection is synchronous)
         setTimeout(() => setClickedButton(null), 100);
     }, [action, actions, isProcessing, isMultiAction, rejectAgentAction]);
 
     const handleUndo = useCallback(async () => {
         if (!action || isProcessing) return;
 
-        // Clear any prior undo error before retrying. In group mode the
-        // canonical store is the parent's per-action map, so notify it; out of
-        // group mode we own the local state.
-        if (isInGroup && onUndoErrorChange) {
-            onUndoErrorChange(toolcallId, null);
-        } else {
-            setUndoError(null);
-        }
         setIsProcessingAction(true);
         setClickedButton('undo');
         try {
             if (toolName === 'edit_metadata') {
-                // First pass: check what needs to be reverted without forcing
                 let result: UndoResult = await undoEditMetadataAction(action, false);
-                
-                // If some fields were manually modified, ask for confirmation
                 if (result.needsConfirmation && result.manuallyModified.length > 0) {
                     const shouldOverwrite = confirmOverwriteManualChanges(result.manuallyModified);
-                    
                     if (shouldOverwrite) {
-                        // User confirmed: force revert all fields
                         result = await undoEditMetadataAction(action, true);
                         logger(`AgentActionView: Force-reverted ${result.fieldsReverted} fields after user confirmation`, 1);
                     } else {
-                        // User declined: the first pass already reverted non-modified fields
                         logger(`AgentActionView: User declined to overwrite ${result.manuallyModified.length} manually modified fields`, 1);
                     }
                 }
-                
-                // Log edge cases
                 if (result.alreadyReverted.length > 0) {
                     logger(`AgentActionView: Fields already at original value: ${result.alreadyReverted.join(', ')}`, 1);
                 }
-                
-                // Update action status to 'undone'
-                // Even if some fields were manually modified and user declined,
-                // we consider the AI's changes undone (user has taken control)
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone edit_metadata action ${action.id} (${result.fieldsReverted} fields reverted)`, 1);
             } else if (toolName === 'create_collection') {
@@ -604,30 +371,18 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 await undoOrganizeItemsAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone organize_items action ${action.id}`, 1);
-            } else if (toolName === 'edit_note') {
-                // Dismiss any active diff preview before undoing — same reason as apply.
-                if (isDiffPreviewActive()) {
-                    await dismissDiffPreview();
-                    store.set(diffPreviewNoteKeyAtom, null);
-                }
-                await undoEditNoteAction(action);
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone edit_note action ${action.id}`, 1);
             } else if (toolName === 'create_note') {
                 await undoCreateNoteAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone create_note action ${action.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
-                // Handle batch undo for multiple items
-                const actionsToUndo = actions.filter(a => a.status === 'applied');
+                const actionsToUndo = actions.filter((candidate) => candidate.status === 'applied');
                 if (actionsToUndo.length === 0) return;
 
                 const batchResult = await undoCreateItemActions(actionsToUndo);
-                
-                // Mark successfully undone actions and clear external reference mapping
                 for (const actionId of batchResult.successes) {
                     undoAgentAction(actionId);
-                    const undoneAction = actionsToUndo.find(a => a.id === actionId);
+                    const undoneAction = actionsToUndo.find((candidate) => candidate.id === actionId);
                     if (undoneAction) {
                         const proposedData = undoneAction.proposed_data as CreateItemProposedData;
                         if (proposedData?.item?.source_id) {
@@ -635,12 +390,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         }
                     }
                 }
-                
-                // Set error status for failed actions
                 for (const failure of batchResult.failures) {
                     setAgentActionsToError([failure.actionId], failure.error, failure.errorDetails);
                 }
-                
                 logger(`AgentActionView: Undone ${batchResult.successes.length} create_item actions`, 1);
                 if (batchResult.failures.length > 0) {
                     logger(`AgentActionView: Failed to undo ${batchResult.failures.length} create_item actions`, 1);
@@ -651,130 +403,43 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             const stackTrace = error?.stack || '';
             logger(`AgentActionView: Failed to undo actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
 
-            if (toolName === 'edit_note') {
-                // For edit_note: keep action in 'applied' state, show inline error banner.
-                // In group mode the parent owns the error map (so the banner
-                // shows up in the right child row regardless of whether the
-                // user clicked the per-edit Undo or the group's Undo All).
-                if (isInGroup && onUndoErrorChange) {
-                    onUndoErrorChange(toolcallId, errorMessage);
-                } else {
-                    setUndoError(errorMessage);
-                }
-            } else {
-                // For other action types: set error status but track that it came from undo
-                setIsUndoError(true);
-                const appliedActionIds = actions.filter(a => a.status === 'applied').map(a => a.id);
-                if (appliedActionIds.length > 0) {
-                    setAgentActionsToError(appliedActionIds, errorMessage, {
-                        stack_trace: stackTrace,
-                        error_name: error?.name,
-                    });
-                }
+            setIsUndoError(true);
+            const appliedActionIds = actions.filter((candidate) => candidate.status === 'applied').map((candidate) => candidate.id);
+            if (appliedActionIds.length > 0) {
+                setAgentActionsToError(appliedActionIds, errorMessage, {
+                    stack_trace: stackTrace,
+                    error_name: error?.name,
+                });
             }
         } finally {
             setIsProcessingAction(false);
             setClickedButton(null);
         }
-    }, [action, actions, isProcessing, toolName, isInGroup, toolcallId, onUndoErrorChange, undoAgentAction, setAgentActionsToError, markExternalReferenceDeleted]);
+    }, [
+        action,
+        actions,
+        isProcessing,
+        toolName,
+        undoAgentAction,
+        setAgentActionsToError,
+        markExternalReferenceDeleted,
+    ]);
 
     const handleRetry = useCallback(async () => {
         if (isUndoError) {
-            // Error came from a failed undo — retry the undo, not re-apply
             setIsUndoError(false);
             await handleUndo();
         } else {
-            // Error came from a failed apply — retry the apply
             await handleApplyPending();
         }
     }, [isUndoError, handleUndo, handleApplyPending]);
 
-    // Handler: open the note in editor and show diff preview
-    const handlePreviewInEditor = useCallback(async () => {
-        const libraryId = pendingApproval?.actionData?.library_id ?? action?.proposed_data?.library_id;
-        const zoteroKey = pendingApproval?.actionData?.zotero_key ?? action?.proposed_data?.zotero_key;
-        logger(`[DiffPreview] handlePreviewInEditor called: libraryId=${libraryId}, zoteroKey=${zoteroKey}, hasPendingApproval=${!!pendingApproval}, hasAction=${!!action}, hasProposedData=${!!action?.proposed_data}`);
-        if (libraryId == null || !zoteroKey) {
-            logger(`[DiffPreview] Aborting: missing libraryId or zoteroKey`, 1);
-            return;
-        }
-
-        // Open / focus the note tab
-        logger(`[DiffPreview] Opening note tab for ${libraryId}/${zoteroKey}`);
-        await openNoteByKey(libraryId, zoteroKey);
-
-        // Wait for the editor instance to be available (needed for newly
-        // opened tabs; no-op cost when the tab was already selected)
-        const editorReady = await new Promise<boolean>((resolve) => {
-            let attempts = 0;
-            const check = () => {
-                if (isNoteOpenInEditor(libraryId, zoteroKey)) {
-                    resolve(true);
-                } else if (++attempts > 25) {
-                    resolve(false);
-                } else {
-                    setTimeout(check, 200);
-                }
-            };
-            setTimeout(check, 300);
-        });
-        logger(`[DiffPreview] Editor ready: ${editorReady} for ${libraryId}/${zoteroKey}`);
-        if (!editorReady) {
-            logger(`[DiffPreview] Editor not available after polling — cannot show preview`, 1);
-        }
-
-        // During an active run, pending approvals live in the approval map —
-        // updateDiffPreviewForNote reads that map and shows the combined diff.
-        if (pendingApproval) {
-            logger(`[DiffPreview] Delegating to updateDiffPreviewForNote (pending approval path)`);
-            updateDiffPreviewForNote(libraryId, zoteroKey);
-        } else if (action?.proposed_data) {
-            // Post-run: the approval was already removed; build the edit from the action directly.
-            const oldStr = action.proposed_data.old_string ?? '';
-            const operation = action.proposed_data.operation ?? 'str_replace';
-            const undoFullHtml = action.proposed_data.undo_full_html ?? action.result_data?.undo_full_html ?? '';
-            logger(`[DiffPreview] Post-run path: operation=${operation}, oldStr length=${oldStr.length}, newStr length=${(action.proposed_data.new_string ?? '').length}, hasUndoFullHtml=${!!undoFullHtml}`);
-            if (operation === 'rewrite' || oldStr) {
-                logger(`[DiffPreview] Calling showDiffPreview (operation=${operation})`);
-                showDiffPreview(libraryId, zoteroKey, [{
-                    oldString: oldStr,
-                    newString: action.proposed_data.new_string ?? '',
-                    operation,
-                }], {
-                    onAction: (bannerAction) => {
-                        if (bannerAction === 'approve') {
-                            handleApplyPending();
-                        } else {
-                            handleRejectPending();
-                        }
-                    },
-                });
-            } else {
-                logger(`[DiffPreview] Skipping showDiffPreview: oldStr is empty and not a rewrite (operation=${operation})`, 1);
-            }
-        } else {
-            logger(`[DiffPreview] No pendingApproval and no action.proposed_data — nothing to preview`, 1);
-        }
-    }, [pendingApproval, action, handleApplyPending, handleRejectPending]);
-
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
-
-    // Build preview data from either pending approval or agent action
     const previewData = buildPreviewData(toolName, pendingApproval, action);
 
-    // Show the preview button when there's an unapplied edit that has an old_string to preview or is a rewrite
-    const canShowPreview = DIFF_PREVIEW_ENABLED
-        && toolName === 'edit_note'
-        && (isAwaitingApproval || status === 'pending' || status === 'rejected' || status === 'undone')
-        && !!(pendingApproval?.actionData?.old_string || action?.proposed_data?.old_string
-            || (pendingApproval?.actionData?.operation ?? 'str_replace') === 'rewrite'
-            || (action?.proposed_data?.operation ?? 'str_replace') === 'rewrite');
-    // Determine what icon to show in header
     const getHeaderIcon = () => {
         const getToolIcon = () => {
-            if (toolName === 'edit_metadata') return PropertyEditIcon;
-            if (toolName === 'edit_item') return PropertyEditIcon;
-            if (toolName === 'edit_note') return EditIcon;
+            if (toolName === 'edit_metadata' || toolName === 'edit_item') return PropertyEditIcon;
             if (toolName === 'create_note') return FileDiffIcon;
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
@@ -789,19 +454,15 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         if (config.icon === null) return getToolIcon();
         return config.icon;
     };
-    
-    // Determine whether to show status icon styling
+
     const shouldShowStatusIcon = () => {
-        // Don't show status styling if we're showing arrows on hover
         if (isHovered) return false;
-        // Show status styling if we have a status icon
         return config.icon !== null || !isAwaitingApproval;
     };
 
     const actionTitle = getActionTitle(toolName, action?.proposed_data, itemTitle, actions);
 
-    // Streaming mode: show live preview without action buttons
-    if (isStreaming && !isInGroup) {
+    if (isStreaming) {
         const effectiveArgs = streamingArgs ?? {};
         const streamingTitle = getActionTitle(toolName, effectiveArgs, itemTitle, undefined);
         const streamingPreviewData: PreviewData = {
@@ -811,7 +472,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
         return (
             <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
-                {/* Header with spinner + shimmer title */}
                 <div className="display-flex flex-row py-15 bg-senary border-bottom-quinary">
                     <div
                         className="variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left mt-015"
@@ -828,7 +488,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         </div>
                     </div>
                 </div>
-                {/* Always-expanded preview */}
                 <ActionPreview
                     toolName={toolName}
                     previewData={streamingPreviewData}
@@ -839,191 +498,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         );
     }
 
-    // In-group rendering
-    if (isInGroup) {
-        // Left status icon
-        const effectiveStatus: ActionStatus | 'awaiting' = isAwaitingApproval
-            ? 'awaiting'
-            : isOrphanedEditNote
-                ? 'error'
-                : isMultiAction
-                    ? getOverallStatus(actions)
-                    : (action?.status ?? 'pending');
-        const effectiveConfig = STATUS_CONFIGS[effectiveStatus];
-        const LeftStatusIcon = effectiveConfig.icon;
-        const isInGroupStreamingPlaceholder = isStreamingEditNotePlaceholder;
-
-        // Fallback preview from streamingArgs
-        const inGroupPreviewData: PreviewData | null = previewData
-            ?? (streamingArgs && Object.keys(streamingArgs).length > 0
-                ? { actionType: toolName, actionData: streamingArgs }
-                : null);
-        const inGroupPreviewStatus: ActionStatus | 'awaiting' = previewData
-            ? status
-            : (isOrphanedEditNote ? 'error' : 'pending');
-        const inGroupPreviewIsStreaming = !previewData && isInGroupStreamingPlaceholder;
-        return (
-            <div
-                className="agent-action-view rounded-md flex flex-col min-w-0"
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
-            >
-                <div className="display-flex flex-row min-w-0">
-                    {/* Left action bar: status icon stacked above per-state icons */}
-                    <div className="display-flex flex-col items-center gap-25 px-2 py-2 flex-shrink-0 ml-05">
-                        {isInGroupStreamingPlaceholder ? (
-                            // Streaming placeholder: just a spinner.
-                            <div className="display-flex items-center mt-010">
-                                <Spinner size={13} className="font-color-secondary scale-10" style={{ marginLeft: '0.185rem' }} />
-                            </div>
-                        ) : (
-                            <>
-                                {/*
-                                    Show the effective-status icon (applied/
-                                    rejected/undone/error) so each row has an
-                                    at-a-glance state indicator.
-                                */}
-                                {LeftStatusIcon && LeftStatusIcon !== Spinner && (
-                                    <div className="display-flex items-center mt-010">
-                                        <Icon icon={LeftStatusIcon} className={`${effectiveConfig.iconClassName} scale-10`} />
-                                    </div>
-                                )}
-                            </>
-                        )}
-                    </div>
-
-                    {/* Right side: diff preview */}
-                    <div className="flex-1 min-w-0">
-                        {inGroupPreviewData ? (
-                            <ActionPreview
-                                toolName={toolName}
-                                previewData={inGroupPreviewData}
-                                status={inGroupPreviewStatus}
-                                actions={actions}
-                                isStreaming={inGroupPreviewIsStreaming}
-                            />
-                        ) : (
-                            <div className="px-3 py-2" style={{ minHeight: '1.4em' }} aria-hidden />
-                        )}
-                    </div>
-
-                    <div className="display-flex flex-col gap-25 py-2 mr-2">
-                        {/* Per-edit action buttons */}
-                        {isProcessing ? (
-                            <>
-                                {clickedButton === 'approve' && (
-                                    <Tooltip content="Apply" showArrow singleLine>
-                                        <IconButton
-                                            icon={TickIcon}
-                                            variant="ghost-secondary"
-                                            iconClassName="font-color-secondary scale-12"
-                                            onClick={() => {}}
-                                            loading={true}
-                                            disabled={true}
-                                        />
-                                    </Tooltip>
-                                )}
-                                {clickedButton === 'reject' && (
-                                    <Tooltip content="Reject" showArrow singleLine>
-                                        <IconButton
-                                            icon={CancelIcon}
-                                            variant="ghost-secondary"
-                                            iconClassName="font-color-secondary scale-90"
-                                            onClick={() => {}}
-                                            loading={true}
-                                            disabled={true}
-                                        />
-                                    </Tooltip>
-                                )}
-                                {clickedButton === 'undo' && (
-                                    <Tooltip content="Undo" showArrow singleLine>
-                                        <IconButton
-                                            icon={UndoIcon}
-                                            variant="ghost-secondary"
-                                            iconClassName="font-color-secondary scale-10"
-                                            onClick={() => {}}
-                                            loading={true}
-                                            disabled={true}
-                                        />
-                                    </Tooltip>
-                                )}
-                            </>
-                        ) : (
-                            <>
-                                {/* Apply (awaiting/pending/rejected/undone) */}
-                                {config.showApply && (
-                                    <Tooltip content="Apply" showArrow singleLine>
-                                        <IconButton
-                                            icon={TickIcon}
-                                            variant="ghost-secondary"
-                                            iconClassName="font-color-green scale-12"
-                                            onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                            disabled={disabled}
-                                        />
-                                    </Tooltip>
-                                )}
-
-                                {/* Reject (awaiting/pending) */}
-                                {config.showReject && (
-                                    <Tooltip content="Reject" showArrow singleLine>
-                                        <IconButton
-                                            icon={CancelIcon}
-                                            variant="ghost-secondary"
-                                            iconClassName="font-color-red scale-90"
-                                            onClick={isAwaitingApproval ? handleReject : handleRejectPending}
-                                            disabled={disabled}
-                                        />
-                                    </Tooltip>
-                                )}
-
-                                {/* Undo (applied) */}
-                                {config.showUndo && (
-                                    <Tooltip content="Undo" showArrow singleLine>
-                                        <IconButton
-                                            icon={UndoIcon}
-                                            variant="ghost-secondary"
-                                            iconClassName="scale-10"
-                                            onClick={handleUndo}
-                                            disabled={disabled}
-                                        />
-                                    </Tooltip>
-                                )}
-
-                                {/* Retry (error) */}
-                                {config.showRetry && (
-                                    <Tooltip content={isUndoError ? 'Retry undo' : 'Try again'} showArrow singleLine>
-                                        <IconButton
-                                            icon={RepeatIcon}
-                                            variant="ghost-secondary"
-                                            iconClassName="scale-90"
-                                            onClick={handleRetry}
-                                            disabled={disabled}
-                                        />
-                                    </Tooltip>
-                                )}
-                            </>
-                        )}
-                    </div>
-                </div>
-
-                {/* Inline undo error banner */}
-                {(externalUndoError ?? undoError) && (
-                    <div className="display-flex flex-row items-start gap-2 mx-3 mb-2 px-3 py-2 rounded-md bg-senary">
-                        <div className="mt-010 flex-shrink-0">
-                            <Icon icon={AlertIcon} className="font-color-secondary scale-90" />
-                        </div>
-                        <div className="text-sm font-color-secondary" style={{ lineHeight: '1.4' }}>
-                            Could not undo automatically. The note may have been modified since this edit was applied. You can revert manually in the note editor.
-                        </div>
-                    </div>
-                )}
-            </div>
-        );
-    }
-
     return (
         <div className="agent-action-view rounded-md flex flex-col min-w-0 border-popup mb-2">
-            {/* Header */}
             <div
                 className={`
                     display-flex flex-row py-15 bg-senary items-start
@@ -1044,52 +520,45 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     onMouseLeave={() => setIsHovered(false)}
                 >
                     <div className="display-flex flex-row ml-3 gap-2">
-                        <div className={`flex-1 display-flex mt-010 font-color-primary`}>
+                        <div className="flex-1 display-flex mt-010 font-color-primary">
                             <Icon icon={getHeaderIcon()} className={shouldShowStatusIcon() ? config.iconClassName : undefined} />
                         </div>
                         <div className="two-line-header">
                             <span className="font-color-primary font-medium">{getActionLabel(toolName)}</span>
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
-                            {((action?.proposed_data?.library_id && action?.proposed_data?.zotero_key) || (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key)) && (<>{'\u00A0'}<Tooltip content={toolName === 'edit_note' || toolName === 'create_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
-                                    <span
-                                        className="font-color-secondary scale-10"
-                                        style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
-                                        role="button"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            e.preventDefault();
-                                            if (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key) {
-                                                openNoteByKey(action.result_data.library_id, action.result_data.zotero_key);
-                                            } else if (toolName === 'edit_note') {
-                                                const isApplied = action?.status === 'applied';
-                                                openNoteAndSearchEdit(
-                                                    action?.proposed_data?.library_id,
-                                                    action?.proposed_data?.zotero_key,
-                                                    action?.proposed_data?.old_string || '',
-                                                    action?.proposed_data?.new_string || '',
-                                                    isApplied,
-                                                    action?.result_data?.undo_before_context,
-                                                    action?.result_data?.undo_after_context,
-                                                    action?.proposed_data?.target_before_context,
-                                                    action?.proposed_data?.target_after_context,
-                                                );
-                                            } else {
-                                                revealSource({ library_id: action?.proposed_data?.library_id, zotero_key: action?.proposed_data?.zotero_key });
-                                            }
-                                        }}
-                                    >
-                                        <Icon icon={ArrowUpRightIcon} />
-                                    </span>
-                                </Tooltip></>
+                            {((action?.proposed_data?.library_id && action?.proposed_data?.zotero_key) || (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key)) && (
+                                <>
+                                    {'\u00A0'}
+                                    <Tooltip content={toolName === 'create_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
+                                        <span
+                                            className="font-color-secondary scale-10"
+                                            style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
+                                            role="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                e.preventDefault();
+                                                if (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key) {
+                                                    openNoteByKey(action.result_data.library_id, action.result_data.zotero_key);
+                                                } else {
+                                                    revealSource({
+                                                        library_id: action?.proposed_data?.library_id,
+                                                        zotero_key: action?.proposed_data?.zotero_key,
+                                                    });
+                                                }
+                                            }}
+                                        >
+                                            <Icon icon={ArrowUpRightIcon} />
+                                        </span>
+                                    </Tooltip>
+                                </>
                             )}
                         </div>
                     </div>
-
                 </button>
 
                 <div className="flex-1" />
 
-                <div 
+                <div
                     className="display-flex flex-row items-center gap-25 mr-2 mt-015"
                     style={{ visibility: !(isAwaitingApproval || status === 'pending') ? 'visible' : 'hidden' }}
                 >
@@ -1103,10 +572,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     </Tooltip>
                 </div>
 
-                {/* Reject and Apply buttons - show during awaiting, pending, or processing */}
                 {((isAwaitingApproval || status === 'pending') && !isProcessing && !isConfirmAction && !hasNoActionData) && (
                     <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
-                        {/* Show Reject button only if not processing or if Reject was clicked */}
                         {(!isProcessing || clickedButton === 'reject') && (
                             <Tooltip content="Reject" showArrow singleLine>
                                 <IconButton
@@ -1119,7 +586,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 />
                             </Tooltip>
                         )}
-                        {/* Show Apply button only if not processing or if Apply was clicked */}
                         {(!isProcessing || clickedButton === 'approve') && (
                             <Tooltip content="Apply" showArrow singleLine>
                                 <IconButton
@@ -1134,13 +600,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )}
                     </div>
                 )}
-
             </div>
 
-            {/* Expanded content */}
             {isExpanded && (
                 <div className="display-flex flex-col">
-                    {/* Preview section */}
                     {previewData ? (
                         <ActionPreview
                             toolName={toolName}
@@ -1154,19 +617,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         </div>
                     )}
 
-                    {/* Inline undo error banner for edit_note */}
-                    {undoError && (
-                        <div className="display-flex flex-row items-start gap-2 mx-3 mt-2 px-3 py-2 rounded-md bg-senary">
-                            <div className="mt-010 flex-shrink-0">
-                                <Icon icon={AlertIcon} className="font-color-secondary scale-90" />
-                            </div>
-                            <div className="text-sm font-color-secondary" style={{ lineHeight: '1.4' }}>
-                                Could not undo automatically. The note may have been modified since this edit was applied. You can revert manually in the note editor.
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Action buttons */}
                     <div className="display-flex flex-row gap-2 px-2 py-2">
                         {(isAwaitingApproval || status === 'pending') && !hasNoActionData && (
                             isConfirmExtraction ? (
@@ -1179,18 +629,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         )}
                         <div className="flex-1" />
 
-                        {canShowPreview && (
-                            <Button
-                                variant="ghost"
-                                icon={FileDiffIcon}
-                                onClick={handlePreviewInEditor}
-                                style={{ padding: '3px 6px' }}
-                            >
-                                Preview
-                            </Button>
-                        )}
-
-                        {/* Reject button - for awaiting and pending */}
                         {config.showReject && (!isProcessing || clickedButton === 'reject') && (
                             <Button
                                 variant="outline"
@@ -1202,7 +640,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             </Button>
                         )}
 
-                        {/* Undo button - for applied */}
                         {(config.showUndo || (isProcessing && clickedButton === 'undo')) && (
                             <Button
                                 variant="outline"
@@ -1214,7 +651,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             </Button>
                         )}
 
-                        {/* Retry button - for error (label changes based on error source) */}
                         {config.showRetry && (
                             <Button
                                 variant="outline"
@@ -1226,36 +662,16 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             </Button>
                         )}
 
-                        {/* Apply button - for awaiting, pending, rejected, undone (not while processing) */}
                         {config.showApply && (!isProcessing || clickedButton === 'approve') && (
-                            toolName === 'edit_note' && isAwaitingApproval ? (
-                                <SplitApplyButton
-                                    onApply={handleApprove}
-                                    onApplyAll={handleApproveAllForNote}
-                                    loading={isProcessing && clickedButton === 'approve'}
-                                    disabled={isProcessing}
-                                />
-                            ) : (
-                                <Button
-                                    variant='solid'
-                                    onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                    loading={isProcessing && clickedButton === 'approve'}
-                                    disabled={isProcessing}
-                                >
-                                    <span>
-                                        {isConfirmAction ? 'Confirm' : 'Apply'}
-                                    </span>
-                                </Button>
-                            )
+                            <Button
+                                variant="solid"
+                                onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
+                                loading={isProcessing && clickedButton === 'approve'}
+                                disabled={isProcessing}
+                            >
+                                <span>{isConfirmAction ? 'Confirm' : 'Apply'}</span>
+                            </Button>
                         )}
-
-                        {/* Applied badge - for applied state */}
-                        {/* {status === 'applied' && (
-                            <div className="display-flex items-center px-3 py-1 rounded bg-success-subtle color-success text-sm">
-                                <Icon icon={TickIcon} className="mr-1 scale-12" />
-                                Success
-                            </div>
-                        )} */}
                     </div>
                 </div>
             )}

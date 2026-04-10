@@ -8,153 +8,7 @@ import { EditNoteGroupView } from './EditNoteGroupView';
 import { isAnnotationToolResult } from '../../agents/toolResultTypes';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
-
-/**
- * Render item for the tool-call iteration in a model response.
- *
- * Consecutive `edit_note` parts targeting the same note are folded into one
- * `edit-note-group` so the chat shows a single "X Edits · Note Title" row
- * instead of one row per parallel tool call.
- */
-type RenderItem =
-    | { kind: 'single'; part: ToolCallPart }
-    | {
-        kind: 'edit-note-group';
-        libraryId: number;
-        zoteroKey: string;
-        parts: ToolCallPart[];
-    };
-
-/**
- * Result of inspecting a `ToolCallPart` for grouping purposes.
- *
- * - `'known'`: it's an `edit_note` part with a fully-parseable target.
- * - `'pending'`: it's an `edit_note` part but the args haven't streamed
- *   far enough to extract `note_id` (or the equivalent `library_id` /
- *   `zotero_key` pair). The grouping pass treats this as "extends the
- *   current run" so a streaming child slots into whatever group it ends
- *   up in. If it later turns out to target a *different* note, the next
- *   render will split it out.
- * - `null`: not an `edit_note` part at all — flush the current run.
- */
-type EditNoteTarget =
-    | { kind: 'known'; libraryId: number; zoteroKey: string }
-    | { kind: 'pending' }
-    | null;
-
-/**
- * Inspect a `ToolCallPart` and decide how it relates to the current
- * `edit_note` grouping run.
- */
-function getEditNoteTarget(part: ToolCallPart): EditNoteTarget {
-    if (part.tool_name !== 'edit_note') return null;
-    if (isAnnotationToolResult(part.tool_name)) return null;
-
-    let args: Record<string, unknown> | undefined;
-    try {
-        args = typeof part.args === 'string'
-            ? (part.args ? JSON.parse(part.args) : undefined)
-            : (part.args as Record<string, unknown> | undefined) ?? undefined;
-    } catch {
-        // Args still streaming as a partial JSON string — treat as pending.
-        return { kind: 'pending' };
-    }
-
-    if (!args) return { kind: 'pending' };
-
-    // Preferred: combined note_id of the form "<libraryId>-<zoteroKey>"
-    const noteId = args.note_id;
-    if (typeof noteId === 'string' && noteId) {
-        const dashIdx = noteId.indexOf('-');
-        if (dashIdx > 0 && dashIdx < noteId.length - 1) {
-            const libraryId = parseInt(noteId.substring(0, dashIdx), 10);
-            const zoteroKey = noteId.substring(dashIdx + 1);
-            if (Number.isFinite(libraryId) && zoteroKey) {
-                return { kind: 'known', libraryId, zoteroKey };
-            }
-        }
-    }
-
-    // Fallback: separate library_id / zotero_key fields
-    const libRaw = args.library_id;
-    const keyRaw = args.zotero_key;
-    const libraryId = typeof libRaw === 'number'
-        ? libRaw
-        : (typeof libRaw === 'string' ? parseInt(libRaw, 10) : NaN);
-    if (Number.isFinite(libraryId) && typeof keyRaw === 'string' && keyRaw) {
-        return { kind: 'known', libraryId, zoteroKey: keyRaw };
-    }
-
-    // It's an edit_note but we can't pin down the target yet.
-    return { kind: 'pending' };
-}
-
-/**
- * Walk the tool-call parts left-to-right, folding consecutive `edit_note`
- * parts that target the same note into a group.
- *
- * Streaming `edit_note` parts (with `kind: 'pending'`, i.e. args haven't
- * resolved a target yet) extend the current run rather than starting a new
- * one.
- *
- * Forming a group requires the run to have *at least one* part with a
- * resolved target — the group's `(libraryId, zoteroKey)` is taken from the
- * first such part.
- */
-function buildRenderItems(parts: ToolCallPart[]): RenderItem[] {
-    const items: RenderItem[] = [];
-    let runParts: ToolCallPart[] = [];
-    let runLib: number | null = null;
-    let runKey: string | null = null;
-
-    const flushRun = () => {
-        if (runParts.length === 0) return;
-        if (runParts.length >= 2 && runLib !== null && runKey !== null) {
-            items.push({
-                kind: 'edit-note-group',
-                libraryId: runLib,
-                zoteroKey: runKey,
-                parts: runParts,
-            });
-        } else {
-            for (const p of runParts) items.push({ kind: 'single', part: p });
-        }
-        runParts = [];
-        runLib = null;
-        runKey = null;
-    };
-
-    for (const part of parts) {
-        const target = getEditNoteTarget(part);
-        if (target?.kind === 'known') {
-            if (runLib === null) {
-                // Run had no target yet (only pending parts so far) —
-                // adopt this one and absorb the prior pending parts.
-                runLib = target.libraryId;
-                runKey = target.zoteroKey;
-                runParts.push(part);
-            } else if (runLib === target.libraryId && runKey === target.zoteroKey) {
-                runParts.push(part);
-            } else {
-                flushRun();
-                runParts = [part];
-                runLib = target.libraryId;
-                runKey = target.zoteroKey;
-            }
-        } else if (target?.kind === 'pending') {
-            // Streaming edit_note with no resolved target. Extend the
-            // current run regardless of whether it has a target yet
-            runParts.push(part);
-        } else {
-            // Not edit_note — flush and pass through.
-            flushRun();
-            items.push({ kind: 'single', part });
-        }
-    }
-    flushRun();
-
-    return items;
-}
+import { buildEditNoteRenderItems, getEditNoteGroupInstanceId } from './editNoteShared';
 
 interface ModelResponseViewProps {
     /** The model response */
@@ -174,6 +28,8 @@ interface ModelResponseViewProps {
 /**
  * Renders a single model response with all its parts.
  * Parts are rendered in order: thinking, text, and tool calls.
+ * All edit_note runs are routed through EditNoteGroupView, including
+ * single-call runs, so note edits have one container path.
  */
 export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
     message,
@@ -241,14 +97,13 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
             {/* Tool call parts */}
             {toolCallParts.length > 0 && (
                 <div className="display-flex flex-col py-2 gap-1">
-                    {buildRenderItems(toolCallParts as ToolCallPart[]).map((item) => {
+                    {buildEditNoteRenderItems(toolCallParts as ToolCallPart[]).map((item) => {
                         if (item.kind === 'edit-note-group') {
                             return (
                                 <EditNoteGroupView
-                                    key={`edit-note-group-${item.libraryId}-${item.zoteroKey}-${item.parts[0].tool_call_id}`}
+                                    key={`edit-note-group-${getEditNoteGroupInstanceId(item.parts)}`}
                                     parts={item.parts}
-                                    libraryId={item.libraryId}
-                                    zoteroKey={item.zoteroKey}
+                                    target={item.target}
                                     runId={runId}
                                     responseIndex={responseIndex}
                                     runStatus={runStatus}
@@ -297,4 +152,3 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
 };
 
 export default ModelResponseView;
-
