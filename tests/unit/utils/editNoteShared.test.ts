@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { ToolCallPart } from '../../../react/agents/types';
 import {
     buildEditNoteRenderItems,
+    findPendingApprovalForToolcall,
     getEditNoteDisplayStatus,
     getEditNoteGroupExpansionKey,
     getEffectiveEditNotePendingApproval,
     getOverallEditNoteDisplayStatus,
+    isEditNoteOrphaned,
+    isEditNoteStreamingPlaceholder,
+    parseEditNoteToolCallArgs,
     resolveEditNoteTargetFromData,
 } from '../../../react/components/agentRuns/editNoteShared';
 
@@ -39,6 +43,13 @@ describe('editNoteShared', () => {
                 libraryId: 7,
                 zoteroKey: 'FGHIJ',
             });
+        });
+    });
+
+    describe('parseEditNoteToolCallArgs', () => {
+        it('rejects arrays from object and JSON inputs', () => {
+            expect(parseEditNoteToolCallArgs([])).toBeNull();
+            expect(parseEditNoteToolCallArgs('[]')).toBeNull();
         });
     });
 
@@ -142,6 +153,20 @@ describe('editNoteShared', () => {
     });
 
     describe('edit note status helpers', () => {
+        it('finds pending approvals by tool call id and returns null on miss', () => {
+            const approvals = [
+                {
+                    actionId: 'action-1',
+                    toolcallId: 'tc-1',
+                    actionType: 'edit_note',
+                    actionData: { note_id: '1-AAAAA' },
+                },
+            ];
+
+            expect(findPendingApprovalForToolcall('tc-1', approvals)).toEqual(approvals[0]);
+            expect(findPendingApprovalForToolcall('tc-2', approvals)).toBeNull();
+        });
+
         it('builds unique expansion keys for separate same-note segments', () => {
             expect(getEditNoteGroupExpansionKey('run-1', 0, [
                 makeToolCallPart('tc-1', 'edit_note', { note_id: '1-AAAAA' }),
@@ -150,12 +175,53 @@ describe('editNoteShared', () => {
             ]));
         });
 
+        it('covers awaiting and finalized display-status branches', () => {
+            expect(getEditNoteDisplayStatus({
+                action: null,
+                pendingApproval: {
+                    actionId: 'action-1',
+                    toolcallId: 'tc-1',
+                    actionType: 'edit_note',
+                    actionData: {},
+                },
+                toolCallStatus: 'in_progress',
+            })).toBe('awaiting');
+            expect(getEditNoteDisplayStatus({
+                action: { status: 'applied' },
+                pendingApproval: null,
+                toolCallStatus: 'completed',
+            })).toBe('applied');
+            expect(getEditNoteDisplayStatus({
+                action: { status: 'rejected' },
+                pendingApproval: null,
+                toolCallStatus: 'completed',
+            })).toBe('rejected');
+            expect(getEditNoteDisplayStatus({
+                action: { status: 'undone' },
+                pendingApproval: null,
+                toolCallStatus: 'completed',
+            })).toBe('undone');
+        });
+
         it('treats terminal tool failures without actions as errors', () => {
             expect(getEditNoteDisplayStatus({
                 action: null,
                 pendingApproval: null,
                 toolCallStatus: 'error',
             })).toBe('error');
+        });
+
+        it('detects streaming placeholders and orphaned rows', () => {
+            expect(isEditNoteStreamingPlaceholder({
+                action: null,
+                pendingApproval: null,
+                toolCallStatus: 'in_progress',
+            })).toBe(true);
+            expect(isEditNoteOrphaned({
+                action: null,
+                pendingApproval: null,
+                toolCallStatus: 'error',
+            })).toBe(true);
         });
 
         it('suppresses reused pending approvals once a row action is final', () => {
@@ -173,6 +239,7 @@ describe('editNoteShared', () => {
         });
 
         it('aggregates row-level tool failures as group errors', () => {
+            expect(getOverallEditNoteDisplayStatus([])).toBe('pending');
             expect(getOverallEditNoteDisplayStatus(['error'])).toBe('error');
             expect(getOverallEditNoteDisplayStatus(['applied', 'error'])).toBe('applied');
         });

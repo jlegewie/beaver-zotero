@@ -12,7 +12,12 @@ import {
     setAgentActionsToErrorAtom,
     undoAgentActionAtom,
 } from '../../agents/agentActions';
-import { sendApprovalResponseAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
+import {
+    approvalResponseIntentsAtom,
+    isWSChatPendingAtom,
+    removeApprovalResponseIntentAtom,
+    sendApprovalResponseAtom,
+} from '../../atoms/agentRunAtoms';
 import { getToolCallStatus, toolResultsMapAtom } from '../../agents/atoms';
 import { executeEditNoteAction, undoEditNoteAction } from '../../utils/editNoteActions';
 import { openNoteAndSearchEdit, openNoteByKey } from '../../utils/sourceUtils';
@@ -23,11 +28,12 @@ import {
     showDiffPreview,
     type EditOperation,
 } from '../../utils/noteEditorDiffPreview';
-import { DIFF_PREVIEW_ENABLED, diffPreviewNoteKeyAtom } from '../../utils/diffPreviewCoordinator';
+import { diffPreviewNoteKeyAtom } from '../../utils/diffPreviewCoordinator';
 import { logger } from '../../../src/utils/logger';
 import { store } from '../../store';
 import { PreviewData, STATUS_CONFIGS, buildPreviewData } from './AgentActionView.helpers';
 import {
+    EditNoteDisplayStatus,
     EditNoteResolvedTarget,
     findPendingApprovalForToolcall,
     getEditNoteDisplayStatus,
@@ -97,17 +103,12 @@ interface UseEditNoteActionsOptions {
 }
 
 export interface EditNoteRowState {
-    action: AgentAction | null;
     actions: AgentAction[];
-    pendingApproval: PendingApproval | null;
-    resolvedTarget: EditNoteResolvedTarget | null;
     previewData: PreviewData | null;
-    previewStatus: 'awaiting' | 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
+    previewStatus: EditNoteDisplayStatus;
     previewIsStreaming: boolean;
-    isAwaitingApproval: boolean;
     isProcessing: boolean;
     isStreamingPlaceholder: boolean;
-    effectiveStatus: 'awaiting' | 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
     config: typeof STATUS_CONFIGS.awaiting;
     clickedButton: 'approve' | 'reject' | 'undo' | 'retry' | null;
     displayedUndoError: string | null;
@@ -123,7 +124,6 @@ export interface EditNoteRowState {
     handleRejectPending: () => void;
     handleUndo: () => Promise<void>;
     handleRetry: () => Promise<void>;
-    handlePreviewInEditor: () => Promise<void>;
     handleOpenNote: () => Promise<void>;
 }
 
@@ -139,7 +139,9 @@ export function useEditNoteActions({
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
     const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
+    const approvalResponseIntents = useAtomValue(approvalResponseIntentsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
+    const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
@@ -154,7 +156,6 @@ export function useEditNoteActions({
         [allPendingApprovals, toolcallId],
     );
     const pendingApproval = getEffectiveEditNotePendingApproval(action, pendingApprovalFromMap);
-    const isAwaitingApproval = pendingApproval !== null;
     const hasToolReturn = resultsMap.get(toolcallId) !== undefined;
     const toolCallStatus = getToolCallStatus(toolcallId, resultsMap, runStatus);
 
@@ -192,16 +193,33 @@ export function useEditNoteActions({
     const prevPendingApprovalRef = useRef<PendingApproval | null>(pendingApproval);
 
     useEffect(() => {
-        const wasAwaiting = prevPendingApprovalRef.current !== null;
+        const previousPendingApproval = prevPendingApprovalRef.current;
+        const wasAwaiting = previousPendingApproval !== null;
         const isNoLongerAwaiting = pendingApproval === null;
 
-        if (wasAwaiting && isNoLongerAwaiting && !isProcessingApproval && isRunPending && !hasToolReturn) {
-            setIsExternallyProcessing(true);
-            setClickedButton('approve');
+        if (wasAwaiting && isNoLongerAwaiting) {
+            const previousActionId = previousPendingApproval.actionId;
+            const previousIntent = approvalResponseIntents.get(previousActionId);
+
+            if (!isProcessingApproval && isRunPending && !hasToolReturn) {
+                setIsExternallyProcessing(true);
+                setClickedButton(previousIntent === false ? 'reject' : 'approve');
+            }
+
+            if (previousIntent !== undefined) {
+                removeApprovalResponseIntent(previousActionId);
+            }
         }
 
         prevPendingApprovalRef.current = pendingApproval;
-    }, [pendingApproval, isProcessingApproval, isRunPending, hasToolReturn]);
+    }, [
+        pendingApproval,
+        isProcessingApproval,
+        isRunPending,
+        hasToolReturn,
+        approvalResponseIntents,
+        removeApprovalResponseIntent,
+    ]);
 
     useEffect(() => {
         if ((isProcessingApproval || isExternallyProcessing) && action && action.status !== 'pending') {
@@ -216,21 +234,22 @@ export function useEditNoteActions({
     }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action]);
 
     const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing;
-    const effectiveStatus: EditNoteRowState['effectiveStatus'] = getEditNoteDisplayStatus({
+    const effectiveStatus: EditNoteDisplayStatus = getEditNoteDisplayStatus({
         action,
         pendingApproval,
         toolCallStatus,
     });
     const config = STATUS_CONFIGS[effectiveStatus];
 
-    const previewData = buildPreviewData('edit_note', pendingApproval, action)
+    const basePreviewData = buildPreviewData('edit_note', pendingApproval, action);
+    const previewData = basePreviewData
         ?? (parsedArgs && Object.keys(parsedArgs).length > 0
             ? { actionType: 'edit_note', actionData: parsedArgs }
             : null);
-    const previewStatus: EditNoteRowState['previewStatus'] = previewData
+    const previewStatus: EditNoteDisplayStatus = previewData
         ? effectiveStatus
         : (isOrphaned ? 'error' : 'pending');
-    const previewIsStreaming = !buildPreviewData('edit_note', pendingApproval, action) && isStreamingPlaceholder;
+    const previewIsStreaming = !basePreviewData && isStreamingPlaceholder;
 
     const showApply = config.showApply && (!!pendingApproval || !!action);
     const showReject = config.showReject && (!!pendingApproval || !!action);
@@ -326,40 +345,6 @@ export function useEditNoteActions({
         await runApply('retry');
     }, [runApply]);
 
-    const handlePreviewInEditor = useCallback(async () => {
-        if (!resolvedTarget) return;
-        const edits = pendingApproval
-            ? buildPreviewableEditOperations([pendingApproval.actionData])
-            : buildPreviewableEditOperations([
-                action && ['pending', 'rejected', 'undone'].includes(action.status)
-                    ? action.proposed_data
-                    : null,
-            ]);
-        if (edits.length === 0) return;
-
-        await showEditNotePreviewForEdits(resolvedTarget, edits, (bannerAction) => {
-            if (bannerAction === 'approve') {
-                if (pendingApproval) {
-                    handleApprove();
-                } else {
-                    handleApplyPending();
-                }
-            } else if (pendingApproval) {
-                handleReject();
-            } else {
-                handleRejectPending();
-            }
-        });
-    }, [
-        resolvedTarget,
-        pendingApproval,
-        action,
-        handleApprove,
-        handleApplyPending,
-        handleReject,
-        handleRejectPending,
-    ]);
-
     const handleOpenNote = useCallback(async () => {
         if (!resolvedTarget) return;
         const editData = action?.proposed_data ?? pendingApproval?.actionData;
@@ -383,17 +368,12 @@ export function useEditNoteActions({
     }, [resolvedTarget, action, pendingApproval]);
 
     return {
-        action,
         actions,
-        pendingApproval,
-        resolvedTarget,
         previewData,
         previewStatus,
         previewIsStreaming,
-        isAwaitingApproval,
         isProcessing,
         isStreamingPlaceholder,
-        effectiveStatus,
         config,
         clickedButton,
         displayedUndoError: externalUndoError ?? undoError,
@@ -409,7 +389,6 @@ export function useEditNoteActions({
         handleRejectPending,
         handleUndo,
         handleRetry,
-        handlePreviewInEditor: DIFF_PREVIEW_ENABLED ? handlePreviewInEditor : async () => {},
         handleOpenNote,
     };
 }

@@ -106,7 +106,7 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
                                 variant="ghost-secondary"
                                 iconClassName="scale-10"
                                 onClick={handleOpenNote}
-                                disabled={false}
+                                disabled={actionButtonsDisabled}
                             />
                         </Tooltip>
                     )}

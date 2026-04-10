@@ -11,7 +11,12 @@ import {
     rejectAgentActionAtom,
     setAgentActionsToErrorAtom,
 } from '../../agents/agentActions';
-import { sendApprovalResponseAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
+import {
+    approvalResponseIntentsAtom,
+    isWSChatPendingAtom,
+    removeApprovalResponseIntentAtom,
+    sendApprovalResponseAtom,
+} from '../../atoms/agentRunAtoms';
 import {
     agentActionItemTitlesAtom,
     setAgentActionItemTitleAtom,
@@ -142,9 +147,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const prevPendingApprovalRef = useRef<PendingApproval | null>(pendingApproval);
 
     const isRunPending = useAtomValue(isWSChatPendingAtom);
+    const approvalResponseIntents = useAtomValue(approvalResponseIntentsAtom);
     const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
 
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
+    const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
@@ -184,16 +191,33 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [action, pendingApproval, itemTitle, itemTitleKey, hasAssociatedItem, setItemTitle]);
 
     useEffect(() => {
-        const wasAwaiting = prevPendingApprovalRef.current !== null;
+        const previousPendingApproval = prevPendingApprovalRef.current;
+        const wasAwaiting = previousPendingApproval !== null;
         const isNoLongerAwaiting = pendingApproval === null;
 
-        if (wasAwaiting && isNoLongerAwaiting && !isProcessingApproval && isRunPending && !hasToolReturn) {
-            setIsExternallyProcessing(true);
-            setClickedButton('approve');
+        if (wasAwaiting && isNoLongerAwaiting) {
+            const previousActionId = previousPendingApproval.actionId;
+            const previousIntent = approvalResponseIntents.get(previousActionId);
+
+            if (!isProcessingApproval && isRunPending && !hasToolReturn) {
+                setIsExternallyProcessing(true);
+                setClickedButton(previousIntent === false ? 'reject' : 'approve');
+            }
+
+            if (previousIntent !== undefined) {
+                removeApprovalResponseIntent(previousActionId);
+            }
         }
 
         prevPendingApprovalRef.current = pendingApproval;
-    }, [pendingApproval, isProcessingApproval, isRunPending, hasToolReturn]);
+    }, [
+        pendingApproval,
+        isProcessingApproval,
+        isRunPending,
+        hasToolReturn,
+        approvalResponseIntents,
+        removeApprovalResponseIntent,
+    ]);
 
     useEffect(() => {
         if ((isProcessingApproval || isExternallyProcessing) && action && action.status !== 'pending') {

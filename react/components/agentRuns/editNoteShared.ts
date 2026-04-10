@@ -1,7 +1,6 @@
 import { ToolCallPart } from '../../agents/types';
 import type { ToolCallStatus } from '../../agents/atoms';
 import type { AgentAction, PendingApproval } from '../../agents/agentActions';
-import { isAnnotationToolResult } from '../../agents/toolResultTypes';
 
 export interface EditNoteResolvedTarget {
     libraryId: number;
@@ -49,12 +48,12 @@ export function parseEditNoteToolCallArgs(
 ): Record<string, any> | null {
     if (args == null) return null;
     if (typeof args !== 'string') {
-        return typeof args === 'object' ? args as Record<string, any> : null;
+        return typeof args === 'object' && !Array.isArray(args) ? args as Record<string, any> : null;
     }
     if (!args) return null;
     try {
         const parsed = JSON.parse(args);
-        return parsed && typeof parsed === 'object'
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
             ? parsed as Record<string, any>
             : null;
     } catch {
@@ -173,8 +172,9 @@ export function getOverallEditNoteDisplayStatus(
  */
 export function getEditNoteTarget(part: ToolCallPart): EditNoteTarget {
     if (part.tool_name !== 'edit_note') return null;
-    if (isAnnotationToolResult(part.tool_name)) return null;
 
+    // Prefer streaming_args while the tool call is still arriving incrementally.
+    // Once args is finalized it should agree, and remains the fallback.
     const target = resolveEditNoteTargetFromData(part.streaming_args)
         ?? resolveEditNoteTargetFromData(part.args);
     if (target) {
