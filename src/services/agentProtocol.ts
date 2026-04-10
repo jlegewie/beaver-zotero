@@ -175,15 +175,23 @@ export interface WSDataError {
 }
 
 export interface WSPageContent {
-    /** 1-indexed page number */
+    /** 1-indexed physical page number */
     page_number: number;
+    /**
+     * PDF page label for this physical page (e.g. "iv", "38", "A-3"),
+     * when the document declares one. Populated whenever labels exist,
+     * independent of whether prefer_page_labels was set on the request.
+     */
+    page_label?: string;
     /** Text content of the page */
     content: string;
 }
 
 export interface WSPageImage {
-    /** 1-indexed page number */
+    /** 1-indexed physical page number */
     page_number: number;
+    /** PDF page label for this physical page, when the document declares one. */
+    page_label?: string;
     /** Base64-encoded image data */
     image_data: string;
     /** Image format (png or jpeg) */
@@ -199,12 +207,23 @@ export interface WSZoteroAttachmentPagesRequest extends WSBaseEvent {
     event: 'zotero_attachment_pages_request';
     request_id: string;
     attachment: ZoteroItemReference;
-    /** 1-indexed start page (inclusive, defaults to 1) */
-    start_page?: number;
-    /** 1-indexed end page (inclusive, defaults to total pages) */
-    end_page?: number;
+    /**
+     * Start page, inclusive. Defaults to 1. Accepts either a 1-based
+     * physical index (number) or a PDF page label string (e.g. "iv", "A-3").
+     * String values are resolved against page labels when prefer_page_labels
+     * is true; string values that parse as integers are also accepted when
+     * prefer_page_labels is false.
+     */
+    start_page?: number | string;
+    /** End page, inclusive. Same type semantics as start_page. */
+    end_page?: number | string;
     /** Skip local file size and page count limits. Default: false */
     skip_local_limits?: boolean;
+    /**
+     * When true, resolve start_page/end_page against PDF page labels first,
+     * falling back to 1-based document index when no label matches.
+     */
+    prefer_page_labels?: boolean;
 }
 
 /** Request from backend to render attachment pages as images */
@@ -212,8 +231,12 @@ export interface WSZoteroAttachmentPageImagesRequest extends WSBaseEvent {
     event: 'zotero_attachment_page_images_request';
     request_id: string;
     attachment: ZoteroItemReference;
-    /** 1-indexed page numbers to render (defaults to all pages if not specified) */
-    pages?: number[];
+    /**
+     * 1-indexed page numbers to render (defaults to all pages if not specified).
+     * Each entry is either a physical 1-based index (number) or a PDF page
+     * label string (e.g. "iv"). Same resolution semantics as start_page.
+     */
+    pages?: (number | string)[];
     /** Scale factor (1.0 = 72 DPI, 2.0 = 144 DPI, etc.). Default: 1.0 */
     scale?: number;
     /** Target DPI (alternative to scale, takes precedence if provided) */
@@ -224,6 +247,11 @@ export interface WSZoteroAttachmentPageImagesRequest extends WSBaseEvent {
     jpeg_quality?: number;
     /** Skip local file size and page count limits. Default: false */
     skip_local_limits?: boolean;
+    /**
+     * When true, resolve `pages` entries against PDF page labels first,
+     * falling back to 1-based document index when no label matches.
+     */
+    prefer_page_labels?: boolean;
 }
 
 /**
@@ -478,6 +506,7 @@ export type AttachmentPagesErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
+    | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'extraction_failed';  // General extraction failure
 
 /** Response to zotero attachment pages request */
@@ -508,6 +537,7 @@ export type AttachmentPageImagesErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
+    | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'render_failed';      // General rendering failure
 
 /** Response to zotero attachment page images request */

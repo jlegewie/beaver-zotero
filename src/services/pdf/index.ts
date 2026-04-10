@@ -507,6 +507,23 @@ export class PDFExtractor {
     }
 
     /**
+     * Get page count and all page labels in a single metadata-only pass.
+     */
+    async getPageCountAndLabels(
+        pdfData: Uint8Array | ArrayBuffer
+    ): Promise<{ count: number; labels: Record<number, string> }> {
+        try {
+            await this.mupdf.open(pdfData);
+            return {
+                count: this.mupdf.getPageCount(),
+                labels: this.mupdf.getAllPageLabels(),
+            };
+        } finally {
+            this.mupdf.close();
+        }
+    }
+
+    /**
      * Get raw document data without processing.
      * Useful for debugging or custom processing.
      */
