@@ -31,7 +31,7 @@ import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError 
 export async function handleZoteroAttachmentPagesRequest(
     request: WSZoteroAttachmentPagesRequest
 ): Promise<WSZoteroAttachmentPagesResponse> {
-    const { attachment, start_page, end_page, skip_local_limits, prefer_page_labels, request_id } = request;
+    const { attachment, start_page, end_page, skip_local_limits, prefer_page_labels, max_pages, request_id } = request;
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
     let errorKey = requestKey;
 
@@ -244,8 +244,14 @@ export async function handleZoteroAttachmentPagesRequest(
             );
         }
 
-        // Clamp end_page to document bounds
-        const endPage = Math.min(requestedEndPage, totalPages);
+        // Clamp the resolved range to max_pages and document bounds.
+        let endPage = Math.min(requestedEndPage, totalPages);
+        if (max_pages && max_pages > 0) {
+            const maxAllowedEnd = startPage + max_pages - 1;
+            if (endPage > maxAllowedEnd) {
+                endPage = maxAllowedEnd;
+            }
+        }
 
         // 7b. Try content cache for requested page range (0-indexed)
         const startIdx = startPage - 1;

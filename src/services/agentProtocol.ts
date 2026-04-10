@@ -224,6 +224,12 @@ export interface WSZoteroAttachmentPagesRequest extends WSBaseEvent {
      * falling back to 1-based document index when no label matches.
      */
     prefer_page_labels?: boolean;
+    /**
+     * Maximum number of pages to return in a single response. When set, the
+     * frontend clamps the resolved [startPage, endPage] range to at most
+     * max_pages.
+     */
+    max_pages?: number;
 }
 
 /** Request from backend to render attachment pages as images */
