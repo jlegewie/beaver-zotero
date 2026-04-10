@@ -288,11 +288,6 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                                 : ''}
                         </div>
                     )}
-                    {isInsertAfter && (
-                        <div className="text-sm font-color-primary font-medium px-3 py-1">
-                            Insert after
-                        </div>
-                    )}
                     <div className="inline-diff-container">
                         {splitIntoParagraphs(inlineSegments).map((para, pi) => {
                             const isHeading = para.length > 0
