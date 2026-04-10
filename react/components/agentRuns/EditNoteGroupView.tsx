@@ -21,7 +21,7 @@ import {
     setToolExpandedAtom,
 } from '../../atoms/messageUIState';
 import { addAutoApproveNoteKeyAtom, makeNoteKey } from '../../atoms/editNoteAutoApprove';
-import { STATUS_CONFIGS, type ActionStatus } from './AgentActionView.helpers';
+import { STATUS_CONFIGS, type ActionStatus } from './agentActionViewHelpers';
 import {
     ArrowDownIcon,
     ArrowRightIcon,

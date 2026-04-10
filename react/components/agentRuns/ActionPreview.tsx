@@ -9,7 +9,7 @@ import { ConfirmExtractionPreview } from './ConfirmExtractionPreview';
 import { ConfirmExternalSearchPreview } from './ConfirmExternalSearchPreview';
 import { EditNotePreview } from './EditNotePreview';
 import { CreateNotePreview } from './CreateNotePreview';
-import type { ActionStatus, PreviewData } from './AgentActionView.helpers';
+import type { ActionStatus, PreviewData } from './agentActionViewHelpers';
 
 /**
  * Dispatches to action-specific preview components

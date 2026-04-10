@@ -31,7 +31,7 @@ import {
 import { diffPreviewNoteKeyAtom } from '../../utils/diffPreviewCoordinator';
 import { logger } from '../../../src/utils/logger';
 import { store } from '../../store';
-import { PreviewData, STATUS_CONFIGS, buildPreviewData } from './AgentActionView.helpers';
+import { PreviewData, STATUS_CONFIGS, buildPreviewData } from './agentActionViewHelpers';
 import {
     EditNoteDisplayStatus,
     EditNoteResolvedTarget,

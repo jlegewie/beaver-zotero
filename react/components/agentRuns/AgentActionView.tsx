@@ -68,11 +68,11 @@ import {
     getActionTitle,
     buildPreviewData,
     PreviewData,
-} from './AgentActionView.helpers';
+} from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
 
-export { STATUS_CONFIGS, getOverallStatus } from './AgentActionView.helpers';
-export type { ActionStatus } from './AgentActionView.helpers';
+export { STATUS_CONFIGS, getOverallStatus } from './agentActionViewHelpers';
+export type { ActionStatus } from './agentActionViewHelpers';
 
 interface AgentActionViewProps {
     toolcallId: string;
