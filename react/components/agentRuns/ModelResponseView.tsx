@@ -26,9 +26,25 @@ type RenderItem =
     };
 
 /**
- * Extract `(library_id, zotero_key)` from a `ToolCallPart`'s args. Returns
- * null when the args aren't a complete edit_note payload (e.g. mid-stream
- * unparseable JSON, or missing fields).
+ * Result of inspecting a `ToolCallPart` for grouping purposes.
+ *
+ * - `'known'`: it's an `edit_note` part with a fully-parseable target.
+ * - `'pending'`: it's an `edit_note` part but the args haven't streamed
+ *   far enough to extract `note_id` (or the equivalent `library_id` /
+ *   `zotero_key` pair). The grouping pass treats this as "extends the
+ *   current run" so a streaming child slots into whatever group it ends
+ *   up in. If it later turns out to target a *different* note, the next
+ *   render will split it out.
+ * - `null`: not an `edit_note` part at all — flush the current run.
+ */
+type EditNoteTarget =
+    | { kind: 'known'; libraryId: number; zoteroKey: string }
+    | { kind: 'pending' }
+    | null;
+
+/**
+ * Inspect a `ToolCallPart` and decide how it relates to the current
+ * `edit_note` grouping run.
  *
  * The `edit_note` tool schema uses a combined `note_id` field of the form
  * `"<library_id>-<zotero_key>"`. We also accept the separate
@@ -38,12 +54,12 @@ type RenderItem =
  * Note: `edit_note` is intentionally NOT in `STREAMING_PREVIEW_TOOLS` (see
  * `ToolCallPartView.tsx`), so partially-parsed `streaming_args` never reach
  * this path. We only see fully-parsed args (or a JSON string that hasn't
- * been parsed yet, which falls into the `JSON.parse` try/catch below). That
- * means a mid-stream `note_id` value of e.g. `"0-AB"` shouldn't appear here
- * — if it does, the dash-split would group with a temporary key and the
- * group would re-form once the args complete.
+ * been parsed yet, which falls into the `JSON.parse` try/catch below). A
+ * mid-stream `note_id` value of e.g. `"0-AB"` shouldn't reach the
+ * dash-split path — if it does, the temporary group would re-form on the
+ * next render once the args complete.
  */
-function getEditNoteTarget(part: ToolCallPart): { libraryId: number; zoteroKey: string } | null {
+function getEditNoteTarget(part: ToolCallPart): EditNoteTarget {
     if (part.tool_name !== 'edit_note') return null;
     if (isAnnotationToolResult(part.tool_name)) return null;
 
@@ -53,10 +69,11 @@ function getEditNoteTarget(part: ToolCallPart): { libraryId: number; zoteroKey: 
             ? (part.args ? JSON.parse(part.args) : undefined)
             : (part.args as Record<string, unknown> | undefined) ?? undefined;
     } catch {
-        return null;
+        // Args still streaming as a partial JSON string — treat as pending.
+        return { kind: 'pending' };
     }
 
-    if (!args) return null;
+    if (!args) return { kind: 'pending' };
 
     // Preferred: combined note_id of the form "<libraryId>-<zoteroKey>"
     const noteId = args.note_id;
@@ -66,7 +83,7 @@ function getEditNoteTarget(part: ToolCallPart): { libraryId: number; zoteroKey: 
             const libraryId = parseInt(noteId.substring(0, dashIdx), 10);
             const zoteroKey = noteId.substring(dashIdx + 1);
             if (Number.isFinite(libraryId) && zoteroKey) {
-                return { libraryId, zoteroKey };
+                return { kind: 'known', libraryId, zoteroKey };
             }
         }
     }
@@ -78,16 +95,32 @@ function getEditNoteTarget(part: ToolCallPart): { libraryId: number; zoteroKey: 
         ? libRaw
         : (typeof libRaw === 'string' ? parseInt(libRaw, 10) : NaN);
     if (Number.isFinite(libraryId) && typeof keyRaw === 'string' && keyRaw) {
-        return { libraryId, zoteroKey: keyRaw };
+        return { kind: 'known', libraryId, zoteroKey: keyRaw };
     }
 
-    return null;
+    // It's an edit_note but we can't pin down the target yet.
+    return { kind: 'pending' };
 }
 
 /**
  * Walk the tool-call parts left-to-right, folding consecutive `edit_note`
- * parts that target the same note into a group. A run of length 1 stays as
- * a `single` item so single edits render exactly as before.
+ * parts that target the same note into a group.
+ *
+ * Streaming `edit_note` parts (with `kind: 'pending'`, i.e. args haven't
+ * resolved a target yet) extend the current run rather than starting a new
+ * one. This keeps a freshly-arriving streaming part visually grouped with
+ * the previous part(s) — the user sees one growing group instead of a
+ * sequence of separate "Edit note" rows. If the streaming part later
+ * resolves to a *different* target, the next render will reorganize and
+ * split it out.
+ *
+ * A run of length 1 still falls through to `single` rendering (single
+ * edits and lone-streaming edits look like before).
+ *
+ * Forming a group requires the run to have *at least one* part with a
+ * resolved target — the group's `(libraryId, zoteroKey)` is taken from the
+ * first such part. A run made entirely of pending parts (rare, transient)
+ * falls back to single rendering.
  */
 function buildRenderItems(parts: ToolCallPart[]): RenderItem[] {
     const items: RenderItem[] = [];
@@ -114,8 +147,14 @@ function buildRenderItems(parts: ToolCallPart[]): RenderItem[] {
 
     for (const part of parts) {
         const target = getEditNoteTarget(part);
-        if (target) {
-            if (runLib === target.libraryId && runKey === target.zoteroKey) {
+        if (target?.kind === 'known') {
+            if (runLib === null) {
+                // Run had no target yet (only pending parts so far) —
+                // adopt this one and absorb the prior pending parts.
+                runLib = target.libraryId;
+                runKey = target.zoteroKey;
+                runParts.push(part);
+            } else if (runLib === target.libraryId && runKey === target.zoteroKey) {
                 runParts.push(part);
             } else {
                 flushRun();
@@ -123,7 +162,15 @@ function buildRenderItems(parts: ToolCallPart[]): RenderItem[] {
                 runLib = target.libraryId;
                 runKey = target.zoteroKey;
             }
+        } else if (target?.kind === 'pending') {
+            // Streaming edit_note with no resolved target. Extend the
+            // current run regardless of whether it has a target yet — this
+            // is the key change that prevents an in-flight edit_note from
+            // rendering as its own dangling "Edit note" row outside the
+            // existing group.
+            runParts.push(part);
         } else {
+            // Not edit_note — flush and pass through.
             flushRun();
             items.push({ kind: 'single', part });
         }
@@ -228,6 +275,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
                                     zoteroKey={item.zoteroKey}
                                     runId={runId}
                                     responseIndex={responseIndex}
+                                    runStatus={runStatus}
                                 />
                             );
                         }

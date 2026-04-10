@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
+import { AgentRunStatus } from '../../agents/types';
 import {
     AgentAction,
     PendingApproval,
@@ -119,6 +120,15 @@ interface AgentActionViewProps {
     hasToolReturn?: boolean;
     /** Pre-parsed partial tool call arguments for streaming preview */
     streamingArgs?: Record<string, any> | null;
+    /**
+     * Status of the run this action belongs to. Used to gate streaming-state
+     * rendering: an edit_note row should only show the "still arriving"
+     * spinner placeholder while the run is actively in progress. After the
+     * run is canceled / completed / errored, orphan tool-call parts (ones
+     * that never produced an action or pending approval) should render as
+     * a terminal error instead of a permanent spinner.
+     */
+    runStatus?: AgentRunStatus;
     /**
      * When true, render in compact in-group mode: skip the tool/title header
      * (it lives on the parent group), always show the preview, drop the outer
@@ -260,6 +270,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     pendingApproval: pendingApprovalProp,
     hasToolReturn = false,
     streamingArgs,
+    runStatus,
     isInGroup = false,
     externalUndoError = null,
     onUndoErrorChange,
@@ -282,9 +293,19 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const pendingApproval = actionInFinalState ? null : pendingApprovalProp;
     const isAwaitingApproval = pendingApproval !== null;
 
-    // Streaming mode: show live preview without action buttons while LLM generates args
-    const isStreaming = !action && !pendingApproval && streamingArgs
-        && Object.keys(streamingArgs).length > 0;
+    // Streaming mode: show live preview without action buttons
+    const runIsStreamable = runStatus === undefined || runStatus === 'in_progress';
+    const isStreamingEditNotePlaceholder =
+        toolName === 'edit_note' && !action && !pendingApproval && !hasToolReturn && runIsStreamable;
+    const isStreaming = (!action && !pendingApproval && !!streamingArgs
+        && Object.keys(streamingArgs).length > 0 && runIsStreamable)
+        || isStreamingEditNotePlaceholder;
+    const isOrphanedEditNote =
+        toolName === 'edit_note'
+        && !action
+        && !pendingApproval
+        && !hasToolReturn
+        && !runIsStreamable;
 
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
     // Include responseIndex to disambiguate duplicate tool_call_ids within the same run
@@ -376,12 +397,38 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         if (!hasAssociatedItem || itemTitle) return;
 
         const fetchTitle = async () => {
-            // Get item info from action or pending approval
-            const libraryId = action?.proposed_data?.library_id ?? pendingApproval?.actionData?.library_id;
-            const zoteroKey = action?.proposed_data?.zotero_key ?? pendingApproval?.actionData?.zotero_key;
-            
+            // Get item info from action, pending approval, or — for an
+            // edit_note placeholder rendered while the part is still
+            // streaming — partial streamingArgs (which may contain
+            // `note_id` or `library_id`/`zotero_key` once enough JSON
+            // has arrived).
+            let libraryId: number | undefined =
+                action?.proposed_data?.library_id ?? pendingApproval?.actionData?.library_id;
+            let zoteroKey: string | undefined =
+                action?.proposed_data?.zotero_key ?? pendingApproval?.actionData?.zotero_key;
+
+            if ((libraryId == null || !zoteroKey) && toolName === 'edit_note' && streamingArgs) {
+                const noteId = streamingArgs.note_id;
+                if (typeof noteId === 'string' && noteId) {
+                    const dashIdx = noteId.indexOf('-');
+                    if (dashIdx > 0 && dashIdx < noteId.length - 1) {
+                        const lib = parseInt(noteId.substring(0, dashIdx), 10);
+                        if (Number.isFinite(lib)) {
+                            libraryId = lib;
+                            zoteroKey = noteId.substring(dashIdx + 1);
+                        }
+                    }
+                }
+                if (libraryId == null && typeof streamingArgs.library_id === 'number') {
+                    libraryId = streamingArgs.library_id;
+                }
+                if (!zoteroKey && typeof streamingArgs.zotero_key === 'string') {
+                    zoteroKey = streamingArgs.zotero_key;
+                }
+            }
+
             if (!libraryId || !zoteroKey) return;
-            
+
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
             if (item) {
                 let title: string;
@@ -393,9 +440,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 setItemTitle({ key: itemTitleKey, title });
             }
         };
-        
+
         fetchTitle();
-    }, [action, pendingApproval, itemTitle, itemTitleKey, hasAssociatedItem, toolName, setItemTitle]);
+    }, [action, pendingApproval, streamingArgs, itemTitle, itemTitleKey, hasAssociatedItem, toolName, setItemTitle]);
 
     // Detect when pending approval is removed externally (e.g., via PendingActionsBar "Apply All")
     useEffect(() => {
@@ -759,10 +806,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
     }, [isUndoError, handleUndo, handleApplyPending]);
 
-    // Handler: open the note in editor and show diff preview.
-    // Always opens the note tab (focusing it if already open) and then
-    // shows the preview. The preview auto-dismisses when the user leaves
-    // the tab, so we must re-show it every time rather than short-circuiting.
+    // Handler: open the note in editor and show diff preview
     const handlePreviewInEditor = useCallback(async () => {
         const libraryId = pendingApproval?.actionData?.library_id ?? action?.proposed_data?.library_id;
         const zoteroKey = pendingApproval?.actionData?.zotero_key ?? action?.proposed_data?.zotero_key;
@@ -873,15 +917,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const actionTitle = getActionTitle(toolName, action?.proposed_data, itemTitle, actions);
 
-    // Streaming mode: show live preview without action buttons while LLM generates args.
-    // This must be after all hooks to satisfy Rules of Hooks.
-    // Skip the streaming-specific full-card layout when rendered inside a group —
-    // the parent group owns the header, and the body will render once args complete.
-    if (isStreaming && streamingArgs && !isInGroup) {
-        const streamingTitle = getActionTitle(toolName, streamingArgs, null, undefined);
+    // Streaming mode: show live preview without action buttons
+    if (isStreaming && !isInGroup) {
+        const effectiveArgs = streamingArgs ?? {};
+        const streamingTitle = getActionTitle(toolName, effectiveArgs, itemTitle, undefined);
         const streamingPreviewData: PreviewData = {
             actionType: toolName,
-            actionData: streamingArgs,
+            actionData: effectiveArgs,
         };
 
         return (
@@ -914,12 +956,29 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         );
     }
 
-    // -----------------------------------------------------------------
-    // In-group rendering: thin left bar (status + per-edit action icons)
-    // and the diff preview taking the rest of the row.
-    // -----------------------------------------------------------------
+    // In-group rendering
     if (isInGroup) {
-        const StatusIcon = config.icon;
+        // Left status icon
+        const effectiveStatus: ActionStatus | 'awaiting' = isAwaitingApproval
+            ? 'awaiting'
+            : isOrphanedEditNote
+                ? 'error'
+                : isMultiAction
+                    ? getOverallStatus(actions)
+                    : (action?.status ?? 'pending');
+        const effectiveConfig = STATUS_CONFIGS[effectiveStatus];
+        const LeftStatusIcon = effectiveConfig.icon;
+        const isInGroupStreamingPlaceholder = isStreamingEditNotePlaceholder;
+
+        // Fallback preview from streamingArgs
+        const inGroupPreviewData: PreviewData | null = previewData
+            ?? (streamingArgs && Object.keys(streamingArgs).length > 0
+                ? { actionType: toolName, actionData: streamingArgs }
+                : null);
+        const inGroupPreviewStatus: ActionStatus | 'awaiting' = previewData
+            ? status
+            : (isOrphanedEditNote ? 'error' : 'pending');
+        const inGroupPreviewIsStreaming = !previewData && isInGroupStreamingPlaceholder;
         return (
             <div
                 className="agent-action-view rounded-md flex flex-col min-w-0"
@@ -929,107 +988,142 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 <div className="display-flex flex-row min-w-0">
                     {/* Left action bar: status icon stacked above per-state icons */}
                     <div className="display-flex flex-col items-center gap-25 px-2 py-2 flex-shrink-0 ml-05">
-                        {StatusIcon && (
+                        {isInGroupStreamingPlaceholder ? (
+                            // Streaming placeholder: just a spinner.
                             <div className="display-flex items-center mt-010">
-                                {StatusIcon === Spinner ? (
-                                    <Spinner size={13} className={`${config.iconClassName} scale-10`} style={{ marginLeft: '0.185rem' }} />
-                                ) : (
-                                    <Icon icon={StatusIcon} className={`${config.iconClassName} scale-10`} />
-                                )}
+                                <Spinner size={13} className="font-color-secondary scale-10" style={{ marginLeft: '0.185rem' }} />
                             </div>
-                        )}
-
-                        {/*
-                            Each per-edit action button uses the inner spinner
-                            pattern from the single AgentActionView footer:
-                            outer guard is `config.showX`, inner guard is
-                            `(!isProcessing || clickedButton === 'X')` so the
-                            *active* button stays mounted with `loading={true}`
-                            while the OTHER buttons disappear during processing.
-
-                            `disabled` is OR'd in from the parent group so a
-                            mid-loop "Apply All" / "Undo All" can't fan out into
-                            parallel per-child clicks on the same action.
-                        */}
-
-                        {/* Apply (awaiting/pending/rejected/undone) */}
-                        {config.showApply && (!isProcessing || clickedButton === 'approve') && (
-                            <Tooltip content="Apply" showArrow singleLine>
-                                <IconButton
-                                    icon={TickIcon}
-                                    variant="ghost-secondary"
-                                    iconClassName="font-color-green scale-12"
-                                    onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                    disabled={isProcessing || disabled}
-                                    loading={isProcessing && clickedButton === 'approve'}
-                                />
-                            </Tooltip>
-                        )}
-
-                        {/* Reject (awaiting/pending) */}
-                        {config.showReject && (!isProcessing || clickedButton === 'reject') && (
-                            <Tooltip content="Reject" showArrow singleLine>
-                                <IconButton
-                                    icon={CancelIcon}
-                                    variant="ghost-secondary"
-                                    iconClassName="font-color-red scale-90"
-                                    onClick={isAwaitingApproval ? handleReject : handleRejectPending}
-                                    disabled={isProcessing || disabled}
-                                    loading={isProcessing && clickedButton === 'reject'}
-                                />
-                            </Tooltip>
-                        )}
-
-                        {/* Undo (applied) */}
-                        {(config.showUndo || (isProcessing && clickedButton === 'undo')) && (
-                            <Tooltip content="Undo" showArrow singleLine>
-                                <IconButton
-                                    icon={UndoIcon}
-                                    variant="ghost-secondary"
-                                    iconClassName="scale-10"
-                                    onClick={handleUndo}
-                                    disabled={isProcessing || disabled}
-                                    loading={isProcessing && clickedButton === 'undo'}
-                                />
-                            </Tooltip>
-                        )}
-
-                        {/* Retry (error) */}
-                        {config.showRetry && (
-                            <Tooltip content={isUndoError ? 'Retry undo' : 'Try again'} showArrow singleLine>
-                                <IconButton
-                                    icon={RepeatIcon}
-                                    variant="ghost-secondary"
-                                    iconClassName="scale-90"
-                                    onClick={handleRetry}
-                                    disabled={isProcessing || disabled}
-                                    loading={isProcessing}
-                                />
-                            </Tooltip>
+                        ) : (
+                            <>
+                                {/*
+                                    Show the effective-status icon (applied/
+                                    rejected/undone/error) so each row has an
+                                    at-a-glance state indicator.
+                                */}
+                                {LeftStatusIcon && LeftStatusIcon !== Spinner && (
+                                    <div className="display-flex items-center mt-010">
+                                        <Icon icon={LeftStatusIcon} className={`${effectiveConfig.iconClassName} scale-10`} />
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
 
-                    {/* Right side: diff preview. While the part has arrived
-                        but no action / pending approval has landed yet, render
-                        an empty placeholder rather than the literal "No preview
-                        available" text — the row would otherwise flash garbage. */}
+                    {/* Right side: diff preview */}
                     <div className="flex-1 min-w-0">
-                        {previewData ? (
+                        {inGroupPreviewData ? (
                             <ActionPreview
                                 toolName={toolName}
-                                previewData={previewData}
-                                status={status}
+                                previewData={inGroupPreviewData}
+                                status={inGroupPreviewStatus}
                                 actions={actions}
+                                isStreaming={inGroupPreviewIsStreaming}
                             />
                         ) : (
                             <div className="px-3 py-2" style={{ minHeight: '1.4em' }} aria-hidden />
                         )}
                     </div>
+
+                    <div className="display-flex flex-col gap-25 py-2 mr-2">
+                        {/* Per-edit action buttons */}
+                        {isProcessing ? (
+                            <>
+                                {clickedButton === 'approve' && (
+                                    <Tooltip content="Apply" showArrow singleLine>
+                                        <IconButton
+                                            icon={TickIcon}
+                                            variant="ghost-secondary"
+                                            iconClassName="font-color-secondary scale-12"
+                                            onClick={() => {}}
+                                            loading={true}
+                                            disabled={true}
+                                        />
+                                    </Tooltip>
+                                )}
+                                {clickedButton === 'reject' && (
+                                    <Tooltip content="Reject" showArrow singleLine>
+                                        <IconButton
+                                            icon={CancelIcon}
+                                            variant="ghost-secondary"
+                                            iconClassName="font-color-secondary scale-90"
+                                            onClick={() => {}}
+                                            loading={true}
+                                            disabled={true}
+                                        />
+                                    </Tooltip>
+                                )}
+                                {clickedButton === 'undo' && (
+                                    <Tooltip content="Undo" showArrow singleLine>
+                                        <IconButton
+                                            icon={UndoIcon}
+                                            variant="ghost-secondary"
+                                            iconClassName="font-color-secondary scale-10"
+                                            onClick={() => {}}
+                                            loading={true}
+                                            disabled={true}
+                                        />
+                                    </Tooltip>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                {/* Apply (awaiting/pending/rejected/undone) */}
+                                {config.showApply && (
+                                    <Tooltip content="Apply" showArrow singleLine>
+                                        <IconButton
+                                            icon={TickIcon}
+                                            variant="ghost-secondary"
+                                            iconClassName="font-color-green scale-12"
+                                            onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
+                                            disabled={disabled}
+                                        />
+                                    </Tooltip>
+                                )}
+
+                                {/* Reject (awaiting/pending) */}
+                                {config.showReject && (
+                                    <Tooltip content="Reject" showArrow singleLine>
+                                        <IconButton
+                                            icon={CancelIcon}
+                                            variant="ghost-secondary"
+                                            iconClassName="font-color-red scale-90"
+                                            onClick={isAwaitingApproval ? handleReject : handleRejectPending}
+                                            disabled={disabled}
+                                        />
+                                    </Tooltip>
+                                )}
+
+                                {/* Undo (applied) */}
+                                {config.showUndo && (
+                                    <Tooltip content="Undo" showArrow singleLine>
+                                        <IconButton
+                                            icon={UndoIcon}
+                                            variant="ghost-secondary"
+                                            iconClassName="scale-10"
+                                            onClick={handleUndo}
+                                            disabled={disabled}
+                                        />
+                                    </Tooltip>
+                                )}
+
+                                {/* Retry (error) */}
+                                {config.showRetry && (
+                                    <Tooltip content={isUndoError ? 'Retry undo' : 'Try again'} showArrow singleLine>
+                                        <IconButton
+                                            icon={RepeatIcon}
+                                            variant="ghost-secondary"
+                                            iconClassName="scale-90"
+                                            onClick={handleRetry}
+                                            disabled={disabled}
+                                        />
+                                    </Tooltip>
+                                )}
+                            </>
+                        )}
+                    </div>
                 </div>
 
-                {/* Inline undo error banner — in-group mode prefers the
-                    parent-provided error so the banner reflects failures from
-                    both the per-edit Undo button and the group's "Undo All". */}
+                {/* Inline undo error banner */}
                 {(externalUndoError ?? undoError) && (
                     <div className="display-flex flex-row items-start gap-2 mx-3 mb-2 px-3 py-2 rounded-md bg-senary">
                         <div className="mt-010 flex-shrink-0">

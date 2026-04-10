@@ -311,6 +311,42 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                 pendingApproval={null}
                 hasToolReturn={false}
                 streamingArgs={streamingArgs}
+                runStatus={runStatus}
+            />
+        );
+    }
+
+    // Streaming edit_note placeholder: render the AgentActionView so the
+    // user sees a spinner + bold "Note Edit" header (with optional title
+    // once `note_id` resolves) while the part streams in. The fully-armed
+    // `showAgentActionView` path takes over once the WS approval / action
+    // event lands. We pass `part.args` as `streamingArgs` so the title
+    // fetch can pull `library_id`/`zotero_key` from the partial payload
+    // before the action exists.
+    const isStreamingEditNote =
+        part.tool_name === 'edit_note'
+        && !showAgentActionView
+        && runStatus === 'in_progress'
+        && isInProgress;
+    if (isStreamingEditNote) {
+        let parsedArgs: Record<string, any> | null = null;
+        try {
+            parsedArgs = typeof part.args === 'string'
+                ? (part.args ? JSON.parse(part.args) : null)
+                : (part.args as Record<string, any> | null) ?? null;
+        } catch {
+            parsedArgs = null;
+        }
+        return (
+            <AgentActionView
+                toolcallId={part.tool_call_id}
+                toolName="edit_note"
+                runId={runId}
+                responseIndex={responseIndex}
+                pendingApproval={null}
+                hasToolReturn={false}
+                streamingArgs={parsedArgs}
+                runStatus={runStatus}
             />
         );
     }
@@ -325,6 +361,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                 responseIndex={responseIndex}
                 pendingApproval={pendingApproval}
                 hasToolReturn={hasResult}
+                runStatus={runStatus}
             />
         );
     }

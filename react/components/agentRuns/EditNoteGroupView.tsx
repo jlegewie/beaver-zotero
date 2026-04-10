@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { ToolCallPart } from '../../agents/types';
+import { AgentRunStatus, ToolCallPart } from '../../agents/types';
 import {
     AgentAction,
     PendingApproval,
@@ -37,6 +37,7 @@ import {
     FileDiffIcon,
     Icon,
     RepeatIcon,
+    Spinner,
     TickIcon,
 } from '../icons/icons';
 import Button from '../ui/Button';
@@ -59,6 +60,23 @@ import { executeEditNoteAction, undoEditNoteAction } from '../../utils/editNoteA
 import { logger } from '../../../src/utils/logger';
 import { store } from '../../store';
 
+/**
+ * Best-effort parse of a tool-call's `args` payload into an object
+ */
+function parseToolCallArgs(args: ToolCallPart['args']): Record<string, any> | null {
+    if (args == null) return null;
+    if (typeof args !== 'string') {
+        return (args as Record<string, any>) ?? null;
+    }
+    if (!args) return null;
+    try {
+        const parsed = JSON.parse(args);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
 interface EditNoteGroupViewProps {
     /** 2+ consecutive edit_note tool call parts targeting the same note. */
     parts: ToolCallPart[];
@@ -67,6 +85,10 @@ interface EditNoteGroupViewProps {
     runId: string;
     /** Index of the parent response message within the run. */
     responseIndex: number;
+    /**
+     * Status of the run this group belongs to. Used to gate streaming-state
+     */
+    runStatus: AgentRunStatus;
 }
 
 /**
@@ -82,7 +104,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     zoteroKey,
     runId,
     responseIndex,
+    runStatus,
 }) => {
+    const isRunStreaming = runStatus === 'in_progress';
     const [isHovered, setIsHovered] = useState(false);
 
     // Atoms for state management
@@ -163,6 +187,32 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     );
     const errorCount = errorActions.length;
 
+    /**
+     * True if at least one child part has not yet produced an action or a
+     * pending approval — i.e., it's still streaming in from the LLM. The
+     * group header swaps to a Spinner icon and hides the
+     * Reject All / Apply All shortcut icons in the right slot until every
+     * part has landed, since acting on a partially-loaded group would risk
+     * approving fewer edits than the user intends.
+     *
+     * Gated on `isRunStreaming`: once the run is no longer in progress
+     * (canceled / completed / errored), an orphan child without an action
+     * is dead, not streaming, so the header should drop the spinner and
+     * the orphan rows render as terminal errors via AgentActionView.
+     */
+    const hasStreamingChild = useMemo(() => {
+        if (!isRunStreaming) return false;
+        for (const part of parts) {
+            const childActions = getAgentActionsByToolcall(
+                part.tool_call_id,
+                (a) => a.run_id === runId,
+            );
+            const childPendingApproval = getPendingApproval(part.tool_call_id);
+            if (childActions.length === 0 && !childPendingApproval) return true;
+        }
+        return false;
+    }, [parts, runId, getAgentActionsByToolcall, getPendingApproval, isRunStreaming]);
+
     // Aggregate status (uses the same priority logic as single-action multi mode)
     const aggregateStatus: ActionStatus | 'awaiting' = hasPendingApprovals
         ? 'awaiting'
@@ -185,6 +235,12 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     // Track previous values to detect transitions vs re-mounts.
     // - Auto-collapse on `hasPendingApprovals` true → false (user resolved
     //   the approval flow). Mirrors single AgentActionView lines 295–314.
+    // - Auto-expand on `hasPendingApprovals` false → true so the user
+    //   actually sees the diff for the edits they're being asked to
+    //   approve. (The group typically mounts BEFORE the WS approval event
+    //   lands, so the initial seed sees `hasPendingApprovals === false`
+    //   and collapses; without this transition the group would stay
+    //   collapsed during the approval flow.)
     // - Auto-expand on aggregate `error` so per-child Retry icons are
     //   reachable for an all-errored collapsed group.
     const prevHasPendingApprovalsRef = useRef(hasPendingApprovals);
@@ -208,6 +264,10 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         if (prevHasPendingApprovalsRef.current && !hasPendingApprovals) {
             // Approval flow just finished — collapse the group.
             setExpanded({ key: expansionKey, expanded: false });
+        } else if (!prevHasPendingApprovalsRef.current && hasPendingApprovals) {
+            // Approval flow just started — expand so the user can see the
+            // diff before they Approve / Reject.
+            setExpanded({ key: expansionKey, expanded: true });
         }
         prevHasPendingApprovalsRef.current = hasPendingApprovals;
     }, [
@@ -653,10 +713,13 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
     const baseConfig = STATUS_CONFIGS[aggregateStatus];
 
-    // Header icon: same logic as single AgentActionView
+    // Header icon. While any child is still streaming we always show a
+    // Spinner regardless of aggregate status, so the group communicates
+    // "still receiving parts" rather than "awaiting your approval".
     const headerIcon = (() => {
         if (isHovered && isExpanded) return ArrowDownIcon;
         if (isHovered && !isExpanded) return ArrowRightIcon;
+        if (hasStreamingChild) return Spinner;
         if (aggregateStatus === 'awaiting') return EditIcon;
         if (baseConfig.icon === null) return EditIcon;
         return baseConfig.icon;
@@ -670,12 +733,14 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const groupLabel = editCount === 1 ? 'Note Edit' : `${editCount} Note Edits`;
 
     // Collapsed-header right slot only shows during the active approval flow
-    // (mirrors single AgentActionView's collapsed-header buttons). Outer
-    // `!isProcessing` is intentionally OMITTED — the inner per-button gate
-    // `(!isProcessing || clickedButton === 'X')` keeps the active button
-    // mounted with its loading spinner.
+    // (mirrors single AgentActionView's collapsed-header buttons). Hidden
+    // while the group is still receiving parts so the user doesn't approve
+    // a half-formed group. Outer `!isProcessing` is intentionally OMITTED —
+    // the inner per-button gate `(!isProcessing || clickedButton === 'X')`
+    // keeps the active button mounted with its loading spinner.
     const showCollapsedHeaderActions =
-        aggregateStatus === 'awaiting' || aggregateStatus === 'pending';
+        !hasStreamingChild
+        && (aggregateStatus === 'awaiting' || aggregateStatus === 'pending');
 
     // Footer button visibility — driven by *what is available in the group*
     // instead of by aggregate status. This is the key difference from single
@@ -839,6 +904,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                     responseIndex={responseIndex}
                                     pendingApproval={getPendingApproval(part.tool_call_id)}
                                     hasToolReturn={false}
+                                    streamingArgs={parseToolCallArgs(part.args)}
+                                    runStatus={runStatus}
                                     isInGroup={true}
                                     disabled={isProcessing}
                                     externalUndoError={perEditUndoErrors[part.tool_call_id] ?? null}
