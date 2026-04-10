@@ -245,11 +245,13 @@ export async function showDiffPreview(
                     expandedEdits.push({ expandedOld: '', expandedNew, operation: op });
                 } else {
                     const expandedOld = edit.oldString ? expandToRawHtml(edit.oldString, metadata, 'old') : '';
-                    // For insert_after, new_string is already normalized by
-                    // validation to include old_string as a prefix (via
-                    // normalized_action_data), so computeHtmlDiff will
-                    // naturally show the anchor as context and the insertion
-                    // as addition.
+                    // For insert_after / insert_before, new_string is already
+                    // normalized by validation to merge old_string with
+                    // new_string (via normalized_action_data):
+                    //   - insert_after:  new_string = old_string + new_string
+                    //   - insert_before: new_string = new_string + old_string
+                    // so computeHtmlDiff will naturally show the anchor as
+                    // context and the insertion as addition.
                     const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new') : '';
                     if (expandedOld) expandedEdits.push({ expandedOld, expandedNew, operation: op });
                 }

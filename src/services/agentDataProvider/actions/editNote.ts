@@ -234,8 +234,8 @@ async function validateEditNoteAction(
 
     // ── String replacement mode (default) ──
 
-    // 9. Strings different (skip for insert_after — old_string is kept, new_string is appended)
-    if (operation !== 'insert_after' && old_string === new_string) {
+    // 9. Strings different (skip for insert_after/insert_before — old_string is kept, new_string is appended/prepended)
+    if (operation !== 'insert_after' && operation !== 'insert_before' && old_string === new_string) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -340,7 +340,7 @@ async function validateEditNoteAction(
                 const trimmedExpandedOld = expandToRawHtml(trimmedOld, metadata, 'old');
                 const trimmedCount = countOccurrences(strippedHtml, trimmedExpandedOld);
                 if (trimmedCount > 0) {
-                    const trimmedNew = operation === 'insert_after'
+                    const trimmedNew = operation === 'insert_after' || operation === 'insert_before'
                         ? new_string
                         : new_string.replace(/\n+$/, '');
                     // Dry-run expand new_string to verify
@@ -351,7 +351,9 @@ async function validateEditNoteAction(
                         old_string: trimmedOld,
                         new_string: operation === 'insert_after'
                             ? trimmedOld + trimmedNew
-                            : trimmedNew,
+                            : operation === 'insert_before'
+                                ? trimmedNew + trimmedOld
+                                : trimmedNew,
                     };
 
                     const noteTitle = item.getNoteTitle() || '(untitled)';
@@ -396,7 +398,9 @@ async function validateEditNoteAction(
                         old_string: unescapedOld,
                         new_string: operation === 'insert_after'
                             ? unescapedOld + unescapedNew
-                            : unescapedNew,
+                            : operation === 'insert_before'
+                                ? unescapedNew + unescapedOld
+                                : unescapedNew,
                     };
 
                     const noteTitle = item.getNoteTitle() || '(untitled)';
@@ -451,7 +455,9 @@ async function validateEditNoteAction(
                         old_string: stripped.strippedOld,
                         new_string: operation === 'insert_after'
                             ? stripped.strippedOld + stripped.strippedNew
-                            : stripped.strippedNew,
+                            : operation === 'insert_before'
+                                ? stripped.strippedNew + stripped.strippedOld
+                                : stripped.strippedNew,
                     };
 
                     if (matchCount > 1 && operation !== 'str_replace_all') {
@@ -532,7 +538,9 @@ async function validateEditNoteAction(
                         old_string: tagStrip.strippedOld,
                         new_string: operation === 'insert_after'
                             ? tagStrip.strippedOld + tagStrip.strippedNew
-                            : tagStrip.strippedNew,
+                            : operation === 'insert_before'
+                                ? tagStrip.strippedNew + tagStrip.strippedOld
+                                : tagStrip.strippedNew,
                     };
 
                     let disambiguated = true;
@@ -662,16 +670,19 @@ async function validateEditNoteAction(
             };
         }
 
-        // insert_after normalization: prepend old_string to new_string so execution
-        // can treat it as a regular str_replace.
-        if (operation === 'insert_after') {
+        // insert_after / insert_before normalization: merge old_string and
+        // new_string so execution can treat it as a regular str_replace.
+        if (operation === 'insert_after' || operation === 'insert_before') {
             if (!normalizedActionData) {
                 normalizedActionData = {
                     ...request.action_data as EditNoteProposedData,
                     ...(oldStringEnriched ? { old_string } : {}),
                 };
             }
-            normalizedActionData.new_string = (normalizedActionData.old_string ?? old_string ?? '') + new_string;
+            const anchor = normalizedActionData.old_string ?? old_string ?? '';
+            normalizedActionData.new_string = operation === 'insert_after'
+                ? anchor + new_string
+                : new_string + anchor;
         }
 
         // Carry enriched old_string forward even when disambiguation succeeded
@@ -701,14 +712,18 @@ async function validateEditNoteAction(
         };
     }
 
-    // 15. insert_after normalization: prepend old_string to new_string so
-    //     execution can treat it as a regular str_replace.
+    // 15. insert_after / insert_before normalization: merge old_string and
+    //     new_string so execution can treat it as a regular str_replace.
+    //     - insert_after:  new_string = old_string + new_string
+    //     - insert_before: new_string = new_string + old_string
     let normalizedActionData: EditNoteProposedData | undefined;
-    if (operation === 'insert_after') {
+    if (operation === 'insert_after' || operation === 'insert_before') {
         normalizedActionData = {
             ...request.action_data as EditNoteProposedData,
             ...(oldStringEnriched ? { old_string } : {}),
-            new_string: (old_string ?? '') + new_string,
+            new_string: operation === 'insert_after'
+                ? (old_string ?? '') + new_string
+                : new_string + (old_string ?? ''),
         };
     } else if (oldStringEnriched) {
         // Carry the enriched old_string forward so the executor sees it.
