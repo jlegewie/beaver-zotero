@@ -23,15 +23,38 @@ const EDIT_FOOTER_MARKER = 'Edited by Beaver';
 const EDIT_FOOTER_REGEX = /<p><span style="color:[^"]*">Edited by Beaver[\s\S]*?<\/span><\/p>/;
 
 /**
- * Matches the "Created by Beaver" footer added when Beaver creates a new note.
- * Color is matched flexibly for the same ProseMirror normalisation reason.
- * Handles multiple formats:
- *   - Plain text: "Created by Beaver ..."
- *   - Bold text:  "<strong>Created by Beaver</strong> ..." (current getBeaverNoteFooterHTML format)
- *   - Link-only:  "<a href="zotero://beaver/...">Created by Beaver</a>"
- * The optional <strong>/<b> wrapper accounts for ProseMirror normalising <strong> → <b>.
+ * The created footer always lives in a single paragraph, but user content can
+ * also mention "Created by Beaver" and link to a Beaver thread. We therefore
+ * scan paragraph-by-paragraph, then only accept the concrete Beaver layouts we
+ * actually emit or that ProseMirror produces after round-tripping them.
  */
-const CREATED_FOOTER_REGEX = /<p><span style="color:[^"]*">(?:(?:<(?:strong|b)>)?Created by Beaver(?:<\/(?:strong|b)>)?[\s\S]*?|<a href="zotero:\/\/beaver\/thread\/[^"]*"[^>]*>Created by Beaver<\/a>)<\/span><\/p>/;
+const CREATED_FOOTER_PARAGRAPH_REGEX = /<p\b[^>]*>[\s\S]*?<\/p>/g;
+const CREATED_FOOTER_COLOR_SPAN_REGEX =
+    /<span\b[^>]*style="[^"]*color:[^"]*"[^>]*>/;
+const CREATED_FOOTER_THREAD_LINK_REGEX =
+    /<a href="zotero:\/\/beaver\/thread\/[^"]*"[^>]*>[\s\S]*?<\/a>/;
+const CREATED_FOOTER_OLD_FORMAT_REGEX =
+    /^<p\b[^>]*>\s*<span\b[^>]*style="[^"]*color:[^"]*"[^>]*>\s*<a href="zotero:\/\/beaver\/thread\/[^"]*"[^>]*>\s*Created by Beaver\s*<\/a>\s*<\/span>\s*<\/p>$/;
+const CREATED_FOOTER_SINGLE_SPAN_REGEX =
+    /^<p\b[^>]*>\s*<span\b[^>]*style="[^"]*color:[^"]*"[^>]*>\s*(?:<(?:strong|b)\b[^>]*>\s*)?Created by Beaver\s*(?:<\/(?:strong|b)>)?(?:&nbsp;|\s)*\u00b7(?:&nbsp;|\s)*<a href="zotero:\/\/beaver\/thread\/[^"]*"[^>]*>\s*(?:Chat|Open Chat|Open Message)\s*<\/a>\s*<\/span>\s*<\/p>$/;
+const CREATED_FOOTER_REORDERED_SPANS_REGEX =
+    /^<p\b[^>]*>\s*<(?:strong|b)\b[^>]*>\s*<span\b[^>]*style="[^"]*color:[^"]*"[^>]*>\s*Created by Beaver\s*<\/span>\s*<\/(?:strong|b)>\s*<span\b[^>]*style="[^"]*color:[^"]*"[^>]*>\s*(?:&nbsp;|\s)*\u00b7(?:&nbsp;|\s)*<a href="zotero:\/\/beaver\/thread\/[^"]*"[^>]*>\s*(?:Chat|Open Chat|Open Message)\s*<\/a>\s*<\/span>\s*<\/p>$/;
+
+function isBeaverCreatedFooterParagraph(paragraphHtml: string): boolean {
+    if (
+        !paragraphHtml.includes('Created by Beaver') ||
+        !CREATED_FOOTER_COLOR_SPAN_REGEX.test(paragraphHtml) ||
+        !CREATED_FOOTER_THREAD_LINK_REGEX.test(paragraphHtml)
+    ) {
+        return false;
+    }
+
+    return (
+        CREATED_FOOTER_OLD_FORMAT_REGEX.test(paragraphHtml) ||
+        CREATED_FOOTER_SINGLE_SPAN_REGEX.test(paragraphHtml) ||
+        CREATED_FOOTER_REORDERED_SPANS_REGEX.test(paragraphHtml)
+    );
+}
 
 export interface ParsedEditFooter {
     footerHtml: string;
@@ -152,5 +175,23 @@ export function stripBeaverEditFooter(html: string): string {
  * Used by the simplifier so the agent can't see or edit the footer.
  */
 export function stripBeaverCreatedFooter(html: string): string {
-    return html.replace(CREATED_FOOTER_REGEX, '');
+    const paragraphRegex = new RegExp(CREATED_FOOTER_PARAGRAPH_REGEX.source, 'g');
+    let footerHtml = '';
+    let footerStart = -1;
+    let paragraphMatch;
+
+    while ((paragraphMatch = paragraphRegex.exec(html)) !== null) {
+        if (isBeaverCreatedFooterParagraph(paragraphMatch[0])) {
+            // Prefer the final matching footer so incidental earlier content
+            // never wins over the real Beaver footer near the end of the note.
+            footerHtml = paragraphMatch[0];
+            footerStart = paragraphMatch.index;
+        }
+    }
+
+    if (footerStart === -1) {
+        return html;
+    }
+
+    return html.slice(0, footerStart) + html.slice(footerStart + footerHtml.length);
 }

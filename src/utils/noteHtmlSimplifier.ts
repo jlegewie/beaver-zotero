@@ -360,14 +360,18 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
 
     // 6. Simplify math to dollar notation
     // Strip HTML wrappers from math elements, leaving dollar-delimited content.
+    // Empty math blocks (`$$$$` / `$$`) are intentionally left as HTML: the
+    // expandToRawHtml regex requires non-empty content between `$` delimiters,
+    // so simplifying them would break the round-trip (the expander can't
+    // rewrap them, and edit_note old_string matching fails).
     // Display math: <pre class="math">$$...$$</pre> → $$...$$
     simplified = simplified.replace(
-        /<pre\s+class="math">(\$\$[^<]*\$\$)<\/pre>/g,
+        /<pre\s+class="math">(\$\$[^<]+\$\$)<\/pre>/g,
         (_match, content) => content
     );
     // Inline math: <span class="math">$...$</span> → $...$
     simplified = simplified.replace(
-        /<span\s+class="math">(\$[^<]*\$)<\/span>/g,
+        /<span\s+class="math">(\$[^<]+\$)<\/span>/g,
         (_match, content) => content
     );
 
@@ -889,6 +893,25 @@ export function expandToRawHtml(
         }
     );
 
+    // Preserve math wrappers that already exist in the edited string. Empty
+    // placeholders now survive simplification as raw HTML, and the model may
+    // keep those wrappers when filling them in. Shield them before the dollar
+    // pass so `$...$` / `$$...$$` inside the wrapper doesn't get re-expanded
+    // into nested math HTML.
+    const preservedMathWrappers: string[] = [];
+    const preserveMathWrapper = (wrapper: string): string => {
+        const idx = preservedMathWrappers.push(wrapper) - 1;
+        return `__BEAVER_RAW_MATH_${idx}__`;
+    };
+    str = str.replace(
+        /<pre\b[^>]*class="math"[^>]*>[\s\S]*?<\/pre>/g,
+        preserveMathWrapper
+    );
+    str = str.replace(
+        /<span\b[^>]*class="math"[^>]*>[\s\S]*?<\/span>/g,
+        preserveMathWrapper
+    );
+
     // Expand math: dollar notation → Zotero HTML wrappers
     //
     // Pre-processing: when the agent places a standalone equation in its own <p>,
@@ -917,6 +940,11 @@ export function expandToRawHtml(
     str = str.replace(
         /(?<!\$)\$(?!\$)(?=\S)((?:[^$\\]|\\.)+?)(?<=\S)\$(?!\$)/g,
         (match) => `<span class="math">${match}</span>`
+    );
+
+    str = str.replace(
+        /__BEAVER_RAW_MATH_(\d+)__/g,
+        (match, idx) => preservedMathWrappers[Number(idx)] ?? match
     );
 
     return str;

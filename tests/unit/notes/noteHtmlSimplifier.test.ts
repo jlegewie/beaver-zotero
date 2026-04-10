@@ -1657,18 +1657,46 @@ describe('Math expansion', () => {
         expect(result).toBe(`<pre class="math">${input}</pre>`);
     });
 
-    it('does not double-wrap already-wrapped math in old context', () => {
-        // If somehow the input already has math HTML, the dollar regex should
-        // not match the $ inside the tag content (they are flanked by > and <)
-        const input = '<span class="math">$x$</span>';
+    it('preserves already-wrapped math in old context', () => {
+        const input = `<p>Inline <span class="math">$x$</span></p><pre class="math">$$y$$</pre>`;
         const result = expandToRawHtml(input, emptyMetadata(), 'old');
-        // The $x$ inside the span: $ is preceded by > (not $) and followed by x,
-        // but the whole thing is already wrapped. The inner $x$ WILL be matched
-        // by the inline regex since it sees the bare $x$ between > and <.
-        // This produces double-wrapping — but this case should never occur
-        // because the simplified view strips math wrappers.
-        // We just document this known behavior rather than guard against it.
-        expect(result).toContain('class="math"');
+        expect(result).toBe(input);
+    });
+
+    it('preserves already-wrapped math while expanding bare math in new context', () => {
+        const input = '<p>Keep <span class="math">$x$</span> and add $y$.</p><pre class="math">$$z$$</pre>';
+        const result = expandToRawHtml(input, emptyMetadata(), 'new');
+        expect(result).toBe(
+            '<p>Keep <span class="math">$x$</span> and add <span class="math">$y$</span>.</p><pre class="math">$$z$$</pre>'
+        );
+    });
+
+    it('fills empty display math placeholder without nesting when wrapper is preserved', () => {
+        const html = wrap('<h3>Theorem 3</h3><pre class="math">$$$$</pre><p>Next section.</p>');
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const edited = simplified.replace(
+            '<pre class="math">$$$$</pre>',
+            () => '<pre class="math">$$x^2 + y^2 = z^2$$</pre>'
+        );
+
+        const expanded = expandToRawHtml(edited, metadata, 'new');
+
+        expect(expanded).toContain('<pre class="math">$$x^2 + y^2 = z^2$$</pre>');
+        expect(expanded).not.toContain('<pre class="math"><pre class="math">');
+    });
+
+    it('fills empty inline math placeholder without nesting when wrapper is preserved', () => {
+        const html = wrap('<p>Entropy: <span class="math">$$</span>.</p>');
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const edited = simplified.replace(
+            '<span class="math">$$</span>',
+            '<span class="math">$H(p)$</span>'
+        );
+
+        const expanded = expandToRawHtml(edited, metadata, 'new');
+
+        expect(expanded).toContain('<span class="math">$H(p)$</span>');
+        expect(expanded).not.toContain('<span class="math"><span class="math">');
     });
 
     it('passes through plain text without math unchanged', () => {
@@ -1763,6 +1791,37 @@ describe('Math round-trips', () => {
         expect(simplified).toContain('$$\\frac{a}{b}$$');
         expect(simplified).not.toContain('<pre');
 
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toContain(raw);
+    });
+
+    it('empty display math round-trips (kept as raw HTML)', () => {
+        // Empty display math placeholders (`<pre class="math">$$$$</pre>`) must
+        // survive simplify → expand. The expander can't rewrap an empty `$$$$`
+        // (the dollar regex requires non-empty content), so the simplifier
+        // must leave empty blocks as raw HTML instead of producing `$$$$`.
+        // Regression for edit_note failures where the agent targeted an empty
+        // formula placeholder and old_string matching returned zero matches.
+        const raw = '<pre class="math">$$$$</pre>';
+        const html = wrap(`<h3>Theorem 3</h3>${raw}<p>Next section.</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        // Simplifier must keep the empty block wrapped — not produce a
+        // bare `$$$$` that edit_note's expander would then fail to rewrap.
+        expect(simplified).toContain('<pre class="math">$$$$</pre>');
+
+        // Round-trip through expand leaves it unchanged.
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).toContain(raw);
+    });
+
+    it('empty inline math round-trips (kept as raw HTML)', () => {
+        // Mirror of the display-math case for `<span class="math">$$</span>`.
+        const raw = '<span class="math">$$</span>';
+        const html = wrap(`<p>Placeholder: ${raw}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        expect(simplified).toContain('<span class="math">$$</span>');
         const expanded = expandToRawHtml(simplified, metadata, 'old');
         expect(expanded).toContain(raw);
     });
