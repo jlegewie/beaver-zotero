@@ -176,6 +176,25 @@ export async function handleZoteroAttachmentPageImagesRequest(
             pdfData = await IOUtils.read(filePath);
         }
 
+        // When prefer_page_labels is false, the normal fast path may render
+        // from cached metadata without ever loading labels. Hydrate them once
+        // on cold caches so image responses still populate page_label.
+        if (
+            prefer_page_labels !== true
+            && !pageLabels
+            && (!cachedMeta || cachedMeta.page_labels === null)
+        ) {
+            try {
+                const { count, labels } = await extractor.getPageCountAndLabels(pdfData);
+                pageLabels = Object.keys(labels).length > 0 ? labels : null;
+                if (totalPages == null) {
+                    totalPages = count;
+                }
+            } catch (error) {
+                logger(`handleZoteroAttachmentPageImagesRequest: page label hydration failed for ${requestKey}: ${error}`, 1);
+            }
+        }
+
         // 6. Check page count limit for all-pages requests (skip if skip_local_limits is true)
         if (!skip_local_limits && requestingAllPages) {
             const maxPageCount = getPref('maxPageCount');
