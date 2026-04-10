@@ -45,19 +45,6 @@ type EditNoteTarget =
 /**
  * Inspect a `ToolCallPart` and decide how it relates to the current
  * `edit_note` grouping run.
- *
- * The `edit_note` tool schema uses a combined `note_id` field of the form
- * `"<library_id>-<zotero_key>"`. We also accept the separate
- * `library_id` / `zotero_key` shape as a fallback in case the backend
- * normalizes one form to the other in the future.
- *
- * Note: `edit_note` is intentionally NOT in `STREAMING_PREVIEW_TOOLS` (see
- * `ToolCallPartView.tsx`), so partially-parsed `streaming_args` never reach
- * this path. We only see fully-parsed args (or a JSON string that hasn't
- * been parsed yet, which falls into the `JSON.parse` try/catch below). A
- * mid-stream `note_id` value of e.g. `"0-AB"` shouldn't reach the
- * dash-split path — if it does, the temporary group would re-form on the
- * next render once the args complete.
  */
 function getEditNoteTarget(part: ToolCallPart): EditNoteTarget {
     if (part.tool_name !== 'edit_note') return null;
@@ -108,19 +95,11 @@ function getEditNoteTarget(part: ToolCallPart): EditNoteTarget {
  *
  * Streaming `edit_note` parts (with `kind: 'pending'`, i.e. args haven't
  * resolved a target yet) extend the current run rather than starting a new
- * one. This keeps a freshly-arriving streaming part visually grouped with
- * the previous part(s) — the user sees one growing group instead of a
- * sequence of separate "Edit note" rows. If the streaming part later
- * resolves to a *different* target, the next render will reorganize and
- * split it out.
- *
- * A run of length 1 still falls through to `single` rendering (single
- * edits and lone-streaming edits look like before).
+ * one.
  *
  * Forming a group requires the run to have *at least one* part with a
  * resolved target — the group's `(libraryId, zoteroKey)` is taken from the
- * first such part. A run made entirely of pending parts (rare, transient)
- * falls back to single rendering.
+ * first such part.
  */
 function buildRenderItems(parts: ToolCallPart[]): RenderItem[] {
     const items: RenderItem[] = [];
@@ -164,10 +143,7 @@ function buildRenderItems(parts: ToolCallPart[]): RenderItem[] {
             }
         } else if (target?.kind === 'pending') {
             // Streaming edit_note with no resolved target. Extend the
-            // current run regardless of whether it has a target yet — this
-            // is the key change that prevents an in-flight edit_note from
-            // rendering as its own dangling "Edit note" row outside the
-            // existing group.
+            // current run regardless of whether it has a target yet
             runParts.push(part);
         } else {
             // Not edit_note — flush and pass through.
