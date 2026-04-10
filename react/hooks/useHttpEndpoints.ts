@@ -102,6 +102,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/cache-clear-memory',
     '/beaver/test/cache-delete-content',
     '/beaver/test/resolve-item',
+    '/beaver/test/sentence-bboxes',
 ] as const;
 
 /**
@@ -573,6 +574,92 @@ async function handleTestResolveItemHttpRequest(request: any) {
     };
 }
 
+/**
+ * Sentence-level bbox feasibility probe.
+ *
+ * Runs both the page-wide (`SentenceMapper`) and the paragraph-scoped
+ * (`ParagraphSentenceMapper`) prototypes against a Zotero attachment and
+ * returns diagnostic reports for each. The two pipelines coexist — this
+ * endpoint is the side-by-side harness used by the integration test.
+ *
+ * Dev-only. Request body:
+ *   { library_id, zotero_key, page_index?, mode? }
+ * where `mode` is "page" (SentenceMapper only), "paragraph"
+ * (ParagraphSentenceMapper only), or "both" (default).
+ */
+async function handleTestSentenceBBoxesHttpRequest(request: any) {
+    const { MuPDFService } = await import('../../src/services/pdf/MuPDFService');
+    const { buildFeasibilityReport } = await import('../../src/services/pdf/SentenceMapper');
+    const { buildParagraphFeasibilityReport } = await import(
+        '../../src/services/pdf/ParagraphSentenceMapper'
+    );
+
+    const { library_id, zotero_key, page_index, mode } = request;
+    if (library_id == null || zotero_key == null) {
+        return { error: 'Provide library_id + zotero_key' };
+    }
+    const pageIndex = typeof page_index === 'number' ? page_index : 0;
+    const runMode: 'page' | 'paragraph' | 'both' =
+        mode === 'page' || mode === 'paragraph' ? mode : 'both';
+
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item || !item.isAttachment() || !item.isPDFAttachment()) {
+        return { error: 'Item is not a PDF attachment' };
+    }
+    const filePath = await item.getFilePathAsync();
+    if (!filePath) return { error: 'PDF file not available locally' };
+
+    const pdfData = await IOUtils.read(filePath);
+    const mupdf = new MuPDFService();
+    try {
+        await mupdf.open(pdfData);
+        const pageCount = mupdf.getPageCount();
+        if (pageIndex < 0 || pageIndex >= pageCount) {
+            return { error: `page_index out of range (0..${pageCount - 1})` };
+        }
+
+        // Time the shared walk pass once so we can report it.
+        const walkStart = Date.now();
+        const detailed = mupdf.extractRawPageDetailed(pageIndex);
+        const walkMs = Date.now() - walkStart;
+
+        let pageReport: unknown = null;
+        let pageMs = 0;
+        if (runMode === 'page' || runMode === 'both') {
+            const t = Date.now();
+            pageReport = buildFeasibilityReport(detailed);
+            pageMs = Date.now() - t;
+        }
+
+        let paragraphReport: unknown = null;
+        let paragraphMs = 0;
+        if (runMode === 'paragraph' || runMode === 'both') {
+            const t = Date.now();
+            paragraphReport = buildParagraphFeasibilityReport(detailed);
+            paragraphMs = Date.now() - t;
+        }
+
+        return {
+            ok: true,
+            page_count: pageCount,
+            page_width: detailed.width,
+            page_height: detailed.height,
+            num_blocks: detailed.blocks.length,
+            timings_ms: {
+                walk: walkMs,
+                page_mapper: pageMs,
+                paragraph_mapper: paragraphMs,
+            },
+            report: pageReport,
+            paragraph_report: paragraphReport,
+        };
+    } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+    } finally {
+        mupdf.close();
+    }
+}
+
 
 // =============================================================================
 // Registration Functions
@@ -657,6 +744,9 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/sentence-bboxes'] =
+            createEndpoint(handleTestSentenceBBoxesHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

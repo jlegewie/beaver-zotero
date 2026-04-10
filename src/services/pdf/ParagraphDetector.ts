@@ -122,6 +122,14 @@ export interface PageParagraphResult {
     paragraphCount: number;
     /** Count of headers */
     headerCount: number;
+    /**
+     * Per-item constituent `PageLine[]`, in reading order, aligned with
+     * `items` by index. Only populated when `detectParagraphs` is called
+     * with `options.trackItemLines === true`. This lets downstream code
+     * (e.g. sentence-bbox mapping) recover the source lines that were
+     * grouped into each paragraph without re-running detection.
+     */
+    itemLines?: PageLine[][];
 }
 
 /**
@@ -666,11 +674,13 @@ function processColumnLines(
 ): {
     pageContent: string;
     items: ContentItem[];
+    itemLines: PageLine[][];
     paragraphCount: number;
     headerCount: number;
 } {
     let pageContent = initialPageContent;
     const items: ContentItem[] = [];
+    const itemLines: PageLine[][] = [];
     let paragraphIndex = 0;
     let headerIndex = 0;
 
@@ -708,6 +718,7 @@ function processColumnLines(
 
                 pageContent = result.pageContent;
                 items.push(result.item);
+                itemLines.push(currentLines);
 
                 if (result.item.type === "header") {
                     headerIndex++;
@@ -738,6 +749,7 @@ function processColumnLines(
 
         pageContent = result.pageContent;
         items.push(result.item);
+        itemLines.push(currentLines);
 
         if (result.item.type === "header") {
             headerIndex++;
@@ -749,6 +761,7 @@ function processColumnLines(
     return {
         pageContent,
         items,
+        itemLines,
         paragraphCount: paragraphIndex,
         headerCount: headerIndex,
     };
@@ -759,13 +772,27 @@ function processColumnLines(
 // ============================================================================
 
 /**
+ * Options for `detectParagraphs`.
+ */
+export interface DetectParagraphsOptions {
+    /**
+     * When true, the returned `PageParagraphResult` will include an
+     * `itemLines` array aligned with `items`: one `PageLine[]` per
+     * content item, in reading order. Defaults to false so existing
+     * callers pay nothing.
+     */
+    trackItemLines?: boolean;
+}
+
+/**
  * Detect paragraphs and headers from line detection results
  */
 export function detectParagraphs(
     lineResult: PageLineResult,
     bodyStyles: TextStyle[] | null,
     settings: ParagraphDetectionSettings = {},
-    itemCounters: ItemCounters = { paragraph: 0, header: 0 }
+    itemCounters: ItemCounters = { paragraph: 0, header: 0 },
+    options: DetectParagraphsOptions = {}
 ): PageParagraphResult {
     const opts = { ...DEFAULT_SETTINGS, ...settings };
 
@@ -774,6 +801,7 @@ export function detectParagraphs(
 
     let pageContent = "";
     const allItems: ContentItem[] = [];
+    const allItemLines: PageLine[][] = [];
     let totalParagraphs = 0;
     let totalHeaders = 0;
 
@@ -803,11 +831,14 @@ export function detectParagraphs(
 
         pageContent = result.pageContent;
         allItems.push(...result.items);
+        if (options.trackItemLines) {
+            allItemLines.push(...result.itemLines);
+        }
         totalParagraphs += result.paragraphCount;
         totalHeaders += result.headerCount;
     }
 
-    return {
+    const baseResult: PageParagraphResult = {
         pageIndex: lineResult.pageIndex,
         width: lineResult.width,
         height: lineResult.height,
@@ -816,6 +847,12 @@ export function detectParagraphs(
         paragraphCount: totalParagraphs,
         headerCount: totalHeaders,
     };
+
+    if (options.trackItemLines) {
+        baseResult.itemLines = allItemLines;
+    }
+
+    return baseResult;
 }
 
 /**

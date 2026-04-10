@@ -106,3 +106,82 @@ export async function resolveItem(
         zotero_key: key,
     });
 }
+
+// ---------------------------------------------------------------------------
+// Sentence bbox feasibility probe
+// ---------------------------------------------------------------------------
+
+export interface SentenceBBoxReportSentence {
+    index: number;
+    text: string;
+    numBBoxes: number;
+    unionBBox: { x: number; y: number; w: number; h: number };
+}
+
+export interface SentenceBBoxReport {
+    pageIndex: number;
+    totalChars: number;
+    totalLines: number;
+    totalSentences: number;
+    multiFragmentSentences: number;
+    pageTextLength: number;
+    invariantHolds: boolean;
+    allBBoxesInPage: boolean;
+    sentences: SentenceBBoxReportSentence[];
+}
+
+export interface ParagraphSentenceReportParagraph {
+    index: number;
+    itemType: 'paragraph' | 'header';
+    numLines: number;
+    paragraphText: string;
+    numSentences: number;
+    sentences: Array<{
+        text: string;
+        numBBoxes: number;
+        unionBBox: { x: number; y: number; w: number; h: number };
+    }>;
+}
+
+export interface ParagraphSentenceBBoxReport {
+    pageIndex: number;
+    totalParagraphs: number;
+    totalHeaders: number;
+    mappedParagraphs: number;
+    unmappedParagraphs: number;
+    totalSentences: number;
+    multiFragmentSentences: number;
+    invariantHolds: boolean;
+    allBBoxesInPage: boolean;
+    paragraphs: ParagraphSentenceReportParagraph[];
+}
+
+export interface SentenceBBoxResponse {
+    ok?: boolean;
+    error?: string;
+    page_count?: number;
+    page_width?: number;
+    page_height?: number;
+    num_blocks?: number;
+    timings_ms?: {
+        walk: number;
+        page_mapper: number;
+        paragraph_mapper: number;
+    };
+    report?: SentenceBBoxReport;
+    paragraph_report?: ParagraphSentenceBBoxReport;
+}
+
+export async function getSentenceBBoxReport(
+    libraryId: number,
+    key: string,
+    pageIndex = 0,
+    mode: 'page' | 'paragraph' | 'both' = 'both',
+): Promise<SentenceBBoxResponse> {
+    return post<SentenceBBoxResponse>('/beaver/test/sentence-bboxes', {
+        library_id: libraryId,
+        zotero_key: key,
+        page_index: pageIndex,
+        mode,
+    });
+}
