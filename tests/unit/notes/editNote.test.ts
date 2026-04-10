@@ -23,6 +23,7 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
     validateNewString: vi.fn(() => null),
     findFuzzyMatch: vi.fn(() => null),
+    findInlineTagDriftMatch: vi.fn(() => null),
     findUniqueRawMatchPosition: vi.fn(() => null),
     captureValidatedEditTargetContext: vi.fn(() => null),
     findTargetRawMatchPosition: vi.fn(() => null),
@@ -119,6 +120,7 @@ import {
     getLatestNoteHtml,
     validateNewString,
     findFuzzyMatch,
+    findInlineTagDriftMatch,
     findUniqueRawMatchPosition,
     captureValidatedEditTargetContext,
     findTargetRawMatchPosition,
@@ -382,6 +384,35 @@ describe('validateEditNoteAction — failures', () => {
         expect(response.valid).toBe(false);
         expect(response.error_code).toBe('old_string_not_found');
         expect(response.error).toContain('possible match here');
+    });
+
+    it('old_string_not_found with inline-tag drift hint', async () => {
+        // Simulate the case where old_string text matches a unique span in the
+        // note, but is missing inline formatting tags (e.g. <strong>) that the
+        // note has. The drift branch should fire BEFORE the generic fuzzy match.
+        vi.mocked(countOccurrences).mockReturnValueOnce(0);
+        vi.mocked(findInlineTagDriftMatch).mockReturnValueOnce({
+            noteSpan: 'experienced <strong>substantial</strong> negative effects',
+            droppedTags: ['<strong>', '</strong>'],
+        });
+        // findFuzzyMatch should NOT be consulted when drift detection succeeds.
+        const fuzzySpy = vi.mocked(findFuzzyMatch);
+
+        const response = await handleAgentActionValidateRequest(makeValidateRequest());
+
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('old_string_not_found');
+        // Surfaces the canonical with-tags note span.
+        expect(response.error).toContain('<strong>substantial</strong>');
+        // Lists the dropped tags.
+        expect(response.error).toContain('Tags missing from old_string');
+        expect(response.error).toContain('<strong> </strong>');
+        // Intent-neutral guidance: must NOT instruct the model to keep tags in
+        // both old_string and new_string (would break unbold edits).
+        expect(response.error).not.toMatch(/in BOTH/i);
+        expect(response.error).toMatch(/keep the same tags.*preserve|omit them.*remove/i);
+        // Drift branch short-circuits the generic fuzzy match.
+        expect(fuzzySpy).not.toHaveBeenCalled();
     });
 
     it('ambiguous_match (multiple matches, no str_replace_all)', async () => {

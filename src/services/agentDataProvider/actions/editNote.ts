@@ -11,6 +11,7 @@ import {
     invalidateSimplificationCache,
     checkDuplicateCitations,
     findFuzzyMatch,
+    findInlineTagDriftMatch,
     validateNewString,
     checkNewCitationItemsExist,
     findUniqueRawMatchPosition,
@@ -562,8 +563,36 @@ async function validateEditNoteAction(
         }
     }
 
-    // 13b. Zero matches — fuzzy match on simplified HTML
+    // 13b. Zero matches — try inline tag drift detection first.
+    //      The model often copies text from read_note but drops inline
+    //      formatting tags (<strong>/<em>/etc.) around individual words.
+    //      Detecting this lets us emit a much more pointed error than the
+    //      generic fuzzy match.
     if (matchCount === 0) {
+        const drift = findInlineTagDriftMatch(simplified, old_string ?? '');
+        if (drift) {
+            const droppedList = drift.droppedTags.join(' ');
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: 'The string to replace was not found in the note. '
+                    + 'Your old_string text matches a span in the note uniquely, '
+                    + 'but is missing inline HTML formatting tags that the note has.\n'
+                    + `Note has:\n\`\`\`\n${drift.noteSpan}\n\`\`\`\n`
+                    + `Your old_string:\n\`\`\`\n${old_string}\n\`\`\`\n`
+                    + `Tags missing from old_string: ${droppedList}.\n`
+                    + 'To fix: copy the "Note has" version above as your old_string '
+                    + '(must match exactly, including all inline tags). Then choose '
+                    + 'new_string based on intent — keep the same tags around the '
+                    + 'same words to preserve the formatting, or omit them to remove '
+                    + 'the formatting.',
+                error_code: 'old_string_not_found',
+                preference: 'always_ask',
+            };
+        }
+
+        // 13b (cont). Fall back to generic fuzzy match on simplified HTML.
         const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
         return {
             type: 'agent_action_validate_response',

@@ -1236,6 +1236,147 @@ export function findFuzzyMatch(simplified: string, searchStr: string): string | 
 }
 
 // =============================================================================
+// Inline Tag Drift Detection
+// =============================================================================
+
+/**
+ * Inline formatting tags that the model commonly drops from old_string when
+ * copying text from a note. These are character-level wrappers, so dropping
+ * them changes the HTML but not the visible text.
+ */
+const INLINE_FORMAT_TAG_NAMES = [
+    'strong', 'b', 'em', 'i', 'u', 's', 'code', 'sup', 'sub', 'mark',
+] as const;
+
+const INLINE_FORMAT_TAG_PATTERN =
+    `</?(?:${INLINE_FORMAT_TAG_NAMES.join('|')})\\b[^>]*>`;
+const INLINE_FORMAT_TAG_RE_GLOBAL = new RegExp(INLINE_FORMAT_TAG_PATTERN, 'gi');
+const INLINE_FORMAT_TAG_RE_ANCHORED = new RegExp(`^${INLINE_FORMAT_TAG_PATTERN}`, 'i');
+
+/** Strip inline formatting tags (strong/em/b/i/u/s/code/sup/sub/mark). */
+function stripInlineFormatTags(s: string): string {
+    return s.replace(INLINE_FORMAT_TAG_RE_GLOBAL, '');
+}
+
+export interface InlineTagDriftMatch {
+    /** The matching span from the note in its original (with-tags) form. */
+    noteSpan: string;
+    /** Tags present in noteSpan but missing from old_string (multiset diff). */
+    droppedTags: string[];
+}
+
+/**
+ * Detect "inline tag drift": when old_string text matches a unique span in
+ * the simplified note after both have inline formatting tags stripped, but
+ * old_string is missing some of the inline tags that the note has.
+ *
+ * Returns null when:
+ *  - old_string is empty
+ *  - the stripped form has no match or multiple matches in the note
+ *  - the matched span is identical to old_string (no actual drift)
+ *  - no tags were dropped (e.g. old_string has more tags than the note)
+ *
+ */
+export function findInlineTagDriftMatch(
+    simplified: string,
+    oldString: string,
+): InlineTagDriftMatch | null {
+    if (!oldString || !oldString.trim()) return null;
+
+    const strippedOld = stripInlineFormatTags(oldString);
+    if (!strippedOld.trim()) return null;
+
+    const strippedSimplified = stripInlineFormatTags(simplified);
+
+    const firstIdx = strippedSimplified.indexOf(strippedOld);
+    if (firstIdx === -1) return null;
+    if (strippedSimplified.indexOf(strippedOld, firstIdx + 1) !== -1) {
+        // Ambiguous — refuse to guess which span the model meant.
+        return null;
+    }
+
+    // Walk simplified, tracking the stripped offset, to map firstIdx and
+    // firstIdx + strippedOld.length back to original positions.
+    const targetStart = firstIdx;
+    const targetEnd = firstIdx + strippedOld.length;
+    let strippedPos = 0;
+    let origStart = -1;
+    let origEnd = -1;
+    let i = 0;
+
+    while (i <= simplified.length) {
+        if (origStart === -1 && strippedPos === targetStart) {
+            origStart = i;
+        }
+        if (strippedPos === targetEnd) {
+            origEnd = i;
+            break;
+        }
+        if (i >= simplified.length) break;
+
+        const tail = simplified.substring(i);
+        const tagMatch = tail.match(INLINE_FORMAT_TAG_RE_ANCHORED);
+        if (tagMatch) {
+            i += tagMatch[0].length;
+        } else {
+            strippedPos++;
+            i++;
+        }
+    }
+
+    if (origStart === -1 || origEnd === -1) return null;
+
+    // Extend leftward through opening inline tags directly preceding origStart.
+    // The text "<strong>foo</strong>" stripped to "foo" — when origStart lands
+    // on "f", we want the span to include the leading "<strong>".
+    const openTagRe = new RegExp(
+        `<(?:${INLINE_FORMAT_TAG_NAMES.join('|')})\\b[^>]*>$`, 'i',
+    );
+    while (origStart > 0) {
+        const m = simplified.substring(0, origStart).match(openTagRe);
+        if (!m) break;
+        origStart -= m[0].length;
+    }
+    // Extend rightward through closing inline tags directly following origEnd.
+    const closeTagRe = new RegExp(
+        `^</(?:${INLINE_FORMAT_TAG_NAMES.join('|')})\\s*>`, 'i',
+    );
+    while (origEnd < simplified.length) {
+        const m = simplified.substring(origEnd).match(closeTagRe);
+        if (!m) break;
+        origEnd += m[0].length;
+    }
+
+    const noteSpan = simplified.substring(origStart, origEnd);
+
+    // No drift if the span is byte-identical to old_string.
+    if (noteSpan === oldString) return null;
+
+    // Compute the multiset of tags present in noteSpan but missing from
+    // old_string. We compare full tag tokens (including attributes) so an
+    // attribute mismatch is treated as a drop, not a match.
+    const noteTags = noteSpan.match(INLINE_FORMAT_TAG_RE_GLOBAL) ?? [];
+    const oldTags = oldString.match(INLINE_FORMAT_TAG_RE_GLOBAL) ?? [];
+    const oldCounts = new Map<string, number>();
+    for (const t of oldTags) {
+        oldCounts.set(t, (oldCounts.get(t) ?? 0) + 1);
+    }
+    const droppedTags: string[] = [];
+    for (const t of noteTags) {
+        const c = oldCounts.get(t) ?? 0;
+        if (c > 0) {
+            oldCounts.set(t, c - 1);
+        } else {
+            droppedTags.push(t);
+        }
+    }
+
+    if (droppedTags.length === 0) return null;
+
+    return { noteSpan, droppedTags };
+}
+
+// =============================================================================
 // Duplicate Citation Check
 // =============================================================================
 
