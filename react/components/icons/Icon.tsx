@@ -5,6 +5,7 @@ interface IconProps {
     size?: number | string;
     color?: string;
     className?: string;
+    style?: React.CSSProperties;
 }
 
 const Icon: React.FC<IconProps> = ({ 
@@ -12,6 +13,7 @@ const Icon: React.FC<IconProps> = ({
     size = '1em',  // Default to 1em to scale with text
     color = 'currentColor',
     className = '',
+    style = {},
     ...props 
 }) => {
     // Remove the wrapper div and directly render the SVG
@@ -21,11 +23,12 @@ const Icon: React.FC<IconProps> = ({
             height={size}
             color={color}
             className={`inline-block align-middle ${className}`}
-            style={{ 
+            style={{
                 // Fix vertical alignment
                 // transform: 'translateY(0.125em)',
                 // Ensure consistent sizing
-                flexShrink: 0
+                flexShrink: 0,
+                ...style, 
             }}
             {...props}
         />

@@ -199,7 +199,6 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         part.tool_name === 'create_collection' ||
         part.tool_name === 'organize_items' ||
         part.tool_name === 'create_items' ||
-        part.tool_name === 'edit_note' ||
         part.tool_name === 'create_note';
     const isExtractConfirmApproval =
         part.tool_name === 'extract' &&
@@ -311,6 +310,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                 pendingApproval={null}
                 hasToolReturn={false}
                 streamingArgs={streamingArgs}
+                runStatus={runStatus}
             />
         );
     }
@@ -325,6 +325,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                 responseIndex={responseIndex}
                 pendingApproval={pendingApproval}
                 hasToolReturn={hasResult}
+                runStatus={runStatus}
             />
         );
     }

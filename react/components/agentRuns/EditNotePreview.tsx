@@ -258,6 +258,19 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
             }
             return segments;
         }
+
+        // Formatting-only changes (e.g. bolding existing text): the plain
+        // text is identical but the control-char markers differ. Word-level
+        // diff garbles these because the markers land mid-word, so instead
+        // we walk both strings in sync and highlight just the regions where
+        // bold/italic state changed.
+        const oldPlain = strippedOld.replace(ALL_MARKERS_RE, '');
+        const newPlain = strippedNew.replace(ALL_MARKERS_RE, '');
+        if (oldPlain && oldPlain === newPlain && strippedOld !== strippedNew) {
+            const fmtDiff = computeFormattingOnlyDiff(strippedOld, strippedNew);
+            if (fmtDiff.length > 0) return fmtDiff;
+        }
+
         return computeInlineDiff(strippedOld, strippedNew);
     }, [strippedOld, strippedNew, needsNoteContext, noteContext]);
 
@@ -273,11 +286,6 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                             {occurrencesReplaced != null && occurrencesReplaced > 0
                                 ? ` — ${occurrencesReplaced} occurrence${occurrencesReplaced === 1 ? '' : 's'}`
                                 : ''}
-                        </div>
-                    )}
-                    {isInsertAfter && (
-                        <div className="text-sm font-color-primary font-medium px-3 py-1">
-                            Insert after
                         </div>
                     )}
                     <div className="inline-diff-container">
@@ -371,6 +379,116 @@ function truncateInlineContext(segments: InlineSegment[], maxContext: number = 8
     }
 
     return result;
+}
+
+// ---- Formatting-only diff ----
+
+interface FormattedChar {
+    char: string;
+    bold: boolean;
+    italic: boolean;
+}
+
+/**
+ * Parse text containing bold/italic/heading control-char markers into a
+ * sequence of characters with their associated formatting state. The
+ * markers themselves are consumed.
+ */
+function parseFormattedText(text: string): FormattedChar[] {
+    const result: FormattedChar[] = [];
+    let bold = false;
+    let italic = false;
+    for (const ch of text) {
+        switch (ch) {
+            case BOLD_START:
+            case HEADING_START:
+                bold = true;
+                break;
+            case BOLD_END:
+            case HEADING_END:
+                bold = false;
+                break;
+            case ITALIC_START:
+                italic = true;
+                break;
+            case ITALIC_END:
+                italic = false;
+                break;
+            default:
+                result.push({ char: ch, bold, italic });
+        }
+    }
+    return result;
+}
+
+/**
+ * Re-serialize a formatted-char sequence back into text with balanced markers
+ * so renderFormattedParagraph can pick up the bold/italic state when it
+ * walks the resulting segment.
+ */
+function serializeFormattedChars(chars: FormattedChar[]): string {
+    let out = '';
+    let bold = false;
+    let italic = false;
+    for (const { char, bold: b, italic: it } of chars) {
+        if (b !== bold) {
+            out += b ? BOLD_START : BOLD_END;
+            bold = b;
+        }
+        if (it !== italic) {
+            out += it ? ITALIC_START : ITALIC_END;
+            italic = it;
+        }
+        out += char;
+    }
+    if (bold) out += BOLD_END;
+    if (italic) out += ITALIC_END;
+    return out;
+}
+
+/**
+ * Compute a diff for edits that only change formatting (e.g. bolding or
+ * italicizing existing text). The caller should only invoke this when the
+ * plain text with markers stripped is identical in both sides. Walks both
+ * strings in sync and emits regions whose bold/italic state differs as
+ * additions so they stand out visually, while unchanged regions become
+ * plain context that still renders with its original formatting.
+ */
+function computeFormattingOnlyDiff(
+    strippedOld: string,
+    strippedNew: string,
+): InlineSegment[] {
+    const oldChars = parseFormattedText(strippedOld);
+    const newChars = parseFormattedText(strippedNew);
+
+    // Defensive: lengths should match since the plain text is identical.
+    // If they don't, bail out so the caller falls back to word-level diff.
+    if (oldChars.length !== newChars.length) return [];
+
+    const segments: InlineSegment[] = [];
+    let buffer: FormattedChar[] = [];
+    let bufferType: 'context' | 'addition' = 'context';
+
+    const flush = () => {
+        if (buffer.length === 0) return;
+        segments.push({ text: serializeFormattedChars(buffer), type: bufferType });
+        buffer = [];
+    };
+
+    for (let i = 0; i < newChars.length; i++) {
+        const o = oldChars[i];
+        const n = newChars[i];
+        const changed = o.bold !== n.bold || o.italic !== n.italic;
+        const type: 'context' | 'addition' = changed ? 'addition' : 'context';
+        if (type !== bufferType) {
+            flush();
+            bufferType = type;
+        }
+        buffer.push(n);
+    }
+    flush();
+
+    return segments;
 }
 
 // ---- Line-level diff computation (used by sourceUtils.ts) ----

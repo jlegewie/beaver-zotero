@@ -2043,6 +2043,7 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
 
     // Clear any pending approvals (for parallel tool calls that were awaiting user response)
     set(clearAllPendingApprovalsAtom);
+    set(clearApprovalResponseIntentsAtom);
     // Clear per-run auto-approve state
     set(clearAutoApproveNoteKeysAtom);
 
@@ -2087,12 +2088,42 @@ export const clearThreadAtom = atom(null, (_get, set) => {
 });
 
 /**
+ * Best-effort local record of approval/reject intent keyed by deferred action id.
+ * Used by views to keep the correct spinner visible after a pending approval is removed.
+ */
+export const approvalResponseIntentsAtom = atom<Map<string, boolean>>(new Map());
+
+export const removeApprovalResponseIntentAtom = atom(
+    null,
+    (_get, set, actionId: string) => {
+        set(approvalResponseIntentsAtom, (prev) => {
+            if (!prev.has(actionId)) return prev;
+            const next = new Map(prev);
+            next.delete(actionId);
+            return next;
+        });
+    },
+);
+
+export const clearApprovalResponseIntentsAtom = atom(
+    null,
+    (_get, set) => {
+        set(approvalResponseIntentsAtom, new Map());
+    },
+);
+
+/**
  * Send approval response for a deferred action.
  * Called by the UI when user approves/rejects an action.
  */
 export const sendApprovalResponseAtom = atom(
     null,
-    (_get, _set, { actionId, approved, userInstructions }: { actionId: string; approved: boolean; userInstructions?: string | null }) => {
+    (_get, set, { actionId, approved, userInstructions }: { actionId: string; approved: boolean; userInstructions?: string | null }) => {
+        set(approvalResponseIntentsAtom, (prev) => {
+            const next = new Map(prev);
+            next.set(actionId, approved);
+            return next;
+        });
         logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
         agentService.sendApprovalResponse(actionId, approved, userInstructions);
     }

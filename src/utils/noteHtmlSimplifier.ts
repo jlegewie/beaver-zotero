@@ -360,14 +360,18 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
 
     // 6. Simplify math to dollar notation
     // Strip HTML wrappers from math elements, leaving dollar-delimited content.
+    // Empty math blocks (`$$$$` / `$$`) are intentionally left as HTML: the
+    // expandToRawHtml regex requires non-empty content between `$` delimiters,
+    // so simplifying them would break the round-trip (the expander can't
+    // rewrap them, and edit_note old_string matching fails).
     // Display math: <pre class="math">$$...$$</pre> → $$...$$
     simplified = simplified.replace(
-        /<pre\s+class="math">(\$\$[^<]*\$\$)<\/pre>/g,
+        /<pre\s+class="math">(\$\$[^<]+\$\$)<\/pre>/g,
         (_match, content) => content
     );
     // Inline math: <span class="math">$...$</span> → $...$
     simplified = simplified.replace(
-        /<span\s+class="math">(\$[^<]*\$)<\/span>/g,
+        /<span\s+class="math">(\$[^<]+\$)<\/span>/g,
         (_match, content) => content
     );
 
@@ -889,6 +893,25 @@ export function expandToRawHtml(
         }
     );
 
+    // Preserve math wrappers that already exist in the edited string. Empty
+    // placeholders now survive simplification as raw HTML, and the model may
+    // keep those wrappers when filling them in. Shield them before the dollar
+    // pass so `$...$` / `$$...$$` inside the wrapper doesn't get re-expanded
+    // into nested math HTML.
+    const preservedMathWrappers: string[] = [];
+    const preserveMathWrapper = (wrapper: string): string => {
+        const idx = preservedMathWrappers.push(wrapper) - 1;
+        return `__BEAVER_RAW_MATH_${idx}__`;
+    };
+    str = str.replace(
+        /<pre\b[^>]*class="math"[^>]*>[\s\S]*?<\/pre>/g,
+        preserveMathWrapper
+    );
+    str = str.replace(
+        /<span\b[^>]*class="math"[^>]*>[\s\S]*?<\/span>/g,
+        preserveMathWrapper
+    );
+
     // Expand math: dollar notation → Zotero HTML wrappers
     //
     // Pre-processing: when the agent places a standalone equation in its own <p>,
@@ -917,6 +940,11 @@ export function expandToRawHtml(
     str = str.replace(
         /(?<!\$)\$(?!\$)(?=\S)((?:[^$\\]|\\.)+?)(?<=\S)\$(?!\$)/g,
         (match) => `<span class="math">${match}</span>`
+    );
+
+    str = str.replace(
+        /__BEAVER_RAW_MATH_(\d+)__/g,
+        (match, idx) => preservedMathWrappers[Number(idx)] ?? match
     );
 
     return str;
@@ -1234,6 +1262,221 @@ export function findFuzzyMatch(simplified: string, searchStr: string): string | 
     // Require at least 30% word overlap
     return bestScore >= 0.3 ? bestLine : null;
 }
+
+// =============================================================================
+// Inline Tag Drift Detection
+// =============================================================================
+
+/**
+ * Inline formatting tags that the model commonly drops from old_string when
+ * copying text from a note. These are character-level wrappers, so dropping
+ * them changes the HTML but not the visible text.
+ */
+const INLINE_FORMAT_TAG_NAMES = [
+    'strong', 'b', 'em', 'i', 'u', 's', 'code', 'sup', 'sub', 'mark',
+] as const;
+
+const INLINE_FORMAT_TAG_PATTERN =
+    `</?(?:${INLINE_FORMAT_TAG_NAMES.join('|')})\\b[^>]*>`;
+const INLINE_FORMAT_TAG_RE_GLOBAL = new RegExp(INLINE_FORMAT_TAG_PATTERN, 'gi');
+const INLINE_FORMAT_TAG_RE_ANCHORED = new RegExp(`^${INLINE_FORMAT_TAG_PATTERN}`, 'i');
+
+/** Strip inline formatting tags (strong/em/b/i/u/s/code/sup/sub/mark). */
+function stripInlineFormatTags(s: string): string {
+    return s.replace(INLINE_FORMAT_TAG_RE_GLOBAL, '');
+}
+
+export interface InlineTagDriftMatch {
+    /** The matching span from the note in its original (with-tags) form. */
+    noteSpan: string;
+    /** Tags present in noteSpan but missing from old_string (multiset diff). */
+    droppedTags: string[];
+}
+
+/**
+ * Detect "inline tag drift": when old_string text matches a unique span in
+ * the simplified note after both have inline formatting tags stripped, but
+ * old_string is missing some of the inline tags that the note has.
+ *
+ * Returns null when:
+ *  - old_string is empty
+ *  - the stripped form has no match or multiple matches in the note
+ *  - the matched span is identical to old_string (no actual drift)
+ *  - no tags were dropped (e.g. old_string has more tags than the note)
+ *
+ */
+export function findInlineTagDriftMatch(
+    simplified: string,
+    oldString: string,
+): InlineTagDriftMatch | null {
+    if (!oldString || !oldString.trim()) return null;
+
+    const strippedOld = stripInlineFormatTags(oldString);
+    if (!strippedOld.trim()) return null;
+
+    const strippedSimplified = stripInlineFormatTags(simplified);
+
+    const firstIdx = strippedSimplified.indexOf(strippedOld);
+    if (firstIdx === -1) return null;
+    if (strippedSimplified.indexOf(strippedOld, firstIdx + 1) !== -1) {
+        // Ambiguous — refuse to guess which span the model meant.
+        return null;
+    }
+
+    // Walk simplified, tracking the stripped offset, to map firstIdx and
+    // firstIdx + strippedOld.length back to original positions.
+    const targetStart = firstIdx;
+    const targetEnd = firstIdx + strippedOld.length;
+    let strippedPos = 0;
+    let origStart = -1;
+    let origEnd = -1;
+    let i = 0;
+
+    while (i <= simplified.length) {
+        if (origStart === -1 && strippedPos === targetStart) {
+            origStart = i;
+        }
+        if (strippedPos === targetEnd) {
+            origEnd = i;
+            break;
+        }
+        if (i >= simplified.length) break;
+
+        const tail = simplified.substring(i);
+        const tagMatch = tail.match(INLINE_FORMAT_TAG_RE_ANCHORED);
+        if (tagMatch) {
+            i += tagMatch[0].length;
+        } else {
+            strippedPos++;
+            i++;
+        }
+    }
+
+    if (origStart === -1 || origEnd === -1) return null;
+
+    // Extend leftward through opening inline tags directly preceding origStart.
+    // The text "<strong>foo</strong>" stripped to "foo" — when origStart lands
+    // on "f", we want the span to include the leading "<strong>".
+    const openTagRe = new RegExp(
+        `<(?:${INLINE_FORMAT_TAG_NAMES.join('|')})\\b[^>]*>$`, 'i',
+    );
+    while (origStart > 0) {
+        const m = simplified.substring(0, origStart).match(openTagRe);
+        if (!m) break;
+        origStart -= m[0].length;
+    }
+    // Extend rightward through closing inline tags directly following origEnd.
+    const closeTagRe = new RegExp(
+        `^</(?:${INLINE_FORMAT_TAG_NAMES.join('|')})\\s*>`, 'i',
+    );
+    while (origEnd < simplified.length) {
+        const m = simplified.substring(origEnd).match(closeTagRe);
+        if (!m) break;
+        origEnd += m[0].length;
+    }
+
+    const noteSpan = simplified.substring(origStart, origEnd);
+
+    // No drift if the span is byte-identical to old_string.
+    if (noteSpan === oldString) return null;
+
+    // Compute the multiset of tags present in noteSpan but missing from
+    // old_string. We compare full tag tokens (including attributes) so an
+    // attribute mismatch is treated as a drop, not a match.
+    const noteTags = noteSpan.match(INLINE_FORMAT_TAG_RE_GLOBAL) ?? [];
+    const oldTags = oldString.match(INLINE_FORMAT_TAG_RE_GLOBAL) ?? [];
+    const oldCounts = new Map<string, number>();
+    for (const t of oldTags) {
+        oldCounts.set(t, (oldCounts.get(t) ?? 0) + 1);
+    }
+    const droppedTags: string[] = [];
+    for (const t of noteTags) {
+        const c = oldCounts.get(t) ?? 0;
+        if (c > 0) {
+            oldCounts.set(t, c - 1);
+        } else {
+            droppedTags.push(t);
+        }
+    }
+
+    if (droppedTags.length === 0) return null;
+
+    return { noteSpan, droppedTags };
+}
+
+// =============================================================================
+// Old-String Citation Ref Enrichment
+// =============================================================================
+
+/**
+ * Enrich no-ref citations in `old_string` with the `ref` attribute from the
+ * metadata map.
+ *
+ * Returns the enriched `oldString`, or `null` if no citations were
+ * enriched (caller should continue with the original `old_string`).
+ */
+export function enrichOldStringCitationRefs(
+    oldString: string,
+    metadata: SimplificationMetadata,
+): string | null {
+    if (!oldString) return null;
+
+    interface Replacement { start: number; end: number; replacement: string; }
+    const replacements: Replacement[] = [];
+
+    const citationRe = /<citation\s+([^/]*?)\s*\/>/g;
+    let m: RegExpExecArray | null;
+    while ((m = citationRe.exec(oldString)) !== null) {
+        const attrStr = m[1];
+        // Skip if it already has a ref — enrichment not needed
+        if (extractAttr(attrStr, 'ref') !== undefined) continue;
+        // Only enrich item_id citations; att_id maps to parent item_id at
+        // simplification time so the reverse lookup isn't unique.
+        const itemId = extractAttr(attrStr, 'item_id');
+        if (!itemId) continue;
+        const page = extractAttr(attrStr, 'page') || undefined;
+
+        // Find metadata entries whose originalAttrs match exactly.
+        let candidateRef: string | null = null;
+        let candidateCount = 0;
+        for (const [ref, el] of metadata.elements) {
+            if (el.type !== 'citation') continue;
+            if (el.originalAttrs?.item_id !== itemId) continue;
+            const storedPage = el.originalAttrs.page || undefined;
+            if (storedPage !== page) continue;
+            candidateRef = ref;
+            candidateCount++;
+            if (candidateCount > 1) break;
+        }
+
+        // Unique candidate only — ambiguous or missing citations fall through.
+        if (candidateCount !== 1 || candidateRef === null) continue;
+
+        // Inject ` ref="..."` before the self-closing `/>`, preserving all
+        // existing attributes verbatim. extractAttr's word-boundary guard
+        // requires the attribute to be preceded by a non-word character, so
+        // we always prepend a space.
+        const trimmedAttrs = attrStr.replace(/\s+$/, '');
+        const enrichedTag = `<citation ${trimmedAttrs} ref="${candidateRef}"/>`;
+
+        replacements.push({
+            start: m.index,
+            end: m.index + m[0].length,
+            replacement: enrichedTag,
+        });
+    }
+
+    if (replacements.length === 0) return null;
+
+    // Apply replacements in reverse order so earlier indices stay valid.
+    let result = oldString;
+    for (let i = replacements.length - 1; i >= 0; i--) {
+        const r = replacements[i];
+        result = result.substring(0, r.start) + r.replacement + result.substring(r.end);
+    }
+    return result;
+}
+
 
 // =============================================================================
 // Duplicate Citation Check

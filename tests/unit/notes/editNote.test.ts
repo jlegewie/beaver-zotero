@@ -23,6 +23,7 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
     validateNewString: vi.fn(() => null),
     findFuzzyMatch: vi.fn(() => null),
+    findInlineTagDriftMatch: vi.fn(() => null),
     findUniqueRawMatchPosition: vi.fn(() => null),
     captureValidatedEditTargetContext: vi.fn(() => null),
     findTargetRawMatchPosition: vi.fn(() => null),
@@ -39,6 +40,7 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     stripSpuriousWrappingTags: vi.fn(() => []),
     normalizeNoteHtml: vi.fn((html: string) => html),
     checkNewCitationItemsExist: vi.fn(() => null),
+    enrichOldStringCitationRefs: vi.fn(() => null),
     stripNoteWrapperDiv: vi.fn((html: string) => {
         const trimmed = html.trim();
         if (!trimmed.startsWith('<div') || !trimmed.endsWith('</div>')) return html;
@@ -119,6 +121,7 @@ import {
     getLatestNoteHtml,
     validateNewString,
     findFuzzyMatch,
+    findInlineTagDriftMatch,
     findUniqueRawMatchPosition,
     captureValidatedEditTargetContext,
     findTargetRawMatchPosition,
@@ -127,6 +130,7 @@ import {
     rebuildDataCitationItems,
     preloadPageLabelsForNewCitations,
     stripPartialSimplifiedElements,
+    enrichOldStringCitationRefs,
 } from '../../../src/utils/noteHtmlSimplifier';
 import { getDeferredToolPreference } from '../../../src/services/agentDataProvider/utils';
 import { store } from '../../../react/store';
@@ -247,6 +251,7 @@ beforeEach(() => {
     vi.mocked(checkDuplicateCitations).mockReturnValue(null);
     vi.mocked(invalidateSimplificationCache).mockImplementation(() => {});
     vi.mocked(preloadPageLabelsForNewCitations).mockResolvedValue(undefined);
+    vi.mocked(enrichOldStringCitationRefs).mockReturnValue(null);
 });
 
 
@@ -382,6 +387,35 @@ describe('validateEditNoteAction — failures', () => {
         expect(response.valid).toBe(false);
         expect(response.error_code).toBe('old_string_not_found');
         expect(response.error).toContain('possible match here');
+    });
+
+    it('old_string_not_found with inline-tag drift hint', async () => {
+        // Simulate the case where old_string text matches a unique span in the
+        // note, but is missing inline formatting tags (e.g. <strong>) that the
+        // note has. The drift branch should fire BEFORE the generic fuzzy match.
+        vi.mocked(countOccurrences).mockReturnValueOnce(0);
+        vi.mocked(findInlineTagDriftMatch).mockReturnValueOnce({
+            noteSpan: 'experienced <strong>substantial</strong> negative effects',
+            droppedTags: ['<strong>', '</strong>'],
+        });
+        // findFuzzyMatch should NOT be consulted when drift detection succeeds.
+        const fuzzySpy = vi.mocked(findFuzzyMatch);
+
+        const response = await handleAgentActionValidateRequest(makeValidateRequest());
+
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('old_string_not_found');
+        // Surfaces the canonical with-tags note span.
+        expect(response.error).toContain('<strong>substantial</strong>');
+        // Lists the dropped tags.
+        expect(response.error).toContain('Tags missing from old_string');
+        expect(response.error).toContain('<strong> </strong>');
+        // Intent-neutral guidance: must NOT instruct the model to keep tags in
+        // both old_string and new_string (would break unbold edits).
+        expect(response.error).not.toMatch(/in BOTH/i);
+        expect(response.error).toMatch(/keep the same tags.*preserve|omit them.*remove/i);
+        // Drift branch short-circuits the generic fuzzy match.
+        expect(fuzzySpy).not.toHaveBeenCalled();
     });
 
     it('ambiguous_match (multiple matches, no str_replace_all)', async () => {
@@ -951,5 +985,172 @@ describe('trailing whitespace normalization in matching', () => {
         const response = await handleAgentActionValidateRequest(req);
         // "Hello\n\nworld" is not in the note, and trimming trailing \n won't help
         expect(response.valid).toBe(false);
+    });
+});
+
+
+// =============================================================================
+// Citation ref enrichment (no-ref citations in old_string)
+// =============================================================================
+//
+// These tests verify the fix for the failure mode observed in
+// failed-edits-15.md, where the model reused the form it wrote in an
+// earlier edit_note (citation without a ref attribute) as its old_string
+// in a follow-up edit. Without enrichment, expansion throws
+// "New citations (without a ref) can only appear in new_string".
+//
+// The integration tests here only verify the wiring between the
+// validate/execute paths and `enrichOldStringCitationRefs`; the deep
+// per-case logic is covered by the unit tests in
+// `noteHtmlSimplifier.test.ts`.
+
+describe('citation ref enrichment — validate', () => {
+    // Using simple text tokens (instead of full citation HTML) so the mocked
+    // identity expandToRawHtml produces something that countOccurrences can
+    // find verbatim in the note HTML. The goal here is to verify WIRING —
+    // that enrichment runs and its output flows into normalized_action_data
+    // and the executor. The per-case parsing logic for citation tags is
+    // covered by the unit tests in noteHtmlSimplifier.test.ts.
+    let mockItem: any;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        // Note contains the "enriched" form of the string.
+        const noteHtml = '<div data-schema-version="9"><p>See CITATION_WITH_REF</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified: noteHtml,
+            metadata: { elements: new Map() } as any,
+            isStale: false,
+        });
+        vi.mocked(getDeferredToolPreference).mockReturnValue('always_ask');
+    });
+
+    it('enriched old_string is carried through validation and surfaces in normalized_action_data', async () => {
+        // Simulate enrichment: swap the no-ref token for the enriched token.
+        vi.mocked(enrichOldStringCitationRefs).mockImplementation((oldStr: string) => {
+            if (oldStr.includes('CITATION_NO_REF')) {
+                return oldStr.replace('CITATION_NO_REF', 'CITATION_WITH_REF');
+            }
+            return null;
+        });
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                // "Before enrichment" form — doesn't exist verbatim in the note.
+                old_string: 'See CITATION_NO_REF',
+                new_string: 'See UPDATED_CITATION',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(enrichOldStringCitationRefs).toHaveBeenCalled();
+        expect(response.valid).toBe(true);
+        // Enriched old_string threaded through to normalized_action_data so
+        // the executor uses it instead of the model's original no-ref form.
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data!.old_string).toBe('See CITATION_WITH_REF');
+        // new_string is untouched by enrichment
+        expect(response.normalized_action_data!.new_string).toBe('See UPDATED_CITATION');
+    });
+
+    it('enriched old_string is preserved through the insert_after normalization path', async () => {
+        vi.mocked(enrichOldStringCitationRefs).mockImplementation((oldStr: string) => {
+            if (oldStr.includes('CITATION_NO_REF')) {
+                return oldStr.replace('CITATION_NO_REF', 'CITATION_WITH_REF');
+            }
+            return null;
+        });
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'See CITATION_NO_REF',
+                new_string: ' appended',
+                operation: 'insert_after',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        // Enriched old_string + prepended to new_string per insert_after semantics
+        expect(response.normalized_action_data!.old_string).toBe('See CITATION_WITH_REF');
+        expect(response.normalized_action_data!.new_string).toBe('See CITATION_WITH_REF appended');
+    });
+
+    it('no enrichment → no normalized_action_data from enrichment alone', async () => {
+        vi.mocked(enrichOldStringCitationRefs).mockReturnValue(null);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'See CITATION_WITH_REF',
+                new_string: 'See UPDATED_CITATION',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        // No enrichment happened and operation is not insert_after → no
+        // normalized_action_data wrapping from this code path.
+        expect(response.normalized_action_data).toBeUndefined();
+    });
+});
+
+describe('citation ref enrichment — execute (defense-in-depth)', () => {
+    let mockItem: any;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        const noteHtml = '<div data-schema-version="9"><p>See CITATION_WITH_REF</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified: noteHtml,
+            metadata: { elements: new Map() } as any,
+            isStale: false,
+        });
+    });
+
+    it('re-enriches old_string during execute so direct executor calls also benefit', async () => {
+        vi.mocked(enrichOldStringCitationRefs).mockImplementation((oldStr: string) => {
+            if (oldStr.includes('CITATION_NO_REF')) {
+                return oldStr.replace('CITATION_NO_REF', 'CITATION_WITH_REF');
+            }
+            return null;
+        });
+
+        const req = makeExecuteRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                // No-ref form — simulates stale/pre-enrichment action_data.
+                old_string: 'See CITATION_NO_REF',
+                new_string: 'See UPDATED_CITATION',
+            },
+        });
+
+        const response = await handleAgentActionExecuteRequest(req);
+
+        expect(response.success).toBe(true);
+        // Enrichment was invoked during execute (defense-in-depth).
+        expect(enrichOldStringCitationRefs).toHaveBeenCalled();
+        // The enriched form was used for the actual replacement.
+        expect(mockItem.setNote).toHaveBeenCalled();
+        const newHtml = vi.mocked(mockItem.setNote).mock.calls[0]![0] as string;
+        expect(newHtml).toContain('See UPDATED_CITATION');
+        expect(newHtml).not.toContain('CITATION_NO_REF');
+        expect(newHtml).not.toContain('CITATION_WITH_REF');
     });
 });

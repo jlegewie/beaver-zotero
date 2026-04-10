@@ -11,8 +11,10 @@ import {
     invalidateSimplificationCache,
     checkDuplicateCitations,
     findFuzzyMatch,
+    findInlineTagDriftMatch,
     validateNewString,
     checkNewCitationItemsExist,
+    enrichOldStringCitationRefs,
     findUniqueRawMatchPosition,
     captureValidatedEditTargetContext,
     findTargetRawMatchPosition,
@@ -67,8 +69,16 @@ function getEditNotePreference(library_id: number, zotero_key: string): Deferred
 async function validateEditNoteAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { library_id, zotero_key, old_string, new_string, operation: rawOp } = request.action_data as EditNoteProposedData;
+    // `old_string` is `let` because step 10c may enrich no-ref citations in
+    // place (see `enrichOldStringCitationRefs`). All downstream code — including
+    // the fallback normalization paths — operates on the enriched value.
+    const { library_id, zotero_key, new_string, operation: rawOp } = request.action_data as EditNoteProposedData;
+    let { old_string } = request.action_data as EditNoteProposedData;
     const operation: EditNoteOperation = rawOp ?? 'str_replace';
+    // Track whether step 10c modified old_string so success paths that don't
+    // otherwise build a `normalized_action_data` can carry the enrichment
+    // forward to the executor.
+    let oldStringEnriched = false;
 
     // 1. Validate library exists
     const library = Zotero.Libraries.get(library_id);
@@ -260,6 +270,18 @@ async function validateEditNoteAction(
             error_code: 'citation_item_not_found',
             preference: 'always_ask',
         };
+    }
+
+    // 10c. Enrich no-ref citations in old_string with refs from metadata.
+    //      When the model reuses the form it wrote in an earlier edit_note
+    //      (citation without ref) as its old_string in a follow-up edit,
+    //      we look up the corresponding ref from metadata and inject it so
+    //      expansion succeeds instead of throwing "New citations (without a
+    //      ref) can only appear in new_string".
+    const enrichedOldString = enrichOldStringCitationRefs(old_string ?? '', metadata);
+    if (enrichedOldString !== null) {
+        old_string = enrichedOldString;
+        oldStringEnriched = true;
     }
 
     // 11. Dry-run expansion
@@ -562,8 +584,36 @@ async function validateEditNoteAction(
         }
     }
 
-    // 13b. Zero matches — fuzzy match on simplified HTML
+    // 13b. Zero matches — try inline tag drift detection first.
+    //      The model often copies text from read_note but drops inline
+    //      formatting tags (<strong>/<em>/etc.) around individual words.
+    //      Detecting this lets us emit a much more pointed error than the
+    //      generic fuzzy match.
     if (matchCount === 0) {
+        const drift = findInlineTagDriftMatch(simplified, old_string ?? '');
+        if (drift) {
+            const droppedList = drift.droppedTags.join(' ');
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: 'The string to replace was not found in the note. '
+                    + 'Your old_string text matches a span in the note uniquely, '
+                    + 'but is missing inline HTML formatting tags that the note has.\n'
+                    + `Note has:\n\`\`\`\n${drift.noteSpan}\n\`\`\`\n`
+                    + `Your old_string:\n\`\`\`\n${old_string}\n\`\`\`\n`
+                    + `Tags missing from old_string: ${droppedList}.\n`
+                    + 'To fix: copy the "Note has" version above as your old_string '
+                    + '(must match exactly, including all inline tags). Then choose '
+                    + 'new_string based on intent — keep the same tags around the '
+                    + 'same words to preserve the formatting, or omit them to remove '
+                    + 'the formatting.',
+                error_code: 'old_string_not_found',
+                preference: 'always_ask',
+            };
+        }
+
+        // 13b (cont). Fall back to generic fuzzy match on simplified HTML.
         const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
         return {
             type: 'agent_action_validate_response',
@@ -593,6 +643,7 @@ async function validateEditNoteAction(
             if (targetContext) {
                 normalizedActionData = {
                     ...request.action_data as EditNoteProposedData,
+                    ...(oldStringEnriched ? { old_string } : {}),
                     target_before_context: targetContext.beforeContext,
                     target_after_context: targetContext.afterContext,
                 };
@@ -615,9 +666,21 @@ async function validateEditNoteAction(
         // can treat it as a regular str_replace.
         if (operation === 'insert_after') {
             if (!normalizedActionData) {
-                normalizedActionData = { ...request.action_data as EditNoteProposedData };
+                normalizedActionData = {
+                    ...request.action_data as EditNoteProposedData,
+                    ...(oldStringEnriched ? { old_string } : {}),
+                };
             }
             normalizedActionData.new_string = (normalizedActionData.old_string ?? old_string ?? '') + new_string;
+        }
+
+        // Carry enriched old_string forward even when disambiguation succeeded
+        // via the unique raw-position path (no target context captured).
+        if (!normalizedActionData && oldStringEnriched) {
+            normalizedActionData = {
+                ...request.action_data as EditNoteProposedData,
+                old_string,
+            };
         }
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
@@ -644,7 +707,14 @@ async function validateEditNoteAction(
     if (operation === 'insert_after') {
         normalizedActionData = {
             ...request.action_data as EditNoteProposedData,
+            ...(oldStringEnriched ? { old_string } : {}),
             new_string: (old_string ?? '') + new_string,
+        };
+    } else if (oldStringEnriched) {
+        // Carry the enriched old_string forward so the executor sees it.
+        normalizedActionData = {
+            ...request.action_data as EditNoteProposedData,
+            old_string,
         };
     }
 
@@ -680,10 +750,14 @@ async function executeEditNoteAction(
     const {
         library_id,
         zotero_key,
-        old_string,
         new_string,
         operation: rawOp,
     } = request.action_data as EditNoteProposedData;
+    // `old_string` is `let` because we may enrich no-ref citations with their
+    // stored refs before expansion (step 5b). This is defense-in-depth: validate
+    // already enriches and emits `normalized_action_data`, but we re-enrich here
+    // so direct executor calls (or stale action_data) also benefit.
+    let { old_string } = request.action_data as EditNoteProposedData;
     const operation: EditNoteOperation = rawOp ?? 'str_replace';
     let {
         target_before_context,
@@ -810,6 +884,15 @@ async function executeEditNoteAction(
     }
 
     // ── String replacement mode (default) ──
+
+    // 5b. Enrich no-ref citations in old_string with refs from metadata.
+    //     Defense-in-depth: validation normally emits this via
+    //     normalized_action_data, but re-running here protects against stale
+    //     or skipped validation.
+    const enrichedOldString = enrichOldStringCitationRefs(old_string ?? '', metadata);
+    if (enrichedOldString !== null) {
+        old_string = enrichedOldString;
+    }
 
     // 6. Expand old_string and new_string to raw HTML
     let expandedOld: string;
