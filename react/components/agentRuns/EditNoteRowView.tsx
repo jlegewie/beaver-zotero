@@ -4,6 +4,7 @@ import {
     AlertIcon,
     ArrowUpRightIcon,
     CancelIcon,
+    EditIcon,
     Icon,
     RepeatIcon,
     Spinner,
@@ -70,15 +71,19 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
     return (
         <div className="agent-action-view rounded-md flex flex-col min-w-0">
             <div className="display-flex flex-row min-w-0">
-                <div className="display-flex flex-col items-center gap-25 px-2 py-2 flex-shrink-0 ml-05">
+                <div className="display-flex flex-col items-center gap-25 px-2 py-2 flex-shrink-0" style={{ marginLeft: '0.225rem' }}>
                     {isStreamingPlaceholder ? (
                         <div className="display-flex items-center mt-010">
                             <Spinner size={13} className="font-color-secondary scale-10" style={{ marginLeft: '0.185rem' }} />
                         </div>
                     ) : (
-                        config.icon && config.icon !== Spinner && (
+                        config.icon && config.icon !== Spinner ? (
                             <div className="display-flex items-center mt-010">
-                                <Icon icon={config.icon} className={`${config.iconClassName} scale-10`} />
+                                <Icon icon={config.icon} className={`${config.iconClassName}`} style={{ transform: 'scale(1)' }} />
+                            </div>
+                        ) : (
+                            <div className="display-flex items-center mt-010 scale-10">
+                                <Icon icon={EditIcon} className="font-color-secondary opacity-0" />
                             </div>
                         )
                     )}
@@ -99,18 +104,6 @@ export const EditNoteRowView: React.FC<EditNoteRowViewProps> = ({
                 </div>
 
                 <div className="display-flex flex-col gap-25 py-2 mr-2">
-                    {showOpenNoteAction && (
-                        <Tooltip content={openNoteTooltip} showArrow singleLine>
-                            <IconButton
-                                icon={ArrowUpRightIcon}
-                                variant="ghost-secondary"
-                                iconClassName="scale-10"
-                                onClick={handleOpenNote}
-                                disabled={actionButtonsDisabled}
-                            />
-                        </Tooltip>
-                    )}
-
                     {isProcessing ? (
                         <>
                             {clickedButton === 'approve' && (

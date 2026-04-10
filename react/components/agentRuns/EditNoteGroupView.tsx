@@ -559,7 +559,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             : undefined);
     const groupLabel = editCount === 1 ? 'Note Edit' : `${editCount} Note Edits`;
     const showCollapsedHeaderActions =
-        !isProcessing && !hasStreamingChild && (aggregateStatus === 'awaiting' || aggregateStatus === 'pending');
+        !isProcessing && !hasStreamingChild && (aggregateStatus === 'awaiting' || aggregateStatus === 'pending') && !isExpanded;
     const rejectableActionCount = useMemo(
         () => pendingApprovalsForGroup.length + allActions.filter((a) => a.status === 'pending').length,
         [pendingApprovalsForGroup, allActions],
