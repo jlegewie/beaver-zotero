@@ -1086,6 +1086,33 @@ describe('citation ref enrichment — validate', () => {
         expect(response.normalized_action_data!.new_string).toBe('See CITATION_WITH_REF appended');
     });
 
+    it('enriched old_string is preserved through the insert_before normalization path', async () => {
+        vi.mocked(enrichOldStringCitationRefs).mockImplementation((oldStr: string) => {
+            if (oldStr.includes('CITATION_NO_REF')) {
+                return oldStr.replace('CITATION_NO_REF', 'CITATION_WITH_REF');
+            }
+            return null;
+        });
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'See CITATION_NO_REF',
+                new_string: 'prepended ',
+                operation: 'insert_before',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        // Enriched old_string + appended to new_string per insert_before semantics
+        expect(response.normalized_action_data!.old_string).toBe('See CITATION_WITH_REF');
+        expect(response.normalized_action_data!.new_string).toBe('prepended See CITATION_WITH_REF');
+    });
+
     it('no enrichment → no normalized_action_data from enrichment alone', async () => {
         vi.mocked(enrichOldStringCitationRefs).mockReturnValue(null);
 
@@ -1101,8 +1128,9 @@ describe('citation ref enrichment — validate', () => {
         const response = await handleAgentActionValidateRequest(req);
 
         expect(response.valid).toBe(true);
-        // No enrichment happened and operation is not insert_after → no
-        // normalized_action_data wrapping from this code path.
+        // No enrichment happened and operation is neither insert_after nor
+        // insert_before → no normalized_action_data wrapping from this code
+        // path.
         expect(response.normalized_action_data).toBeUndefined();
     });
 });

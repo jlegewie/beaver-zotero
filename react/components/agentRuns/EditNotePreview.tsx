@@ -158,6 +158,7 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     const isDelete = newString === '';
     const isRewrite = operation === 'rewrite';
     const isInsertAfter = operation === 'insert_after';
+    const isInsertBefore = operation === 'insert_before';
 
     // For rewrite mode when oldContent is missing (e.g. after undo),
     // fetch the current note content — the note is back to its original state.
@@ -188,16 +189,19 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
 
     // For rewrite mode, use oldContent prop, fetched content, or fall back to oldString
     const effectiveOld = isRewrite && (oldContent || fetchedOldContent) ? (oldContent || fetchedOldContent!) : oldString;
-    // For insert_after, new_string is already normalized by validation to include
-    // old_string as a prefix (via normalized_action_data), so diffWords will
-    // naturally show old_string as context and the appended text as addition.
+    // For insert_after / insert_before, new_string is already normalized by
+    // validation to merge old_string with new_string (via normalized_action_data):
+    //   - insert_after:  new_string = old_string + new_string
+    //   - insert_before: new_string = new_string + old_string
+    // so diffWords will naturally show old_string as context and the inserted
+    // text as addition.
     const strippedOld = normalizeForInlineDiff(stripHtmlPreserveFormatting(effectiveOld));
     const strippedNew = normalizeForInlineDiff(stripHtmlPreserveFormatting(newString));
 
     // When strippedOld is empty (old_string was pure HTML structure), fetch
     // surrounding visible text from the full note for context.
     // Skip for rewrite mode — we already have the full old content.
-    const needsNoteContext = !isRewrite && !isInsertAfter && strippedOld === '' && effectiveOld !== '' && strippedNew !== '';
+    const needsNoteContext = !isRewrite && !isInsertAfter && !isInsertBefore && strippedOld === '' && effectiveOld !== '' && strippedNew !== '';
     const [noteContext, setNoteContext] = useState<{ before: string; after: string } | null>(null);
 
     useEffect(() => {
@@ -278,7 +282,7 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
         <div className="edit-note-preview">
             <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1">
-                    {/* Show header for str_replace_all and insert_after modes */}
+                    {/* Show header for str_replace_all mode */}
                     {operation === 'str_replace_all' && (
                         <div className="text-sm font-color-primary font-medium px-3 py-1">
                             {isDelete ? 'Delete' : 'Replace'}

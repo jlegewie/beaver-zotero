@@ -189,9 +189,11 @@ export async function executeEditNoteAction(
         target_before_context?: string;
         target_after_context?: string;
     };
-    // For insert_after, new_string is already normalized by validation to
-    // include old_string as a prefix (via normalized_action_data), so the
-    // rest of the function treats it as a regular str_replace.
+    // For insert_after / insert_before, new_string is already normalized by
+    // validation to merge old_string with new_string (via normalized_action_data):
+    //   - insert_after:  new_string = old_string + new_string
+    //   - insert_before: new_string = new_string + old_string
+    // so the rest of the function treats it as a regular str_replace.
     const operation: EditNoteOperation = rawOp ?? 'str_replace';
     let {
         target_before_context,
