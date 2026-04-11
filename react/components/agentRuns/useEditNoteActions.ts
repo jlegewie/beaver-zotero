@@ -66,15 +66,24 @@ export async function dismissActiveEditNotePreview(): Promise<void> {
     store.set(diffPreviewNoteKeyAtom, null);
 }
 
-async function waitForNoteEditorReady(libraryId: number, zoteroKey: string): Promise<void> {
-    await new Promise<void>((resolve) => {
+async function waitForNoteEditorReady(libraryId: number, zoteroKey: string): Promise<boolean> {
+    return await new Promise<boolean>((resolve) => {
         let attempts = 0;
         const check = () => {
-            if (isNoteOpenInEditor(libraryId, zoteroKey) || ++attempts > 25) {
-                resolve();
-            } else {
-                setTimeout(check, 200);
+            if (isNoteOpenInEditor(libraryId, zoteroKey)) {
+                resolve(true);
+                return;
             }
+            if (++attempts > 25) {
+                logger(
+                    `waitForNoteEditorReady: timed out after ${attempts} attempts (~${300 + 25 * 200}ms) `
+                    + `waiting for editor for ${libraryId}-${zoteroKey}`,
+                    1,
+                );
+                resolve(false);
+                return;
+            }
+            setTimeout(check, 200);
         };
         setTimeout(check, 300);
     });
@@ -84,10 +93,10 @@ export async function showEditNotePreviewForEdits(
     target: EditNoteResolvedTarget,
     edits: EditOperation[],
     onAction: (bannerAction: 'approve' | 'reject') => void,
-): Promise<void> {
+): Promise<boolean> {
     await openNoteByKey(target.libraryId, target.zoteroKey);
     await waitForNoteEditorReady(target.libraryId, target.zoteroKey);
-    showDiffPreview(target.libraryId, target.zoteroKey, edits, {
+    return await showDiffPreview(target.libraryId, target.zoteroKey, edits, {
         onAction: (bannerAction) => {
             onAction(bannerAction === 'approve' ? 'approve' : 'reject');
         },

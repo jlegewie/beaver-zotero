@@ -512,7 +512,14 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     }, [allActions]);
 
     const handlePreviewInEditor = useCallback(async () => {
-        if (!DIFF_PREVIEW_ENABLED || !resolvedTarget) return;
+        if (!DIFF_PREVIEW_ENABLED) {
+            logger(`EditNoteGroupView: handlePreviewInEditor — aborting, DIFF_PREVIEW_ENABLED is false`, 1);
+            return;
+        }
+        if (!resolvedTarget) {
+            logger(`EditNoteGroupView: handlePreviewInEditor — aborting, no resolvedTarget for ${noteKeyLabel}`, 1);
+            return;
+        }
         const edits = hasPendingApprovals
             ? buildPreviewableEditOperations(pendingApprovalsForGroup.map((pending) => pending.actionData))
             : buildPreviewableEditOperations(reapplicableActions.map((action) => action.proposed_data));
@@ -521,13 +528,23 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             return;
         }
 
-        await showEditNotePreviewForEdits(resolvedTarget, edits, (bannerAction) => {
-            if (bannerAction === 'approve') {
-                handleApplyAll();
-            } else {
-                handleRejectAll();
-            }
-        });
+        try {
+            await showEditNotePreviewForEdits(resolvedTarget, edits, (bannerAction) => {
+                if (bannerAction === 'approve') {
+                    handleApplyAll();
+                } else {
+                    handleRejectAll();
+                }
+            });
+        } catch (error: any) {
+            const errorMessage = error?.message || 'Unknown error';
+            const stackTrace = error?.stack || '';
+            logger(
+                `EditNoteGroupView: handlePreviewInEditor — failed to show preview for ${noteKeyLabel}: `
+                + `${errorMessage}\n${stackTrace}`,
+                1,
+            );
+        }
     }, [
         resolvedTarget,
         hasPendingApprovals,

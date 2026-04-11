@@ -24,6 +24,10 @@ import {
     stripDataCitationItems,
     rebuildDataCitationItems,
     getLatestNoteHtml,
+    normalizeNoteHtml,
+    decodeHtmlEntities,
+    encodeTextEntities,
+    ENTITY_FORMS,
 } from '../../src/utils/noteHtmlSimplifier';
 
 // =============================================================================
@@ -197,8 +201,12 @@ export async function showDiffPreview(
     edits: EditOperation[],
     options?: DiffPreviewOptions,
 ): Promise<boolean> {
+    const noteKey = `${libraryId}-${zoteroKey}`;
     try {
-        if (edits.length === 0) return false;
+        if (edits.length === 0) {
+            logger(`showDiffPreview: aborting for ${noteKey}, edits array is empty`, 1);
+            return false;
+        }
 
         const hash = computeEditsHash(edits);
 
@@ -209,6 +217,7 @@ export async function showDiffPreview(
             && activePreview.zoteroKey === zoteroKey
             && activePreview.editsHash === hash
         ) {
+            logger(`showDiffPreview: dedup hit for ${noteKey}, scrolling to existing preview`, 1);
             scrollToDiff(activePreview.editorInstance);
             return true;
         }
@@ -217,21 +226,49 @@ export async function showDiffPreview(
         dismissDiffPreview();
         const myGeneration = ++generation;
 
-        if (!areEditorApisAvailable()) return false;
+        if (!areEditorApisAvailable()) {
+            logger(`showDiffPreview: aborting for ${noteKey}, Zotero.Notes._editorInstances not available`, 1);
+            return false;
+        }
 
         const itemId = Zotero.Items.getIDFromLibraryAndKey(libraryId, zoteroKey);
-        if (!itemId) return false;
+        if (!itemId) {
+            logger(`showDiffPreview: aborting for ${noteKey}, no itemId for libraryId=${libraryId} zoteroKey=${zoteroKey}`, 1);
+            return false;
+        }
 
         const inst = findEditorInstance(itemId);
-        if (!inst) return false;
+        if (!inst) {
+            logger(
+                `showDiffPreview: aborting for ${noteKey}, no usable editor instance for itemId=${itemId} `
+                + `(findEditorInstance returned null — note may not be open, or editor not yet initialized)`,
+                1,
+            );
+            return false;
+        }
 
         const item = await Zotero.Items.getAsync(itemId);
-        if (myGeneration !== generation) return false;
-        if (!item) return false;
+        if (myGeneration !== generation) {
+            logger(`showDiffPreview: aborting for ${noteKey}, generation changed after Items.getAsync`, 1);
+            return false;
+        }
+        if (!item) {
+            logger(`showDiffPreview: aborting for ${noteKey}, Items.getAsync returned null for itemId=${itemId}`, 1);
+            return false;
+        }
         await item.loadDataType('note');
-        if (myGeneration !== generation) return false;
+        if (myGeneration !== generation) {
+            logger(`showDiffPreview: aborting for ${noteKey}, generation changed after loadDataType('note')`, 1);
+            return false;
+        }
 
         const rawHtml = getLatestNoteHtml(item);
+        // Normalize through ProseMirror to match what simplifyNoteHtml exposes
+        // to the model. Without this, entity encoding differences (e.g. the
+        // note has `&#x27;` but the model wrote `'`) cause constructMultiDiffHtml's
+        // indexOf to miss. Mirrors the match strategy in
+        // src/services/agentDataProvider/actions/editNote.ts (lines 309, 914).
+        const normalizedHtml = normalizeNoteHtml(rawHtml);
         const noteId = `${libraryId}-${zoteroKey}`;
         const { metadata } = getOrSimplify(noteId, rawHtml, libraryId);
 
@@ -253,17 +290,45 @@ export async function showDiffPreview(
                     // so computeHtmlDiff will naturally show the anchor as
                     // context and the insertion as addition.
                     const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new') : '';
-                    if (expandedOld) expandedEdits.push({ expandedOld, expandedNew, operation: op });
+                    if (expandedOld) {
+                        expandedEdits.push({ expandedOld, expandedNew, operation: op });
+                    } else {
+                        logger(
+                            `showDiffPreview: dropping edit for ${noteKey} — expandedOld is empty `
+                            + `(op=${op}, oldStringLen=${edit.oldString?.length ?? 0}, `
+                            + `newStringLen=${edit.newString?.length ?? 0}) — `
+                            + `expandToRawHtml could not locate old_string in the current note`,
+                            1,
+                        );
+                    }
                 }
             } catch (e: any) {
-                logger(`showDiffPreview: expansion failed for one edit: ${e.message}`, 1);
+                logger(`showDiffPreview: expansion failed for one edit in ${noteKey}: ${e.message}`, 1);
             }
         }
-        if (expandedEdits.length === 0) return false;
-        if (myGeneration !== generation) return false;
+        if (expandedEdits.length === 0) {
+            logger(
+                `showDiffPreview: aborting for ${noteKey}, no edits survived expansion `
+                + `(attempted ${edits.length}) — check that old_string still matches current note content`,
+                1,
+            );
+            return false;
+        }
+        if (myGeneration !== generation) {
+            logger(`showDiffPreview: aborting for ${noteKey}, generation changed after expansion`, 1);
+            return false;
+        }
 
-        const diffHtml = constructMultiDiffHtml(rawHtml, expandedEdits);
-        if (!diffHtml) return false;
+        const diffHtml = constructMultiDiffHtml(normalizedHtml, expandedEdits);
+        if (!diffHtml) {
+            logger(
+                `showDiffPreview: aborting for ${noteKey}, constructMultiDiffHtml returned null — `
+                + `expanded old_string not found via indexOf in the raw note HTML `
+                + `(${expandedEdits.length} expanded edit(s) attempted)`,
+                1,
+            );
+            return false;
+        }
 
         // Disable saving
         const wasSavingDisabled = !!inst._disableSaving;
@@ -272,6 +337,7 @@ export async function showDiffPreview(
         try {
             inst.applyIncrementalUpdate({ html: diffHtml }, false);
         } catch (e: any) {
+            logger(`showDiffPreview: applyIncrementalUpdate threw for ${noteKey}: ${e.message}\n${e.stack ?? ''}`, 1);
             inst._disableSaving = wasSavingDisabled;
             return false;
         }
@@ -324,7 +390,7 @@ export async function showDiffPreview(
         logger(`showDiffPreview: preview active for ${noteId} (${expandedEdits.length} edit(s))`, 1);
         return true;
     } catch (e: any) {
-        logger(`showDiffPreview: error: ${e.message}`, 1);
+        logger(`showDiffPreview: error for ${noteKey}: ${e.message}\n${e.stack ?? ''}`, 1);
         return false;
     }
 }
@@ -599,6 +665,134 @@ function findScrollContainer(element: Element): Element | null {
 // Diff Construction
 // =============================================================================
 
+/**
+ * Try to locate edit.expandedOld in `stripped`, falling back through entity
+ * decode/encode variants the way the validation/execution paths do (see
+ * src/services/agentDataProvider/actions/editNote.ts).
+ *
+ * Returns a possibly-rewritten edit whose expandedOld appears verbatim in
+ * `stripped`, or null if no variant matches.
+ *
+ * Order mirrors editNote.ts:
+ *   1. Primary: expandedOld as-is
+ *   2. Decode: note is PM-normalized (literal chars), model wrote entities
+ *   3. Encode: note is pre-PM (entity-encoded), model wrote literal chars —
+ *      try hex, decimal, and named forms
+ */
+function resolveExpandedOldForMatch(
+    stripped: string,
+    edit: { expandedOld: string; expandedNew: string; operation: EditNoteOperation },
+): { expandedOld: string; expandedNew: string; operation: EditNoteOperation } | null {
+    if (stripped.indexOf(edit.expandedOld) !== -1) return edit;
+
+    const decodedOld = decodeHtmlEntities(edit.expandedOld);
+    if (decodedOld !== edit.expandedOld && stripped.indexOf(decodedOld) !== -1) {
+        return {
+            expandedOld: decodedOld,
+            expandedNew: decodeHtmlEntities(edit.expandedNew),
+            operation: edit.operation,
+        };
+    }
+
+    for (const form of ENTITY_FORMS) {
+        const encodedOld = encodeTextEntities(edit.expandedOld, form);
+        if (encodedOld !== edit.expandedOld && stripped.indexOf(encodedOld) !== -1) {
+            return {
+                expandedOld: encodedOld,
+                expandedNew: encodeTextEntities(edit.expandedNew, form),
+                operation: edit.operation,
+            };
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Diagnostic: when stripped.indexOf(expandedOld) returns -1, log enough context
+ * to identify where the two strings diverge. Uses binary search to find the
+ * longest prefix of expandedOld that still exists in stripped, then prints a
+ * snippet from both sides around that divergence point.
+ *
+ * Only invoked on a miss, so the O(log n · indexOf) cost is acceptable.
+ */
+function logExpandedOldMismatch(
+    stripped: string,
+    edit: { expandedOld: string; expandedNew: string; operation: EditNoteOperation },
+): void {
+    const expandedOld = edit.expandedOld;
+    // Binary search: largest k such that expandedOld.slice(0, k) is found in stripped.
+    let lo = 0;
+    let hi = expandedOld.length;
+    while (lo < hi) {
+        const mid = Math.floor((lo + hi + 1) / 2);
+        if (stripped.indexOf(expandedOld.slice(0, mid)) !== -1) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    const matchedPrefixLen = lo;
+
+    logger(
+        `constructMultiDiffHtml: expandedOld NOT FOUND in stripped `
+        + `(op=${edit.operation ?? 'str_replace'}, strippedLen=${stripped.length}, `
+        + `expandedOldLen=${expandedOld.length}, longestMatchingPrefix=${matchedPrefixLen}/${expandedOld.length})`,
+        1,
+    );
+
+    const headSnippet = expandedOld.length <= 400
+        ? expandedOld
+        : expandedOld.slice(0, 400) + '…';
+    logger(
+        `constructMultiDiffHtml: expandedOld head: ${JSON.stringify(headSnippet)}`,
+        1,
+    );
+
+    if (matchedPrefixLen === 0) {
+        // Nothing matches at all — not a partial drift, likely a completely
+        // different encoding (e.g., entity escaping, tag rewriting)
+        logger(
+            `constructMultiDiffHtml: zero prefix match — expandedOld does not share even its first `
+            + `character with any position in stripped. Likely an encoding/normalization difference `
+            + `rather than a content drift.`,
+            1,
+        );
+        return;
+    }
+
+    if (matchedPrefixLen === expandedOld.length) {
+        // Shouldn't happen (indexOf would have succeeded), but guard anyway
+        return;
+    }
+
+    // Locate the prefix in stripped to align the two contexts
+    const prefixInStripped = stripped.indexOf(expandedOld.slice(0, matchedPrefixLen));
+    if (prefixInStripped === -1) return;
+
+    const CTX_BEFORE = 40;
+    const CTX_AFTER = 80;
+    const expandedContext = expandedOld.slice(
+        Math.max(0, matchedPrefixLen - CTX_BEFORE),
+        Math.min(expandedOld.length, matchedPrefixLen + CTX_AFTER),
+    );
+    const strippedContext = stripped.slice(
+        Math.max(0, prefixInStripped + matchedPrefixLen - CTX_BEFORE),
+        Math.min(stripped.length, prefixInStripped + matchedPrefixLen + CTX_AFTER),
+    );
+
+    logger(
+        `constructMultiDiffHtml: divergence at expandedOld[${matchedPrefixLen}] — `
+        + `expandedOld has: ${JSON.stringify(expandedContext)}`,
+        1,
+    );
+    logger(
+        `constructMultiDiffHtml: divergence at stripped[${prefixInStripped + matchedPrefixLen}] — `
+        + `stripped has:    ${JSON.stringify(strippedContext)}`,
+        1,
+    );
+}
+
 function constructMultiDiffHtml(
     fullHtml: string,
     edits: Array<{ expandedOld: string; expandedNew: string; operation: EditNoteOperation }>,
@@ -627,8 +821,18 @@ function constructMultiDiffHtml(
 
     const ops: Array<{ pos: number; oldLen: number; replacement: string }> = [];
 
-    for (const edit of edits) {
-        if (!edit.expandedOld) continue;
+    for (const origEdit of edits) {
+        if (!origEdit.expandedOld) continue;
+
+        // Match strategy mirrors src/services/agentDataProvider/actions/editNote.ts:
+        // primary match, then entity-decode fallback (model used &#x27; but note
+        // has '), then entity-encode fallbacks (model used ' but note has entity).
+        const edit = resolveExpandedOldForMatch(stripped, origEdit);
+        if (!edit) {
+            logExpandedOldMismatch(stripped, origEdit);
+            continue;
+        }
+
         let searchFrom = 0;
         while (true) {
             const idx = stripped.indexOf(edit.expandedOld, searchFrom);
