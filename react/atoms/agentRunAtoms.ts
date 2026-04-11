@@ -417,7 +417,7 @@ async function startResumeRun(
             set(threadRunsAtom, runs => appendRunIfMissing(runs, failedRun));
         }
 
-        set(resetWSStateAtom);
+        set(prepareForNewRunAtom);
         set(isWSChatPendingAtom, true);
 
         const modelOptions = buildModelSelectionOptions(model);
@@ -822,6 +822,18 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
     set(wsWarningAtom, null);
     set(wsRetryAtom, null);
     set(streamingDoneRunIdsAtom, new Set<string>());
+});
+
+/**
+ * Clear transient frontend state before starting a replacement run.
+ * This is separate from transport-level onClose cleanup so reconnect handoffs
+ * do not leak per-run approval UI or auto-approve settings into the new run.
+ */
+export const prepareForNewRunAtom = atom(null, (_get, set) => {
+    set(resetWSStateAtom);
+    set(clearAllPendingApprovalsAtom);
+    set(clearApprovalResponseIntentsAtom);
+    set(clearAutoApproveNoteKeysAtom);
 });
 
 /**
@@ -1376,7 +1388,7 @@ export const sendWSMessageAtom = atom(
         dismissDiffPreview();
 
         // Reset state
-        set(resetWSStateAtom);
+        set(prepareForNewRunAtom);
         set(isWSChatPendingAtom, true);
 
         try {
@@ -1819,7 +1831,7 @@ export const regenerateFromRunAtom = atom(
             set(updateCitationDataAtom);
 
             // Reset WS state and set pending
-            set(resetWSStateAtom);
+            set(prepareForNewRunAtom);
             set(isWSChatPendingAtom, true);
 
             // Build model selection options
@@ -2015,7 +2027,7 @@ export const regenerateWithEditedPromptAtom = atom(
             set(updateCitationDataAtom);
 
             // Reset WS state and set pending
-            set(resetWSStateAtom);
+            set(prepareForNewRunAtom);
             set(isWSChatPendingAtom, true);
 
             // Build model selection options

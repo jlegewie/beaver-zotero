@@ -62,6 +62,14 @@ export class AgentService {
         this.baseUrl = baseUrl;
     }
 
+    private resetConnectionState(): void {
+        this.ws = null;
+        this.callbacks = null;
+        this.connectionId++;
+        this.messageQueue = Promise.resolve();
+        this.actionExecutionQueue = Promise.resolve();
+    }
+
     /**
      * Get WebSocket URL from HTTP base URL
      */
@@ -140,7 +148,7 @@ export class AgentService {
         }
         
         // Close existing connection if any
-        this.close();
+        this.close(1000, 'Client closing', { notifyClose: false });
 
         this.callbacks = callbacks;
 
@@ -248,11 +256,7 @@ export class AgentService {
                     }
                     logger(`AgentService: Connection closed - code=${event.code}, reason=${event.reason}, clean=${event.wasClean}`, 1);
                     callbacks.onClose?.(event.code, event.reason, event.wasClean);
-                    this.ws = null;
-                    this.callbacks = null;
-                    this.connectionId++;
-                    this.messageQueue = Promise.resolve();
-                    this.actionExecutionQueue = Promise.resolve();
+                    this.resetConnectionState();
                     // If we haven't resolved yet, the connection closed before ready
                     if (!hasResolved) {
                         hasResolved = true;
@@ -756,7 +760,12 @@ export class AgentService {
      * @param code Optional close code (default: 1000 for normal closure)
      * @param reason Optional close reason
      */
-    close(code: number = 1000, reason: string = 'Client closing'): void {
+    close(
+        code: number = 1000,
+        reason: string = 'Client closing',
+        options: { notifyClose?: boolean } = {},
+    ): void {
+        const { notifyClose = true } = options;
         const wsToClose = this.ws;
         const callbacks = this.callbacks;
 
@@ -774,13 +783,11 @@ export class AgentService {
             } else {
                 logger(`AgentService: WebSocket already closing/closed (state=${wsToClose.readyState})`, 1);
             }
-            this.ws = null;
         }
-        this.callbacks = null;
-        this.connectionId++;
-        this.messageQueue = Promise.resolve();
-        this.actionExecutionQueue = Promise.resolve();
-        callbacks?.onClose?.(code, reason, true);
+        this.resetConnectionState();
+        if (notifyClose) {
+            callbacks?.onClose?.(code, reason, true);
+        }
     }
 
     /**

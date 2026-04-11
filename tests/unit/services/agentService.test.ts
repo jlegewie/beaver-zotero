@@ -179,7 +179,7 @@ describe('AgentService reconnect handling', () => {
         vi.useRealTimers();
     });
 
-    it('ignores stale onclose after reconnect so the resumed socket keeps its callbacks', async () => {
+    it('silently supersedes the old socket on reconnect and ignores its later close event', async () => {
         const service = new AgentService('https://api.example.com');
         const firstCallbacks = createCallbacks();
         const secondCallbacks = createCallbacks();
@@ -189,8 +189,9 @@ describe('AgentService reconnect handling', () => {
         const firstSocket = await completeConnect(service, firstCallbacks, firstRequest);
         const secondSocket = await completeConnect(service, secondCallbacks, secondRequest);
 
-        expect(firstCallbacks.onClose).toHaveBeenCalledTimes(1);
-        expect(firstCallbacks.onClose).toHaveBeenCalledWith(1000, 'Client closing', true);
+        expect(firstSocket.close).toHaveBeenCalledTimes(1);
+        expect(firstSocket.close).toHaveBeenCalledWith(1000, 'Client closing');
+        expect(firstCallbacks.onClose).not.toHaveBeenCalled();
 
         firstSocket.emitClose({
             code: 1011,
@@ -207,7 +208,7 @@ describe('AgentService reconnect handling', () => {
         });
         await flushMicrotasks();
 
-        expect(firstCallbacks.onClose).toHaveBeenCalledTimes(1);
+        expect(firstCallbacks.onClose).not.toHaveBeenCalled();
         expect(secondCallbacks.onClose).not.toHaveBeenCalled();
         expect(secondCallbacks.onPart).toHaveBeenCalledTimes(1);
     });
@@ -228,5 +229,22 @@ describe('AgentService reconnect handling', () => {
 
         expect(callbacks.onClose).toHaveBeenCalledTimes(1);
         expect(callbacks.onClose).toHaveBeenCalledWith(1000, 'User cancelled', true);
+    });
+
+    it('notifies onClose for an unexpected transport close on the active socket', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const request = { type: 'close-test' } as AgentRunRequest;
+
+        const socket = await completeConnect(service, callbacks, request);
+
+        socket.emitClose({
+            code: 1011,
+            reason: 'transport lost',
+            wasClean: false,
+        });
+
+        expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+        expect(callbacks.onClose).toHaveBeenCalledWith(1011, 'transport lost', false);
     });
 });
