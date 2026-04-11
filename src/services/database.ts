@@ -1206,16 +1206,25 @@ export class BeaverDB {
      * Record multiple failed embedding attempts in a batch.
      * @param items Array of {itemId, libraryId} pairs
      * @param error The error message (same for all items in batch)
+     * @param options.incrementExisting When true (default), existing rows have
+     *   their failure_count bumped and next_retry_after pushed out per the
+     *   exponential backoff schedule. Use this for "real" failures from the
+     *   API or upsert path. When false, existing rows only refresh last_attempt
+     *   and last_error, and new rows are inserted in an immediately retryable
+     *   state so transient local failures do not start a backoff window.
      */
     public async recordFailedEmbeddingsBatch(
         items: Array<{ itemId: number; libraryId: number }>,
-        error: string
+        error: string,
+        options: { incrementExisting?: boolean } = {}
     ): Promise<void> {
         if (items.length === 0) return;
 
+        const { incrementExisting = true } = options;
+
         const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
         const itemIds = items.map(i => i.itemId);
-        
+
         // Get existing failed records
         const existing = await this.getFailedEmbeddingsBatch(itemIds);
         const existingMap = new Map(existing.map(r => [r.item_id, r]));
@@ -1223,25 +1232,43 @@ export class BeaverDB {
         await this.conn.executeTransaction(async () => {
             for (const item of items) {
                 const existingRecord = existingMap.get(item.itemId);
-                
+
                 if (existingRecord) {
-                    const newFailureCount = existingRecord.failure_count + 1;
-                    const nextRetry = BeaverDB.calculateNextRetryTime(newFailureCount);
-                    
-                    await this.conn.queryAsync(
-                        `UPDATE failed_embeddings 
-                         SET failure_count = ?, last_error = ?, last_attempt = ?, next_retry_after = ?
-                         WHERE item_id = ?`,
-                        [newFailureCount, error, now, nextRetry, item.itemId]
-                    );
+                    if (incrementExisting) {
+                        const newFailureCount = existingRecord.failure_count + 1;
+                        const nextRetry = BeaverDB.calculateNextRetryTime(newFailureCount);
+
+                        await this.conn.queryAsync(
+                            `UPDATE failed_embeddings
+                             SET failure_count = ?, last_error = ?, last_attempt = ?, next_retry_after = ?
+                             WHERE item_id = ?`,
+                            [newFailureCount, error, now, nextRetry, item.itemId]
+                        );
+                    } else {
+                        // Transient mode: refresh diagnostics but preserve the
+                        // existing failure_count and retry schedule. This keeps
+                        // healthy items from being escalated toward permanent
+                        // failure on a string of local DB errors.
+                        await this.conn.queryAsync(
+                            `UPDATE failed_embeddings
+                             SET last_error = ?, last_attempt = ?
+                             WHERE item_id = ?`,
+                            [error, now, item.itemId]
+                        );
+                    }
                 } else {
-                    const nextRetry = BeaverDB.calculateNextRetryTime(1);
-                    
                     await this.conn.queryAsync(
-                        `INSERT INTO failed_embeddings 
+                        `INSERT INTO failed_embeddings
                          (item_id, library_id, failure_count, last_error, last_attempt, next_retry_after)
-                         VALUES (?, ?, 1, ?, ?, ?)`,
-                        [item.itemId, item.libraryId, error, now, nextRetry]
+                         VALUES (?, ?, ?, ?, ?, ?)`,
+                        [
+                            item.itemId,
+                            item.libraryId,
+                            incrementExisting ? 1 : 0,
+                            error,
+                            now,
+                            incrementExisting ? BeaverDB.calculateNextRetryTime(1) : now,
+                        ]
                     );
                 }
             }

@@ -1,6 +1,6 @@
 import { BeaverDB, EmbeddingRecord, MAX_EMBEDDING_FAILURES } from './database';
 import { embeddingsService } from './embeddingsService';
-import { getClientDateModifiedAsISOString } from '../utils/zoteroUtils';
+import { getClientDateModifiedAsISOString, getClientDateModifiedBatch } from '../utils/zoteroUtils';
 import { logger } from '../utils/logger';
 
 
@@ -54,12 +54,109 @@ export interface IndexingDiff {
 }
 
 /**
+ * Sanitized error summary surfaced through indexing results.
+ */
+export interface IndexingError {
+    type: string;       // Error class name
+    message: string;    // Sanitized message (no file paths, no PII, capped length)
+    count: number;      // How many items hit this exact error
+}
+
+/**
  * Result of an indexing operation
  */
 export interface IndexingResult {
     indexed: number;        // Number of items successfully indexed
     skipped: number;        // Number of items skipped (no content or unchanged)
     failed: number;         // Number of items that failed
+    errors: IndexingError[]; // Sanitized error summaries for diagnostics
+    /**
+     * True if any batch hit a failure that prevented items from being properly
+     * classified into indexed/failed/skipped buckets — i.e. the batch crashed
+     * before items could be sent to the API or persisted to failed_embeddings.
+     */
+    incomplete: boolean;
+}
+
+/**
+ * Maximum length of a sanitized error message before truncation.
+ */
+const MAX_ERROR_MESSAGE_LENGTH = 300;
+
+/**
+ * Maximum number of unique error variants tracked per result.
+ */
+const MAX_ERROR_VARIANTS = 20;
+
+/**
+ * Sanitize an error message for transmission to the backend
+ */
+function sanitizeErrorMessage(message: string): string {
+    if (!message) return '';
+    let m = message;
+    // Strip Unix home dirs and common system dirs (preserves leading slash for context)
+    m = m.replace(/\/(?:Users|home|root|var|tmp|opt|private)\/[^\s'"]+/g, '<path>');
+    // Strip Windows-style absolute paths
+    m = m.replace(/[A-Za-z]:\\[^\s'"]+/g, '<path>');
+    if (m.length > MAX_ERROR_MESSAGE_LENGTH) {
+        m = m.slice(0, MAX_ERROR_MESSAGE_LENGTH) + '...';
+    }
+    return m;
+}
+
+/**
+ * Convert an unknown thrown value into a {type, message} pair safe to send
+ * to the backend.
+ */
+function classifyError(err: unknown): { type: string; message: string } {
+    if (err instanceof Error) {
+        return {
+            type: err.name || 'Error',
+            message: sanitizeErrorMessage(err.message || ''),
+        };
+    }
+    return {
+        type: 'unknown',
+        message: sanitizeErrorMessage(String(err)),
+    };
+}
+
+/**
+ * Record an error against an IndexingResult. Deduplicates by (type, message)
+ * and bumps the count if the same error has been seen before. Caps total
+ * variants at MAX_ERROR_VARIANTS to keep the payload bounded.
+ */
+export function recordIndexingError(result: IndexingResult, err: unknown): void {
+    const { type, message } = classifyError(err);
+    const existing = result.errors.find(e => e.type === type && e.message === message);
+    if (existing) {
+        existing.count++;
+        return;
+    }
+    if (result.errors.length < MAX_ERROR_VARIANTS) {
+        result.errors.push({ type, message, count: 1 });
+    }
+}
+
+/**
+ * Merge errors from one IndexingResult into another, preserving dedup/cap
+ * semantics. Used by callers (e.g. useEmbeddingIndex) that aggregate results
+ * from multiple library passes / batches.
+ */
+export function mergeIndexingErrors(
+    target: IndexingError[],
+    source: IndexingError[],
+): void {
+    for (const incoming of source) {
+        const existing = target.find(
+            e => e.type === incoming.type && e.message === incoming.message,
+        );
+        if (existing) {
+            existing.count += incoming.count;
+        } else if (target.length < MAX_ERROR_VARIANTS) {
+            target.push({ ...incoming });
+        }
+    }
 }
 
 /**
@@ -316,7 +413,9 @@ export class EmbeddingIndexer {
         const result: IndexingResult = {
             indexed: 0,
             skipped: 0,
-            failed: 0
+            failed: 0,
+            errors: [],
+            incomplete: false,
         };
 
         if (itemIds.length === 0) {
@@ -331,8 +430,15 @@ export class EmbeddingIndexer {
             }
             const batchIds = itemIds.slice(i, i + batchSize);
 
+            // Items "in flight" to the API/upsert
+            let itemsToProcess: ItemIndexData[] = [];
+            // Best-known retryable set before the API call. This excludes
+            // non-regular and too-short items even if the batch fails during
+            // local preprocessing (e.g. content-hash lookup).
+            let retryablePreApiItems: Array<{ itemId: number; libraryId: number }> = [];
+
             try {
-                // Load items for this batch
+                // ----- Phase 1: load items + bulk metadata -----
                 const items = await Zotero.Items.getAsync(batchIds);
                 
                 // Load required data types
@@ -340,65 +446,103 @@ export class EmbeddingIndexer {
                     await Zotero.Items.loadDataTypes(items, ["primaryData", "itemData", "creators"]);
                 }
 
-                // Filter to valid items and extract data
+                // Pre-fetch clientDateModified for the whole batch in one SQL query.
+                let clientDatesMap = new Map<number, string>();
+                try {
+                    clientDatesMap = await getClientDateModifiedBatch(items);
+                } catch (datesError) {
+                    // SQL error or similar: fall back to per-item now() and surface the error
+                    logger(`indexItemIdsBatch: getClientDateModifiedBatch failed, falling back to current time: ${(datesError as Error).message}`, 2);
+                    recordIndexingError(result, datesError);
+                }
+
+                // ----- Phase 2: per-item validation (per-item try/catch) -----
+                // A poison item now fails alone instead of taking the whole batch down.
                 const itemsData: ItemIndexData[] = [];
-                const clientDatesMap = new Map<number, string>();
                 const textsForHashCheck: Map<number, string> = new Map();
 
                 for (const item of items) {
-                    if (!item || !item.isRegularItem()) {
-                        result.skipped++;
-                        continue;
-                    }
+                    try {
+                        if (!item || !item.isRegularItem()) {
+                            result.skipped++;
+                            continue;
+                        }
 
-                    const title = item.getField('title', false, true) as string || '';
-                    const abstract = item.getField('abstractNote') as string || '';
-                    const combinedLength = (title.trim() + abstract.trim()).length;
+                        const title = item.getField('title', false, true) as string || '';
+                        const abstract = item.getField('abstractNote') as string || '';
+                        const combinedLength = (title.trim() + abstract.trim()).length;
 
-                    if (combinedLength < MIN_CONTENT_LENGTH) {
-                        result.skipped++;
-                        continue;
-                    }
+                        if (combinedLength < MIN_CONTENT_LENGTH) {
+                            result.skipped++;
+                            continue;
+                        }
 
-                    // Get clientDateModified
-                    const clientDateModified = await getClientDateModifiedAsISOString(item);
-                    clientDatesMap.set(item.id, clientDateModified);
+                        const clientDateModified = clientDatesMap.get(item.id) || new Date().toISOString();
 
-                    const itemData: ItemIndexData = {
-                        itemId: item.id,
-                        libraryId: item.libraryID,
-                        zoteroKey: item.key,
-                        version: item.version,
-                        title,
-                        abstract,
-                        clientDateModified,
-                    };
-                    
-                    itemsData.push(itemData);
-                    
-                    // Pre-compute text for hash checking
-                    if (skipUnchanged) {
-                        textsForHashCheck.set(item.id, this.buildEmbeddingText(title, abstract));
+                        const itemData: ItemIndexData = {
+                            itemId: item.id,
+                            libraryId: item.libraryID,
+                            zoteroKey: item.key,
+                            version: item.version,
+                            title,
+                            abstract,
+                            clientDateModified,
+                        };
+
+                        itemsData.push(itemData);
+
+                        // Pre-compute text for hash checking
+                        if (skipUnchanged) {
+                            textsForHashCheck.set(item.id, this.buildEmbeddingText(title, abstract));
+                        }
+                    } catch (itemError) {
+                        // Individual item blew up (corrupt field, type error, etc.).
+                        // Count just this item, record it in the failed table, and keep going.
+                        result.failed++;
+                        recordIndexingError(result, itemError);
+                        logger(`indexItemIdsBatch: Item ${item?.id} validation failed (${(itemError as Error).name}): ${(itemError as Error).message}`, 1);
+                        if (item && item.id !== undefined && item.libraryID !== undefined) {
+                            try {
+                                await this.db.recordFailedEmbeddingsBatch(
+                                    [{ itemId: item.id, libraryId: item.libraryID }],
+                                    sanitizeErrorMessage((itemError as Error).message || ''),
+                                );
+                            } catch (trackError) {
+                                logger(`indexItemIdsBatch: Failed to record per-item failure: ${(trackError as Error).message}`, 1);
+                            }
+                        }
                     }
                 }
 
                 if (itemsData.length === 0) {
+                    if (onProgress) {
+                        onProgress(result.indexed + result.skipped + result.failed, itemIds.length);
+                    }
                     continue;
                 }
 
-                // Filter out items with unchanged content if requested
-                let itemsToProcess = itemsData;
+                retryablePreApiItems = itemsData.map(itemData => ({
+                    itemId: itemData.itemId,
+                    libraryId: itemData.libraryId,
+                }));
+
+                // ----- Phase 3: skipUnchanged filter -----
+                // Compute the filtered candidates in a local variable. We do NOT
+                // assign itemsToProcess here yet — if getContentHashes() throws,
+                // we want the failure to land in the "incomplete" path, not the
+                // "API failed → mark items as failed" path. (P2 fix)
+                let candidates: ItemIndexData[] = itemsData;
                 if (skipUnchanged && textsForHashCheck.size > 0) {
                     const itemIdsToCheck = itemsData.map(d => d.itemId);
                     const existingHashes = await this.db.getContentHashes(itemIdsToCheck);
-                    
-                    itemsToProcess = itemsData.filter(itemData => {
+
+                    candidates = itemsData.filter(itemData => {
                         const text = textsForHashCheck.get(itemData.itemId);
                         if (!text) return true; // Shouldn't happen, but include if no text
-                        
+
                         const newHash = BeaverDB.computeContentHash(text);
                         const existingHash = existingHashes.get(itemData.itemId);
-                        
+
                         // Include if no existing hash (new item) or hash changed
                         const needsIndexing = existingHash === undefined || existingHash !== newHash;
                         if (!needsIndexing) {
@@ -408,18 +552,24 @@ export class EmbeddingIndexer {
                     });
                 }
 
-                if (itemsToProcess.length === 0) {
+                if (candidates.length === 0) {
+                    if (onProgress) {
+                        onProgress(result.indexed + result.skipped + result.failed, itemIds.length);
+                    }
                     continue;
                 }
 
-                // Build texts for embedding
+                // Mark items as in-flight only now that the local hash lookup
+                // has succeeded and we're committed to sending them to the API.
+                itemsToProcess = candidates;
+
+                // ----- Phase 4: API call -----
                 const texts = itemsToProcess.map(item => this.buildEmbeddingText(item.title, item.abstract));
                 const ids = itemsToProcess.map(item => item.itemId);
 
-                // Generate embeddings via API with retry
                 const response = await embeddingsService.generateEmbeddingsWithRetry(texts, ids);
 
-                // Prepare embedding records
+                // ----- Phase 5: process response -----
                 const embeddingRecords: Array<Omit<EmbeddingRecord, 'indexed_at'>> = [];
                 const successfulItemIds: number[] = [];
 
@@ -428,13 +578,18 @@ export class EmbeddingIndexer {
                     const embeddingData = response.embeddings.find(e => e.item_id === itemData.itemId);
 
                     if (!embeddingData) {
+                        // Backend returned 200 but the response is missing this item_id.
+                        // This shouldn't happen given the backend's positional mapping
+                        // (and the new defensive assertion in routes/embeddings.py),
+                        // but surface it loudly if it ever does.
                         result.failed++;
+                        recordIndexingError(result, new Error('embedding_missing_in_response'));
                         continue;
                     }
 
                     const text = texts[j];
                     const contentHash = BeaverDB.computeContentHash(text);
-                    const clientDateModified = clientDatesMap.get(itemData.itemId) || new Date().toISOString();
+                    const clientDateModified = itemData.clientDateModified || new Date().toISOString();
 
                     embeddingRecords.push({
                         item_id: itemData.itemId,
@@ -451,7 +606,7 @@ export class EmbeddingIndexer {
                     successfulItemIds.push(itemData.itemId);
                 }
 
-                // Store embeddings in batch
+                // ----- Phase 6: persist embeddings -----
                 if (embeddingRecords.length > 0) {
                     await this.db.upsertEmbeddingsBatch(embeddingRecords);
                     result.indexed += embeddingRecords.length;
@@ -461,24 +616,56 @@ export class EmbeddingIndexer {
                 }
 
             } catch (error) {
-                const errorMessage = (error as Error).message;
-                logger(`indexItemIdsBatch: Batch failed at offset ${i}: ${errorMessage}`, 1);
-                result.failed += batchIds.length;
-                
-                // Track all items in the failed batch
-                // We need to get library IDs for the failed items
-                try {
-                    const items = await Zotero.Items.getAsync(batchIds);
-                    const failedItems = items
-                        .filter(item => item && item.isRegularItem())
-                        .map(item => ({ itemId: item.id, libraryId: item.libraryID }));
-                    
-                    if (failedItems.length > 0) {
-                        await this.db.recordFailedEmbeddingsBatch(failedItems, errorMessage);
-                        logger(`indexItemIdsBatch: Recorded ${failedItems.length} items as failed`, 3);
+                const errorName = (error as Error).name || 'Error';
+                const rawMessage = (error as Error).message || String(error);
+                logger(`indexItemIdsBatch: Batch failed at offset ${i} (${errorName}): ${rawMessage}`, 1);
+                recordIndexingError(result, error);
+
+                // Determine which items to mark as failed:
+                // - If we got past phase 4 (itemsToProcess set), the failure happened
+                //   during the API call or upsert; record exactly those items.
+                // - If we never reached phase 4, the failure was during loading,
+                //   loadDataTypes, getClientDateModifiedBatch, or getContentHashes.
+                //   We don't know which items would have been valid, so mark the
+                //   result as incomplete and the caller MUST NOT save the library
+                //   state for this run — otherwise unindexed items would be
+                //   silently invisible until the weekly safety diff (P1 fix).
+                if (itemsToProcess.length > 0) {
+                    const failedItemRecords = itemsToProcess.map(d => ({
+                        itemId: d.itemId,
+                        libraryId: d.libraryId,
+                    }));
+                    try {
+                        await this.db.recordFailedEmbeddingsBatch(
+                            failedItemRecords,
+                            sanitizeErrorMessage(rawMessage),
+                        );
+                        result.failed += failedItemRecords.length;
+                        logger(`indexItemIdsBatch: Recorded ${failedItemRecords.length} items as failed`, 3);
+                    } catch (trackError) {
+                        // Even DB write failed — count items as failed for the report
+                        // but log the secondary failure.
+                        result.failed += failedItemRecords.length;
+                        logger(`indexItemIdsBatch: Failed to track failed items: ${(trackError as Error).message}`, 1);
                     }
-                } catch (trackError) {
-                    logger(`indexItemIdsBatch: Failed to track failed items: ${(trackError as Error).message}`, 1);
+                } else {
+                    // Pre-API failure: failure happened during loading,
+                    // loadDataTypes, getClientDateModifiedBatch, or getContentHashes.
+                    result.incomplete = true;
+                    logger(`indexItemIdsBatch: Batch incomplete; ${retryablePreApiItems.length} validated items will be re-checked next pass`, 2);
+
+                    try {
+                        if (retryablePreApiItems.length > 0) {
+                            await this.db.recordFailedEmbeddingsBatch(
+                                retryablePreApiItems,
+                                sanitizeErrorMessage(rawMessage),
+                                { incrementExisting: false },
+                            );
+                            logger(`indexItemIdsBatch: Queued ${retryablePreApiItems.length} items for retry (transient pre-API failure)`, 2);
+                        }
+                    } catch (trackError) {
+                        logger(`indexItemIdsBatch: Failed to queue items for retry after incomplete batch: ${(trackError as Error).message}`, 1);
+                    }
                 }
             }
 
@@ -734,7 +921,9 @@ export class EmbeddingIndexer {
         const result: IndexingResult = {
             indexed: 0,
             skipped: 0,
-            failed: 0
+            failed: 0,
+            errors: [],
+            incomplete: false,
         };
 
         // Extract data from all items
