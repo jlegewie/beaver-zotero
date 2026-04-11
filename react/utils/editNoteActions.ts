@@ -508,7 +508,7 @@ export async function undoEditNoteAction(
         await item.loadDataType('note');
         const noteId = `${library_id}-${zotero_key}`;
 
-        let restoredHtml = rebuildDataCitationItems(resultData.undo_full_html);
+        const restoredHtml = rebuildDataCitationItems(resultData.undo_full_html);
         item.setNote(restoredHtml);
         await item.saveTx();
         logger(`undoEditNoteAction: Restored full note content for ${noteId}`, 1);
