@@ -348,8 +348,22 @@ function resolveSentencesInParagraph(
  * Options for `extractPageSentenceBBoxes`.
  */
 export interface PageSentenceBBoxOptions {
-    /** Splitter callback; defaults to `simpleRegexSentenceSplit`. */
+    /**
+     * Splitter callback. Defaults to `simpleRegexSentenceSplit` at this
+     * layer; production callers should construct a sentencex-backed
+     * splitter via `getSentenceSplitterWithFallback(language)` and pass
+     * it in. The default is kept regex-only so the mapper module has no
+     * implicit WASM dependency and stays trivially testable.
+     */
     splitter?: SentenceSplitter;
+    /**
+     * BCP-47 / ISO 639-1 language code, used by callers higher up the
+     * stack (e.g. `PDFExtractor.extractSentenceBBoxes`) to construct a
+     * language-tuned splitter. This field is informational at the
+     * mapper layer — if `splitter` is set it takes precedence and
+     * `language` is ignored.
+     */
+    language?: string;
     /** Forwarded to `detectParagraphs`. */
     paragraphSettings?: ParagraphDetectionSettings;
     /**

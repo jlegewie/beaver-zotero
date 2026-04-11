@@ -1072,3 +1072,33 @@ export function canSetField(item: Zotero.Item, field: string): boolean {
     // 6. Check the schema for validity
     return Zotero.ItemFields.isValidForType(fieldID, itemTypeID);
 }
+
+/**
+ * Get the `language` field for a Zotero item by library ID + key.
+ *
+ * Falls back to the parent item if the target is not a regular item
+ * (attachment, note, annotation). Returns null if no language is set
+ * or the item cannot be resolved.
+ *
+ * The returned value is the raw, unnormalized field text — callers that
+ * need an ISO 639-1 code should pass it through
+ * `normalizeLanguageCode` from `src/services/pdf/SentencexSplitter.ts`.
+ */
+export async function getItemLanguage(
+    libraryID: number,
+    key: string
+): Promise<string | null> {
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
+    if (!item) return null;
+
+    // Attachments / notes / annotations don't carry a language field —
+    // walk up to the parent regular item if there is one.
+    const target = item.isRegularItem()
+        ? item
+        : (item.parentItemID ? await Zotero.Items.getAsync(item.parentItemID) : null);
+    if (!target || !target.isRegularItem()) return null;
+
+    await target.loadDataType('itemData');
+    const value = (target.getField('language') as string | undefined)?.trim();
+    return value ? value : null;
+}
