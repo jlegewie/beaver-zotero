@@ -987,6 +987,132 @@ describe('trailing whitespace normalization in matching', () => {
         // "Hello\n\nworld" is not in the note, and trimming trailing \n won't help
         expect(response.valid).toBe(false);
     });
+
+    it('rejects ambiguous match after trimming when operation is str_replace', async () => {
+        // Note has two identical paragraphs separated by a single \n; the
+        // trailing \n\n in old_string forces fallback into block 12b, after
+        // which the trimmed form matches both paragraphs.
+        const noteHtml = '<div data-schema-version="9"><p>Duplicate</p>\n<p>Duplicate</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<p>Duplicate</p>\n\n',
+                new_string: '<p>Replaced</p>',
+                operation: 'str_replace',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('ambiguous_match');
+        expect(response.error).toContain('2 times');
+    });
+
+    it('allows ambiguous match after trimming when operation is str_replace_all', async () => {
+        const noteHtml = '<div data-schema-version="9"><p>Duplicate</p>\n<p>Duplicate</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<p>Duplicate</p>\n\n',
+                new_string: '<p>Replaced</p>',
+                operation: 'str_replace_all',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data.old_string).toBe('<p>Duplicate</p>');
+    });
+});
+
+describe('JSON-escape unescape fallback in matching', () => {
+    let mockItem: any;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('matches old_string with literal \\" when note has plain " and emits normalized_action_data', async () => {
+        const noteHtml = '<div data-schema-version="9"><p>Say "hello"</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                // Literal backslash-quote pairs — what the server sees if the LLM
+                // double-escaped quotes when emitting JSON tool-call args.
+                old_string: 'Say \\"hello\\"',
+                new_string: 'Say goodbye',
+                operation: 'str_replace',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data.old_string).toBe('Say "hello"');
+        expect(response.normalized_action_data.new_string).toBe('Say goodbye');
+    });
+
+    it('rejects ambiguous match after JSON-unescape when operation is str_replace', async () => {
+        // Note has two identical 'Say "hello"' paragraphs; after unescape both match.
+        const noteHtml = '<div data-schema-version="9"><p>Say "hello"</p>\n<p>Say "hello"</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                // Over-escaped — what the server sees if the LLM double-escaped quotes.
+                old_string: 'Say \\"hello\\"',
+                new_string: 'Say goodbye',
+                operation: 'str_replace',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('ambiguous_match');
+        expect(response.error).toContain('2 times');
+    });
+
+    it('allows ambiguous match after JSON-unescape when operation is str_replace_all', async () => {
+        const noteHtml = '<div data-schema-version="9"><p>Say "hello"</p>\n<p>Say "hello"</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'Say \\"hello\\"',
+                new_string: 'Say goodbye',
+                operation: 'str_replace_all',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data.old_string).toBe('Say "hello"');
+    });
 });
 
 

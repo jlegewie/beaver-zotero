@@ -366,6 +366,21 @@ async function validateEditNoteAction(
                 const trimmedExpandedOld = expandToRawHtml(trimmedOld, metadata, 'old');
                 const trimmedCount = countOccurrences(strippedHtml, trimmedExpandedOld);
                 if (trimmedCount > 0) {
+                    // Refuse ambiguous matches when operation is str_replace.
+                    // Mirrors the guard in blocks 13/14 — validation must not
+                    // confirm an action the executor cannot apply.
+                    if (trimmedCount > 1 && operation !== 'str_replace_all') {
+                        return {
+                            type: 'agent_action_validate_response',
+                            request_id: request.request_id,
+                            valid: false,
+                            error: `The string to replace was found ${trimmedCount} times in the note. `
+                                + 'Use operation str_replace_all to replace all occurrences, or include more context to make the match unique.',
+                            error_code: 'ambiguous_match',
+                            preference: 'always_ask',
+                        };
+                    }
+
                     const trimmedNew = operation === 'insert_after' || operation === 'insert_before'
                         ? new_string
                         : new_string.replace(/\n+$/, '');
@@ -411,6 +426,21 @@ async function validateEditNoteAction(
                 const unescapedExpandedOld = expandToRawHtml(unescapedOld, metadata, 'old');
                 const unescapedCount = countOccurrences(strippedHtml, unescapedExpandedOld);
                 if (unescapedCount > 0) {
+                    // Refuse ambiguous matches when operation is str_replace.
+                    // Mirrors the guard in blocks 13/14 — validation must not
+                    // confirm an action the executor cannot apply.
+                    if (unescapedCount > 1 && operation !== 'str_replace_all') {
+                        return {
+                            type: 'agent_action_validate_response',
+                            request_id: request.request_id,
+                            valid: false,
+                            error: `The string to replace was found ${unescapedCount} times in the note. `
+                                + 'Use operation str_replace_all to replace all occurrences, or include more context to make the match unique.',
+                            error_code: 'ambiguous_match',
+                            preference: 'always_ask',
+                        };
+                    }
+
                     const unescapedNew = new_string.replace(/\\"/g, '"').replace(/\\\\/g, '\\').replace(/\\\//g, '/');
                     // Dry-run expand new_string to verify
                     expandToRawHtml(unescapedNew, metadata, 'new');
