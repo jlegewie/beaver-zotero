@@ -48,6 +48,21 @@ import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 
 /**
+ * Merge old_string and new_string for insert_after / insert_before operations
+ * so the result can be treated as a regular str_replace. Returns new_string
+ * unchanged for non-insert operations.
+ */
+function mergeInsertNewString(
+    operation: EditNoteOperation,
+    oldString: string,
+    newString: string,
+): string {
+    if (operation === 'insert_after') return oldString + newString;
+    if (operation === 'insert_before') return newString + oldString;
+    return newString;
+}
+
+/**
  * Get the effective preference for an edit_note action.
  * Returns 'always_apply' if the note has been auto-approved for this run,
  * otherwise falls back to the user's stored deferred-tool preference.
@@ -360,11 +375,7 @@ async function validateEditNoteAction(
                     const normalizedActionData: EditNoteProposedData = {
                         ...request.action_data as EditNoteProposedData,
                         old_string: trimmedOld,
-                        new_string: operation === 'insert_after'
-                            ? trimmedOld + trimmedNew
-                            : operation === 'insert_before'
-                                ? trimmedNew + trimmedOld
-                                : trimmedNew,
+                        new_string: mergeInsertNewString(operation, trimmedOld, trimmedNew),
                     };
 
                     const noteTitle = item.getNoteTitle() || '(untitled)';
@@ -407,11 +418,7 @@ async function validateEditNoteAction(
                     const normalizedActionData: EditNoteProposedData = {
                         ...request.action_data as EditNoteProposedData,
                         old_string: unescapedOld,
-                        new_string: operation === 'insert_after'
-                            ? unescapedOld + unescapedNew
-                            : operation === 'insert_before'
-                                ? unescapedNew + unescapedOld
-                                : unescapedNew,
+                        new_string: mergeInsertNewString(operation, unescapedOld, unescapedNew),
                     };
 
                     const noteTitle = item.getNoteTitle() || '(untitled)';
@@ -464,11 +471,11 @@ async function validateEditNoteAction(
                     const normalizedActionData: EditNoteProposedData = {
                         ...request.action_data as EditNoteProposedData,
                         old_string: stripped.strippedOld,
-                        new_string: operation === 'insert_after'
-                            ? stripped.strippedOld + stripped.strippedNew
-                            : operation === 'insert_before'
-                                ? stripped.strippedNew + stripped.strippedOld
-                                : stripped.strippedNew,
+                        new_string: mergeInsertNewString(
+                            operation,
+                            stripped.strippedOld,
+                            stripped.strippedNew,
+                        ),
                     };
 
                     if (matchCount > 1 && operation !== 'str_replace_all') {
@@ -547,11 +554,11 @@ async function validateEditNoteAction(
                     const normalizedActionData: EditNoteProposedData = {
                         ...request.action_data as EditNoteProposedData,
                         old_string: tagStrip.strippedOld,
-                        new_string: operation === 'insert_after'
-                            ? tagStrip.strippedOld + tagStrip.strippedNew
-                            : operation === 'insert_before'
-                                ? tagStrip.strippedNew + tagStrip.strippedOld
-                                : tagStrip.strippedNew,
+                        new_string: mergeInsertNewString(
+                            operation,
+                            tagStrip.strippedOld,
+                            tagStrip.strippedNew,
+                        ),
                     };
 
                     let disambiguated = true;
@@ -706,9 +713,7 @@ async function validateEditNoteAction(
                 };
             }
             const anchor = normalizedActionData.old_string ?? old_string ?? '';
-            normalizedActionData.new_string = operation === 'insert_after'
-                ? anchor + new_string
-                : new_string + anchor;
+            normalizedActionData.new_string = mergeInsertNewString(operation, anchor, new_string);
         }
 
         // Carry enriched old_string forward even when disambiguation succeeded
@@ -747,9 +752,7 @@ async function validateEditNoteAction(
         normalizedActionData = {
             ...request.action_data as EditNoteProposedData,
             ...(oldStringEnriched ? { old_string } : {}),
-            new_string: operation === 'insert_after'
-                ? (old_string ?? '') + new_string
-                : new_string + (old_string ?? ''),
+            new_string: mergeInsertNewString(operation, old_string ?? '', new_string),
         };
     } else if (oldStringEnriched) {
         // Carry the enriched old_string forward so the executor sees it.
