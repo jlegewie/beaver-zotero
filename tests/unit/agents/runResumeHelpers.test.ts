@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentRun } from '../../../react/agents/types';
 import {
     appendRunIfMissing,
+    findResumeChainRoot,
     findRunForResume,
     resolveErrorRunId,
     toRunError,
@@ -25,6 +26,16 @@ function makeRun(id: string, status: AgentRun['status'] = 'error'): AgentRun {
         consent_to_share: false,
         model_name: 'gpt-5',
     };
+}
+
+function makeResumeRun(id: string, resumesRunId: string, status: AgentRun['status'] = 'completed'): AgentRun {
+    const run = makeRun(id, status);
+    run.user_prompt = {
+        content: '',
+        is_resume: true,
+        resumes_run_id: resumesRunId,
+    };
+    return run;
 }
 
 describe('runResumeHelpers', () => {
@@ -55,6 +66,48 @@ describe('runResumeHelpers', () => {
 
         expect(resolveErrorRunId(event, activeRun)).toBe('event-run');
         expect(resolveErrorRunId({ ...event, run_id: undefined }, activeRun)).toBe('active-run');
+    });
+
+    describe('findResumeChainRoot', () => {
+        it('returns the run itself when it is not a resume', () => {
+            const original = makeRun('run-original', 'completed');
+            original.user_prompt.content = 'original question';
+
+            expect(findResumeChainRoot(original, [original])).toBe(original);
+        });
+
+        it('walks a single-step resume chain back to the original run', () => {
+            const original = makeRun('run-original', 'error');
+            original.user_prompt.content = 'original question';
+            const resume = makeResumeRun('run-resume', 'run-original', 'completed');
+
+            expect(findResumeChainRoot(resume, [original, resume])).toBe(original);
+        });
+
+        it('walks a multi-step resume chain back to the root', () => {
+            const original = makeRun('run-a', 'error');
+            original.user_prompt.content = 'original question';
+            const resumeB = makeResumeRun('run-b', 'run-a', 'error');
+            const resumeC = makeResumeRun('run-c', 'run-b', 'completed');
+
+            expect(findResumeChainRoot(resumeC, [original, resumeB, resumeC])).toBe(original);
+        });
+
+        it('stops walking when the referenced parent run is missing', () => {
+            const resume = makeResumeRun('run-resume', 'run-missing', 'completed');
+
+            expect(findResumeChainRoot(resume, [resume])).toBe(resume);
+        });
+
+        it('guards against cycles in the resume chain', () => {
+            const runA = makeResumeRun('run-a', 'run-b', 'completed');
+            const runB = makeResumeRun('run-b', 'run-a', 'completed');
+
+            // Should not infinite-loop; it returns whichever run it ends on when
+            // it detects the cycle.
+            const root = findResumeChainRoot(runA, [runA, runB]);
+            expect([runA, runB]).toContain(root);
+        });
     });
 
     it('toRunError keeps only persisted/manual-resume fields', () => {

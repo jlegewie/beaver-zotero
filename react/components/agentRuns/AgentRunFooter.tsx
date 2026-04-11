@@ -278,10 +278,9 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
 
     const handleRegenerate = async () => {
-        const runId = run.user_prompt.is_resume && run.user_prompt.resumes_run_id
-            ? run.user_prompt.resumes_run_id
-            : run.id;
-        await regenerateFromRun(runId);
+        // regenerateFromRunAtom walks the resume chain back to the root
+        // internally, so we can pass the clicked run's id directly.
+        await regenerateFromRun(run.id);
     };
 
     // Hide during streaming (but show during post-processing when citations are resolving)

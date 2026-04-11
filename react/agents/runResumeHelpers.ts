@@ -27,6 +27,28 @@ export function resolveErrorRunId(
     return event.run_id || activeRun?.id || null;
 }
 
+/**
+ * Walk the resume chain back to the root run (the first non-resume run).
+ *
+ * Resume runs carry `is_resume: true` and `resumes_run_id` pointing at the run
+ * they resumed, and they have an empty `user_prompt.content`. When retrying
+ * from a resume run we want to regenerate from the original user message, not
+ * from an intermediate resume prompt — so walk the chain to its root.
+ *
+ * Guards against cycles by tracking visited run IDs.
+ */
+export function findResumeChainRoot(run: AgentRun, allRuns: AgentRun[]): AgentRun {
+    let current = run;
+    const visited = new Set<string>([current.id]);
+    while (current.user_prompt.is_resume && current.user_prompt.resumes_run_id) {
+        const parent = allRuns.find(r => r.id === current.user_prompt.resumes_run_id);
+        if (!parent || visited.has(parent.id)) break;
+        visited.add(parent.id);
+        current = parent;
+    }
+    return current;
+}
+
 export function toRunError(event: WSErrorEvent): NonNullable<AgentRun['error']> {
     return {
         type: event.type,

@@ -122,7 +122,7 @@ import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
-import { appendRunIfMissing, findRunForResume, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
+import { appendRunIfMissing, findResumeChainRoot, findRunForResume, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 
 // =============================================================================
 // Helper Functions
@@ -1694,6 +1694,24 @@ export const regenerateFromRunAtom = atom(
             if (!targetRun) {
                 logger(`regenerateFromRunAtom: Run ${runId} not found`, 1);
                 return;
+            }
+
+            // If the target is a resume run, walk the resume chain back to the
+            // root so we regenerate from the original user message, not from an
+            // intermediate resume prompt (whose content is empty). The root
+            // always lives in threadRuns — startResumeRun guarantees the failed
+            // run is appended to threadRuns before the resume is started.
+            const allRunsForChain: AgentRun[] = activeRun && !threadRuns.some(r => r.id === activeRun.id)
+                ? [...threadRuns, activeRun]
+                : threadRuns;
+            const rootRun = findResumeChainRoot(targetRun, allRunsForChain);
+            if (rootRun.id !== targetRun.id) {
+                const rootIndex = threadRuns.findIndex(r => r.id === rootRun.id);
+                if (rootIndex >= 0) {
+                    logger(`regenerateFromRunAtom: walking resume chain, using root run ${rootRun.id}`, 1);
+                    targetRun = rootRun;
+                    runIndex = rootIndex;
+                }
             }
 
             // Get thread ID from the target run (may not be set in currentThreadIdAtom yet)
