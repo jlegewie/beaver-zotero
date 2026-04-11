@@ -14,6 +14,8 @@ import {
     lineBBoxToRect,
     logParagraphDetection,
     extractPageSentenceBBoxes,
+    getSentenceSplitterWithFallback,
+    normalizeLanguageCode,
     Rect,
     RawPageData,
     PageLineResult,
@@ -21,6 +23,7 @@ import {
     ContentItem,
     SentenceBBox,
 } from "../../src/services/pdf";
+import { getItemLanguage } from "../../src/utils/zoteroUtils";
 import { getCurrentReaderAndWaitForView } from "./readerUtils";
 import { getPageViewportInfo } from "./pdfUtils";
 import { BeaverTemporaryAnnotations, ZoteroReader } from "./annotationUtils";
@@ -1017,7 +1020,20 @@ export async function visualizeCurrentPageSentences(): Promise<{
         }
 
         // 5. Run the paragraph-scoped sentence pipeline.
-        const result = extractPageSentenceBBoxes(detailedPage);
+        //    Resolve a sentencex-backed splitter once per visualization run.
+        //    The cache inside SentencexSplitter ensures repeated visualizations
+        //    in the same session pay the WASM init cost only once.
+        let language: string | undefined;
+        try {
+            const raw = await getItemLanguage(item.libraryID, item.key);
+            if (raw) language = raw;
+        } catch {
+            // Best effort — fall back to "en" via normalizeLanguageCode.
+        }
+        const splitter = await getSentenceSplitterWithFallback(
+            normalizeLanguageCode(language),
+        );
+        const result = extractPageSentenceBBoxes(detailedPage, { splitter });
 
         if (result.sentences.length === 0) {
             return {

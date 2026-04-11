@@ -593,14 +593,19 @@ async function handleTestSentenceBBoxesHttpRequest(request: any) {
     const { buildParagraphFeasibilityReport } = await import(
         '../../src/services/pdf/ParagraphSentenceMapper'
     );
+    const { getSentenceSplitterWithFallback, normalizeLanguageCode } =
+        await import('../../src/services/pdf/SentencexSplitter');
+    const { getItemLanguage } = await import('../../src/utils/zoteroUtils');
 
-    const { library_id, zotero_key, page_index, mode } = request;
+    const { library_id, zotero_key, page_index, mode, splitter: splitterChoice, language: langOverride } = request;
     if (library_id == null || zotero_key == null) {
         return { error: 'Provide library_id + zotero_key' };
     }
     const pageIndex = typeof page_index === 'number' ? page_index : 0;
     const runMode: 'page' | 'paragraph' | 'both' =
         mode === 'page' || mode === 'paragraph' ? mode : 'both';
+    // Splitter selection: "sentencex" (default) | "simple"
+    const useSimple = splitterChoice === 'simple';
 
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
     if (!item || !item.isAttachment() || !item.isPDFAttachment()) {
@@ -623,11 +628,36 @@ async function handleTestSentenceBBoxesHttpRequest(request: any) {
         const detailed = mupdf.extractRawPageDetailed(pageIndex);
         const walkMs = Date.now() - walkStart;
 
+        // Resolve splitter:
+        //   - "simple" → undefined → mappers default to simpleRegexSentenceSplit
+        //   - "sentencex" (default) → load WASM-backed splitter, falls back
+        //     internally to the regex if init fails.
+        let splitter: ((text: string) => Array<{ start: number; end: number }>) | undefined;
+        let splitterUsed = 'simple';
+        let splitterInitMs = 0;
+        if (!useSimple) {
+            let language = typeof langOverride === 'string' ? langOverride : undefined;
+            if (!language) {
+                try {
+                    const raw = await getItemLanguage(library_id, zotero_key);
+                    if (raw) language = raw;
+                } catch {
+                    // Best effort.
+                }
+            }
+            const t = Date.now();
+            splitter = await getSentenceSplitterWithFallback(
+                normalizeLanguageCode(language),
+            );
+            splitterInitMs = Date.now() - t;
+            splitterUsed = 'sentencex';
+        }
+
         let pageReport: unknown = null;
         let pageMs = 0;
         if (runMode === 'page' || runMode === 'both') {
             const t = Date.now();
-            pageReport = buildFeasibilityReport(detailed);
+            pageReport = buildFeasibilityReport(detailed, splitter);
             pageMs = Date.now() - t;
         }
 
@@ -635,7 +665,7 @@ async function handleTestSentenceBBoxesHttpRequest(request: any) {
         let paragraphMs = 0;
         if (runMode === 'paragraph' || runMode === 'both') {
             const t = Date.now();
-            paragraphReport = buildParagraphFeasibilityReport(detailed);
+            paragraphReport = buildParagraphFeasibilityReport(detailed, { splitter });
             paragraphMs = Date.now() - t;
         }
 
@@ -645,8 +675,10 @@ async function handleTestSentenceBBoxesHttpRequest(request: any) {
             page_width: detailed.width,
             page_height: detailed.height,
             num_blocks: detailed.blocks.length,
+            splitter: splitterUsed,
             timings_ms: {
                 walk: walkMs,
+                splitter_init: splitterInitMs,
                 page_mapper: pageMs,
                 paragraph_mapper: paragraphMs,
             },

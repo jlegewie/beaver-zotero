@@ -47,6 +47,16 @@ import {
     type PageSentenceBBoxOptions,
     type PageSentenceBBoxResult,
 } from "./ParagraphSentenceMapper";
+import {
+    getSentenceSplitterWithFallback,
+    normalizeLanguageCode,
+} from "./SentencexSplitter";
+// `getItemLanguage` is intentionally lazy-imported inside
+// `extractSentenceBBoxesFromZoteroItem` to keep the static import surface
+// of this barrel small. `zoteroUtils` transitively pulls in heavy modules
+// (Supabase client, webAPI) that throw on module load when env vars are
+// missing — undesirable for vitest cold paths and shutdown hooks that
+// just need `disposeSentencex`.
 
 // Re-export types and classes for convenience
 export * from "./types";
@@ -109,6 +119,15 @@ export type {
     PageSentenceBBoxOptions,
     ParagraphFeasibilityReport,
 } from "./ParagraphSentenceMapper";
+export {
+    getSentencexSplitter,
+    getSentenceSplitterWithFallback,
+    disposeSentencex,
+    normalizeLanguageCode,
+    buildByteOffsetTable,
+    byteRangesToCharRanges,
+} from "./SentencexSplitter";
+export type { SentencexBoundary } from "./SentencexSplitter";
 
 /**
  * PDFExtractor - High-level API for extracting text from PDFs.
@@ -600,7 +619,18 @@ export class PDFExtractor {
                 );
             }
             const detailed = this.mupdf.extractRawPageDetailed(pageIndex);
-            return extractPageSentenceBBoxes(detailed, options);
+
+            // Resolve splitter once per call. Caller-provided `options.splitter`
+            // wins; otherwise default to sentencex with regex fallback. The
+            // sentencex module is cached for the rest of the session so this
+            // only pays the WASM init cost on the first call.
+            const splitter =
+                options.splitter ??
+                (await getSentenceSplitterWithFallback(
+                    normalizeLanguageCode(options.language),
+                ));
+
+            return extractPageSentenceBBoxes(detailed, { ...options, splitter });
         } finally {
             this.mupdf.close();
         }
@@ -979,7 +1009,30 @@ export async function extractSentenceBBoxesFromZoteroItem(
         return null;
     }
 
+    // Resolve language from the parent regular item if the caller didn't
+    // pass one explicitly. `getItemLanguage` walks attachments → parent
+    // and returns the raw `language` field; `normalizeLanguageCode` (run
+    // inside the extractor) handles BCP-47 / ISO 639-2 / English-name
+    // variants. We resolve here rather than inside the extractor so that
+    // the extractor stays Zotero-item-agnostic.
+    let language = options.language;
+    if (language === undefined) {
+        try {
+            const { getItemLanguage } = await import(
+                "../../utils/zoteroUtils"
+            );
+            const raw = await getItemLanguage(item.libraryID, item.key);
+            if (raw) language = raw;
+        } catch {
+            // Field lookup is best effort — fall through to the "en"
+            // default applied by normalizeLanguageCode downstream.
+        }
+    }
+
     const pdfData = await IOUtils.read(path);
     const extractor = new PDFExtractor();
-    return extractor.extractSentenceBBoxes(pdfData, pageIndex, options);
+    return extractor.extractSentenceBBoxes(pdfData, pageIndex, {
+        ...options,
+        language,
+    });
 }
