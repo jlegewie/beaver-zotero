@@ -45,6 +45,7 @@ vi.mock('../../../react/utils/noteEditorDiffPreview', () => ({
     showDiffPreview: vi.fn().mockResolvedValue(true),
     dismissDiffPreview: (...args: any[]) => mockDismissDiffPreview(...args),
     isDiffPreviewActive: vi.fn().mockReturnValue(false),
+    isDiffPreviewSupported: vi.fn().mockReturnValue(true),
     isNoteInSelectedTab: vi.fn().mockReturnValue(true),
     getPreviewNoteKey: () => capturedHandlers.previewNoteKey,
     setOnBannerAction: (handler: any) => { capturedHandlers.bannerAction = handler; },

@@ -145,6 +145,28 @@ function isEditorInstanceUsable(inst: any): boolean {
     } catch { return false; }
 }
 
+/**
+ * Runtime capability gate for the in-editor diff preview.
+ *
+ * The preview relies on Zotero 8-only APIs (`Zotero.Notes.open()` to open
+ * notes as tabs and `EditorInstance.applyIncrementalUpdate()` to inject diff
+ * HTML without persisting it). On Zotero 7 these are absent and the feature
+ * cannot work — callers should hide any UI that exposes it and avoid
+ * triggering the coordinator's automatic preview.
+ *
+ * This is a feature detection rather than a version check, and it is
+ * independent from `DIFF_PREVIEW_ENABLED` (which remains a global kill
+ * switch, e.g. to disable the feature in production without a code change).
+ * The preview is considered live only when BOTH are true.
+ */
+export function isDiffPreviewSupported(): boolean {
+    try {
+        if (typeof (Zotero as any).Notes?.open !== 'function') return false;
+        if (!Array.isArray((Zotero as any).Notes?._editorInstances)) return false;
+        return true;
+    } catch { return false; }
+}
+
 // =============================================================================
 // Public API
 // =============================================================================
@@ -205,6 +227,11 @@ export async function showDiffPreview(
     try {
         if (edits.length === 0) {
             logger(`showDiffPreview: aborting for ${noteKey}, edits array is empty`, 1);
+            return false;
+        }
+
+        if (!isDiffPreviewSupported()) {
+            logger(`showDiffPreview: aborting for ${noteKey}, required Zotero APIs unavailable (Zotero 7 or older)`, 1);
             return false;
         }
 
