@@ -242,10 +242,17 @@ export class AgentService {
                 };
 
                 this.ws.onclose = (event) => {
+                    if (this.ws !== wsInstance || this.connectionId !== connId) {
+                        logger('AgentService: Ignoring stale close event from superseded connection', 1);
+                        return;
+                    }
                     logger(`AgentService: Connection closed - code=${event.code}, reason=${event.reason}, clean=${event.wasClean}`, 1);
                     callbacks.onClose?.(event.code, event.reason, event.wasClean);
                     this.ws = null;
                     this.callbacks = null;
+                    this.connectionId++;
+                    this.messageQueue = Promise.resolve();
+                    this.actionExecutionQueue = Promise.resolve();
                     // If we haven't resolved yet, the connection closed before ready
                     if (!hasResolved) {
                         hasResolved = true;
@@ -380,21 +387,29 @@ export class AgentService {
                     this.callbacks.onThreadName?.(event);
                     break;
 
-                case 'error':
+                case 'error': {
                     // Call onError callback
                     this.callbacks.onError(event);
                     // Backend behavior: some errors close connection (auth, internal), 
                     // others keep it open (LLM errors, rate limits, invalid_request).
                     // Since each connect() is for a single run (for now), close on any error.
                     // Use a small delay to avoid race with server-initiated close.
+                    const errorSocket = this.ws;
+                    const errorConnectionId = this.connectionId;
                     setTimeout(() => {
-                        if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
+                        if (
+                            this.connectionId === errorConnectionId &&
+                            this.ws === errorSocket &&
+                            this.ws &&
+                            this.ws.readyState !== WebSocket.CLOSED
+                        ) {
                             // Firefox/Zotero only allows code 1000 or 3000-4999 for close()
                             // 1011 causes InvalidAccessError, so we use 1000 (Normal Closure)
                             this.close(1000, `Client closing after error: ${event.type}`);
                         }
                     }, 100);
                     break;
+                }
 
                 case 'warning':
                     this.callbacks.onWarning(event);
@@ -742,19 +757,22 @@ export class AgentService {
      * @param reason Optional close reason
      */
     close(code: number = 1000, reason: string = 'Client closing'): void {
-        if (this.ws) {
+        const wsToClose = this.ws;
+        const callbacks = this.callbacks;
+
+        if (wsToClose) {
             // Only attempt to close if not already closing/closed
             // CLOSING = 2, CLOSED = 3
-            if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+            if (wsToClose.readyState === WebSocket.OPEN || wsToClose.readyState === WebSocket.CONNECTING) {
                 logger(`AgentService: Closing connection - code=${code}, reason=${reason}`, 1);
                 try {
-                    this.ws.close(code, reason);
+                    wsToClose.close(code, reason);
                 } catch (error) {
                     // Log but don't throw - the connection may already be closing from server side
-                    logger(`AgentService: Error closing WebSocket (state=${this.ws.readyState}): ${error}`, 1);
+                    logger(`AgentService: Error closing WebSocket (state=${wsToClose.readyState}): ${error}`, 1);
                 }
             } else {
-                logger(`AgentService: WebSocket already closing/closed (state=${this.ws.readyState})`, 1);
+                logger(`AgentService: WebSocket already closing/closed (state=${wsToClose.readyState})`, 1);
             }
             this.ws = null;
         }
@@ -762,6 +780,7 @@ export class AgentService {
         this.connectionId++;
         this.messageQueue = Promise.resolve();
         this.actionExecutionQueue = Promise.resolve();
+        callbacks?.onClose?.(code, reason, true);
     }
 
     /**

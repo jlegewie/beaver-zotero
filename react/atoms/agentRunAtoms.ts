@@ -122,6 +122,7 @@ import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
+import { appendRunIfMissing, findRunForResume, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 
 // =============================================================================
 // Helper Functions
@@ -357,6 +358,103 @@ function createAgentRunShell(
     };
 
     return { run, request };
+}
+
+type StartResumeRunOptions = {
+    requireResumable: boolean;
+    logPrefix: string;
+    failureErrorType: string;
+    failureMessage: string;
+};
+
+async function startResumeRun(
+    get: Getter,
+    set: Setter,
+    failedRunId: string,
+    options: StartResumeRunOptions,
+): Promise<void> {
+    logger(`${options.logPrefix}: Resuming from run ${failedRunId}`, 1);
+
+    let newRunId: string | null = null;
+
+    try {
+        const model = get(selectedModelAtom);
+        if (!model) {
+            logger(`${options.logPrefix}: No model selected`, 1);
+            return;
+        }
+
+        const userId = get(userIdAtom);
+        if (!userId) {
+            logger(`${options.logPrefix}: No user ID found`, 1);
+            return;
+        }
+
+        const threadRuns = get(threadRunsAtom);
+        const activeRun = get(activeRunAtom);
+        const failedRun = findRunForResume(threadRuns, activeRun, failedRunId);
+
+        if (!failedRun) {
+            logger(`${options.logPrefix}: Failed run ${failedRunId} not found`, 1);
+            return;
+        }
+
+        if (
+            failedRun.status !== 'error' ||
+            (options.requireResumable && !failedRun.error?.is_resumable)
+        ) {
+            logger(`${options.logPrefix}: Run ${failedRunId} is not resumable`, 1);
+            return;
+        }
+
+        const threadId = get(currentThreadIdAtom) || failedRun.thread_id;
+        if (!threadId) {
+            logger(`${options.logPrefix}: No thread ID found`, 1);
+            return;
+        }
+
+        if (activeRun?.id === failedRunId) {
+            set(threadRunsAtom, runs => appendRunIfMissing(runs, failedRun));
+        }
+
+        set(resetWSStateAtom);
+        set(isWSChatPendingAtom, true);
+
+        const modelOptions = buildModelSelectionOptions(model);
+        const customInstructions = getPref('customInstructions') || undefined;
+
+        const resumePrompt: BeaverAgentPrompt = {
+            content: '',
+            is_resume: true,
+            resumes_run_id: failedRunId,
+        };
+
+        const { run: newRun, request } = createAgentRunShell(
+            resumePrompt,
+            threadId,
+            userId,
+            model.name,
+            modelOptions,
+            model.provider,
+            customInstructions,
+            model.is_custom ? model.custom_model : undefined,
+        );
+
+        newRunId = newRun.id;
+        set(activeRunAtom, newRun);
+
+        await executeWSRequest(newRun, request, get, set);
+    } catch (error) {
+        logger(`${options.logPrefix}: Unexpected error:`, error, 1);
+        set(wsErrorAtom, {
+            event: 'error',
+            type: options.failureErrorType,
+            message: error instanceof Error ? error.message : options.failureMessage,
+            is_retryable: true,
+        });
+        set(activeRunAtom, prev => (newRunId && prev?.id === newRunId ? null : prev));
+        set(isWSChatPendingAtom, false);
+    }
 }
 
 /**
@@ -705,6 +803,7 @@ export interface RetryState {
     waitSeconds?: number | null;
 }
 export const wsRetryAtom = atom<RetryState | null>(null);
+const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
 
 // =============================================================================
 // Action Atoms
@@ -993,25 +1092,22 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
         onError: (event: WSErrorEvent) => {
             logger('WS onError:', event, 1);
+            const errorRunId = resolveErrorRunId(event, store.get(activeRunAtom));
 
             // Clear streaming-done state
             set(streamingDoneRunIdsAtom, new Set<string>());
 
             // Normal error handling
             set(wsErrorAtom, event);
-            set(activeRunAtom, (prev) => prev ? {
-                ...prev,
-                status: 'error',
-                error: {
-                    type: event.type,
-                    message: event.message,
-                    details: event.details,
-                    is_retryable: event.is_retryable,
-                    retry_after: event.retry_after,
-                    is_resumable: event.is_resumable,
-                    has_beaver_fallback: event.has_beaver_fallback,
-                }
-            } : prev);
+            set(activeRunAtom, (prev) => {
+                if (!prev) return prev;
+                if (errorRunId && prev.id !== errorRunId) return prev;
+                return {
+                    ...prev,
+                    status: 'error',
+                    error: toRunError(event),
+                };
+            });
             set(isWSChatPendingAtom, false);
             // Clear retry state on error
             set(wsRetryAtom, null);
@@ -1019,6 +1115,22 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(clearAllPendingApprovalsAtom);
             // Clear per-run auto-approve state
             set(clearAutoApproveNoteKeysAtom);
+
+            if (
+                event.try_auto_resume &&
+                errorRunId &&
+                !store.get(scheduledAutoResumeRunIdsAtom).has(errorRunId)
+            ) {
+                set(scheduledAutoResumeRunIdsAtom, (prev: Set<string>) => {
+                    const next = new Set(prev);
+                    next.add(errorRunId);
+                    return next;
+                });
+
+                setTimeout(() => {
+                    store.set(autoResumeErroredRunAtom, errorRunId);
+                }, 0);
+            }
         },
 
         onWarning: (event: WSWarningEvent) => {
@@ -1935,101 +2047,35 @@ export const regenerateWithEditedPromptAtom = atom(
  * The backend will continue from where it left off and the UI will hide the error run
  * when displaying the resumed run.
  */
+export const autoResumeErroredRunAtom = atom(
+    null,
+    async (get, set, failedRunId: string) => {
+        try {
+            await startResumeRun(get, set, failedRunId, {
+                requireResumable: false,
+                logPrefix: 'autoResumeErroredRunAtom',
+                failureErrorType: 'auto_resume_error',
+                failureMessage: 'Failed to automatically resume run',
+            });
+        } finally {
+            set(scheduledAutoResumeRunIdsAtom, (prev: Set<string>) => {
+                const next = new Set(prev);
+                next.delete(failedRunId);
+                return next;
+            });
+        }
+    }
+);
+
 export const resumeFromRunAtom = atom(
     null,
     async (get, set, failedRunId: string) => {
-        logger(`resumeFromRunAtom: Resuming from run ${failedRunId}`, 1);
-
-        try {
-            // Get current model
-            const model = get(selectedModelAtom);
-            if (!model) {
-                logger('resumeFromRunAtom: No model selected', 1);
-                return;
-            }
-
-            // Get user ID
-            const userId = get(userIdAtom);
-            if (!userId) {
-                logger('resumeFromRunAtom: No user ID found', 1);
-                return;
-            }
-
-            // Find the failed run
-            const threadRuns = get(threadRunsAtom);
-            const activeRun = get(activeRunAtom);
-            
-            let failedRun: AgentRun | null = null;
-            const failedRunIndex = threadRuns.findIndex(r => r.id === failedRunId);
-            
-            if (failedRunIndex >= 0) {
-                failedRun = threadRuns[failedRunIndex];
-            } else if (activeRun?.id === failedRunId) {
-                failedRun = activeRun;
-            }
-            
-            if (!failedRun) {
-                logger(`resumeFromRunAtom: Failed run ${failedRunId} not found`, 1);
-                return;
-            }
-
-            // Verify it's an error run that can be resumed
-            if (failedRun.status !== 'error' || !failedRun.error?.is_resumable) {
-                logger(`resumeFromRunAtom: Run ${failedRunId} is not resumable`, 1);
-                return;
-            }
-
-            // Get thread ID
-            const threadId = get(currentThreadIdAtom) || failedRun.thread_id;
-            if (!threadId) {
-                logger('resumeFromRunAtom: No thread ID found', 1);
-                return;
-            }
-
-            // Reset WS state and set pending
-            set(resetWSStateAtom);
-            set(isWSChatPendingAtom, true);
-
-            // Build model selection options
-            const modelOptions = buildModelSelectionOptions(model);
-            const customInstructions = getPref('customInstructions') || undefined;
-
-            // Create resume prompt with empty content
-            const resumePrompt: BeaverAgentPrompt = {
-                content: '',
-                is_resume: true,
-                resumes_run_id: failedRunId,
-            };
-
-            // Create new AgentRun shell with the resume prompt
-            const { run: newRun, request } = createAgentRunShell(
-                resumePrompt,
-                threadId,
-                userId,
-                model.name,
-                modelOptions,
-                model.provider,
-                customInstructions,
-                model.is_custom ? model.custom_model : undefined,
-            );
-
-            // Set active run - UI now shows spinner
-            set(activeRunAtom, newRun);
-
-            // Execute the WebSocket request
-            await executeWSRequest(newRun, request, get, set);
-        } catch (error) {
-            // Catch any unexpected errors during resume
-            logger('resumeFromRunAtom: Unexpected error:', error, 1);
-            set(wsErrorAtom, {
-                event: 'error',
-                type: 'resume_error',
-                message: error instanceof Error ? error.message : 'Failed to resume run',
-                is_retryable: true,
-            });
-            set(activeRunAtom, null);
-            set(isWSChatPendingAtom, false);
-        }
+        await startResumeRun(get, set, failedRunId, {
+            requireResumable: true,
+            logPrefix: 'resumeFromRunAtom',
+            failureErrorType: 'resume_error',
+            failureMessage: 'Failed to resume run',
+        });
     }
 );
 
