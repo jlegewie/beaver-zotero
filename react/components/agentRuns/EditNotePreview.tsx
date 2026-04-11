@@ -157,8 +157,6 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     const isApplied = status === 'applied';
     const isDelete = newString === '';
     const isRewrite = operation === 'rewrite';
-    const isInsertAfter = operation === 'insert_after';
-    const isInsertBefore = operation === 'insert_before';
 
     // For rewrite mode when oldContent is missing (e.g. after undo),
     // fetch the current note content — the note is back to its original state.
@@ -201,7 +199,12 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     // When strippedOld is empty (old_string was pure HTML structure), fetch
     // surrounding visible text from the full note for context.
     // Skip for rewrite mode — we already have the full old content.
-    const needsNoteContext = !isRewrite && !isInsertAfter && !isInsertBefore && strippedOld === '' && effectiveOld !== '' && strippedNew !== '';
+    const needsNoteContext = shouldFetchNoteContext({
+        operation,
+        strippedOld,
+        effectiveOld,
+        strippedNew,
+    });
     const [noteContext, setNoteContext] = useState<{ before: string; after: string } | null>(null);
 
     useEffect(() => {
@@ -354,6 +357,23 @@ export function computeInlineDiff(oldText: string, newText: string): InlineSegme
     }));
 
     return truncateInlineContext(segments);
+}
+
+export function shouldFetchNoteContext({
+    operation,
+    strippedOld,
+    effectiveOld,
+    strippedNew,
+}: {
+    operation: EditNoteOperation;
+    strippedOld: string;
+    effectiveOld: string;
+    strippedNew: string;
+}): boolean {
+    return operation !== 'rewrite'
+        && strippedOld === ''
+        && effectiveOld !== ''
+        && strippedNew !== '';
 }
 
 /**

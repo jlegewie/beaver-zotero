@@ -1113,6 +1113,24 @@ describe('citation ref enrichment — validate', () => {
         expect(response.normalized_action_data!.new_string).toBe('prepended See CITATION_WITH_REF');
     });
 
+    it('rejects empty insert_before payloads as no-op edits', async () => {
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'See CITATION_WITH_REF',
+                new_string: '',
+                operation: 'insert_before',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('no_changes');
+        expect(response.error).toBe('new_string must not be empty.');
+    });
+
     it('no enrichment → no normalized_action_data from enrichment alone', async () => {
         vi.mocked(enrichOldStringCitationRefs).mockReturnValue(null);
 

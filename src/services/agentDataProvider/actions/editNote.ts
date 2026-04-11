@@ -234,13 +234,23 @@ async function validateEditNoteAction(
 
     // ── String replacement mode (default) ──
 
-    // 9. Strings different (skip for insert_after/insert_before — old_string is kept, new_string is appended/prepended)
-    if (operation !== 'insert_after' && operation !== 'insert_before' && old_string === new_string) {
+    // 9. Require an actual change.
+    // For insert_after / insert_before, old_string is preserved and new_string
+    // is later appended/prepended during normalization, so the regular
+    // identical-strings check does not apply. An empty payload is still a
+    // no-op and must be rejected before normalization turns it into
+    // replace-with-self.
+    if (
+        ((operation !== 'insert_after' && operation !== 'insert_before') && old_string === new_string)
+        || ((operation === 'insert_after' || operation === 'insert_before') && new_string === '')
+    ) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: 'old_string and new_string are identical.',
+            error: operation === 'insert_after' || operation === 'insert_before'
+                ? 'new_string must not be empty.'
+                : 'old_string and new_string are identical.',
             error_code: 'no_changes',
             preference: 'always_ask',
         };
