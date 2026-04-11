@@ -1034,6 +1034,39 @@ describe('trailing whitespace normalization in matching', () => {
         expect(response.normalized_action_data).toBeDefined();
         expect(response.normalized_action_data.old_string).toBe('<p>Duplicate</p>');
     });
+
+    it('recovers from ambiguous trimmed match via captureValidatedEditTargetContext', async () => {
+        // After trimming, the trimmed form matches twice in raw HTML, but
+        // captureValidatedEditTargetContext can pin down a unique target via
+        // surrounding context (e.g. simplification collapsed two raw forms
+        // into one). Mirrors block 14's recovery path — block 12b must not
+        // reject these edits without trying disambiguation first.
+        const noteHtml = '<div data-schema-version="9"><p>Duplicate</p>\n<p>Duplicate</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+        vi.mocked(captureValidatedEditTargetContext).mockReturnValueOnce({
+            beforeContext: 'before-anchor',
+            afterContext: 'after-anchor',
+        });
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<p>Duplicate</p>\n\n',
+                new_string: '<p>Replaced</p>',
+                operation: 'str_replace',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data.old_string).toBe('<p>Duplicate</p>');
+        expect(response.normalized_action_data.target_before_context).toBe('before-anchor');
+        expect(response.normalized_action_data.target_after_context).toBe('after-anchor');
+    });
 });
 
 describe('JSON-escape unescape fallback in matching', () => {
@@ -1112,6 +1145,38 @@ describe('JSON-escape unescape fallback in matching', () => {
         expect(response.valid).toBe(true);
         expect(response.normalized_action_data).toBeDefined();
         expect(response.normalized_action_data.old_string).toBe('Say "hello"');
+    });
+
+    it('recovers from ambiguous unescaped match via captureValidatedEditTargetContext', async () => {
+        // After unescape, the unescaped form matches twice in raw HTML, but
+        // captureValidatedEditTargetContext can pin down a unique target via
+        // surrounding context. Mirrors block 14's recovery path — block 12c
+        // must not reject these edits without trying disambiguation first.
+        const noteHtml = '<div data-schema-version="9"><p>Say "hello"</p>\n<p>Say "hello"</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+        vi.mocked(captureValidatedEditTargetContext).mockReturnValueOnce({
+            beforeContext: 'unescaped-before',
+            afterContext: 'unescaped-after',
+        });
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'Say \\"hello\\"',
+                new_string: 'Say goodbye',
+                operation: 'str_replace',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data.old_string).toBe('Say "hello"');
+        expect(response.normalized_action_data.target_before_context).toBe('unescaped-before');
+        expect(response.normalized_action_data.target_after_context).toBe('unescaped-after');
     });
 });
 

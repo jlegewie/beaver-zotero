@@ -366,21 +366,6 @@ async function validateEditNoteAction(
                 const trimmedExpandedOld = expandToRawHtml(trimmedOld, metadata, 'old');
                 const trimmedCount = countOccurrences(strippedHtml, trimmedExpandedOld);
                 if (trimmedCount > 0) {
-                    // Refuse ambiguous matches when operation is str_replace.
-                    // Mirrors the guard in blocks 13/14 — validation must not
-                    // confirm an action the executor cannot apply.
-                    if (trimmedCount > 1 && operation !== 'str_replace_all') {
-                        return {
-                            type: 'agent_action_validate_response',
-                            request_id: request.request_id,
-                            valid: false,
-                            error: `The string to replace was found ${trimmedCount} times in the note. `
-                                + 'Use operation str_replace_all to replace all occurrences, or include more context to make the match unique.',
-                            error_code: 'ambiguous_match',
-                            preference: 'always_ask',
-                        };
-                    }
-
                     const trimmedNew = operation === 'insert_after' || operation === 'insert_before'
                         ? new_string
                         : new_string.replace(/\n+$/, '');
@@ -392,6 +377,39 @@ async function validateEditNoteAction(
                         old_string: trimmedOld,
                         new_string: mergeInsertNewString(operation, trimmedOld, trimmedNew),
                     };
+
+                    // Multi-match: mirror block 14's disambiguation. Try
+                    // findUniqueRawMatchPosition first; if that fails, fall back
+                    // to captureValidatedEditTargetContext so the executor can
+                    // disambiguate via surrounding raw context. Only refuse the
+                    // edit when neither path can pin down a single target.
+                    if (trimmedCount > 1 && operation !== 'str_replace_all') {
+                        const rawPos = findUniqueRawMatchPosition(
+                            strippedHtml, simplified, trimmedOld, trimmedExpandedOld, metadata
+                        );
+                        let disambiguated = rawPos !== null;
+                        if (!disambiguated) {
+                            const targetContext = captureValidatedEditTargetContext(
+                                strippedHtml, simplified, trimmedOld, trimmedExpandedOld, metadata
+                            );
+                            if (targetContext) {
+                                normalizedActionData.target_before_context = targetContext.beforeContext;
+                                normalizedActionData.target_after_context = targetContext.afterContext;
+                                disambiguated = true;
+                            }
+                        }
+                        if (!disambiguated) {
+                            return {
+                                type: 'agent_action_validate_response',
+                                request_id: request.request_id,
+                                valid: false,
+                                error: `The string to replace was found ${trimmedCount} times in the note. `
+                                    + 'Use operation str_replace_all to replace all occurrences, or include more context to make the match unique.',
+                                error_code: 'ambiguous_match',
+                                preference: 'always_ask',
+                            };
+                        }
+                    }
 
                     const noteTitle = item.getNoteTitle() || '(untitled)';
                     const totalLines = simplified.split('\n').length;
@@ -426,21 +444,6 @@ async function validateEditNoteAction(
                 const unescapedExpandedOld = expandToRawHtml(unescapedOld, metadata, 'old');
                 const unescapedCount = countOccurrences(strippedHtml, unescapedExpandedOld);
                 if (unescapedCount > 0) {
-                    // Refuse ambiguous matches when operation is str_replace.
-                    // Mirrors the guard in blocks 13/14 — validation must not
-                    // confirm an action the executor cannot apply.
-                    if (unescapedCount > 1 && operation !== 'str_replace_all') {
-                        return {
-                            type: 'agent_action_validate_response',
-                            request_id: request.request_id,
-                            valid: false,
-                            error: `The string to replace was found ${unescapedCount} times in the note. `
-                                + 'Use operation str_replace_all to replace all occurrences, or include more context to make the match unique.',
-                            error_code: 'ambiguous_match',
-                            preference: 'always_ask',
-                        };
-                    }
-
                     const unescapedNew = new_string.replace(/\\"/g, '"').replace(/\\\\/g, '\\').replace(/\\\//g, '/');
                     // Dry-run expand new_string to verify
                     expandToRawHtml(unescapedNew, metadata, 'new');
@@ -450,6 +453,39 @@ async function validateEditNoteAction(
                         old_string: unescapedOld,
                         new_string: mergeInsertNewString(operation, unescapedOld, unescapedNew),
                     };
+
+                    // Multi-match: mirror block 14's disambiguation. Try
+                    // findUniqueRawMatchPosition first; if that fails, fall back
+                    // to captureValidatedEditTargetContext so the executor can
+                    // disambiguate via surrounding raw context. Only refuse the
+                    // edit when neither path can pin down a single target.
+                    if (unescapedCount > 1 && operation !== 'str_replace_all') {
+                        const rawPos = findUniqueRawMatchPosition(
+                            strippedHtml, simplified, unescapedOld, unescapedExpandedOld, metadata
+                        );
+                        let disambiguated = rawPos !== null;
+                        if (!disambiguated) {
+                            const targetContext = captureValidatedEditTargetContext(
+                                strippedHtml, simplified, unescapedOld, unescapedExpandedOld, metadata
+                            );
+                            if (targetContext) {
+                                normalizedActionData.target_before_context = targetContext.beforeContext;
+                                normalizedActionData.target_after_context = targetContext.afterContext;
+                                disambiguated = true;
+                            }
+                        }
+                        if (!disambiguated) {
+                            return {
+                                type: 'agent_action_validate_response',
+                                request_id: request.request_id,
+                                valid: false,
+                                error: `The string to replace was found ${unescapedCount} times in the note. `
+                                    + 'Use operation str_replace_all to replace all occurrences, or include more context to make the match unique.',
+                                error_code: 'ambiguous_match',
+                                preference: 'always_ask',
+                            };
+                        }
+                    }
 
                     const noteTitle = item.getNoteTitle() || '(untitled)';
                     const totalLines = simplified.split('\n').length;
