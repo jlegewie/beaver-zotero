@@ -1264,6 +1264,94 @@ export function findFuzzyMatch(simplified: string, searchStr: string): string | 
 }
 
 // =============================================================================
+// Structural Anchor Hint
+// =============================================================================
+
+/**
+ * Distinctive block-level tags that can serve as structural anchors when
+ * old_string is mostly HTML structure with little or no word content
+ * (e.g. `</h2>\n<table>`). These tags are typically unique or rare in a
+ * note, so finding their real location gives the model a usable anchor.
+ */
+const STRUCTURAL_ANCHOR_TAG_NAMES = [
+    'table', 'thead', 'tbody', 'tfoot',
+    'ul', 'ol', 'dl',
+    'blockquote', 'pre', 'hr',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+] as const;
+
+const STRUCTURAL_ANCHOR_TAG_IN_OLD_RE = new RegExp(
+    `</?(${STRUCTURAL_ANCHOR_TAG_NAMES.join('|')})\\b[^>]*>`,
+    'gi',
+);
+
+export interface StructuralAnchorHint {
+    /** The tag name (lowercased, without angle brackets) used as the anchor. */
+    tagName: string;
+    /** Context snippet showing where that tag actually appears in the note. */
+    context: string;
+}
+
+/**
+ * When fuzzy text matching fails because old_string is mostly structural HTML
+ * (no meaningful words for `findFuzzyMatch` to latch onto), look for
+ * block-level tag openers referenced in old_string and check whether any of
+ * them appears exactly once in the simplified note. If so, return a context
+ * snippet around the real location — this gives the model a concrete anchor
+ * to rewrite its old_string against, instead of a generic "not found" error.
+ *
+ * Returns null when:
+ *  - old_string is empty
+ *  - old_string references no recognized structural tags
+ *  - none of the referenced tags appears exactly once in the simplified note
+ */
+export function findStructuralAnchorHint(
+    simplified: string,
+    oldString: string,
+): StructuralAnchorHint | null {
+    if (!oldString) return null;
+
+    // Collect unique tag names referenced in old_string (opening or closing).
+    // Preserves insertion order so we prefer the first-mentioned tag.
+    const tagsInOld: string[] = [];
+    const seen = new Set<string>();
+    for (const m of oldString.matchAll(STRUCTURAL_ANCHOR_TAG_IN_OLD_RE)) {
+        const name = m[1].toLowerCase();
+        if (!seen.has(name)) {
+            seen.add(name);
+            tagsInOld.push(name);
+        }
+    }
+    if (tagsInOld.length === 0) return null;
+
+    // For each candidate tag, find where its opening tag occurs in `simplified`.
+    // If it occurs exactly once, return that context.
+    for (const tagName of tagsInOld) {
+        const openRe = new RegExp(`<${tagName}\\b[^>]*>`, 'gi');
+        const matches = [...simplified.matchAll(openRe)];
+        if (matches.length !== 1) continue;
+
+        const match = matches[0];
+        const idx = match.index ?? -1;
+        if (idx < 0) continue;
+        const matchLen = match[0].length;
+
+        // Simple character-based window around the match
+        const CONTEXT_CHARS = 250;
+        const start = Math.max(0, idx - CONTEXT_CHARS);
+        const end = Math.min(simplified.length, idx + matchLen + CONTEXT_CHARS);
+
+        let context = simplified.substring(start, end);
+        if (start > 0) context = '…' + context;
+        if (end < simplified.length) context = context + '…';
+
+        return { tagName, context };
+    }
+
+    return null;
+}
+
+// =============================================================================
 // Inline Tag Drift Detection
 // =============================================================================
 

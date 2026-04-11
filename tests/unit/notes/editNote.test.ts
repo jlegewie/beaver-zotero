@@ -23,6 +23,7 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
     validateNewString: vi.fn(() => null),
     findFuzzyMatch: vi.fn(() => null),
+    findStructuralAnchorHint: vi.fn(() => null),
     findInlineTagDriftMatch: vi.fn(() => null),
     findUniqueRawMatchPosition: vi.fn(() => null),
     captureValidatedEditTargetContext: vi.fn(() => null),

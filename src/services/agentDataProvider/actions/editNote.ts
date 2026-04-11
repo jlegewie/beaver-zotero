@@ -11,6 +11,7 @@ import {
     invalidateSimplificationCache,
     checkDuplicateCitations,
     findFuzzyMatch,
+    findStructuralAnchorHint,
     findInlineTagDriftMatch,
     validateNewString,
     checkNewCitationItemsExist,
@@ -633,12 +634,27 @@ async function validateEditNoteAction(
 
         // 13b (cont). Fall back to generic fuzzy match on simplified HTML.
         const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
+        // 13c. When fuzzy word-match returns nothing (e.g. old_string is mostly
+        //      structural HTML like `</h2>\n<table>`), try to find a distinctive
+        //      block-level tag that old_string references and show its real
+        //      context in the note so the model can pick a correct anchor.
+        const structural = fuzzy
+            ? null
+            : findStructuralAnchorHint(simplified, old_string ?? '');
+        let errorMsg = 'The string to replace was not found in the note.';
+        if (fuzzy) {
+            errorMsg += ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\``;
+        } else if (structural) {
+            errorMsg += ` Your old_string references \`<${structural.tagName}>\`,`
+                + ' but its actual context in the note is:\n'
+                + `\`\`\`\n${structural.context}\n\`\`\`\n`
+                + 'Rewrite old_string to match the surrounding content shown above.';
+        }
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: 'The string to replace was not found in the note.'
-                + (fuzzy ? ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\`` : ''),
+            error: errorMsg,
             error_code: 'old_string_not_found',
             preference: 'always_ask',
         };
