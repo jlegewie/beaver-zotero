@@ -16,6 +16,7 @@ import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { initContextMenus, cleanupContextMenus } from "./modules/zoteroContextMenu";
 import { initReaderIntegration, cleanupReaderIntegration } from "./modules/readerIntegration";
 import { initReaderToolbarMenu, cleanupReaderToolbarMenu } from "./modules/readerToolbarMenu";
+import { initUpdateController, disposeUpdateController, attachSidebarListenerForWindow } from "./modules/updateController";
 
 /** Timeout for individual async shutdown operations to prevent hangs. */
 const SHUTDOWN_TIMEOUT_MS = 3000;
@@ -241,6 +242,16 @@ async function onStartup() {
         // -------- Register protocol handler (zotero://beaver) --------
         registerBeaverProtocolHandler();
 
+        // -------- Initialize update controller --------
+        // Intercepts Mozilla AddonManager upgrades to our addon and defers
+        // them while the Beaver sidebar is visible, so auto-updates never
+        // tear down the UI mid-session. Non-fatal on failure.
+        try {
+            await initUpdateController();
+        } catch (error) {
+            ztoolkit.log(`initUpdateController failed (non-fatal): ${error}`);
+        }
+
         // -------- Register Zotero 8 context menus (no-op on Zotero 7) --------
         initContextMenus();
 
@@ -319,6 +330,11 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     // Assign the global eventBus instance to this window.
     win.__beaverEventBus = eventBus;
 
+    // Attach sidebar-visibility listener used by the update controller.
+    // Safe to call before or after initUpdateController — it's a no-op if
+    // the controller isn't initialized yet and idempotent per bus.
+    attachSidebarListenerForWindow(win);
+
     BeaverUIFactory.registerChatPanel(win);
 
     ztoolkit.log("UI ready");
@@ -367,6 +383,13 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             // Cancel all background tasks (sync, PDF fetch, metadata enrich)
             // and clear their 60-second cleanup timers that keep the event loop alive.
             cancelAllActiveTasks();
+
+            // Dispose the update controller BEFORE React unmounts the chat
+            // panel. React unmount triggers a sidebar-visibility transition
+            // which would otherwise fire tryApplyDeferredUpdate mid-shutdown.
+            // The shutdown flag set above would already make those callbacks
+            // no-op, but disposing early is the clean ordering.
+            disposeUpdateController();
         }
 
         // Clean up window-specific resources

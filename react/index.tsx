@@ -25,6 +25,7 @@ import { useContextMenuActionHandler } from './hooks/useContextMenuActionHandler
 import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActionHandler';
 import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationActionHandler';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
+import { useUpdateControllerBridge } from './hooks/useUpdateControllerBridge';
 
 
 /**
@@ -83,6 +84,10 @@ const GlobalContextInitializer = () => {
 
     // Handle first-install and first-reader onboarding popups
     useOnboardingPopups();
+
+    // Bridge state to the src/ update controller (mirrors active thread ID to
+    // a Zotero global and dispatches sidebarVisibilityChange events).
+    useUpdateControllerBridge();
 
     return null; // This component does not render any UI
 };

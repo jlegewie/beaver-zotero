@@ -58,6 +58,7 @@ declare namespace _ZoteroTypes {
       "runWebDAVSync": boolean;
       "runEmbeddingFullDiff": boolean;
       "pendingVersionNotifications": string;
+      "pendingDeferredThread": string;
     };
   }
 }

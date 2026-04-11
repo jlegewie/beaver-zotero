@@ -29,6 +29,14 @@ export interface BeaverEvents {
         readerItemID: number;
     };
     focusInput: {};
+    /**
+     * Fired when the Beaver sidebar visibility changes. Used by the src/ esbuild
+     * bundle (e.g. updateController) to react to sidebar open/close without
+     * importing Jotai across the bundle boundary.
+     */
+    sidebarVisibilityChange: {
+        isVisible: boolean;
+    };
 }
 
 export type BeaverEventName = keyof BeaverEvents;
