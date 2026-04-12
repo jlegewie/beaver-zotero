@@ -1258,9 +1258,17 @@ export function rebuildDataCitationItems(
  * open or if reading from the editor fails.
  */
 export function getLatestNoteHtml(item: any): string {
+    const savedHtml = item.getNote();
     try {
         const instances = (Zotero as any).Notes._editorInstances;
-        if (!Array.isArray(instances)) return item.getNote();
+        if (!Array.isArray(instances)) return savedHtml;
+
+        const candidates: Array<{
+            instance: any;
+            html: string;
+            source: string;
+        }> = [];
+
         for (const instance of instances) {
             if (!instance._item || instance._item.id !== item.id) continue;
             // Skip instances where saving is disabled (e.g., during diff
@@ -1275,16 +1283,45 @@ export function getLatestNoteHtml(item: any): string {
                     noteData = JSON.parse(JSON.stringify(noteData));
                 }
                 if (typeof noteData?.html === 'string') {
-                    return noteData.html;
+                    candidates.push({
+                        instance,
+                        html: noteData.html,
+                        source: instance.tabID
+                            ? `tab:${instance.tabID}`
+                            : (instance.viewMode ?? 'unknown'),
+                    });
                 }
             } catch {
                 continue;
             }
         }
+
+        if (candidates.length === 0) return savedHtml;
+        if (candidates.length === 1) return candidates[0].html;
+
+        const selectedTabId = Zotero.getMainWindow?.()?.Zotero_Tabs?.selectedID;
+        const preferred = candidates.find((candidate) => (
+            selectedTabId
+            && candidate.instance.tabID
+            && candidate.instance.tabID === selectedTabId
+        )) ?? candidates.find((candidate) => candidate.instance.viewMode === 'tab')
+            ?? candidates.find((candidate) => candidate.html === savedHtml)
+            ?? candidates[0];
+
+        const distinctSnapshots = new Set(candidates.map((candidate) => candidate.html)).size;
+        if (distinctSnapshots > 1) {
+            logger(
+                `getLatestNoteHtml: found ${candidates.length} live editor instances for item ${item.id} `
+                + `with ${distinctSnapshots} distinct HTML snapshots; preferring ${preferred.source}`,
+                1,
+            );
+        }
+
+        return preferred.html;
     } catch {
         // Fall through
     }
-    return item.getNote();
+    return savedHtml;
 }
 
 /**

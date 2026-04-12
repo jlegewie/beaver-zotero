@@ -1894,6 +1894,75 @@ describe('getLatestNoteHtml', () => {
         expect(getLatestNoteHtml(item)).toBe(editorHtml);
     });
 
+    it('prefers the selected tab editor when multiple live instances exist', () => {
+        const item = mockItem(42, '<p>saved version</p>');
+        const staleWindowHtml = '<p>window copy</p>';
+        const selectedTabHtml = '<p>selected tab copy</p>';
+        (globalThis as any).Zotero.getMainWindow = vi.fn(() => ({
+            Zotero_Tabs: {
+                selectedID: 'tab-123',
+            },
+        }));
+        (globalThis as any).Zotero.Notes._editorInstances = [
+            {
+                _item: { id: 42 },
+                viewMode: 'window',
+                _iframeWindow: {
+                    frameElement: { isConnected: true },
+                    wrappedJSObject: {
+                        getDataSync: vi.fn(() => ({ html: staleWindowHtml })),
+                    },
+                },
+            },
+            {
+                _item: { id: 42 },
+                viewMode: 'tab',
+                tabID: 'tab-123',
+                _iframeWindow: {
+                    frameElement: { isConnected: true },
+                    wrappedJSObject: {
+                        getDataSync: vi.fn(() => ({ html: selectedTabHtml })),
+                    },
+                },
+            },
+        ];
+
+        expect(getLatestNoteHtml(item)).toBe(selectedTabHtml);
+    });
+
+    it('falls back to saved HTML when multiple live instances disagree and none is preferred', () => {
+        const item = mockItem(42, '<p>saved version</p>');
+        (globalThis as any).Zotero.getMainWindow = vi.fn(() => ({
+            Zotero_Tabs: {
+                selectedID: 'other-tab',
+            },
+        }));
+        (globalThis as any).Zotero.Notes._editorInstances = [
+            {
+                _item: { id: 42 },
+                viewMode: 'window',
+                _iframeWindow: {
+                    frameElement: { isConnected: true },
+                    wrappedJSObject: {
+                        getDataSync: vi.fn(() => ({ html: '<p>stale window copy</p>' })),
+                    },
+                },
+            },
+            {
+                _item: { id: 42 },
+                viewMode: 'window',
+                _iframeWindow: {
+                    frameElement: { isConnected: true },
+                    wrappedJSObject: {
+                        getDataSync: vi.fn(() => ({ html: '<p>saved version</p>' })),
+                    },
+                },
+            },
+        ];
+
+        expect(getLatestNoteHtml(item)).toBe('<p>saved version</p>');
+    });
+
     it('falls back to item.getNote() when note is not in any editor', () => {
         const item = mockItem(42, '<p>saved version</p>');
         (globalThis as any).Zotero.Notes._editorInstances = [{
