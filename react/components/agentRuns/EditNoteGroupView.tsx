@@ -7,7 +7,6 @@ import {
     PendingApproval,
     getAgentActionsByToolcallAtom,
     pendingApprovalsAtom,
-    removePendingApprovalAtom,
     ackAgentActionsAtom,
     rejectAgentActionAtom,
     setAgentActionsToErrorAtom,
@@ -86,9 +85,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const resultsMap = useAtomValue(toolResultsMapAtom);
     const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
     const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
+    const setPendingApprovals = useSetAtom(pendingApprovalsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const isRunPending = useAtomValue(isWSChatPendingAtom);
-    const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
@@ -284,14 +283,25 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         const shouldWaitForExternalProcessing = hasPendingApprovals && isRunPending;
         try {
             if (hasPendingApprovals) {
+                // Dismiss the preview first, then batch-remove approvals in a
+                // single update.
+                await dismissActiveEditNotePreview();
+                const idsToRemove: string[] = [];
                 for (const pending of pendingApprovalsForGroup) {
                     sendApprovalResponse({ actionId: pending.actionId, approved: true });
-                    removePendingApproval(pending.actionId);
+                    idsToRemove.push(pending.actionId);
+                }
+                if (idsToRemove.length > 0) {
+                    setPendingApprovals((prev) => {
+                        const next = new Map(prev);
+                        for (const id of idsToRemove) next.delete(id);
+                        return next;
+                    });
                 }
                 if (shouldWaitForExternalProcessing) {
                     setIsExternallyProcessing(true);
                 }
-                logger(`EditNoteGroupView: Approved ${pendingApprovalsForGroup.length} edit_note actions for ${noteKeyLabel}`, 1);
+                logger(`EditNoteGroupView: Approved ${idsToRemove.length} edit_note actions for ${noteKeyLabel}`, 1);
                 return;
             }
 
@@ -330,7 +340,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         reapplicableActions,
         noteKeyLabel,
         sendApprovalResponse,
-        removePendingApproval,
+        setPendingApprovals,
         ackAgentActions,
         runId,
         setAgentActionsToError,
@@ -341,6 +351,10 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         const noteKey = makeNoteKey(resolvedTarget.libraryId, resolvedTarget.zoteroKey);
         addAutoApproveNoteKey(noteKey);
 
+        // Batch-remove non-group approvals for this note in one update;
+        // handleApplyAll will dismiss the preview and batch-remove the
+        // group's own approvals.
+        const idsToRemove: string[] = [];
         for (const [, pending] of allPendingApprovals) {
             if (pending.actionType !== 'edit_note') continue;
             const pendingTarget = resolveEditNoteTargetFromData(pending.actionData);
@@ -348,7 +362,14 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             if (makeNoteKey(pendingTarget.libraryId, pendingTarget.zoteroKey) !== noteKey) continue;
             if (pendingApprovalsForGroup.some((groupPending) => groupPending.actionId === pending.actionId)) continue;
             sendApprovalResponse({ actionId: pending.actionId, approved: true });
-            removePendingApproval(pending.actionId);
+            idsToRemove.push(pending.actionId);
+        }
+        if (idsToRemove.length > 0) {
+            setPendingApprovals((prev) => {
+                const next = new Map(prev);
+                for (const id of idsToRemove) next.delete(id);
+                return next;
+            });
         }
 
         handleApplyAll();
@@ -358,7 +379,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         allPendingApprovals,
         pendingApprovalsForGroup,
         sendApprovalResponse,
-        removePendingApproval,
+        setPendingApprovals,
         handleApplyAll,
     ]);
 
@@ -366,11 +387,22 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         if (isProcessing) return;
         setClickedButton('reject');
         if (hasPendingApprovals) {
+            // Dismiss the preview first, then batch-remove approvals in a
+            // single update. See handleApplyAll for rationale.
+            void dismissActiveEditNotePreview();
+            const idsToRemove: string[] = [];
             for (const pending of pendingApprovalsForGroup) {
                 sendApprovalResponse({ actionId: pending.actionId, approved: false });
-                removePendingApproval(pending.actionId);
+                idsToRemove.push(pending.actionId);
             }
-            logger(`EditNoteGroupView: Rejected ${pendingApprovalsForGroup.length} edit_note actions for ${noteKeyLabel}`, 1);
+            if (idsToRemove.length > 0) {
+                setPendingApprovals((prev) => {
+                    const next = new Map(prev);
+                    for (const id of idsToRemove) next.delete(id);
+                    return next;
+                });
+            }
+            logger(`EditNoteGroupView: Rejected ${idsToRemove.length} edit_note actions for ${noteKeyLabel}`, 1);
         } else {
             for (const action of reapplicableActions) {
                 rejectAgentAction(action.id);
@@ -384,7 +416,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         pendingApprovalsForGroup,
         noteKeyLabel,
         sendApprovalResponse,
-        removePendingApproval,
+        setPendingApprovals,
         reapplicableActions,
         rejectAgentAction,
     ]);
