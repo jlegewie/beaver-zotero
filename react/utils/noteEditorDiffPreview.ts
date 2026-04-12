@@ -148,11 +148,12 @@ function isEditorInstanceUsable(inst: any): boolean {
 /**
  * Runtime capability gate for the in-editor diff preview.
  *
- * The preview relies on Zotero 8-only APIs (`Zotero.Notes.open()` to open
- * notes as tabs and `EditorInstance.applyIncrementalUpdate()` to inject diff
- * HTML without persisting it). On Zotero 7 these are absent and the feature
- * cannot work — callers should hide any UI that exposes it and avoid
- * triggering the coordinator's automatic preview.
+ * The preview relies on `Zotero.Notes.open()` to open notes as tabs, which
+ * was introduced in Zotero 8.0. On Zotero 7 this method is absent and the
+ * feature cannot work — callers should hide any UI that exposes it and
+ * avoid triggering the coordinator's automatic preview. The per-instance
+ * `EditorInstance.applyIncrementalUpdate()` requirement is checked later by
+ * `isEditorInstanceUsable()` when an editor instance actually exists.
  *
  * This is a feature detection rather than a version check, and it is
  * independent from `DIFF_PREVIEW_ENABLED` (which remains a global kill
@@ -161,7 +162,10 @@ function isEditorInstanceUsable(inst: any): boolean {
  */
 export function isDiffPreviewSupported(): boolean {
     try {
+        // Zotero 8.0+ gate: note-as-tab API.
         if (typeof (Zotero as any).Notes?.open !== 'function') return false;
+        // Defensive structural check: ensure the internal editor-instance
+        // registry we read from later is the expected shape.
         if (!Array.isArray((Zotero as any).Notes?._editorInstances)) return false;
         return true;
     } catch { return false; }
