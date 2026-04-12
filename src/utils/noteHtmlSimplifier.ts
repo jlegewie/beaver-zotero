@@ -1357,11 +1357,11 @@ export function findStructuralAnchorHint(
 
 /**
  * Inline formatting tags that the model commonly drops from old_string when
- * copying text from a note. These are character-level wrappers, so dropping
+ * copying text from a note. The character-level wrappers, so dropping
  * them changes the HTML but not the visible text.
  */
 const INLINE_FORMAT_TAG_NAMES = [
-    'strong', 'b', 'em', 'i', 'u', 's', 'code', 'sup', 'sub', 'mark',
+    'strong', 'b', 'em', 'i', 'u', 's', 'code', 'sup', 'sub', 'mark', 'br',
 ] as const;
 
 const INLINE_FORMAT_TAG_PATTERN =
@@ -1369,7 +1369,7 @@ const INLINE_FORMAT_TAG_PATTERN =
 const INLINE_FORMAT_TAG_RE_GLOBAL = new RegExp(INLINE_FORMAT_TAG_PATTERN, 'gi');
 const INLINE_FORMAT_TAG_RE_ANCHORED = new RegExp(`^${INLINE_FORMAT_TAG_PATTERN}`, 'i');
 
-/** Strip inline formatting tags (strong/em/b/i/u/s/code/sup/sub/mark). */
+/** Strip inline formatting tags (strong/em/b/i/u/s/code/sup/sub/mark/br). */
 function stripInlineFormatTags(s: string): string {
     return s.replace(INLINE_FORMAT_TAG_RE_GLOBAL, '');
 }

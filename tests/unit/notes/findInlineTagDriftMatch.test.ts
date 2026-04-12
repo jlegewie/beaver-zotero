@@ -227,3 +227,55 @@ describe('findInlineTagDriftMatch — edge cases', () => {
         expect(result!.droppedTags).toContain('</em>');
     });
 });
+
+
+// =============================================================================
+// <br> void element (failed-edits-17.md)
+// =============================================================================
+
+describe('findInlineTagDriftMatch — <br> void element', () => {
+    it('detects a dropped trailing <br> before a closing wrapper', () => {
+        // The model copied the text but dropped the final <br> before </span>.
+        const simplified =
+            '<p><strong><span>发表时间：<br>期刊会议：<br>方向分类： <br></span></strong></p>';
+        const oldString =
+            '<p><strong><span>发表时间：<br>期刊会议：<br>方向分类： </span></strong></p>';
+
+        const result = findInlineTagDriftMatch(simplified, oldString);
+        expect(result).not.toBeNull();
+        expect(result!.droppedTags).toEqual(['<br>']);
+        expect(result!.noteSpan).toContain('方向分类： <br></span>');
+    });
+
+    it('detects a dropped interior <br>', () => {
+        const simplified = '<p>Line A<br>Line B<br>Line C</p>';
+        // Model dropped the middle <br>
+        const oldString = '<p>Line A<br>Line BLine C</p>';
+
+        const result = findInlineTagDriftMatch(simplified, oldString);
+        expect(result).not.toBeNull();
+        expect(result!.droppedTags).toEqual(['<br>']);
+    });
+
+    it('reports <br> vs <br/> as a drop (token-level comparison)', () => {
+        // Post-PM form is <br>, but a model might emit <br/>. The droppedTags
+        // multiset compares full tag tokens, so these are treated as distinct
+        // — same as how `<strong class="foo">` differs from `<strong>`. The
+        // model gets a pointed "you have <br/>, note has <br>" error and
+        // copies the canonical form on retry. Acceptable minor cost.
+        const simplified = '<p>A<br>B</p>';
+        const oldString = '<p>A<br/>B</p>';
+
+        const result = findInlineTagDriftMatch(simplified, oldString);
+        expect(result).not.toBeNull();
+        expect(result!.droppedTags).toEqual(['<br>']);
+    });
+
+    it('returns null when <br> counts match exactly', () => {
+        const simplified = '<p>A<br>B<br>C</p>';
+        const oldString = '<p>A<br>B<br>C</p>';
+
+        const result = findInlineTagDriftMatch(simplified, oldString);
+        expect(result).toBeNull();
+    });
+});
