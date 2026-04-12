@@ -1357,8 +1357,9 @@ export function findStructuralAnchorHint(
 
 /**
  * Inline formatting tags that the model commonly drops from old_string when
- * copying text from a note. The character-level wrappers, so dropping
- * them changes the HTML but not the visible text.
+ * copying text from a note. Most are character-level wrappers whose removal
+ * changes the HTML but not the visible text; <br> is a void line-break
+ * element that the model commonly drops in the same way.
  */
 const INLINE_FORMAT_TAG_NAMES = [
     'strong', 'b', 'em', 'i', 'u', 's', 'code', 'sup', 'sub', 'mark', 'br',
