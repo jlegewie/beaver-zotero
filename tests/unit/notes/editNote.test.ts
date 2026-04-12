@@ -1178,6 +1178,138 @@ describe('JSON-escape unescape fallback in matching', () => {
         expect(response.normalized_action_data.target_before_context).toBe('unescaped-before');
         expect(response.normalized_action_data.target_after_context).toBe('unescaped-after');
     });
+
+    // The next batch reproduces the failed-edits-18.md case: the LLM
+    // double-escaped newlines, sending literal `\n` (backslash + n) where
+    // the note HTML has actual newline characters. Block 12c must extend
+    // its existing JSON-escape unescape to also handle `\n`, `\r`, `\t`.
+
+    it('matches old_string with literal \\n when note has real newlines (failed-edits-18.md)', async () => {
+        // Note HTML has actual newlines between block elements (typical PM
+        // output). The model sent literal "\n" (backslash + n) instead of
+        // newline characters in old_string.
+        const noteHtml = '<div data-schema-version="9"><h2>Section</h2>\n<hr>\n<p></p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                // Literal backslash-n pairs — what the server sees if the LLM
+                // double-escaped newlines when emitting JSON tool-call args.
+                old_string: '<h2>Section</h2>\\n<hr>\\n<p></p>',
+                new_string: '<h2>Section</h2>\\n<hr>\\n<p>New content</p>',
+                operation: 'str_replace',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        // Both old_string and new_string should have real newlines now.
+        expect(response.normalized_action_data.old_string).toBe('<h2>Section</h2>\n<hr>\n<p></p>');
+        expect(response.normalized_action_data.new_string).toBe('<h2>Section</h2>\n<hr>\n<p>New content</p>');
+    });
+
+    it('matches old_string with literal \\n for insert_after operation', async () => {
+        const noteHtml = '<div data-schema-version="9"><h2>Anchor</h2>\n<p>Existing</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                // Literal \n in old_string anchor — should be unescaped, then
+                // mergeInsertNewString concatenates with new_string for insert.
+                old_string: '<h2>Anchor</h2>\\n<p>Existing</p>',
+                new_string: '\\n<p>Inserted</p>',
+                operation: 'insert_after',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data.old_string).toBe('<h2>Anchor</h2>\n<p>Existing</p>');
+        // insert_after merges the unescaped anchor + the unescaped new_string.
+        expect(response.normalized_action_data.new_string).toBe('<h2>Anchor</h2>\n<p>Existing</p>\n<p>Inserted</p>');
+    });
+
+    it('matches old_string with mixed \\" and \\n escapes', async () => {
+        // Verify the single-pass unescape handles multiple escape kinds in
+        // the same string without ordering bugs.
+        const noteHtml = '<div data-schema-version="9"><p>Say "hi"</p>\n<p>Done</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<p>Say \\"hi\\"</p>\\n<p>Done</p>',
+                new_string: '<p>Say \\"bye\\"</p>\\n<p>Done</p>',
+                operation: 'str_replace',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data.old_string).toBe('<p>Say "hi"</p>\n<p>Done</p>');
+        expect(response.normalized_action_data.new_string).toBe('<p>Say "bye"</p>\n<p>Done</p>');
+    });
+
+    it('matches old_string with literal \\t when note has real tabs', async () => {
+        const noteHtml = '<div data-schema-version="9"><pre>col1\tcol2</pre></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<pre>col1\\tcol2</pre>',
+                new_string: '<pre>a\\tb</pre>',
+                operation: 'str_replace',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data.old_string).toBe('<pre>col1\tcol2</pre>');
+        expect(response.normalized_action_data.new_string).toBe('<pre>a\tb</pre>');
+    });
+
+    it('rejects ambiguous match after \\n unescape when operation is str_replace', async () => {
+        // Two identical multi-line blocks; after unescaping \n both match.
+        // Block 12c must reject (or disambiguate), not silently confirm.
+        const noteHtml = '<div data-schema-version="9"><h2>S</h2>\n<p>X</p>\n<h2>S</h2>\n<p>X</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<h2>S</h2>\\n<p>X</p>',
+                new_string: '<h2>S</h2>\\n<p>Y</p>',
+                operation: 'str_replace',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('ambiguous_match');
+        expect(response.error).toContain('2 times');
+    });
 });
 
 

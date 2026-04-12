@@ -435,16 +435,27 @@ async function validateEditNoteAction(
     }
 
     // 12c. Zero matches — try stripping JSON-style backslash escapes.
-    //      LLMs sometimes double-escape quotes when constructing JSON tool call
-    //      parameters, producing literal \" in the string instead of plain ".
-    if (matchCount === 0 && old_string && /\\["\\/]/.test(old_string)) {
-        const unescapedOld = old_string.replace(/\\"/g, '"').replace(/\\\\/g, '\\').replace(/\\\//g, '/');
+    //      LLMs sometimes double-escape characters when constructing JSON tool
+    //      call parameters, producing literal \" / \n / \\ in the string
+    //      instead of the actual characters.
+    const JSON_ESCAPE_PATTERN = /\\(["\\/nrt])/g;
+    const unescapeJsonEscapes = (s: string): string =>
+        s.replace(JSON_ESCAPE_PATTERN, (_match, c) => {
+            switch (c) {
+                case 'n': return '\n';
+                case 'r': return '\r';
+                case 't': return '\t';
+                default: return c; // " \ /
+            }
+        });
+    if (matchCount === 0 && old_string && /\\["\\/nrt]/.test(old_string)) {
+        const unescapedOld = unescapeJsonEscapes(old_string);
         if (unescapedOld !== old_string) {
             try {
                 const unescapedExpandedOld = expandToRawHtml(unescapedOld, metadata, 'old');
                 const unescapedCount = countOccurrences(strippedHtml, unescapedExpandedOld);
                 if (unescapedCount > 0) {
-                    const unescapedNew = new_string.replace(/\\"/g, '"').replace(/\\\\/g, '\\').replace(/\\\//g, '/');
+                    const unescapedNew = unescapeJsonEscapes(new_string);
                     // Dry-run expand new_string to verify
                     expandToRawHtml(unescapedNew, metadata, 'new');
 
