@@ -1871,3 +1871,170 @@ describe('undo-all with repeating context anchors (regression)', () => {
         expect(afterUndo1).toContain('Item 6');
     });
 });
+
+
+// =============================================================================
+// Section 15: PM Whitespace/Indentation Changes (Regression)
+// =============================================================================
+
+describe('PM whitespace indentation changes (regression)', () => {
+    // Reproduces the bug where PM reformats a compact note with indentation,
+    // causing undo to silently skip because:
+    // 1) undo_new_html no longer matches verbatim (different whitespace)
+    // 2) context anchors don't match either (different whitespace)
+    // 3) isAlreadyUndone falls back to strippedHtml.includes(undoOldHtml)
+    //    which is always true for insert_after (undoOldHtml is a substring)
+
+    /** A compact note without PM indentation (typical of notes never opened in editor) */
+    const COMPACT_NOTE = wrap(
+        '<h1>Key Findings</h1>'
+        + '<ol>'
+        + '<li><strong>Finding one</strong>: The first result.</li>'
+        + '<li><strong>Finding two</strong>: The second result.</li>'
+        + '</ol>'
+        + '<h2>Discussion</h2>'
+        + '<p>These findings suggest important implications.</p>'
+    );
+
+    /**
+     * Aggressive PM normalization that adds indentation (like real Zotero does),
+     * not just newlines. The standard simulatePMNormalization only adds \n,
+     * but real PM also indents nested elements.
+     */
+    function aggressivePMNormalization(html: string): string {
+        // First apply standard PM normalization (newlines, tag conversion, etc.)
+        let result = simulatePMNormalization(html);
+        // Then add indentation like real Zotero PM does
+        let indent = 0;
+        const lines = result.split('\n');
+        const indented: string[] = [];
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            // Decrease indent for closing tags
+            if (/^<\//.test(trimmed) && !/^<\/(?:strong|em|span|a)\b/.test(trimmed)) {
+                indent = Math.max(0, indent - 1);
+            }
+            indented.push('    '.repeat(indent) + trimmed);
+            // Increase indent for opening block tags (not self-closing or inline)
+            if (/^<(?:div|ol|ul|li|table|tr|td|th|thead|tbody|blockquote)\b/.test(trimmed)
+                && !trimmed.endsWith('/>')) {
+                indent++;
+            }
+        }
+        return indented.join('\n') + '\n';
+    }
+
+    it('insert_after: undo works despite PM adding indentation', async () => {
+        // This is the exact bug scenario from the issue report:
+        // 1. Note has compact HTML (no indentation)
+        // 2. Agent does insert_after: old_string=<h2>Discussion</h2>,
+        //    new_string=<h2>Discussion</h2><p>Several limitations.</p>
+        // 3. PM normalizes the note with indentation
+        // 4. User clicks undo — it should remove the inserted paragraph
+
+        const { item, action, result } = await applyEdit({
+            noteHtml: COMPACT_NOTE,
+            oldString: '<h2>Discussion</h2>',
+            newString: '<h2>Discussion</h2><p>Several limitations should be noted.</p>',
+        });
+        expect(item._getHtml()).toContain('Several limitations should be noted');
+
+        // Simulate PM adding indentation (not just newlines)
+        item._setHtml(aggressivePMNormalization(item._getHtml()));
+
+        // Verify PM changed the whitespace significantly
+        expect(item._getHtml()).toContain('    <h2>Discussion</h2>');
+        expect(item._getHtml()).toContain('    <p>Several limitations should be noted.</p>');
+
+        // Deliberately revert undo data to pre-PM versions (simulating
+        // waitForPMNormalization failing to find contexts in indented HTML)
+        result.undo_new_html = '<h2>Discussion</h2><p>Several limitations should be noted.</p>';
+        result.undo_old_html = '<h2>Discussion</h2>';
+        action.result_data = result;
+
+        invalidateSimplificationCache('1-TESTKEY');
+        const restored = await undoEdit(item, action);
+
+        // The inserted paragraph should be removed
+        expect(restored).not.toContain('Several limitations should be noted');
+        // The original content should still be there
+        expect(restored).toContain('Discussion');
+        expect(restored).toContain('These findings suggest important implications');
+    });
+
+    it('insert_after: undo is not silently skipped when old_string is substring of new_string', async () => {
+        // Ensures that even when contexts can't be matched (stale whitespace),
+        // the undo is not incorrectly skipped via the includes(undoOldHtml) fallback.
+        const { item, action, result } = await applyEdit({
+            noteHtml: COMPACT_NOTE,
+            oldString: '<h2>Discussion</h2>',
+            newString: '<h2>Discussion</h2><p>New content.</p>',
+        });
+
+        // Simulate PM adding indentation
+        item._setHtml(aggressivePMNormalization(item._getHtml()));
+
+        // Revert undo data to pre-PM versions
+        result.undo_new_html = '<h2>Discussion</h2><p>New content.</p>';
+        result.undo_old_html = '<h2>Discussion</h2>';
+        action.result_data = result;
+
+        invalidateSimplificationCache('1-TESTKEY');
+        const restored = await undoEdit(item, action);
+
+        // Must NOT silently skip — the inserted content should be removed
+        expect(restored).not.toContain('New content');
+        expect(restored).toContain('Discussion');
+    });
+
+    it('str_replace: undo works despite PM adding indentation', async () => {
+        const { item, action, result } = await applyEdit({
+            noteHtml: COMPACT_NOTE,
+            oldString: '<h2>Discussion</h2>',
+            newString: '<h2>Analysis</h2>',
+        });
+        expect(item._getHtml()).toContain('Analysis');
+
+        // Simulate PM adding indentation
+        item._setHtml(aggressivePMNormalization(item._getHtml()));
+
+        // Revert undo data to pre-PM versions
+        result.undo_new_html = '<h2>Analysis</h2>';
+        result.undo_old_html = '<h2>Discussion</h2>';
+        action.result_data = result;
+
+        invalidateSimplificationCache('1-TESTKEY');
+        const restored = await undoEdit(item, action);
+
+        expect(restored).not.toContain('Analysis');
+        expect(restored).toContain('Discussion');
+    });
+
+    it('deletion: undo works despite PM adding indentation', async () => {
+        const { item, action, result } = await applyEdit({
+            noteHtml: COMPACT_NOTE,
+            oldString: '<h2>Discussion</h2>',
+            newString: '',
+        });
+        expect(item._getHtml()).not.toContain('Discussion');
+
+        // Simulate PM adding indentation to the note without the deleted content
+        item._setHtml(aggressivePMNormalization(item._getHtml()));
+
+        // Revert undo context anchors to pre-PM whitespace
+        if (result.undo_before_context) {
+            // Strip the indentation that PM would have added
+            result.undo_before_context = result.undo_before_context.replace(/\n\s+/g, '\n');
+        }
+        if (result.undo_after_context) {
+            result.undo_after_context = result.undo_after_context.replace(/\n\s+/g, '\n');
+        }
+        action.result_data = result;
+
+        invalidateSimplificationCache('1-TESTKEY');
+        const restored = await undoEdit(item, action);
+
+        expect(restored).toContain('Discussion');
+    });
+});

@@ -177,11 +177,53 @@ function isAlreadyUndone(
         if (range) {
             return strippedHtml.substring(range.start, range.end) === undoOldHtml;
         }
+        // Context anchors were expected but could not be found in the current
+        // HTML (likely due to ProseMirror whitespace normalization drift).
+        return false;
     }
     return strippedHtml.includes(undoOldHtml);
 }
 
 const UNDO_CONTEXT_LENGTH = 200;
+
+/**
+ * Search for `needle` in `haystack` with tolerance for whitespace differences
+ * introduced by ProseMirror normalization (indentation, newlines between tags).
+ *
+ * - Existing whitespace runs in the needle match any whitespace (`\s+`).
+ * - Adjacent tags (`><`) in the needle allow optional whitespace (`\s*`).
+ *
+ * Returns the matched range in the original haystack, or null if not found.
+ */
+function findWhitespaceTolerant(
+    haystack: string,
+    needle: string,
+): { start: number; end: number } | null {
+    // Split needle into alternating [nonWS, ws, nonWS, ws, ...] segments
+    const segments = needle.split(/(\s+)/);
+    const regexParts: string[] = [];
+    for (let i = 0; i < segments.length; i++) {
+        if (i % 2 === 1) {
+            // Original whitespace → match any whitespace (one or more)
+            regexParts.push('\\s+');
+        } else if (segments[i].length > 0) {
+            // Literal text — escape for regex, then allow optional whitespace
+            // between adjacent tags (><) since PM may insert newlines there
+            let escaped = segments[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            escaped = escaped.replace(/></g, '>\\s*<');
+            regexParts.push(escaped);
+        }
+    }
+    const pattern = regexParts.join('');
+    if (!pattern) return null;
+    try {
+        const match = haystack.match(new RegExp(pattern));
+        if (!match || match.index === undefined) return null;
+        return { start: match.index, end: match.index + match[0].length };
+    } catch {
+        return null;
+    }
+}
 
 /**
  * Execute an edit_note agent action by applying string replacement on the note.
@@ -613,6 +655,21 @@ export async function undoEditNoteAction(
             }
         }
 
+        // PM may have changed inter-tag whitespace (indentation, newlines).
+        const seamAfterDecode = (beforeCtx || '') + (afterCtx || '');
+        if (seamAfterDecode && !strippedHtml.includes(seamAfterDecode)) {
+            const beforeWs = beforeCtx ? findWhitespaceTolerant(strippedHtml, beforeCtx) : null;
+            const afterWs = afterCtx ? findWhitespaceTolerant(strippedHtml, afterCtx) : null;
+            if (beforeWs || afterWs) {
+                logger(`undoEditNoteAction: whitespace-tolerant context match for deletion undo on note ${noteId}`, 1);
+                if (beforeWs) beforeCtx = strippedHtml.substring(beforeWs.start, beforeWs.end);
+                if (afterWs) afterCtx = strippedHtml.substring(afterWs.start, afterWs.end);
+                // Also update undoOldHtml whitespace if needed
+                const oldWs = findWhitespaceTolerant(strippedHtml, undoOldHtml);
+                if (oldWs) undoOldHtml = strippedHtml.substring(oldWs.start, oldWs.end);
+            }
+        }
+
         // Check if already undone (old_string is back in the note) — context-aware
         if (isAlreadyUndone(strippedHtml, undoOldHtml, beforeCtx, afterCtx)) {
             logger(`undoEditNoteAction: Note ${noteId} already contains old_string, skipping`, 1);
@@ -702,6 +759,34 @@ export async function undoEditNoteAction(
                 undoOldHtml = decodeHtmlEntities(undoOldHtml);
                 if (beforeCtx != null) beforeCtx = decodeHtmlEntities(beforeCtx);
                 if (afterCtx != null) afterCtx = decodeHtmlEntities(afterCtx);
+            }
+        }
+
+        // PM may have changed inter-tag whitespace (indentation, newlines)
+        // since the undo data was stored. If the exact string still isn't
+        // found, try whitespace-tolerant matching and update the undo strings
+        // + contexts to use the actual PM-normalized versions.
+        if (!strippedHtml.includes(undoNewHtml)) {
+            const wsMatch = findWhitespaceTolerant(strippedHtml, undoNewHtml);
+            if (wsMatch) {
+                logger(`undoEditNoteAction: whitespace-tolerant match for undo_new_html on note ${noteId}`, 1);
+                undoNewHtml = strippedHtml.substring(wsMatch.start, wsMatch.end);
+                // Also update undoOldHtml if its whitespace differs
+                if (!strippedHtml.includes(undoOldHtml)) {
+                    const oldWsMatch = findWhitespaceTolerant(strippedHtml, undoOldHtml);
+                    if (oldWsMatch) {
+                        undoOldHtml = strippedHtml.substring(oldWsMatch.start, oldWsMatch.end);
+                    }
+                }
+                // Refresh context anchors from current HTML
+                beforeCtx = strippedHtml.substring(
+                    Math.max(0, wsMatch.start - UNDO_CONTEXT_LENGTH),
+                    wsMatch.start,
+                );
+                afterCtx = strippedHtml.substring(
+                    wsMatch.end,
+                    Math.min(strippedHtml.length, wsMatch.end + UNDO_CONTEXT_LENGTH),
+                );
             }
         }
 
