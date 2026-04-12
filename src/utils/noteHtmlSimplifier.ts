@@ -182,11 +182,26 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
     // Track occurrence counts for content-based IDs
     const citationKeyCounts = new Map<string, number>();
 
+    // Strip Beaver footers FIRST, before any normalization. The footer regexes
+    // require <a href="zotero://beaver/thread/..."> to be present, but Zotero's
+    // chrome HTMLDocument (used by normalizeNoteHtml under getDocument()) silently
+    // drops href attrs whose scheme is `zotero://` when parsing via innerHTML.
+    // Once the href is gone, ProseMirror's link mark (`tag: 'a[href]'`) can't
+    // bind, the <a> is dropped on re-serialization, and the regexes never match —
+    // so the footer would leak into the simplified view that the agent sees and
+    // edits. Stripping pre-normalize keeps the regexes operating on the raw shape
+    // that the writers (`getBeaverNoteFooterHTML`, `buildEditFooterHtml`) actually
+    // emit. Note: this only affects what the agent sees in the simplified view —
+    // the raw HTML on disk is untouched, since edit_note saves changes against
+    // its own normalize'd-but-uncached `strippedHtml`, not against `simplified`.
+    let simplified = stripBeaverEditFooter(rawHtml);
+    simplified = stripBeaverCreatedFooter(simplified);
+
     // Use regex-based approach to avoid DOMParser re-serialization issues.
     // DOMParser + innerHTML can change attribute order, whitespace, and entity encoding.
     // Pre-normalize to ProseMirror-canonical format so the simplified output is stable
     // across PM re-serializations (hex→rgb, style splitting, legacy elements, etc.).
-    let simplified = normalizeNoteHtml(rawHtml);
+    simplified = normalizeNoteHtml(simplified);
 
     // 1. Strip data-citation-items from wrapper div
     simplified = stripDataCitationItems(simplified);
@@ -377,11 +392,7 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
         (_match, content) => content
     );
 
-    // 7. Strip Beaver footers — user-facing metadata, not content.
-    simplified = stripBeaverEditFooter(simplified);
-    simplified = stripBeaverCreatedFooter(simplified);
-
-    // 8. Strip the outer wrapper div.
+    // 7. Strip the outer wrapper div.
     // Zotero notes are wrapped in <div data-schema-version="N">...</div>.
     // This wrapper is structural metadata, not content the agent should edit.
     // Stripping it prevents the agent from anchoring edits on </div>.
