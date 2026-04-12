@@ -1959,6 +1959,61 @@ describe('findRangeByContexts', () => {
         // First <p>A</p> to <p>C</p>
         expect(repeated.substring(result!.start, result!.end)).toBe('<p>B</p><p>A</p>');
     });
+
+    it('with expectedLength, picks the (before, after) pair whose range is closest in length', () => {
+        // beforeCtx="<p>A</p>" appears 3 times; afterCtx="<p>D</p>" is unique.
+        // Without expectedLength → first match spans B+C+A (large range).
+        // With expectedLength ≈ length of "<p>C</p><p>A</p>" → picks second match (shorter).
+        // With expectedLength ≈ length of "" → picks third match (empty, adjacent).
+        const html = '<p>A</p><p>B</p><p>C</p><p>A</p><p>C</p><p>A</p><p>D</p>';
+
+        // Without hint: first pair (legacy behavior)
+        const noHint = findRangeByContexts(html, '<p>A</p>', '<p>D</p>');
+        expect(noHint).not.toBeNull();
+        expect(html.substring(noHint!.start, noHint!.end)).toBe('<p>B</p><p>C</p><p>A</p><p>C</p><p>A</p>');
+
+        // With expectedLength=0: prefer shortest range (third A, adjacent to D)
+        const shortest = findRangeByContexts(html, '<p>A</p>', '<p>D</p>', 0);
+        expect(shortest).not.toBeNull();
+        expect(html.substring(shortest!.start, shortest!.end)).toBe('');
+
+        // With expectedLength matching the middle range
+        const midLen = '<p>C</p><p>A</p>'.length;
+        const mid = findRangeByContexts(html, '<p>A</p>', '<p>D</p>', midLen);
+        expect(mid).not.toBeNull();
+        expect(html.substring(mid!.start, mid!.end)).toBe('<p>C</p><p>A</p>');
+    });
+
+    it('expectedLength disambiguates repeating citation suffixes (production bug scenario)', () => {
+        // Simulates the note structure where each <li> ends with the same citation suffix.
+        // beforeCtx = citation suffix (repeated); afterCtx = unique next-item start.
+        const citeSuffix = '<span class="cite">Author, 2024</span></li>\n';
+        const html =
+            '<li>Item 1 ' + citeSuffix
+            + '<li>Item 2 ' + citeSuffix
+            + '<li>Item 3 ' + citeSuffix
+            + '<li>Item 4 ' + citeSuffix
+            + '<li>Item 5</li>\n';
+
+        const beforeCtx = citeSuffix;
+        const afterCtx = '<li>Item 5</li>';
+
+        // Without hint: first occurrence of citeSuffix → spans items 2-4
+        const noHint = findRangeByContexts(html, beforeCtx, afterCtx);
+        expect(noHint).not.toBeNull();
+        const noHintFragment = html.substring(noHint!.start, noHint!.end);
+        expect(noHintFragment).toContain('Item 2');
+        expect(noHintFragment).toContain('Item 4');
+
+        // With expectedLength matching single item: should pick the last citeSuffix before afterCtx
+        const singleItemLen = ('<li>Item 4 ' + citeSuffix).length;
+        const withHint = findRangeByContexts(html, beforeCtx, afterCtx, singleItemLen);
+        expect(withHint).not.toBeNull();
+        const hintFragment = html.substring(withHint!.start, withHint!.end);
+        expect(hintFragment).toContain('Item 4');
+        expect(hintFragment).not.toContain('Item 2');
+        expect(hintFragment).not.toContain('Item 3');
+    });
 });
 
 

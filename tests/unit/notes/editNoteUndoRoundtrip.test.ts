@@ -1770,3 +1770,104 @@ describe('text-content fallback for PM structural changes', () => {
         expect(restored).not.toContain('<strong>');
     });
 });
+
+
+// =============================================================================
+// Section 13: Undo-All with Repeating Context Anchors (Regression)
+//
+// When a note has many sibling <li> elements with identical citation suffixes,
+// the 200-char undo_before_context is non-unique — it matches at the end of
+// every <li>. Before the fix, waitForPMNormalization used findRangeByContexts
+// (which returned the first match), causing undo_new_html to be overwritten
+// with a huge chunk spanning many unrelated elements. Then undo replaced that
+// entire chunk with the original single-element undo_old_html, silently
+// deleting everything in between.
+// =============================================================================
+
+describe('undo-all with repeating context anchors (regression)', () => {
+    // Build a note with 6 list items, each ending with the same citation span.
+    // This mirrors the production bug scenario.
+    const CITE_KEY = 'CITEKEY';
+    const cite = rawCitation(CITE_KEY, 1, '1', 'Author, 2024, p. 1');
+
+    const NOTE_WITH_REPEATING_CITATIONS = wrap(
+        '<h2>Findings</h2>\n'
+        + '<ol>\n'
+        + '<li>\n<strong>Item 1</strong>: Description one. ' + cite + '\n</li>\n'
+        + '<li>\n<strong>Item 2</strong>: Description two. ' + cite + '\n</li>\n'
+        + '<li>\n<strong>Item 3</strong>: Description three. ' + cite + '\n</li>\n'
+        + '<li>\n<strong>Item 4</strong>: Description four with extra text that will be shortened. ' + cite + '\n</li>\n'
+        + '<li>\n<strong>Item 5</strong>: Description five with extra text that will be shortened. ' + cite + '\n</li>\n'
+        + '<li>\n<strong>Item 6</strong>: Description six. ' + cite + '\n</li>\n'
+        + '</ol>\n'
+    );
+
+    it('two sequential edits + undo-all preserves all unrelated items (with PM normalization)', async () => {
+        // Edit 1: Shorten item 4
+        const edit1 = await applyEdit({
+            noteHtml: NOTE_WITH_REPEATING_CITATIONS,
+            oldString: '<strong>Item 4</strong>: Description four with extra text that will be shortened.',
+            newString: '<strong>Item 4</strong>: Description four shortened.',
+            applyPMNormalization: true,
+        });
+
+        // The note after edit 1 should have all 6 items, with item 4 shortened
+        expect(edit1.currentStripped).toContain('Item 1');
+        expect(edit1.currentStripped).toContain('Item 3');
+        expect(edit1.currentStripped).toContain('Item 4');
+        expect(edit1.currentStripped).toContain('Description four shortened.');
+        expect(edit1.currentStripped).toContain('Item 6');
+
+        // Critical: undo_new_html should be just the single edited <li>, NOT
+        // a huge chunk spanning multiple items. Before the fix, ambiguous context
+        // anchors caused this to be overwritten with items 2-4 or similar.
+        const undoNewLen1 = (edit1.result as EditNoteResultData).undo_new_html!.length;
+        const undoOldLen1 = (edit1.result as EditNoteResultData).undo_old_html!.length;
+        expect(undoNewLen1).toBeLessThan(undoOldLen1 * 3);
+
+        // Edit 2: Shorten item 5 (applied on top of edit 1)
+        // Need to update the item reference for the next edit
+        const noteAfterEdit1 = edit1.item._getHtml();
+        invalidateSimplificationCache('1-TESTKEY');
+
+        const edit2 = await applyEdit({
+            noteHtml: noteAfterEdit1,
+            oldString: '<strong>Item 5</strong>: Description five with extra text that will be shortened.',
+            newString: '<strong>Item 5</strong>: Description five shortened.',
+            applyPMNormalization: true,
+        });
+
+        expect(edit2.currentStripped).toContain('Item 1');
+        expect(edit2.currentStripped).toContain('Item 3');
+        expect(edit2.currentStripped).toContain('Description four shortened.');
+        expect(edit2.currentStripped).toContain('Description five shortened.');
+        expect(edit2.currentStripped).toContain('Item 6');
+
+        const undoNewLen2 = (edit2.result as EditNoteResultData).undo_new_html!.length;
+        const undoOldLen2 = (edit2.result as EditNoteResultData).undo_old_html!.length;
+        expect(undoNewLen2).toBeLessThan(undoOldLen2 * 3);
+
+        // Undo edit 2 first (reverse order, like "Undo All" does)
+        const item = edit2.item;
+        const afterUndo2 = await undoEdit(item, edit2.action, true);
+
+        // After undoing edit 2: items 1-6 all present, item 5 restored, item 4 still shortened
+        expect(afterUndo2).toContain('Item 1');
+        expect(afterUndo2).toContain('Item 2');
+        expect(afterUndo2).toContain('Item 3');
+        expect(afterUndo2).toContain('Description four shortened.');
+        expect(afterUndo2).toContain('Description five with extra text that will be shortened.');
+        expect(afterUndo2).toContain('Item 6');
+
+        // Undo edit 1 (second undo)
+        const afterUndo1 = await undoEdit(item, edit1.action, true);
+
+        // After undoing both edits: all items restored to original
+        expect(afterUndo1).toContain('Item 1');
+        expect(afterUndo1).toContain('Item 2');
+        expect(afterUndo1).toContain('Item 3');
+        expect(afterUndo1).toContain('Description four with extra text that will be shortened.');
+        expect(afterUndo1).toContain('Description five with extra text that will be shortened.');
+        expect(afterUndo1).toContain('Item 6');
+    });
+});

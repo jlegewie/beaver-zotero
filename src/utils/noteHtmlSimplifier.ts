@@ -2231,17 +2231,28 @@ export function stripSpuriousWrappingTags(
 /**
  * Find the range in currentHtml bracketed by before/after context strings.
  * Used for context-anchored undo and PM normalization refresh.
+ *
+ * When `expectedLength` is provided and both anchors are present, all valid
+ * (beforeCtx, afterCtx) pairs are evaluated and the one whose range length
+ * is closest to `expectedLength` is returned. This disambiguates cases where
+ * `beforeCtx` matches non-uniquely (e.g., a shared citation-span suffix
+ * repeated across sibling `<li>` elements). Without `expectedLength`, the
+ * first valid pair is returned (legacy behavior).
  */
 export function findRangeByContexts(
     currentHtml: string,
     beforeCtx?: string,
-    afterCtx?: string
+    afterCtx?: string,
+    expectedLength?: number,
 ): { start: number; end: number } | null {
     const hasBefore = beforeCtx != null && beforeCtx.length > 0;
     const hasAfter = afterCtx != null && afterCtx.length > 0;
 
     if (hasBefore && hasAfter) {
-        // Both anchors — bracket the region
+        let bestStart = -1;
+        let bestEnd = -1;
+        let bestScore = Number.POSITIVE_INFINITY;
+
         let searchFrom = 0;
         while (true) {
             const beforeIdx = currentHtml.indexOf(beforeCtx!, searchFrom);
@@ -2249,9 +2260,22 @@ export function findRangeByContexts(
             const start = beforeIdx + beforeCtx!.length;
             const afterIdx = currentHtml.indexOf(afterCtx!, start);
             if (afterIdx !== -1 && afterIdx >= start) {
-                return { start, end: afterIdx };
+                // Without expectedLength, return the first valid pair (legacy).
+                if (expectedLength === undefined) {
+                    return { start, end: afterIdx };
+                }
+                const score = Math.abs((afterIdx - start) - expectedLength);
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestStart = start;
+                    bestEnd = afterIdx;
+                }
             }
             searchFrom = beforeIdx + 1;
+        }
+
+        if (bestStart !== -1) {
+            return { start: bestStart, end: bestEnd };
         }
     } else if (hasBefore && !hasAfter) {
         // Edit at end of note — beforeCtx anchors the start, end is end-of-string
@@ -2338,11 +2362,18 @@ export async function waitForPMNormalization(
             // HTML changed — PM has normalized. Extract the actual fragment.
             // PM may decode HTML entities (e.g. &#x27; → '), so if anchors
             // don't match, retry with entity-decoded anchors.
-            let range = findRangeByContexts(currentStripped, beforeCtx, afterCtx);
+            //
+            // Pass expectedLength so that when beforeCtx matches non-uniquely
+            // (e.g. repeating citation-span suffixes in a list), we pick the
+            // (beforeCtx, afterCtx) pair whose range is closest to the original
+            // fragment length, rather than always picking the first match which
+            // can span many unrelated elements.
+            const originalLength = undoData.undo_new_html.length;
+            let range = findRangeByContexts(currentStripped, beforeCtx, afterCtx, originalLength);
             if (!range) {
                 const decodedBefore = beforeCtx != null ? decodeHtmlEntities(beforeCtx) : undefined;
                 const decodedAfter = afterCtx != null ? decodeHtmlEntities(afterCtx) : undefined;
-                range = findRangeByContexts(currentStripped, decodedBefore, decodedAfter);
+                range = findRangeByContexts(currentStripped, decodedBefore, decodedAfter, originalLength);
             }
             if (!range) {
                 logger('waitForPMNormalization: context anchors not found in PM-normalized HTML, skipping refresh', 1);
@@ -2353,6 +2384,24 @@ export async function waitForPMNormalization(
 
             // Skip update if the fragment didn't actually change
             if (actualFragment === undoData.undo_new_html) return;
+
+            // Sanity check: PM normalization changes markup slightly (entities,
+            // whitespace, wrappers) but never dramatically alters fragment size.
+            // If the refreshed range is much larger than the original, the
+            // context anchors were still ambiguous despite the expectedLength
+            // hint — bail out and keep the original undo data rather than risk
+            // overwriting it with a huge chunk that would cause undo to delete
+            // unrelated content.
+            const actualLength = actualFragment.length;
+            const lengthDelta = actualLength - originalLength;
+            if (lengthDelta > 200 && actualLength > originalLength * 2) {
+                logger(
+                    `waitForPMNormalization: refreshed fragment (${actualLength} chars) much larger `
+                    + `than original (${originalLength} chars); keeping original undo data`,
+                    1,
+                );
+                return;
+            }
 
             // Update in-place with PM-normalized data
             undoData.undo_new_html = actualFragment;

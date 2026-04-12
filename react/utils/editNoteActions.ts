@@ -136,7 +136,7 @@ function undoReplaceAllViaContexts(
     const ranges: Array<{ start: number; end: number }> = [];
 
     for (const ctx of occurrenceContexts) {
-        const range = findRangeByContexts(strippedHtml, ctx.before, ctx.after);
+        const range = findRangeByContexts(strippedHtml, ctx.before, ctx.after, undoNewHtml.length);
         if (!range) return undefined; // Context not found — bail out
 
         // Verify the region is semantically equivalent to the expected new fragment
@@ -173,7 +173,7 @@ function isAlreadyUndone(
     afterCtx?: string
 ): boolean {
     if (beforeCtx !== undefined || afterCtx !== undefined) {
-        const range = findRangeByContexts(strippedHtml, beforeCtx, afterCtx);
+        const range = findRangeByContexts(strippedHtml, beforeCtx, afterCtx, undoOldHtml.length);
         if (range) {
             return strippedHtml.substring(range.start, range.end) === undoOldHtml;
         }
@@ -731,7 +731,7 @@ export async function undoEditNoteAction(
                 const candidateRanges: Array<{ start: number; end: number; fromContext: boolean }> = [];
                 const seenRanges = new Set<string>();
 
-                const contextRange = findRangeByContexts(strippedHtml, beforeCtx, afterCtx);
+                const contextRange = findRangeByContexts(strippedHtml, beforeCtx, afterCtx, undoNewHtml.length);
                 if (contextRange) {
                     const key = `${contextRange.start}:${contextRange.end}`;
                     seenRanges.add(key);
@@ -801,7 +801,7 @@ export async function undoEditNoteAction(
                 // indexOf alone picks the first match which may be the wrong one.
                 // Use context anchors to find the correct occurrence.
                 if (idx !== -1 && beforeCtx && strippedHtml.indexOf(undoNewHtml, idx + undoNewHtml.length) !== -1) {
-                    const ctxRange = findRangeByContexts(strippedHtml, beforeCtx, afterCtx);
+                    const ctxRange = findRangeByContexts(strippedHtml, beforeCtx, afterCtx, undoNewHtml.length);
                     if (ctxRange) {
                         idx = ctxRange.start;
                     }
