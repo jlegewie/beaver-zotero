@@ -356,6 +356,16 @@ async function validateEditNoteAction(
         }
     }
 
+    // 12a'. Zero matches — NFKC fallback for CJK full-width → half-width drift.
+    if (matchCount === 0) {
+        const nfkcOld = expandedOld.normalize('NFKC');
+        if (nfkcOld !== expandedOld && countOccurrences(strippedHtml, nfkcOld) > 0) {
+            expandedOld = nfkcOld;
+            expandedNew = expandedNew.normalize('NFKC');
+            matchCount = countOccurrences(strippedHtml, expandedOld);
+        }
+    }
+
     // 12b. Zero matches — try trimming trailing newlines from old_string.
     //      LLMs often add extra trailing \n characters to old_string.
     //      Emit normalized_action_data so execution uses the trimmed strings.
@@ -1062,6 +1072,24 @@ async function executeEditNoteAction(
                 matchCount = countOccurrences(strippedHtml, expandedOld);
                 break;
             }
+        }
+    }
+
+    // 7b. Zero matches — NFKC fallback for CJK full-width → half-width drift.
+    //     Mirrors the validation-time retry (see validateEditNoteAction). Notes
+    //     created by legacy create_note runs may have had full-width CJK
+    //     punctuation (，（）) rewritten to half-width ASCII. If the model
+    //     rebuilds `old_string` from the original full-width form, the match
+    //     fails here. NFKC-normalize symmetrically so the replacement stays
+    //     consistent with the note's stored form.
+    if (matchCount === 0) {
+        const nfkcOld = expandedOld.normalize('NFKC');
+        if (nfkcOld !== expandedOld && countOccurrences(strippedHtml, nfkcOld) > 0) {
+            expandedOld = nfkcOld;
+            expandedNew = expandedNew.normalize('NFKC');
+            if (target_before_context != null) target_before_context = target_before_context.normalize('NFKC');
+            if (target_after_context != null) target_after_context = target_after_context.normalize('NFKC');
+            matchCount = countOccurrences(strippedHtml, expandedOld);
         }
     }
 
