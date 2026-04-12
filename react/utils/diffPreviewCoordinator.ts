@@ -18,6 +18,7 @@ import {
     showDiffPreview,
     dismissDiffPreview,
     isDiffPreviewActive,
+    isDiffPreviewSupported,
     isNoteInSelectedTab,
     getPreviewNoteKey,
     setOnBannerAction,
@@ -31,10 +32,25 @@ import { pendingApprovalsAtom } from '../agents/agentActions';
 import { sendApprovalResponseAtom } from '../atoms/agentRunAtoms';
 
 /**
- * Kill switch for the diff preview feature.
- * Set to `false` to disable all in-editor diff previews.
+ * Global kill switch for the diff preview feature.
+ * Set to `false` to disable all in-editor diff previews regardless of
+ * runtime capability. This is intentionally a compile-time constant so the
+ * feature can be toggled off quickly without a settings round-trip.
+ *
+ * For runtime feature detection (e.g. Zotero 7 vs 8) use
+ * `isDiffPreviewSupported()` from `noteEditorDiffPreview.ts`. The preview is
+ * considered live only when BOTH flags are true; see `isDiffPreviewLive()`.
  */
 export const DIFF_PREVIEW_ENABLED = true;
+
+/**
+ * Convenience gate that combines the kill switch and the runtime capability
+ * check. Use this from UI components to decide whether to render
+ * preview-related controls.
+ */
+export function isDiffPreviewLive(): boolean {
+    return DIFF_PREVIEW_ENABLED && isDiffPreviewSupported();
+}
 
 // Accessor for the Jotai store. The store is imported eagerly above
 // (store.ts is safe in tests because it guards on `typeof Zotero`).
@@ -65,7 +81,7 @@ export const diffPreviewNoteKeyAtom = atom<string | null>(null);
  * Called from addPendingApprovalAtom and removePendingApprovalAtom.
  */
 export function updateDiffPreviewForNote(libraryId: number, zoteroKey: string): void {
-    if (!DIFF_PREVIEW_ENABLED) return;
+    if (!isDiffPreviewLive()) return;
     const store = getStore();
     const noteKey = makeNoteKey(libraryId, zoteroKey);
     const allApprovals: Map<string, any> = store.get(pendingApprovalsAtom);

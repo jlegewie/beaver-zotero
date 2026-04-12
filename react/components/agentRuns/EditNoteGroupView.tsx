@@ -43,7 +43,7 @@ import { openNoteByKey } from '../../utils/sourceUtils';
 import { executeEditNoteAction, undoEditNoteAction } from '../../utils/editNoteActions';
 import { logger } from '../../../src/utils/logger';
 import { EditNoteRowView } from './EditNoteRowView';
-import { DIFF_PREVIEW_ENABLED } from '../../utils/diffPreviewCoordinator';
+import { isDiffPreviewLive } from '../../utils/diffPreviewCoordinator';
 import {
     buildPreviewableEditOperations,
     dismissActiveEditNotePreview,
@@ -512,8 +512,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     }, [allActions]);
 
     const handlePreviewInEditor = useCallback(async () => {
-        if (!DIFF_PREVIEW_ENABLED) {
-            logger(`EditNoteGroupView: handlePreviewInEditor — aborting, DIFF_PREVIEW_ENABLED is false`, 1);
+        if (!isDiffPreviewLive()) {
+            logger(`EditNoteGroupView: handlePreviewInEditor — aborting, diff preview not live (kill switch off or Zotero 7)`, 1);
             return;
         }
         if (!resolvedTarget) {
@@ -590,9 +590,12 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         appliedCount > 0 || (isProcessing && clickedButton === 'undo');
     const showFooterRetry =
         errorActions.length > 0 || (isProcessing && clickedButton === 'retry');
+    // Gate on both the global kill switch and the runtime Zotero capability
+    // check so the button is hidden on Zotero 7 (where showDiffPreview would
+    // silently no-op) without requiring a version bump of strict_min_version.
     const canShowPreview =
         !isProcessing
-        && DIFF_PREVIEW_ENABLED
+        && isDiffPreviewLive()
         && (
         resolvedTarget !== null
         && (hasPendingApprovals || reapplicableActions.length > 0)

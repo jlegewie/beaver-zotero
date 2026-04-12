@@ -28,7 +28,7 @@ import {
     showDiffPreview,
     type EditOperation,
 } from '../../utils/noteEditorDiffPreview';
-import { diffPreviewNoteKeyAtom } from '../../utils/diffPreviewCoordinator';
+import { diffPreviewNoteKeyAtom, isDiffPreviewLive } from '../../utils/diffPreviewCoordinator';
 import { logger } from '../../../src/utils/logger';
 import { store } from '../../store';
 import { PreviewData, STATUS_CONFIGS, buildPreviewData } from './agentActionViewHelpers';
@@ -94,6 +94,10 @@ export async function showEditNotePreviewForEdits(
     edits: EditOperation[],
     onAction: (bannerAction: 'approve' | 'reject') => void,
 ): Promise<boolean> {
+    if (!isDiffPreviewLive()) {
+        logger(`showEditNotePreviewForEdits: diff preview not live (kill switch off or Zotero 7), aborting`, 1);
+        return false;
+    }
     await openNoteByKey(target.libraryId, target.zoteroKey);
     await waitForNoteEditorReady(target.libraryId, target.zoteroKey);
     return await showDiffPreview(target.libraryId, target.zoteroKey, edits, {
