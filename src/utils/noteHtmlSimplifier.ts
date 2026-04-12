@@ -2326,7 +2326,10 @@ export async function waitForPMNormalization(
     undoData: { undo_new_html?: string; undo_before_context?: string; undo_after_context?: string },
     preEditStrippedHtml?: string,
 ): Promise<void> {
-    if (!undoData.undo_new_html) return;
+    // Skip only when undo_new_html is truly absent (undefined/null).
+    // Empty string ("") is valid — it means a deletion, and we still need
+    // to refresh the before/after context anchors after PM normalization.
+    if (undoData.undo_new_html == null) return;
 
     // Only refresh edits that have context anchors.
     // Note: empty string ("") is a valid context (edit at start/end of note),
@@ -2382,8 +2385,22 @@ export async function waitForPMNormalization(
 
             const actualFragment = currentStripped.substring(range.start, range.end);
 
-            // Skip update if the fragment didn't actually change
-            if (actualFragment === undoData.undo_new_html) return;
+            // Refresh contexts from the PM-normalized HTML
+            const newBeforeCtx = currentStripped.substring(
+                Math.max(0, range.start - PM_UNDO_CONTEXT_LENGTH), range.start
+            );
+            const newAfterCtx = currentStripped.substring(
+                range.end, range.end + PM_UNDO_CONTEXT_LENGTH
+            );
+
+            // Skip update if nothing actually changed (fragment AND contexts)
+            if (
+                actualFragment === undoData.undo_new_html
+                && newBeforeCtx === undoData.undo_before_context
+                && newAfterCtx === undoData.undo_after_context
+            ) {
+                return;
+            }
 
             // Sanity check: PM normalization changes markup slightly (entities,
             // whitespace, wrappers) but never dramatically alters fragment size.
@@ -2405,14 +2422,10 @@ export async function waitForPMNormalization(
 
             // Update in-place with PM-normalized data
             undoData.undo_new_html = actualFragment;
-            undoData.undo_before_context = currentStripped.substring(
-                Math.max(0, range.start - PM_UNDO_CONTEXT_LENGTH), range.start
-            );
-            undoData.undo_after_context = currentStripped.substring(
-                range.end, range.end + PM_UNDO_CONTEXT_LENGTH
-            );
+            undoData.undo_before_context = newBeforeCtx;
+            undoData.undo_after_context = newAfterCtx;
 
-            logger('waitForPMNormalization: updated undo_new_html after PM normalization', 1);
+            logger('waitForPMNormalization: updated undo data after PM normalization', 1);
             return;
         } catch (e: any) {
             logger(`waitForPMNormalization: error during poll: ${e?.message || e}`, 1);

@@ -2038,3 +2038,92 @@ describe('PM whitespace indentation changes (regression)', () => {
         expect(restored).toContain('Discussion');
     });
 });
+
+
+// =============================================================================
+// Section 12: Deletion Undo with Edit Footer (regression)
+// =============================================================================
+
+describe('deletion undo with edit footer (regression)', () => {
+    // Reproduces the bug where deletion undo fails because:
+    // 1. The undo after-context is captured from the pre-edit HTML
+    // 2. addOrUpdateEditFooter inserts a footer before </div>
+    // 3. The stored after-context (ending in "...</p>\n</div>") no longer
+    //    matches the actual note HTML (which now has "<footer>\n</div>")
+    // 4. waitForPMNormalization skipped deletions (undo_new_html === "" is falsy)
+    // 5. Undo fails: "the note has been modified around the deletion point"
+
+    const NOTE_WITH_SECTIONS = wrap(
+        '<h1>Research Summary</h1>\n'
+        + '<h2>Results</h2>\n'
+        + '<p>Students showed improved GPA.</p>\n'
+        + '<h2>Discussion</h2>\n'
+        + '<p>These findings suggest peer composition policies could be effective.</p>\n'
+        + '<p>The effect is heterogeneous.</p>\n'
+        + '<h2>Conclusion</h2>\n'
+        + '<p>Our results provide causal evidence for peer effects.</p>\n'
+    );
+
+    it('deletion undo succeeds when footer is added near deletion point', async () => {
+        // Enable footer insertion by returning a thread ID from store.get
+        const { store } = await import('../../../react/store');
+        const originalGet = (store.get as ReturnType<typeof vi.fn>).getMockImplementation();
+        (store.get as ReturnType<typeof vi.fn>).mockReturnValue('test-thread-123');
+
+        try {
+            const { item, action, result } = await applyEdit({
+                noteHtml: NOTE_WITH_SECTIONS,
+                oldString: '<h2>Discussion</h2>\n<p>These findings suggest peer composition policies could be effective.</p>\n<p>The effect is heterogeneous.</p>',
+                newString: '',
+            });
+
+            // Verify the deletion was applied and footer was added
+            expect(item._getHtml()).not.toContain('Discussion');
+            expect(item._getHtml()).toContain('Edited by Beaver');
+
+            // Verify the after-context now includes the footer
+            // (the fix recaptures contexts from post-footer HTML)
+            expect(result.undo_after_context).toContain('Edited by Beaver');
+
+            // Undo should succeed despite footer being in the after-context
+            const restored = await undoEdit(item, action);
+            expect(restored).toContain('Discussion');
+            expect(restored).toContain('These findings suggest peer composition policies could be effective');
+            expect(restored).toContain('The effect is heterogeneous');
+        } finally {
+            // Restore mock
+            if (originalGet) {
+                (store.get as ReturnType<typeof vi.fn>).mockImplementation(originalGet);
+            } else {
+                (store.get as ReturnType<typeof vi.fn>).mockReturnValue(null);
+            }
+        }
+    });
+
+    it('replacement undo succeeds when footer is added', async () => {
+        const { store } = await import('../../../react/store');
+        const originalGet = (store.get as ReturnType<typeof vi.fn>).getMockImplementation();
+        (store.get as ReturnType<typeof vi.fn>).mockReturnValue('test-thread-456');
+
+        try {
+            const { item, action } = await applyEdit({
+                noteHtml: NOTE_WITH_SECTIONS,
+                oldString: '<h2>Conclusion</h2>\n<p>Our results provide causal evidence for peer effects.</p>',
+                newString: '<h2>Conclusion</h2>\n<p>Updated conclusion text.</p>',
+            });
+
+            expect(item._getHtml()).toContain('Updated conclusion text');
+            expect(item._getHtml()).toContain('Edited by Beaver');
+
+            const restored = await undoEdit(item, action);
+            expect(restored).toContain('Our results provide causal evidence for peer effects');
+            expect(restored).not.toContain('Updated conclusion text');
+        } finally {
+            if (originalGet) {
+                (store.get as ReturnType<typeof vi.fn>).mockImplementation(originalGet);
+            } else {
+                (store.get as ReturnType<typeof vi.fn>).mockReturnValue(null);
+            }
+        }
+    });
+});

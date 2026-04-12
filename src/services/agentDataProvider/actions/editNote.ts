@@ -1184,6 +1184,7 @@ async function executeEditNoteAction(
     let undoOccurrenceContexts: Array<{ before: string; after: string }> | undefined;
     const UNDO_CONTEXT_LENGTH = 200;
     let replacementCount: number;
+    let editPos = -1; // Position of the edit in strippedHtml (single-occurrence only)
 
     if (operation === 'str_replace_all') {
         replacementCount = matchCount;
@@ -1249,6 +1250,7 @@ async function executeEditNoteAction(
 
         newHtml = strippedHtml.substring(0, rawPos) + expandedNew
             + strippedHtml.substring(afterStart);
+        editPos = rawPos;
     }
 
     // 10b. Add/update "Edited by Beaver" footer
@@ -1270,6 +1272,20 @@ async function executeEditNoteAction(
             error: 'The note wrapper <div data-schema-version="..."> must not be removed.',
             error_code: 'wrapper_removed',
         };
+    }
+
+    // 12b. Recapture undo contexts from the post-edit, post-footer stripped HTML.
+    // The initial capture (from pre-edit strippedHtml at step 9) may be stale
+    // because addOrUpdateEditFooter inserts/moves content before </div>, causing
+    // the after-context to diverge from what the note actually contains after saving.
+    // The edit position is unchanged since the footer is appended at the end.
+    if (editPos !== -1 && undoBeforeContext !== undefined) {
+        const postEditStripped = stripDataCitationItems(newHtml);
+        const posInNew = editPos + expandedNew.length;
+        undoBeforeContext = postEditStripped.substring(
+            Math.max(0, editPos - UNDO_CONTEXT_LENGTH), editPos);
+        undoAfterContext = postEditStripped.substring(
+            posInNew, posInNew + UNDO_CONTEXT_LENGTH);
     }
 
     // 13. Checkpoint before save

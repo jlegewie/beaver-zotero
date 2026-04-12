@@ -93,13 +93,19 @@ export function parseEditFooter(html: string): ParsedEditFooter | null {
 /**
  * Build the edit footer HTML from a list of thread IDs.
  * Each thread gets a numbered "Chat N" link.
+ *
+ * The HTML is emitted in ProseMirror-canonical form (`rgb(...)` color,
+ * `rel="noopener noreferrer nofollow"` on links) so that the stored note
+ * matches the footer byte-for-byte without requiring a PM save-back round
+ * trip. This lets undo-context anchors captured right after footer insertion
+ * match the final stored HTML.
  */
 export function buildEditFooterHtml(threadIds: string[]): string {
     if (threadIds.length === 0) return '';
     const links = threadIds.map((tid, i) =>
-        `<a href="zotero://beaver/thread/${tid}">Chat ${i + 1}</a>`
+        `<a href="zotero://beaver/thread/${tid}" rel="noopener noreferrer nofollow">Chat ${i + 1}</a>`
     );
-    return `<p><span style="color: #aaa;">${EDIT_FOOTER_MARKER} \u00b7 ${links.join(' \u00b7 ')}</span></p>`;
+    return `<p><span style="color: rgb(170, 170, 170);">${EDIT_FOOTER_MARKER} \u00b7 ${links.join(' \u00b7 ')}</span></p>`;
 }
 
 /**

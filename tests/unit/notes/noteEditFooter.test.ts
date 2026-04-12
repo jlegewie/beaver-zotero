@@ -88,7 +88,11 @@ describe('buildEditFooterHtml', () => {
         expect(html).toContain('Edited by Beaver');
         expect(html).toContain('zotero://beaver/thread/thread-1');
         expect(html).toContain('Chat 1');
-        expect(html).toContain('color: #aaa');
+        // Footer is emitted in PM-canonical form so it doesn't drift after a
+        // ProseMirror save round-trip (which would normalize #aaa → rgb()
+        // and add rel="noopener noreferrer nofollow" to the link).
+        expect(html).toContain('color: rgb(170, 170, 170)');
+        expect(html).toContain('rel="noopener noreferrer nofollow"');
     });
 
     it('builds multi-thread footer with sequential numbering', () => {
@@ -99,6 +103,17 @@ describe('buildEditFooterHtml', () => {
         expect(html).toContain('zotero://beaver/thread/t1');
         expect(html).toContain('zotero://beaver/thread/t2');
         expect(html).toContain('zotero://beaver/thread/t3');
+    });
+
+    it('is idempotent under ProseMirror normalization (regression)', async () => {
+        // Footer must be emitted in PM-canonical form so that the stored note
+        // matches what we captured for undo contexts. If this test fails, undo
+        // after a note edit will fail because context anchors in result_data
+        // won't match the PM-normalized stored HTML.
+        const { normalizeNoteHtml } = await import('../../../src/prosemirror/normalize');
+        const html = wrap(buildEditFooterHtml(['thread-abc']));
+        const normalized = normalizeNoteHtml(html);
+        expect(normalized).toContain(buildEditFooterHtml(['thread-abc']));
     });
 });
 
