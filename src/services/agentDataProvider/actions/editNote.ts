@@ -5,6 +5,7 @@ import {
     getOrSimplify,
     expandToRawHtml,
     stripDataCitationItems,
+    extractDataCitationItems,
     rebuildDataCitationItems,
     countOccurrences,
     getLatestNoteHtml,
@@ -963,7 +964,9 @@ async function executeEditNoteAction(
             };
         }
 
-        const strippedHtml = stripDataCitationItems(normalizeNoteHtml(oldHtml));
+        const normalizedOldHtml = normalizeNoteHtml(oldHtml);
+        const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
+        const strippedHtml = stripDataCitationItems(normalizedOldHtml);
 
         // Preserve wrapper div
         const trimmed = strippedHtml.trim();
@@ -983,8 +986,9 @@ async function executeEditNoteAction(
             newHtml = addOrUpdateEditFooter(newHtml, threadId);
         }
 
-        // Rebuild data-citation-items
-        newHtml = rebuildDataCitationItems(newHtml);
+        // Rebuild data-citation-items, preserving pre-edit itemData so
+        // citations to foreign/unresolved URIs don't lose their labels.
+        newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
 
         // Wrapper div protection
         const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
@@ -1067,8 +1071,12 @@ async function executeEditNoteAction(
         };
     }
 
-    // 6b. Normalize + strip data-citation-items from raw HTML for matching
-    const strippedHtml = stripDataCitationItems(normalizeNoteHtml(oldHtml));
+    // 6b. Normalize + strip data-citation-items from raw HTML for matching.
+    //     Snapshot the cache first so rebuild can preserve itemData for
+    //     URIs that don't resolve in the current library.
+    const normalizedOldHtml = normalizeNoteHtml(oldHtml);
+    const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
+    const strippedHtml = stripDataCitationItems(normalizedOldHtml);
 
     // 7. Count occurrences — if zero, retry with entity-decoded or entity-encoded
     // strings. PM may have decoded entities (&#x27; → ') since the model read the
@@ -1259,8 +1267,9 @@ async function executeEditNoteAction(
         newHtml = addOrUpdateEditFooter(newHtml, threadId);
     }
 
-    // 11. Rebuild data-citation-items
-    newHtml = rebuildDataCitationItems(newHtml);
+    // 11. Rebuild data-citation-items, preserving pre-edit itemData so
+    //     citations to foreign/unresolved URIs don't lose their labels.
+    newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
 
     // 12. Wrapper div protection — only error if the edit removed it
     const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);

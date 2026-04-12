@@ -22,6 +22,7 @@ import {
     getOrSimplify,
     expandToRawHtml,
     stripDataCitationItems,
+    extractDataCitationItems,
     rebuildDataCitationItems,
     getLatestNoteHtml,
     normalizeNoteHtml,
@@ -847,6 +848,7 @@ function constructMultiDiffHtml(
     fullHtml: string,
     edits: Array<{ expandedOld: string; expandedNew: string; operation: EditNoteOperation }>,
 ): string | null {
+    const existingCitationCache = extractDataCitationItems(fullHtml);
     const stripped = stripDataCitationItems(fullHtml);
 
     // Handle rewrite: replace entire body with deletion-styled old + addition-styled new
@@ -866,7 +868,7 @@ function constructMultiDiffHtml(
 
         const styledOld = bodyContent ? wrapTextNodesWithStyle(bodyContent, DEL_STYLE) : '';
         const styledNew = rewriteEdit.expandedNew ? wrapTextNodesWithStyle(rewriteEdit.expandedNew, ADD_STYLE) : '';
-        return rebuildDataCitationItems(wrapperOpen + styledOld + styledNew + wrapperClose);
+        return rebuildDataCitationItems(wrapperOpen + styledOld + styledNew + wrapperClose, existingCitationCache);
     }
 
     const ops: Array<{ pos: number; oldLen: number; replacement: string }> = [];
@@ -908,7 +910,7 @@ function constructMultiDiffHtml(
     for (const op of filtered) {
         result = result.substring(0, op.pos) + op.replacement + result.substring(op.pos + op.oldLen);
     }
-    return rebuildDataCitationItems(result);
+    return rebuildDataCitationItems(result, existingCitationCache);
 }
 
 function computeHtmlDiff(oldHtml: string, newHtml: string) {

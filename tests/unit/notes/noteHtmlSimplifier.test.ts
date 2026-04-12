@@ -36,6 +36,7 @@ import {
     getOrSimplify,
     invalidateSimplificationCache,
     stripDataCitationItems,
+    extractDataCitationItems,
     stripNoteWrapperDiv,
     rebuildDataCitationItems,
     validateNewString,
@@ -1351,6 +1352,97 @@ describe('rebuildDataCitationItems', () => {
         const html = wrap('<span class="citation" data-citation="not%20valid%20json">text</span>');
         // Should not throw
         expect(() => rebuildDataCitationItems(html)).not.toThrow();
+    });
+
+    // Regression: notes whose citations reference items outside the current
+    // user's library (shared notes, foreign userIDs, test URIs) lost all
+    // citation labels on edit because `Zotero.URI.getURIItemLibraryKey`
+    // returned false and rebuild emitted no data-citation-items, so
+    // ProseMirror re-serialised every citation as `()` on save.
+    it('preserves itemData from existing cache when URI resolution fails', () => {
+        // Simulate a URI that does not resolve in the current library.
+        (globalThis as any).Zotero.URI.getURIItemLibraryKey = vi.fn(() => false);
+
+        const existingCache = [{
+            uris: ['http://zotero.org/users/1/items/FOREIGN1'],
+            itemData: {
+                id: 'FOREIGN1',
+                type: 'article-journal',
+                title: 'Foreign Work',
+                author: [{ family: 'Smith', given: 'John' }],
+                issued: { 'date-parts': [['2023']] },
+            },
+        }];
+
+        const html = wrap(`<p>${rawCitation('FOREIGN1')}</p>`);
+        const stripped = stripDataCitationItems(html);
+        const rebuilt = rebuildDataCitationItems(stripped, existingCache);
+
+        expect(rebuilt).toContain('data-citation-items=');
+        const match = rebuilt.match(/data-citation-items="([^"]*)"/);
+        const decoded = JSON.parse(decodeURIComponent(match![1]));
+        expect(decoded).toHaveLength(1);
+        expect(decoded[0].uris).toEqual(['http://zotero.org/users/1/items/FOREIGN1']);
+        expect(decoded[0].itemData.title).toBe('Foreign Work');
+    });
+
+    it('prefers existing cache over fresh URI lookup for matching URIs', () => {
+        const existingCache = [{
+            uris: ['http://zotero.org/users/1/items/RB_CACHED'],
+            itemData: { id: 'RB_CACHED', title: 'Cached Item' },
+        }];
+
+        const html = wrap(`<p>${rawCitation('RB_CACHED')}</p>`);
+        const stripped = stripDataCitationItems(html);
+        const rebuilt = rebuildDataCitationItems(stripped, existingCache);
+
+        // itemToCSLJSON must not be invoked when the cache already has this URI.
+        expect((globalThis as any).Zotero.Utilities.Item.itemToCSLJSON).not.toHaveBeenCalled();
+        const match = rebuilt.match(/data-citation-items="([^"]*)"/);
+        const decoded = JSON.parse(decodeURIComponent(match![1]));
+        expect(decoded[0].itemData.title).toBe('Cached Item');
+    });
+
+    it('falls back to fresh lookup for new URIs not in the cache', () => {
+        const existingCache = [{
+            uris: ['http://zotero.org/users/1/items/EXISTING1'],
+            itemData: { id: 'EXISTING1', title: 'Existing' },
+        }];
+
+        // Note also cites a newly-added item (NEW1) which is not in the cache —
+        // it must be resolved via URI lookup so Zotero can render it too.
+        const html = wrap(`<p>${rawCitation('EXISTING1')} ${rawCitation('NEW1')}</p>`);
+        const stripped = stripDataCitationItems(html);
+        const rebuilt = rebuildDataCitationItems(stripped, existingCache);
+
+        const match = rebuilt.match(/data-citation-items="([^"]*)"/);
+        const decoded = JSON.parse(decodeURIComponent(match![1]));
+        expect(decoded).toHaveLength(2);
+        const uris = decoded.map((d: any) => d.uris[0]);
+        expect(uris).toContain('http://zotero.org/users/1/items/EXISTING1');
+        expect(uris).toContain('http://zotero.org/users/1/items/NEW1');
+    });
+});
+
+describe('extractDataCitationItems', () => {
+    it('returns null when attribute is missing', () => {
+        expect(extractDataCitationItems('<div data-schema-version="9"><p>no cache</p></div>'))
+            .toBeNull();
+    });
+
+    it('parses the cached array from the wrapper div', () => {
+        const cache = [{
+            uris: ['http://zotero.org/users/1/items/X1'],
+            itemData: { id: 'X1', title: 'Foo' },
+        }];
+        const html = `<div data-schema-version="9" data-citation-items="${encodeURIComponent(JSON.stringify(cache))}"></div>`;
+        const extracted = extractDataCitationItems(html);
+        expect(extracted).toEqual(cache);
+    });
+
+    it('returns null for malformed attribute content', () => {
+        const html = '<div data-schema-version="9" data-citation-items="not%20json"></div>';
+        expect(extractDataCitationItems(html)).toBeNull();
     });
 });
 

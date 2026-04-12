@@ -1154,14 +1154,52 @@ export function stripDataCitationItems(html: string): string {
 }
 
 /**
- * Rebuild the data-citation-items attribute on the wrapper div.
- * Scans all data-citation attributes in the HTML, collects unique URIs,
- * looks up fresh itemData, and injects as data-citation-items on the wrapper div.
+ * Extract the `data-citation-items` cache from the wrapper div, if present.
+ * Returns the parsed array of stored citation items (each with `uris` and
+ * `itemData`), or `null` when the attribute is missing or malformed.
  */
-export function rebuildDataCitationItems(html: string): string {
+export function extractDataCitationItems(html: string): Array<{ uris: string[]; itemData: any }> | null {
+    const match = html.match(/data-citation-items="([^"]*)"/);
+    if (!match) return null;
+    try {
+        const parsed = JSON.parse(decodeURIComponent(match[1]));
+        return Array.isArray(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Rebuild the data-citation-items attribute on the wrapper div.
+ *
+ * Scans all data-citation attributes in the HTML, collects unique URIs, and
+ * resolves itemData for each. When `existingCache` is supplied (the pre-edit
+ * cache from the wrapper), itemData is sourced from the cache first and only
+ * looked up fresh when a URI is missing from the cache. This preserves
+ * itemData for notes whose citations reference items outside the current
+ * user's library (shared notes, imported notes, foreign userIDs) where
+ * `Zotero.URI.getURIItemLibraryKey` would fail to resolve — without the
+ * cache, Zotero's ProseMirror re-serialises those citations as `()`.
+ */
+export function rebuildDataCitationItems(
+    html: string,
+    existingCache?: Array<{ uris: string[]; itemData: any }> | null
+): string {
     const storedCitationItems: any[] = [];
     const seenUris = new Set<string>();
     const citationAttrRegex = /data-citation="([^"]*)"/g;
+
+    // Build a URI → itemData lookup from the pre-edit cache so we can preserve
+    // itemData even when URI resolution fails (e.g. foreign user libraries).
+    const cachedByUri = new Map<string, any>();
+    if (existingCache) {
+        for (const entry of existingCache) {
+            if (!entry?.itemData || !Array.isArray(entry.uris)) continue;
+            for (const uri of entry.uris) {
+                if (!cachedByUri.has(uri)) cachedByUri.set(uri, entry.itemData);
+            }
+        }
+    }
 
     let attrMatch;
     while ((attrMatch = citationAttrRegex.exec(html)) !== null) {
@@ -1171,7 +1209,16 @@ export function rebuildDataCitationItems(html: string): string {
                 const uriKey = ci.uris?.[0];
                 if (uriKey && !seenUris.has(uriKey)) {
                     seenUris.add(uriKey);
-                    // getURIItem is async (returns a Promise) — use sync equivalents
+
+                    // Prefer the pre-edit cache: it already has correct itemData
+                    // for items that may not resolve via URI (foreign libraries).
+                    const cachedItemData = cachedByUri.get(uriKey);
+                    if (cachedItemData) {
+                        storedCitationItems.push({ uris: ci.uris, itemData: cachedItemData });
+                        continue;
+                    }
+
+                    // Fresh lookup for new citations not in the pre-edit cache.
                     const itemInfo = (Zotero.URI as any).getURIItemLibraryKey(uriKey);
                     if (itemInfo) {
                         const item = Zotero.Items.getByLibraryAndKey(itemInfo.libraryID, itemInfo.key);

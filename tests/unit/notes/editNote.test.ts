@@ -12,6 +12,7 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     })),
     expandToRawHtml: vi.fn((str: string, _metadata: any, _context: string) => str),
     stripDataCitationItems: vi.fn((html: string) => html),
+    extractDataCitationItems: vi.fn(() => null),
     rebuildDataCitationItems: vi.fn((html: string) => html),
     countOccurrences: vi.fn((haystack: string, needle: string) => {
         if (!needle) return 0;

@@ -11,6 +11,7 @@ import {
     simplifyNoteHtml,
     expandToRawHtml,
     stripDataCitationItems,
+    extractDataCitationItems,
     rebuildDataCitationItems,
     countOccurrences,
     getLatestNoteHtml,
@@ -294,6 +295,7 @@ export async function executeEditNoteAction(
             throw new Error(e.message || String(e));
         }
 
+        const existingCitationCache = extractDataCitationItems(oldHtml);
         const strippedHtml = stripDataCitationItems(oldHtml);
 
         // Preserve wrapper div
@@ -313,7 +315,9 @@ export async function executeEditNoteAction(
             newHtml = addOrUpdateEditFooter(newHtml, threadId);
         }
 
-        newHtml = rebuildDataCitationItems(newHtml);
+        // Preserve pre-edit itemData so citations to foreign/unresolved URIs
+        // don't lose their labels after the round-trip through ProseMirror.
+        newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
 
         const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
         if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
@@ -357,7 +361,10 @@ export async function executeEditNoteAction(
         throw new Error(e.message || String(e));
     }
 
-    // 6b. Strip data-citation-items from raw HTML for matching
+    // 6b. Strip data-citation-items from raw HTML for matching.
+    //     Snapshot the cache first so rebuild can preserve itemData for
+    //     URIs that don't resolve in the current library.
+    const existingCitationCache = extractDataCitationItems(oldHtml);
     const strippedHtml = stripDataCitationItems(oldHtml);
 
     // 7. Count occurrences — if zero, retry with entity-decoded or entity-encoded
@@ -476,8 +483,9 @@ export async function executeEditNoteAction(
         newHtml = addOrUpdateEditFooter(newHtml, threadId);
     }
 
-    // 11. Rebuild data-citation-items
-    newHtml = rebuildDataCitationItems(newHtml);
+    // 11. Rebuild data-citation-items, preserving pre-edit itemData so
+    //     citations to foreign/unresolved URIs don't lose their labels.
+    newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
 
     // 12. Wrapper div protection — only error if the edit removed it
     const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
@@ -587,7 +595,11 @@ export async function undoEditNoteAction(
         await item.loadDataType('note');
         const noteId = `${library_id}-${zotero_key}`;
 
-        const restoredHtml = rebuildDataCitationItems(resultData.undo_full_html);
+        // Seed the rebuild with the current note's cache so itemData for
+        // foreign/unresolved URIs survives the undo round-trip.
+        const currentHtml = getLatestNoteHtml(item);
+        const existingCitationCache = extractDataCitationItems(currentHtml);
+        const restoredHtml = rebuildDataCitationItems(resultData.undo_full_html, existingCitationCache);
         item.setNote(restoredHtml);
         await item.saveTx();
         logger(`undoEditNoteAction: Restored full note content for ${noteId}`, 1);
@@ -618,7 +630,9 @@ export async function undoEditNoteAction(
     // 3. Get current HTML
     const currentHtml = getLatestNoteHtml(item);
 
-    // 4. Strip data-citation-items for matching
+    // 4. Strip data-citation-items for matching. Snapshot the cache first so
+    //    rebuild can preserve itemData for URIs that don't resolve.
+    const existingCitationCache = extractDataCitationItems(currentHtml);
     const strippedHtml = stripDataCitationItems(currentHtml);
     const storedUndoOldHtml = resultData?.undo_old_html;
     const storedUndoNewHtml = resultData?.undo_new_html;
@@ -913,8 +927,9 @@ export async function undoEditNoteAction(
         }
     }
 
-    // Rebuild data-citation-items
-    restoredHtml = rebuildDataCitationItems(restoredHtml!);
+    // Rebuild data-citation-items, preserving the pre-undo itemData so
+    // citations to foreign/unresolved URIs don't lose their labels.
+    restoredHtml = rebuildDataCitationItems(restoredHtml!, existingCitationCache);
 
     // Save
     try {
