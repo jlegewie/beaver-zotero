@@ -27,11 +27,28 @@ import {
     decodeHtmlEntities,
     encodeTextEntities,
     ENTITY_FORMS,
+    type ExternalRefContext,
 } from '../../src/utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from './sourceUtils';
 import { store } from '../store';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { addOrUpdateEditFooter } from '../../src/utils/noteEditFooter';
+import {
+    externalReferenceMappingAtom,
+    externalReferenceItemMappingAtom,
+} from '../atoms/externalReferences';
+
+/**
+ * Snapshot the thread's external-reference state from the Jotai store so
+ * `expandToRawHtml('new', ...)` can resolve `<citation external_id="..."/>`
+ * to either an in-library Zotero item or an inline `<a>` link.
+ */
+function getExternalRefContext(): ExternalRefContext {
+    return {
+        externalRefs: store.get(externalReferenceMappingAtom),
+        externalItemMapping: store.get(externalReferenceItemMappingAtom),
+    };
+}
 
 function normalizeUndoComparisonHtml(html: string, libraryId: number): string {
     const { simplified } = simplifyNoteHtml(stripDataCitationItems(html), libraryId);
@@ -222,11 +239,15 @@ export async function executeEditNoteAction(
     // 5. Pre-load page labels so new citations resolve page indices to labels
     await preloadPageLabelsForNewCitations(new_string);
 
+    // Snapshot external-reference state once so every expandToRawHtml('new', ...)
+    // below can resolve `<citation external_id="..."/>` consistently.
+    const externalRefContext = getExternalRefContext();
+
     // ── rewrite mode: replace entire note body ──
     if (operation === 'rewrite') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new');
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
         } catch (e: any) {
             throw new Error(e.message || String(e));
         }
@@ -289,7 +310,7 @@ export async function executeEditNoteAction(
     let expandedNew: string;
     try {
         expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
-        expandedNew = expandToRawHtml(new_string, metadata, 'new');
+        expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
     } catch (e: any) {
         throw new Error(e.message || String(e));
     }
@@ -549,13 +570,14 @@ export async function undoEditNoteAction(
 
     if (!expandedOld || (!isDeletion && expandedNew === undefined)) {
         const { metadata } = getOrSimplify(noteId, currentHtml, library_id);
+        const externalRefContext = getExternalRefContext();
 
         try {
             if (!expandedOld) {
                 expandedOld = expandToRawHtml(old_string, metadata, 'old');
             }
             if (!isDeletion && expandedNew === undefined) {
-                expandedNew = expandToRawHtml(new_string, metadata, 'new');
+                expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
             }
         } catch (e: any) {
             throw new Error(`Failed to expand strings for undo: ${e.message || String(e)}`);

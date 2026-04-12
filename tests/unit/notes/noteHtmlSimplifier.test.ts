@@ -583,6 +583,259 @@ describe('expandToRawHtml', () => {
         expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/Attachment not found/);
     });
 
+    // ---- external_id citations ----
+    //
+    // `external_id` is the chat-side citation format used by search tools
+    // (OpenAlex, Semantic Scholar) for works that may not be in the user's
+    // Zotero library. The simplifier-level fallback has three tiers:
+    //   1. Auto-resolve to a Zotero `item_id` if `externalItemMapping` has a hit
+    //   2. Build an inline `<a>` link from `externalRefs` metadata
+    //   3. Throw a helpful error when neither map has data for the id
+
+    it('external_id auto-resolves to item_id citation when in mapping', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation external_id="W1234567890" page="15"/>';
+        const externalRefContext = {
+            externalRefs: {
+                W1234567890: {
+                    source: 'openalex' as const,
+                    source_id: 'W1234567890',
+                    title: 'Mapped Work',
+                    library_items: [],
+                },
+            },
+            externalItemMapping: {
+                W1234567890: { library_id: 1, zotero_key: 'MAPPED1' },
+            },
+        };
+        const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
+        // Auto-resolve goes through buildCitationFromSimplifiedAttrs → real Zotero citation
+        expect(createCitationHTML).toHaveBeenCalled();
+        expect(result).toContain('data-citation=');
+        // Confirm Items.getByLibraryAndKey was called with the mapped key
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKey).toHaveBeenCalledWith(1, 'MAPPED1');
+    });
+
+    it('external_id falls back to <a> link with DOI URL', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation external_id="W1975284160"/>';
+        const externalRefContext = {
+            externalRefs: {
+                W1975284160: {
+                    source: 'openalex' as const,
+                    source_id: 'W1975284160',
+                    title: 'Lithium-ion battery cathodes',
+                    authors: ['Smith, John', 'Doe, Jane', 'Roe, Mary'],
+                    year: 2020,
+                    identifiers: { doi: '10.1234/lib.2020.001' },
+                    library_items: [],
+                },
+            },
+            externalItemMapping: {},
+        };
+        const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
+        expect(result).toBe(
+            '<a href="https://doi.org/10.1234/lib.2020.001" rel="noopener noreferrer">'
+            + '(Smith et al., 2020)</a>'
+        );
+        // Should NOT call createCitationHTML — this is a link, not a Zotero citation
+        expect(createCitationHTML).not.toHaveBeenCalled();
+    });
+
+    it('external_id falls back to publication_url when no DOI', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation external_id="W1"/>';
+        const externalRefContext = {
+            externalRefs: {
+                W1: {
+                    source: 'openalex' as const,
+                    source_id: 'W1',
+                    title: 'No-DOI Work',
+                    authors: ['Singleton, Solo'],
+                    year: 2019,
+                    publication_url: 'https://example.org/paper/123',
+                    library_items: [],
+                },
+            },
+            externalItemMapping: {},
+        };
+        const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
+        expect(result).toBe(
+            '<a href="https://example.org/paper/123" rel="noopener noreferrer">'
+            + '(Singleton, 2019)</a>'
+        );
+    });
+
+    it('external_id falls back to open_access_url when no DOI or publication_url', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation external_id="W2"/>';
+        const externalRefContext = {
+            externalRefs: {
+                W2: {
+                    source: 'openalex' as const,
+                    source_id: 'W2',
+                    authors: ['Brown, Bob'],
+                    year: 2024,
+                    open_access_url: 'https://oa.example.org/pdf/2.pdf',
+                    library_items: [],
+                },
+            },
+            externalItemMapping: {},
+        };
+        const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
+        expect(result).toContain('href="https://oa.example.org/pdf/2.pdf"');
+        expect(result).toContain('(Brown, 2024)');
+    });
+
+    it('external_id link includes page suffix when page attribute is present', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation external_id="W3" page="42"/>';
+        const externalRefContext = {
+            externalRefs: {
+                W3: {
+                    source: 'openalex' as const,
+                    source_id: 'W3',
+                    authors: ['Zhang, Wei'],
+                    year: 2023,
+                    identifiers: { doi: '10.1/abc' },
+                    library_items: [],
+                },
+            },
+            externalItemMapping: {},
+        };
+        const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
+        expect(result).toContain('(Zhang, 2023, p. 42)');
+    });
+
+    it('external_id falls back to title when authors are missing', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation external_id="W4"/>';
+        const externalRefContext = {
+            externalRefs: {
+                W4: {
+                    source: 'openalex' as const,
+                    source_id: 'W4',
+                    title: 'A Mystery Paper With No Authors',
+                    identifiers: { doi: '10.1/mystery' },
+                    library_items: [],
+                },
+            },
+            externalItemMapping: {},
+        };
+        const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
+        // No authors and no year → label falls back to title
+        expect(result).toContain('(A Mystery Paper With No Authors)');
+    });
+
+    it('external_id throws when reference has no DOI or URL', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation external_id="W5"/>';
+        const externalRefContext = {
+            externalRefs: {
+                W5: {
+                    source: 'openalex' as const,
+                    source_id: 'W5',
+                    title: 'URL-less Work',
+                    authors: ['Nobody'],
+                    year: 2024,
+                    library_items: [],
+                },
+            },
+            externalItemMapping: {},
+        };
+        expect(() => expandToRawHtml(input, metadata, 'new', externalRefContext))
+            .toThrow(/no DOI or URL/);
+    });
+
+    it('external_id throws helpful error when not in any mapping', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation external_id="W_NOT_IN_THREAD"/>';
+        const externalRefContext = {
+            externalRefs: {},
+            externalItemMapping: {},
+        };
+        expect(() => expandToRawHtml(input, metadata, 'new', externalRefContext))
+            .toThrow(/external reference cache/);
+    });
+
+    it('external_id throws when externalRefContext is omitted entirely', () => {
+        // No externalRefContext = legacy behaviour. external_id is unrecognized
+        // and falls through to the generic missing-id error.
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation external_id="W6"/>';
+        expect(() => expandToRawHtml(input, metadata, 'new'))
+            .toThrow(/external reference cache/);
+    });
+
+    it('external_id throws in old_string context (cannot match retroactively)', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation external_id="W7"/>';
+        const externalRefContext = {
+            externalRefs: {
+                W7: {
+                    source: 'openalex' as const,
+                    source_id: 'W7',
+                    identifiers: { doi: '10.1/old' },
+                    library_items: [],
+                },
+            },
+            externalItemMapping: {},
+        };
+        // 'old' context routes through the no-ref branch, which always rejects
+        // any citation that wasn't in the original metadata map.
+        expect(() => expandToRawHtml(input, metadata, 'old', externalRefContext))
+            .toThrow(/old_string/);
+    });
+
+    it('external_id link escapes special characters in href and label', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation external_id="W8"/>';
+        const externalRefContext = {
+            externalRefs: {
+                W8: {
+                    source: 'openalex' as const,
+                    source_id: 'W8',
+                    authors: ['Smith & Jones'],
+                    year: 2022,
+                    publication_url: 'https://example.org/path?a=1&b=2',
+                    library_items: [],
+                },
+            },
+            externalItemMapping: {},
+        };
+        const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
+        // Ampersand in href must be entity-escaped
+        expect(result).toContain('href="https://example.org/path?a=1&amp;b=2"');
+        // Ampersand in label text must also be entity-escaped
+        expect(result).toContain('(Jones, 2022)'); // last name extracted from "Smith & Jones"
+    });
+
+    it('external_id mixed with item_id citations expands both correctly', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input =
+            'See <citation item_id="1-REAL" page="5"/> and '
+            + '<citation external_id="W9"/> for details.';
+        const externalRefContext = {
+            externalRefs: {
+                W9: {
+                    source: 'openalex' as const,
+                    source_id: 'W9',
+                    authors: ['Tester'],
+                    year: 2024,
+                    identifiers: { doi: '10.1/mix' },
+                    library_items: [],
+                },
+            },
+            externalItemMapping: {},
+        };
+        const result = expandToRawHtml(input, metadata, 'new', externalRefContext);
+        // First (item_id) becomes a real citation
+        expect(result).toContain('data-citation=');
+        // Second (external_id) becomes an inline link
+        expect(result).toContain('https://doi.org/10.1/mix');
+        expect(result).toContain('(Tester, 2024)');
+    });
+
     // ---- extractAttr word-boundary correctness ----
 
     it('extractAttr distinguishes ref from item_id (no false match)', () => {

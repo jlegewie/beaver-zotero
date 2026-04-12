@@ -12,6 +12,8 @@ import { createCitationHTML } from './zoteroUtils';
 import { getAttachmentFileStatus } from '../services/agentDataProvider/utils';
 import { logger } from './logger';
 import { stripBeaverEditFooter, stripBeaverCreatedFooter } from './noteEditFooter';
+import type { ExternalReference } from '../../react/types/externalReferences';
+import type { ZoteroItemReference } from '../../react/types/zotero';
 
 // =============================================================================
 // Types
@@ -751,6 +753,95 @@ function buildCitationFromSimplifiedAttrs(attrs: { item_id: string; page?: strin
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
 }
 
+/**
+ * External reference context passed into expandToRawHtml so the citation
+ * expander can resolve `<citation external_id="..."/>` (used by chat search
+ * tools for non-Zotero works) into something a Zotero note can store.
+ *
+ * Two-tier fallback:
+ *  1. If `externalItemMapping[external_id]` resolves to a Zotero item, the
+ *     citation is rewritten as a normal item_id citation (best outcome).
+ *  2. Otherwise, an inline `<a href="...">(Author Year)</a>` link is built
+ *     from the matching `ExternalReference` metadata.
+ *
+ * If neither map has any data for the external_id, expansion throws with a
+ * helpful message instead of silently dropping the citation.
+ */
+export interface ExternalRefContext {
+    /** source_id → ExternalReference object (title, authors, urls, identifiers, ...) */
+    externalRefs: Record<string, ExternalReference>;
+    /** source_id → mapped Zotero item, or null if checked but not in library */
+    externalItemMapping: Record<string, ZoteroItemReference | null>;
+}
+
+/** Format a compact "Author, Year" / "First et al., Year" label for a link. */
+function formatCompactAuthorYear(ref: ExternalReference): string {
+    const year = ref.year != null
+        ? String(ref.year)
+        : (ref.publication_date ? ref.publication_date.slice(0, 4) : '');
+
+    const firstAuthor = ref.authors && ref.authors.length > 0 ? ref.authors[0] : '';
+    let lastName = '';
+    if (firstAuthor) {
+        // Author may be "Last, First" or "First Last"
+        if (firstAuthor.includes(',')) {
+            lastName = firstAuthor.split(',')[0].trim();
+        } else {
+            const parts = firstAuthor.trim().split(/\s+/);
+            lastName = parts[parts.length - 1] || firstAuthor.trim();
+        }
+    }
+
+    if (lastName && (ref.authors?.length ?? 0) > 1) {
+        return year ? `${lastName} et al., ${year}` : `${lastName} et al.`;
+    }
+    if (lastName) {
+        return year ? `${lastName}, ${year}` : lastName;
+    }
+    return year;
+}
+
+/**
+ * Pick the best URL for an external reference. Priority: DOI (most stable) →
+ * publisher page → generic url → open-access PDF.
+ */
+function pickExternalRefUrl(ref: ExternalReference): string | undefined {
+    const doi = ref.identifiers?.doi;
+    if (doi) {
+        // DOIs are passed through as-is to https://doi.org — they may contain
+        // slashes and parentheses but no characters that need URL encoding
+        // beyond what the surrounding attribute escape will handle.
+        return `https://doi.org/${doi}`;
+    }
+    return ref.publication_url || ref.url || ref.open_access_url || undefined;
+}
+
+/**
+ * Build an inline `<a>` link representing an external reference. Used as the
+ * non-Zotero fallback for `<citation external_id="..."/>` so external works
+ * still produce something useful in a saved Zotero note.
+ *
+ * Throws if the reference has no URL or DOI — in that case the model should
+ * pick a different source rather than emit a useless bare label.
+ */
+function buildExternalRefLinkHTML(ref: ExternalReference, page?: string): string {
+    const url = pickExternalRefUrl(ref);
+    if (!url) {
+        throw new Error(
+            `Error: External reference "${ref.source_id ?? ''}" has no DOI or URL — `
+            + 'cannot embed it in a Zotero note. Omit the citation or pick a different source.'
+        );
+    }
+
+    let label = formatCompactAuthorYear(ref);
+    if (!label) label = ref.title || url;
+    if (page) label += `, p. ${page}`;
+
+    // escapeAttr also escapes < > inside text — that's safe for the visible
+    // anchor text since the note editor renders the literal characters.
+    return `<a href="${escapeAttr(url)}" rel="noopener noreferrer">${escapeAttr(`(${label})`)}</a>`;
+}
+
 /** Build a new citation from an attachment ID (att_id format: "LIB-KEY") */
 function buildCitationFromAttId(attId: string, page?: string, shouldTranslatePage = true): string {
     const dashIdx = attId.indexOf('-');
@@ -775,11 +866,17 @@ function buildCitationFromAttId(attId: string, page?: string, shouldTranslatePag
  * @param str - String containing simplified tags (from old_string or new_string)
  * @param metadata - The metadata map from simplification
  * @param context - 'old' for old_string, 'new' for new_string
+ * @param externalRefContext - Optional. When provided, citations using
+ *   `external_id` (chat-side external work IDs from search tools) are
+ *   auto-resolved to a Zotero `item_id` if the work is in the library, or
+ *   converted to an inline `<a>` link otherwise. When omitted, `external_id`
+ *   citations throw the same "item_id or att_id" error as before.
  */
 export function expandToRawHtml(
     str: string,
     metadata: SimplificationMetadata,
-    context: 'old' | 'new'
+    context: 'old' | 'new',
+    externalRefContext?: ExternalRefContext,
 ): string {
     // Expand citations (all self-closing: <citation ... />)
     str = str.replace(
@@ -789,6 +886,7 @@ export function expandToRawHtml(
             const itemId = extractAttr(attrStr, 'item_id');
             const attId = extractAttr(attrStr, 'att_id');
             const items = extractAttr(attrStr, 'items');
+            const externalId = extractAttr(attrStr, 'external_id');
 
             // Case 1: Existing citation (has ref) — look up from metadata map
             if (ref) {
@@ -841,6 +939,37 @@ export function expandToRawHtml(
             }
             if (attId) {
                 return buildCitationFromAttId(attId, extractAttr(attrStr, 'page'), true);
+            }
+            // external_id: chat-side external work ID (e.g. OpenAlex W-id). Two-tier
+            // fallback so the model's research effort isn't lost when it tries to
+            // cite an external source in a Zotero note.
+            if (externalId) {
+                const page = extractAttr(attrStr, 'page');
+
+                // Tier 1: auto-resolve to Zotero item if the external work is in
+                // the library. Best outcome — produces a real Zotero citation.
+                const mappedItemRef = externalRefContext?.externalItemMapping?.[externalId];
+                if (mappedItemRef) {
+                    const itemIdStr = `${mappedItemRef.library_id}-${mappedItemRef.zotero_key}`;
+                    return buildCitationFromSimplifiedAttrs({ item_id: itemIdStr, page }, true);
+                }
+
+                // Tier 2: emit an inline hyperlink from the ExternalReference
+                // metadata. Lossy compared to a Zotero citation, but matches what a
+                // user would type by hand for a non-library work.
+                const externalRef = externalRefContext?.externalRefs?.[externalId];
+                if (externalRef) {
+                    return buildExternalRefLinkHTML(externalRef, page);
+                }
+
+                // Tier 3: no data at all — give the model an actionable error
+                // instead of the generic "item_id or att_id" message.
+                throw new Error(
+                    `Error: Citation external_id="${externalId}" not found in this thread's `
+                    + 'external reference cache. To cite a Zotero item use item_id="LIB-KEY", '
+                    + 'or att_id="LIB-KEY" for a PDF attachment. external_id is only valid '
+                    + 'for works returned by a search tool earlier in this thread.'
+                );
             }
             if (items) {
                 throw new Error(

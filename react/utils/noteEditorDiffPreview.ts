@@ -28,7 +28,25 @@ import {
     decodeHtmlEntities,
     encodeTextEntities,
     ENTITY_FORMS,
+    type ExternalRefContext,
 } from '../../src/utils/noteHtmlSimplifier';
+import { store } from '../store';
+import {
+    externalReferenceMappingAtom,
+    externalReferenceItemMappingAtom,
+} from '../atoms/externalReferences';
+
+/**
+ * Snapshot the thread's external-reference state from the Jotai store so
+ * `expandToRawHtml('new', ...)` can resolve `<citation external_id="..."/>`
+ * to either an in-library Zotero item or an inline `<a>` link.
+ */
+function getExternalRefContext(): ExternalRefContext {
+    return {
+        externalRefs: store.get(externalReferenceMappingAtom),
+        externalItemMapping: store.get(externalReferenceItemMappingAtom),
+    };
+}
 
 // =============================================================================
 // Constants
@@ -302,6 +320,7 @@ export async function showDiffPreview(
         const normalizedHtml = normalizeNoteHtml(rawHtml);
         const noteId = `${libraryId}-${zoteroKey}`;
         const { metadata } = getOrSimplify(noteId, rawHtml, libraryId);
+        const externalRefContext = getExternalRefContext();
 
         // Expand all edits
         const expandedEdits: Array<{ expandedOld: string; expandedNew: string; operation: EditNoteOperation }> = [];
@@ -309,7 +328,7 @@ export async function showDiffPreview(
             const op = edit.operation ?? 'str_replace';
             try {
                 if (op === 'rewrite') {
-                    const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new') : '';
+                    const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new', externalRefContext) : '';
                     expandedEdits.push({ expandedOld: '', expandedNew, operation: op });
                 } else {
                     const expandedOld = edit.oldString ? expandToRawHtml(edit.oldString, metadata, 'old') : '';
@@ -320,7 +339,7 @@ export async function showDiffPreview(
                     //   - insert_before: new_string = new_string + old_string
                     // so computeHtmlDiff will naturally show the anchor as
                     // context and the insertion as addition.
-                    const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new') : '';
+                    const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new', externalRefContext) : '';
                     if (expandedOld) {
                         expandedEdits.push({ expandedOld, expandedNew, operation: op });
                     } else {

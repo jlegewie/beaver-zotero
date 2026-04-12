@@ -30,10 +30,15 @@ import {
     stripNoteWrapperDiv,
     stripSpuriousWrappingTags,
     normalizeNoteHtml,
+    type ExternalRefContext,
 } from '../../../utils/noteHtmlSimplifier';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
+import {
+    externalReferenceMappingAtom,
+    externalReferenceItemMappingAtom,
+} from '../../../../react/atoms/externalReferences';
 import { addOrUpdateEditFooter } from '../../../utils/noteEditFooter';
 import {
     WSAgentActionValidateRequest,
@@ -74,6 +79,19 @@ function getEditNotePreference(library_id: number, zotero_key: string): Deferred
         return 'always_apply';
     }
     return getDeferredToolPreference('edit_note');
+}
+
+/**
+ * Snapshot the thread's external-reference state from the Jotai store so
+ * `expandToRawHtml('new', ...)` can resolve `<citation external_id="..."/>`
+ * to either an in-library Zotero item or an inline `<a>` link, instead of
+ * throwing on attributes the simplifier doesn't natively know about.
+ */
+function getExternalRefContext(): ExternalRefContext {
+    return {
+        externalRefs: store.get(externalReferenceMappingAtom),
+        externalItemMapping: store.get(externalReferenceItemMappingAtom),
+    };
 }
 
 
@@ -188,6 +206,10 @@ async function validateEditNoteAction(
     const noteId = `${library_id}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, rawHtml, library_id);
 
+    // Snapshot external-reference state once so every expandToRawHtml('new', ...)
+    // below can resolve `<citation external_id="..."/>` consistently.
+    const externalRefContext = getExternalRefContext();
+
     // ── rewrite mode: skip old_string matching, validate new_string only ──
     if (operation === 'rewrite') {
         // Validate new_string tags
@@ -218,7 +240,7 @@ async function validateEditNoteAction(
 
         // Dry-run expand new_string only
         try {
-            expandToRawHtml(new_string, metadata, 'new');
+            expandToRawHtml(new_string, metadata, 'new', externalRefContext);
         } catch (e: any) {
             return {
                 type: 'agent_action_validate_response',
@@ -315,7 +337,7 @@ async function validateEditNoteAction(
     let expandedNew: string;
     try {
         expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
-        expandedNew = expandToRawHtml(new_string, metadata, 'new');
+        expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
     } catch (e: any) {
         return {
             type: 'agent_action_validate_response',
@@ -380,7 +402,7 @@ async function validateEditNoteAction(
                         ? new_string
                         : new_string.replace(/\n+$/, '');
                     // Dry-run expand new_string to verify
-                    expandToRawHtml(trimmedNew, metadata, 'new');
+                    expandToRawHtml(trimmedNew, metadata, 'new', externalRefContext);
 
                     const normalizedActionData: EditNoteProposedData = {
                         ...request.action_data as EditNoteProposedData,
@@ -467,7 +489,7 @@ async function validateEditNoteAction(
                 if (unescapedCount > 0) {
                     const unescapedNew = unescapeJsonEscapes(new_string);
                     // Dry-run expand new_string to verify
-                    expandToRawHtml(unescapedNew, metadata, 'new');
+                    expandToRawHtml(unescapedNew, metadata, 'new', externalRefContext);
 
                     const normalizedActionData: EditNoteProposedData = {
                         ...request.action_data as EditNoteProposedData,
@@ -547,7 +569,7 @@ async function validateEditNoteAction(
             if (stripped) {
                 try {
                     expandedOld = expandToRawHtml(stripped.strippedOld, metadata, 'old');
-                    expandedNew = expandToRawHtml(stripped.strippedNew, metadata, 'new');
+                    expandedNew = expandToRawHtml(stripped.strippedNew, metadata, 'new', externalRefContext);
                     matchCount = countOccurrences(strippedHtml, expandedOld);
                 } catch {
                     // expansion failed — fall through to fuzzy error
@@ -634,7 +656,7 @@ async function validateEditNoteAction(
             try {
                 const tagExpandedOld = expandToRawHtml(tagStrip.strippedOld, metadata, 'old');
                 // Dry-run expand new_string to verify it's valid
-                expandToRawHtml(tagStrip.strippedNew, metadata, 'new');
+                expandToRawHtml(tagStrip.strippedNew, metadata, 'new', externalRefContext);
                 const tagMatchCount = countOccurrences(strippedHtml, tagExpandedOld);
 
                 if (tagMatchCount >= 1) {
@@ -922,11 +944,15 @@ async function executeEditNoteAction(
     const noteId = `${library_id}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
 
+    // Snapshot external-reference state once so every expandToRawHtml('new', ...)
+    // below can resolve `<citation external_id="..."/>` consistently.
+    const externalRefContext = getExternalRefContext();
+
     // ── rewrite mode: replace entire note body ──
     if (operation === 'rewrite') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new');
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
         } catch (e: any) {
             return {
                 type: 'agent_action_execute_response',
@@ -1030,7 +1056,7 @@ async function executeEditNoteAction(
     let expandedNew: string;
     try {
         expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
-        expandedNew = expandToRawHtml(new_string, metadata, 'new');
+        expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
     } catch (e: any) {
         return {
             type: 'agent_action_execute_response',
@@ -1108,7 +1134,7 @@ async function executeEditNoteAction(
             if (stripped) {
                 try {
                     expandedOld = expandToRawHtml(stripped.strippedOld, metadata, 'old');
-                    expandedNew = expandToRawHtml(stripped.strippedNew, metadata, 'new');
+                    expandedNew = expandToRawHtml(stripped.strippedNew, metadata, 'new', externalRefContext);
                     matchCount = countOccurrences(strippedHtml, expandedOld);
                 } catch {
                     // expansion failed — fall through to fuzzy error
@@ -1124,7 +1150,7 @@ async function executeEditNoteAction(
         for (const tagStrip of tagCandidates) {
             try {
                 const candidateOld = expandToRawHtml(tagStrip.strippedOld, metadata, 'old');
-                const candidateNew = expandToRawHtml(tagStrip.strippedNew, metadata, 'new');
+                const candidateNew = expandToRawHtml(tagStrip.strippedNew, metadata, 'new', externalRefContext);
                 const candidateCount = countOccurrences(strippedHtml, candidateOld);
                 if (candidateCount >= 1) {
                     expandedOld = candidateOld;
