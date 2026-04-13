@@ -21,6 +21,7 @@ AGENTS.md
 .claude/*
 archive
 .vscode/
+/scripts/*
 
 # compiled files
 reactBundle.js
