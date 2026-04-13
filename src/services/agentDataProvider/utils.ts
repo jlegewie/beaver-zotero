@@ -1,6 +1,6 @@
 import { logger } from '../../utils/logger';
 import { ZoteroItemReference } from '../../../react/types/zotero';
-import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus, AttachmentSummary } from '../../../react/types/zotero';
+import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus, AttachmentSummary, FileStatusCode } from '../../../react/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
 import { syncingItemFilter, syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
@@ -72,7 +72,7 @@ async function checkAttachmentAvailability(
                 mime_type: contentType,
                 page_count: null,
                 status: "unavailable",
-                status_reason: `File type "${contentType || 'unknown'}" is not supported`,
+                status_code: FileStatusCode.UnsupportedFileType,
             }
         };
     }
@@ -82,9 +82,6 @@ async function checkAttachmentAvailability(
     const filePath = await attachment.getFilePathAsync();
     if (!filePath) {
         const isFileAvailableOnServer = isAttachmentOnServer(attachment);
-        const status_message = isFileAvailableOnServer
-            ? 'File not available locally. It may be in remote storage, which cannot be accessed by Beaver.'
-            : 'File is not available locally';
         return {
             available: false,
             fileExistsLocally: false,
@@ -93,7 +90,9 @@ async function checkAttachmentAvailability(
                 mime_type: contentType,
                 page_count: null,
                 status: "unavailable",
-                status_reason: status_message,
+                status_code: isFileAvailableOnServer
+                    ? FileStatusCode.FileNotLocalRemote
+                    : FileStatusCode.FileNotLocal,
             }
         };
     }
@@ -133,13 +132,13 @@ async function checkAttachmentAvailability(
  */
 function fileStatusFromCache(record: AttachmentFileCacheRecord, isPrimary: boolean): FrontendFileStatus {
     if (record.is_encrypted) {
-        return { is_primary: isPrimary, mime_type: record.content_type, page_count: null, status: "unavailable", status_reason: 'PDF is password-protected' };
+        return { is_primary: isPrimary, mime_type: record.content_type, page_count: null, status: "unavailable", status_code: FileStatusCode.PdfEncrypted };
     }
     if (record.is_invalid) {
-        return { is_primary: isPrimary, mime_type: record.content_type, page_count: null, status: "unavailable", status_reason: 'PDF file is invalid or corrupted' };
+        return { is_primary: isPrimary, mime_type: record.content_type, page_count: null, status: "unavailable", status_code: FileStatusCode.PdfInvalid };
     }
     if (record.needs_ocr) {
-        return { is_primary: isPrimary, mime_type: record.content_type, page_count: record.page_count, status: "unavailable", status_reason: `Text unavailable because the PDF requires OCR. Page images are available` };
+        return { is_primary: isPrimary, mime_type: record.content_type, page_count: record.page_count, status: "unavailable", status_code: FileStatusCode.PdfNeedsOcr };
     }
     return { is_primary: isPrimary, mime_type: record.content_type, page_count: record.page_count, status: "available" };
 }
@@ -314,7 +313,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                         mime_type: contentType,
                         page_count: null,
                         status: "unavailable",
-                        status_reason: 'PDF is password-protected',
+                        status_code: FileStatusCode.PdfEncrypted,
                     };
                 } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
                     await persistMetadataToCache(attachment, filePath, contentType, { page_count: null, page_labels: {}, has_text_layer: null, needs_ocr: false, is_encrypted: false, is_invalid: true });
@@ -323,7 +322,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                         mime_type: contentType,
                         page_count: null,
                         status: "unavailable",
-                        status_reason: 'PDF file is invalid or corrupted',
+                        status_code: FileStatusCode.PdfInvalid,
                     };
                 }
             }
@@ -343,7 +342,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                 mime_type: contentType,
                 page_count: pageCount,
                 status: "unavailable",
-                status_reason: `Text unavailable because the PDF requires OCR. Page images are available`,
+                status_code: FileStatusCode.PdfNeedsOcr,
             };
         }
 
@@ -364,7 +363,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
             mime_type: contentType,
             page_count: null,
             status: "unavailable",
-            status_reason: `Error analyzing PDF`,
+            status_code: FileStatusCode.PdfAnalysisError,
         };
     }
 }
@@ -441,7 +440,7 @@ export async function getAttachmentFileStatusLightweight(
             mime_type: contentType,
             page_count: null,
             status: "unavailable",
-            status_reason: 'Unable to read PDF - file may be encrypted, corrupted, or invalid',
+            status_code: FileStatusCode.PdfUnreadable,
         }, fileExistsLocally };
     }
 
@@ -790,6 +789,7 @@ export function toAttachmentSummary(a: AttachmentDataWithStatus): AttachmentSumm
         is_primary: a.file_status?.is_primary ?? false,
         page_count: a.file_status?.page_count ?? null,
         status: a.file_status?.status === 'available' ? 'available' : 'unavailable',
+        status_code: a.file_status?.status_code,
         status_reason: a.file_status?.status_reason,
     };
 }
