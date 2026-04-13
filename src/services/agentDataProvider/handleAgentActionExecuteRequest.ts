@@ -1,5 +1,5 @@
 import { logger } from '../../utils/logger';
-import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse } from '../agentProtocol';
+import { WSAgentActionExecuteRequest, WSAgentActionExecuteResponse, FrontendTimingMetadata } from '../agentProtocol';
 import type { CreateItemProposedData, CreateItemResultData } from '../../../react/types/agentActions/items';
 import { applyCreateItemData } from '../../../react/utils/addItemActions';
 import { TimeoutContext, checkAborted, DEFAULT_TIMEOUT_SECONDS } from './timeout';
@@ -8,6 +8,7 @@ import { executeEditNoteAction } from './actions/editNote';
 import { executeEditMetadataAction } from './actions/editMetadata';
 import { executeOrganizeItemsAction } from './actions/organizeItems';
 import { executeCreateNoteAction } from './actions/createNote';
+import { TimingAccumulator } from '../../utils/timing';
 
 
 /**
@@ -84,6 +85,7 @@ export async function handleAgentActionExecuteRequest(
                     action_type: request.action_type,
                     timeout_seconds: error.timeoutSeconds,
                 },
+                timing: { total_ms: error.elapsedMs },
             };
         }
 
@@ -99,6 +101,7 @@ export async function handleAgentActionExecuteRequest(
                 elapsed_ms: elapsedMs,
                 action_type: request.action_type,
             },
+            timing: { total_ms: elapsedMs },
         };
     } finally {
         clearTimeout(timer);
@@ -268,6 +271,14 @@ async function executeCreateItemAction(
     request: WSAgentActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
+    const startTime = Date.now();
+    const ta = new TimingAccumulator();
+
+    const buildTiming = (): FrontendTimingMetadata => ({
+        total_ms: Date.now() - startTime,
+        ...ta.getAll(),
+    });
+
     // The action_data is the proposed_data for a single create_item action
     const proposedData = request.action_data as CreateItemProposedData;
 
@@ -279,22 +290,26 @@ async function executeCreateItemAction(
             success: false,
             error: 'No item data provided',
             error_code: 'missing_item_data',
+            timing: buildTiming(),
         };
     }
 
     // Resolve target library: use provided ID, resolve name, or default to user's main library
+    const libResolveStart = Date.now();
     let library_id: number;
 
     if (proposedData.library_id != null && proposedData.library_id !== 0) {
         if (typeof proposedData.library_id === 'number' && proposedData.library_id > 0) {
             library_id = proposedData.library_id;
         } else {
+            ta.record('resolve_library_ms', Date.now() - libResolveStart);
             return {
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
                 success: false,
                 error: `Invalid library ID: ${proposedData.library_id}`,
                 error_code: 'library_not_found',
+                timing: buildTiming(),
             };
         }
     } else if (proposedData.library_name) {
@@ -303,18 +318,21 @@ async function executeCreateItemAction(
             (lib) => lib.name.toLowerCase() === proposedData.library_name!.toLowerCase()
         );
         if (!matchedLibrary) {
+            ta.record('resolve_library_ms', Date.now() - libResolveStart);
             return {
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
                 success: false,
                 error: `Library not found: "${proposedData.library_name}"`,
                 error_code: 'library_not_found',
+                timing: buildTiming(),
             };
         }
         library_id = matchedLibrary.libraryID;
     } else {
         library_id = Zotero.Libraries.userLibraryID;
     }
+    ta.record('resolve_library_ms', Date.now() - libResolveStart);
 
     try {
         logger(`executeCreateItemAction: Creating item "${proposedData.item.title}" in library ${library_id}`, 1);
@@ -323,10 +341,13 @@ async function executeCreateItemAction(
         checkAborted(ctx, 'create_item:before_apply');
 
         // Create the item using the existing utility function
-        // Pass library_id from resolved library to target the correct library
-        const result: CreateItemResultData = await applyCreateItemData(proposedData, {
-            libraryId: library_id,
-        });
+        const result: CreateItemResultData = await ta.track('apply_ms', () =>
+            applyCreateItemData(proposedData, {
+                libraryId: library_id,
+                skipUrlTranslation: true,
+                timing: ta,
+            })
+        );
 
         logger(`executeCreateItemAction: Successfully created item ${result.library_id}-${result.zotero_key}`, 1);
 
@@ -335,6 +356,7 @@ async function executeCreateItemAction(
             request_id: request.request_id,
             success: true,
             result_data: result,
+            timing: buildTiming(),
         };
     } catch (error: any) {
         // Re-throw TimeoutError so it propagates to the main handler
@@ -351,6 +373,7 @@ async function executeCreateItemAction(
             success: false,
             error: errorMsg,
             error_code: 'create_failed',
+            timing: buildTiming(),
         };
     }
 }

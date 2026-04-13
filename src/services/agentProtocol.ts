@@ -354,6 +354,39 @@ export interface FrontendTimingMetadata {
     /** Cumulative time computing file status (page count, etc.) */
     att_file_status_ms?: number;
 
+    // create_item action timings
+    // NOTE: These buckets are nested, not disjoint. Summing them double-counts.
+    // Hierarchy:
+    //   total_ms
+    //     └─ resolve_library_ms
+    //     └─ apply_ms
+    //          ├─ create_zotero_item_ms
+    //          │    ├─ resolve_target_ms
+    //          │    ├─ identifier_translation_ms | url_translation_ms | manual_creation_ms
+    //          │    └─ add_to_collection_ms
+    //          ├─ post_save_ms
+    //          └─ pdf_check_ms
+    /** Time resolving target library (name lookup, editability check) */
+    resolve_library_ms?: number;
+    /** Time spent in resolveImportTarget inside createZoteroItem */
+    resolve_target_ms?: number;
+    /** Time spent in Zotero identifier translation (DOI / ISBN / PMID / arXiv) */
+    identifier_translation_ms?: number;
+    /** Time spent in Zotero URL translation via HiddenBrowser (should be 0 on WS path) */
+    url_translation_ms?: number;
+    /** Time spent in manual (non-translator) item creation */
+    manual_creation_ms?: number;
+    /** Time adding the newly-created item to a collection */
+    add_to_collection_ms?: number;
+    /** Time spent in createZoteroItem (identifier + url + manual + collection) */
+    create_zotero_item_ms?: number;
+    /** Time saving post-creation field edits (extra, collections, tags) */
+    post_save_ms?: number;
+    /** Time checking for existing PDF attachments after creation */
+    pdf_check_ms?: number;
+    /** Total time inside applyCreateItemData (createZoteroItem + post-processing) */
+    apply_ms?: number;
+
     // Reference check specific timings
     /** Time spent in phase 1: identifier (DOI/ISBN) lookup */
     phase1_identifier_lookup_ms?: number;
@@ -1005,6 +1038,8 @@ export interface WSAgentActionExecuteResponse {
     error?: string | null;
     error_code?: string | null;
     result_data?: Record<string, any>;
+    /** Optional timing breakdown for diagnostics (e.g. create_item latency) */
+    timing?: FrontendTimingMetadata;
 }
 
 /** Request from backend for user approval of a deferred action */
