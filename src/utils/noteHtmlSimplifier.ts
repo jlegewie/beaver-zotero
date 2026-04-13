@@ -1790,6 +1790,19 @@ export function enrichOldStringCitationRefs(
     return result;
 }
 
+/**
+ * Apply no-ref citation enrichment, returning the (possibly unchanged) string.
+ * Centralizes the null-vs-string dance so validator + executor share one entry.
+ */
+export function applyOldStringEnrichment(
+    oldString: string | undefined,
+    metadata: SimplificationMetadata,
+): string | undefined {
+    if (!oldString) return oldString;
+    const enriched = enrichOldStringCitationRefs(oldString, metadata);
+    return enriched ?? oldString;
+}
+
 
 // =============================================================================
 // Duplicate Citation Check

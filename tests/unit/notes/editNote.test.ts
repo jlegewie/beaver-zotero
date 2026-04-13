@@ -4,7 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Module Mocks (must be before imports)
 // =============================================================================
 
-vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
+vi.mock('../../../src/utils/noteHtmlSimplifier', () => {
+    // `applyOldStringEnrichment` delegates to `enrichOldStringCitationRefs`,
+    // mirroring the production wrapper so existing tests that mock
+    // `enrichOldStringCitationRefs` (including `.toHaveBeenCalled()` assertions)
+    // keep working without change.
+    const enrichMock = vi.fn(() => null as string | null);
+    return {
     getOrSimplify: vi.fn((_noteId: string, rawHtml: string, _libId: number) => ({
         simplified: rawHtml.replace(/<[^>]+>/g, ''), // Crude strip-tags for testing
         metadata: { elements: new Map() },
@@ -43,7 +49,12 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     stripSpuriousWrappingTags: vi.fn(() => []),
     normalizeNoteHtml: vi.fn((html: string) => html),
     checkNewCitationItemsExist: vi.fn(() => null),
-    enrichOldStringCitationRefs: vi.fn(() => null),
+    enrichOldStringCitationRefs: enrichMock,
+    applyOldStringEnrichment: vi.fn((oldString: string | undefined, metadata: any) => {
+        if (!oldString) return oldString;
+        const enriched = enrichMock(oldString, metadata);
+        return enriched ?? oldString;
+    }),
     stripNoteWrapperDiv: vi.fn((html: string) => {
         const trimmed = html.trim();
         if (!trimmed.startsWith('<div') || !trimmed.endsWith('</div>')) return html;
@@ -51,7 +62,8 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
         if (closeAngle === -1) return html;
         return trimmed.substring(closeAngle + 1, trimmed.length - 6);
     }),
-}));
+    };
+});
 
 vi.mock('../../../src/services/supabaseClient', () => ({
     supabase: {
@@ -1524,5 +1536,91 @@ describe('citation ref enrichment — execute (defense-in-depth)', () => {
         expect(newHtml).toContain('See UPDATED_CITATION');
         expect(newHtml).not.toContain('CITATION_NO_REF');
         expect(newHtml).not.toContain('CITATION_WITH_REF');
+    });
+});
+
+// =============================================================================
+// Insert_after/before multi-match normalization (regression gate)
+// =============================================================================
+//
+// Exercises the insert_after/before branch inside the multi-match block — the
+// risky site in the citation-ref simplification refactor. Must emit a
+// normalized_action_data with a merged new_string regardless of whether
+// enrichment happened, and must carry the enriched old_string through when
+// enrichment did happen.
+
+describe('insert_after multi-match normalization', () => {
+    it('emits merged new_string + context anchors with no enrichment', async () => {
+        vi.mocked(enrichOldStringCitationRefs).mockReturnValue(null);
+        vi.mocked(countOccurrences).mockReturnValueOnce(2);
+        vi.mocked(captureValidatedEditTargetContext).mockReturnValueOnce({
+            beforeContext: 'before',
+            afterContext: 'after',
+        });
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'Hello',
+                new_string: ' there',
+                operation: 'insert_after',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toEqual({
+            library_id: 1,
+            zotero_key: 'NOTE0001',
+            old_string: 'Hello',
+            new_string: 'Hello there',
+            operation: 'insert_after',
+            target_before_context: 'before',
+            target_after_context: 'after',
+        });
+    });
+
+    it('carries enriched old_string through merged new_string', async () => {
+        vi.mocked(enrichOldStringCitationRefs).mockImplementation((oldStr: string) =>
+            oldStr.includes('CITATION_NO_REF')
+                ? oldStr.replace('CITATION_NO_REF', 'CITATION_WITH_REF')
+                : null,
+        );
+        const noteHtml = '<div data-schema-version="9"><p>See CITATION_WITH_REF. See CITATION_WITH_REF.</p></div>';
+        const item = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(item);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified: noteHtml,
+            metadata: { elements: new Map() } as any,
+            isStale: false,
+        });
+        vi.mocked(captureValidatedEditTargetContext).mockReturnValueOnce({
+            beforeContext: 'before',
+            afterContext: 'after',
+        });
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'See CITATION_NO_REF',
+                new_string: ' (cf. 2020)',
+                operation: 'insert_after',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        // Enriched old_string used as anchor and as the base for the merged
+        // new_string (insert_after prepends the anchor).
+        expect(response.normalized_action_data!.old_string).toBe('See CITATION_WITH_REF');
+        expect(response.normalized_action_data!.new_string).toBe('See CITATION_WITH_REF (cf. 2020)');
+        expect(response.normalized_action_data!.target_before_context).toBe('before');
+        expect(response.normalized_action_data!.target_after_context).toBe('after');
     });
 });

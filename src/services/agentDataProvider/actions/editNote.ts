@@ -13,7 +13,7 @@ import {
     checkDuplicateCitations,
     validateNewString,
     checkNewCitationItemsExist,
-    enrichOldStringCitationRefs,
+    applyOldStringEnrichment,
     preloadPageLabelsForNewCitations,
     waitForPMNormalization,
     waitForNoteSaveStabilization,
@@ -27,6 +27,7 @@ import {
     stripSpuriousWrappingTags,
     normalizeNoteHtml,
     type ExternalRefContext,
+    type SimplificationMetadata,
 } from '../../../utils/noteHtmlSimplifier';
 import {
     locateEditTarget,
@@ -96,6 +97,70 @@ function getExternalRefContext(): ExternalRefContext {
     };
 }
 
+/**
+ * Run the three `new_string` pre-checks (tag validity, citation item existence,
+ * dry-run expansion) and return either the expanded raw HTML or a fully-formed
+ * validation error response. Keeps the rewrite and main validator branches in
+ * sync so future pre-checks only need to be added in one place.
+ */
+type NewStringPrecheckResult =
+    | { ok: true; expandedNew: string }
+    | { ok: false; response: WSAgentActionValidateResponse };
+
+function precheckNewString(
+    requestId: string,
+    newString: string,
+    metadata: SimplificationMetadata,
+    externalRefContext: ExternalRefContext,
+): NewStringPrecheckResult {
+    const validationError = validateNewString(newString, metadata);
+    if (validationError) {
+        return {
+            ok: false,
+            response: {
+                type: 'agent_action_validate_response',
+                request_id: requestId,
+                valid: false,
+                error: validationError,
+                error_code: 'invalid_new_string',
+                preference: 'always_ask',
+            },
+        };
+    }
+
+    const citationError = checkNewCitationItemsExist(newString, metadata);
+    if (citationError) {
+        return {
+            ok: false,
+            response: {
+                type: 'agent_action_validate_response',
+                request_id: requestId,
+                valid: false,
+                error: citationError,
+                error_code: 'citation_item_not_found',
+                preference: 'always_ask',
+            },
+        };
+    }
+
+    try {
+        const expandedNew = expandToRawHtml(newString, metadata, 'new', externalRefContext);
+        return { ok: true, expandedNew };
+    } catch (e: any) {
+        return {
+            ok: false,
+            response: {
+                type: 'agent_action_validate_response',
+                request_id: requestId,
+                valid: false,
+                error: e.message || String(e),
+                error_code: 'expansion_failed',
+                preference: 'always_ask',
+            },
+        };
+    }
+}
+
 
 /**
  * Validate an edit_note action.
@@ -106,15 +171,29 @@ async function validateEditNoteAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
     // `old_string` is `let` because step 10c may enrich no-ref citations in
-    // place (see `enrichOldStringCitationRefs`). All downstream code — including
-    // the fallback normalization paths — operates on the enriched value.
+    // place (see `applyOldStringEnrichment`). All downstream code operates on
+    // the enriched value, and `buildNormalizedActionData` below automatically
+    // propagates the enrichment into `normalized_action_data`.
     const { library_id, zotero_key, new_string, operation: rawOp } = request.action_data as EditNoteProposedData;
-    let { old_string } = request.action_data as EditNoteProposedData;
+    const baseActionData = request.action_data as EditNoteProposedData;
+    let { old_string } = baseActionData;
     const operation: EditNoteOperation = rawOp ?? 'str_replace';
-    // Track whether step 10c modified old_string so success paths that don't
-    // otherwise build a `normalized_action_data` can carry the enrichment
-    // forward to the executor.
-    let oldStringEnriched = false;
+
+    // Build a `normalized_action_data` payload that auto-includes any
+    // post-enrichment `old_string`. Returns `undefined` when neither the
+    // supplied `overrides` nor enrichment changed anything from the input,
+    // letting callers skip emitting `normalized_action_data` unconditionally.
+    // Callers should NOT pass `old_string` via `overrides` — rely on the
+    // mutating local binding.
+    const buildNormalizedActionData = (
+        overrides: Partial<EditNoteProposedData> = {},
+    ): EditNoteProposedData | undefined => {
+        const changed: Partial<EditNoteProposedData> = { ...overrides };
+        if (old_string !== baseActionData.old_string) changed.old_string = old_string;
+        return Object.keys(changed).length > 0
+            ? { ...baseActionData, ...changed }
+            : undefined;
+    };
 
     // 1. Validate library exists
     const library = Zotero.Libraries.get(library_id);
@@ -214,45 +293,8 @@ async function validateEditNoteAction(
 
     // ── rewrite mode: skip old_string matching, validate new_string only ──
     if (operation === 'rewrite') {
-        // Validate new_string tags
-        const validationError = validateNewString(new_string, metadata);
-        if (validationError) {
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: validationError,
-                error_code: 'invalid_new_string',
-                preference: 'always_ask',
-            };
-        }
-
-        // Check new citation items exist
-        const citationError = checkNewCitationItemsExist(new_string, metadata);
-        if (citationError) {
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: citationError,
-                error_code: 'citation_item_not_found',
-                preference: 'always_ask',
-            };
-        }
-
-        // Dry-run expand new_string only
-        try {
-            expandToRawHtml(new_string, metadata, 'new', externalRefContext);
-        } catch (e: any) {
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: e.message || String(e),
-                error_code: 'expansion_failed',
-                preference: 'always_ask',
-            };
-        }
+        const pre = precheckNewString(request.request_id, new_string, metadata, externalRefContext);
+        if (!pre.ok) return pre.response;
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
         const totalLines = simplified.split('\n').length;
@@ -296,50 +338,24 @@ async function validateEditNoteAction(
         };
     }
 
-    // 10. Validate new_string tags
-    const validationError = validateNewString(new_string, metadata);
-    if (validationError) {
-        return {
-            type: 'agent_action_validate_response',
-            request_id: request.request_id,
-            valid: false,
-            error: validationError,
-            error_code: 'invalid_new_string',
-            preference: 'always_ask',
-        };
-    }
-
-    // 10b. Check new citation items exist
-    const citationError = checkNewCitationItemsExist(new_string, metadata);
-    if (citationError) {
-        return {
-            type: 'agent_action_validate_response',
-            request_id: request.request_id,
-            valid: false,
-            error: citationError,
-            error_code: 'citation_item_not_found',
-            preference: 'always_ask',
-        };
-    }
+    // 10. Pre-check new_string (tag validity, citation items exist, dry-run expand)
+    const pre = precheckNewString(request.request_id, new_string, metadata, externalRefContext);
+    if (!pre.ok) return pre.response;
+    let expandedNew = pre.expandedNew;
 
     // 10c. Enrich no-ref citations in old_string with refs from metadata.
     //      When the model reuses the form it wrote in an earlier edit_note
     //      (citation without ref) as its old_string in a follow-up edit,
     //      we look up the corresponding ref from metadata and inject it so
     //      expansion succeeds instead of throwing "New citations (without a
-    //      ref) can only appear in new_string".
-    const enrichedOldString = enrichOldStringCitationRefs(old_string ?? '', metadata);
-    if (enrichedOldString !== null) {
-        old_string = enrichedOldString;
-        oldStringEnriched = true;
-    }
+    //      ref) can only appear in new_string". `buildNormalizedActionData`
+    //      propagates the enriched value to the executor automatically.
+    old_string = applyOldStringEnrichment(old_string, metadata);
 
-    // 11. Dry-run expansion
+    // 11. Dry-run expansion of old_string
     let expandedOld: string;
-    let expandedNew: string;
     try {
         expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
-        expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
     } catch (e: any) {
         return {
             type: 'agent_action_validate_response',
@@ -727,12 +743,10 @@ async function validateEditNoteAction(
         let normalizedActionData: EditNoteProposedData | undefined;
 
         if (location.kind === 'context') {
-            normalizedActionData = {
-                ...request.action_data as EditNoteProposedData,
-                ...(oldStringEnriched ? { old_string } : {}),
+            normalizedActionData = buildNormalizedActionData({
                 target_before_context: location.beforeContext,
                 target_after_context: location.afterContext,
-            };
+            });
         }
 
         if (location.kind === 'ambiguous') {
@@ -750,23 +764,23 @@ async function validateEditNoteAction(
         // insert_after / insert_before normalization: merge old_string and
         // new_string so execution can treat it as a regular str_replace.
         if (operation === 'insert_after' || operation === 'insert_before') {
-            if (!normalizedActionData) {
-                normalizedActionData = {
-                    ...request.action_data as EditNoteProposedData,
-                    ...(oldStringEnriched ? { old_string } : {}),
-                };
+            const anchor = normalizedActionData?.old_string ?? old_string ?? '';
+            const merged = mergeInsertNewString(operation, anchor, new_string);
+            if (normalizedActionData) {
+                // Preserve fields already captured by the context branch
+                // (target_before_context/target_after_context) — mutate the
+                // merged new_string in place rather than rebuilding the object.
+                normalizedActionData.new_string = merged;
+            } else {
+                normalizedActionData = buildNormalizedActionData({ new_string: merged })
+                    ?? { ...baseActionData, new_string: merged };
             }
-            const anchor = normalizedActionData.old_string ?? old_string ?? '';
-            normalizedActionData.new_string = mergeInsertNewString(operation, anchor, new_string);
         }
 
         // Carry enriched old_string forward even when disambiguation succeeded
         // via the unique raw-position path (no target context captured).
-        if (!normalizedActionData && oldStringEnriched) {
-            normalizedActionData = {
-                ...request.action_data as EditNoteProposedData,
-                old_string,
-            };
+        if (!normalizedActionData) {
+            normalizedActionData = buildNormalizedActionData();
         }
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
@@ -793,17 +807,12 @@ async function validateEditNoteAction(
     //     - insert_before: new_string = new_string + old_string
     let normalizedActionData: EditNoteProposedData | undefined;
     if (operation === 'insert_after' || operation === 'insert_before') {
-        normalizedActionData = {
-            ...request.action_data as EditNoteProposedData,
-            ...(oldStringEnriched ? { old_string } : {}),
-            new_string: mergeInsertNewString(operation, old_string ?? '', new_string),
-        };
-    } else if (oldStringEnriched) {
-        // Carry the enriched old_string forward so the executor sees it.
-        normalizedActionData = {
-            ...request.action_data as EditNoteProposedData,
-            old_string,
-        };
+        const merged = mergeInsertNewString(operation, old_string ?? '', new_string);
+        normalizedActionData = buildNormalizedActionData({ new_string: merged })
+            ?? { ...baseActionData, new_string: merged };
+    } else {
+        // Carry any enriched old_string forward so the executor sees it.
+        normalizedActionData = buildNormalizedActionData();
     }
 
     // 16. Valid — return current value
@@ -841,10 +850,8 @@ async function executeEditNoteAction(
         new_string,
         operation: rawOp,
     } = request.action_data as EditNoteProposedData;
-    // `old_string` is `let` because we may enrich no-ref citations with their
-    // stored refs before expansion (step 5b). This is defense-in-depth: validate
-    // already enriches and emits `normalized_action_data`, but we re-enrich here
-    // so direct executor calls (or stale action_data) also benefit.
+    // `old_string` is `let` because step 5b re-runs `applyOldStringEnrichment`
+    // as defense-in-depth for skipped/stale validation.
     let { old_string } = request.action_data as EditNoteProposedData;
     const operation: EditNoteOperation = rawOp ?? 'str_replace';
     let {
@@ -987,14 +994,9 @@ async function executeEditNoteAction(
 
     // ── String replacement mode (default) ──
 
-    // 5b. Enrich no-ref citations in old_string with refs from metadata.
-    //     Defense-in-depth: validation normally emits this via
-    //     normalized_action_data, but re-running here protects against stale
-    //     or skipped validation.
-    const enrichedOldString = enrichOldStringCitationRefs(old_string ?? '', metadata);
-    if (enrichedOldString !== null) {
-        old_string = enrichedOldString;
-    }
+    // 5b. Defense-in-depth: validator normally already enriched, re-run for
+    //     skipped/stale validation paths. See applyOldStringEnrichment.
+    old_string = applyOldStringEnrichment(old_string, metadata);
 
     // 6. Expand old_string and new_string to raw HTML
     let expandedOld: string;
