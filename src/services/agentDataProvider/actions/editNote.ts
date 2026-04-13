@@ -23,6 +23,7 @@ import {
     preloadPageLabelsForNewCitations,
     waitForPMNormalization,
     waitForNoteSaveStabilization,
+    flushLiveEditorToDB,
     hasSchemaVersionWrapper,
     decodeHtmlEntities,
     encodeTextEntities,
@@ -932,6 +933,13 @@ async function executeEditNoteAction(
 
     // 2. Load note
     await item.loadDataType('note');
+
+    // 2b. Promote any unsaved content from the open editor into the DB so that
+    //     this execute reads the same HTML validation saw. Without this, a
+    //     rewrite could clobber the user's in-flight typing, and a str_replace
+    //     could fail with no_match against matches that only exist in the
+    //     editor's unsaved state.
+    await flushLiveEditorToDB(item);
 
     // 3. Pre-load page labels so new citations resolve page indices to labels.
     //    Done before reading the note to avoid async gaps between read and write.

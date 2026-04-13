@@ -2572,3 +2572,43 @@ export async function waitForNoteSaveStabilization(
     }
     logger(`waitForNoteSaveStabilization: timeout after ${STABILIZE_MAX_WAIT_MS}ms, proceeding`, 1);
 }
+
+// =============================================================================
+// Pre-read flush
+// =============================================================================
+
+/**
+ * Promote unsaved content from an open note editor into the DB so that
+ * subsequent `item.getNote()` reads see the same HTML the user is looking at.
+ *
+ * Without this, validation (which reads via `getLatestNoteHtml` and therefore
+ * captures unsaved manual typing) and execution (which reads `item.getNote()`)
+ * can operate on different HTML. In rewrite mode that asymmetry silently
+ * discards the user's in-flight edits; in str_replace mode it causes
+ * `no_match` failures and stale simplifier metadata.
+ *
+ * Returns true when a flush actually ran.
+ */
+export async function flushLiveEditorToDB(item: any): Promise<boolean> {
+    let latest: string;
+    try {
+        latest = getLatestNoteHtml(item);
+    } catch (e: any) {
+        logger(`flushLiveEditorToDB: getLatestNoteHtml threw: ${e?.message || e}`, 1);
+        return false;
+    }
+
+    const saved: string = item.getNote();
+    if (latest === saved) return false;
+
+    try {
+        item.setNote(latest);
+        await item.saveTx();
+    } catch (e: any) {
+        logger(`flushLiveEditorToDB: save failed: ${e?.message || e}`, 1);
+        return false;
+    }
+
+    await waitForNoteSaveStabilization(item, latest);
+    return true;
+}

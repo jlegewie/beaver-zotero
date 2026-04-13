@@ -34,6 +34,7 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
     waitForPMNormalization: vi.fn().mockResolvedValue(undefined),
     waitForNoteSaveStabilization: vi.fn().mockResolvedValue(undefined),
+    flushLiveEditorToDB: vi.fn().mockResolvedValue(false),
     hasSchemaVersionWrapper: vi.fn((html: string) => html.includes('data-schema-version=')),
     decodeHtmlEntities: vi.fn((s: string) => s),
     encodeTextEntities: vi.fn((s: string) => s),

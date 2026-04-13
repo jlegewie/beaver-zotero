@@ -24,6 +24,7 @@ import {
     findRangeByContexts,
     waitForPMNormalization,
     waitForNoteSaveStabilization,
+    flushLiveEditorToDB,
     hasSchemaVersionWrapper,
     decodeHtmlEntities,
     encodeTextEntities,
@@ -271,6 +272,10 @@ export async function executeEditNoteAction(
 
     // 2. Load note data
     await item.loadDataType('note');
+
+    // 2b. Promote any unsaved editor content into the DB so this apply sees
+    //     the same HTML validation saw. See flushLiveEditorToDB for rationale.
+    await flushLiveEditorToDB(item);
 
     // 3. Get current note HTML
     const oldHtml: string = item.getNote();
