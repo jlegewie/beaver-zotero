@@ -140,16 +140,15 @@ const AddSourcesMenu: React.FC<{
             query = query.trim();
             
             // Search Zotero items
-            const { libraryIds, collectionIds, tagSelections } = store.get(currentMessageFiltersAtom);
+            const { libraryIds, tagSelections } = store.get(currentMessageFiltersAtom);
             const searchLibraryIds = libraryIds.length > 0
                 ? libraryIds
                 : tagSelections.length > 0
                     ? Array.from(new Set(tagSelections.map((tag: ZoteroTag) => tag.libraryId)))
                     : searchableLibraryIds;
-            const searchCollectionIds = collectionIds.length > 0 ? collectionIds : undefined;
             const searchTags = tagSelections.length > 0 ? tagSelections : undefined;
-            logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}${searchCollectionIds ? `, collections: ${searchCollectionIds.join(', ')}` : ''}${searchTags ? `, tags: ${searchTags.map((tag: ZoteroTag) => `${tag.tag} (lib ${tag.libraryId})`).join('; ')}` : ''}`)
-            const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds, searchCollectionIds, searchTags);
+            logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}${searchTags ? `, tags: ${searchTags.map((tag: ZoteroTag) => `${tag.tag} (lib ${tag.libraryId})`).join('; ')}` : ''}`)
+            const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds, undefined, searchTags);
 
             // Ensure item data is loaded
             await loadFullItemData(resultsItems);
