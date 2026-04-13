@@ -17,9 +17,6 @@ import {
     getLatestNoteHtml,
     invalidateSimplificationCache,
     checkDuplicateCitations,
-    findFuzzyMatch,
-    findUniqueRawMatchPosition,
-    findTargetRawMatchPosition,
     preloadPageLabelsForNewCitations,
     findRangeByContexts,
     waitForPMNormalization,
@@ -31,6 +28,10 @@ import {
     ENTITY_FORMS,
     type ExternalRefContext,
 } from '../../src/utils/noteHtmlSimplifier';
+import {
+    resolveEditTargetAtRuntime,
+    buildExecutionZeroMatchMessage,
+} from '../../src/utils/editNotePositionLookup';
 import { clearNoteEditorSelection } from './sourceUtils';
 import { store } from '../store';
 import { currentThreadIdAtom } from '../atoms/threads';
@@ -405,11 +406,7 @@ export async function executeEditNoteAction(
 
     // 8. Zero matches
     if (matchCount === 0) {
-        const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
-        throw new Error(
-            'The string to replace was not found in the note.'
-            + (fuzzy ? ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\`` : '')
-        );
+        throw new Error(buildExecutionZeroMatchMessage(simplified, old_string ?? ''));
     }
 
     // 9. Perform replacement and capture context
@@ -447,19 +444,14 @@ export async function executeEditNoteAction(
         // first use the conservative matcher, then fall back to the exact target
         // context captured during validation.
         if (matchCount > 1) {
-            rawPos = findUniqueRawMatchPosition(
-                strippedHtml, simplified, old_string ?? '', expandedOld, metadata
-            ) ?? -1;
-            if (rawPos === -1 && (
-                target_before_context !== undefined || target_after_context !== undefined
-            )) {
-                rawPos = findTargetRawMatchPosition(
-                    strippedHtml,
-                    expandedOld,
-                    target_before_context,
-                    target_after_context
-                ) ?? -1;
-            }
+            rawPos = resolveEditTargetAtRuntime({
+                strippedHtml, simplified,
+                oldString: old_string ?? '',
+                expandedOld,
+                metadata,
+                targetBeforeContext: target_before_context,
+                targetAfterContext: target_after_context,
+            }).rawPosition;
         }
 
         if (rawPos === -1) {

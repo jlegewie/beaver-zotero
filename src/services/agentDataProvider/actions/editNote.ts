@@ -11,15 +11,9 @@ import {
     getLatestNoteHtml,
     invalidateSimplificationCache,
     checkDuplicateCitations,
-    findFuzzyMatch,
-    findStructuralAnchorHint,
-    findInlineTagDriftMatch,
     validateNewString,
     checkNewCitationItemsExist,
     enrichOldStringCitationRefs,
-    findUniqueRawMatchPosition,
-    captureValidatedEditTargetContext,
-    findTargetRawMatchPosition,
     preloadPageLabelsForNewCitations,
     waitForPMNormalization,
     waitForNoteSaveStabilization,
@@ -34,6 +28,12 @@ import {
     normalizeNoteHtml,
     type ExternalRefContext,
 } from '../../../utils/noteHtmlSimplifier';
+import {
+    locateEditTarget,
+    resolveEditTargetAtRuntime,
+    buildZeroMatchHint,
+    buildExecutionZeroMatchMessage,
+} from '../../../utils/editNotePositionLookup';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
@@ -412,27 +412,20 @@ async function validateEditNoteAction(
                         new_string: mergeInsertNewString(operation, trimmedOld, trimmedNew),
                     };
 
-                    // Multi-match: mirror block 14's disambiguation. Try
-                    // findUniqueRawMatchPosition first; if that fails, fall back
-                    // to captureValidatedEditTargetContext so the executor can
-                    // disambiguate via surrounding raw context. Only refuse the
-                    // edit when neither path can pin down a single target.
+                    // Multi-match: mirror block 14's disambiguation. Only refuse
+                    // the edit when neither the unique-match nor the context
+                    // capture path can pin down a single target.
                     if (trimmedCount > 1 && operation !== 'str_replace_all') {
-                        const rawPos = findUniqueRawMatchPosition(
-                            strippedHtml, simplified, trimmedOld, trimmedExpandedOld, metadata
-                        );
-                        let disambiguated = rawPos !== null;
-                        if (!disambiguated) {
-                            const targetContext = captureValidatedEditTargetContext(
-                                strippedHtml, simplified, trimmedOld, trimmedExpandedOld, metadata
-                            );
-                            if (targetContext) {
-                                normalizedActionData.target_before_context = targetContext.beforeContext;
-                                normalizedActionData.target_after_context = targetContext.afterContext;
-                                disambiguated = true;
-                            }
-                        }
-                        if (!disambiguated) {
+                        const location = locateEditTarget({
+                            strippedHtml, simplified,
+                            oldString: trimmedOld,
+                            expandedOld: trimmedExpandedOld,
+                            metadata,
+                        });
+                        if (location.kind === 'context') {
+                            normalizedActionData.target_before_context = location.beforeContext;
+                            normalizedActionData.target_after_context = location.afterContext;
+                        } else if (location.kind === 'ambiguous') {
                             return {
                                 type: 'agent_action_validate_response',
                                 request_id: request.request_id,
@@ -499,27 +492,20 @@ async function validateEditNoteAction(
                         new_string: mergeInsertNewString(operation, unescapedOld, unescapedNew),
                     };
 
-                    // Multi-match: mirror block 14's disambiguation. Try
-                    // findUniqueRawMatchPosition first; if that fails, fall back
-                    // to captureValidatedEditTargetContext so the executor can
-                    // disambiguate via surrounding raw context. Only refuse the
-                    // edit when neither path can pin down a single target.
+                    // Multi-match: mirror block 14's disambiguation. Only refuse
+                    // the edit when neither the unique-match nor the context
+                    // capture path can pin down a single target.
                     if (unescapedCount > 1 && operation !== 'str_replace_all') {
-                        const rawPos = findUniqueRawMatchPosition(
-                            strippedHtml, simplified, unescapedOld, unescapedExpandedOld, metadata
-                        );
-                        let disambiguated = rawPos !== null;
-                        if (!disambiguated) {
-                            const targetContext = captureValidatedEditTargetContext(
-                                strippedHtml, simplified, unescapedOld, unescapedExpandedOld, metadata
-                            );
-                            if (targetContext) {
-                                normalizedActionData.target_before_context = targetContext.beforeContext;
-                                normalizedActionData.target_after_context = targetContext.afterContext;
-                                disambiguated = true;
-                            }
-                        }
-                        if (!disambiguated) {
+                        const location = locateEditTarget({
+                            strippedHtml, simplified,
+                            oldString: unescapedOld,
+                            expandedOld: unescapedExpandedOld,
+                            metadata,
+                        });
+                        if (location.kind === 'context') {
+                            normalizedActionData.target_before_context = location.beforeContext;
+                            normalizedActionData.target_after_context = location.afterContext;
+                        } else if (location.kind === 'ambiguous') {
                             return {
                                 type: 'agent_action_validate_response',
                                 request_id: request.request_id,
@@ -674,25 +660,17 @@ async function validateEditNoteAction(
 
                     let disambiguated = true;
                     if (tagMatchCount > 1 && operation !== 'str_replace_all') {
-                        disambiguated = false;
-                        const rawPos = findUniqueRawMatchPosition(
-                            strippedHtml, simplified, tagStrip.strippedOld,
-                            tagExpandedOld, metadata,
-                        );
-                        if (rawPos !== null) {
-                            disambiguated = true;
-                        } else {
-                            const targetContext = captureValidatedEditTargetContext(
-                                strippedHtml, simplified, tagStrip.strippedOld,
-                                tagExpandedOld, metadata,
-                            );
-                            if (targetContext) {
-                                normalizedActionData.target_before_context =
-                                    targetContext.beforeContext;
-                                normalizedActionData.target_after_context =
-                                    targetContext.afterContext;
-                                disambiguated = true;
-                            }
+                        const location = locateEditTarget({
+                            strippedHtml, simplified,
+                            oldString: tagStrip.strippedOld,
+                            expandedOld: tagExpandedOld,
+                            metadata,
+                        });
+                        if (location.kind === 'context') {
+                            normalizedActionData.target_before_context = location.beforeContext;
+                            normalizedActionData.target_after_context = location.afterContext;
+                        } else if (location.kind === 'ambiguous') {
+                            disambiguated = false;
                         }
                     }
 
@@ -721,58 +699,16 @@ async function validateEditNoteAction(
         }
     }
 
-    // 13b. Zero matches — try inline tag drift detection first.
-    //      The model often copies text from read_note but drops inline
-    //      formatting tags (<strong>/<em>/etc.) around individual words.
-    //      Detecting this lets us emit a much more pointed error than the
-    //      generic fuzzy match.
+    // 13b. Zero matches — build the best hint available.
+    //      Priority: inline-tag drift → fuzzy word match → structural anchor.
+    //      See buildZeroMatchHint() for the full message bodies.
     if (matchCount === 0) {
-        const drift = findInlineTagDriftMatch(simplified, old_string ?? '');
-        if (drift) {
-            const droppedList = drift.droppedTags.join(' ');
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: 'The string to replace was not found in the note. '
-                    + 'Your old_string text matches a span in the note uniquely, '
-                    + 'but is missing inline HTML formatting tags that the note has.\n'
-                    + `Note has:\n\`\`\`\n${drift.noteSpan}\n\`\`\`\n`
-                    + `Your old_string:\n\`\`\`\n${old_string}\n\`\`\`\n`
-                    + `Tags missing from old_string: ${droppedList}.\n`
-                    + 'To fix: copy the "Note has" version above as your old_string '
-                    + '(must match exactly, including all inline tags). Then choose '
-                    + 'new_string based on intent — keep the same tags around the '
-                    + 'same words to preserve the formatting, or omit them to remove '
-                    + 'the formatting.',
-                error_code: 'old_string_not_found',
-                preference: 'always_ask',
-            };
-        }
-
-        // 13b (cont). Fall back to generic fuzzy match on simplified HTML.
-        const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
-        // 13c. When fuzzy word-match returns nothing (e.g. old_string is mostly
-        //      structural HTML like `</h2>\n<table>`), try to find a distinctive
-        //      block-level tag that old_string references and show its real
-        //      context in the note so the model can pick a correct anchor.
-        const structural = fuzzy
-            ? null
-            : findStructuralAnchorHint(simplified, old_string ?? '');
-        let errorMsg = 'The string to replace was not found in the note.';
-        if (fuzzy) {
-            errorMsg += ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\``;
-        } else if (structural) {
-            errorMsg += ` Your old_string references \`<${structural.tagName}>\`,`
-                + ' but its actual context in the note is:\n'
-                + `\`\`\`\n${structural.context}\n\`\`\`\n`
-                + 'Rewrite old_string to match the surrounding content shown above.';
-        }
+        const hint = buildZeroMatchHint(simplified, old_string ?? '');
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: errorMsg,
+            error: hint.message,
             error_code: 'old_string_not_found',
             preference: 'always_ask',
         };
@@ -782,27 +718,24 @@ async function validateEditNoteAction(
     //     either uniquely identifiable without relying on ref stability, or
     //     can be captured now and re-located later via surrounding context.
     if (matchCount > 1 && operation !== 'str_replace_all') {
-        const rawPos = findUniqueRawMatchPosition(
-            strippedHtml, simplified, old_string ?? '', expandedOld, metadata
-        );
+        const location = locateEditTarget({
+            strippedHtml, simplified,
+            oldString: old_string ?? '',
+            expandedOld,
+            metadata,
+        });
         let normalizedActionData: EditNoteProposedData | undefined;
 
-        if (rawPos === null) {
-            const targetContext = captureValidatedEditTargetContext(
-                strippedHtml, simplified, old_string ?? '', expandedOld, metadata
-            );
-
-            if (targetContext) {
-                normalizedActionData = {
-                    ...request.action_data as EditNoteProposedData,
-                    ...(oldStringEnriched ? { old_string } : {}),
-                    target_before_context: targetContext.beforeContext,
-                    target_after_context: targetContext.afterContext,
-                };
-            }
+        if (location.kind === 'context') {
+            normalizedActionData = {
+                ...request.action_data as EditNoteProposedData,
+                ...(oldStringEnriched ? { old_string } : {}),
+                target_before_context: location.beforeContext,
+                target_after_context: location.afterContext,
+            };
         }
 
-        if (rawPos === null && normalizedActionData === undefined) {
+        if (location.kind === 'ambiguous') {
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
@@ -1182,13 +1115,11 @@ async function executeEditNoteAction(
 
     // 8b. Still zero matches — fuzzy error
     if (matchCount === 0) {
-        const fuzzy = findFuzzyMatch(simplified, old_string ?? '');
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
-            error: 'The string to replace was not found in the note.'
-                + (fuzzy ? ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\`` : ''),
+            error: buildExecutionZeroMatchMessage(simplified, old_string ?? ''),
             error_code: 'old_string_not_found',
         };
     }
@@ -1229,19 +1160,14 @@ async function executeEditNoteAction(
         // first use the conservative matcher, then fall back to the exact target
         // context captured during validation.
         if (matchCount > 1) {
-            rawPos = findUniqueRawMatchPosition(
-                strippedHtml, simplified, old_string ?? '', expandedOld, metadata
-            ) ?? -1;
-            if (rawPos === -1 && (
-                target_before_context !== undefined || target_after_context !== undefined
-            )) {
-                rawPos = findTargetRawMatchPosition(
-                    strippedHtml,
-                    expandedOld,
-                    target_before_context,
-                    target_after_context
-                ) ?? -1;
-            }
+            rawPos = resolveEditTargetAtRuntime({
+                strippedHtml, simplified,
+                oldString: old_string ?? '',
+                expandedOld,
+                metadata,
+                targetBeforeContext: target_before_context,
+                targetAfterContext: target_after_context,
+            }).rawPosition;
         }
 
         // Single raw match or disambiguation succeeded
