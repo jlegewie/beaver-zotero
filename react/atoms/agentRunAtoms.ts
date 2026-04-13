@@ -588,21 +588,23 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
         changeLines.push(`• ${createNotes.length} created note${createNotes.length === 1 ? '' : 's'}`);
     }
     
-    const title = 'Undo changes?';
-    const message = `The following changes will be undone when regenerating:\n\n${changeLines.join('\n')}\n\nDo you want to undo these changes?`;
+    const title = 'Retry?';
+    const message = `The following changes were applied and can be undone:\n\n${changeLines.join('\n')}\n\nUndo them and retry, or retry without undoing?`;
 
     const buttonIndex = Zotero.Prompt.confirm({
         window: Zotero.getMainWindow(),
         title,
         text: message,
-        button0: Zotero.Prompt.BUTTON_TITLE_YES,
-        button1: Zotero.Prompt.BUTTON_TITLE_NO,
-        button2: Zotero.Prompt.BUTTON_TITLE_CANCEL,
-        defaultButton: 2,
+        button0: 'Undo && Retry',
+        // Cancel must be at button1 so Escape/dialog-close routes here
+        // (Services.prompt.confirmEx returns index 1 on Esc).
+        button1: Zotero.Prompt.BUTTON_TITLE_CANCEL,
+        button2: 'Retry',
+        defaultButton: 1,
     });
 
     if (buttonIndex === 0) return 'undo';
-    if (buttonIndex === 1) return 'skip';
+    if (buttonIndex === 2) return 'skip';
     return 'cancel';
 }
 
