@@ -147,6 +147,9 @@ export function initContextMenus(): void {
         ztoolkit.log('zoteroContextMenu: MenuManager not available, skipping');
         return;
     }
+    // Clear stale Beaver DOM left by a prior version that didn't get a chance
+    // to clean up (e.g., upgraded mid-session).
+    removeStaleMenuDOM();
     registerMenus();
     startPrefObserver();
 }
@@ -163,6 +166,33 @@ export function cleanupContextMenus(): void {
 // ---------------------------------------------------------------------------
 // Menu registration
 // ---------------------------------------------------------------------------
+
+/**
+ * Wrap an onShowing handler to swallow any throw and default to hidden.
+ * `label` identifies the handler in logs so a failing action is traceable
+ * when many wrappers share the same root cause.
+ */
+function safeOnShowing(
+    label: string,
+    fn: (event: any, context: any) => void,
+): (event: any, context: any) => void {
+    // Log at most once per wrapped handler to avoid spamming on every
+    // popupshowing when a handler throws consistently.
+    let logged = false;
+    return (event: any, context: any) => {
+        try {
+            fn(event, context);
+        } catch (e) {
+            try { context?.setVisible?.(false); } catch { /* ignore */ }
+            if (!logged) {
+                logged = true;
+                try {
+                    ztoolkit.log(`zoteroContextMenu: onShowing threw in "${label}", hiding menu item: ${e}`);
+                } catch { /* ignore — logger must not break the wrapper guarantee */ }
+            }
+        }
+    };
+}
 
 function unregisterMenus(): void {
     const MenuManager = (Zotero as any).MenuManager;
@@ -200,7 +230,7 @@ function registerMenus(): void {
         menus: [{
             menuType: 'submenu' as const,
             l10nID: 'beaver-context-menu-submenu',
-            onShowing: (_event: any, context: any) => {
+            onShowing: safeOnShowing('item-submenu', (_event: any, context: any) => {
                 const { items, setVisible } = context;
 
                 // Reset module-level state
@@ -224,7 +254,7 @@ function registerMenus(): void {
                 }
 
                 setVisible(true);
-            },
+            }),
             menus: buildItemMenuItems(itemActions),
         }],
     });
@@ -240,10 +270,10 @@ function registerMenus(): void {
         menus: [{
             menuType: 'submenu' as const,
             l10nID: 'beaver-context-menu-submenu',
-            onShowing: (_event: any, context: any) => {
+            onShowing: safeOnShowing('collection-submenu', (_event: any, context: any) => {
                 const { collectionTreeRow, setVisible } = context;
                 setVisible(collectionTreeRow?.isCollection?.() === true);
-            },
+            }),
             menus: buildCollectionMenuItems(collectionActions),
         }],
     });
@@ -265,7 +295,7 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
         menuType: 'menuitem' as const,
         l10nID: 'beaver-context-menu-context-header',
         l10nArgs: JSON.stringify({ context: '' }),
-        onShowing: (_event: any, context: any) => {
+        onShowing: safeOnShowing('context-header', (_event: any, context: any) => {
             const { items, setVisible, setEnabled, setL10nArgs } = context;
             const totalSelected = items?.length ?? 0;
             if (winningTarget && winningTarget.count < totalSelected) {
@@ -275,7 +305,7 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
             } else {
                 setVisible(false);
             }
-        },
+        }),
     });
 
     // Action items
@@ -284,9 +314,9 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
             menuType: 'menuitem' as const,
             l10nID: 'beaver-context-menu-action',
             l10nArgs: JSON.stringify({ title: action.title }),
-            onShowing: (_event: any, context: any) => {
+            onShowing: safeOnShowing(`item-action:${action.id}`, (_event: any, context: any) => {
                 filterItemAction(action, context);
-            },
+            }),
             onCommand: (_event: any, context: any) => {
                 dispatchAction(action, context);
             },
@@ -313,9 +343,9 @@ function buildCollectionMenuItems(collectionActions: Action[]): any[] {
         menuType: 'menuitem' as const,
         l10nID: 'beaver-context-menu-action',
         l10nArgs: JSON.stringify({ title: action.title }),
-        onShowing: (_event: any, context: any) => {
+        onShowing: safeOnShowing(`collection-action:${action.id}`, (_event: any, context: any) => {
             filterCollectionAction(action, context);
-        },
+        }),
         onCommand: (_event: any, context: any) => {
             dispatchAction(action, context);
         },
@@ -429,14 +459,17 @@ function dispatchAction(action: Action, context: any): void {
 const CUSTOM_MENU_CLASS = 'zotero-custom-menu-item';
 
 function removeStaleMenuDOM(): void {
+    // Scoped to Beaver's own l10n IDs so we never wipe other plugins' menu
+    // items (they share CUSTOM_MENU_CLASS via Zotero's MenuManager).
     try {
         const win = Zotero.getMainWindow();
         if (!win?.document) return;
 
+        const selector = `.${CUSTOM_MENU_CLASS}[data-l10n-id^="beaver-context-menu-"]`;
         for (const popupId of ['zotero-itemmenu', 'zotero-collectionmenu']) {
             const popup = win.document.getElementById(popupId);
             if (!popup) continue;
-            const stale = popup.querySelectorAll(`.${CUSTOM_MENU_CLASS}`);
+            const stale = popup.querySelectorAll(selector);
             if (stale.length > 0) {
                 stale.forEach((el: Element) => el.remove());
             }
