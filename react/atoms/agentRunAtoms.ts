@@ -546,17 +546,20 @@ interface ActionsToUndo {
     createNotes: AgentAction[];
 }
 
+type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
+
 /**
  * Prompt user to confirm undoing applied agent actions during regeneration.
  * Shows a combined dialog listing all types of changes that will be undone.
- * Returns true if user confirms, false otherwise.
+ * Returns 'undo' to undo and regenerate, 'skip' to regenerate without undoing,
+ * or 'cancel' to abort regeneration entirely.
  */
-function confirmUndoAppliedActions(actions: ActionsToUndo): boolean {
+function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
     const { annotations, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, createNotes } = actions;
     const totalActions = annotations.length + zoteroNotes.length + metadataEdits.length +
                          noteEdits.length + createItems.length + createCollections.length + organizeItems.length + createNotes.length;
-    
-    if (totalActions === 0) return true;
+
+    if (totalActions === 0) return 'skip';
     
     // Build a list of changes
     const changeLines: string[] = [];
@@ -594,10 +597,13 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): boolean {
         text: message,
         button0: Zotero.Prompt.BUTTON_TITLE_YES,
         button1: Zotero.Prompt.BUTTON_TITLE_NO,
-        defaultButton: 1,
+        button2: Zotero.Prompt.BUTTON_TITLE_CANCEL,
+        defaultButton: 2,
     });
 
-    return buttonIndex === 0;
+    if (buttonIndex === 0) return 'undo';
+    if (buttonIndex === 1) return 'skip';
+    return 'cancel';
 }
 
 
@@ -1769,7 +1775,7 @@ export const regenerateFromRunAtom = atom(
                                      createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
                                      createNotesToUndo.length > 0;
             if (hasActionsToUndo) {
-                const shouldUndo = confirmUndoAppliedActions({
+                const confirmResult = confirmUndoAppliedActions({
                     annotations: annotationsToDelete,
                     zoteroNotes: zoteroNotesToDelete,
                     metadataEdits: metadataEditsToUndo,
@@ -1779,7 +1785,10 @@ export const regenerateFromRunAtom = atom(
                     organizeItems: organizeItemsToUndo,
                     createNotes: createNotesToUndo,
                 });
-                if (shouldUndo) {
+                if (confirmResult === 'cancel') {
+                    return;
+                }
+                if (confirmResult === 'undo') {
                     // Undo annotations (delete Zotero items)
                     if (annotationsToDelete.length > 0) {
                         await deleteAppliedZoteroItems(annotationsToDelete);
@@ -1820,12 +1829,12 @@ export const regenerateFromRunAtom = atom(
             set(threadRunsAtom, truncatedRuns);
 
             // Clear agent actions for removed runs
-            set(threadAgentActionsAtom, (prev) => 
+            set(threadAgentActionsAtom, (prev) =>
                 prev.filter(a => !runIdsToRemove.includes(a.run_id))
             );
 
             // Clear citations for removed runs
-            set(citationMetadataAtom, (prev) => 
+            set(citationMetadataAtom, (prev) =>
                 prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
             );
             set(updateCitationDataAtom);
@@ -1965,7 +1974,7 @@ export const regenerateWithEditedPromptAtom = atom(
                                      createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
                                      createNotesToUndo.length > 0;
             if (hasActionsToUndo) {
-                const shouldUndo = confirmUndoAppliedActions({
+                const confirmResult = confirmUndoAppliedActions({
                     annotations: annotationsToDelete,
                     zoteroNotes: zoteroNotesToDelete,
                     metadataEdits: metadataEditsToUndo,
@@ -1975,7 +1984,10 @@ export const regenerateWithEditedPromptAtom = atom(
                     organizeItems: organizeItemsToUndo,
                     createNotes: createNotesToUndo,
                 });
-                if (shouldUndo) {
+                if (confirmResult === 'cancel') {
+                    return;
+                }
+                if (confirmResult === 'undo') {
                     // Undo annotations (delete Zotero items)
                     if (annotationsToDelete.length > 0) {
                         await deleteAppliedZoteroItems(annotationsToDelete);
