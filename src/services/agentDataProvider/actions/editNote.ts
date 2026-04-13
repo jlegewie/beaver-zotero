@@ -939,7 +939,7 @@ async function executeEditNoteAction(
 
     // 4. Get current note HTML (kept for rollback on save failure)
     //    Avoid async operations between here and item.setNote() to preserve atomicity.
-    const oldHtml = getLatestNoteHtml(item);
+    const oldHtml: string = item.getNote();
 
     // 5. Get metadata from cache or re-simplify
     const noteId = `${library_id}-${zotero_key}`;

@@ -273,7 +273,7 @@ export async function executeEditNoteAction(
     await item.loadDataType('note');
 
     // 3. Get current note HTML
-    const oldHtml = getLatestNoteHtml(item);
+    const oldHtml: string = item.getNote();
 
     // 4. Get metadata from cache or re-simplify
     const noteId = `${library_id}-${zotero_key}`;

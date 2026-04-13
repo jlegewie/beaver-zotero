@@ -23,14 +23,12 @@ const PendingActionsBar: React.FC = () => {
         return null;
     }
 
-    const handleBatchAction = (e: React.FormEvent | React.MouseEvent, approved: boolean) => {
+    const handleBatchAction = async (e: React.FormEvent | React.MouseEvent, approved: boolean) => {
         e.preventDefault();
         e.stopPropagation();
 
         // Dismiss the diff preview first to prevent re-showing during removal.
-        // Same batch pattern as handleBannerAction in diffPreviewCoordinator:
-        // send all responses, then remove all from the map in one update.
-        dismissDiffPreview();
+        await dismissDiffPreview();
         setDiffPreviewNoteKey(null);
 
         const idsToRemove: string[] = [];
@@ -50,8 +48,8 @@ const PendingActionsBar: React.FC = () => {
         }
     };
 
-    const handleApproveAll = (e: React.FormEvent | React.MouseEvent) => handleBatchAction(e, true);
-    const handleRejectAll = (e: React.FormEvent | React.MouseEvent) => handleBatchAction(e, false);
+    const handleApproveAll = (e: React.FormEvent | React.MouseEvent) => { void handleBatchAction(e, true); };
+    const handleRejectAll = (e: React.FormEvent | React.MouseEvent) => { void handleBatchAction(e, false); };
 
     const label = pendingCount === 1 
         ? '1 Pending Approval' 

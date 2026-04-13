@@ -273,7 +273,7 @@ export async function showDiffPreview(
         }
 
         // Dismiss existing and claim this generation
-        dismissDiffPreview();
+        await dismissDiffPreview();
         const myGeneration = ++generation;
 
         if (!areEditorApisAvailable()) {
@@ -516,24 +516,31 @@ export function dismissDiffPreview(): Promise<void> {
         // before saving resumes — unlike a fixed timeout.
         return new Promise<void>((resolve) => {
             let savingRestored = false;
+            let quietTimer: ReturnType<typeof setTimeout> | null = null;
+            const QUIET_DURATION_MS = 50;
             const restoreSaving = () => {
                 if (savingRestored) return;
                 savingRestored = true;
+                if (quietTimer) clearTimeout(quietTimer);
                 try { inst._iframeWindow?.removeEventListener('message', onIframeMsg); } catch { /* ignore */ }
                 try { inst._disableSaving = wasSavingDisabled; } catch { /* ignore */ }
                 resolve();
+            };
+            const scheduleQuietRestore = () => {
+                if (quietTimer) clearTimeout(quietTimer);
+                quietTimer = setTimeout(restoreSaving, QUIET_DURATION_MS);
             };
             const onIframeMsg = (e: any) => {
                 try {
                     if (e.data?.instanceID !== inst.instanceID) return;
                     const action = e.data?.message?.action;
                     if ((action === 'update' && e.data?.message?.system) || action === 'incrementalUpdateFailed') {
-                        restoreSaving();
+                        scheduleQuietRestore();
                     }
                 } catch { /* ignore */ }
             };
             try { inst._iframeWindow.addEventListener('message', onIframeMsg); } catch { /* ignore */ }
-            // Fallback: restore after 1.5s if the message never arrives
+            // Fallback: restore after 1.5s even if no 'update' arrives
             // (e.g., iframe destroyed or update silently dropped).
             setTimeout(restoreSaving, 1500);
         });

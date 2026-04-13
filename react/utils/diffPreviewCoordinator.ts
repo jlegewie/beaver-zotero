@@ -126,7 +126,7 @@ export function updateDiffPreviewForNote(libraryId: number, zoteroKey: string): 
 // Banner action handler
 // =============================================================================
 
-function handleBannerAction(action: string): void {
+async function handleBannerAction(action: string): Promise<void> {
     if (action !== 'approveAll' && action !== 'rejectAll') return;
 
     const approved = action === 'approveAll';
@@ -136,7 +136,7 @@ function handleBannerAction(action: string): void {
     const previewKey = getPreviewNoteKey();
 
     // Dismiss the preview immediately
-    dismissDiffPreview();
+    await dismissDiffPreview();
     store.set(diffPreviewNoteKeyAtom, null);
 
     // Collect matching edit_note action IDs, send responses, then batch-remove
