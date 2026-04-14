@@ -1002,6 +1002,27 @@ describe('trailing whitespace normalization in matching', () => {
         expect(response.valid).toBe(false);
     });
 
+    it('execute trims merged insert_after replacement when note drift removed anchor newlines', async () => {
+        mockItem = makeMockItem({ getNote: vi.fn(() => 'hello') });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue('hello');
+
+        const req = makeExecuteRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                operation: 'insert_after',
+                old_string: 'hello\n\n',
+                new_string: 'hello\n\n world',
+            },
+        });
+
+        const response = await handleAgentActionExecuteRequest(req);
+        expect(response.success).toBe(true);
+        const savedHtml = mockItem.setNote.mock.calls[0][0];
+        expect(savedHtml).toMatch(/^hello world/);
+    });
+
     it('rejects ambiguous match after trimming when operation is str_replace', async () => {
         // Note has two identical paragraphs separated by a single \n; the
         // trailing \n\n in old_string forces fallback into block 12b, after
