@@ -37,6 +37,10 @@ const ApiKeysSection: React.FC = () => {
                         Beaver supports multiple model providers. Connect your API keys to use Gemini, Claude, or OpenAI models.
                         See our <DocLink path="api-key">API key guide</DocLink> or learn about <DocLink path="custom-models">additional providers and custom endpoints</DocLink>.
                     </div>
+
+                    <div className="font-color-secondary text-base mt-1">                                                                                                                                                                                                                                              
+                        <strong>Heads up:</strong> Free API keys and new paid keys (Tier 1) often hit rate limits in Beaver because each question uses much more of your quota than a normal chat. A key with higher rate limits works best (Tier 2+). <DocLink path="api-key#why-beaver-needs-more-from-your-api-key">Learn why</DocLink>.                                    
+                    </div>
                 </div>
             </SettingsGroup>
 
