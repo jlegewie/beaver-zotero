@@ -34,7 +34,7 @@ import {
     locateEditTarget,
     resolveEditTargetAtRuntime,
     buildZeroMatchHint,
-    buildExecutionZeroMatchMessage,
+    buildExecutionZeroMatchHint,
 } from '../../../utils/editNotePositionLookup';
 import {
     expandBase,
@@ -448,6 +448,9 @@ async function validateEditNoteAction(
             error: hint.message,
             error_code: 'old_string_not_found',
             preference: 'always_ask',
+            ...(hint.candidates.length > 0
+                ? { error_candidates: hint.candidates }
+                : {}),
         };
     }
 
@@ -710,12 +713,16 @@ async function executeEditNoteAction(
     //    edit) so we re-match here against the current HTML.
     const match = findBestMatch(matchInput, base);
     if (!match) {
+        const hint = buildExecutionZeroMatchHint(simplified, old_string ?? '');
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
-            error: buildExecutionZeroMatchMessage(simplified, old_string ?? ''),
+            error: hint.message,
             error_code: 'old_string_not_found',
+            ...(hint.candidates.length > 0
+                ? { error_candidates: hint.candidates }
+                : {}),
         };
     }
 

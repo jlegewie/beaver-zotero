@@ -37,7 +37,7 @@ import {
 } from '../../src/utils/noteHtmlEntities';
 import {
     resolveEditTargetAtRuntime,
-    buildExecutionZeroMatchMessage,
+    buildExecutionZeroMatchHint,
     locateEditFragment,
     findWhitespaceTolerant,
     normalizeUndoComparisonHtml,
@@ -306,7 +306,7 @@ export async function executeEditNoteAction(
 
     // 8. Zero matches
     if (matchCount === 0) {
-        throw new Error(buildExecutionZeroMatchMessage(simplified, old_string ?? ''));
+        throw new Error(buildExecutionZeroMatchHint(simplified, old_string ?? '').message);
     }
 
     // 9. Perform replacement and capture context

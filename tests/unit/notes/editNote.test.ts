@@ -79,9 +79,11 @@ vi.mock('../../../src/utils/editNoteStrippers', () => ({
 }));
 
 vi.mock('../../../src/utils/editNoteHints', () => ({
-    findFuzzyMatch: vi.fn(() => null),
+    findCandidateSnippets: vi.fn(() => []),
     findStructuralAnchorHint: vi.fn(() => null),
     findInlineTagDriftMatch: vi.fn(() => null),
+    centerTruncate: vi.fn((text: string) => ({ snippet: text, truncated: false })),
+    DEFAULT_MAX_SNIPPET_LENGTH: 200,
 }));
 
 vi.mock('../../../src/utils/editNoteRawPosition', async () => {
@@ -170,7 +172,7 @@ import {
     enrichOldStringCitationRefs,
 } from '../../../src/utils/editNoteValidation';
 import {
-    findFuzzyMatch,
+    findCandidateSnippets,
     findInlineTagDriftMatch,
 } from '../../../src/utils/editNoteHints';
 import {
@@ -302,7 +304,7 @@ beforeEach(() => {
     });
     vi.mocked(getLatestNoteHtml).mockImplementation((item: any) => item.getNote());
     vi.mocked(validateNewString).mockReturnValue(null);
-    vi.mocked(findFuzzyMatch).mockReturnValue(null);
+    vi.mocked(findCandidateSnippets).mockReturnValue([]);
     vi.mocked(getDeferredToolPreference).mockReturnValue('always_ask');
     vi.mocked(checkDuplicateCitations).mockReturnValue(null);
     vi.mocked(invalidateSimplificationCache).mockImplementation(() => {});
@@ -428,34 +430,43 @@ describe('validateEditNoteAction — failures', () => {
         expect(response.error_code).toBe('expansion_failed');
     });
 
-    it('old_string_not_found without fuzzy hint', async () => {
+    it('old_string_not_found without candidates', async () => {
         vi.mocked(countOccurrences).mockReturnValueOnce(0);
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
         expect(response.valid).toBe(false);
         expect(response.error_code).toBe('old_string_not_found');
-        expect(response.error).not.toContain('fuzzy');
+        expect(response.error).not.toContain('Closest matches');
+        expect(response.error_candidates).toBeUndefined();
     });
 
-    it('old_string_not_found with fuzzy hint', async () => {
+    it('old_string_not_found with candidate snippets', async () => {
         vi.mocked(countOccurrences).mockReturnValueOnce(0);
-        vi.mocked(findFuzzyMatch).mockReturnValueOnce('possible match here');
+        vi.mocked(findCandidateSnippets).mockReturnValueOnce([
+            { snippet: 'possible match here', truncated: false, via: 'word_overlap', score: 0.8 },
+            { snippet: 'another weaker line', truncated: false, via: 'word_overlap', score: 0.6 },
+        ]);
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
         expect(response.valid).toBe(false);
         expect(response.error_code).toBe('old_string_not_found');
+        expect(response.error).toContain('Closest matches');
         expect(response.error).toContain('possible match here');
+        expect(response.error_candidates).toEqual([
+            { snippet: 'possible match here', truncated: false, via: 'word_overlap', score: 0.8 },
+            { snippet: 'another weaker line', truncated: false, via: 'word_overlap', score: 0.6 },
+        ]);
     });
 
     it('old_string_not_found with inline-tag drift hint', async () => {
         // Simulate the case where old_string text matches a unique span in the
         // note, but is missing inline formatting tags (e.g. <strong>) that the
-        // note has. The drift branch should fire BEFORE the generic fuzzy match.
+        // note has. The drift branch should fire BEFORE the candidate search.
         vi.mocked(countOccurrences).mockReturnValueOnce(0);
         vi.mocked(findInlineTagDriftMatch).mockReturnValueOnce({
             noteSpan: 'experienced <strong>substantial</strong> negative effects',
             droppedTags: ['<strong>', '</strong>'],
         });
-        // findFuzzyMatch should NOT be consulted when drift detection succeeds.
-        const fuzzySpy = vi.mocked(findFuzzyMatch);
+        // findCandidateSnippets should NOT be consulted when drift detection succeeds.
+        const candidateSpy = vi.mocked(findCandidateSnippets);
 
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
 
@@ -470,8 +481,15 @@ describe('validateEditNoteAction — failures', () => {
         // both old_string and new_string (would break unbold edits).
         expect(response.error).not.toMatch(/in BOTH/i);
         expect(response.error).toMatch(/keep the same tags.*preserve|omit them.*remove/i);
-        // Drift branch short-circuits the generic fuzzy match.
-        expect(fuzzySpy).not.toHaveBeenCalled();
+        // Drift branch short-circuits the candidate search.
+        expect(candidateSpy).not.toHaveBeenCalled();
+        // Drift response attaches a single inline_tag_drift candidate.
+        expect(response.error_candidates).toEqual([{
+            snippet: 'experienced <strong>substantial</strong> negative effects',
+            truncated: false,
+            via: 'inline_tag_drift',
+            score: 1,
+        }]);
     });
 
     it('ambiguous_match (multiple matches, no str_replace_all)', async () => {
@@ -793,10 +811,12 @@ describe('validateEditNoteAction — partial element fallback', () => {
         expect(response.normalized_action_data!.new_string).toBe('. Ein theoretisch');
     });
 
-    it('falls through to fuzzy error when stripPartialSimplifiedElements returns null', async () => {
+    it('falls through to candidate-based error when stripPartialSimplifiedElements returns null', async () => {
         setupPartialElementMocks();
         vi.mocked(stripPartialSimplifiedElements).mockReturnValue(null);
-        vi.mocked(findFuzzyMatch).mockReturnValue('some fuzzy match');
+        vi.mocked(findCandidateSnippets).mockReturnValue([
+            { snippet: 'some fuzzy match', truncated: false, via: 'word_overlap', score: 0.7 },
+        ]);
 
         const req = makeValidateRequest({
             action_data: {

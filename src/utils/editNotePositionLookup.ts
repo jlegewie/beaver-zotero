@@ -25,7 +25,10 @@ import {
 } from './noteHtmlSimplifier';
 import { stripDataCitationItems } from './noteWrapper';
 import {
-    findFuzzyMatch,
+    type CandidateSnippet,
+    centerTruncate,
+    DEFAULT_MAX_SNIPPET_LENGTH,
+    findCandidateSnippets,
     findInlineTagDriftMatch,
     findStructuralAnchorHint,
 } from './editNoteHints';
@@ -126,15 +129,17 @@ export function resolveEditTargetAtRuntime(args: {
 // =============================================================================
 
 export type ZeroMatchHint =
-    | { kind: 'drift'; droppedTags: string[]; noteSpan: string; message: string }
-    | { kind: 'fuzzy'; fuzzyMatch: string; message: string }
-    | { kind: 'structural'; tagName: string; context: string; message: string }
-    | { kind: 'generic'; message: string };
+    | { kind: 'drift'; droppedTags: string[]; noteSpan: string; message: string; candidates: CandidateSnippet[] }
+    | { kind: 'fuzzy'; message: string; candidates: CandidateSnippet[] }
+    | { kind: 'structural'; tagName: string; context: string; message: string; candidates: CandidateSnippet[] }
+    | { kind: 'generic'; message: string; candidates: CandidateSnippet[] };
 
 /**
  * Build the most specific error hint available when `old_string` isn't found.
- * Priority: inline-tag drift → fuzzy word match → structural anchor → generic.
- * The structured return lets callers compose their own error envelope.
+ * Priority: inline-tag drift → candidate snippets → structural anchor →
+ * generic. Each variant carries `candidates` so callers can forward them to
+ * the agent in a structured envelope (see `WSAgentActionValidateResponse
+ * .error_candidates`).
  */
 export function buildZeroMatchHint(
     simplified: string,
@@ -155,15 +160,42 @@ export function buildZeroMatchHint(
             + 'new_string based on intent — keep the same tags around the '
             + 'same words to preserve the formatting, or omit them to remove '
             + 'the formatting.';
-        return { kind: 'drift', droppedTags: drift.droppedTags, noteSpan: drift.noteSpan, message };
+        const driftTrimmed = centerTruncate(
+            drift.noteSpan,
+            Math.floor(drift.noteSpan.length / 2),
+            DEFAULT_MAX_SNIPPET_LENGTH,
+        );
+        return {
+            kind: 'drift',
+            droppedTags: drift.droppedTags,
+            noteSpan: drift.noteSpan,
+            message,
+            candidates: [{
+                snippet: driftTrimmed.snippet,
+                truncated: driftTrimmed.truncated,
+                via: 'inline_tag_drift',
+                score: 1,
+            }],
+        };
     }
 
-    const fuzzy = findFuzzyMatch(simplified, oldString);
-    if (fuzzy) {
-        const message =
-            'The string to replace was not found in the note.'
-            + ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\``;
-        return { kind: 'fuzzy', fuzzyMatch: fuzzy, message };
+    const candidates = findCandidateSnippets(simplified, oldString);
+    if (candidates.length > 0) {
+        const header =
+            'The string to replace was not found in the note. '
+            + 'Closest matches in the note:';
+        const body = candidates
+            .map((c, i) => {
+                const parts: string[] = [`score ${c.score.toFixed(2)}`, `via ${c.via}`];
+                if (c.truncated) parts.push('truncated');
+                return `  [${i + 1}] (${parts.join(', ')})\n\`\`\`\n${c.snippet}\n\`\`\``;
+            })
+            .join('\n');
+        const footer =
+            '\nCopy the exact text from one of the candidates above as your '
+            + 'old_string, or rewrite old_string to match a span you can see '
+            + 'in the note.';
+        return { kind: 'fuzzy', message: `${header}\n${body}${footer}`, candidates };
     }
 
     const structural = findStructuralAnchorHint(simplified, oldString);
@@ -174,29 +206,64 @@ export function buildZeroMatchHint(
             + ' but its actual context in the note is:\n'
             + `\`\`\`\n${structural.context}\n\`\`\`\n`
             + 'Rewrite old_string to match the surrounding content shown above.';
-        return { kind: 'structural', tagName: structural.tagName, context: structural.context, message };
+        const structuralTrimmed = centerTruncate(
+            structural.context,
+            Math.floor(structural.context.length / 2),
+            DEFAULT_MAX_SNIPPET_LENGTH,
+        );
+        return {
+            kind: 'structural',
+            tagName: structural.tagName,
+            context: structural.context,
+            message,
+            candidates: [{
+                snippet: structuralTrimmed.snippet,
+                truncated: structuralTrimmed.truncated,
+                via: 'structural_anchor',
+                score: 1,
+            }],
+        };
     }
 
     return {
         kind: 'generic',
         message: 'The string to replace was not found in the note.',
+        candidates: [],
     };
 }
 
+export interface ExecutionZeroMatchHint {
+    message: string;
+    candidates: CandidateSnippet[];
+}
+
 /**
- * Executor variant: only the fuzzy leg is used in the executor today (drift
- * and structural hints are validator-only). Kept as a separate entry point so
- * the executor's shorter error message stays faithful to the original.
+ * Executor variant of `buildZeroMatchHint`. The validator already ran the
+ * inline-tag-drift and structural-anchor legs; at execute time we only care
+ * about candidate snippets so the error carries actionable alternatives.
  */
-export function buildExecutionZeroMatchMessage(
+export function buildExecutionZeroMatchHint(
     simplified: string,
     oldString: string
-): string {
-    const fuzzy = findFuzzyMatch(simplified, oldString);
-    return (
-        'The string to replace was not found in the note.'
-        + (fuzzy ? ` Found a possible fuzzy match:\n\`\`\`\n${fuzzy}\n\`\`\`` : '')
-    );
+): ExecutionZeroMatchHint {
+    const candidates = findCandidateSnippets(simplified, oldString);
+    if (candidates.length === 0) {
+        return {
+            message: 'The string to replace was not found in the note.',
+            candidates: [],
+        };
+    }
+    const header =
+        'The string to replace was not found in the note. '
+        + 'Closest matches in the note:';
+    const body = candidates
+        .map((c, i) => {
+            const parts: string[] = [`score ${c.score.toFixed(2)}`, `via ${c.via}`];
+            if (c.truncated) parts.push('truncated');
+            return `  [${i + 1}] (${parts.join(', ')})\n\`\`\`\n${c.snippet}\n\`\`\``;
+        })
+        .join('\n');
+    return { message: `${header}\n${body}`, candidates };
 }
 
 // =============================================================================

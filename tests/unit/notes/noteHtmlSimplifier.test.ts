@@ -42,7 +42,6 @@ import {
     checkDuplicateCitations,
     enrichOldStringCitationRefs,
 } from '../../../src/utils/editNoteValidation';
-import { findFuzzyMatch } from '../../../src/utils/editNoteHints';
 import {
     findUniqueRawMatchPosition,
     captureValidatedEditTargetContext,
@@ -1507,40 +1506,6 @@ describe('validateNewString', () => {
     it('rejects new compound citation (items attr without ref)', () => {
         const str = '<citation items="1-A, 1-B" label="Multi"/>';
         expect(validateNewString(str, metaWithElements)).toContain('compound');
-    });
-});
-
-
-// =============================================================================
-// findFuzzyMatch
-// =============================================================================
-
-describe('findFuzzyMatch', () => {
-    it('finds whitespace-relaxed exact match', () => {
-        const simplified = 'This is a   long\n   sentence with  whitespace.';
-        const result = findFuzzyMatch(simplified, 'long sentence with whitespace');
-        expect(result).toBeTruthy();
-        expect(result).toContain('long');
-    });
-
-    it('finds word overlap above 30% threshold', () => {
-        const simplified = '<p>The quick brown fox jumps over the lazy dog.</p>\n<p>Other content here.</p>';
-        // Enough word overlap with first line
-        const result = findFuzzyMatch(simplified, 'quick brown fox jumps');
-        expect(result).toBeTruthy();
-    });
-
-    it('returns null for match below 30% threshold', () => {
-        const simplified = '<p>The quick brown fox.</p>\n<p>Other content.</p>';
-        const result = findFuzzyMatch(simplified, 'completely unrelated words here now');
-        expect(result).toBeNull();
-    });
-
-    it('returns null for empty/short-word search', () => {
-        const simplified = '<p>Content here.</p>';
-        // All words <= 2 chars are filtered out
-        const result = findFuzzyMatch(simplified, 'a b c');
-        expect(result).toBeNull();
     });
 });
 

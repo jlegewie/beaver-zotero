@@ -69,7 +69,6 @@ import {
     checkDuplicateCitations,
     validateNewString,
 } from '../../../src/utils/editNoteValidation';
-import { findFuzzyMatch } from '../../../src/utils/editNoteHints';
 import { captureValidatedEditTargetContext } from '../../../src/utils/editNoteRawPosition';
 import {
     expandToRawHtml,

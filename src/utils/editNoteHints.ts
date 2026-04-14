@@ -1,7 +1,7 @@
 /**
  * Zero-match hint finders used by `editNotePositionLookup`.
  *
- *   - `findFuzzyMatch`          word-overlap fuzzy match for a search snippet
+ *   - `findCandidateSnippets`    ranked candidate snippets for the agent
  *   - `findStructuralAnchorHint` locate a unique block-level tag anchor
  *   - `findInlineTagDriftMatch`  detect dropped inline formatting tags
  *
@@ -13,49 +13,177 @@
 import { normalizeWS } from './noteHtmlEntities';
 
 // =============================================================================
-// Fuzzy Matching
+// Candidate snippets
 // =============================================================================
 
 /**
- * Find a fuzzy match for a search string in the simplified HTML.
- * Used to provide hints when exact matching fails.
+ * How a candidate was located. Callers surface this to the model so it can
+ * judge confidence.
+ *
+ *   - `whitespace_relaxed` — old_string matches after collapsing whitespace;
+ *     very high confidence, typically a lone candidate.
+ *   - `word_overlap`       — top-N lines by word-overlap ratio; lower
+ *     confidence, the model should pick or rewrite.
+ *   - `inline_tag_drift`   — attached by `buildZeroMatchHint` from
+ *     `findInlineTagDriftMatch`.
+ *   - `structural_anchor`  — attached by `buildZeroMatchHint` from
+ *     `findStructuralAnchorHint`.
  */
-export function findFuzzyMatch(simplified: string, searchStr: string): string | null {
-    // 1. Try whitespace-relaxed exact match
-    const normSearch = normalizeWS(searchStr);
-    const normHtml = normalizeWS(simplified);
+export type CandidateSource =
+    | 'whitespace_relaxed'
+    | 'word_overlap'
+    | 'inline_tag_drift'
+    | 'structural_anchor';
 
+export interface CandidateSnippet {
+    /** Snippet to show the model. Already truncated — do not re-truncate. */
+    snippet: string;
+    /** True when the snippet was shortened. */
+    truncated: boolean;
+    /** How this candidate was located. */
+    via: CandidateSource;
+    /** 0-1 confidence. 1 for deterministic locators (whitespace_relaxed,
+     *  inline_tag_drift, structural_anchor); word-overlap ratio for
+     *  `word_overlap`. */
+    score: number;
+}
+
+export interface FindCandidateSnippetsOptions {
+    maxCandidates?: number;
+    maxSnippetLength?: number;
+    /** Minimum word-overlap ratio required for `word_overlap` candidates.
+     *  Raised from the legacy 0.3 threshold to suppress low-confidence noise. */
+    minScore?: number;
+}
+
+const DEFAULT_MAX_CANDIDATES = 3;
+export const DEFAULT_MAX_SNIPPET_LENGTH = 200;
+const DEFAULT_MIN_SCORE = 0.5;
+
+/** Truncate `text` around `pivot` with `…` markers when trimmed. Keeps roughly
+ *  `before` chars before the pivot and `after` chars after. */
+export function centerTruncate(
+    text: string,
+    pivot: number,
+    maxLen: number,
+): { snippet: string; truncated: boolean } {
+    if (text.length <= maxLen) {
+        return { snippet: text, truncated: false };
+    }
+    const before = Math.floor(maxLen * 0.4);
+    const after = maxLen - before;
+    const pivotClamped = Math.max(0, Math.min(text.length, pivot));
+    let start = Math.max(0, pivotClamped - before);
+    let end = Math.min(text.length, start + maxLen);
+    // If we hit the right edge, shift start back so the window stays full-size.
+    if (end === text.length) {
+        start = Math.max(0, end - maxLen);
+    } else {
+        end = Math.min(text.length, pivotClamped + after);
+    }
+    let snippet = text.substring(start, end);
+    if (start > 0) snippet = '…' + snippet;
+    if (end < text.length) snippet = snippet + '…';
+    return { snippet, truncated: true };
+}
+
+/**
+ * Ranked candidate snippets for an `old_string` that didn't match exactly.
+ *
+ * Two tiers:
+ *   1. Whitespace-relaxed exact match — if `old_string` appears in the note
+ *      after collapsing whitespace, return that single high-confidence
+ *      candidate.
+ *   2. Word-overlap lines — score every line by fraction of old_string words
+ *      present; return the top `maxCandidates` above `minScore`.
+ *
+ * Returns `[]` when nothing passes the threshold. Callers should fall through
+ * to a generic error in that case rather than inventing low-confidence hints.
+ */
+export function findCandidateSnippets(
+    simplified: string,
+    oldString: string,
+    opts: FindCandidateSnippetsOptions = {},
+): CandidateSnippet[] {
+    const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
+    const maxSnippetLength = opts.maxSnippetLength ?? DEFAULT_MAX_SNIPPET_LENGTH;
+    const minScore = opts.minScore ?? DEFAULT_MIN_SCORE;
+
+    const normSearch = normalizeWS(oldString);
+    if (!normSearch) return [];
+
+    // Tier 1: whitespace-relaxed exact match
+    const normHtml = normalizeWS(simplified);
     const idx = normHtml.indexOf(normSearch);
     if (idx !== -1) {
-        const start = Math.max(0, idx - 50);
-        const end = Math.min(normHtml.length, idx + normSearch.length + 50);
-        return normHtml.substring(start, end);
+        const matchEnd = idx + normSearch.length;
+        const pivot = Math.floor((idx + matchEnd) / 2);
+        const { snippet, truncated } = centerTruncate(normHtml, pivot, maxSnippetLength);
+        return [{ snippet, truncated, via: 'whitespace_relaxed', score: 1 }];
     }
 
-    // 2. Fall back to best-matching line by word overlap
+    // Tier 2: word-overlap line scoring
     const searchWords = new Set(
         normSearch.toLowerCase().split(/\s+/).filter(w => w.length > 2)
     );
-    if (searchWords.size === 0) return null;
+    if (searchWords.size === 0) return [];
 
-    const lines = simplified.split('\n');
-    let bestLine = '';
-    let bestScore = 0;
+    const scored: Array<{
+        score: number;
+        line: string;
+        firstMatchIdx: number;
+    }> = [];
 
-    for (const line of lines) {
-        const text = normalizeWS(line.replace(/<[^>]+>/g, '')).toLowerCase();
-        if (!text) continue;
-        const lineWords = text.split(/\s+/);
-        const matches = lineWords.filter(w => searchWords.has(w)).length;
+    for (const line of simplified.split('\n')) {
+        const textOnly = normalizeWS(line.replace(/<[^>]+>/g, ''));
+        if (!textOnly) continue;
+        const lowered = textOnly.toLowerCase();
+        const lineWords = lowered.split(/\s+/);
+        const uniqueLineWords = new Set(lineWords);
+        let matches = 0;
+        let firstMatchIdx = -1;
+        for (const w of searchWords) {
+            if (!uniqueLineWords.has(w)) continue;
+            matches += 1;
+            if (firstMatchIdx === -1) {
+                firstMatchIdx = lowered.indexOf(w);
+            }
+        }
+        if (firstMatchIdx === -1) {
+            for (const w of lineWords) {
+                if (searchWords.has(w)) {
+                    firstMatchIdx = lowered.indexOf(w);
+                    break;
+                }
+            }
+        }
         const score = matches / searchWords.size;
-        if (score > bestScore) {
-            bestScore = score;
-            bestLine = line.trim();
+        if (score >= minScore) {
+            scored.push({
+                score,
+                line: textOnly,
+                firstMatchIdx: firstMatchIdx === -1 ? 0 : firstMatchIdx,
+            });
         }
     }
 
-    // Require at least 30% word overlap
-    return bestScore >= 0.3 ? bestLine : null;
+    scored.sort((a, b) => b.score - a.score);
+
+    const seen = new Set<string>();
+    const out: CandidateSnippet[] = [];
+    for (const entry of scored) {
+        if (out.length >= maxCandidates) break;
+        const { snippet, truncated } = centerTruncate(
+            entry.line,
+            entry.firstMatchIdx,
+            maxSnippetLength,
+        );
+        if (seen.has(snippet)) continue;
+        seen.add(snippet);
+        out.push({ snippet, truncated, via: 'word_overlap', score: entry.score });
+    }
+
+    return out;
 }
 
 // =============================================================================
