@@ -61,10 +61,13 @@ describe('findCandidateSnippets', () => {
         expect(candidates[0].score).toBeCloseTo(2 / 3, 5);
     });
 
-    it('truncates long lines with … markers and sets truncated flag', () => {
-        const longLine = '<p>' + 'alpha '.repeat(80) + 'bravo charlie delta echo foxtrot golf hotel</p>';
+    it('truncates long tier-2 candidate lines with … markers and sets truncated flag', () => {
+        // Reordered so tier-1 (whitespace-relaxed substring) cannot fire and
+        // tier-2 runs. The long repetition of "alpha" pads the line past the
+        // snippet budget.
+        const longLine = '<p>' + 'alpha '.repeat(80) + 'bravo charlie delta echo</p>';
         const simplified = longLine;
-        const oldString = 'bravo charlie delta echo foxtrot golf hotel';
+        const oldString = 'delta echo bravo charlie';
 
         const candidates = findCandidateSnippets(simplified, oldString, {
             maxSnippetLength: 120,
@@ -76,6 +79,32 @@ describe('findCandidateSnippets', () => {
         expect(top.snippet.length).toBeLessThanOrEqual(122);
         // At least one side is marked truncated
         expect(top.snippet.startsWith('…') || top.snippet.endsWith('…')).toBe(true);
+    });
+
+    it('tier-2 candidates preserve inline HTML tags so the agent can paste an exact substring', () => {
+        const simplified = '<p>The <strong>critical</strong> passage about X and Y</p>';
+        // Typo in "critical" prevents drift and exact match, but word overlap
+        // is high enough to surface the line.
+        const oldString = 'cirtical passage about X and Y';
+
+        const candidates = findCandidateSnippets(simplified, oldString);
+        expect(candidates.length).toBeGreaterThan(0);
+        expect(candidates[0].snippet).toContain('<strong>critical</strong>');
+    });
+
+    it('tier-1 expands the snippet window so the full match is always visible for long old_strings', () => {
+        // An old_string longer than the default 200-char snippet budget. If we
+        // center-truncated at the default budget the `…` markers would land
+        // inside the match, which the agent cannot paste verbatim.
+        const longMatch = 'word '.repeat(60).trim();  // ~300 chars
+        const simplified = `<p>prefix padding here ${longMatch} trailing padding here</p>`;
+        const oldString = longMatch;
+
+        const candidates = findCandidateSnippets(simplified, oldString);
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0].via).toBe('whitespace_relaxed');
+        // The returned snippet must contain the full match verbatim.
+        expect(candidates[0].snippet).toContain(longMatch);
     });
 
     it('respects a custom minScore that rejects previously-surfaced lines', () => {

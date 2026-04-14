@@ -112,17 +112,23 @@ export function findCandidateSnippets(
     const normSearch = normalizeWS(oldString);
     if (!normSearch) return [];
 
-    // Tier 1: whitespace-relaxed exact match
+    // Tier 1: whitespace-relaxed exact match. Expand the snippet window so the
+    // full match is always visible even for long old_strings — truncating
+    // inside the match would yield a snippet with `…` markers the agent
+    // cannot paste verbatim.
     const normHtml = normalizeWS(simplified);
     const idx = normHtml.indexOf(normSearch);
     if (idx !== -1) {
         const matchEnd = idx + normSearch.length;
         const pivot = Math.floor((idx + matchEnd) / 2);
-        const { snippet, truncated } = centerTruncate(normHtml, pivot, maxSnippetLength);
+        const window = Math.max(maxSnippetLength, normSearch.length + 100);
+        const { snippet, truncated } = centerTruncate(normHtml, pivot, window);
         return [{ snippet, truncated, via: 'whitespace_relaxed', score: 1 }];
     }
 
-    // Tier 2: word-overlap line scoring
+    // Tier 2: word-overlap line scoring. Score on text-only (so `<p>` doesn't
+    // match the word "p") but return the tag-ful line so the agent can paste
+    // an exact simplified-form substring as its next `old_string`.
     const searchWords = new Set(
         normSearch.toLowerCase().split(/\s+/).filter(w => w.length > 2)
     );
@@ -135,36 +141,31 @@ export function findCandidateSnippets(
     }> = [];
 
     for (const line of simplified.split('\n')) {
-        const textOnly = normalizeWS(line.replace(/<[^>]+>/g, ''));
+        const trimmedLine = line.trim();
+        if (!trimmedLine) continue;
+        const textOnly = normalizeWS(trimmedLine.replace(/<[^>]+>/g, ''));
         if (!textOnly) continue;
-        const lowered = textOnly.toLowerCase();
-        const lineWords = lowered.split(/\s+/);
+        const loweredText = textOnly.toLowerCase();
+        const lineWords = loweredText.split(/\s+/);
         const uniqueLineWords = new Set(lineWords);
         let matches = 0;
-        let firstMatchIdx = -1;
+        let firstMatchedWord: string | null = null;
         for (const w of searchWords) {
             if (!uniqueLineWords.has(w)) continue;
             matches += 1;
-            if (firstMatchIdx === -1) {
-                firstMatchIdx = lowered.indexOf(w);
-            }
-        }
-        if (firstMatchIdx === -1) {
-            for (const w of lineWords) {
-                if (searchWords.has(w)) {
-                    firstMatchIdx = lowered.indexOf(w);
-                    break;
-                }
-            }
+            if (firstMatchedWord === null) firstMatchedWord = w;
         }
         const score = matches / searchWords.size;
-        if (score >= minScore) {
-            scored.push({
-                score,
-                line: textOnly,
-                firstMatchIdx: firstMatchIdx === -1 ? 0 : firstMatchIdx,
-            });
+        if (score < minScore) continue;
+
+        // Locate the first matched word in the tag-ful line as the truncation
+        // pivot. Falling back to 0 keeps centerTruncate well-defined.
+        let pivot = 0;
+        if (firstMatchedWord) {
+            const p = trimmedLine.toLowerCase().indexOf(firstMatchedWord);
+            if (p !== -1) pivot = p;
         }
+        scored.push({ score, line: trimmedLine, firstMatchIdx: pivot });
     }
 
     scored.sort((a, b) => b.score - a.score);
