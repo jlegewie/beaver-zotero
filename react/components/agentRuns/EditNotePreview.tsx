@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { diffWords, diffLines, diffChars } from 'diff';
-import {
-    getOrSimplify,
-    getLatestNoteHtml,
-} from '../../../src/utils/noteHtmlSimplifier';
+import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
+import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
 import type { EditNoteOperation } from '../../types/agentActions/editNote';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';

@@ -1,7 +1,7 @@
 import { ZoteroItemReference } from "../types/zotero";
 import { renderToHTML, RenderContextData } from "./citationRenderers";
 import { preloadPageLabelsForContent } from "./pageLabels";
-import { hasSchemaVersionWrapper } from "../../src/utils/noteHtmlSimplifier";
+import { hasSchemaVersionWrapper } from "../../src/utils/noteWrapper";
 import { store } from "../store";
 import { currentThreadNameAtom } from "../atoms/threads";
 

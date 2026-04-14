@@ -4,22 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Module Mocks (must be before imports)
 // =============================================================================
 
-vi.mock('../../../src/utils/noteHtmlSimplifier', () => {
-    // `applyOldStringEnrichment` delegates to `enrichOldStringCitationRefs`,
-    // mirroring the production wrapper so existing tests that mock
-    // `enrichOldStringCitationRefs` (including `.toHaveBeenCalled()` assertions)
-    // keep working without change.
-    const enrichMock = vi.fn(() => null as string | null);
-    return {
+vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     getOrSimplify: vi.fn((_noteId: string, rawHtml: string, _libId: number) => ({
         simplified: rawHtml.replace(/<[^>]+>/g, ''), // Crude strip-tags for testing
         metadata: { elements: new Map() },
         isStale: false,
     })),
-    expandToRawHtml: vi.fn((str: string, _metadata: any, _context: string) => str),
-    stripDataCitationItems: vi.fn((html: string) => html),
-    extractDataCitationItems: vi.fn(() => null),
-    rebuildDataCitationItems: vi.fn((html: string) => html),
     countOccurrences: vi.fn((haystack: string, needle: string) => {
         if (!needle) return 0;
         let count = 0;
@@ -27,34 +17,40 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => {
         while ((pos = haystack.indexOf(needle, pos)) !== -1) { count++; pos += needle.length; }
         return count;
     }),
-    getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
-    validateNewString: vi.fn(() => null),
-    findFuzzyMatch: vi.fn(() => null),
-    findStructuralAnchorHint: vi.fn(() => null),
-    findInlineTagDriftMatch: vi.fn(() => null),
-    findUniqueRawMatchPosition: vi.fn(() => null),
-    captureValidatedEditTargetContext: vi.fn(() => null),
-    findTargetRawMatchPosition: vi.fn(() => null),
     invalidateSimplificationCache: vi.fn(),
-    checkDuplicateCitations: vi.fn(() => null),
-    preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
-    waitForPMNormalization: vi.fn().mockResolvedValue(undefined),
-    waitForNoteSaveStabilization: vi.fn().mockResolvedValue(undefined),
-    flushLiveEditorToDB: vi.fn().mockResolvedValue(false),
-    hasSchemaVersionWrapper: vi.fn((html: string) => html.includes('data-schema-version=')),
+    normalizeNoteHtml: vi.fn((html: string) => html),
+}));
+
+vi.mock('../../../src/utils/editNoteValidation', () => {
+    // `applyOldStringEnrichment` delegates to `enrichOldStringCitationRefs`,
+    // mirroring the production wrapper so existing tests that mock
+    // `enrichOldStringCitationRefs` (including `.toHaveBeenCalled()` assertions)
+    // keep working without change.
+    const enrichMock = vi.fn(() => null as string | null);
+    return {
+        validateNewString: vi.fn(() => null),
+        checkNewCitationItemsExist: vi.fn(() => null),
+        checkDuplicateCitations: vi.fn(() => null),
+        enrichOldStringCitationRefs: enrichMock,
+        applyOldStringEnrichment: vi.fn((oldString: string | undefined, metadata: any) => {
+            if (!oldString) return oldString;
+            const enriched = enrichMock(oldString, metadata);
+            return enriched ?? oldString;
+        }),
+    };
+});
+
+vi.mock('../../../src/utils/noteHtmlEntities', () => ({
     decodeHtmlEntities: vi.fn((s: string) => s),
     encodeTextEntities: vi.fn((s: string) => s),
     ENTITY_FORMS: ['hex', 'decimal', 'named'],
-    stripPartialSimplifiedElements: vi.fn(() => null),
-    stripSpuriousWrappingTags: vi.fn(() => []),
-    normalizeNoteHtml: vi.fn((html: string) => html),
-    checkNewCitationItemsExist: vi.fn(() => null),
-    enrichOldStringCitationRefs: enrichMock,
-    applyOldStringEnrichment: vi.fn((oldString: string | undefined, metadata: any) => {
-        if (!oldString) return oldString;
-        const enriched = enrichMock(oldString, metadata);
-        return enriched ?? oldString;
-    }),
+}));
+
+vi.mock('../../../src/utils/noteWrapper', () => ({
+    stripDataCitationItems: vi.fn((html: string) => html),
+    extractDataCitationItems: vi.fn(() => null),
+    rebuildDataCitationItems: vi.fn((html: string) => html),
+    hasSchemaVersionWrapper: vi.fn((html: string) => html.includes('data-schema-version=')),
     stripNoteWrapperDiv: vi.fn((html: string) => {
         const trimmed = html.trim();
         if (!trimmed.startsWith('<div') || !trimmed.endsWith('</div>')) return html;
@@ -62,6 +58,41 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => {
         if (closeAngle === -1) return html;
         return trimmed.substring(closeAngle + 1, trimmed.length - 6);
     }),
+}));
+
+vi.mock('../../../src/utils/noteEditorIO', () => ({
+    getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
+    isNoteInEditor: vi.fn(() => false),
+    waitForPMNormalization: vi.fn().mockResolvedValue(undefined),
+    waitForNoteSaveStabilization: vi.fn().mockResolvedValue(undefined),
+    flushLiveEditorToDB: vi.fn().mockResolvedValue(false),
+}));
+
+vi.mock('../../../src/utils/noteCitationExpand', () => ({
+    expandToRawHtml: vi.fn((str: string, _metadata: any, _context: string) => str),
+    preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../../src/utils/editNoteStrippers', () => ({
+    stripPartialSimplifiedElements: vi.fn(() => null),
+    stripSpuriousWrappingTags: vi.fn(() => []),
+}));
+
+vi.mock('../../../src/utils/editNoteHints', () => ({
+    findFuzzyMatch: vi.fn(() => null),
+    findStructuralAnchorHint: vi.fn(() => null),
+    findInlineTagDriftMatch: vi.fn(() => null),
+}));
+
+vi.mock('../../../src/utils/editNoteRawPosition', async () => {
+    const actual = await vi.importActual<typeof import('../../../src/utils/editNoteRawPosition')>(
+        '../../../src/utils/editNoteRawPosition'
+    );
+    return {
+        ...actual,
+        findUniqueRawMatchPosition: vi.fn(() => null),
+        captureValidatedEditTargetContext: vi.fn(() => null),
+        findTargetRawMatchPosition: vi.fn(() => null),
     };
 });
 
@@ -130,23 +161,33 @@ import { handleAgentActionValidateRequest } from '../../../src/services/agentDat
 import { handleAgentActionExecuteRequest } from '../../../src/services/agentDataProvider/handleAgentActionExecuteRequest';
 import {
     getOrSimplify,
-    expandToRawHtml,
-    stripDataCitationItems,
     countOccurrences,
-    getLatestNoteHtml,
+    invalidateSimplificationCache,
+} from '../../../src/utils/noteHtmlSimplifier';
+import {
     validateNewString,
+    checkDuplicateCitations,
+    enrichOldStringCitationRefs,
+} from '../../../src/utils/editNoteValidation';
+import {
     findFuzzyMatch,
     findInlineTagDriftMatch,
+} from '../../../src/utils/editNoteHints';
+import {
     findUniqueRawMatchPosition,
     captureValidatedEditTargetContext,
     findTargetRawMatchPosition,
-    invalidateSimplificationCache,
-    checkDuplicateCitations,
+} from '../../../src/utils/editNoteRawPosition';
+import { stripPartialSimplifiedElements } from '../../../src/utils/editNoteStrippers';
+import {
+    stripDataCitationItems,
     rebuildDataCitationItems,
+} from '../../../src/utils/noteWrapper';
+import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
+import {
+    expandToRawHtml,
     preloadPageLabelsForNewCitations,
-    stripPartialSimplifiedElements,
-    enrichOldStringCitationRefs,
-} from '../../../src/utils/noteHtmlSimplifier';
+} from '../../../src/utils/noteCitationExpand';
 import { getDeferredToolPreference } from '../../../src/services/agentDataProvider/utils';
 import { store } from '../../../react/store';
 import type {

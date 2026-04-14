@@ -26,7 +26,7 @@ vi.mock('../../../react/utils/batchFindExistingReferences', () => ({
     BatchReferenceCheckItem: {},
 }));
 
-import { findInlineTagDriftMatch } from '../../../src/utils/noteHtmlSimplifier';
+import { findInlineTagDriftMatch } from '../../../src/utils/editNoteHints';
 
 
 // =============================================================================

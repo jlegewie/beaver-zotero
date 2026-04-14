@@ -26,7 +26,7 @@ vi.mock('../../../react/utils/batchFindExistingReferences', () => ({
     BatchReferenceCheckItem: {},
 }));
 
-import { stripSpuriousWrappingTags } from '../../../src/utils/noteHtmlSimplifier';
+import { stripSpuriousWrappingTags } from '../../../src/utils/editNoteStrippers';
 
 
 // =============================================================================

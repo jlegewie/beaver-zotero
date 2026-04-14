@@ -10,7 +10,8 @@ vi.mock('../../../src/services/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
 
-import { normalizeNoteHtml, hexToRgb } from '../../../src/utils/noteHtmlSimplifier';
+import { normalizeNoteHtml } from '../../../src/utils/noteHtmlSimplifier';
+import { hexToRgb } from '../../../src/utils/noteHtmlEntities';
 
 /** Helper: wrap inner HTML in the PM canonical wrapper */
 function pmWrap(inner: string): string {

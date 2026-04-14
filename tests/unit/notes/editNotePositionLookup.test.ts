@@ -15,16 +15,18 @@ vi.mock('../../../src/utils/logger', () => ({
     logger: vi.fn(),
 }));
 
-import {
-    simplifyNoteHtml,
-    expandToRawHtml,
-    stripDataCitationItems,
-} from '../../../src/utils/noteHtmlSimplifier';
+import { simplifyNoteHtml } from '../../../src/utils/noteHtmlSimplifier';
+import { expandToRawHtml } from '../../../src/utils/noteCitationExpand';
+import { stripDataCitationItems } from '../../../src/utils/noteWrapper';
 import {
     locateEditTarget,
     resolveEditTargetAtRuntime,
     buildZeroMatchHint,
     buildExecutionZeroMatchMessage,
+    locateEditFragment,
+    findRangesByRawAnchors,
+    findWhitespaceTolerant,
+    normalizeUndoComparisonHtml,
 } from '../../../src/utils/editNotePositionLookup';
 
 // =============================================================================
@@ -203,5 +205,228 @@ describe('buildExecutionZeroMatchMessage', () => {
 
         const msg = buildExecutionZeroMatchMessage(simplified, oldString);
         expect(msg).toBe('The string to replace was not found in the note.');
+    });
+});
+
+// =============================================================================
+// findRangesByRawAnchors / findWhitespaceTolerant / normalizeUndoComparisonHtml
+// =============================================================================
+
+describe('findRangesByRawAnchors', () => {
+    it('returns the unique surrounding range when anchors match once', () => {
+        const target = '<p>This is the unique passage with enough length to anchor.</p>';
+        const html = `<p>Other prelude.</p>${target}<p>Other epilogue here that comes after.</p>`;
+
+        const ranges = findRangesByRawAnchors(html, target);
+        expect(ranges.length).toBeGreaterThan(0);
+        // At least one candidate must wrap the literal target
+        expect(ranges.some(r => html.substring(r.start, r.end) === target)).toBe(true);
+    });
+
+    it('returns empty when target is too short for the minimum anchor length', () => {
+        expect(findRangesByRawAnchors('<p>some content here</p>', 'abc')).toEqual([]);
+    });
+});
+
+describe('findWhitespaceTolerant', () => {
+    it('matches across newlines that PM may have inserted between tags', () => {
+        const haystack = '<p>First.</p>\n  <p>Second.</p>';
+        const needle = '<p>First.</p><p>Second.</p>';
+        const range = findWhitespaceTolerant(haystack, needle);
+        expect(range).not.toBeNull();
+        expect(haystack.substring(range!.start, range!.end)).toContain('First');
+        expect(haystack.substring(range!.start, range!.end)).toContain('Second');
+    });
+
+    it('returns null when no whitespace-tolerant match exists', () => {
+        expect(findWhitespaceTolerant('<p>foo</p>', '<p>bar</p>')).toBeNull();
+    });
+});
+
+describe('normalizeUndoComparisonHtml', () => {
+    it('compares-equal across inter-tag whitespace differences', () => {
+        const a = '<p>Hello.</p>\n<p>World.</p>';
+        const b = '<p>Hello.</p><p>World.</p>';
+        expect(normalizeUndoComparisonHtml(a, 1)).toBe(normalizeUndoComparisonHtml(b, 1));
+    });
+});
+
+// =============================================================================
+// locateEditFragment
+// =============================================================================
+
+describe('locateEditFragment — undo-seam intent', () => {
+    it('exact seam: returns insertion point at end of beforeContext', () => {
+        const html = '<p>before-text</p><p>after-text</p>';
+        const beforeCtx = '<p>before-text</p>';
+        const afterCtx = '<p>after-text</p>';
+
+        const result = locateEditFragment({
+            strippedHtml: html,
+            intent: { kind: 'undo-seam', beforeContext: beforeCtx, afterContext: afterCtx },
+        });
+
+        expect(result.kind).toBe('seam');
+        if (result.kind === 'seam') {
+            expect(result.insertionPoint).toBe(beforeCtx.length);
+            expect(result.gapEnd).toBeUndefined();
+        }
+    });
+
+    it('proximity seam: returns gapEnd when editor inserted whitespace at the seam', () => {
+        const html = '<p>before-text</p>   <p>after-text</p>';
+        const beforeCtx = '<p>before-text</p>';
+        const afterCtx = '<p>after-text</p>';
+
+        const result = locateEditFragment({
+            strippedHtml: html,
+            intent: { kind: 'undo-seam', beforeContext: beforeCtx, afterContext: afterCtx },
+        });
+
+        expect(result.kind).toBe('seam');
+        if (result.kind === 'seam') {
+            expect(result.insertionPoint).toBe(beforeCtx.length);
+            expect(result.gapEnd).toBe(beforeCtx.length + 3);
+        }
+    });
+
+    it('beforeOnly: uses beforeCtx end when afterCtx is missing', () => {
+        const html = '<p>before-text</p>tail';
+        const result = locateEditFragment({
+            strippedHtml: html,
+            intent: { kind: 'undo-seam', beforeContext: '<p>before-text</p>' },
+        });
+        expect(result.kind).toBe('seam');
+        if (result.kind === 'seam') {
+            expect(result.insertionPoint).toBe(18);
+        }
+    });
+
+    it('afterOnly: uses afterCtx start when beforeCtx is missing', () => {
+        const html = 'head<p>after-text</p>';
+        const result = locateEditFragment({
+            strippedHtml: html,
+            intent: { kind: 'undo-seam', afterContext: '<p>after-text</p>' },
+        });
+        expect(result.kind).toBe('seam');
+        if (result.kind === 'seam') {
+            expect(result.insertionPoint).toBe(4);
+        }
+    });
+
+    it('returns not-found when neither context appears in the note', () => {
+        const result = locateEditFragment({
+            strippedHtml: '<p>unrelated content</p>',
+            intent: { kind: 'undo-seam', beforeContext: '<p>nope</p>', afterContext: '<p>also-nope</p>' },
+        });
+        expect(result.kind).toBe('not-found');
+    });
+
+    it('whole-note deletion: empty before/after contexts resolve to offset 0 (regression)', () => {
+        // When a delete edit removes the entire note body, the validator captures
+        // both contexts as empty strings. The seam is empty and must locate at 0
+        // so undo can splice the deleted content back at the start.
+        const result = locateEditFragment({
+            strippedHtml: '',
+            intent: { kind: 'undo-seam', beforeContext: '', afterContext: '' },
+        });
+        expect(result.kind).toBe('seam');
+        if (result.kind === 'seam') {
+            expect(result.insertionPoint).toBe(0);
+            expect(result.gapEnd).toBeUndefined();
+        }
+    });
+
+    it('deletion leaving only the footer: empty contexts still locate at offset 0', () => {
+        // Same scenario but a footer remained in the note. Splicing at 0 means
+        // the restored content goes back before the footer, matching the prior
+        // inline behavior.
+        const result = locateEditFragment({
+            strippedHtml: '<p>--- Edited by Beaver ---</p>',
+            intent: { kind: 'undo-seam', beforeContext: '', afterContext: '' },
+        });
+        expect(result.kind).toBe('seam');
+        if (result.kind === 'seam') {
+            expect(result.insertionPoint).toBe(0);
+        }
+    });
+});
+
+describe('locateEditFragment — undo-fragment intent', () => {
+    it('exact path: returns the unique indexOf range', () => {
+        const html = '<p>head</p><p>fragment-applied</p><p>tail</p>';
+        const expected = '<p>fragment-applied</p>';
+
+        const result = locateEditFragment({
+            strippedHtml: html,
+            intent: { kind: 'undo-fragment', expectedHtml: expected, libraryId: 1 },
+        });
+        expect(result.kind).toBe('range');
+        if (result.kind === 'range') {
+            expect(result.via).toBe('exact');
+            expect(html.substring(result.start, result.end)).toBe(expected);
+        }
+    });
+
+    it('exact path with duplicates: prefers context-bracketed occurrence', () => {
+        const expected = '<p>fragment</p>';
+        const html =
+            '<p>alpha</p>' + expected + '<p>between</p>' + expected + '<p>omega</p>';
+        const beforeCtx = '<p>between</p>';
+        const afterCtx = '<p>omega</p>';
+
+        const result = locateEditFragment({
+            strippedHtml: html,
+            intent: {
+                kind: 'undo-fragment',
+                expectedHtml: expected,
+                beforeContext: beforeCtx,
+                afterContext: afterCtx,
+                libraryId: 1,
+            },
+        });
+
+        expect(result.kind).toBe('range');
+        if (result.kind === 'range') {
+            // Should pick the SECOND occurrence (between/omega bracket)
+            expect(result.start).toBe(html.indexOf(expected, html.indexOf(expected) + 1));
+            expect(result.via).toBe('exact');
+        }
+    });
+
+    it('fuzzy path: recovers via context anchors when exact match fails', () => {
+        const expected = '<p>fragment-applied</p>';
+        // Note has the fragment with extra inter-tag whitespace
+        const html = '<p>head</p>\n<p>fragment-applied</p>\n<p>tail</p>';
+        // Exact indexOf works here; force fuzzy by making expected slightly different
+        const stale = '<p>fragment-applied OLD</p>';
+
+        const result = locateEditFragment({
+            strippedHtml: html,
+            intent: {
+                kind: 'undo-fragment',
+                expectedHtml: stale,
+                beforeContext: '<p>head</p>',
+                afterContext: '<p>tail</p>',
+                libraryId: 1,
+                allowFuzzy: true,
+            },
+        });
+        // Stale text won't match by content; expect not-found (text-content
+        // fallback fails because content differs)
+        expect(result.kind).toBe('not-found');
+    });
+
+    it('allowFuzzy=false: exact-only, returns not-found on mismatch', () => {
+        const result = locateEditFragment({
+            strippedHtml: '<p>actual</p>',
+            intent: {
+                kind: 'undo-fragment',
+                expectedHtml: '<p>missing</p>',
+                libraryId: 1,
+                allowFuzzy: false,
+            },
+        });
+        expect(result.kind).toBe('not-found');
     });
 });

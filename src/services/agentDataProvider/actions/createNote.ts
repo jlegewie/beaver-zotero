@@ -8,7 +8,8 @@ import { activeRunAtom } from '../../../../react/agents/atoms';
 import { renderToHTML } from '../../../../react/utils/citationRenderers';
 import { preloadPageLabelsForContent } from '../../../../react/utils/pageLabels';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from '../../../../react/utils/noteActions';
-import { getOrSimplify, getLatestNoteHtml } from '../../../utils/noteHtmlSimplifier';
+import { getOrSimplify } from '../../../utils/noteHtmlSimplifier';
+import { getLatestNoteHtml } from '../../../utils/noteEditorIO';
 import {
     WSAgentActionValidateRequest,
     WSAgentActionValidateResponse,

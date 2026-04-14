@@ -26,7 +26,7 @@ vi.mock('../../../react/utils/batchFindExistingReferences', () => ({
     BatchReferenceCheckItem: {},
 }));
 
-import { stripPartialSimplifiedElements } from '../../../src/utils/noteHtmlSimplifier';
+import { stripPartialSimplifiedElements } from '../../../src/utils/editNoteStrippers';
 
 // =============================================================================
 // Helper

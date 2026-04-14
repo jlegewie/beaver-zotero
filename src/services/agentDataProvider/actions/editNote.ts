@@ -3,25 +3,33 @@ import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { EditNoteProposedData, type EditNoteOperation } from '../../../../react/types/agentActions/editNote';
 import {
     getOrSimplify,
-    expandToRawHtml,
-    stripDataCitationItems,
-    extractDataCitationItems,
-    rebuildDataCitationItems,
-    getLatestNoteHtml,
     invalidateSimplificationCache,
+    normalizeNoteHtml,
+    type SimplificationMetadata,
+} from '../../../utils/noteHtmlSimplifier';
+import {
     checkDuplicateCitations,
     validateNewString,
     checkNewCitationItemsExist,
     applyOldStringEnrichment,
+} from '../../../utils/editNoteValidation';
+import {
+    expandToRawHtml,
     preloadPageLabelsForNewCitations,
+    type ExternalRefContext,
+} from '../../../utils/noteCitationExpand';
+import {
+    getLatestNoteHtml,
     waitForPMNormalization,
     waitForNoteSaveStabilization,
     flushLiveEditorToDB,
+} from '../../../utils/noteEditorIO';
+import {
+    stripDataCitationItems,
+    extractDataCitationItems,
+    rebuildDataCitationItems,
     hasSchemaVersionWrapper,
-    normalizeNoteHtml,
-    type ExternalRefContext,
-    type SimplificationMetadata,
-} from '../../../utils/noteHtmlSimplifier';
+} from '../../../utils/noteWrapper';
 import {
     locateEditTarget,
     resolveEditTargetAtRuntime,

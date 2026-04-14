@@ -19,17 +19,23 @@
  */
 
 import {
-    expandToRawHtml,
     countOccurrences,
+    type SimplificationMetadata,
+} from '../../../utils/noteHtmlSimplifier';
+import { stripNoteWrapperDiv } from '../../../utils/noteWrapper';
+import {
+    expandToRawHtml,
+    type ExternalRefContext,
+} from '../../../utils/noteCitationExpand';
+import {
     decodeHtmlEntities,
     encodeTextEntities,
     ENTITY_FORMS,
+} from '../../../utils/noteHtmlEntities';
+import {
     stripPartialSimplifiedElements,
     stripSpuriousWrappingTags,
-    stripNoteWrapperDiv,
-    type SimplificationMetadata,
-    type ExternalRefContext,
-} from '../../../utils/noteHtmlSimplifier';
+} from '../../../utils/editNoteStrippers';
 import type { EditNoteOperation } from '../../../../react/types/agentActions/editNote';
 
 // =============================================================================

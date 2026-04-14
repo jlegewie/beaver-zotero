@@ -20,17 +20,23 @@ import { logger } from '../../src/utils/logger';
 import type { EditNoteOperation } from '../types/agentActions/editNote';
 import {
     getOrSimplify,
+    normalizeNoteHtml,
+} from '../../src/utils/noteHtmlSimplifier';
+import {
     expandToRawHtml,
+    type ExternalRefContext,
+} from '../../src/utils/noteCitationExpand';
+import { getLatestNoteHtml } from '../../src/utils/noteEditorIO';
+import {
     stripDataCitationItems,
     extractDataCitationItems,
     rebuildDataCitationItems,
-    getLatestNoteHtml,
-    normalizeNoteHtml,
+} from '../../src/utils/noteWrapper';
+import {
     decodeHtmlEntities,
     encodeTextEntities,
     ENTITY_FORMS,
-    type ExternalRefContext,
-} from '../../src/utils/noteHtmlSimplifier';
+} from '../../src/utils/noteHtmlEntities';
 import { store } from '../store';
 import {
     externalReferenceMappingAtom,

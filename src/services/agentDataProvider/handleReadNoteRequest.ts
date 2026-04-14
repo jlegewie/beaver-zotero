@@ -6,7 +6,8 @@
  */
 
 import { logger } from '../../utils/logger';
-import { getOrSimplify, getLatestNoteHtml } from '../../utils/noteHtmlSimplifier';
+import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
+import { getLatestNoteHtml } from '../../utils/noteEditorIO';
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,

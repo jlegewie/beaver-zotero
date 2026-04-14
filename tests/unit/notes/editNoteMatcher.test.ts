@@ -26,9 +26,9 @@ vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
 // Identity expansion: simplified == raw for these tests. All other primitives
 // (entity encode/decode, NFKC via String.prototype, countOccurrences, strip*)
 // are exercised for real — they encapsulate the behavior we want to verify.
-vi.mock('../../../src/utils/noteHtmlSimplifier', async () => {
-    const actual = await vi.importActual<typeof import('../../../src/utils/noteHtmlSimplifier')>(
-        '../../../src/utils/noteHtmlSimplifier'
+vi.mock('../../../src/utils/noteCitationExpand', async () => {
+    const actual = await vi.importActual<typeof import('../../../src/utils/noteCitationExpand')>(
+        '../../../src/utils/noteCitationExpand'
     );
     return {
         ...actual,
