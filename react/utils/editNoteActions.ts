@@ -8,29 +8,39 @@ import type { EditNoteResultData, EditNoteOperation } from '../types/agentAction
 import { logger } from '../../src/utils/logger';
 import {
     getOrSimplify,
-    simplifyNoteHtml,
-    expandToRawHtml,
-    stripDataCitationItems,
-    extractDataCitationItems,
-    rebuildDataCitationItems,
     countOccurrences,
-    getLatestNoteHtml,
     invalidateSimplificationCache,
-    checkDuplicateCitations,
+} from '../../src/utils/noteHtmlSimplifier';
+import { checkDuplicateCitations } from '../../src/utils/editNoteValidation';
+import { findRangeByContexts } from '../../src/utils/editNoteRawPosition';
+import {
+    expandToRawHtml,
     preloadPageLabelsForNewCitations,
-    findRangeByContexts,
+    type ExternalRefContext,
+} from '../../src/utils/noteCitationExpand';
+import {
+    getLatestNoteHtml,
     waitForPMNormalization,
     waitForNoteSaveStabilization,
     flushLiveEditorToDB,
+} from '../../src/utils/noteEditorIO';
+import {
+    stripDataCitationItems,
+    extractDataCitationItems,
+    rebuildDataCitationItems,
     hasSchemaVersionWrapper,
+} from '../../src/utils/noteWrapper';
+import {
     decodeHtmlEntities,
     encodeTextEntities,
     ENTITY_FORMS,
-    type ExternalRefContext,
-} from '../../src/utils/noteHtmlSimplifier';
+} from '../../src/utils/noteHtmlEntities';
 import {
     resolveEditTargetAtRuntime,
-    buildExecutionZeroMatchMessage,
+    buildExecutionZeroMatchHint,
+    locateEditFragment,
+    findWhitespaceTolerant,
+    normalizeUndoComparisonHtml,
 } from '../../src/utils/editNotePositionLookup';
 import { clearNoteEditorSelection } from './sourceUtils';
 import { store } from '../store';
@@ -51,77 +61,6 @@ function getExternalRefContext(): ExternalRefContext {
         externalRefs: store.get(externalReferenceMappingAtom),
         externalItemMapping: store.get(externalReferenceItemMappingAtom),
     };
-}
-
-function normalizeUndoComparisonHtml(html: string, libraryId: number): string {
-    const { simplified } = simplifyNoteHtml(stripDataCitationItems(html), libraryId);
-    // Collapse all whitespace, then strip whitespace between HTML tags so that
-    // ProseMirror-inserted newlines (e.g. </p>\n</div> vs </p></div>) don't
-    // cause false mismatches during undo comparison.
-    return simplified.replace(/\s+/g, ' ').replace(/>\s+</g, '><').trim();
-}
-
-function findRangesByRawAnchors(
-    currentHtml: string,
-    targetHtml: string
-): Array<{ start: number; end: number }> {
-    const anchorLengths = [160, 120, 80, 40, 24, 16, 12];
-    const candidates: Array<{ start: number; end: number }> = [];
-    const seen = new Set<string>();
-    const MAX_PREFIX_MATCHES = 12;
-    const MAX_SUFFIX_MATCHES_PER_PREFIX = 8;
-
-    for (const prefixLen of anchorLengths) {
-        const resolvedPrefixLen = Math.min(prefixLen, targetHtml.length);
-        if (resolvedPrefixLen < 12) continue;
-
-        const prefix = targetHtml.slice(0, resolvedPrefixLen);
-        let prefixSearchFrom = 0;
-        let prefixMatches = 0;
-
-        while (prefixMatches < MAX_PREFIX_MATCHES) {
-            const start = currentHtml.indexOf(prefix, prefixSearchFrom);
-            if (start === -1) break;
-
-            prefixMatches += 1;
-
-            for (const suffixLen of anchorLengths) {
-                const resolvedSuffixLen = Math.min(suffixLen, targetHtml.length);
-                if (resolvedSuffixLen < 12) continue;
-
-                const suffix = targetHtml.slice(-resolvedSuffixLen);
-                let suffixSearchFrom = start + resolvedPrefixLen;
-                let suffixMatches = 0;
-
-                while (suffixMatches < MAX_SUFFIX_MATCHES_PER_PREFIX) {
-                    const suffixIdx = currentHtml.indexOf(suffix, suffixSearchFrom);
-                    if (suffixIdx === -1) break;
-
-                    suffixMatches += 1;
-
-                    const key = `${start}:${suffixIdx + resolvedSuffixLen}`;
-                    if (!seen.has(key)) {
-                        seen.add(key);
-                        candidates.push({ start, end: suffixIdx + resolvedSuffixLen });
-                    }
-
-                    suffixSearchFrom = suffixIdx + 1;
-                }
-            }
-
-            prefixSearchFrom = start + 1;
-        }
-    }
-
-    candidates.sort((a, b) => {
-        const lengthDiff = (a.end - a.start) - (b.end - b.start);
-        if (lengthDiff !== 0) {
-            return lengthDiff;
-        }
-        return a.start - b.start;
-    });
-
-    return candidates;
 }
 
 /**
@@ -188,45 +127,6 @@ function isAlreadyUndone(
 }
 
 const UNDO_CONTEXT_LENGTH = 200;
-
-/**
- * Search for `needle` in `haystack` with tolerance for whitespace differences
- * introduced by ProseMirror normalization (indentation, newlines between tags).
- *
- * - Existing whitespace runs in the needle match any whitespace (`\s+`).
- * - Adjacent tags (`><`) in the needle allow optional whitespace (`\s*`).
- *
- * Returns the matched range in the original haystack, or null if not found.
- */
-function findWhitespaceTolerant(
-    haystack: string,
-    needle: string,
-): { start: number; end: number } | null {
-    // Split needle into alternating [nonWS, ws, nonWS, ws, ...] segments
-    const segments = needle.split(/(\s+)/);
-    const regexParts: string[] = [];
-    for (let i = 0; i < segments.length; i++) {
-        if (i % 2 === 1) {
-            // Original whitespace → match any whitespace (one or more)
-            regexParts.push('\\s+');
-        } else if (segments[i].length > 0) {
-            // Literal text — escape for regex, then allow optional whitespace
-            // between adjacent tags (><) since PM may insert newlines there
-            let escaped = segments[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            escaped = escaped.replace(/></g, '>\\s*<');
-            regexParts.push(escaped);
-        }
-    }
-    const pattern = regexParts.join('');
-    if (!pattern) return null;
-    try {
-        const match = haystack.match(new RegExp(pattern));
-        if (!match || match.index === undefined) return null;
-        return { start: match.index, end: match.index + match[0].length };
-    } catch {
-        return null;
-    }
-}
 
 /**
  * Execute an edit_note agent action by applying string replacement on the note.
@@ -406,7 +306,7 @@ export async function executeEditNoteAction(
 
     // 8. Zero matches
     if (matchCount === 0) {
-        throw new Error(buildExecutionZeroMatchMessage(simplified, old_string ?? ''));
+        throw new Error(buildExecutionZeroMatchHint(simplified, old_string ?? '').message);
     }
 
     // 9. Perform replacement and capture context
@@ -703,71 +603,25 @@ export async function undoEditNoteAction(
             return;
         }
 
-        // Find the insertion point using before/after context.
-        // The editor may normalize whitespace at the deletion seam (e.g. collapse
-        // double newlines), so we cannot rely on an exact beforeCtx+afterCtx match.
-        // Instead, find beforeCtx individually and use its end as the insertion point,
-        // with afterCtx as a nearby sanity check.
-        const MAX_GAP = 10; // Allow up to 10 chars of whitespace normalization at the seam
-
-        // Strategy 1: exact seam match (ideal case)
-        const seam = (beforeCtx || '') + (afterCtx || '');
-        let insertionPoint = -1;
-        const seamIdx = strippedHtml.indexOf(seam);
-        if (seamIdx !== -1) {
-            insertionPoint = seamIdx + (beforeCtx || '').length;
-            logger(`undoEditNoteAction: exact seam match at ${seamIdx}`, 1);
-        }
-
-        // Strategy 2: find beforeCtx end, verify afterCtx is nearby
-        if (insertionPoint === -1 && beforeCtx) {
-            const beforeIdx = strippedHtml.indexOf(beforeCtx);
-            if (beforeIdx !== -1) {
-                const beforeEnd = beforeIdx + beforeCtx.length;
-                if (afterCtx) {
-                    const afterIdx = strippedHtml.indexOf(afterCtx, Math.max(0, beforeEnd - MAX_GAP));
-                    if (afterIdx !== -1 && Math.abs(afterIdx - beforeEnd) <= MAX_GAP) {
-                        // afterCtx is near the end of beforeCtx — use beforeEnd as insertion point.
-                        // Remove any whitespace the editor inserted between the two contexts.
-                        insertionPoint = beforeEnd;
-                        // Adjust: if there are extra chars between beforeEnd and afterIdx, the
-                        // insertion should replace that gap (it's editor-inserted whitespace)
-                        const gapSize = afterIdx - beforeEnd;
-                        logger(`undoEditNoteAction: beforeCtx+afterCtx proximity match (gap=${gapSize})`, 1);
-                        restoredHtml = strippedHtml.substring(0, beforeEnd)
-                            + undoOldHtml
-                            + strippedHtml.substring(afterIdx);
-                    }
-                } else {
-                    // No afterCtx — use beforeEnd directly
-                    insertionPoint = beforeEnd;
-                    logger(`undoEditNoteAction: using beforeCtx end only (no afterCtx)`, 1);
-                }
-            }
-        }
-
-        // Strategy 3: find afterCtx start (beforeCtx not found)
-        if (insertionPoint === -1 && afterCtx) {
-            const afterIdx = strippedHtml.indexOf(afterCtx);
-            if (afterIdx !== -1) {
-                insertionPoint = afterIdx;
-                logger(`undoEditNoteAction: using afterCtx start only (no beforeCtx match)`, 1);
-            }
-        }
-
-        if (insertionPoint === -1) {
+        // Locate the deletion seam, tolerating editor-inserted whitespace.
+        const seamLoc = locateEditFragment({
+            strippedHtml,
+            intent: { kind: 'undo-seam', beforeContext: beforeCtx, afterContext: afterCtx },
+        });
+        if (seamLoc.kind !== 'seam') {
             throw new Error(
                 'Cannot undo deletion: the note has been modified around the deletion point. '
                 + 'The surrounding context could not be found.'
             );
         }
-
-        // Build restored HTML (if not already set by proximity match above)
-        if (!restoredHtml) {
-            restoredHtml = strippedHtml.substring(0, insertionPoint)
-                + undoOldHtml
-                + strippedHtml.substring(insertionPoint);
-        }
+        logger(`undoEditNoteAction: deletion seam at ${seamLoc.insertionPoint}` +
+            (seamLoc.gapEnd !== undefined ? ` (gap=${seamLoc.gapEnd - seamLoc.insertionPoint})` : ''), 1);
+        // When the editor inserted whitespace between the two contexts, span
+        // the gap so the undo replaces it (gapEnd marks the start of afterCtx).
+        const sliceEnd = seamLoc.gapEnd ?? seamLoc.insertionPoint;
+        restoredHtml = strippedHtml.substring(0, seamLoc.insertionPoint)
+            + undoOldHtml
+            + strippedHtml.substring(sliceEnd);
     } else {
         // --- Non-deletion undo: reverse str-replace (new fragment → old fragment) ---
         let undoOldHtml = expandedOld!;
@@ -825,10 +679,9 @@ export async function undoEditNoteAction(
             return;
         }
 
-        if (!newStringFound) {
-            // Exact match failed — try fuzzy recovery via context anchors
-            if (operation === 'str_replace_all') {
-                // str_replace_all: use per-occurrence contexts to locate and replace each occurrence
+        if (operation === 'str_replace_all') {
+            if (!newStringFound) {
+                // str_replace_all fuzzy recovery: per-occurrence context anchors
                 const occCtxs = resultData?.undo_occurrence_contexts;
                 if (occCtxs && occCtxs.length > 0) {
                     restoredHtml = undoReplaceAllViaContexts(
@@ -838,89 +691,41 @@ export async function undoEditNoteAction(
                         logger(`undoEditNoteAction: restored ${occCtxs.length} replace_all occurrences via contexts on note ${noteId}`, 1);
                     }
                 }
+                if (!restoredHtml) {
+                    throw new Error(
+                        'Cannot undo: the note has been modified since this edit was applied. '
+                        + 'Neither the applied text nor the original text could be found.'
+                    );
+                }
             } else {
-                // Single occurrence: find via context anchors + raw anchors, then normalize-compare
-                const candidateRanges: Array<{ start: number; end: number; fromContext: boolean }> = [];
-                const seenRanges = new Set<string>();
-
-                const contextRange = findRangeByContexts(strippedHtml, beforeCtx, afterCtx, undoNewHtml.length);
-                if (contextRange) {
-                    const key = `${contextRange.start}:${contextRange.end}`;
-                    seenRanges.add(key);
-                    candidateRanges.push({ ...contextRange, fromContext: true });
-                }
-
-                for (const anchorRange of findRangesByRawAnchors(strippedHtml, undoNewHtml)) {
-                    const key = `${anchorRange.start}:${anchorRange.end}`;
-                    if (seenRanges.has(key)) {
-                        continue;
-                    }
-                    seenRanges.add(key);
-                    candidateRanges.push({ ...anchorRange, fromContext: false });
-                }
-
-                for (const candidateRange of candidateRanges) {
-                    const candidateHtml = strippedHtml.substring(candidateRange.start, candidateRange.end);
-                    const normalizedCandidate = normalizeUndoComparisonHtml(candidateHtml, library_id);
-                    const normalizedExpected = normalizeUndoComparisonHtml(undoNewHtml, library_id);
-
-                    if (normalizedCandidate !== normalizedExpected) {
-                        // Normalized HTML didn't match — PM may have restructured
-                        // the HTML (e.g., inline styles → semantic wrappers like
-                        // <strong>). Fall back to text-content comparison: if the
-                        // visible text is the same, PM only changed structure and
-                        // it's safe to trust the context anchors.
-                        //
-                        // IMPORTANT: Only allow this fallback for context-anchor
-                        // candidates (200 chars before + after), which provide
-                        // strong uniqueness guarantees. Raw anchor candidates are
-                        // less reliable and could false-positive on duplicate text.
-                        if (!candidateRange.fromContext) {
-                            continue;
-                        }
-                        const candidateText = candidateHtml.replace(/<[^>]+>/g, '').trim();
-                        const expectedText = undoNewHtml.replace(/<[^>]+>/g, '').trim();
-                        if (!candidateText || candidateText !== expectedText) {
-                            continue;
-                        }
-                        logger(`undoEditNoteAction: text-content match (PM restructured HTML) on note ${noteId}`, 1);
-                    }
-
-                    restoredHtml = strippedHtml.substring(0, candidateRange.start)
-                        + undoOldHtml
-                        + strippedHtml.substring(candidateRange.end);
-                    logger(`undoEditNoteAction: restored via fuzzy matching on note ${noteId}`, 1);
-                    break;
-                }
+                // Exact match path — undoNewHtml found verbatim
+                restoredHtml = strippedHtml.split(undoNewHtml).join(undoOldHtml);
             }
-
-            if (!restoredHtml) {
+        } else {
+            // Single-occurrence: one orchestrator call handles exact +
+            // duplicate disambiguation + fuzzy recovery.
+            const fragment = locateEditFragment({
+                strippedHtml,
+                intent: {
+                    kind: 'undo-fragment',
+                    expectedHtml: undoNewHtml,
+                    beforeContext: beforeCtx,
+                    afterContext: afterCtx,
+                    libraryId: library_id,
+                    allowFuzzy: true,
+                },
+            });
+            if (fragment.kind !== 'range') {
                 throw new Error(
                     'Cannot undo: the note has been modified since this edit was applied. '
                     + 'Neither the applied text nor the original text could be found.'
                 );
             }
-        }
-
-        if (!restoredHtml) {
-            // Exact match path — undoNewHtml was found in strippedHtml
-            if (operation === 'str_replace_all') {
-                restoredHtml = strippedHtml.split(undoNewHtml).join(undoOldHtml);
-            } else {
-                let idx = strippedHtml.indexOf(undoNewHtml);
-                // When undoNewHtml appears more than once (e.g. after a disambiguated
-                // duplicate-citation edit made the target look like another citation),
-                // indexOf alone picks the first match which may be the wrong one.
-                // Use context anchors to find the correct occurrence.
-                if (idx !== -1 && beforeCtx && strippedHtml.indexOf(undoNewHtml, idx + undoNewHtml.length) !== -1) {
-                    const ctxRange = findRangeByContexts(strippedHtml, beforeCtx, afterCtx, undoNewHtml.length);
-                    if (ctxRange) {
-                        idx = ctxRange.start;
-                    }
-                }
-                restoredHtml = strippedHtml.substring(0, idx) + undoOldHtml
-                    + strippedHtml.substring(idx + undoNewHtml.length);
+            if (fragment.via !== 'exact') {
+                logger(`undoEditNoteAction: restored via ${fragment.via} on note ${noteId}`, 1);
             }
+            restoredHtml = strippedHtml.substring(0, fragment.start) + undoOldHtml
+                + strippedHtml.substring(fragment.end);
         }
     }
 

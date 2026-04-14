@@ -26,7 +26,7 @@ vi.mock('../../../react/utils/batchFindExistingReferences', () => ({
     BatchReferenceCheckItem: {},
 }));
 
-import { findStructuralAnchorHint } from '../../../src/utils/noteHtmlSimplifier';
+import { findStructuralAnchorHint } from '../../../src/utils/editNoteHints';
 
 
 // =============================================================================

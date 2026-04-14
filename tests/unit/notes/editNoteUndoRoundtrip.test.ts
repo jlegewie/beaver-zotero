@@ -78,11 +78,13 @@ vi.mock('../../../src/services/agentActionsService', () => ({
 
 import {
     simplifyNoteHtml,
-    stripDataCitationItems,
-    rebuildDataCitationItems,
     invalidateSimplificationCache,
     normalizeNoteHtml,
 } from '../../../src/utils/noteHtmlSimplifier';
+import {
+    stripDataCitationItems,
+    rebuildDataCitationItems,
+} from '../../../src/utils/noteWrapper';
 import {
     executeEditNoteAction,
     undoEditNoteAction,

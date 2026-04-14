@@ -1000,6 +1000,23 @@ export interface FieldValidationErrorInfo {
     error_code: 'field_restricted' | 'field_unknown' | 'field_invalid_for_type';
 }
 
+/**
+ * Alternative snippet returned when an `old_string` lookup fails in a note
+ * edit. The backend surfaces these to the model so it can pick a candidate or
+ * rewrite `old_string` to match exactly. Snippets are pre-truncated on the
+ * plugin side — the backend must not re-truncate them.
+ */
+export interface ErrorCandidate {
+    snippet: string;
+    truncated: boolean;
+    via:
+        | 'whitespace_relaxed'
+        | 'word_overlap'
+        | 'inline_tag_drift'
+        | 'structural_anchor';
+    score: number;
+}
+
 /** Response to agent action validation request */
 export interface WSAgentActionValidateResponse {
     type: 'agent_action_validate_response';
@@ -1009,6 +1026,12 @@ export interface WSAgentActionValidateResponse {
     error_code?: string | null;
     /** Detailed list of field validation errors (for batch validation) */
     errors?: FieldValidationErrorInfo[];
+    /**
+     * Ranked alternative snippets when an edit_note old_string lookup fails.
+     * Present only with `error_code === 'old_string_not_found'`. Already
+     * truncated — do not re-truncate.
+     */
+    error_candidates?: ErrorCandidate[];
     /** Current value for before/after tracking. Shape depends on action_type. */
     current_value?: any;
     /**
@@ -1037,6 +1060,12 @@ export interface WSAgentActionExecuteResponse {
     success: boolean;
     error?: string | null;
     error_code?: string | null;
+    /**
+     * Ranked alternative snippets when an edit_note old_string lookup fails
+     * at execute time. Present only with `error_code === 'old_string_not_found'`.
+     * Already truncated — do not re-truncate.
+     */
+    error_candidates?: ErrorCandidate[];
     result_data?: Record<string, any>;
     /** Optional timing breakdown for diagnostics (e.g. create_item latency) */
     timing?: FrontendTimingMetadata;

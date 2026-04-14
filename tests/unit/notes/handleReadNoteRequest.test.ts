@@ -7,8 +7,12 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
         metadata: { elements: new Map() },
         isStale: false,
     })),
-    getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
     normalizeNoteHtml: vi.fn((html: string) => html),
+}));
+
+// Mock noteEditorIO
+vi.mock('../../../src/utils/noteEditorIO', () => ({
+    getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
 }));
 
 // Mock logger
@@ -37,7 +41,8 @@ vi.mock('../../../react/store', () => ({
 }));
 
 import { handleReadNoteRequest } from '../../../src/services/agentDataProvider/handleReadNoteRequest';
-import { getOrSimplify, getLatestNoteHtml } from '../../../src/utils/noteHtmlSimplifier';
+import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
+import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
 import type { WSReadNoteRequest } from '../../../src/services/agentProtocol';
 
 

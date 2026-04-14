@@ -59,22 +59,27 @@ vi.mock('../../../react/atoms/threads', () => ({
 
 import {
     simplifyNoteHtml,
-    expandToRawHtml,
-    stripDataCitationItems,
-    stripNoteWrapperDiv,
-    rebuildDataCitationItems,
     getOrSimplify,
     invalidateSimplificationCache,
     countOccurrences,
-    findFuzzyMatch,
-    checkDuplicateCitations,
-    validateNewString,
-    getLatestNoteHtml,
-    normalizePageLocator,
-    captureValidatedEditTargetContext,
     normalizeNoteHtml,
     SimplificationMetadata,
 } from '../../../src/utils/noteHtmlSimplifier';
+import {
+    checkDuplicateCitations,
+    validateNewString,
+} from '../../../src/utils/editNoteValidation';
+import { captureValidatedEditTargetContext } from '../../../src/utils/editNoteRawPosition';
+import {
+    expandToRawHtml,
+    normalizePageLocator,
+} from '../../../src/utils/noteCitationExpand';
+import {
+    stripDataCitationItems,
+    stripNoteWrapperDiv,
+    rebuildDataCitationItems,
+} from '../../../src/utils/noteWrapper';
+import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
 import { createCitationHTML } from '../../../src/utils/zoteroUtils';
 
 // =============================================================================

@@ -4,22 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Module Mocks (must be before imports)
 // =============================================================================
 
-vi.mock('../../../src/utils/noteHtmlSimplifier', () => {
-    // `applyOldStringEnrichment` delegates to `enrichOldStringCitationRefs`,
-    // mirroring the production wrapper so existing tests that mock
-    // `enrichOldStringCitationRefs` (including `.toHaveBeenCalled()` assertions)
-    // keep working without change.
-    const enrichMock = vi.fn(() => null as string | null);
-    return {
+vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     getOrSimplify: vi.fn((_noteId: string, rawHtml: string, _libId: number) => ({
         simplified: rawHtml.replace(/<[^>]+>/g, ''), // Crude strip-tags for testing
         metadata: { elements: new Map() },
         isStale: false,
     })),
-    expandToRawHtml: vi.fn((str: string, _metadata: any, _context: string) => str),
-    stripDataCitationItems: vi.fn((html: string) => html),
-    extractDataCitationItems: vi.fn(() => null),
-    rebuildDataCitationItems: vi.fn((html: string) => html),
     countOccurrences: vi.fn((haystack: string, needle: string) => {
         if (!needle) return 0;
         let count = 0;
@@ -27,34 +17,40 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => {
         while ((pos = haystack.indexOf(needle, pos)) !== -1) { count++; pos += needle.length; }
         return count;
     }),
-    getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
-    validateNewString: vi.fn(() => null),
-    findFuzzyMatch: vi.fn(() => null),
-    findStructuralAnchorHint: vi.fn(() => null),
-    findInlineTagDriftMatch: vi.fn(() => null),
-    findUniqueRawMatchPosition: vi.fn(() => null),
-    captureValidatedEditTargetContext: vi.fn(() => null),
-    findTargetRawMatchPosition: vi.fn(() => null),
     invalidateSimplificationCache: vi.fn(),
-    checkDuplicateCitations: vi.fn(() => null),
-    preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
-    waitForPMNormalization: vi.fn().mockResolvedValue(undefined),
-    waitForNoteSaveStabilization: vi.fn().mockResolvedValue(undefined),
-    flushLiveEditorToDB: vi.fn().mockResolvedValue(false),
-    hasSchemaVersionWrapper: vi.fn((html: string) => html.includes('data-schema-version=')),
+    normalizeNoteHtml: vi.fn((html: string) => html),
+}));
+
+vi.mock('../../../src/utils/editNoteValidation', () => {
+    // `applyOldStringEnrichment` delegates to `enrichOldStringCitationRefs`,
+    // mirroring the production wrapper so existing tests that mock
+    // `enrichOldStringCitationRefs` (including `.toHaveBeenCalled()` assertions)
+    // keep working without change.
+    const enrichMock = vi.fn(() => null as string | null);
+    return {
+        validateNewString: vi.fn(() => null),
+        checkNewCitationItemsExist: vi.fn(() => null),
+        checkDuplicateCitations: vi.fn(() => null),
+        enrichOldStringCitationRefs: enrichMock,
+        applyOldStringEnrichment: vi.fn((oldString: string | undefined, metadata: any) => {
+            if (!oldString) return oldString;
+            const enriched = enrichMock(oldString, metadata);
+            return enriched ?? oldString;
+        }),
+    };
+});
+
+vi.mock('../../../src/utils/noteHtmlEntities', () => ({
     decodeHtmlEntities: vi.fn((s: string) => s),
     encodeTextEntities: vi.fn((s: string) => s),
     ENTITY_FORMS: ['hex', 'decimal', 'named'],
-    stripPartialSimplifiedElements: vi.fn(() => null),
-    stripSpuriousWrappingTags: vi.fn(() => []),
-    normalizeNoteHtml: vi.fn((html: string) => html),
-    checkNewCitationItemsExist: vi.fn(() => null),
-    enrichOldStringCitationRefs: enrichMock,
-    applyOldStringEnrichment: vi.fn((oldString: string | undefined, metadata: any) => {
-        if (!oldString) return oldString;
-        const enriched = enrichMock(oldString, metadata);
-        return enriched ?? oldString;
-    }),
+}));
+
+vi.mock('../../../src/utils/noteWrapper', () => ({
+    stripDataCitationItems: vi.fn((html: string) => html),
+    extractDataCitationItems: vi.fn(() => null),
+    rebuildDataCitationItems: vi.fn((html: string) => html),
+    hasSchemaVersionWrapper: vi.fn((html: string) => html.includes('data-schema-version=')),
     stripNoteWrapperDiv: vi.fn((html: string) => {
         const trimmed = html.trim();
         if (!trimmed.startsWith('<div') || !trimmed.endsWith('</div>')) return html;
@@ -62,6 +58,43 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => {
         if (closeAngle === -1) return html;
         return trimmed.substring(closeAngle + 1, trimmed.length - 6);
     }),
+}));
+
+vi.mock('../../../src/utils/noteEditorIO', () => ({
+    getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
+    isNoteInEditor: vi.fn(() => false),
+    waitForPMNormalization: vi.fn().mockResolvedValue(undefined),
+    waitForNoteSaveStabilization: vi.fn().mockResolvedValue(undefined),
+    flushLiveEditorToDB: vi.fn().mockResolvedValue(false),
+}));
+
+vi.mock('../../../src/utils/noteCitationExpand', () => ({
+    expandToRawHtml: vi.fn((str: string, _metadata: any, _context: string) => str),
+    preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../../src/utils/editNoteStrippers', () => ({
+    stripPartialSimplifiedElements: vi.fn(() => null),
+    stripSpuriousWrappingTags: vi.fn(() => []),
+}));
+
+vi.mock('../../../src/utils/editNoteHints', () => ({
+    findCandidateSnippets: vi.fn(() => []),
+    findStructuralAnchorHint: vi.fn(() => null),
+    findInlineTagDriftMatch: vi.fn(() => null),
+    centerTruncate: vi.fn((text: string) => ({ snippet: text, truncated: false })),
+    DEFAULT_MAX_SNIPPET_LENGTH: 200,
+}));
+
+vi.mock('../../../src/utils/editNoteRawPosition', async () => {
+    const actual = await vi.importActual<typeof import('../../../src/utils/editNoteRawPosition')>(
+        '../../../src/utils/editNoteRawPosition'
+    );
+    return {
+        ...actual,
+        findUniqueRawMatchPosition: vi.fn(() => null),
+        captureValidatedEditTargetContext: vi.fn(() => null),
+        findTargetRawMatchPosition: vi.fn(() => null),
     };
 });
 
@@ -130,23 +163,33 @@ import { handleAgentActionValidateRequest } from '../../../src/services/agentDat
 import { handleAgentActionExecuteRequest } from '../../../src/services/agentDataProvider/handleAgentActionExecuteRequest';
 import {
     getOrSimplify,
-    expandToRawHtml,
-    stripDataCitationItems,
     countOccurrences,
-    getLatestNoteHtml,
+    invalidateSimplificationCache,
+} from '../../../src/utils/noteHtmlSimplifier';
+import {
     validateNewString,
-    findFuzzyMatch,
+    checkDuplicateCitations,
+    enrichOldStringCitationRefs,
+} from '../../../src/utils/editNoteValidation';
+import {
+    findCandidateSnippets,
     findInlineTagDriftMatch,
+} from '../../../src/utils/editNoteHints';
+import {
     findUniqueRawMatchPosition,
     captureValidatedEditTargetContext,
     findTargetRawMatchPosition,
-    invalidateSimplificationCache,
-    checkDuplicateCitations,
+} from '../../../src/utils/editNoteRawPosition';
+import { stripPartialSimplifiedElements } from '../../../src/utils/editNoteStrippers';
+import {
+    stripDataCitationItems,
     rebuildDataCitationItems,
+} from '../../../src/utils/noteWrapper';
+import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
+import {
+    expandToRawHtml,
     preloadPageLabelsForNewCitations,
-    stripPartialSimplifiedElements,
-    enrichOldStringCitationRefs,
-} from '../../../src/utils/noteHtmlSimplifier';
+} from '../../../src/utils/noteCitationExpand';
 import { getDeferredToolPreference } from '../../../src/services/agentDataProvider/utils';
 import { store } from '../../../react/store';
 import type {
@@ -261,7 +304,7 @@ beforeEach(() => {
     });
     vi.mocked(getLatestNoteHtml).mockImplementation((item: any) => item.getNote());
     vi.mocked(validateNewString).mockReturnValue(null);
-    vi.mocked(findFuzzyMatch).mockReturnValue(null);
+    vi.mocked(findCandidateSnippets).mockReturnValue([]);
     vi.mocked(getDeferredToolPreference).mockReturnValue('always_ask');
     vi.mocked(checkDuplicateCitations).mockReturnValue(null);
     vi.mocked(invalidateSimplificationCache).mockImplementation(() => {});
@@ -387,34 +430,43 @@ describe('validateEditNoteAction — failures', () => {
         expect(response.error_code).toBe('expansion_failed');
     });
 
-    it('old_string_not_found without fuzzy hint', async () => {
+    it('old_string_not_found without candidates', async () => {
         vi.mocked(countOccurrences).mockReturnValueOnce(0);
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
         expect(response.valid).toBe(false);
         expect(response.error_code).toBe('old_string_not_found');
-        expect(response.error).not.toContain('fuzzy');
+        expect(response.error).not.toContain('Closest matches');
+        expect(response.error_candidates).toBeUndefined();
     });
 
-    it('old_string_not_found with fuzzy hint', async () => {
+    it('old_string_not_found with candidate snippets', async () => {
         vi.mocked(countOccurrences).mockReturnValueOnce(0);
-        vi.mocked(findFuzzyMatch).mockReturnValueOnce('possible match here');
+        vi.mocked(findCandidateSnippets).mockReturnValueOnce([
+            { snippet: 'possible match here', truncated: false, via: 'word_overlap', score: 0.8 },
+            { snippet: 'another weaker line', truncated: false, via: 'word_overlap', score: 0.6 },
+        ]);
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
         expect(response.valid).toBe(false);
         expect(response.error_code).toBe('old_string_not_found');
+        expect(response.error).toContain('Closest matches');
         expect(response.error).toContain('possible match here');
+        expect(response.error_candidates).toEqual([
+            { snippet: 'possible match here', truncated: false, via: 'word_overlap', score: 0.8 },
+            { snippet: 'another weaker line', truncated: false, via: 'word_overlap', score: 0.6 },
+        ]);
     });
 
     it('old_string_not_found with inline-tag drift hint', async () => {
         // Simulate the case where old_string text matches a unique span in the
         // note, but is missing inline formatting tags (e.g. <strong>) that the
-        // note has. The drift branch should fire BEFORE the generic fuzzy match.
+        // note has. The drift branch should fire BEFORE the candidate search.
         vi.mocked(countOccurrences).mockReturnValueOnce(0);
         vi.mocked(findInlineTagDriftMatch).mockReturnValueOnce({
             noteSpan: 'experienced <strong>substantial</strong> negative effects',
             droppedTags: ['<strong>', '</strong>'],
         });
-        // findFuzzyMatch should NOT be consulted when drift detection succeeds.
-        const fuzzySpy = vi.mocked(findFuzzyMatch);
+        // findCandidateSnippets should NOT be consulted when drift detection succeeds.
+        const candidateSpy = vi.mocked(findCandidateSnippets);
 
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
 
@@ -429,8 +481,15 @@ describe('validateEditNoteAction — failures', () => {
         // both old_string and new_string (would break unbold edits).
         expect(response.error).not.toMatch(/in BOTH/i);
         expect(response.error).toMatch(/keep the same tags.*preserve|omit them.*remove/i);
-        // Drift branch short-circuits the generic fuzzy match.
-        expect(fuzzySpy).not.toHaveBeenCalled();
+        // Drift branch short-circuits the candidate search.
+        expect(candidateSpy).not.toHaveBeenCalled();
+        // Drift response attaches a single inline_tag_drift candidate.
+        expect(response.error_candidates).toEqual([{
+            snippet: 'experienced <strong>substantial</strong> negative effects',
+            truncated: false,
+            via: 'inline_tag_drift',
+            score: 1,
+        }]);
     });
 
     it('ambiguous_match (multiple matches, no str_replace_all)', async () => {
@@ -752,10 +811,12 @@ describe('validateEditNoteAction — partial element fallback', () => {
         expect(response.normalized_action_data!.new_string).toBe('. Ein theoretisch');
     });
 
-    it('falls through to fuzzy error when stripPartialSimplifiedElements returns null', async () => {
+    it('falls through to candidate-based error when stripPartialSimplifiedElements returns null', async () => {
         setupPartialElementMocks();
         vi.mocked(stripPartialSimplifiedElements).mockReturnValue(null);
-        vi.mocked(findFuzzyMatch).mockReturnValue('some fuzzy match');
+        vi.mocked(findCandidateSnippets).mockReturnValue([
+            { snippet: 'some fuzzy match', truncated: false, via: 'word_overlap', score: 0.7 },
+        ]);
 
         const req = makeValidateRequest({
             action_data: {
@@ -1000,6 +1061,27 @@ describe('trailing whitespace normalization in matching', () => {
         const response = await handleAgentActionValidateRequest(req);
         // "Hello\n\nworld" is not in the note, and trimming trailing \n won't help
         expect(response.valid).toBe(false);
+    });
+
+    it('execute trims merged insert_after replacement when note drift removed anchor newlines', async () => {
+        mockItem = makeMockItem({ getNote: vi.fn(() => 'hello') });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue('hello');
+
+        const req = makeExecuteRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                operation: 'insert_after',
+                old_string: 'hello\n\n',
+                new_string: 'hello\n\n world',
+            },
+        });
+
+        const response = await handleAgentActionExecuteRequest(req);
+        expect(response.success).toBe(true);
+        const savedHtml = mockItem.setNote.mock.calls[0][0];
+        expect(savedHtml).toMatch(/^hello world/);
     });
 
     it('rejects ambiguous match after trimming when operation is str_replace', async () => {

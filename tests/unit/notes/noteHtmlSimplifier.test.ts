@@ -31,28 +31,37 @@ vi.mock('../../../src/services/supabaseClient', () => ({
 
 import {
     simplifyNoteHtml,
-    expandToRawHtml,
     normalizeNoteHtml,
     getOrSimplify,
     invalidateSimplificationCache,
+    countOccurrences,
+    SimplificationMetadata,
+} from '../../../src/utils/noteHtmlSimplifier';
+import {
+    validateNewString,
+    checkDuplicateCitations,
+    enrichOldStringCitationRefs,
+} from '../../../src/utils/editNoteValidation';
+import {
+    findUniqueRawMatchPosition,
+    captureValidatedEditTargetContext,
+    findTargetRawMatchPosition,
+    findRangeByContexts,
+} from '../../../src/utils/editNoteRawPosition';
+import {
+    expandToRawHtml,
+    translatePageNumberToLabel,
+} from '../../../src/utils/noteCitationExpand';
+import {
+    isNoteInEditor,
+    getLatestNoteHtml,
+} from '../../../src/utils/noteEditorIO';
+import {
     stripDataCitationItems,
     extractDataCitationItems,
     stripNoteWrapperDiv,
     rebuildDataCitationItems,
-    validateNewString,
-    findFuzzyMatch,
-    countOccurrences,
-    findUniqueRawMatchPosition,
-    captureValidatedEditTargetContext,
-    findTargetRawMatchPosition,
-    checkDuplicateCitations,
-    enrichOldStringCitationRefs,
-    isNoteInEditor,
-    getLatestNoteHtml,
-    findRangeByContexts,
-    translatePageNumberToLabel,
-    SimplificationMetadata,
-} from '../../../src/utils/noteHtmlSimplifier';
+} from '../../../src/utils/noteWrapper';
 import { createCitationHTML } from '../../../src/utils/zoteroUtils';
 
 
@@ -1502,40 +1511,6 @@ describe('validateNewString', () => {
 
 
 // =============================================================================
-// findFuzzyMatch
-// =============================================================================
-
-describe('findFuzzyMatch', () => {
-    it('finds whitespace-relaxed exact match', () => {
-        const simplified = 'This is a   long\n   sentence with  whitespace.';
-        const result = findFuzzyMatch(simplified, 'long sentence with whitespace');
-        expect(result).toBeTruthy();
-        expect(result).toContain('long');
-    });
-
-    it('finds word overlap above 30% threshold', () => {
-        const simplified = '<p>The quick brown fox jumps over the lazy dog.</p>\n<p>Other content here.</p>';
-        // Enough word overlap with first line
-        const result = findFuzzyMatch(simplified, 'quick brown fox jumps');
-        expect(result).toBeTruthy();
-    });
-
-    it('returns null for match below 30% threshold', () => {
-        const simplified = '<p>The quick brown fox.</p>\n<p>Other content.</p>';
-        const result = findFuzzyMatch(simplified, 'completely unrelated words here now');
-        expect(result).toBeNull();
-    });
-
-    it('returns null for empty/short-word search', () => {
-        const simplified = '<p>Content here.</p>';
-        // All words <= 2 chars are filtered out
-        const result = findFuzzyMatch(simplified, 'a b c');
-        expect(result).toBeNull();
-    });
-});
-
-
-// =============================================================================
 // countOccurrences
 // =============================================================================
 
@@ -2174,6 +2149,59 @@ describe('findRangeByContexts', () => {
         expect(hintFragment).toContain('Item 4');
         expect(hintFragment).not.toContain('Item 2');
         expect(hintFragment).not.toContain('Item 3');
+    });
+
+    describe('policy parameter', () => {
+        it("policy='unique' returns the single range when context appears once", () => {
+            const html = '<p>before</p><p>middle</p><p>after</p>';
+            const result = findRangeByContexts(
+                html, '<p>before</p>', '<p>after</p>', undefined, 'unique',
+            );
+            expect(result).toEqual({
+                start: '<p>before</p>'.length,
+                end: '<p>before</p><p>middle</p>'.length,
+            });
+        });
+
+        it("policy='unique' returns null when both anchors yield multiple distinct ranges", () => {
+            const html = '<p>A</p>X<p>B</p>Y<p>A</p>Z<p>B</p>';
+            const result = findRangeByContexts(
+                html, '<p>A</p>', '<p>B</p>', undefined, 'unique',
+            );
+            expect(result).toBeNull();
+        });
+
+        it("policy='unique' for before-only: requires beforeCtx to appear exactly once", () => {
+            const ambiguous = '<p>head</p>middle<p>head</p>tail';
+            expect(
+                findRangeByContexts(ambiguous, '<p>head</p>', undefined, undefined, 'unique'),
+            ).toBeNull();
+
+            const unique = '<p>head</p>tail';
+            expect(
+                findRangeByContexts(unique, '<p>head</p>', undefined, undefined, 'unique'),
+            ).toEqual({ start: '<p>head</p>'.length, end: unique.length });
+        });
+
+        it("policy='first' (legacy default) returns the first valid pair", () => {
+            const html = '<p>A</p>X<p>B</p>Y<p>A</p>Z<p>B</p>';
+            const result = findRangeByContexts(
+                html, '<p>A</p>', '<p>B</p>', undefined, 'first',
+            );
+            // First valid pair: starts after first <p>A</p>, ends at first <p>B</p>
+            expect(result).toEqual({
+                start: '<p>A</p>'.length,
+                end: '<p>A</p>X'.length,
+            });
+        });
+
+        it("policy='best-length' is auto-selected when expectedLength provided", () => {
+            const html = '<p>A</p>XX<p>B</p>YY<p>A</p>X<p>B</p>';
+            // Length-1 target — should pick the second pair (gap = 1 char) over first (gap = 2)
+            const result = findRangeByContexts(html, '<p>A</p>', '<p>B</p>', 1);
+            expect(result).not.toBeNull();
+            expect(result!.end - result!.start).toBe(1);
+        });
     });
 });
 
@@ -2909,7 +2937,7 @@ describe('translatePageNumberToLabel', () => {
 // decodeHtmlEntities
 // =============================================================================
 
-import { decodeHtmlEntities } from '../../../src/utils/noteHtmlSimplifier';
+import { decodeHtmlEntities } from '../../../src/utils/noteHtmlEntities';
 
 describe('decodeHtmlEntities', () => {
     it('decodes &#x27; to apostrophe', () => {
@@ -2966,7 +2994,7 @@ describe('decodeHtmlEntities', () => {
 // encodeTextEntities
 // =============================================================================
 
-import { encodeTextEntities } from '../../../src/utils/noteHtmlSimplifier';
+import { encodeTextEntities } from '../../../src/utils/noteHtmlEntities';
 
 describe('encodeTextEntities', () => {
     it('encodes apostrophe to &#x27; in text', () => {

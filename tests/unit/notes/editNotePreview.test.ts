@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     getOrSimplify: vi.fn(),
+}));
+
+vi.mock('../../../src/utils/noteEditorIO', () => ({
     getLatestNoteHtml: vi.fn(),
 }));
 

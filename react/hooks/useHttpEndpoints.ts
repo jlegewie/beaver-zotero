@@ -457,6 +457,7 @@ async function handleAgentActionValidateHttpRequest(request: any) {
         valid: response.valid,
         error: response.error,
         error_code: response.error_code,
+        error_candidates: response.error_candidates,
         current_value: response.current_value,
         normalized_action_data: response.normalized_action_data,
         preference: response.preference,
@@ -478,6 +479,7 @@ async function handleAgentActionExecuteHttpRequest(request: any) {
         success: response.success,
         error: response.error,
         error_code: response.error_code,
+        error_candidates: response.error_candidates,
         result_data: response.result_data,
     };
 }
