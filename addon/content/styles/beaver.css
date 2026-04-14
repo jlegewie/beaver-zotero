@@ -416,6 +416,62 @@
     color: var(--fill-tertiary);
 }
 
+/* -----------------------------------------------------------
+ * Lexical-based rich input (replaces textarea in InputArea)
+ * --------------------------------------------------------- */
+
+[id^="beaver-pane-"] .beaver-lexical-root {
+    position: relative;
+    width: 100%;
+}
+
+/* ContentEditable shares .chat-input typography / sizing with the old
+   textarea so the rest of the UI is unchanged. */
+[id^="beaver-pane-"] .beaver-lexical-content {
+    min-height: calc(1.25em + 2px);
+    max-height: 12.5em;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    outline: none;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+/* Placeholder overlay - absolutely positioned and click-through. */
+[id^="beaver-pane-"] .beaver-lexical-placeholder {
+    position: absolute;
+    top: 1px;
+    left: 0;
+    pointer-events: none;
+    color: var(--fill-tertiary);
+    font-size: 13px;
+    line-height: 1.25;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* Mention pill - uses the same .source-button / .variant-outline styling
+   shared with MessageItemButton so pills feel native. */
+[id^="beaver-pane-"] .beaver-mention-pill {
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+    margin: 0 1px;
+}
+
+/* Slash-command pill - styled as a colored text token. */
+[id^="beaver-pane-"] .beaver-slash-command {
+    display: inline-block;
+    padding: 0 4px;
+    margin: 0 1px;
+    border-radius: 4px;
+    background-color: var(--fill-quinary);
+    color: var(--fill-primary);
+    font-weight: 500;
+    line-height: 1.25;
+}
+
 
 [id^="beaver-pane-"] .preference-input {
     font-family: system-ui, -apple-system, sans-serif;

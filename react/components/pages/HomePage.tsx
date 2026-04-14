@@ -12,7 +12,7 @@ import { threadWarningsAtom } from "../../atoms/warnings";
 
 interface HomePageProps {
     isWindow?: boolean;
-    inputRef: React.RefObject<HTMLTextAreaElement | null>;
+    inputRef: React.RefObject<HTMLElement | null>;
 }
 
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
@@ -6,7 +6,7 @@ import { currentMessageContentAtom, currentMessageItemsAtom } from '../../atoms/
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
-import SearchMenu, { MenuPosition } from '../ui/menus/SearchMenu';
+import { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
 import { logger } from '../../../src/utils/logger';
@@ -21,12 +21,14 @@ import { allRunsAtom } from '../../agents/atoms';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, dismissSoftCapWarningForThreadAtom, dismissedSoftCapWarningByThreadAtom, backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { useSlashMenu } from '../../hooks/useSlashMenu';
+import { LexicalEditorInput, LexicalEditorInputHandle } from './lexical/LexicalEditorInput';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
 
 interface InputAreaProps {
-    inputRef: React.RefObject<HTMLTextAreaElement | null>;
+    // Kept for backward-compat with callers that only need `.focus()`.
+    // The underlying element is now a contenteditable div managed by Lexical.
+    inputRef: React.RefObject<HTMLElement | null>;
     verticalPosition?: 'above' | 'below';
 }
 
@@ -52,6 +54,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     const backendHighTokenUsageRuns = useAtomValue(backendHighTokenUsageRunsAtom);
     const softCapTriggeredRuns = useAtomValue(softCapTriggeredRunsAtom);
     const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
+
+    // Imperative handle exposed by the Lexical editor (focus / clear).
+    const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -91,29 +96,14 @@ const InputArea: React.FC<InputAreaProps> = ({
         dismissedSoftCapRunId !== lastRun.id
     );
 
-    // Slash menu hook
-    const {
-        isSlashMenuOpen,
-        slashMenuPosition,
-        slashSearchQuery,
-        setSlashSearchQuery,
-        slashMenuItems,
-        handleSlashDismiss,
-        handleSlashMenuChange,
-        handleSlashTrigger,
-        handleSlashMenuKeyDown,
-    } = useSlashMenu(inputRef, verticalPosition);
+    // Slash handling now lives inside the Lexical editor (SlashCommandsPlugin).
+    // Legacy slash-menu state kept inert to avoid touching other call sites.
+    const isSlashMenuOpen = false;
 
     useEffect(() => {
-        inputRef.current?.focus();
+        // Focus on mount via the Lexical handle.
+        editorHandleRef.current?.focus();
     }, []);
-
-    useEffect(() => {
-        if (inputRef.current) {
-            inputRef.current.style.height = 'auto';
-            inputRef.current.style.height = `${inputRef.current.scrollHeight}px`;
-        }
-    }, [messageContent]);
 
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
@@ -161,23 +151,30 @@ const InputArea: React.FC<InputAreaProps> = ({
         setMessageContent('');
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        // Handle ⌘N (Mac) or Ctrl+N (Windows/Linux) for new thread
-        if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
-            e.preventDefault();
-            newThread();
-        }
-    };
-
     const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
         // Check if the click target is a button or within a button
         const isButtonClick = (e.target as Element).closest('button') !== null;
 
         // Only focus if not clicking a button and editing is enabled
-        if (!isButtonClick && inputRef.current) {
-            inputRef.current.focus();
+        if (!isButtonClick) {
+            editorHandleRef.current?.focus();
         }
     };
+
+    // Handle the editor's submit signal (Enter without Shift).
+    const handleEditorSubmit = useCallback(() => {
+        if (isPending) {
+            logger('handleEditorSubmit: Blocked - request already in progress');
+            return;
+        }
+        if (isAwaitingApproval) {
+            // Mirror old behavior: Enter does not reject-with-instructions,
+            // users must click the button.
+            return;
+        }
+        if (isSlashMenuOpen) return;
+        sendMessage(messageContent);
+    }, [isPending, isAwaitingApproval, isSlashMenuOpen, messageContent]);
 
     const handleDismissHighTokenWarning = (e: React.MouseEvent) => {
         e.preventDefault();
@@ -247,82 +244,34 @@ const InputArea: React.FC<InputAreaProps> = ({
                 setIsAddAttachmentMenuOpen={setIsAddAttachmentMenuOpen}
                 menuPosition={menuPosition}
                 setMenuPosition={setMenuPosition}
-                inputRef={inputRef as React.RefObject<HTMLTextAreaElement>}
+                inputRef={inputRef}
                 disabled={isAwaitingApproval}
                 verticalPosition={verticalPosition}
             />
 
-            {/* Slash command menu */}
-            <SearchMenu
-                menuItems={slashMenuItems}
-                isOpen={isSlashMenuOpen}
-                onClose={handleSlashDismiss}
-                position={slashMenuPosition}
-                verticalPosition={verticalPosition}
-                useFixedPosition={true}
-                width="250px"
-                searchQuery={slashSearchQuery}
-                setSearchQuery={setSlashSearchQuery}
-                onSearch={() => {}}
-                noResultsText="No actions found"
-                placeholder="Search actions..."
-                closeOnSelect={false}
-                showSearchInput={false}
-            />
-
             {/* Input Form */}
             <form onSubmit={handleSubmit} className="display-flex flex-col">
-                {/* Message Input  */}
+                {/* Message Input - Lexical-backed rich input with inline pills */}
                 <div className="mb-2 -ml-1">
-                    <textarea
-                        ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+                    <LexicalEditorInput
+                        ref={editorHandleRef}
                         value={messageContent}
-                        onChange={(e) => {
-                            const value = e.target.value;
-
-                            // When slash menu is open, track search query from typed text
-                            if (handleSlashMenuChange(value)) return;
-
-                            // Detect `/` trigger: at start or after whitespace/newline
-                            if (!isAddAttachmentMenuOpen && handleSlashTrigger(value, e.currentTarget.getBoundingClientRect())) return;
-
-                            // Don't open attachment menu when awaiting approval
-                            if (e.target.value.endsWith('@') && !isAwaitingApproval) {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
-                                setMenuPosition({
-                                    x: rect.left,
-                                    y,
-                                })
-                                setIsAddAttachmentMenuOpen(true);
-                            } else {
-                                setMessageContent(e.target.value);
-                            }
-                        }}
-                        onInput={(e) => {
-                            e.currentTarget.style.height = 'auto';
-                            e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
-                        }}
+                        onChange={setMessageContent}
+                        onSubmit={handleEditorSubmit}
                         placeholder={getPlaceholderText()}
-                        className="chat-input"
-                        onKeyDown={(e) => {
-                            // When slash menu is open, handle navigation and dismiss keys
-                            if (handleSlashMenuKeyDown(e)) return;
-                            handleKeyDown(e);
-                            // Submit on Enter (without Shift) - guard against pending to prevent race with button click
-                            // Don't trigger reject on Enter when awaiting approval (must click button)
-                            if (e.key === 'Enter' && !e.shiftKey && !isPending && !isAwaitingApproval && !isSlashMenuOpen) {
-                                e.preventDefault();
-                                handleSubmit(e as any);
-                            }
+                        ariaLabel="Message input"
+                        disabled={isAwaitingApproval}
+                        onContentEditableRef={(el) => {
+                            // Forward the Lexical content-editable element to the
+                            // parent's inputRef so legacy `.focus()` callers work.
+                            (inputRef as React.MutableRefObject<HTMLElement | null>).current = el;
                         }}
-                        rows={1}
                     />
                 </div>
 
                 {/* Button Row */}
                 <div className="display-flex flex-row items-center pt-2">
-                    <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} disabled={isAwaitingApproval} />
+                    <ModelSelectionButton inputRef={inputRef} disabled={isAwaitingApproval} />
                     <div className="flex-1" />
                     <div className="display-flex flex-row items-center gap-4">
                         <Tooltip

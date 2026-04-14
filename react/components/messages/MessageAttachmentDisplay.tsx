@@ -27,7 +27,7 @@ const MessageAttachmentDisplay = ({
     setIsAddAttachmentMenuOpen: (isAddAttachmentMenuOpen: boolean) => void;
     menuPosition: { x: number; y: number };
     setMenuPosition: (menuPosition: { x: number; y: number }) => void;
-    inputRef: React.RefObject<HTMLTextAreaElement>;
+    inputRef: React.RefObject<HTMLElement | null>;
     disabled?: boolean;
     verticalPosition?: 'above' | 'below';
 }) => {
