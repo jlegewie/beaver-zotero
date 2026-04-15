@@ -40,18 +40,103 @@ export function isRemoteAccessAvailable(item: Zotero.Item): boolean {
 const REMOTE_FAILURE_NOTIFY_INTERVAL_MS = 8 * 60 * 60 * 1000;
 let _remoteDownloadFailureLastNotifiedAt = 0;
 
-function notifyRemoteDownloadFailure(): void {
+const DISABLE_HINT = 'You can disable Beaver\'s remote file access in Settings \u203A Permissions.';
+
+/**
+ * Classify a download error into a user-facing title/text pair.
+ * Error messages originate from handleDownloadError() in utils/webAPI.ts —
+ * we match on distinctive substrings to surface a specific cause when we
+ * recognize it, and fall back to the generic message otherwise.
+ */
+function describeRemoteDownloadFailure(error: unknown): { title: string; text: string } {
+    const message = error instanceof Error ? error.message : String(error ?? '');
+
+    if (/Authentication failed for WebDAV/i.test(message)) {
+        return {
+            title: 'WebDAV Authentication Failed',
+            text: "Beaver couldn't authenticate with your WebDAV server. "
+                + 'Check your WebDAV username and password in Zotero \u203A Settings \u203A Sync. '
+                + DISABLE_HINT,
+        };
+    }
+
+    if (/Access forbidden.*Zotero API key/i.test(message)) {
+        return {
+            title: 'Zotero Access Denied',
+            text: "Beaver couldn't access your file on the Zotero server. "
+                + 'Ensure that your Zotero sync settings are configured correctly. '
+                + DISABLE_HINT,
+        };
+    }
+
+    if (/File not found on WebDAV server|File not found on server/i.test(message)) {
+        return {
+            title: 'Remote File Not Found',
+            text: "The file isn't available on your remote storage yet. "
+                + 'Make sure Zotero has finished syncing, or sync the file locally. '
+                + DISABLE_HINT,
+        };
+    }
+
+    if (/Rate limited by/i.test(message)) {
+        return {
+            title: 'Remote Storage Rate Limited',
+            text: 'Your remote storage is temporarily rate-limiting requests so that Beaver can\'t access the file.'
+                + DISABLE_HINT,
+        };
+    }
+
+    if (/server error/i.test(message)) {
+        return {
+            title: 'Remote Storage Server Error',
+            text: 'The remote storage server returned an error. This is usually temporary \u2014 try again shortly. '
+                + DISABLE_HINT,
+        };
+    }
+
+    if (/Download timeout|TimeoutException/i.test(message)) {
+        return {
+            title: 'Remote File Download Timed Out',
+            text: 'The download took too long to complete. Check your network connection or sync the file locally for faster access. '
+                + DISABLE_HINT,
+        };
+    }
+
+    if (/is offline/i.test(message)) {
+        return {
+            title: 'Zotero Is Offline',
+            text: 'Zotero is currently offline, so remote files can\u2019t be downloaded. Reconnect and try again.',
+        };
+    }
+
+    if (/Network error/i.test(message)) {
+        return {
+            title: 'Network Error',
+            text: "Beaver couldn't reach your remote storage. Check your internet connection and try again. "
+                + DISABLE_HINT,
+        };
+    }
+
+    return {
+        title: 'Remote File Download Failed',
+        text: "Couldn't download a remotely stored attachment. This is usually a network or server issue. For faster, more reliable access, sync the file locally in Zotero. "
+            + DISABLE_HINT,
+    };
+}
+
+function notifyRemoteDownloadFailure(error: unknown): void {
     const now = Date.now();
     if (now - _remoteDownloadFailureLastNotifiedAt < REMOTE_FAILURE_NOTIFY_INTERVAL_MS) return;
     _remoteDownloadFailureLastNotifiedAt = now;
+
+    const { title, text } = describeRemoteDownloadFailure(error);
 
     try {
         store.set(addPopupMessageAtom, {
             id: 'remote-download-failed',
             type: 'warning',
-            title: 'Remote File Download Failed',
-            text: "Couldn't download a remotely stored attachment. This is usually a network or server issue. For faster, more reliable access, sync the file locally in Zotero. "
-                + 'You can disable remote file access in Settings \u203A Permissions.',
+            title,
+            text,
             expire: false,
         });
     } catch (error) {
@@ -118,7 +203,7 @@ export async function loadPdfData(
     try {
         data = await downloadPromise;
     } catch (error) {
-        notifyRemoteDownloadFailure();
+        notifyRemoteDownloadFailure(error);
         throw error;
     } finally {
         _remoteInflight.delete(cacheKey);
