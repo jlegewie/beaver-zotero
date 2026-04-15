@@ -204,9 +204,10 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const expansionState = useAtomValue(toolExpandedAtom);
     const setExpanded = useSetAtom(setToolExpandedAtom);
     const hasExistingExpandState = expansionState[expansionKey] !== undefined;
-    const isExpanded =
-        expansionState[expansionKey]
-        ?? (hasPendingApprovals || (errorCount > 0 && reapplicableActions.length === 0 && appliedCount === 0));
+    const isExpanded = hasStreamingChild
+        ? false
+        : (expansionState[expansionKey]
+            ?? (hasPendingApprovals || (errorCount > 0 && reapplicableActions.length === 0 && appliedCount === 0)));
 
     const prevHasPendingApprovalsRef = useRef(hasPendingApprovals);
     const hasInitializedRef = useRef(false);
@@ -588,8 +589,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     ]);
 
     const toggleExpanded = useCallback(() => {
+        if (hasStreamingChild) return;
         setExpanded({ key: expansionKey, expanded: !isExpanded });
-    }, [setExpanded, expansionKey, isExpanded]);
+    }, [setExpanded, expansionKey, isExpanded, hasStreamingChild]);
 
     const baseConfig = STATUS_CONFIGS[aggregateStatus];
     const headerIcon = (() => {
@@ -653,8 +655,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                     `}
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={isExpanded}
-                    onClick={isProcessing ? () => {} : toggleExpanded}
-                    disabled={isProcessing}
+                    onClick={isProcessing || hasStreamingChild ? () => {} : toggleExpanded}
+                    disabled={isProcessing || hasStreamingChild}
                     onMouseEnter={() => setIsHovered(true)}
                     onMouseLeave={() => setIsHovered(false)}
                 >
@@ -705,6 +707,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                             variant="ghost-secondary"
                             iconClassName="scale-12"
                             onClick={toggleExpanded}
+                            disabled={hasStreamingChild}
                         />
                     </Tooltip>
                 </div>
