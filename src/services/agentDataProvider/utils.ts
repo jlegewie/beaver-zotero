@@ -50,9 +50,8 @@ function notifyRemoteDownloadFailure(): void {
             id: 'remote-download-failed',
             type: 'warning',
             title: 'Remote File Download Failed',
-            text: 'A remotely stored attachment couldn\'t be downloaded. '
-                + 'To avoid this, sync your files locally in Zotero. '
-                + 'You can also disable remote file access in Settings \u203A Permissions.',
+            text: "Couldn't download a remotely stored attachment. This is usually a network or server issue. For faster, more reliable access, sync the file locally in Zotero. "
+                + 'You can disable remote file access in Settings \u203A Permissions.',
             expire: false,
         });
     } catch (error) {
