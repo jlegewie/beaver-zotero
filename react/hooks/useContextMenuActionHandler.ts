@@ -41,7 +41,10 @@ export function useContextMenuActionHandler() {
                 if (itemIds.length > 0) {
                     const items = await Zotero.Items.getAsync(itemIds);
                     if (items.length > 0) {
-                        await Zotero.Items.loadDataTypes(items, ['itemData']);
+                        const dataTypes = targetType === 'note'
+                            ? ['itemData', 'note']
+                            : ['itemData'];
+                        await Zotero.Items.loadDataTypes(items, dataTypes);
                         setCurrentMessageItems(items);
                     }
                 } else {

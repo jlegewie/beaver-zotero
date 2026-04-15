@@ -13,6 +13,7 @@ import { TextSelection } from "../types/attachments/apiTypes";
 import { ZoteroTag } from "../types/zotero";
 import { processingModeAtom } from "./profile";
 import { ProcessingMode } from "../types/profile";
+import { currentNoteItemAtom } from "./zoteroContext";
 
 
 /**
@@ -118,6 +119,14 @@ export const currentReaderAttachmentAtom = atom<Zotero.Item | null>(null);
 */
 export const currentReaderAttachmentKeyAtom = atom<string | null>((get) => {
     const item = get(currentReaderAttachmentAtom);
+    return item?.key || null;
+});
+
+/**
+* Current note tab item key (note open in its own tab)
+*/
+export const currentNoteTabItemKeyAtom = atom<string | null>((get) => {
+    const item = get(currentNoteItemAtom);
     return item?.key || null;
 });
 
@@ -230,7 +239,7 @@ export const addItemsToCurrentMessageItemsAtom = atom(
 
         // Pre-filter items using sync filter to avoid unnecessary state change
         // (validation still runs to show error message)
-        const preValidatedItems = newItems.filter((i) => syncingItemFilter(i) || i.isAnnotation());
+        const preValidatedItems = newItems.filter((i) => syncingItemFilter(i) || i.isAnnotation() || i.isNote());
 
         // Add items immediately (optimistic update)
         set(currentMessageItemsAtom, [...currentItems, ...preValidatedItems]);
@@ -268,10 +277,11 @@ async function validateItemsInBackground(
     logger(`validateItemsInBackground: Using ${processingMode} mode with validation type ${validationType}`, 3);
     
     try {
-        // Separate regular items from standalone attachments and annotations
+        // Separate regular items from standalone attachments, annotations, and notes
         const regularItems = items.filter((item) => item.isRegularItem());
         const attachments = items.filter((item) => item.isAttachment());
         const annotations = items.filter((item) => item.isAnnotation());
+        const notes = items.filter((item) => item.isNote());
         
         // Validate regular items using mode-aware batch validation (item + all attachments)
         const regularItemValidationPromises = regularItems.map((item) => 
@@ -311,11 +321,28 @@ async function validateItemsInBackground(
             });
         });
 
+        // Validate notes (always use LOCAL_ONLY/FRONTEND since notes only need local validation)
+        const noteValidationType = processingMode === ProcessingMode.FRONTEND
+            ? ItemValidationType.FRONTEND
+            : ItemValidationType.LOCAL_ONLY;
+
+        const noteValidationPromises = notes.map((item) => {
+            logger(`validateItemsInBackground: Validating note ${item.libraryID}-${item.key}`, 3);
+            return set(validateItemsAtom, {
+                items: [item],
+                validationType: noteValidationType,
+                forceRefresh: false
+            }).catch((error: any) => {
+                logger(`Validation failed for note ${item.key}: ${error.message}`, 2);
+                return null;
+            });
+        });
+
         // Validate parent items of annotations using appropriate validation type
         const parentItems = annotations
             .map((item) => item.parentItem ?? null)
             .filter((item): item is Zotero.Item => item !== null);
-        
+
         const parentItemValidationPromises = parentItems.map((item) =>
             set(validateItemsAtom, {
                 items: [item],
@@ -326,12 +353,13 @@ async function validateItemsInBackground(
                 return null;
             })
         );
-        
+
         // Wait for all validations to complete
         await Promise.all([
             ...regularItemValidationPromises,
             ...attachmentValidationPromises,
             ...annotationValidationPromises,
+            ...noteValidationPromises,
             ...parentItemValidationPromises
         ]);
         
@@ -426,7 +454,7 @@ export const updateMessageItemsFromZoteroSelectionAtom = atom(
     null,
     async (get, set, limit?: number) => {
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
-        const itemsFiltered = items.filter((item) => item.isRegularItem() || item.isAttachment());
+        const itemsFiltered = items.filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote());
         
         // Filter out items already in the thread
         const existingKeys = get(allUserAttachmentKeysAtom);

@@ -80,7 +80,7 @@ export interface CitationMetadata {
     
     // Common fields for all citation types
     /** Citation type discriminator */
-    citation_type?: "item" | "attachment" | "external_reference";
+    citation_type?: "item" | "attachment" | "external_reference" | "note";
     /** The display marker, e.g., '1', '2'.. */
     marker?: string;
     /** The author-year of the citation. */
@@ -227,12 +227,12 @@ export interface NormalizedCitationAttrs {
  */
 export function parseCitationAttributes(attributesStr: string): NormalizedCitationAttrs {
     const attrs: NormalizedCitationAttrs = {};
-    const attrRegex = /(\w+)="([^"]*)"/g;
+    const attrRegex = /(\w+)=(?:"([^"]*)"|'([^']*)')/g;
     let match: RegExpExecArray | null;
     
     while ((match = attrRegex.exec(attributesStr)) !== null) {
         let name = match[1];
-        const value = match[2];
+        const value = match[2] ?? match[3];
         
         // Normalize attribute names
         if (name === 'attachment_id') {

@@ -28,10 +28,12 @@ interface ZoteroItemsListProps {
     )[];
     oneLine?: boolean;
     muted?: boolean;
+    showParentItem?: boolean;
 }
 
 const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
     messageAttachments,
+    showParentItem = true,
     oneLine = false,
     muted = false
 }) => {
@@ -49,7 +51,7 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                         attachment.zotero_key
                     );
                     if (item) items.push({
-                        item: item.parentItem || item,
+                        item: showParentItem ? (item.parentItem || item) : item,
                         selectionItemId: item.id,
                         label: 'label' in attachment ? attachment.label : undefined,
                         faded: 'faded' in attachment ? attachment.faded : false

@@ -5,6 +5,7 @@ import {
     ackAgentActionsAtom,
     rejectAgentActionAtom,
     undoAgentActionAtom,
+    isCreateNoteAgentAction,
 } from '../../agents/agentActions';
 import { NoteProposedData } from '../../types/agentActions/base';
 import { AgentRun } from '../../agents/types';
@@ -189,7 +190,7 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
                     onMouseLeave={() => setIsHovered(false)}
                     onClick={isApplied ? handleReveal : undefined}
                 >
-                    <div className="display-flex mt-010" style={{ flexShrink: 0 }}>
+                    <div className="display-flex mt-015" style={{ flexShrink: 0 }}>
                         <Icon icon={getHeaderIcon()} className={getIconClassName()} />
                     </div>
                     <div
@@ -211,8 +212,8 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
                             {title}
                         </span>
                         {isApplied && (
-                            <span style={{ display: 'inline-flex', verticalAlign: 'start', marginLeft: '2px' }}>
-                                <Icon icon={ArrowUpRightIcon} className="font-color-secondary" size={10} />
+                            <span className="font-color-secondary scale-10" style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer', marginLeft: '1px' }}>
+                                <Icon icon={ArrowUpRightIcon} />
                             </span>
                         )}
                     </div>
@@ -290,7 +291,8 @@ const NoteAgentActionDisplay: React.FC<NoteAgentActionDisplayProps> = ({ run, ac
     const visibleActions = actions.filter(a =>
         // FOR NOW: Only show for auto-applied notes
         // a.status === 'pending' || a.status === 'error' || (a.status === 'applied' && isNoteAutoApplied(a.id))
-        (a.status === 'applied' && isNoteAutoApplied(a.id))
+        (a.status === 'applied' && isNoteAutoApplied(a.id)) ||
+        (a.status === 'applied' && isCreateNoteAgentAction(a))
     );
 
     // Pre-extract note blocks from run messages for content matching

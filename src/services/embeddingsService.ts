@@ -45,6 +45,17 @@ interface QueryEmbeddingResponse {
 }
 
 /**
+ * Sanitized error summary for indexing failures.
+ * Aggregated by (type, message) so a poison item shows up once with a count
+ * rather than as N separate entries.
+ */
+export interface IndexingErrorReport {
+    type: string;       // Error class name (e.g. 'TypeError', 'SessionExpiredError')
+    message: string;    // Sanitized message (no file paths, no PII, capped length)
+    count: number;      // How many items hit this exact error
+}
+
+/**
  * Stats for indexing completion report
  */
 export interface IndexingCompleteStats {
@@ -55,6 +66,7 @@ export interface IndexingCompleteStats {
     libraries_count: number;
     duration_ms: number;
     is_force_reindex: boolean;
+    errors?: IndexingErrorReport[];
 }
 
 /**

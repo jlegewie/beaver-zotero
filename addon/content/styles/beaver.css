@@ -21,12 +21,12 @@
     --tag-yellow-quinary: #ffd4000f;
     --tag-yellow-senary: #ffd40008;
 
-    --tag-orange-primary: #ff6666e5;
-    --tag-orange-secondary: #ff66668c;
-    --tag-orange-tertiary: #ff66664d;
-    --tag-orange-quarternary: #ff66661f;
-    --tag-orange-quinary: #ff66660f;
-    --tag-orange-senary: #ff666608;
+    --tag-orange-primary: #e8850ce5;
+    --tag-orange-secondary: #e8850c8c;
+    --tag-orange-tertiary: #e8850c4d;
+    --tag-orange-quarternary: #e8850c1f;
+    --tag-orange-quinary: #e8850c0f;
+    --tag-orange-senary: #e8850c08;
 
     --tag-red-primary: #ff6666e5;
     --tag-red-secondary: #ff66668c;
@@ -71,21 +71,17 @@
 }
 
 /* Separate window: sizing and constraints.
- * Set font-size on the root window element so rem units match the sidebar.
- * XUL windows default to 16px; Zotero sidepanes use ~13px.
- * Use !important to override Zotero.UIProperties.registerRoot() font scaling. */
+ * Root font-size is mirrored from the main Zotero window in beaverWindow.js
+ * so `rem` units resolve identically to the sidebar. */
 #beaver-window {
     min-width: 400px;
     min-height: 600px;
-    font-size: 13px !important;
 }
 
-/* Preferences window: sizing and constraints.
- * Use !important to override Zotero.UIProperties.registerRoot() font scaling. */
+/* Preferences window: sizing and constraints. */
 #beaver-preferences-window {
     min-width: 695px;
     min-height: 600px;
-    font-size: 13px !important;
 }
 
 /* Floating Popup Overlay - renders over main Zotero window, bottom-right */
@@ -890,6 +886,7 @@
 [id^="beaver-pane-"] .border-right-quinary { border-right: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-top-quinary { border-top: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-bottom-quinary { border-bottom: 1px solid var(--fill-quinary); }
+[id^="beaver-pane-"] .border-bottom-quarternary { border-bottom: 1px solid var(--fill-quarternary); }
 [id^="beaver-pane-"] .border-quinary { border: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-quarternary { border: 1px solid var(--material-mix-quarternary); }
 [id^="beaver-pane-"] .border-popup { border: 1px solid var(--fill-quarternary); }
@@ -926,12 +923,26 @@
     display: inline-block;
     margin: 0 0.1em;
     font-size: 1.1em !important;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 [id^="beaver-pane-"] .markdown .katex-display {
     /* Styles for display math block */
     padding: 0rem;
-    overflow: auto;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+[id^="beaver-pane-"] .markdown .katex-display > .katex {
+    /* Restore katex.css defaults inside display math — the .markdown .katex rule
+       above would otherwise override these to inline-block with overflow */
+    display: block;
+    margin: 0;
+    max-width: none;
+    overflow: visible;
 }
 
 [id^="beaver-pane-"] .markdown .katex-display > .katex {
@@ -2271,6 +2282,71 @@
     white-space: pre-wrap;
 }
 
+/* Context lines in diff - very subtle, no colored border */
+[id^="beaver-pane-"] .diff-context {
+    background-color: rgba(128, 128, 128, 0.04);
+    border-left-color: transparent !important;
+    color: var(--fill-secondary);
+    opacity: 0.7;
+}
+
+/* Separator between non-adjacent hunks */
+[id^="beaver-pane-"] .diff-separator {
+    background-color: transparent;
+    border-left-color: transparent !important;
+    color: var(--fill-tertiary);
+    opacity: 0.5;
+    font-size: 0.75rem;
+    padding: 1px 8px;
+}
+
+/* Character-level highlight for changed chars within deletion lines */
+[id^="beaver-pane-"] .diff-char-del {
+    background-color: rgba(186, 42, 41, 0.35);
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+/* Character-level highlight for changed chars within addition lines */
+[id^="beaver-pane-"] .diff-char-add {
+    background-color: rgba(20, 135, 85, 0.35);
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+/* Inline diff view — continuous text with interwoven deletions and additions */
+[id^="beaver-pane-"] .inline-diff-container {
+    font-size: 0.875rem;
+    line-height: 1.45;
+    padding: 4px 6px;
+    word-break: break-word;
+    border-radius: 1px;
+}
+
+[id^="beaver-pane-"] .inline-diff-para {
+    margin-top: 0.4em;
+}
+
+[id^="beaver-pane-"] .inline-diff-heading {
+    font-weight: 600;
+}
+
+[id^="beaver-pane-"] .inline-diff-del {
+    background-color: rgba(210, 40, 40, 0.25);
+    text-decoration: line-through;
+    border-radius: 2px;
+    padding: 1px 1px;
+    color: var(--fill-primary);
+    opacity: 0.7;
+}
+
+[id^="beaver-pane-"] .inline-diff-add {
+    background-color: rgba(16, 150, 72, 0.25);
+    border-radius: 2px;
+    padding: 1px 1px;
+    color: var(--fill-primary);
+}
+
 /* Feature Tour Styles */
 [id^="beaver-pane-"] .feature-tour-content {
     max-width: 100%;
@@ -2548,4 +2624,16 @@
 
 [id^="beaver-pane-"] .file-status-bar:hover {
     color: var(--fill-secondary);
+}
+
+
+[id^="beaver-pane-"] .two-line-header {
+    flex-wrap: wrap;
+    display: '-webkit-box';
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-break: break-word;
 }

@@ -10,6 +10,7 @@ import { navigateToAnnotation } from '../../utils/readerUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { toAnnotation } from '../../types/attachments/converters';
 import { selectItemById } from '../../../src/utils/selectItem';
+import { openNoteById } from '../../utils/sourceUtils';
 
 const MAX_ITEM_TEXT_LENGTH = 30;
 
@@ -33,7 +34,7 @@ interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
     canEdit?: boolean;
     disabled?: boolean;
     onRemove?: (item: Zotero.Item) => void;
-    isReaderAttachment?: boolean;
+    tabContextType?: 'reader' | 'note';
     showInvalid?: boolean;
     /** Optional collection key to reveal the item within when clicked */
     revealInCollectionKey?: string;
@@ -52,7 +53,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             disabled = false,
             canEdit = true,
             onRemove,
-            isReaderAttachment = false,
+            tabContextType,
             showInvalid = true,
             revealInCollectionKey,
             ...rest
@@ -80,8 +81,8 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // Determine display name based on item type
         const displayName = isAnnotation && annotation
             ? ANNOTATION_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation'
-            : item.isRegularItem() 
-                ? truncateText(getDisplayNameFromItem(item), MAX_ITEM_TEXT_LENGTH)
+            : (item.isRegularItem() || item.isNote())
+                ? item.isRegularItem() ? truncateText(getDisplayNameFromItem(item), MAX_ITEM_TEXT_LENGTH) : getDisplayNameFromItem(item)
                 : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH);
 
         // Handle remove
@@ -102,7 +103,13 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 navigateToAnnotation(item);
                 return;
             }
-            
+
+            // For notes, open the note in editor (tab or window per user preference)
+            if (item.isNote()) {
+                openNoteById(item.id);
+                return;
+            }
+
             // For regular items, select in Zotero
             try {
                 // If a collection key is provided, reveal in that collection
@@ -201,9 +208,11 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             >
                 {getIconElement()}
                 <span className={`truncate ${validation && !validation.isValid ? 'font-color-red' : ''}`}>
-                    {isReaderAttachment
+                    {tabContextType === 'reader'
                         ? (validation && !validation.isValid && showInvalid) ? 'Invalid File' : 'Current File'
-                        : displayName || '...'}
+                        : tabContextType === 'note'
+                            ? 'Current Note'
+                            : displayName || '...'}
                 </span>
                 
                 {/* Show arrow icon for annotations not in current reader */}

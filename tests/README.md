@@ -1,48 +1,77 @@
 # Tests
 
-Unit and integration tests for the Beaver Zotero plugin, using [Vitest](https://vitest.dev/).
+Unit, live, and integration tests for the Beaver Zotero plugin, using [Vitest](https://vitest.dev/).
 
 ## Running tests
 
 ```bash
-npm test                # unit tests (single run, no Zotero needed)
-npm run test:watch      # unit tests — re-run on file changes
-npm run test:integration  # integration tests (requires running Zotero)
-npx vitest run tests/some-file.test.ts  # run a single file
+npm test                                        # unit tests (no Zotero needed)
+npm run test:watch                              # unit tests in watch mode
+npm run test:live                               # live tests (requires running Zotero)
+npm run test:integration                        # integration tests (requires running Zotero)
+npm run test:all                                # all three tiers sequentially
+npx vitest run tests/unit/notes/editNote.test.ts   # single file
+npx vitest run -t "returns empty"               # tests matching name pattern
 ```
+
+## Three test tiers
+
+| Tier | Dir | File pattern | Zotero required? | Vitest config | Timeout |
+|------|-----|-------------|-------------------|---------------|---------|
+| **Unit** | `tests/unit/` | `*.test.ts` | No | `vitest.config.ts` | 10 s |
+| **Live** | `tests/live/` | `*.live.test.ts` | Yes | `vitest.live.config.ts` | 15 s |
+| **Integration** | `tests/integration/` | `*.integration.test.ts` | Yes | `vitest.integration.config.ts` | 30 s |
+
+- **Unit tests** run entirely in Node with mocked Zotero globals. Fast, CI-friendly, and the default for `npm test`.
+- **Live tests** hit a single Beaver HTTP endpoint against a running Zotero instance. Use these to verify individual handlers produce correct results with real data. Tests skip gracefully when Zotero is unavailable.
+- **Integration tests** exercise multi-step pipelines (e.g., HTTP request -> PDF extraction -> cache write -> cache read). Sequential execution, longer timeout.
 
 ## Directory structure
 
 ```
 tests/
-  setup.ts                  # Global setup — stubs Zotero/Mozilla globals
-  mocks/
-    mockDBConnection.ts     # Real SQLite (better-sqlite3) mock of Zotero.DBConnection
-  *.test.ts                 # Unit test files
-  integration/
-    helpers/
-      fixtures.ts           # Test fixture definitions (attachment refs by library_id + zotero_key)
-      zoteroClient.ts       # HTTP client wrapper for Beaver endpoints
-      cacheInspector.ts     # Cache state inspection/cleanup via /beaver/test/* endpoints
-    *.integration.test.ts   # Integration test files
+├── setup.ts                        # Global setup — stubs Zotero/Mozilla globals (unit only)
+├── mocks/
+│   └── mockDBConnection.ts         # In-memory SQLite mock of Zotero.DBConnection
+├── helpers/
+│   ├── factories.ts                # Mock Zotero object factories (createMockItem, etc.)
+│   ├── fixtures.ts                 # Attachment fixture definitions + Zotero port config
+│   ├── zoteroHttpClient.ts         # HTTP client for Beaver endpoints
+│   ├── zoteroAvailability.ts       # isZoteroAvailable() + skipIfNoZotero()
+│   └── cacheInspector.ts           # Cache inspection/cleanup via /beaver/test/* endpoints
+├── unit/
+│   ├── services/                   # Service layer tests (cache, DB, API)
+│   ├── notes/                      # Note editing, HTML processing, read handlers
+│   ├── handlers/                   # agentDataProvider handler tests
+│   └── utils/                      # Utility function tests
+├── live/                           # Single-handler tests against live Zotero
+│   └── *.live.test.ts
+└── integration/                    # Multi-step pipeline tests against live Zotero
+    └── *.integration.test.ts
 ```
 
-- **`setup.ts`** runs before every test file (configured in `vitest.config.ts` via `setupFiles`). It stubs the Zotero-specific globals (`IOUtils`, `PathUtils`, `Ci`, `Zotero`, `ztoolkit`) that the source code references at import time. All stubs use `vi.fn()` so individual tests can override behavior with `.mockResolvedValue()`, `.mockImplementation()`, etc.
-- **`mocks/mockDBConnection.ts`** wraps an in-memory better-sqlite3 database that implements the subset of `Zotero.DBConnection` used by `BeaverDB`: `queryAsync`, `executeTransaction`, `test`, `closeDatabase`. This gives tests real SQLite semantics (constraints, ON CONFLICT, COALESCE, etc.) without a running Zotero instance.
-
-## Writing a new test file
+## Writing a new unit test
 
 ### 1. Create the file
 
-Place it at `tests/<module-name>.test.ts`. Vitest picks up any file matching `tests/**/*.test.ts`.
+Place it in the appropriate subdirectory under `tests/unit/`:
+
+| Testing... | Directory |
+|-----------|-----------|
+| A service (`src/services/*`) | `tests/unit/services/` |
+| Note editing / HTML processing | `tests/unit/notes/` |
+| An agentDataProvider handler | `tests/unit/handlers/` |
+| A utility function | `tests/unit/utils/` |
+
+File name: `<module-name>.test.ts`. Vitest picks up `tests/unit/**/*.test.ts`.
 
 ### 2. Choose your mocking strategy
 
 **Testing database/SQL logic** — use `MockDBConnection` with real SQLite:
 
 ```ts
-import { MockDBConnection } from './mocks/mockDBConnection';
-import { BeaverDB } from '../src/services/database';
+import { MockDBConnection } from '../../mocks/mockDBConnection';
+import { BeaverDB } from '../../../src/services/database';
 
 let conn: MockDBConnection;
 let db: BeaverDB;
@@ -58,7 +87,7 @@ afterEach(async () => {
 });
 ```
 
-**Testing code that uses filesystem APIs** — override the IOUtils/PathUtils stubs from setup.ts:
+**Testing code that uses filesystem APIs** — override the IOUtils/PathUtils stubs from `setup.ts`:
 
 ```ts
 const mockIOUtils = (globalThis as any).IOUtils as {
@@ -72,33 +101,48 @@ const mockIOUtils = (globalThis as any).IOUtils as {
 };
 
 beforeEach(() => {
-  vi.clearAllMocks(); // reset all stubs to defaults from setup.ts
+  vi.clearAllMocks();
 });
 ```
 
-Then in individual tests, configure mock returns:
+Then configure per-test:
 
 ```ts
 mockIOUtils.exists.mockResolvedValue(true);
 mockIOUtils.stat.mockResolvedValue({ lastModified: 170000000000, size: 12345 });
-mockIOUtils.readUTF8.mockResolvedValue(JSON.stringify(someData));
 ```
 
-**Combining both** (e.g., testing a service that uses DB + filesystem):
+**Using shared factories** for mock Zotero items:
 
 ```ts
-beforeEach(async () => {
-  vi.clearAllMocks();
-  conn = new MockDBConnection();
-  db = new BeaverDB(conn as any);
-  await db.initDatabase('0.99.0');
-  cache = new AttachmentFileCache(db);
-});
+import { createMockItem, createMockNote, createMockAttachment } from '../../helpers/factories';
+
+const item = createMockItem({ id: 42, fields: { title: 'My Paper' } });
+item.getField('title'); // 'My Paper'
+
+const note = createMockNote({ noteHTML: '<div>content</div>' });
+const pdf = createMockAttachment({ contentType: 'application/pdf' });
 ```
 
-### 3. Structure your tests
+**Mocking transitive dependencies**: Code under `src/services/agentDataProvider/` transitively imports Supabase, auth atoms, and other React/store modules. If your test imports from this area, you'll need to mock these:
 
-Follow the existing convention:
+```ts
+vi.mock('../../../src/services/supabaseClient', () => ({
+    supabase: { auth: { getSession: vi.fn() } },
+}));
+vi.mock('../../../src/utils/zoteroUtils', () => ({
+    getZoteroUserIdentifier: vi.fn(() => ({ userID: '123', localUserKey: 'abc' })),
+    createCitationHTML: vi.fn(),
+}));
+vi.mock('../../../react/atoms/profile', () => ({ userIdentifierAtom: {} }));
+vi.mock('../../../react/store', () => ({
+    store: { get: vi.fn(), set: vi.fn(), sub: vi.fn() },
+}));
+```
+
+See `editNote.test.ts` for a comprehensive example.
+
+### 3. Structure your tests
 
 ```ts
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -116,71 +160,98 @@ describe('ModuleName', () => {
 });
 ```
 
-### 4. Key patterns to know
+### 4. Key patterns
 
-**SQLite booleans**: Zotero stores booleans as INTEGER (0/1). `BeaverDB` converts them to/from `boolean` in the application layer. Test both the DB-level values (0/1) and the converted values (true/false).
+- **SQLite booleans**: DB stores as INTEGER (0/1), `BeaverDB` converts to boolean. Test both levels.
+- **`onRow` callback**: `MockDBConnection` supports the `onRow` + `getResultByIndex(n)` pattern.
+- **Clearing mocks**: Always `vi.clearAllMocks()` in `beforeEach`. Stubs in `setup.ts` provide safe defaults.
+- **Private field access**: `(instance as any).fieldName` for testing internals.
+- **Async errors**: `.mockRejectedValue()` + `expect(...).resolves.toBeUndefined()`.
 
-**`onRow` callback**: Some `BeaverDB` methods use `Zotero.DB.queryAsync` with an `onRow` callback and `getResultByIndex(n)` instead of direct row access. `MockDBConnection` supports this pattern — the callback receives a proxy with `getResultByIndex` mapped to column order from the SELECT.
+## Writing a new live test
 
-**Clearing mocks**: Always call `vi.clearAllMocks()` in `beforeEach` to reset all stubs. The stubs in `setup.ts` provide safe defaults (e.g., `IOUtils.exists` returns `false`), so after clearing, each test starts from a known state.
+Live tests verify individual handlers against a running Zotero instance.
 
-**Private field access**: Use `(instance as any).fieldName` to inspect or set private fields in tests (e.g., `(cache as any).contentCacheDir`).
+### 1. Create the file
 
-**Async errors**: When testing that errors are handled gracefully, use `.mockRejectedValue()` and verify the method doesn't throw:
+Place it at `tests/live/<name>.live.test.ts`.
+
+### 2. Use the skip pattern
 
 ```ts
-mockIOUtils.stat.mockRejectedValue(new Error('disk error'));
-await expect(cache.someMethod()).resolves.toBeUndefined();
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { isZoteroAvailable, skipIfNoZotero } from '../helpers/zoteroAvailability';
+import { post } from '../helpers/zoteroHttpClient';
+
+let available: boolean;
+
+beforeAll(async () => {
+  available = await isZoteroAvailable();
+  if (!available) {
+    console.warn('\n⚠  Zotero not available — live tests will be skipped.\n');
+  }
+});
+
+describe('handler name', () => {
+  beforeEach((ctx) => { skipIfNoZotero(ctx, available); });
+
+  it('returns expected data', async () => {
+    const res = await post('/beaver/some-endpoint', { ... });
+    expect(res).toMatchObject({ ... });
+  });
+});
+```
+
+### 3. Use shared fixtures and HTTP client
+
+```ts
+import { NORMAL_PDF } from '../helpers/fixtures';
+import { fetchPages } from '../helpers/zoteroHttpClient';
+
+const res = await fetchPages(NORMAL_PDF, { start_page: 1, end_page: 3 });
 ```
 
 ## Integration tests
 
-Integration tests exercise the full pipeline against a live Zotero instance: HTTP request -> handler -> PDF extraction -> cache write -> cache read -> response.
+Integration tests exercise full pipelines. Same prerequisites as live tests plus specific test attachments.
 
 ### Prerequisites
 
-- Zotero running with the Beaver plugin loaded
-- Logged into Beaver (endpoints are only registered when authenticated)
-- Test attachments present in the library (see `integration/helpers/fixtures.ts` for the expected items)
-
-### Configuration
-
-Zotero's HTTP server port varies between installations. Set `ZOTERO_HTTP_PORT` to match your instance (default: `23119`):
-
-```bash
-ZOTERO_HTTP_PORT=23124 npm run test:integration
-```
-
-To find the port, check Zotero's preferences or run:
-```js
-Zotero.Prefs.get('httpServer.port')
-```
-
-### How it works
-
-- Tests use Beaver's local HTTP endpoints (`/beaver/attachment/pages`, etc.) registered in `react/hooks/useHttpEndpoints.ts`.
-- Cache inspection and manipulation uses test-only endpoints (`/beaver/test/*`) also registered in `useHttpEndpoints.ts`. These are only available in development/staging builds.
-- Tests skip gracefully when Zotero is not available (`beforeAll` pings the server and sets a flag; each `beforeEach` calls `ctx.skip()` if the flag is false).
-- `vitest.integration.config.ts` is a separate Vitest config with no `setupFiles` (no Zotero global stubs), a 30-second timeout, and sequential execution.
+- Zotero running with Beaver plugin loaded and authenticated
+- Test attachments present (see `helpers/fixtures.ts`)
+- Set `ZOTERO_HTTP_PORT` if not 23119: `ZOTERO_HTTP_PORT=23124 npm run test:integration`
 
 ### Test-only endpoints
 
 | Endpoint | Purpose |
 |----------|---------|
 | `POST /beaver/test/ping` | Verify Zotero + cache + DB are available |
-| `POST /beaver/test/cache-metadata` | Get raw cache metadata by `library_id` + `zotero_key` or `item_id` |
-| `POST /beaver/test/cache-invalidate` | Invalidate cache (metadata + content) for a specific item |
+| `POST /beaver/test/cache-metadata` | Get raw cache metadata |
+| `POST /beaver/test/cache-invalidate` | Invalidate cache for a specific item |
 | `POST /beaver/test/cache-clear-memory` | Clear in-memory LRU cache |
-| `POST /beaver/test/cache-delete-content` | Delete content cache file only (keep metadata) |
-| `POST /beaver/test/resolve-item` | Resolve `library_id` + `zotero_key` to `item_id` and `item_type` |
+| `POST /beaver/test/cache-delete-content` | Delete content file only (keep metadata) |
+| `POST /beaver/test/resolve-item` | Resolve library_id + zotero_key to item_id |
+| `POST /beaver/test/note-create` | Create a Zotero note (optionally wrapped with schema-version) — used by `editNote.live.test.ts` |
+| `POST /beaver/test/note-delete` | Erase a note by library_id + zotero_key |
+| `POST /beaver/test/note-read` | Return `{saved_html, live_html, in_editor}` for a note |
+| `POST /beaver/test/note-open-editor` | Open a note in the Zotero editor (tab or window) |
+| `POST /beaver/test/note-close-editor` | Close all editor instances for a note |
+| `POST /beaver/test/note-undo` | Invoke `undoEditNoteAction()` given an AgentAction payload |
 
-### Updating fixtures
+### edit_note live tests
 
-Fixtures in `integration/helpers/fixtures.ts` reference real items by `library_id` + `zotero_key`. If your Zotero library differs from the test library, update the keys to match attachments in your library. Each fixture has a `description` field documenting what kind of item it should point to (e.g., "Encrypted PDF", "2-page PDF").
+`tests/live/editNote.live.test.ts` needs the note-related test endpoints above and:
+
+- library_id 1 (user library) must be marked "searchable" in Beaver preferences.
+- Override with `ZOTERO_TEST_LIBRARY_ID=<id>` if you want to target a different library.
+- Run: `npm run test:live` (or target just this file: `npx vitest run --config vitest.live.config.ts tests/live/editNote.live.test.ts`).
+- Each test seeds and deletes its own notes — no manual fixture setup required.
 
 ## Conventions
 
-- One test file per logical module/concern (e.g., `database.*.test.ts` for SQL, `attachmentFileCache.metadata.test.ts` for the metadata tier).
-- Helper functions (`makeRecord`, `makePage`, etc.) go at the top of the test file, not in shared utilities. Tests should be self-contained.
-- Test names describe behavior: `"returns null when content file does not exist"`, not `"test getContentRange"`.
-- Close database connections in `afterEach` to avoid leaking file handles.
+- **File placement**: One file per logical module/concern, in the appropriate subdirectory.
+- **File naming**: `<module>.test.ts` (unit), `<name>.live.test.ts` (live), `<name>.integration.test.ts` (integration).
+- **Test names**: Describe behavior — `"returns null when content file does not exist"`, not `"test getContentRange"`.
+- **Shared factories**: Use `helpers/factories.ts` for mock Zotero items. File-local helpers (`makeRecord`, etc.) go at the top of the test file.
+- **Cleanup**: Close DB connections in `afterEach`. Call `vi.clearAllMocks()` in `beforeEach`.
+- **Fixture updates**: Fixtures in `helpers/fixtures.ts` reference real items by `library_id + zotero_key`. Update keys to match your library.

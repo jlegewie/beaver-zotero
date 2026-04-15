@@ -11,6 +11,7 @@ import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { getToolCallStatus, toolResultsMapAtom, resumedRunIdsAtom } from '../../agents/atoms';
+import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -44,7 +45,9 @@ export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(functi
     const runWarnings = allWarnings.filter((w) => w.run_id === run.id && w.type !== 'credit_info');
     const resumedRunIds = useAtomValue(resumedRunIdsAtom);
     const resultsMap = useAtomValue(toolResultsMapAtom);
-    
+    const streamingDoneRunIds = useAtomValue(streamingDoneRunIdsAtom);
+    const isPostProcessing = streamingDoneRunIds.has(run.id);
+
     // Check if any tool calls are currently in progress
     const hasInprogressToolcalls = useMemo(() => {
         for (const message of run.model_messages) {
@@ -71,9 +74,10 @@ export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(functi
     const showStatusIndicator = isLastRun && isStreaming && !hasVisibleContent(run) && !hasInprogressToolcalls;
 
     // Show agent run footer
-    const showAgentRunFooter = 
+    const showAgentRunFooter =
         run.status === 'completed' ||
         run.status === 'canceled' ||
+        isPostProcessing ||
         (wasResumed &&  run.model_messages.length > 0 && run.model_messages[run.model_messages.length - 1].parts.some(part => part.part_kind === 'text' && part.content.trim() !== '')) ||
         (run.status === 'error' && !isLastRun);
 

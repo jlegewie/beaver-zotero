@@ -13,7 +13,10 @@ import {
     WSZoteroSearchRequest,
     WSZoteroSearchResponse,
     ZoteroSearchResultItem,
+    RegularSearchResultItem,
+    AttachmentResultItem,
 } from '../agentProtocol';
+import { serializeNote } from '../../utils/zoteroSerializers';
 import { validateLibraryAccess, extractYear, formatCreatorsString } from './utils';
 
 
@@ -119,7 +122,25 @@ export async function handleZoteroSearchRequest(
         }
         
         // Execute search
-        const itemIds = await search.search();
+        let itemIds = await search.search();
+
+        // Post-filter by attachment status if requested
+        if (request.has_attachments != null) {
+            const allForFilter = await Zotero.Items.getAsync(itemIds);
+            const validForFilter = allForFilter.filter((item): item is Zotero.Item => item !== null);
+            if (validForFilter.length > 0) {
+                await Zotero.Items.loadDataTypes(validForFilter, ['childItems']);
+            }
+            itemIds = validForFilter
+                .filter(item => {
+                    // Only apply attachment filter to regular items
+                    if (!item.isRegularItem()) return true;
+                    const hasAtt = item.numAttachments() > 0;
+                    return request.has_attachments ? hasAtt : !hasAtt;
+                })
+                .map(item => item.id);
+        }
+
         const totalCount = itemIds.length;
 
         // Apply pagination
@@ -209,61 +230,102 @@ export async function handleZoteroSearchRequest(
             }
         }
 
+        // Batch-load parent items for child items (notes, attachments)
+        const childParentIds = new Set<number>();
+        for (const item of paginatedZoteroItems) {
+            if ((item.isNote() || item.isAttachment()) && item.parentItemID) {
+                childParentIds.add(item.parentItemID);
+            }
+        }
+        const parentMap = new Map<number, { item_id: string; title: string }>();
+        if (childParentIds.size > 0) {
+            const parentItems = await Zotero.Items.getAsync([...childParentIds]);
+            const validParents = parentItems.filter((p): p is Zotero.Item => p !== null);
+            if (validParents.length > 0) {
+                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData']);
+            }
+            for (const parent of validParents) {
+                let title = '';
+                try { title = (parent.getField('title', false, true) as string) || ''; }
+                catch { title = parent.getDisplayTitle?.() || ''; }
+                parentMap.set(parent.id, { item_id: `${parent.libraryID}-${parent.key}`, title });
+            }
+        }
+
         // Build results
         const items: ZoteroSearchResultItem[] = [];
 
         for (const item of paginatedZoteroItems) {
-            // Get creators
-            const creators = item.getCreators();
+            if (item.isNote()) {
+                const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
+                items.push(serializeNote(item, parentInfo));
+            } else if (item.isAttachment()) {
+                const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
+                const attachmentItem: AttachmentResultItem = {
+                    result_type: 'attachment',
+                    item_id: `${item.libraryID}-${item.key}`,
+                    title: item.getDisplayTitle?.() || '',
+                    filename: item.attachmentFilename || null,
+                    content_type: item.attachmentContentType || null,
+                    parent_item_id: parentInfo?.item_id ?? null,
+                    parent_title: parentInfo?.title ?? null,
+                    date_modified: item.dateModified,
+                };
+                items.push(attachmentItem);
+            } else {
+                // Get creators
+                const creators = item.getCreators();
 
-            // Get date and extract year
-            let year: number | null = null;
-            try {
-                const dateStr = item.getField('date', false, true) as string;
-                if (dateStr) {
-                    year = extractYear(dateStr);
+                // Get date and extract year
+                let year: number | null = null;
+                try {
+                    const dateStr = item.getField('date', false, true) as string;
+                    if (dateStr) {
+                        year = extractYear(dateStr);
+                    }
+                } catch {
+                    // Date field may not exist for some item types
                 }
-            } catch {
-                // Date field may not exist for some item types
-            }
 
-            // Get title safely
-            let title = '';
-            try {
-                title = (item.getField('title', false, true) as string) || '';
-            } catch {
-                // Some item types (like annotations) may not have title field
-                title = item.getDisplayTitle?.() || '';
-            }
+                // Get title safely
+                let title = '';
+                try {
+                    title = (item.getField('title', false, true) as string) || '';
+                } catch {
+                    // Some item types (like annotations) may not have title field
+                    title = item.getDisplayTitle?.() || '';
+                }
 
-            const resultItem: ZoteroSearchResultItem = {
-                item_id: `${item.libraryID}-${item.key}`,
-                item_type: item.itemType,
-                title,
-                creators: formatCreatorsString(creators),
-                year,
-            };
+                const resultItem: RegularSearchResultItem = {
+                    result_type: 'regular',
+                    item_id: `${item.libraryID}-${item.key}`,
+                    item_type: item.itemType,
+                    title,
+                    creators: formatCreatorsString(creators),
+                    year,
+                };
 
-            // Include extra fields if requested
-            if (request.fields && request.fields.length > 0) {
-                const extraFields: Record<string, any> = {};
-                for (const field of request.fields) {
-                    try {
-                        // includeBaseMapped=true so base fields resolve to type-specific fields
-                        const value = item.getField(field, false, true);
-                        if (value !== undefined && value !== '') {
-                            extraFields[field] = value;
+                // Include extra fields if requested
+                if (request.fields && request.fields.length > 0) {
+                    const extraFields: Record<string, any> = {};
+                    for (const field of request.fields) {
+                        try {
+                            // includeBaseMapped=true so base fields resolve to type-specific fields
+                            const value = item.getField(field, false, true);
+                            if (value !== undefined && value !== '') {
+                                extraFields[field] = value;
+                            }
+                        } catch {
+                            // Field not valid for this item type - skip silently
                         }
-                    } catch {
-                        // Field not valid for this item type - skip silently
+                    }
+                    if (Object.keys(extraFields).length > 0) {
+                        resultItem.extra_fields = extraFields;
                     }
                 }
-                if (Object.keys(extraFields).length > 0) {
-                    resultItem.extra_fields = extraFields;
-                }
-            }
 
-            items.push(resultItem);
+                items.push(resultItem);
+            }
         }
 
         logger(`handleZoteroSearchRequest: Returning ${items.length}/${totalCount} items${sortRequested ? ` (sorted by ${request.sort_by} ${request.sort_order || 'desc'})` : ''}`, 1);

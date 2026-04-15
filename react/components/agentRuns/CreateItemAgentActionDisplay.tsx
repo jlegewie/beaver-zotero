@@ -442,15 +442,15 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         return DocumentValidationIcon;
     };
 
-    // Generate button text
-    const getButtonText = () => {
+    // Generate button text parts (bold label + regular detail)
+    const getButtonTextParts = (): { label: string; detail: string } => {
         if (pendingCount > 0) {
-            return `Import ${pendingCount} Item${pendingCount === 1 ? '' : 's'}`;
+            return { label: 'Import', detail: `${pendingCount} Item${pendingCount === 1 ? '' : 's'}` };
         }
         if (allErrors) {
-            return `Error importing ${totalItems} Item${totalItems === 1 ? '' : 's'}`;
+            return { label: 'Error importing', detail: `${totalItems} Item${totalItems === 1 ? '' : 's'}` };
         }
-        return `Imported ${appliedCount} Item${appliedCount === 1 ? '' : 's'}`;
+        return { label: 'Imported', detail: `${appliedCount} Item${appliedCount === 1 ? '' : 's'}` };
     };
 
     // Determine when results can be toggled
@@ -477,8 +477,8 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             >
                 <button
                     type="button"
-                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left ${canToggleResults ? 'cursor-pointer' : ''}`}
-                    style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 ml-05 text-left ${canToggleResults ? 'cursor-pointer' : ''}`}
+                    style={{ background: 'transparent', border: 0, padding: 0, fontSize: '1rem' }}
                     aria-expanded={resultsVisible}
                     aria-controls={`agent-actions-content-${groupId}`}
                     onClick={toggleResults}
@@ -486,10 +486,11 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                 >
                     <div className="display-flex flex-row gap-2">
                         <div className="flex-1 display-flex mt-010">
-                            <Icon icon={getIcon()} />
+                            <Icon icon={getIcon()} className="scale-105"/>
                         </div>
                         <div className="display-flex">
-                            {getButtonText()}
+                            <span className="font-color-primary font-medium">{getButtonTextParts().label}</span>
+                            <span className="ml-15">{getButtonTextParts().detail}</span>
                         </div>
                     </div>
                 </button>

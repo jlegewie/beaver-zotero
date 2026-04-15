@@ -12,7 +12,7 @@ import {
     updateFailedItemsCountAtom
 } from "../atoms/embeddingIndex";
 import { mcpServerEnabledAtom } from "../atoms/ui";
-import { EmbeddingIndexer, MIN_CONTENT_LENGTH, INDEX_BATCH_SIZE } from "../../src/services/embeddingIndexer";
+import { EmbeddingIndexer, IndexingError, MIN_CONTENT_LENGTH, INDEX_BATCH_SIZE, mergeIndexingErrors } from "../../src/services/embeddingIndexer";
 import { BeaverDB } from "../../src/services/database";
 import { embeddingsService } from "../../src/services/embeddingsService";
 import { logger } from "../../src/utils/logger";
@@ -272,6 +272,7 @@ export function useEmbeddingIndex() {
             let totalIndexed = 0;
             let totalSkipped = 0;
             let totalFailed = 0;
+            const allErrors: IndexingError[] = [];
             const db = getDB();
 
             for (const libraryId of librariesToProcess) {
@@ -296,6 +297,12 @@ export function useEmbeddingIndex() {
                     logger(`useEmbeddingIndex: Deleted ${diff.toDelete.length} orphaned embeddings from library ${libraryId}`, 3);
                 }
 
+                // Track whether the indexing run for this library left any
+                // items in an unknown state (pre-API failure). If so, we MUST
+                // skip saveIndexState below so the next pass re-runs the diff
+                // and gives those items another chance.
+                let libraryIncomplete = false;
+
                 // Index items that need (re-)indexing
                 if (diff.toIndex.length > 0) {
                     logger(`useEmbeddingIndex: Indexing ${diff.toIndex.length} items in library ${libraryId}`, 3);
@@ -315,7 +322,9 @@ export function useEmbeddingIndex() {
                     totalIndexed += result.indexed;
                     totalSkipped += result.skipped;
                     totalFailed += result.failed;
-                    logger(`useEmbeddingIndex: Library ${libraryId} complete: ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed`, 3);
+                    mergeIndexingErrors(allErrors, result.errors);
+                    libraryIncomplete = result.incomplete;
+                    logger(`useEmbeddingIndex: Library ${libraryId} complete: ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed${result.incomplete ? ' (incomplete)' : ''}`, 3);
 
                     // If cancelled mid-batch, don't persist state for this library
                     // (partial scan would be recorded as complete)
@@ -326,10 +335,15 @@ export function useEmbeddingIndex() {
                     }
                 }
 
-                // Save the index state for this library (for future quick checks)
-                if (zoteroState) {
+                // Save the index state for this library (for future quick checks).
+                // Skip if any batch was incomplete — saving would mark the library
+                // as fully scanned and hide unindexed items from quick checks
+                // until the weekly safety diff (P1 fix).
+                if (zoteroState && !libraryIncomplete) {
                     await indexer.saveIndexState(libraryId, zoteroState);
                     logger(`useEmbeddingIndex: Saved index state for library ${libraryId}`, 4);
+                } else if (libraryIncomplete) {
+                    logger(`useEmbeddingIndex: Skipping state save for library ${libraryId} due to incomplete batch — will re-check next pass`, 2);
                 }
             }
 
@@ -352,6 +366,7 @@ export function useEmbeddingIndex() {
                 totalIndexed += result.indexed;
                 totalSkipped += result.skipped;
                 totalFailed += result.failed;
+                mergeIndexingErrors(allErrors, result.errors);
                 logger(`useEmbeddingIndex: Retry items complete: ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed`, 3);
             }
 
@@ -373,9 +388,10 @@ export function useEmbeddingIndex() {
             logger(`useEmbeddingIndex: Initial indexing complete - took ${formatDuration(duration)}`, 3);
             setIndexStatus({ status: 'idle', phase: 'incremental' });
 
-            // Report indexing completion to backend (fire-and-forget)
-            // Only report if there was actual work done
-            if (totalIndexed > 0 || totalFailed > 0 || totalToDelete > 0) {
+            // Report indexing completion to backend (fire-and-forget).
+            const hasActivity = totalIndexed > 0 || totalFailed > 0 || totalToDelete > 0;
+            const hasErrors = allErrors.length > 0;
+            if (hasActivity || hasErrors) {
                 embeddingsService.reportIndexingComplete({
                     items_indexed: totalIndexed,
                     items_failed: totalFailed,
@@ -384,6 +400,7 @@ export function useEmbeddingIndex() {
                     libraries_count: libraryIds.length,
                     duration_ms: duration,
                     is_force_reindex: forceFullDiff,
+                    errors: allErrors.length > 0 ? allErrors : undefined,
                 }).catch(() => {
                     // Silently ignore - already logged in the service
                 });

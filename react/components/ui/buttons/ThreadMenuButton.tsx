@@ -12,7 +12,7 @@ import { currentThreadIdAtom, currentThreadNameAtom, recentThreadsAtom, ThreadDa
 import { citationDataMapAtom } from '../../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
-import { selectItem } from '../../../../src/utils/selectItem';
+import { selectItem, selectItemById } from '../../../../src/utils/selectItem';
 import { store } from '../../../store';
 import { preloadPageLabelsForContent } from '../../../utils/pageLabels';
 
@@ -64,7 +64,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     };
 
     const handleSaveAsNote = async () => {
-        const content = getThreadContent();
+        const content = getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
         await preloadPageLabelsForContent(content);
         let htmlContent = renderToHTML(preprocessNoteContent(content), "markdown", {
             citationDataMap,
@@ -73,9 +73,15 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         });
         const context = getZoteroTargetContextSync();
         const threadId = store.get(currentThreadIdAtom);
-        if (threadId) {
-            htmlContent += getBeaverNoteFooterHTML(threadId);
+
+        // Insert header after <h1> title, append footer
+        const brandingHtml = threadId ? getBeaverNoteFooterHTML(threadId) : '';
+        const h1End = htmlContent.indexOf('</h1>');
+        if (h1End !== -1) {
+            const insertPos = h1End + '</h1>'.length;
+            htmlContent = htmlContent.slice(0, insertPos) + brandingHtml + '<hr>' + htmlContent.slice(insertPos);
         }
+        htmlContent += '<hr>' + brandingHtml;
 
         const newNote = new Zotero.Item('note');
         if (context.targetLibraryId !== undefined) {
@@ -84,19 +90,24 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         newNote.setNote(htmlContent);
         await newNote.saveTx();
 
-        if (context.collectionToAddTo) {
-            await context.collectionToAddTo.addItem(newNote.id);
+        // Always add to the current collection (even when items are selected)
+        const zp = Zotero.getActiveZoteroPane();
+        const selectedCollection = zp?.getSelectedCollection() || null;
+        if (selectedCollection) {
+            await Zotero.DB.executeTransaction(async () => {
+                selectedCollection.addItem(newNote.id);
+            });
         }
 
         const win = Zotero.getMainWindow();
         const isInReader = win.Zotero_Tabs?.selectedType === 'reader';
         if (!isInReader) {
-            selectItem(newNote);
+            await selectItemById(newNote.id, true, selectedCollection?.id);
         }
     };
 
     const handleSaveAsChildNote = async () => {
-        const content = getThreadContent();
+        const content = getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
         await preloadPageLabelsForContent(content);
         let htmlContent = renderToHTML(preprocessNoteContent(content), "markdown", {
             citationDataMap,
@@ -107,9 +118,15 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         if (!context.parentReference) return;
 
         const threadId = store.get(currentThreadIdAtom);
-        if (threadId) {
-            htmlContent += getBeaverNoteFooterHTML(threadId);
+
+        // Insert header after <h1> title, append footer
+        const brandingHtml = threadId ? getBeaverNoteFooterHTML(threadId) : '';
+        const h1End = htmlContent.indexOf('</h1>');
+        if (h1End !== -1) {
+            const insertPos = h1End + '</h1>'.length;
+            htmlContent = htmlContent.slice(0, insertPos) + brandingHtml + '<hr>' + htmlContent.slice(insertPos);
         }
+        htmlContent += '<hr>' + brandingHtml;
 
         const newNote = new Zotero.Item('note');
         newNote.libraryID = context.parentReference.library_id;

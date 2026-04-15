@@ -61,6 +61,22 @@ export function extractZoteroReferencesFromToolCall(part: ToolCallPart): ZoteroI
         }
     }
 
+    // Extract note_id if present (used by read_note, edit_note)
+    const noteId = args.note_id as string | undefined;
+    if (noteId) {
+        const [libraryIdStr, ...keyParts] = noteId.split('-');
+        const zoteroKey = keyParts.join('-');
+        if (libraryIdStr && zoteroKey) {
+            const libraryId = parseInt(libraryIdStr, 10);
+            if (!isNaN(libraryId)) {
+                references.push({
+                    library_id: libraryId,
+                    zotero_key: zoteroKey,
+                });
+            }
+        }
+    }
+
     // Extract attachment_ids array if present (for tools that accept multiple attachments)
     const attachmentIds = args.attachment_ids as string[] | undefined;
     if (Array.isArray(attachmentIds)) {
@@ -103,6 +119,11 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     // Metadata tools
     get_metadata: 'Get metadata',
     edit_metadata: 'Edit metadata',
+
+    // Note tools
+    read_note: 'Reading note',
+    edit_note: 'Edit note',
+    create_note: 'Create note',
 
     // Organization tools
     organize_items: 'Organize items',
@@ -645,6 +666,23 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                 }
             }
             return `${baseLabel}`;
+        }
+
+        // === Note tools ===
+        case 'read_note': {
+            const noteId = args.note_id as string | undefined;
+            if (noteId) {
+                const item = getItemFromAttachmentId(noteId);
+                if (item && item.isNote()) {
+                    const noteTitle = item.getNoteTitle?.();
+                    if (noteTitle) {
+                        return `${baseLabel}: "${truncate(noteTitle, 30)}"`;
+                    }
+                } else {
+                    return `${baseLabel}: Unknown note`;
+                }
+            }
+            return baseLabel;
         }
 
         // === Tools without dynamic labels ===

@@ -109,6 +109,47 @@ export interface DeleteData extends ZoteroItemReference {
     date_modified: string | null;
 }
 
+/** Whether the model can read an attachment's content */
+export type AttachmentReadability = "available" | "unavailable";
+
+/** Lightweight attachment data nested in search results */
+export interface AttachmentSummary {
+    library_id: number;
+    zotero_key: string;
+    parent_key: string | null;
+    title?: string | null;
+    mime_type: string;
+    is_primary: boolean;
+    page_count?: number | null;
+    status: AttachmentReadability;
+    status_code?: FileStatusCodeValue | null;
+    status_reason?: string | null;
+}
+
+/** Lightweight collection reference with name */
+export interface CollectionSummary {
+    library_id: number;
+    zotero_key: string;
+    name: string;
+}
+
+/** Lightweight item data for search results. Omits formatted_citation, item_json, hashes, sync fields. */
+export interface ItemSummary extends ZoteroItemReference {
+    item_type: string;
+    title?: string | null;
+    creators?: ZoteroCreator[] | null;
+    date?: string | null;
+    year?: number | null;
+    publication_title?: string | null;
+    abstract?: string | null;
+    identifiers?: BibliographicIdentifier | null;
+    language?: string | null;
+    tags?: string[] | null;
+    collections?: CollectionSummary[] | null;
+    citation_key?: string | null;
+    attachments?: AttachmentSummary[];
+}
+
 export interface ItemData extends ZoteroItemBase {
     // Core fields that most items have
     item_type: string;
@@ -241,9 +282,28 @@ export interface FrontendFileStatus {
     page_count?: number | null;
     /** Full text availability status */
     status: "available" | "processing" | "unavailable";
-    /** Reason if status is not "available" */
+    /** Machine-readable reason code; backend maps it to model-facing text. */
+    status_code?: FileStatusCodeValue | null;
+    /** Free-form reason. Only set for cases that carry dynamic values (e.g., file too large). */
     status_reason?: string | null;
 }
+
+/**
+ * Stable codes identifying why a file is unavailable. The backend owns the
+ * model-facing text for each code; keep values in sync with
+ * FILE_STATUS_REASON_TEMPLATES in backend app/models/attachments.py.
+ */
+export const FileStatusCode = {
+    UnsupportedFileType: 'unsupported_file_type',
+    FileNotLocal: 'file_not_local',
+    FileNotLocalRemote: 'file_not_local_remote',
+    PdfEncrypted: 'pdf_encrypted',
+    PdfInvalid: 'pdf_invalid',
+    PdfNeedsOcr: 'pdf_needs_ocr',
+    PdfAnalysisError: 'pdf_analysis_error',
+    PdfUnreadable: 'pdf_unreadable',
+} as const;
+export type FileStatusCodeValue = typeof FileStatusCode[keyof typeof FileStatusCode];
 
 /** Attachment data with sync status information */
 export interface AttachmentDataWithStatus {

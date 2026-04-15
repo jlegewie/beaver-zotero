@@ -5,6 +5,7 @@ import {
     getAgentActionsByRunAtom,
     isCreateItemAgentAction,
     isZoteroNoteAgentAction,
+    isCreateNoteAgentAction,
     CreateItemAgentAction,
     AgentAction,
 } from '../../agents/agentActions';
@@ -33,10 +34,10 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
         return countB - countA;
     });
 
-    // Get note actions
+    // Get note actions (both inline zotero_note and tool-based create_note)
     const noteActions = getAgentActionsByRun(
         run.id,
-        (action) => isZoteroNoteAgentAction(action)
+        (action) => isZoteroNoteAgentAction(action) || isCreateNoteAgentAction(action)
     ) as AgentAction[];
 
     // Don't show during streaming

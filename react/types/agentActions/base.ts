@@ -6,6 +6,10 @@ import type {
     CreateItemProposedData,
     CreateItemResultData
 } from './items';
+import type {
+    EditNoteProposedData,
+    EditNoteResultData
+} from './editNote';
 
 
 /**
@@ -233,7 +237,7 @@ export interface ConfirmExternalSearchProposedData {
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'confirm_extraction' | 'confirm_external_search';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
 
 /**
  * Union type for all proposed data types
@@ -265,7 +269,8 @@ export type ProposedData =
     CreateCollectionProposedData |
     OrganizeItemsProposedData |
     ConfirmExtractionProposedData |
-    ConfirmExternalSearchProposedData;
+    ConfirmExternalSearchProposedData |
+    EditNoteProposedData;
 
 /**
  * Type of result data after applying an action
@@ -276,7 +281,8 @@ export type ActionResultDataType =
     CreateItemResultData |
     CreateCollectionResultData |
     OrganizeItemsResultData |
-    EditMetadataResultData;
+    EditMetadataResultData |
+    EditNoteResultData;
 
 /**
  * Core proposed action model matching the backend schema
