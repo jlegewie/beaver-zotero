@@ -5,7 +5,7 @@ import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../util
 import { syncingItemFilter, syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer, getAttachmentDataInMemory, DownloadOptions } from '../../utils/webAPI';
+import { isAttachmentOnServer, isAttachmentAvailableRemotely, getAttachmentDataInMemory, DownloadOptions } from '../../utils/webAPI';
 import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
@@ -26,11 +26,11 @@ import { TimingAccumulator } from '../../utils/timing';
 // ---------------------------------------------------------------------------
 
 /**
- * Check if remote file access is enabled AND the attachment is on the server.
- * Combines the preference check with the server-availability check.
+ * Check if remote file access is enabled AND the file is reachable on the
+ * server (either already hashed-and-synced, or pending on-demand download).
  */
 export function isRemoteAccessAvailable(item: Zotero.Item): boolean {
-    return getPref('accessRemoteFiles') && isAttachmentOnServer(item);
+    return getPref('accessRemoteFiles') && isAttachmentAvailableRemotely(item);
 }
 
 // ---------------------------------------------------------------------------
@@ -314,7 +314,7 @@ async function checkAttachmentAvailability(
             const remotePath = makeRemoteFilePath(attachment);
             return { available: true, filePath: remotePath, contentType };
         }
-        const isFileAvailableOnServer = isAttachmentOnServer(attachment);
+        const isFileAvailableOnServer = isAttachmentAvailableRemotely(attachment);
         return {
             available: false,
             fileExistsLocally: false,

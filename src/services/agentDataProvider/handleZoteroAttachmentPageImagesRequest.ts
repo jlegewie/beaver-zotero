@@ -10,7 +10,7 @@
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer } from '../../utils/webAPI';  // kept for file_missing message check
+import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
     WSZoteroAttachmentPageImagesRequest,
     WSZoteroAttachmentPageImagesResponse,
@@ -94,7 +94,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         resolvedFilePath = effectiveFilePath;
 
         if (!effectiveFilePath) {
-            const onServer = isAttachmentOnServer(pdfItem);
+            const onServer = isAttachmentAvailableRemotely(pdfItem);
             return errorResponse(
                 onServer
                     ? `The PDF file for ${pdfKey} is not available locally and remote file access is disabled in settings.`

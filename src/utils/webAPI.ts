@@ -22,20 +22,34 @@ export function getStorageModeForLibrary(libraryID: number): StorageMode {
 }
 
 /**
- * Checks if an attachment is on the server
- * @param item Zotero item
- * @returns true if the attachment is on the server
+ * Checks if an attachment is on the server with a usable file hash.
+ *
+ * Strict hash-based check — sync, upload, and backend validation all rely on
+ * this predicate implying "we have a hash we can sync/upload". Do NOT broaden
+ * it to cover on-demand attachments whose hash hasn't been populated yet.
+ * For remote-access decisions that should include pending-download items,
+ * use `isAttachmentAvailableRemotely` below.
  */
 export function isAttachmentOnServer(item: Zotero.Item): boolean {
 	if (!item || !item.isStoredFileAttachment()) return false;
+	return Boolean(item.attachmentSyncedHash);
+}
 
-	// Locally-synced file — hash populated after download/upload.
+/**
+ * Checks whether an attachment's file is available on the server for
+ * on-demand download — including "as needed" sync items whose hash isn't
+ * populated until the first actual download.
+ *
+ * Zotero sets syncState to TO_DOWNLOAD / FORCE_DOWNLOAD when the server has
+ * the file (see zotero/xpcom/sync/syncLocal.js _checkAttachmentForDownload).
+ *
+ * Intended only for remote-file-access flows (agent data provider). Do not
+ * use in sync/upload/validation paths — those require a concrete hash and
+ * should keep using `isAttachmentOnServer`.
+ */
+export function isAttachmentAvailableRemotely(item: Zotero.Item): boolean {
+	if (!item || !item.isStoredFileAttachment()) return false;
 	if (item.attachmentSyncedHash) return true;
-
-	// On-demand ("as needed") sync: item metadata is synced and the file is on
-	// the server, but it hasn't been downloaded yet, so the hash is still empty.
-	// Zotero sets syncState to TO_DOWNLOAD / FORCE_DOWNLOAD when the server has
-	// the file (see zotero/xpcom/sync/syncLocal.js _checkAttachmentForDownload).
 	const L = Zotero.Sync.Storage.Local;
 	const s = item.attachmentSyncState;
 	return s === L.SYNC_STATE_TO_DOWNLOAD || s === L.SYNC_STATE_FORCE_DOWNLOAD;
@@ -140,7 +154,7 @@ export async function getAttachmentDataInMemory(item: Zotero.Item, options?: Dow
         throw new Error("Item is not a valid stored file attachment");
     }
 
-    if (!isAttachmentOnServer(item)) {
+    if (!isAttachmentAvailableRemotely(item)) {
         logger(`getAttachmentDataInMemory: File not on server (sync state: ${item.attachmentSyncState})`);
         throw new Error(`File not on server (sync state: ${item.attachmentSyncState})`);
     }

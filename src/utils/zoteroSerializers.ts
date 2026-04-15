@@ -386,8 +386,8 @@ export async function serializeAttachment(
                 skippedItemsManager.upsert(item, 'file access denied');
                 return null;
             }
-        // hash is required when skipHash is false (legacy backend sync)
-        } else if (isAttachmentOnServer(item) && item.attachmentSyncedHash) {
+        } else if (isAttachmentOnServer(item)) {
+            // isAttachmentOnServer returns true only when attachmentSyncedHash is available
             file_hash = item.attachmentSyncedHash;
         }
 
