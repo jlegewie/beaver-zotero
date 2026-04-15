@@ -1,5 +1,8 @@
 import { atom } from 'jotai';
 import { logger } from '../../src/utils/logger';
+import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
+import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
+import { makeNoteKey } from '../atoms/editNoteAutoApprove';
 import { agentActionsService, AckActionLink } from '../../src/services/agentActionsService';
 import { ZoteroItemReference } from '../types/zotero';
 import {
@@ -74,6 +77,13 @@ export const isAnnotationAgentAction = (action: AgentAction): boolean => {
  */
 export const isZoteroNoteAgentAction = (action: AgentAction): boolean => {
     return action.action_type === 'zotero_note';
+};
+
+/**
+ * Type guard for create note actions (via create_note tool)
+ */
+export const isCreateNoteAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'create_note';
 };
 
 /**
@@ -679,11 +689,15 @@ export const undoAgentActionAtom = atom(
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {
             return prev.map((action) => {
                 if (action.id !== actionId) return action;
-                // Preserve old_creators from result_data into proposed_data before clearing,
-                // so the preview can show the before/after diff in the "undone" state.
-                const proposed_data = (action.result_data?.old_creators && !action.proposed_data?.old_creators)
-                    ? { ...action.proposed_data, old_creators: action.result_data.old_creators }
-                    : action.proposed_data;
+                // Preserve undo-critical fields from result_data into proposed_data before
+                // clearing, so the preview can show the before/after diff in the "undone" state.
+                let proposed_data = action.proposed_data;
+                if (action.result_data?.old_creators && !proposed_data?.old_creators) {
+                    proposed_data = { ...proposed_data, old_creators: action.result_data.old_creators };
+                }
+                if (action.result_data?.undo_full_html && !proposed_data?.undo_full_html) {
+                    proposed_data = { ...proposed_data, undo_full_html: action.result_data.undo_full_html };
+                }
                 return { ...action, proposed_data, status: 'undone' as ActionStatus, result_data: undefined, error_message: undefined };
             });
         });
@@ -767,6 +781,14 @@ export const addPendingApprovalAtom = atom(
             });
             return next;
         });
+
+        // Trigger in-editor diff preview for edit_note approvals
+        if (event.action_type === 'edit_note') {
+            const { library_id, zotero_key } = event.action_data || {};
+            if (library_id != null && zotero_key) {
+                updateDiffPreviewForNote(library_id, zotero_key);
+            }
+        }
     }
 );
 
@@ -775,12 +797,25 @@ export const addPendingApprovalAtom = atom(
  */
 export const removePendingApprovalAtom = atom(
     null,
-    (_, set, actionId: string) => {
-        set(pendingApprovalsAtom, (prev) => {
-            const next = new Map(prev);
+    (get, set, actionId: string) => {
+        // Read the approval before removing so we know which note to update
+        const prev = get(pendingApprovalsAtom);
+        const removed = prev.get(actionId);
+
+        set(pendingApprovalsAtom, (p) => {
+            const next = new Map(p);
             next.delete(actionId);
             return next;
         });
+
+        // If the removed approval was edit_note, update/dismiss the preview
+        if (removed?.actionType === 'edit_note') {
+            const libId = removed.actionData?.library_id;
+            const zKey = removed.actionData?.zotero_key;
+            if (libId != null && zKey) {
+                updateDiffPreviewForNote(libId, zKey);
+            }
+        }
     }
 );
 
@@ -790,6 +825,8 @@ export const removePendingApprovalAtom = atom(
 export const clearAllPendingApprovalsAtom = atom(
     null,
     (_, set) => {
+        dismissDiffPreview();
+        set(diffPreviewNoteKeyAtom, null);
         set(pendingApprovalsAtom, new Map());
     }
 );

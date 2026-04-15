@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { diffWords, diffLines, diffChars } from 'diff';
-import {
-    getOrSimplify,
-    getLatestNoteHtml,
-} from '../../../src/utils/noteHtmlSimplifier';
+import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
+import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
+import type { EditNoteOperation } from '../../types/agentActions/editNote';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -12,8 +11,10 @@ interface EditNotePreviewProps {
     oldString: string;
     /** The new replacement string */
     newString: string;
-    /** Whether all occurrences are replaced */
-    replaceAll?: boolean;
+    /** Operation mode (defaults to 'str_replace') */
+    operation?: EditNoteOperation;
+    /** Full old content for diff display (used when operation is 'rewrite') */
+    oldContent?: string;
     /** Number of occurrences replaced (from result_data) */
     occurrencesReplaced?: number;
     /** Warnings from the edit */
@@ -143,7 +144,8 @@ function renderFormattedParagraph(segments: InlineSegment[]): React.ReactNode[] 
 export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     oldString,
     newString,
-    replaceAll,
+    operation = 'str_replace',
+    oldContent,
     occurrencesReplaced,
     warnings,
     status = 'pending',
@@ -151,16 +153,56 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     zoteroKey,
 }) => {
     const isApplied = status === 'applied';
-    const isRejectedOrUndone = status === 'rejected' || status === 'undone';
-    const isError = status === 'error';
     const isDelete = newString === '';
+    const isRewrite = operation === 'rewrite';
 
-    const strippedOld = normalizeForInlineDiff(stripHtmlPreserveFormatting(oldString));
+    // For rewrite mode when oldContent is missing (e.g. after undo),
+    // fetch the current note content — the note is back to its original state.
+    const needsOldContentFetch = isRewrite && !oldContent && libraryId != null && !!zoteroKey;
+    const [fetchedOldContent, setFetchedOldContent] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!needsOldContentFetch) return;
+
+        let cancelled = false;
+
+        (async () => {
+            try {
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId!, zoteroKey!);
+                if (!item || cancelled) return;
+                await item.loadDataType('note');
+                const rawHtml = getLatestNoteHtml(item);
+                const noteId = `${libraryId}-${zoteroKey}`;
+                const { simplified } = getOrSimplify(noteId, rawHtml, libraryId!);
+                if (!cancelled) setFetchedOldContent(simplified);
+            } catch {
+                // Fall back to no old content
+            }
+        })();
+
+        return () => { cancelled = true; };
+    }, [needsOldContentFetch, libraryId, zoteroKey]);
+
+    // For rewrite mode, use oldContent prop, fetched content, or fall back to oldString
+    const effectiveOld = isRewrite && (oldContent || fetchedOldContent) ? (oldContent || fetchedOldContent!) : oldString;
+    // For insert_after / insert_before, new_string is already normalized by
+    // validation to merge old_string with new_string (via normalized_action_data):
+    //   - insert_after:  new_string = old_string + new_string
+    //   - insert_before: new_string = new_string + old_string
+    // so diffWords will naturally show old_string as context and the inserted
+    // text as addition.
+    const strippedOld = normalizeForInlineDiff(stripHtmlPreserveFormatting(effectiveOld));
     const strippedNew = normalizeForInlineDiff(stripHtmlPreserveFormatting(newString));
 
     // When strippedOld is empty (old_string was pure HTML structure), fetch
     // surrounding visible text from the full note for context.
-    const needsNoteContext = strippedOld === '' && oldString !== '' && strippedNew !== '';
+    // Skip for rewrite mode — we already have the full old content.
+    const needsNoteContext = shouldFetchNoteContext({
+        operation,
+        strippedOld,
+        effectiveOld,
+        strippedNew,
+    });
     const [noteContext, setNoteContext] = useState<{ before: string; after: string } | null>(null);
 
     useEffect(() => {
@@ -180,7 +222,7 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                 // After the edit is applied, the note contains newString instead
                 // of oldString. Search for the appropriate string so we get
                 // surrounding context rather than the inserted text itself.
-                const searchString = isApplied ? newString : oldString;
+                const searchString = isApplied ? newString : effectiveOld;
                 const idx = simplified.indexOf(searchString);
                 if (idx === -1 || cancelled) return;
 
@@ -206,7 +248,7 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
         })();
 
         return () => { cancelled = true; };
-    }, [needsNoteContext, libraryId, zoteroKey, oldString, isApplied, newString]);
+    }, [needsNoteContext, libraryId, zoteroKey, effectiveOld, isApplied, newString]);
 
     const inlineSegments = useMemo(() => {
         if (needsNoteContext && noteContext && (noteContext.before || noteContext.after)) {
@@ -221,6 +263,19 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
             }
             return segments;
         }
+
+        // Formatting-only changes (e.g. bolding existing text): the plain
+        // text is identical but the control-char markers differ. Word-level
+        // diff garbles these because the markers land mid-word, so instead
+        // we walk both strings in sync and highlight just the regions where
+        // bold/italic state changed.
+        const oldPlain = strippedOld.replace(ALL_MARKERS_RE, '');
+        const newPlain = strippedNew.replace(ALL_MARKERS_RE, '');
+        if (oldPlain && oldPlain === newPlain && strippedOld !== strippedNew) {
+            const fmtDiff = computeFormattingOnlyDiff(strippedOld, strippedNew);
+            if (fmtDiff.length > 0) return fmtDiff;
+        }
+
         return computeInlineDiff(strippedOld, strippedNew);
     }, [strippedOld, strippedNew, needsNoteContext, noteContext]);
 
@@ -228,8 +283,8 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
         <div className="edit-note-preview">
             <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1">
-                    {/* Only show header when replace_all is true (with occurrence count) */}
-                    {replaceAll && (
+                    {/* Show header for str_replace_all mode */}
+                    {operation === 'str_replace_all' && (
                         <div className="text-sm font-color-primary font-medium px-3 py-1">
                             {isDelete ? 'Delete' : 'Replace'}
                             {' (all occurrences)'}
@@ -302,6 +357,23 @@ export function computeInlineDiff(oldText: string, newText: string): InlineSegme
     return truncateInlineContext(segments);
 }
 
+export function shouldFetchNoteContext({
+    operation,
+    strippedOld,
+    effectiveOld,
+    strippedNew,
+}: {
+    operation: EditNoteOperation;
+    strippedOld: string;
+    effectiveOld: string;
+    strippedNew: string;
+}): boolean {
+    return operation !== 'rewrite'
+        && strippedOld === ''
+        && effectiveOld !== ''
+        && strippedNew !== '';
+}
+
 /**
  * Truncate leading, trailing, and long middle context segments for readability.
  */
@@ -329,6 +401,116 @@ function truncateInlineContext(segments: InlineSegment[], maxContext: number = 8
     }
 
     return result;
+}
+
+// ---- Formatting-only diff ----
+
+interface FormattedChar {
+    char: string;
+    bold: boolean;
+    italic: boolean;
+}
+
+/**
+ * Parse text containing bold/italic/heading control-char markers into a
+ * sequence of characters with their associated formatting state. The
+ * markers themselves are consumed.
+ */
+function parseFormattedText(text: string): FormattedChar[] {
+    const result: FormattedChar[] = [];
+    let bold = false;
+    let italic = false;
+    for (const ch of text) {
+        switch (ch) {
+            case BOLD_START:
+            case HEADING_START:
+                bold = true;
+                break;
+            case BOLD_END:
+            case HEADING_END:
+                bold = false;
+                break;
+            case ITALIC_START:
+                italic = true;
+                break;
+            case ITALIC_END:
+                italic = false;
+                break;
+            default:
+                result.push({ char: ch, bold, italic });
+        }
+    }
+    return result;
+}
+
+/**
+ * Re-serialize a formatted-char sequence back into text with balanced markers
+ * so renderFormattedParagraph can pick up the bold/italic state when it
+ * walks the resulting segment.
+ */
+function serializeFormattedChars(chars: FormattedChar[]): string {
+    let out = '';
+    let bold = false;
+    let italic = false;
+    for (const { char, bold: b, italic: it } of chars) {
+        if (b !== bold) {
+            out += b ? BOLD_START : BOLD_END;
+            bold = b;
+        }
+        if (it !== italic) {
+            out += it ? ITALIC_START : ITALIC_END;
+            italic = it;
+        }
+        out += char;
+    }
+    if (bold) out += BOLD_END;
+    if (italic) out += ITALIC_END;
+    return out;
+}
+
+/**
+ * Compute a diff for edits that only change formatting (e.g. bolding or
+ * italicizing existing text). The caller should only invoke this when the
+ * plain text with markers stripped is identical in both sides. Walks both
+ * strings in sync and emits regions whose bold/italic state differs as
+ * additions so they stand out visually, while unchanged regions become
+ * plain context that still renders with its original formatting.
+ */
+function computeFormattingOnlyDiff(
+    strippedOld: string,
+    strippedNew: string,
+): InlineSegment[] {
+    const oldChars = parseFormattedText(strippedOld);
+    const newChars = parseFormattedText(strippedNew);
+
+    // Defensive: lengths should match since the plain text is identical.
+    // If they don't, bail out so the caller falls back to word-level diff.
+    if (oldChars.length !== newChars.length) return [];
+
+    const segments: InlineSegment[] = [];
+    let buffer: FormattedChar[] = [];
+    let bufferType: 'context' | 'addition' = 'context';
+
+    const flush = () => {
+        if (buffer.length === 0) return;
+        segments.push({ text: serializeFormattedChars(buffer), type: bufferType });
+        buffer = [];
+    };
+
+    for (let i = 0; i < newChars.length; i++) {
+        const o = oldChars[i];
+        const n = newChars[i];
+        const changed = o.bold !== n.bold || o.italic !== n.italic;
+        const type: 'context' | 'addition' = changed ? 'addition' : 'context';
+        if (type !== bufferType) {
+            flush();
+            bufferType = type;
+        }
+        buffer.push(n);
+    }
+    flush();
+
+    return segments;
 }
 
 // ---- Line-level diff computation (used by sourceUtils.ts) ----
@@ -570,14 +752,44 @@ export function lookupCitationItem(itemId: string): { itemData: any } | null {
 }
 
 /**
+ * Look up a Zotero attachment by "libraryID-key" string, resolve to its parent
+ * item, and return a citation-item object with CSL-JSON itemData.
+ * Returns null if the attachment or parent can't be found.
+ */
+export function lookupCitationItemFromAttachment(attId: string): { itemData: any } | null {
+    try {
+        const dashIdx = attId.indexOf('-');
+        if (dashIdx === -1) return null;
+        const libraryID = parseInt(attId.substring(0, dashIdx), 10);
+        const key = attId.substring(dashIdx + 1);
+        const attachment = Zotero.Items.getByLibraryAndKey(libraryID, key);
+        if (!attachment) return null;
+        // Resolve to parent item for citation formatting
+        const parentID = attachment.parentItemID;
+        const item = parentID ? Zotero.Items.get(parentID) : attachment;
+        if (!item) return null;
+        return { itemData: Zotero.Utilities.Item.itemToCSLJSON(item) };
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Recover a citation label from a simplified <citation> tag's attributes
- * (item_id for single citations, items for compound citations).
+ * (item_id for single citations, att_id for attachment-based citations,
+ * items for compound citations).
  */
 export function recoverSimplifiedCitationLabel(tag: string): string | null {
     // Single citation: item_id="1-KEY"
     const itemIdMatch = tag.match(/\bitem_id="([^"]*)"/);
     if (itemIdMatch) {
         const ci = lookupCitationItem(itemIdMatch[1]);
+        return ci ? formatCitationText([ci]) : null;
+    }
+    // Attachment-based citation: att_id="1-KEY" — resolve to parent item
+    const attIdMatch = tag.match(/\batt_id="([^"]*)"/);
+    if (attIdMatch) {
+        const ci = lookupCitationItemFromAttachment(attIdMatch[1]);
         return ci ? formatCitationText([ci]) : null;
     }
     // Compound citation: items="1-KEY1:page=P1, 1-KEY2"
@@ -617,6 +829,21 @@ export function recoverRawCitationLabel(encodedCitation: string): string | null 
 // ---- HTML stripping ----
 
 /**
+ * Extract the page attribute from a simplified citation tag and append it
+ * to the label text so page changes are visible in the diff preview.
+ */
+function appendCitationPage(tag: string, label: string): string {
+    const pageMatch = tag.match(/\bpage="([^"]*)"/);
+    if (!pageMatch || !pageMatch[1]) return label;
+    const page = pageMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+    // Insert before closing paren if label ends with ')'
+    if (label.endsWith(')')) {
+        return label.slice(0, -1) + ', p. ' + page + ')';
+    }
+    return label + ' p. ' + page;
+}
+
+/**
  * Strip HTML tags for display, converting special elements to readable text.
  * - Citations (simplified): <citation ... label="(Author, 2020)"/> → (Author, 2020)
  * - Citations (raw Zotero): <span class="citation" ...>(<span class="citation-item">Author, 2024</span>)</span> → (Author, 2024)
@@ -642,15 +869,17 @@ export function stripHtmlTags(html: string): string {
         )
         // Convert simplified self-closing citation tags to their label text.
         // When label is empty or "()", recover by looking up the item.
+        // Also appends page info from the page attribute when present.
         .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\blabel="([^"]*)"(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi,
             (match, label) => {
-                if (label && label !== '()') return label;
-                return recoverSimplifiedCitationLabel(match) || label || '[citation]';
+                const text = (label && label !== '()') ? label : (recoverSimplifiedCitationLabel(match) || label || '[citation]');
+                return appendCitationPage(match, text);
             })
         // Remove simplified self-closing citation tags without a label (fallback).
         // Try to recover a meaningful label by looking up the cited item.
         .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi, (match) => {
-            return recoverSimplifiedCitationLabel(match) || '[citation]';
+            const text = recoverSimplifiedCitationLabel(match) || '[citation]';
+            return appendCitationPage(match, text);
         })
         // Handle non-self-closing <citation> tags (preserve inner text)
         .replace(/<citation\b[^>]*>([\s\S]*?)<\/citation>/gi, '$1')

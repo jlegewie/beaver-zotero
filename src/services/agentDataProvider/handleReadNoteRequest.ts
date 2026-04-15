@@ -6,7 +6,8 @@
  */
 
 import { logger } from '../../utils/logger';
-import { getOrSimplify, getLatestNoteHtml } from '../../utils/noteHtmlSimplifier';
+import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
+import { getLatestNoteHtml } from '../../utils/noteEditorIO';
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,
@@ -17,7 +18,6 @@ import { prepareBatchAttachmentData, processAttachmentsWithBatchData, toAttachme
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
-
 
 /**
  * Extract unique cited item references from simplified note HTML.
@@ -167,6 +167,11 @@ export async function handleReadNoteRequest(
 
         // 3. Verify item is a note
         if (!item.isNote()) {
+            if (item.isPDFAttachment()) {
+                return errorResponse(
+                    `Item ${note_id} is a PDF attachment and not a note. You can read PDF attachments with the read_pages tool.`
+                );
+            }
             return errorResponse(
                 `Item ${note_id} is not a note (type: ${item.itemType})`
             );
@@ -189,7 +194,10 @@ export async function handleReadNoteRequest(
             };
         }
 
-        // 6. Simplify (also warms cache for subsequent edit_note calls)
+        // 6. Simplify (also warms cache for subsequent edit_note calls).
+        // Pass raw HTML so the cache key matches edit_note's getOrSimplify
+        // calls — simplifyNoteHtml normalizes internally, so the cached
+        // simplified output is identical either way.
         const { simplified } = getOrSimplify(note_id, rawHtml, item.libraryID);
 
         // 7. Apply offset/limit pagination

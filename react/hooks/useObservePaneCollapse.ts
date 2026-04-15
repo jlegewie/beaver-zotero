@@ -3,6 +3,7 @@ import { useSetAtom } from 'jotai';
 import { isSidebarVisibleAtom } from '../atoms/ui';
 import { uiManager } from '../ui/UIManager';
 import { SidebarLocation } from '../ui/types';
+import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 
 /**
 * Watch the item pane for changes to the collapsed attribute and close the chat if the item pane is collapsed.
@@ -28,6 +29,8 @@ export function useObservePaneCollapse(location: SidebarLocation) {
                     if(currentLocation !== location) return;
                     const isCollapsed = itemPane.getAttribute("collapsed") === "true";
                     if (isCollapsed && sidebar.style.display !== 'none') {
+                        // Dismiss any active diff preview in the note editor
+                        dismissDiffPreview();
                         // Cleanup the pane and update the toolbar button
                         uiManager.handleCleanup(location);
                         uiManager.updateToolbarButton(false);

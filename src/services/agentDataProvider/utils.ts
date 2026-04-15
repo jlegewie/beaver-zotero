@@ -1,6 +1,6 @@
 import { logger } from '../../utils/logger';
 import { ZoteroItemReference } from '../../../react/types/zotero';
-import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus, AttachmentSummary } from '../../../react/types/zotero';
+import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus, AttachmentSummary, FileStatusCode } from '../../../react/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
 import { syncingItemFilter, syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
@@ -13,6 +13,7 @@ import { MuPDFService } from '../pdf/MuPDFService';
 import { EXTRACTION_VERSION, isRemoteFilePath, makeRemoteFilePath } from '../attachmentFileCache';
 import type { AttachmentFileCacheRecord } from '../attachmentFileCache';
 import { DeferredToolPreference } from '../agentProtocol';
+import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
 import { isSupportedItem } from '../../utils/sync';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
@@ -209,7 +210,7 @@ async function checkAttachmentAvailability(
                 mime_type: contentType,
                 page_count: null,
                 status: "unavailable",
-                status_reason: `File type "${contentType || 'unknown'}" is not supported`,
+                status_code: FileStatusCode.UnsupportedFileType,
             }
         };
     }
@@ -225,7 +226,7 @@ async function checkAttachmentAvailability(
             const remotePath = makeRemoteFilePath(attachment.attachmentSyncedHash);
             return { available: true, filePath: remotePath, contentType };
         }
-        const onServer = isAttachmentOnServer(attachment);
+        const isFileAvailableOnServer = isAttachmentOnServer(attachment);
         return {
             available: false,
             fileExistsLocally: false,
@@ -234,9 +235,9 @@ async function checkAttachmentAvailability(
                 mime_type: contentType,
                 page_count: null,
                 status: "unavailable",
-                status_reason: onServer && !getPref('accessRemoteFiles')
-                    ? 'File is not available locally. Remote file access is disabled in settings.'
-                    : 'File is not available locally',
+                status_code: isFileAvailableOnServer
+                    ? FileStatusCode.FileNotLocalRemote
+                    : FileStatusCode.FileNotLocal,
             }
         };
     }
@@ -279,13 +280,13 @@ async function checkAttachmentAvailability(
  */
 function fileStatusFromCache(record: AttachmentFileCacheRecord, isPrimary: boolean): FrontendFileStatus {
     if (record.is_encrypted) {
-        return { is_primary: isPrimary, mime_type: record.content_type, page_count: null, status: "unavailable", status_reason: 'PDF is password-protected' };
+        return { is_primary: isPrimary, mime_type: record.content_type, page_count: null, status: "unavailable", status_code: FileStatusCode.PdfEncrypted };
     }
     if (record.is_invalid) {
-        return { is_primary: isPrimary, mime_type: record.content_type, page_count: null, status: "unavailable", status_reason: 'PDF file is invalid or corrupted' };
+        return { is_primary: isPrimary, mime_type: record.content_type, page_count: null, status: "unavailable", status_code: FileStatusCode.PdfInvalid };
     }
     if (record.needs_ocr) {
-        return { is_primary: isPrimary, mime_type: record.content_type, page_count: record.page_count, status: "unavailable", status_reason: `Text unavailable because the PDF requires OCR. Page images are available` };
+        return { is_primary: isPrimary, mime_type: record.content_type, page_count: record.page_count, status: "unavailable", status_code: FileStatusCode.PdfNeedsOcr };
     }
     return { is_primary: isPrimary, mime_type: record.content_type, page_count: record.page_count, status: "available" };
 }
@@ -486,7 +487,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                         mime_type: contentType,
                         page_count: null,
                         status: "unavailable",
-                        status_reason: 'PDF is password-protected',
+                        status_code: FileStatusCode.PdfEncrypted,
                     };
                 } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
                     await persistMetadataToCache(attachment, filePath, contentType, { page_count: null, page_labels: {}, has_text_layer: null, needs_ocr: false, is_encrypted: false, is_invalid: true });
@@ -495,7 +496,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                         mime_type: contentType,
                         page_count: null,
                         status: "unavailable",
-                        status_reason: 'PDF file is invalid or corrupted',
+                        status_code: FileStatusCode.PdfInvalid,
                     };
                 }
             }
@@ -515,7 +516,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                 mime_type: contentType,
                 page_count: pageCount,
                 status: "unavailable",
-                status_reason: `Text unavailable because the PDF requires OCR. Page images are available`,
+                status_code: FileStatusCode.PdfNeedsOcr,
             };
         }
 
@@ -536,7 +537,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
             mime_type: contentType,
             page_count: null,
             status: "unavailable",
-            status_reason: `Error analyzing PDF`,
+            status_code: FileStatusCode.PdfAnalysisError,
         };
     }
 }
@@ -614,7 +615,7 @@ export async function getAttachmentFileStatusLightweight(
             mime_type: contentType,
             page_count: null,
             status: "unavailable",
-            status_reason: 'Unable to read PDF - file may be encrypted, corrupted, or invalid',
+            status_code: FileStatusCode.PdfUnreadable,
         }, fileExistsLocally };
     }
 
@@ -963,6 +964,7 @@ export function toAttachmentSummary(a: AttachmentDataWithStatus): AttachmentSumm
         is_primary: a.file_status?.is_primary ?? false,
         page_count: a.file_status?.page_count ?? null,
         status: a.file_status?.status === 'available' ? 'available' : 'unavailable',
+        status_code: a.file_status?.status_code,
         status_reason: a.file_status?.status_reason,
     };
 }
@@ -1377,23 +1379,18 @@ export function validateLibraryAccess(libraryIdOrName: number | string | null | 
  * Reads from Zotero prefs with a two-level structure:
  * - toolToGroup: Maps tool names to group names
  * - groupPreferences: Maps group names to preference values
+ *
+ * Merges stored prefs with the defaults from deferredToolPreferences.ts
+ * so that newly added tools (e.g. create_note) use their configured
+ * default even before the user saves any preference change.
  */
 export function getDeferredToolPreference(toolName: string): DeferredToolPreference {
     try {
-        const prefString = getPref('deferredToolPreferences');
-        if (prefString && typeof prefString === 'string') {
-            const data = JSON.parse(prefString);
-            const toolToGroup = data.toolToGroup || {};
-            const groupPreferences = data.groupPreferences || {};
-            
-            // Get the group for this tool (fallback to tool name itself)
-            const group = toolToGroup[toolName] ?? toolName;
-            
-            // Get the preference for this group (fallback to 'always_ask')
-            const preference = groupPreferences[group];
-            if (preference === 'always_ask' || preference === 'always_apply' || preference === 'continue_without_applying') {
-                return preference;
-            }
+        const data = store.get(deferredToolPreferencesAtom);
+        const group = data.toolToGroup[toolName] ?? toolName;
+        const preference = data.groupPreferences[group];
+        if (preference === 'always_ask' || preference === 'always_apply' || preference === 'continue_without_applying') {
+            return preference;
         }
     } catch (error) {
         logger(`getDeferredToolPreference: Failed to read preference for ${toolName}: ${error}`, 1);

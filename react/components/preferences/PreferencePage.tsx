@@ -8,6 +8,7 @@ import { useSetAtom } from 'jotai';
 import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
+import { isDiffPreviewSupported } from "../../utils/noteEditorDiffPreview";
 import { performConsistencyCheck } from "../../../src/utils/syncConsistency";
 import { 
     embeddingIndexStateAtom, 
@@ -45,6 +46,8 @@ const PreferencePage: React.FC = () => {
     });
     const [addSelectedOnNewThread, setAddSelectedOnNewThread] = useState(() => getPref('addSelectedItemsOnNewThread'));
     const [addSelectedOnOpen, setAddSelectedOnOpen] = useState(() => getPref('addSelectedItemsOnOpen'));
+    const [showDiffPreview, setShowDiffPreview] = useState(() => getPref('showDiffPreviewInNoteEditor') !== false);
+    const diffPreviewSupported = isDiffPreviewSupported();
     const [consentToShare, setConsentToShare] = useState(() => profileWithPlan?.consent_to_share || false);
     const [emailNotifications, setEmailNotifications] = useState(() => profileWithPlan?.email_notifications || false);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
@@ -293,6 +296,13 @@ const PreferencePage: React.FC = () => {
         setPref("addSelectedItemsOnOpen", newValue);
         setAddSelectedOnOpen(newValue);
     }, [addSelectedOnOpen]);
+
+    const handleShowDiffPreviewToggle = useCallback(() => {
+        if (!diffPreviewSupported) return;
+        const newValue = !showDiffPreview;
+        setPref("showDiffPreviewInNoteEditor", newValue);
+        setShowDiffPreview(newValue);
+    }, [showDiffPreview, diffPreviewSupported]);
 
     const handleConsentToggle = useCallback(() => {
         handleConsentChange(!consentToShare);
@@ -568,6 +578,25 @@ const PreferencePage: React.FC = () => {
                                     }
                                 />
                                 <SettingsRow
+                                    title="Preview Note Edits in Editor"
+                                    description={diffPreviewSupported
+                                        ? "Show proposed note edits inline in the Zotero note editor"
+                                        : "Requires Zotero 8 — unavailable on this version"}
+                                    onClick={diffPreviewSupported ? handleShowDiffPreviewToggle : undefined}
+                                    hasBorder
+                                    tooltip="When enabled, edit_note proposals appear as a colored diff directly in the note editor with Apply / Reject controls. When disabled, approvals fall back to the sidebar preview. Turn off if a Zotero update causes the in-editor preview to misbehave."
+                                    control={
+                                        <input
+                                            type="checkbox"
+                                            checked={showDiffPreview && diffPreviewSupported}
+                                            disabled={!diffPreviewSupported}
+                                            onChange={handleShowDiffPreviewToggle}
+                                            onClick={(e) => e.stopPropagation()}
+                                            style={{ cursor: diffPreviewSupported ? 'pointer' : 'not-allowed', margin: 0 }}
+                                        />
+                                    }
+                                />
+                                <SettingsRow
                                     title="Help Improve Beaver"
                                     description="Share anonymized prompts to help improve Beaver"
                                     onClick={handleConsentToggle}
@@ -805,11 +834,7 @@ const PreferencePage: React.FC = () => {
 
             {/* ===== ACTIONS TAB ===== */}
             {activeTab === 'actions' && (
-                <>
-                    <CustomInstructionsSection />
-
-                    <ActionsPreferenceSection />
-                </>
+                <ActionsPreferenceSection />
             )}
 
             {/* ===== ADVANCED TAB ===== */}

@@ -21,6 +21,7 @@ import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
 import { EXTRACTION_VERSION, makeRemoteFilePath } from '../attachmentFileCache';
 import type { CachedPageContent } from '../attachmentFileCache';
 import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
+import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
 
 
 /**
@@ -30,7 +31,7 @@ import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataFo
 export async function handleZoteroAttachmentPagesRequest(
     request: WSZoteroAttachmentPagesRequest
 ): Promise<WSZoteroAttachmentPagesResponse> {
-    const { attachment, start_page, end_page, skip_local_limits, request_id } = request;
+    const { attachment, start_page, end_page, skip_local_limits, prefer_page_labels, max_pages, request_id } = request;
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
     let errorKey = requestKey;
 
@@ -157,30 +158,49 @@ export async function handleZoteroAttachmentPagesRequest(
         // 5. Determine total page count (from cache or PDF)
         let pdfData: Uint8Array | null = null;
         const extractor = new PDFExtractor();
+        let pageLabels: Record<number, string> | null = null;
 
-        if (cachedMeta?.page_count != null) {
-            totalPages = cachedMeta.page_count;
-        } else {
-            try {
-                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
-            } catch (error) {
-                if (!isRemoteOnly) throw error; // local I/O error — let outer handler deal with it
-                logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${error}`, 1);
-                return errorResponse(
-                    `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
-                    'download_failed'
-                );
+        // 5a. Load page labels (only when a local file is available)
+        if (prefer_page_labels && filePath) {
+            const labelResult = await ensurePageLabelsForResolution(filePath, cachedMeta, extractor);
+            pageLabels = labelResult.labels;
+            if (labelResult.pageCount != null) {
+                totalPages = labelResult.pageCount;
             }
-            if (isRemoteOnly) {
-                const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
-                if (exceeded) {
-                    return errorResponse(
-                        `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
-                        'file_too_large'
-                    );
+            if (labelResult.pdfData) {
+                pdfData = labelResult.pdfData;
+            }
+        } else if (cachedMeta?.page_labels && Object.keys(cachedMeta.page_labels).length > 0) {
+            pageLabels = cachedMeta.page_labels;
+        }
+
+        if (totalPages == null) {
+            if (cachedMeta?.page_count != null) {
+                totalPages = cachedMeta.page_count;
+            } else {
+                if (!pdfData) {
+                    try {
+                        pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                    } catch (error) {
+                        if (!isRemoteOnly) throw error;
+                        logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${error}`, 1);
+                        return errorResponse(
+                            `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                            'download_failed'
+                        );
+                    }
+                    if (isRemoteOnly) {
+                        const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                        if (exceeded) {
+                            return errorResponse(
+                                `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                                'file_too_large'
+                            );
+                        }
+                    }
                 }
+                totalPages = await extractor.getPageCount(pdfData);
             }
-            totalPages = await extractor.getPageCount(pdfData);
         }
 
         // 6. Check page count limit when extracting all pages.
@@ -194,8 +214,24 @@ export async function handleZoteroAttachmentPagesRequest(
             }
         }
 
-        // 7. Validate and clamp page range (1-indexed)
-        const startPage = start_page ?? 1;
+        // 7. Resolve and validate page range (1-indexed).
+        // resolvePageValue handles both numeric and string inputs, and throws
+        // InvalidPageValueError for unparseable strings and unresolved labels.
+        let startPage: number;
+        let requestedEndPage: number;
+        try {
+            startPage = start_page != null
+                ? resolvePageValue(start_page, pageLabels, prefer_page_labels === true)
+                : 1;
+            requestedEndPage = end_page != null
+                ? resolvePageValue(end_page, pageLabels, prefer_page_labels === true)
+                : totalPages;
+        } catch (error) {
+            if (error instanceof InvalidPageValueError) {
+                return errorResponse(error.message, 'invalid_page_value', totalPages);
+            }
+            throw error;
+        }
 
         if (startPage < 1) {
             return errorResponse(
@@ -213,8 +249,6 @@ export async function handleZoteroAttachmentPagesRequest(
             );
         }
 
-        const requestedEndPage = end_page ?? totalPages;
-
         if (requestedEndPage < 1) {
             return errorResponse(
                 `End page ${requestedEndPage} is invalid (must be >= 1)`,
@@ -231,8 +265,14 @@ export async function handleZoteroAttachmentPagesRequest(
             );
         }
 
-        // Clamp end_page to document bounds
-        const endPage = Math.min(requestedEndPage, totalPages);
+        // Clamp the resolved range to max_pages and document bounds.
+        let endPage = Math.min(requestedEndPage, totalPages);
+        if (max_pages && max_pages > 0) {
+            const maxAllowedEnd = startPage + max_pages - 1;
+            if (endPage > maxAllowedEnd) {
+                endPage = maxAllowedEnd;
+            }
+        }
 
         // 7b. Try content cache for requested page range (0-indexed)
         const startIdx = startPage - 1;
@@ -248,6 +288,7 @@ export async function handleZoteroAttachmentPagesRequest(
                     logger(`handleZoteroAttachmentPagesRequest: Cache hit for ${requestKey} pages ${startPage}-${endPage}`, 3);
                     const pages: WSPageContent[] = cachedPages.map((p) => ({
                         page_number: p.index + 1,
+                        page_label: pageLabels?.[p.index] ?? p.label,
                         content: p.content,
                     }));
                     return {
@@ -283,9 +324,17 @@ export async function handleZoteroAttachmentPagesRequest(
             checkTextLayer: true,
         });
 
+        // Refresh pageLabels from the extraction result if we hadn't loaded
+        // them earlier. This ensures response `page_label` is populated even
+        // when prefer_page_labels was false and the cache was cold.
+        if (!pageLabels && result.pageLabels && Object.keys(result.pageLabels).length > 0) {
+            pageLabels = result.pageLabels;
+        }
+
         // 9. Build response (convert back to 1-indexed page numbers)
         const pages: WSPageContent[] = result.pages.map((page) => ({
             page_number: page.index + 1,
+            page_label: pageLabels?.[page.index] ?? page.label,
             content: page.content,
         }));
 

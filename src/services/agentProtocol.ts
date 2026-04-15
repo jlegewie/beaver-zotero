@@ -59,6 +59,15 @@ export interface WSToolCallProgressEvent extends WSBaseEvent {
     progress: string;
 }
 
+/** Streaming tool call arguments for live preview (e.g., create_note content) */
+export interface WSToolCallArgsStreamEvent extends WSBaseEvent {
+    event: 'tool_call_args_stream';
+    run_id: string;
+    tool_call_id: string;
+    tool_name: string;
+    args: Record<string, any>;
+}
+
 /** Run complete event signaling the agent run finished */
 export interface WSRunCompleteEvent extends WSBaseEvent {
     event: 'run_complete';
@@ -76,6 +85,12 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
 /** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */
 export interface WSDoneEvent extends WSBaseEvent {
     event: 'done';
+}
+
+/** Streaming done event: all LLM tokens sent, post-processing (citations) still in progress */
+export interface WSStreamingDoneEvent extends WSBaseEvent {
+    event: 'streaming_done';
+    run_id: string;
 }
 
 /** Thread event sent when a thread is initialized or created */
@@ -108,6 +123,8 @@ export interface WSErrorEvent extends WSBaseEvent {
     retry_after?: number;
     /** Whether the run can be resumed from the point of failure */
     is_resumable?: boolean;
+    /** Whether the frontend should automatically resume by starting a new run */
+    try_auto_resume?: boolean;
     /** show the beaver credits button */
     has_beaver_fallback?: boolean;
 }
@@ -160,15 +177,23 @@ export interface WSDataError {
 }
 
 export interface WSPageContent {
-    /** 1-indexed page number */
+    /** 1-indexed physical page number */
     page_number: number;
+    /**
+     * PDF page label for this physical page (e.g. "iv", "38", "A-3"),
+     * when the document declares one. Populated whenever labels exist,
+     * independent of whether prefer_page_labels was set on the request.
+     */
+    page_label?: string;
     /** Text content of the page */
     content: string;
 }
 
 export interface WSPageImage {
-    /** 1-indexed page number */
+    /** 1-indexed physical page number */
     page_number: number;
+    /** PDF page label for this physical page, when the document declares one. */
+    page_label?: string;
     /** Base64-encoded image data */
     image_data: string;
     /** Image format (png or jpeg) */
@@ -184,12 +209,29 @@ export interface WSZoteroAttachmentPagesRequest extends WSBaseEvent {
     event: 'zotero_attachment_pages_request';
     request_id: string;
     attachment: ZoteroItemReference;
-    /** 1-indexed start page (inclusive, defaults to 1) */
-    start_page?: number;
-    /** 1-indexed end page (inclusive, defaults to total pages) */
-    end_page?: number;
+    /**
+     * Start page, inclusive. Defaults to 1. Accepts either a 1-based
+     * physical index (number) or a PDF page label string (e.g. "iv", "A-3").
+     * String values are resolved against page labels when prefer_page_labels
+     * is true; string values that parse as integers are also accepted when
+     * prefer_page_labels is false.
+     */
+    start_page?: number | string;
+    /** End page, inclusive. Same type semantics as start_page. */
+    end_page?: number | string;
     /** Skip local file size and page count limits. Default: false */
     skip_local_limits?: boolean;
+    /**
+     * When true, resolve start_page/end_page against PDF page labels first,
+     * falling back to 1-based document index when no label matches.
+     */
+    prefer_page_labels?: boolean;
+    /**
+     * Maximum number of pages to return in a single response. When set, the
+     * frontend clamps the resolved [startPage, endPage] range to at most
+     * max_pages.
+     */
+    max_pages?: number;
 }
 
 /** Request from backend to render attachment pages as images */
@@ -197,8 +239,12 @@ export interface WSZoteroAttachmentPageImagesRequest extends WSBaseEvent {
     event: 'zotero_attachment_page_images_request';
     request_id: string;
     attachment: ZoteroItemReference;
-    /** 1-indexed page numbers to render (defaults to all pages if not specified) */
-    pages?: number[];
+    /**
+     * 1-indexed page numbers to render (defaults to all pages if not specified).
+     * Each entry is either a physical 1-based index (number) or a PDF page
+     * label string (e.g. "iv"). Same resolution semantics as start_page.
+     */
+    pages?: (number | string)[];
     /** Scale factor (1.0 = 72 DPI, 2.0 = 144 DPI, etc.). Default: 1.0 */
     scale?: number;
     /** Target DPI (alternative to scale, takes precedence if provided) */
@@ -209,6 +255,11 @@ export interface WSZoteroAttachmentPageImagesRequest extends WSBaseEvent {
     jpeg_quality?: number;
     /** Skip local file size and page count limits. Default: false */
     skip_local_limits?: boolean;
+    /**
+     * When true, resolve `pages` entries against PDF page labels first,
+     * falling back to 1-based document index when no label matches.
+     */
+    prefer_page_labels?: boolean;
 }
 
 /**
@@ -302,6 +353,39 @@ export interface FrontendTimingMetadata {
     att_status_ms?: number;
     /** Cumulative time computing file status (page count, etc.) */
     att_file_status_ms?: number;
+
+    // create_item action timings
+    // NOTE: These buckets are nested, not disjoint. Summing them double-counts.
+    // Hierarchy:
+    //   total_ms
+    //     └─ resolve_library_ms
+    //     └─ apply_ms
+    //          ├─ create_zotero_item_ms
+    //          │    ├─ resolve_target_ms
+    //          │    ├─ identifier_translation_ms | url_translation_ms | manual_creation_ms
+    //          │    └─ add_to_collection_ms
+    //          ├─ post_save_ms
+    //          └─ pdf_check_ms
+    /** Time resolving target library (name lookup, editability check) */
+    resolve_library_ms?: number;
+    /** Time spent in resolveImportTarget inside createZoteroItem */
+    resolve_target_ms?: number;
+    /** Time spent in Zotero identifier translation (DOI / ISBN / PMID / arXiv) */
+    identifier_translation_ms?: number;
+    /** Time spent in Zotero URL translation via HiddenBrowser (should be 0 on WS path) */
+    url_translation_ms?: number;
+    /** Time spent in manual (non-translator) item creation */
+    manual_creation_ms?: number;
+    /** Time adding the newly-created item to a collection */
+    add_to_collection_ms?: number;
+    /** Time spent in createZoteroItem (identifier + url + manual + collection) */
+    create_zotero_item_ms?: number;
+    /** Time saving post-creation field edits (extra, collections, tags) */
+    post_save_ms?: number;
+    /** Time checking for existing PDF attachments after creation */
+    pdf_check_ms?: number;
+    /** Total time inside applyCreateItemData (createZoteroItem + post-processing) */
+    apply_ms?: number;
 
     // Reference check specific timings
     /** Time spent in phase 1: identifier (DOI/ISBN) lookup */
@@ -463,7 +547,8 @@ export type AttachmentPagesErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
-    | 'download_failed'    // Remote file download failed
+    | 'download_failed'     // Remote file download failed
+    | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'extraction_failed';  // General extraction failure
 
 /** Response to zotero attachment pages request */
@@ -494,7 +579,8 @@ export type AttachmentPageImagesErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
-    | 'download_failed'    // Remote file download failed
+    | 'download_failed'     // Remote file download failed
+    | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'render_failed';      // General rendering failure
 
 /** Response to zotero attachment page images request */
@@ -663,6 +749,8 @@ export interface WSZoteroSearchRequest extends WSBaseEvent {
     limit: number;
     offset: number;
     fields?: string[] | null;
+    /** Post-filter: true = only items with attachments, false = only items without */
+    has_attachments?: boolean | null;
 }
 
 /** Regular (non-note) result item from zotero_search */
@@ -735,6 +823,8 @@ export interface WSListItemsRequest extends WSBaseEvent {
     sort_order: string;
     limit: number;
     offset: number;
+    /** Post-filter: true = only items with attachments, false = only items without */
+    has_attachments?: boolean | null;
 }
 
 /** Regular (non-note) result item from list_items */
@@ -896,7 +986,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {
@@ -913,6 +1003,23 @@ export interface FieldValidationErrorInfo {
     error_code: 'field_restricted' | 'field_unknown' | 'field_invalid_for_type';
 }
 
+/**
+ * Alternative snippet returned when an `old_string` lookup fails in a note
+ * edit. The backend surfaces these to the model so it can pick a candidate or
+ * rewrite `old_string` to match exactly. Snippets are pre-truncated on the
+ * plugin side — the backend must not re-truncate them.
+ */
+export interface ErrorCandidate {
+    snippet: string;
+    truncated: boolean;
+    via:
+        | 'whitespace_relaxed'
+        | 'word_overlap'
+        | 'inline_tag_drift'
+        | 'structural_anchor';
+    score: number;
+}
+
 /** Response to agent action validation request */
 export interface WSAgentActionValidateResponse {
     type: 'agent_action_validate_response';
@@ -922,8 +1029,20 @@ export interface WSAgentActionValidateResponse {
     error_code?: string | null;
     /** Detailed list of field validation errors (for batch validation) */
     errors?: FieldValidationErrorInfo[];
+    /**
+     * Ranked alternative snippets when an edit_note old_string lookup fails.
+     * Present only with `error_code === 'old_string_not_found'`. Already
+     * truncated — do not re-truncate.
+     */
+    error_candidates?: ErrorCandidate[];
     /** Current value for before/after tracking. Shape depends on action_type. */
     current_value?: any;
+    /**
+     * Optional normalized action payload returned by validation.
+     * When present, the backend should persist and later execute this data
+     * instead of the original request action_data.
+     */
+    normalized_action_data?: Record<string, any>;
     preference: DeferredToolPreference;
 }
 
@@ -944,7 +1063,15 @@ export interface WSAgentActionExecuteResponse {
     success: boolean;
     error?: string | null;
     error_code?: string | null;
+    /**
+     * Ranked alternative snippets when an edit_note old_string lookup fails
+     * at execute time. Present only with `error_code === 'old_string_not_found'`.
+     * Already truncated — do not re-truncate.
+     */
+    error_candidates?: ErrorCandidate[];
     result_data?: Record<string, any>;
+    /** Optional timing breakdown for diagnostics (e.g. create_item latency) */
+    timing?: FrontendTimingMetadata;
 }
 
 /** Request from backend for user approval of a deferred action */
@@ -976,7 +1103,9 @@ export type WSEvent =
     | WSPartEvent
     | WSToolReturnEvent
     | WSToolCallProgressEvent
+    | WSToolCallArgsStreamEvent
     | WSRunCompleteEvent
+    | WSStreamingDoneEvent
     | WSDoneEvent
     | WSThreadEvent
     | WSThreadNameEvent
@@ -1162,11 +1291,23 @@ export interface WSCallbacks {
     onToolCallProgress: (event: WSToolCallProgressEvent) => void;
 
     /**
+     * Called when streaming tool call arguments are received for live preview.
+     * @param event The tool call args stream event with partially-parsed arguments
+     */
+    onToolCallArgsStream: (event: WSToolCallArgsStreamEvent) => void;
+
+    /**
      * Called when the agent run completes.
      * May be async to load item data for agent actions.
      * @param event The run complete event with usage and cost info
      */
     onRunComplete: (event: WSRunCompleteEvent) => void | Promise<void>;
+
+    /**
+     * Called when LLM streaming ends but post-processing (citations) is still running.
+     * Use to show footer with loading state before citations are resolved.
+     */
+    onStreamingDone?: (event: WSStreamingDoneEvent) => void;
 
     /**
      * Called when the full request is done (after persistence, usage logging, etc.)

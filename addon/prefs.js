@@ -15,7 +15,8 @@ pref("statefulChat", true);
 pref("addSelectedItemsOnOpen", true);
 pref("addSelectedItemsOnNewThread", true);
 pref("annotationToolEnabled", true);
-pref("maxAddAttachmentToMessage", 3);
+pref("maxAddAttachmentToMessage", 10);
+pref("readerExplainPrompt", "Explain the selected passage or annotation(s) from this paper in plain language. Provide context for any technical terms, statistical methods, or domain-specific concepts. If it references other work, briefly explain that context too.");
 
 // Beaver Free file limits
 pref("maxFileSizeMB", 50);
@@ -30,11 +31,12 @@ pref("confirmExtractionCosts", true);
 pref("confirmExternalSearchCosts", true);
 pref("pauseLongRunningAgent", true);
 pref("requestPlusTools", false);
+pref("showDiffPreviewInNoteEditor", true);
 
 // Deferred tool preferences: maps tool group to preference (always_ask, always_apply, continue_without_applying)
-// toolToGroup maps tool names to group names (allows renaming tools while preserving preference)
-// groupPreferences maps group names to the actual preference value
-pref("deferredToolPreferences", '{"toolToGroup":{"edit_metadata":"metadata_edits","edit_item":"metadata_edits","create_collection":"library_modifications","organize_items":"library_modifications","create_item":"create_items","create_items":"create_items"},"groupPreferences":{"metadata_edits":"always_ask","create_items":"always_ask","library_modifications":"always_ask"}}');
+// Defaults are defined in react/atoms/deferredToolPreferences.ts and merged at load time.
+// This pref only stores user overrides.
+pref("deferredToolPreferences", "");
 
 // AI settings
 pref("customInstructions", "");
@@ -70,6 +72,13 @@ pref("deletionJobs", "[]");
 
 // Items skipped during sync
 pref("skippedItems", "[]")
+
+// Onboarding popups
+pref("onboardingWelcomeShown", false);
+pref("onboardingReaderTipShown", false);
+pref("onboardingNoteTipShown", false);
+pref("onboardingCitationTipShown", false);
+pref("onboardingWelcomeShownAt", "");
 
 // MCP server
 pref("mcpServerEnabled", false);

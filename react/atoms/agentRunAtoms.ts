@@ -21,8 +21,10 @@ import {
     WSRetryEvent,
     WSAgentActionsEvent,
     WSToolCallProgressEvent,
+    WSToolCallArgsStreamEvent,
     WSMissingZoteroDataEvent,
     WSDeferredApprovalRequest,
+    WSStreamingDoneEvent,
     WSThreadNameEvent,
     CurrentLibrary,
     CurrentCollection,
@@ -63,6 +65,7 @@ import {
     updateRunWithToolReturn,
     updateRunComplete,
     updateRunWithToolCallProgress,
+    updateRunWithToolCallArgsStream,
     allUserAttachmentKeysAtom,
     resetRunMessages,
 } from '../agents/atoms';
@@ -81,6 +84,7 @@ import {
     isCreateCollectionAgentAction,
     isOrganizeItemsAgentAction,
     isEditNoteAgentAction,
+    isCreateNoteAgentAction,
     hasAppliedZoteroItem,
     AgentAction,
     addPendingApprovalAtom,
@@ -94,6 +98,7 @@ import { undoCreateItemActions } from '../utils/createItemActions';
 import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { undoEditNoteAction } from '../utils/editNoteActions';
+import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
@@ -108,6 +113,7 @@ import {
     makeNoteKey,
 } from './editNoteAutoApprove';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
+import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
 import { syncingItemFilterAsync } from '../../src/utils/sync';
@@ -116,6 +122,7 @@ import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
+import { appendRunIfMissing, findResumeChainRoot, findRunForResume, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 
 // =============================================================================
 // Helper Functions
@@ -353,6 +360,103 @@ function createAgentRunShell(
     return { run, request };
 }
 
+type StartResumeRunOptions = {
+    requireResumable: boolean;
+    logPrefix: string;
+    failureErrorType: string;
+    failureMessage: string;
+};
+
+async function startResumeRun(
+    get: Getter,
+    set: Setter,
+    failedRunId: string,
+    options: StartResumeRunOptions,
+): Promise<void> {
+    logger(`${options.logPrefix}: Resuming from run ${failedRunId}`, 1);
+
+    let newRunId: string | null = null;
+
+    try {
+        const model = get(selectedModelAtom);
+        if (!model) {
+            logger(`${options.logPrefix}: No model selected`, 1);
+            return;
+        }
+
+        const userId = get(userIdAtom);
+        if (!userId) {
+            logger(`${options.logPrefix}: No user ID found`, 1);
+            return;
+        }
+
+        const threadRuns = get(threadRunsAtom);
+        const activeRun = get(activeRunAtom);
+        const failedRun = findRunForResume(threadRuns, activeRun, failedRunId);
+
+        if (!failedRun) {
+            logger(`${options.logPrefix}: Failed run ${failedRunId} not found`, 1);
+            return;
+        }
+
+        if (
+            failedRun.status !== 'error' ||
+            (options.requireResumable && !failedRun.error?.is_resumable)
+        ) {
+            logger(`${options.logPrefix}: Run ${failedRunId} is not resumable`, 1);
+            return;
+        }
+
+        const threadId = get(currentThreadIdAtom) || failedRun.thread_id;
+        if (!threadId) {
+            logger(`${options.logPrefix}: No thread ID found`, 1);
+            return;
+        }
+
+        if (activeRun?.id === failedRunId) {
+            set(threadRunsAtom, runs => appendRunIfMissing(runs, failedRun));
+        }
+
+        set(prepareForNewRunAtom);
+        set(isWSChatPendingAtom, true);
+
+        const modelOptions = buildModelSelectionOptions(model);
+        const customInstructions = getPref('customInstructions') || undefined;
+
+        const resumePrompt: BeaverAgentPrompt = {
+            content: '',
+            is_resume: true,
+            resumes_run_id: failedRunId,
+        };
+
+        const { run: newRun, request } = createAgentRunShell(
+            resumePrompt,
+            threadId,
+            userId,
+            model.name,
+            modelOptions,
+            model.provider,
+            customInstructions,
+            model.is_custom ? model.custom_model : undefined,
+        );
+
+        newRunId = newRun.id;
+        set(activeRunAtom, newRun);
+
+        await executeWSRequest(newRun, request, get, set);
+    } catch (error) {
+        logger(`${options.logPrefix}: Unexpected error:`, error, 1);
+        set(wsErrorAtom, {
+            event: 'error',
+            type: options.failureErrorType,
+            message: error instanceof Error ? error.message : options.failureMessage,
+            is_retryable: true,
+        });
+        set(activeRunAtom, prev => (newRunId && prev?.id === newRunId ? null : prev));
+        set(isWSChatPendingAtom, false);
+    }
+}
+
 /**
  * Delete applied Zotero items (annotations, notes) from agent actions.
  * Returns the number of items successfully deleted.
@@ -439,19 +543,23 @@ interface ActionsToUndo {
     createItems: AgentAction[];
     createCollections: AgentAction[];
     organizeItems: AgentAction[];
+    createNotes: AgentAction[];
 }
+
+type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
 
 /**
  * Prompt user to confirm undoing applied agent actions during regeneration.
  * Shows a combined dialog listing all types of changes that will be undone.
- * Returns true if user confirms, false otherwise.
+ * Returns 'undo' to undo and regenerate, 'skip' to regenerate without undoing,
+ * or 'cancel' to abort regeneration entirely.
  */
-function confirmUndoAppliedActions(actions: ActionsToUndo): boolean {
-    const { annotations, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems } = actions;
+function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
+    const { annotations, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, createNotes } = actions;
     const totalActions = annotations.length + zoteroNotes.length + metadataEdits.length +
-                         noteEdits.length + createItems.length + createCollections.length + organizeItems.length;
-    
-    if (totalActions === 0) return true;
+                         noteEdits.length + createItems.length + createCollections.length + organizeItems.length + createNotes.length;
+
+    if (totalActions === 0) return 'skip';
     
     // Build a list of changes
     const changeLines: string[] = [];
@@ -476,20 +584,28 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): boolean {
     if (organizeItems.length > 0) {
         changeLines.push(`• ${organizeItems.length} organize action${organizeItems.length === 1 ? '' : 's'}`);
     }
+    if (createNotes.length > 0) {
+        changeLines.push(`• ${createNotes.length} created note${createNotes.length === 1 ? '' : 's'}`);
+    }
     
-    const title = 'Undo changes?';
-    const message = `The following changes will be undone when regenerating:\n\n${changeLines.join('\n')}\n\nDo you want to undo these changes?`;
+    const title = 'Retry?';
+    const message = `The following changes were applied and can be undone:\n\n${changeLines.join('\n')}\n\nUndo them and retry, or retry without undoing?`;
 
     const buttonIndex = Zotero.Prompt.confirm({
         window: Zotero.getMainWindow(),
         title,
         text: message,
-        button0: Zotero.Prompt.BUTTON_TITLE_YES,
-        button1: Zotero.Prompt.BUTTON_TITLE_NO,
+        button0: 'Undo && Retry',
+        // Cancel must be at button1 so Escape/dialog-close routes here
+        // (Services.prompt.confirmEx returns index 1 on Esc).
+        button1: Zotero.Prompt.BUTTON_TITLE_CANCEL,
+        button2: 'Retry',
         defaultButton: 1,
     });
 
-    return buttonIndex === 0;
+    if (buttonIndex === 0) return 'undo';
+    if (buttonIndex === 2) return 'skip';
+    return 'cancel';
 }
 
 
@@ -665,6 +781,9 @@ async function handleMissingZoteroData(
 /** Whether a WebSocket chat request is currently in progress */
 export const isWSChatPendingAtom = atom(false);
 
+/** Run IDs where LLM streaming finished but post-processing (citations) is still in progress */
+export const streamingDoneRunIdsAtom = atom<Set<string>>(new Set<string>());
+
 /** Whether the WebSocket is currently connected */
 export const isWSConnectedAtom = atom(false);
 
@@ -692,6 +811,7 @@ export interface RetryState {
     waitSeconds?: number | null;
 }
 export const wsRetryAtom = atom<RetryState | null>(null);
+const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
 
 // =============================================================================
 // Action Atoms
@@ -709,6 +829,19 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
     set(wsErrorAtom, null);
     set(wsWarningAtom, null);
     set(wsRetryAtom, null);
+    set(streamingDoneRunIdsAtom, new Set<string>());
+});
+
+/**
+ * Clear transient frontend state before starting a replacement run.
+ * This is separate from transport-level onClose cleanup so reconnect handoffs
+ * do not leak per-run approval UI or auto-approve settings into the new run.
+ */
+export const prepareForNewRunAtom = atom(null, (_get, set) => {
+    set(resetWSStateAtom);
+    set(clearAllPendingApprovalsAtom);
+    set(clearApprovalResponseIntentsAtom);
+    set(clearAutoApproveNoteKeysAtom);
 });
 
 /**
@@ -853,6 +986,15 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(activeRunAtom, (prev) => prev ? updateRunWithToolCallProgress(prev, event) : prev);
         },
 
+        onToolCallArgsStream: (event: WSToolCallArgsStreamEvent) => {
+            set(activeRunAtom, (prev) => prev ? updateRunWithToolCallArgsStream(prev, event) : prev);
+        },
+
+        onStreamingDone: (event: WSStreamingDoneEvent) => {
+            logger('WS onStreamingDone:', { runId: event.run_id }, 1);
+            set(streamingDoneRunIdsAtom, (prev) => new Set([...prev, event.run_id]));
+        },
+
         onRunComplete: async (event: WSRunCompleteEvent) => {
             logger('WS onRunComplete:', {
                 runId: event.run_id,
@@ -864,6 +1006,12 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 softCapTriggered: event.soft_cap_triggered,
             }, 1);
             set(activeRunAtom, (prev) => prev ? updateRunComplete(prev, event) : prev);
+            // Clear streaming-done state now that citations are resolved
+            set(streamingDoneRunIdsAtom, (prev) => {
+                const next = new Set(prev);
+                next.delete(event.run_id);
+                return next;
+            });
             // Clear retry state when run completes
             set(wsRetryAtom, null);
 
@@ -882,7 +1030,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     ...prev,
                     ...event.citations!.map(c => ({ ...c, run_id: event.run_id }))
                 ]);
-                set(updateCitationDataAtom);
+                await set(updateCitationDataAtom);
             }
 
             // Process agent actions from run complete event
@@ -938,6 +1086,9 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         onDone: () => {
             logger('WS onDone: Request fully complete', 1);
 
+            // Clear any remaining streaming-done state (safety net)
+            set(streamingDoneRunIdsAtom, new Set<string>());
+
             // Move active run to completed runs
             set(activeRunAtom, (prev) => {
                 if (prev) {
@@ -953,33 +1104,53 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
             agentService.close();
             set(isWSChatPendingAtom, false);
+            // Clear pending approvals and dismiss diff preview
+            set(clearAllPendingApprovalsAtom);
             // Clear per-run auto-approve state (keys only; IDs kept for UI labeling)
             set(clearAutoApproveNoteKeysAtom);
         },
 
         onError: (event: WSErrorEvent) => {
             logger('WS onError:', event, 1);
-    
+            const errorRunId = resolveErrorRunId(event, store.get(activeRunAtom));
+
+            // Clear streaming-done state
+            set(streamingDoneRunIdsAtom, new Set<string>());
+
             // Normal error handling
             set(wsErrorAtom, event);
-            set(activeRunAtom, (prev) => prev ? {
-                ...prev,
-                status: 'error',
-                error: {
-                    type: event.type,
-                    message: event.message,
-                    details: event.details,
-                    is_retryable: event.is_retryable,
-                    retry_after: event.retry_after,
-                    is_resumable: event.is_resumable,
-                    has_beaver_fallback: event.has_beaver_fallback,
-                }
-            } : prev);
+            set(activeRunAtom, (prev) => {
+                if (!prev) return prev;
+                if (errorRunId && prev.id !== errorRunId) return prev;
+                return {
+                    ...prev,
+                    status: 'error',
+                    error: toRunError(event),
+                };
+            });
             set(isWSChatPendingAtom, false);
             // Clear retry state on error
             set(wsRetryAtom, null);
+            // Clear pending approvals and dismiss diff preview (run failed)
+            set(clearAllPendingApprovalsAtom);
             // Clear per-run auto-approve state
             set(clearAutoApproveNoteKeysAtom);
+
+            if (
+                event.try_auto_resume &&
+                errorRunId &&
+                !store.get(scheduledAutoResumeRunIdsAtom).has(errorRunId)
+            ) {
+                set(scheduledAutoResumeRunIdsAtom, (prev: Set<string>) => {
+                    const next = new Set(prev);
+                    next.add(errorRunId);
+                    return next;
+                });
+
+                setTimeout(() => {
+                    store.set(autoResumeErroredRunAtom, errorRunId);
+                }, 0);
+            }
         },
 
         onWarning: (event: WSWarningEvent) => {
@@ -1135,6 +1306,10 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
             set(isWSChatPendingAtom, false);
+            // Clear streaming-done state (connection lost during post-processing)
+            set(streamingDoneRunIdsAtom, new Set<string>());
+            // Clear pending approvals and dismiss diff preview (connection lost)
+            set(clearAllPendingApprovalsAtom);
             // Clear per-run auto-approve state if the socket drops before done/error.
             set(clearAutoApproveNoteKeysAtom);
         }
@@ -1217,8 +1392,11 @@ export const sendWSMessageAtom = atom(
             return;
         }
         
+        // Dismiss any open diff preview before sending
+        dismissDiffPreview();
+
         // Reset state
-        set(resetWSStateAtom);
+        set(prepareForNewRunAtom);
         set(isWSChatPendingAtom, true);
 
         try {
@@ -1497,6 +1675,9 @@ export const regenerateFromRunAtom = atom(
     async (get, set, runId: string) => {
         logger(`regenerateFromRunAtom: Regenerating from run ${runId}`, 1);
 
+        // Dismiss any open diff preview before regenerating
+        dismissDiffPreview();
+
         try {
             // Get current model
             const model = get(selectedModelAtom);
@@ -1535,6 +1716,24 @@ export const regenerateFromRunAtom = atom(
                 return;
             }
 
+            // If the target is a resume run, walk the resume chain back to the
+            // root so we regenerate from the original user message, not from an
+            // intermediate resume prompt (whose content is empty). The root
+            // always lives in threadRuns — startResumeRun guarantees the failed
+            // run is appended to threadRuns before the resume is started.
+            const allRunsForChain: AgentRun[] = activeRun && !threadRuns.some(r => r.id === activeRun.id)
+                ? [...threadRuns, activeRun]
+                : threadRuns;
+            const rootRun = findResumeChainRoot(targetRun, allRunsForChain);
+            if (rootRun.id !== targetRun.id) {
+                const rootIndex = threadRuns.findIndex(r => r.id === rootRun.id);
+                if (rootIndex >= 0) {
+                    logger(`regenerateFromRunAtom: walking resume chain, using root run ${rootRun.id}`, 1);
+                    targetRun = rootRun;
+                    runIndex = rootIndex;
+                }
+            }
+
             // Get thread ID from the target run (may not be set in currentThreadIdAtom yet)
             const threadId = get(currentThreadIdAtom) || targetRun.thread_id;
 
@@ -1567,14 +1766,18 @@ export const regenerateFromRunAtom = atom(
             const noteEditsToUndo = actionsInRemovedRuns
                 .filter(isEditNoteAgentAction)
                 .filter(a => a.status === 'applied');
+            const createNotesToUndo = actionsInRemovedRuns
+                .filter(isCreateNoteAgentAction)
+                .filter(a => a.status === 'applied');
 
             // Prompt user to confirm undoing applied actions
             const hasActionsToUndo = annotationsToDelete.length > 0 || zoteroNotesToDelete.length > 0 ||
                                      metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
                                      createItemsToUndo.length > 0 ||
-                                     createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0;
+                                     createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
+                                     createNotesToUndo.length > 0;
             if (hasActionsToUndo) {
-                const shouldUndo = confirmUndoAppliedActions({
+                const confirmResult = confirmUndoAppliedActions({
                     annotations: annotationsToDelete,
                     zoteroNotes: zoteroNotesToDelete,
                     metadataEdits: metadataEditsToUndo,
@@ -1582,8 +1785,12 @@ export const regenerateFromRunAtom = atom(
                     createItems: createItemsToUndo,
                     createCollections: createCollectionsToUndo,
                     organizeItems: organizeItemsToUndo,
+                    createNotes: createNotesToUndo,
                 });
-                if (shouldUndo) {
+                if (confirmResult === 'cancel') {
+                    return;
+                }
+                if (confirmResult === 'undo') {
                     // Undo annotations (delete Zotero items)
                     if (annotationsToDelete.length > 0) {
                         await deleteAppliedZoteroItems(annotationsToDelete);
@@ -1612,6 +1819,10 @@ export const regenerateFromRunAtom = atom(
                     for (const action of organizeItemsToUndo) {
                         await undoOrganizeItemsAction(action);
                     }
+                    // Undo created notes (delete from Zotero)
+                    for (const action of createNotesToUndo) {
+                        await undoCreateNoteAction(action);
+                    }
                 }
             }
 
@@ -1620,18 +1831,18 @@ export const regenerateFromRunAtom = atom(
             set(threadRunsAtom, truncatedRuns);
 
             // Clear agent actions for removed runs
-            set(threadAgentActionsAtom, (prev) => 
+            set(threadAgentActionsAtom, (prev) =>
                 prev.filter(a => !runIdsToRemove.includes(a.run_id))
             );
 
             // Clear citations for removed runs
-            set(citationMetadataAtom, (prev) => 
+            set(citationMetadataAtom, (prev) =>
                 prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
             );
             set(updateCitationDataAtom);
 
             // Reset WS state and set pending
-            set(resetWSStateAtom);
+            set(prepareForNewRunAtom);
             set(isWSChatPendingAtom, true);
 
             // Build model selection options
@@ -1680,6 +1891,9 @@ export const regenerateWithEditedPromptAtom = atom(
     async (get, set, params: { runId: string; editedPrompt: BeaverAgentPrompt }) => {
         const { runId, editedPrompt } = params;
         logger(`regenerateWithEditedPromptAtom: Regenerating run ${runId} with edited prompt`, 1);
+
+        // Dismiss any open diff preview before regenerating
+        dismissDiffPreview();
 
         try {
             // Get current model
@@ -1751,14 +1965,18 @@ export const regenerateWithEditedPromptAtom = atom(
             const noteEditsToUndo = actionsInRemovedRuns
                 .filter(isEditNoteAgentAction)
                 .filter(a => a.status === 'applied');
+            const createNotesToUndo = actionsInRemovedRuns
+                .filter(isCreateNoteAgentAction)
+                .filter(a => a.status === 'applied');
 
             // Prompt user to confirm undoing applied actions
             const hasActionsToUndo = annotationsToDelete.length > 0 || zoteroNotesToDelete.length > 0 ||
                                      metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
                                      createItemsToUndo.length > 0 ||
-                                     createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0;
+                                     createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
+                                     createNotesToUndo.length > 0;
             if (hasActionsToUndo) {
-                const shouldUndo = confirmUndoAppliedActions({
+                const confirmResult = confirmUndoAppliedActions({
                     annotations: annotationsToDelete,
                     zoteroNotes: zoteroNotesToDelete,
                     metadataEdits: metadataEditsToUndo,
@@ -1766,8 +1984,12 @@ export const regenerateWithEditedPromptAtom = atom(
                     createItems: createItemsToUndo,
                     createCollections: createCollectionsToUndo,
                     organizeItems: organizeItemsToUndo,
+                    createNotes: createNotesToUndo,
                 });
-                if (shouldUndo) {
+                if (confirmResult === 'cancel') {
+                    return;
+                }
+                if (confirmResult === 'undo') {
                     // Undo annotations (delete Zotero items)
                     if (annotationsToDelete.length > 0) {
                         await deleteAppliedZoteroItems(annotationsToDelete);
@@ -1796,6 +2018,10 @@ export const regenerateWithEditedPromptAtom = atom(
                     for (const action of organizeItemsToUndo) {
                         await undoOrganizeItemsAction(action);
                     }
+                    // Undo created notes (delete from Zotero)
+                    for (const action of createNotesToUndo) {
+                        await undoCreateNoteAction(action);
+                    }
                 }
             }
 
@@ -1815,7 +2041,7 @@ export const regenerateWithEditedPromptAtom = atom(
             set(updateCitationDataAtom);
 
             // Reset WS state and set pending
-            set(resetWSStateAtom);
+            set(prepareForNewRunAtom);
             set(isWSChatPendingAtom, true);
 
             // Build model selection options
@@ -1865,101 +2091,35 @@ export const regenerateWithEditedPromptAtom = atom(
  * The backend will continue from where it left off and the UI will hide the error run
  * when displaying the resumed run.
  */
+export const autoResumeErroredRunAtom = atom(
+    null,
+    async (get, set, failedRunId: string) => {
+        try {
+            await startResumeRun(get, set, failedRunId, {
+                requireResumable: false,
+                logPrefix: 'autoResumeErroredRunAtom',
+                failureErrorType: 'auto_resume_error',
+                failureMessage: 'Failed to automatically resume run',
+            });
+        } finally {
+            set(scheduledAutoResumeRunIdsAtom, (prev: Set<string>) => {
+                const next = new Set(prev);
+                next.delete(failedRunId);
+                return next;
+            });
+        }
+    }
+);
+
 export const resumeFromRunAtom = atom(
     null,
     async (get, set, failedRunId: string) => {
-        logger(`resumeFromRunAtom: Resuming from run ${failedRunId}`, 1);
-
-        try {
-            // Get current model
-            const model = get(selectedModelAtom);
-            if (!model) {
-                logger('resumeFromRunAtom: No model selected', 1);
-                return;
-            }
-
-            // Get user ID
-            const userId = get(userIdAtom);
-            if (!userId) {
-                logger('resumeFromRunAtom: No user ID found', 1);
-                return;
-            }
-
-            // Find the failed run
-            const threadRuns = get(threadRunsAtom);
-            const activeRun = get(activeRunAtom);
-            
-            let failedRun: AgentRun | null = null;
-            const failedRunIndex = threadRuns.findIndex(r => r.id === failedRunId);
-            
-            if (failedRunIndex >= 0) {
-                failedRun = threadRuns[failedRunIndex];
-            } else if (activeRun?.id === failedRunId) {
-                failedRun = activeRun;
-            }
-            
-            if (!failedRun) {
-                logger(`resumeFromRunAtom: Failed run ${failedRunId} not found`, 1);
-                return;
-            }
-
-            // Verify it's an error run that can be resumed
-            if (failedRun.status !== 'error' || !failedRun.error?.is_resumable) {
-                logger(`resumeFromRunAtom: Run ${failedRunId} is not resumable`, 1);
-                return;
-            }
-
-            // Get thread ID
-            const threadId = get(currentThreadIdAtom) || failedRun.thread_id;
-            if (!threadId) {
-                logger('resumeFromRunAtom: No thread ID found', 1);
-                return;
-            }
-
-            // Reset WS state and set pending
-            set(resetWSStateAtom);
-            set(isWSChatPendingAtom, true);
-
-            // Build model selection options
-            const modelOptions = buildModelSelectionOptions(model);
-            const customInstructions = getPref('customInstructions') || undefined;
-
-            // Create resume prompt with empty content
-            const resumePrompt: BeaverAgentPrompt = {
-                content: '',
-                is_resume: true,
-                resumes_run_id: failedRunId,
-            };
-
-            // Create new AgentRun shell with the resume prompt
-            const { run: newRun, request } = createAgentRunShell(
-                resumePrompt,
-                threadId,
-                userId,
-                model.name,
-                modelOptions,
-                model.provider,
-                customInstructions,
-                model.is_custom ? model.custom_model : undefined,
-            );
-
-            // Set active run - UI now shows spinner
-            set(activeRunAtom, newRun);
-
-            // Execute the WebSocket request
-            await executeWSRequest(newRun, request, get, set);
-        } catch (error) {
-            // Catch any unexpected errors during resume
-            logger('resumeFromRunAtom: Unexpected error:', error, 1);
-            set(wsErrorAtom, {
-                event: 'error',
-                type: 'resume_error',
-                message: error instanceof Error ? error.message : 'Failed to resume run',
-                is_retryable: true,
-            });
-            set(activeRunAtom, null);
-            set(isWSChatPendingAtom, false);
-        }
+        await startResumeRun(get, set, failedRunId, {
+            requireResumable: true,
+            logPrefix: 'resumeFromRunAtom',
+            failureErrorType: 'resume_error',
+            failureMessage: 'Failed to resume run',
+        });
     }
 );
 
@@ -1973,6 +2133,7 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
 
     // Clear any pending approvals (for parallel tool calls that were awaiting user response)
     set(clearAllPendingApprovalsAtom);
+    set(clearApprovalResponseIntentsAtom);
     // Clear per-run auto-approve state
     set(clearAutoApproveNoteKeysAtom);
 
@@ -1988,7 +2149,10 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
         set(threadRunsAtom, (runs) => [...runs, canceledRun]);
         set(activeRunAtom, null);
     }
-    
+
+    // Clear streaming-done state (user canceled during post-processing)
+    set(streamingDoneRunIdsAtom, new Set<string>());
+
     // Send cancel message and close connection
     await agentService.cancel();
     set(isWSConnectedAtom, false);
@@ -2014,12 +2178,42 @@ export const clearThreadAtom = atom(null, (_get, set) => {
 });
 
 /**
+ * Best-effort local record of approval/reject intent keyed by deferred action id.
+ * Used by views to keep the correct spinner visible after a pending approval is removed.
+ */
+export const approvalResponseIntentsAtom = atom<Map<string, boolean>>(new Map());
+
+export const removeApprovalResponseIntentAtom = atom(
+    null,
+    (_get, set, actionId: string) => {
+        set(approvalResponseIntentsAtom, (prev) => {
+            if (!prev.has(actionId)) return prev;
+            const next = new Map(prev);
+            next.delete(actionId);
+            return next;
+        });
+    },
+);
+
+export const clearApprovalResponseIntentsAtom = atom(
+    null,
+    (_get, set) => {
+        set(approvalResponseIntentsAtom, new Map());
+    },
+);
+
+/**
  * Send approval response for a deferred action.
  * Called by the UI when user approves/rejects an action.
  */
 export const sendApprovalResponseAtom = atom(
     null,
-    (_get, _set, { actionId, approved, userInstructions }: { actionId: string; approved: boolean; userInstructions?: string | null }) => {
+    (_get, set, { actionId, approved, userInstructions }: { actionId: string; approved: boolean; userInstructions?: string | null }) => {
+        set(approvalResponseIntentsAtom, (prev) => {
+            const next = new Map(prev);
+            next.set(actionId, approved);
+            return next;
+        });
         logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
         agentService.sendApprovalResponse(actionId, approved, userInstructions);
     }

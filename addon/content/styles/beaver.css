@@ -71,21 +71,17 @@
 }
 
 /* Separate window: sizing and constraints.
- * Set font-size on the root window element so rem units match the sidebar.
- * XUL windows default to 16px; Zotero sidepanes use ~13px.
- * Use !important to override Zotero.UIProperties.registerRoot() font scaling. */
+ * Root font-size is mirrored from the main Zotero window in beaverWindow.js
+ * so `rem` units resolve identically to the sidebar. */
 #beaver-window {
     min-width: 400px;
     min-height: 600px;
-    font-size: 13px !important;
 }
 
-/* Preferences window: sizing and constraints.
- * Use !important to override Zotero.UIProperties.registerRoot() font scaling. */
+/* Preferences window: sizing and constraints. */
 #beaver-preferences-window {
     min-width: 695px;
     min-height: 600px;
-    font-size: 13px !important;
 }
 
 /* Floating Popup Overlay - renders over main Zotero window, bottom-right */
@@ -890,6 +886,7 @@
 [id^="beaver-pane-"] .border-right-quinary { border-right: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-top-quinary { border-top: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-bottom-quinary { border-bottom: 1px solid var(--fill-quinary); }
+[id^="beaver-pane-"] .border-bottom-quarternary { border-bottom: 1px solid var(--fill-quarternary); }
 [id^="beaver-pane-"] .border-quinary { border: 1px solid var(--fill-quinary); }
 [id^="beaver-pane-"] .border-quarternary { border: 1px solid var(--material-mix-quarternary); }
 [id^="beaver-pane-"] .border-popup { border: 1px solid var(--fill-quarternary); }
@@ -1020,6 +1017,23 @@
 [id^="beaver-pane-"] .markdown span.zotero-citation.external-citation.streaming:hover {
     background: var(--tag-blue-quinary);
     color: var(--tag-blue);
+}
+
+/* With-locator citation styling - green for in-library citations that navigate to a specific location */
+[id^="beaver-pane-"] .markdown span.zotero-citation.with-locator {
+    background: var(--tag-green-quinary);
+    border-color: var(--tag-green-tertiary);
+    color: var(--tag-green-primary);
+}
+
+[id^="beaver-pane-"] .markdown span.zotero-citation.with-locator:hover {
+    background: var(--tag-green-quarternary);
+    color: var(--tag-green-primary);
+}
+
+[id^="beaver-pane-"] .markdown span.zotero-citation.with-locator.streaming:hover {
+    background: var(--tag-green-quinary);
+    color: var(--tag-green-primary);
 }
 
 [id^="beaver-pane-"] .markdown h1,
@@ -2304,7 +2318,7 @@
 [id^="beaver-pane-"] .inline-diff-container {
     font-size: 0.875rem;
     line-height: 1.45;
-    padding: 4px 10px;
+    padding: 4px 6px;
     word-break: break-word;
     border-radius: 1px;
 }
@@ -2318,7 +2332,7 @@
 }
 
 [id^="beaver-pane-"] .inline-diff-del {
-    background-color: rgba(186, 42, 41, 0.18);
+    background-color: rgba(210, 40, 40, 0.25);
     text-decoration: line-through;
     border-radius: 2px;
     padding: 1px 1px;
@@ -2327,7 +2341,7 @@
 }
 
 [id^="beaver-pane-"] .inline-diff-add {
-    background-color: rgba(20, 135, 85, 0.18);
+    background-color: rgba(16, 150, 72, 0.25);
     border-radius: 2px;
     padding: 1px 1px;
     color: var(--fill-primary);
@@ -2610,4 +2624,16 @@
 
 [id^="beaver-pane-"] .file-status-bar:hover {
     color: var(--fill-secondary);
+}
+
+
+[id^="beaver-pane-"] .two-line-header {
+    flex-wrap: wrap;
+    display: '-webkit-box';
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-break: break-word;
 }

@@ -8,21 +8,22 @@ import MenuButton from '../ui/MenuButton';
 import Button from '../ui/Button';
 import CitedSourcesList from '../sources/CitedSourcesList';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
-import { getBeaverNoteFooterHTML, wrapWithSchemaVersion } from '../../utils/noteActions';
+import { getBeaverNoteFooterHTML, wrapWithSchemaVersion, generateNoteTitle } from '../../utils/noteActions';
 import CopyButton from '../ui/buttons/CopyButton';
 import { citationDataMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
-import { selectItem } from '../../../src/utils/selectItem';
+import { selectItem, selectItemById } from '../../../src/utils/selectItem';
 import { CitationData, getCitationKey } from '../../types/citations';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
-import { toolResultsMapAtom } from '../../agents/atoms';
+import { toolResultsMapAtom, allRunsAtom } from '../../agents/atoms';
 import { extractRunResponseContent } from '../../utils/threadContent';
 import TokenUsageDisplay from './TokenUsageDisplay';
-import { regenerateFromRunAtom } from '../../atoms/agentRunAtoms';
+import { regenerateFromRunAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { currentThreadIdAtom } from '../../atoms/threads';
 import { store } from '../../store';
 import Tooltip from '../ui/Tooltip';
+import Spinner from '../icons/Spinner';
 import { preloadPageLabelsForContent } from '../../utils/pageLabels';
 
 interface AgentRunFooterProps {
@@ -41,6 +42,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
     const toolResultsMap = useAtomValue(toolResultsMapAtom);
     const citationMarkerMap = useAtomValue(citationKeyToMarkerAtom);
+    const allRuns = useAtomValue(allRunsAtom);
     
     // Force re-render when menu opens to get fresh context for disabled state
     const [, forceUpdate] = useState({});
@@ -126,12 +128,13 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
             },
             {
                 label: 'Save as note',
-                onClick: () => saveToLibrary()
+                onClick: () => saveToLibrary(),
+                disabled: isResolvingCitations
             },
             {
                 label: 'Save as child note',
                 onClick: () => saveToItem(),
-                disabled: !hasParent
+                disabled: !hasParent || isResolvingCitations
             },
             {
                 label: 'Copy link to message',
@@ -164,18 +167,29 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
     /** Save as standalone note to current library/collection */
     const saveToLibrary = async () => {
-        await preloadPageLabelsForContent(combinedContent);
-        let formattedContent = renderToHTML(preprocessNoteContent(combinedContent), "markdown", {
+        // Build note content: ## User (blockquote) + ## Beaver (response)
+        const userQuestion = run.user_prompt.content;
+        const sections: string[] = [];
+        if (userQuestion) {
+            sections.push(`## User\n\n> ${userQuestion.replace(/\n/g, '\n> ')}`);
+        }
+        sections.push(`## Beaver\n\n${combinedContent}`);
+        const noteMarkdown = sections.join('\n\n---\n\n');
+
+        await preloadPageLabelsForContent(noteMarkdown);
+        let formattedContent = renderToHTML(preprocessNoteContent(noteMarkdown), "markdown", {
             citationDataMap,
             externalMapping: externalReferenceMapping,
             externalReferencesMap
         });
         const context = getZoteroTargetContextSync();
-
         const threadId = store.get(currentThreadIdAtom);
-        if (threadId) {
-            formattedContent += getBeaverNoteFooterHTML(threadId, run.id);
-        }
+
+        // Assemble: title + header + <hr> + content + <hr> + footer
+        const responseIndex = allRuns.findIndex(r => r.id === run.id) + 1;
+        const titleHtml = generateNoteTitle(responseIndex || undefined);
+        const brandingHtml = threadId ? getBeaverNoteFooterHTML(threadId, run.id) : '';
+        formattedContent = titleHtml + brandingHtml + '<hr>' + formattedContent + '<hr>' + brandingHtml;
 
         const newNote = new Zotero.Item('note');
         if (context.targetLibraryId !== undefined) {
@@ -184,23 +198,36 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         newNote.setNote(wrapWithSchemaVersion(formattedContent));
         await newNote.saveTx();
 
-        // Add to collection if one is selected
-        if (context.collectionToAddTo) {
-            await context.collectionToAddTo.addItem(newNote.id);
+        // Always add to the current collection (even when items are selected)
+        const zp = Zotero.getActiveZoteroPane();
+        const selectedCollection = zp?.getSelectedCollection() || null;
+        if (selectedCollection) {
+            await Zotero.DB.executeTransaction(async () => {
+                selectedCollection.addItem(newNote.id);
+            });
         }
-        
+
         // Only navigate to the item in library view, not in reader
         const win = Zotero.getMainWindow();
         const isInReader = win.Zotero_Tabs?.selectedType === 'reader';
         if (!isInReader) {
-            selectItem(newNote);
+            await selectItemById(newNote.id, true, selectedCollection?.id);
         }
     };
 
     /** Save as child note attached to selected/current item */
     const saveToItem = async () => {
-        await preloadPageLabelsForContent(combinedContent);
-        let formattedContent = renderToHTML(preprocessNoteContent(combinedContent), "markdown", {
+        // Build note content: ## User (blockquote) + ## Beaver (response)
+        const userQuestion = run.user_prompt.content;
+        const sections: string[] = [];
+        if (userQuestion) {
+            sections.push(`## User\n\n> ${userQuestion.replace(/\n/g, '\n> ')}`);
+        }
+        sections.push(`## Beaver\n\n${combinedContent}`);
+        const noteMarkdown = sections.join('\n\n---\n\n');
+
+        await preloadPageLabelsForContent(noteMarkdown);
+        let formattedContent = renderToHTML(preprocessNoteContent(noteMarkdown), "markdown", {
             citationDataMap,
             externalMapping: externalReferenceMapping,
             externalReferencesMap
@@ -209,10 +236,12 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 
         if (!context.parentReference) return;
 
+        // Assemble: title + header + <hr> + content + <hr> + footer
         const threadId = store.get(currentThreadIdAtom);
-        if (threadId) {
-            formattedContent += getBeaverNoteFooterHTML(threadId, run.id);
-        }
+        const responseIndex = allRuns.findIndex(r => r.id === run.id) + 1;
+        const titleHtml = generateNoteTitle(responseIndex || undefined);
+        const brandingHtml = threadId ? getBeaverNoteFooterHTML(threadId, run.id) : '';
+        formattedContent = titleHtml + brandingHtml + '<hr>' + formattedContent + '<hr>' + brandingHtml;
 
         const newNote = new Zotero.Item('note');
         newNote.libraryID = context.parentReference.library_id;
@@ -249,14 +278,15 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
 
     const handleRegenerate = async () => {
-        const runId = run.user_prompt.is_resume && run.user_prompt.resumes_run_id
-            ? run.user_prompt.resumes_run_id
-            : run.id;
-        await regenerateFromRun(runId);
+        // regenerateFromRunAtom walks the resume chain back to the root
+        // internally, so we can pass the clicked run's id directly.
+        await regenerateFromRun(run.id);
     };
 
-    // Hide during streaming
-    const isStreaming = run.status === 'in_progress';
+    // Hide during streaming (but show during post-processing when citations are resolving)
+    const streamingDoneRunIds = useAtomValue(streamingDoneRunIdsAtom);
+    const isResolvingCitations = streamingDoneRunIds.has(run.id);
+    const isStreaming = run.status === 'in_progress' && !isResolvingCitations;
 
     return (
         <div className="px-4">
@@ -266,9 +296,14 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                     ${isStreaming ? 'hidden' : ''}
                 `}
             >
-                {/* Sources button */}
+                {/* Sources button or resolving spinner */}
                 <div className="flex-1">
-                    {uniqueCitations.length > 0 && (
+                    {isResolvingCitations && uniqueCitations.length === 0 ? (
+                        <div className="display-flex items-center gap-2 font-color-secondary">
+                            <Spinner size={12} />
+                            <span className="text-sm font-color-secondary">Linking sources...</span>
+                        </div>
+                    ) : uniqueCitations.length > 0 ? (
                         <Button
                             variant="ghost"
                             onClick={toggleSources}
@@ -279,7 +314,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                                 {uniqueCitations.length} Source{uniqueCitations.length === 1 ? '' : 's'}
                             </span>
                         </Button>
-                    )}
+                    ) : null}
                 </div>
                 
                 {/* Action buttons */}

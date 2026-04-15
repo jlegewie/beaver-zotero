@@ -14,6 +14,8 @@ import { disposeMuPDF } from "./utils/mupdf";
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { initContextMenus, cleanupContextMenus } from "./modules/zoteroContextMenu";
+import { initReaderIntegration, cleanupReaderIntegration } from "./modules/readerIntegration";
+import { initReaderToolbarMenu, cleanupReaderToolbarMenu } from "./modules/readerToolbarMenu";
 
 /** Timeout for individual async shutdown operations to prevent hangs. */
 const SHUTDOWN_TIMEOUT_MS = 3000;
@@ -130,6 +132,13 @@ function compareVersions(v1: string, v2: string): number {
  * @param currentVersion The current plugin version
  */
 async function handleUpgrade(lastVersion: string, currentVersion: string) {
+    // Mark welcome onboarding as shown for existing users who are upgrading.
+    // This prevents the first-install popup from showing to users who already have the plugin.
+    // The reader tip is intentionally NOT suppressed — existing users should see it once.
+    if (!getPref('onboardingWelcomeShown')) {
+        setPref('onboardingWelcomeShown', true);
+    }
+
     const knownVersions = getAllVersionUpdateMessageVersions();
     if (knownVersions.length && lastVersion) {
         const versionsToNotify = knownVersions
@@ -234,6 +243,12 @@ async function onStartup() {
 
         // -------- Register Zotero 8 context menus (no-op on Zotero 7) --------
         initContextMenus();
+
+        // -------- Register reader text selection popup & context menu --------
+        initReaderIntegration();
+
+        // -------- Register reader toolbar dropdown menu --------
+        await initReaderToolbarMenu();
 
         // -------- Register Zotero preferences pane --------
         await Zotero.PreferencePanes.register({
@@ -437,7 +452,13 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 12. Unregister context menus
         cleanupContextMenus();
 
-        // 13. Unregister protocol handler
+        // 13. Unregister reader integration listeners
+        cleanupReaderIntegration();
+
+        // 13b. Unregister reader toolbar menu
+        cleanupReaderToolbarMenu();
+
+        // 14. Unregister protocol handler
         unregisterBeaverProtocolHandler();
 
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
@@ -552,6 +573,8 @@ async function onShutdown(): Promise<void> {
         
         unregisterQuitObserver();
         cleanupContextMenus();
+        cleanupReaderIntegration();
+        cleanupReaderToolbarMenu();
         unregisterBeaverProtocolHandler();
 
         ztoolkit.unregisterAll();

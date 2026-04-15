@@ -122,7 +122,25 @@ export async function handleZoteroSearchRequest(
         }
         
         // Execute search
-        const itemIds = await search.search();
+        let itemIds = await search.search();
+
+        // Post-filter by attachment status if requested
+        if (request.has_attachments != null) {
+            const allForFilter = await Zotero.Items.getAsync(itemIds);
+            const validForFilter = allForFilter.filter((item): item is Zotero.Item => item !== null);
+            if (validForFilter.length > 0) {
+                await Zotero.Items.loadDataTypes(validForFilter, ['childItems']);
+            }
+            itemIds = validForFilter
+                .filter(item => {
+                    // Only apply attachment filter to regular items
+                    if (!item.isRegularItem()) return true;
+                    const hasAtt = item.numAttachments() > 0;
+                    return request.has_attachments ? hasAtt : !hasAtt;
+                })
+                .map(item => item.id);
+        }
+
         const totalCount = itemIds.length;
 
         // Apply pagination

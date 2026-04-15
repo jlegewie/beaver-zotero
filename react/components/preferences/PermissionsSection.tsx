@@ -88,6 +88,13 @@ const PermissionsSection: React.FC = () => {
                 </div>
                 <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
                     <DeferredToolPreferenceSetting
+                        toolName="create_note"
+                        label="Note Creation"
+                        description="Creating new Zotero notes from agent responses"
+                    />
+                </div>
+                <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
+                    <DeferredToolPreferenceSetting
                         toolName="create_items"
                         label="Item Imports"
                         description="Importing new items from external sources"

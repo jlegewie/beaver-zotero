@@ -20,6 +20,7 @@ import {
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
 import { makeRemoteFilePath } from '../attachmentFileCache';
 import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
+import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
 
 /**
  * Handle zotero_attachment_page_images_request event.
@@ -28,7 +29,7 @@ import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataFo
 export async function handleZoteroAttachmentPageImagesRequest(
     request: WSZoteroAttachmentPageImagesRequest
 ): Promise<WSZoteroAttachmentPageImagesResponse> {
-    const { attachment, pages, scale, dpi, format, jpeg_quality, skip_local_limits, request_id } = request;
+    const { attachment, pages, scale, dpi, format, jpeg_quality, skip_local_limits, prefer_page_labels, request_id } = request;
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
     let errorKey = requestKey;
 
@@ -144,34 +145,95 @@ export async function handleZoteroAttachmentPageImagesRequest(
             }
         }
 
-        // 5. Read PDF and get page count
-        let pdfData: Uint8Array;
-        try {
-            pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
-        } catch (error) {
-            if (!isRemoteOnly) throw error; // local I/O error — let outer handler deal with it
-            logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
-            return errorResponse(
-                `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
-                'download_failed'
-            );
+        // 5. Resolve page count, page labels, and PDF bytes.
+        const extractor = new PDFExtractor();
+        let pdfData: Uint8Array | null = null;
+        let pageLabels: Record<number, string> | null = null;
+        let totalPages: number | null = null;
+
+        // 5a. Load page labels (only when a local file is available)
+        if (prefer_page_labels && filePath) {
+            const labelResult = await ensurePageLabelsForResolution(filePath, cachedMeta, extractor);
+            pageLabels = labelResult.labels;
+            if (labelResult.pageCount != null) {
+                totalPages = labelResult.pageCount;
+            }
+            if (labelResult.pdfData) {
+                pdfData = labelResult.pdfData;
+            }
+        } else if (cachedMeta?.page_labels && Object.keys(cachedMeta.page_labels).length > 0) {
+            pageLabels = cachedMeta.page_labels;
         }
-        if (isRemoteOnly) {
-            const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
-            if (exceeded) {
-                return errorResponse(
-                    `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
-                    'file_too_large'
-                );
+
+        if (totalPages == null) {
+            if (cachedMeta?.page_count != null) {
+                totalPages = cachedMeta.page_count;
+            } else {
+                if (!pdfData) {
+                    try {
+                        pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                    } catch (error) {
+                        if (!isRemoteOnly) throw error;
+                        logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
+                        return errorResponse(
+                            `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                            'download_failed'
+                        );
+                    }
+                    if (isRemoteOnly) {
+                        const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                        if (exceeded) {
+                            return errorResponse(
+                                `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                                'file_too_large'
+                            );
+                        }
+                    }
+                }
+                totalPages = await extractor.getPageCount(pdfData);
             }
         }
-        const extractor = new PDFExtractor();
-        let totalPages: number;
 
-        if (cachedMeta?.page_count != null) {
-            totalPages = cachedMeta.page_count;
-        } else {
-            totalPages = await extractor.getPageCount(pdfData);
+        // Ensure PDF bytes are available for rendering (step 9).
+        if (!pdfData) {
+            try {
+                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+            } catch (error) {
+                if (!isRemoteOnly) throw error;
+                logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
+                return errorResponse(
+                    `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                    'download_failed'
+                );
+            }
+            if (isRemoteOnly) {
+                const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                if (exceeded) {
+                    return errorResponse(
+                        `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                        'file_too_large'
+                    );
+                }
+            }
+        }
+
+        // When prefer_page_labels is false, the normal fast path may render
+        // from cached metadata without ever loading labels. Hydrate them once
+        // on cold caches so image responses still populate page_label.
+        if (
+            prefer_page_labels !== true
+            && !pageLabels
+            && (!cachedMeta || cachedMeta.page_labels === null)
+        ) {
+            try {
+                const { count, labels } = await extractor.getPageCountAndLabels(pdfData);
+                pageLabels = Object.keys(labels).length > 0 ? labels : null;
+                if (totalPages == null) {
+                    totalPages = count;
+                }
+            } catch (error) {
+                logger(`handleZoteroAttachmentPageImagesRequest: page label hydration failed for ${requestKey}: ${error}`, 1);
+            }
         }
 
         // 6. Check page count limit for all-pages requests (skip if skip_local_limits is true)
@@ -188,8 +250,18 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // 7. Determine which pages to render
         let pageIndices: number[];
         if (pages && pages.length > 0) {
+            let resolvedPages: number[];
+            try {
+                resolvedPages = pages.map(p => resolvePageValue(p, pageLabels, prefer_page_labels === true));
+            } catch (error) {
+                if (error instanceof InvalidPageValueError) {
+                    return errorResponse(error.message, 'invalid_page_value', totalPages);
+                }
+                throw error;
+            }
+
             // Filter out invalid pages: keep only pages in [1, totalPages]
-            const validPages = pages.filter(p => p >= 1 && p <= totalPages);
+            const validPages = resolvedPages.filter(p => p >= 1 && p <= totalPages);
 
             if (validPages.length === 0) {
                 return errorResponse(
@@ -227,6 +299,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
             return {
                 page_number: result.pageIndex + 1, // Convert back to 1-indexed
+                page_label: pageLabels?.[result.pageIndex],
                 image_data: base64Data,
                 format: result.format,
                 width: result.width,

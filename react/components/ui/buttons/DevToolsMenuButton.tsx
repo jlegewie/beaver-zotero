@@ -11,10 +11,11 @@ import {
     PDFExtractor,
     searchFromZoteroItem,
 } from '../../../../src/services/pdf';
-import { 
-    visualizeCurrentPageColumns, 
+import {
+    visualizeCurrentPageColumns,
     visualizeCurrentPageLines,
     visualizeCurrentPageParagraphs,
+    visualizeCurrentPageSentences,
     clearVisualizationAnnotations,
     extractCurrentPageContent
 } from '../../../utils/extractionVisualizer';
@@ -255,6 +256,22 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         const result = await visualizeCurrentPageParagraphs();
         if (result.success) {
             console.log(`[PDF Visualizer] ${result.message}`);
+        } else {
+            console.warn(`[PDF Visualizer] ${result.message}`);
+        }
+    };
+
+    // Visualize detected sentences on current page
+    const handleVisualizeSentences = async () => {
+        console.log("[PDF Visualizer] Visualizing sentences on current page...");
+        const result = await visualizeCurrentPageSentences();
+        if (result.success) {
+            console.log(`[PDF Visualizer] ${result.message}`);
+            if (result.degradedParagraphs || result.unmappedParagraphs) {
+                console.warn(
+                    `[PDF Visualizer] Degradation: ${result.degradedParagraphs ?? 0} degraded, ${result.unmappedParagraphs ?? 0} unmapped paragraphs (fallback whole-paragraph bboxes shown in gray)`,
+                );
+            }
         } else {
             console.warn(`[PDF Visualizer] ${result.message}`);
         }
@@ -738,6 +755,12 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         {
             label: "Visualize Paragraphs",
             onClick: handleVisualizeParagraphs,
+            icon: PdfIcon,
+            disabled: false,
+        },
+        {
+            label: "Visualize Sentences",
+            onClick: handleVisualizeSentences,
             icon: PdfIcon,
             disabled: false,
         },

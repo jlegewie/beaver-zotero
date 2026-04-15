@@ -1,13 +1,13 @@
 import React from 'react';
 
-const Spinner = ({ size = 16, className = '' }) => {
+const Spinner = ({ size = 16, className = '', style = {} }) => {
     const spinnerStyle = {
         animation: 'spin 1s linear infinite',
     };
     
     return (
         <svg
-            style={spinnerStyle}
+            style={{ ...spinnerStyle, ...style }}
             className={className}
             width={size}
             height={size}

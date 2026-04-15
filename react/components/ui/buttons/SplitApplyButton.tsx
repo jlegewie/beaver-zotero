@@ -9,6 +9,10 @@ interface SplitApplyButtonProps {
     onApplyAll: () => void;
     loading?: boolean;
     disabled?: boolean;
+    /** Label for the primary (left) button. Defaults to "Apply". */
+    primaryLabel?: string;
+    /** Label for the dropdown menu item. Defaults to "Apply all for this note". */
+    applyAllLabel?: string;
 }
 
 /**
@@ -20,17 +24,19 @@ const SplitApplyButton: React.FC<SplitApplyButtonProps> = ({
     onApplyAll,
     loading = false,
     disabled = false,
+    primaryLabel = 'Apply',
+    applyAllLabel = 'Apply all for this note',
 }) => {
     const menuItems: MenuItem[] = [
         {
-            label: 'Apply all for this note',
+            label: applyAllLabel,
             onClick: onApplyAll,
         },
     ];
 
     return (
         <div className="display-flex flex-row items-stretch" style={{ gap: 0 }}>
-            {/* Primary "Apply" half */}
+            {/* Primary half */}
             <Button
                 variant="solid"
                 onClick={onApply}
@@ -42,7 +48,7 @@ const SplitApplyButton: React.FC<SplitApplyButtonProps> = ({
                     borderRight: 'none',
                 }}
             >
-                Apply
+                {primaryLabel}
             </Button>
 
             {/* Chevron dropdown half */}

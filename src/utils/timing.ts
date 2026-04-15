@@ -27,6 +27,11 @@ export class TimingAccumulator {
         }
     }
 
+    /** Record an externally-measured duration (ms) under `name`. */
+    record(name: string, durationMs: number): void {
+        this.buckets.set(name, (this.buckets.get(name) ?? 0) + durationMs);
+    }
+
     /** Get cumulative ms for a single bucket. */
     get(name: string): number {
         return this.buckets.get(name) ?? 0;

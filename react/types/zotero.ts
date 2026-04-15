@@ -122,6 +122,7 @@ export interface AttachmentSummary {
     is_primary: boolean;
     page_count?: number | null;
     status: AttachmentReadability;
+    status_code?: FileStatusCodeValue | null;
     status_reason?: string | null;
 }
 
@@ -281,9 +282,28 @@ export interface FrontendFileStatus {
     page_count?: number | null;
     /** Full text availability status */
     status: "available" | "processing" | "unavailable";
-    /** Reason if status is not "available" */
+    /** Machine-readable reason code; backend maps it to model-facing text. */
+    status_code?: FileStatusCodeValue | null;
+    /** Free-form reason. Only set for cases that carry dynamic values (e.g., file too large). */
     status_reason?: string | null;
 }
+
+/**
+ * Stable codes identifying why a file is unavailable. The backend owns the
+ * model-facing text for each code; keep values in sync with
+ * FILE_STATUS_REASON_TEMPLATES in backend app/models/attachments.py.
+ */
+export const FileStatusCode = {
+    UnsupportedFileType: 'unsupported_file_type',
+    FileNotLocal: 'file_not_local',
+    FileNotLocalRemote: 'file_not_local_remote',
+    PdfEncrypted: 'pdf_encrypted',
+    PdfInvalid: 'pdf_invalid',
+    PdfNeedsOcr: 'pdf_needs_ocr',
+    PdfAnalysisError: 'pdf_analysis_error',
+    PdfUnreadable: 'pdf_unreadable',
+} as const;
+export type FileStatusCodeValue = typeof FileStatusCode[keyof typeof FileStatusCode];
 
 /** Attachment data with sync status information */
 export interface AttachmentDataWithStatus {

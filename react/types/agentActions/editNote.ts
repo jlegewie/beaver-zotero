@@ -5,6 +5,9 @@
 
 import type { ProposedAction } from './base';
 
+/** Operation mode for edit_note actions. */
+export type EditNoteOperation = 'str_replace' | 'str_replace_all' | 'insert_after' | 'insert_before' | 'rewrite';
+
 /**
  * Proposed data for editing a note via string replacement.
  * Strings use the simplified HTML format (with <citation/>, <annotation/>, etc. tags).
@@ -14,12 +17,31 @@ export interface EditNoteProposedData {
     library_id: number;
     /** Zotero key of the note item */
     zotero_key: string;
-    /** The exact string to find (in simplified HTML format) */
-    old_string: string;
-    /** The replacement string (in simplified HTML format) */
+    /**
+     * Operation mode. Defaults to 'str_replace' if not set.
+     * - str_replace: Replace one unique match of old_string with new_string
+     * - str_replace_all: Replace ALL occurrences of old_string with new_string
+     * - insert_after: Insert new_string immediately after old_string (old_string kept unchanged)
+     * - insert_before: Insert new_string immediately before old_string (old_string kept unchanged)
+     * - rewrite: Replace the entire note body with new_string (old_string ignored)
+     */
+    operation?: EditNoteOperation;
+    /** The exact string to find (in simplified HTML format). Not needed when operation is 'rewrite'. */
+    old_string?: string;
+    /** The replacement string (in simplified HTML format). When operation is 'rewrite', the full new note body. */
     new_string: string;
-    /** If true, replace all occurrences (default: false) */
-    replace_all?: boolean;
+    /**
+     * Raw-note context immediately before the target fragment, taken from the
+     * stripped raw HTML (`stripDataCitationItems(rawHtml)`).
+     * Used to disambiguate duplicate raw matches during execution.
+     */
+    target_before_context?: string;
+    /**
+     * Raw-note context immediately after the target fragment, taken from the
+     * stripped raw HTML (`stripDataCitationItems(rawHtml)`).
+     * Used to disambiguate duplicate raw matches during execution.
+     */
+    target_after_context?: string;
 }
 
 /**
@@ -67,6 +89,12 @@ export interface EditNoteResultData {
      * individual-occurrence undo even when ProseMirror normalizes the HTML.
      */
     undo_occurrence_contexts?: Array<{ before: string; after: string }>;
+    /**
+     * Complete raw HTML of the note before a replace_content edit
+     * (data-citation-items stripped). Stored only for replace_content edits
+     * to enable full undo by restoring the entire previous note body.
+     */
+    undo_full_html?: string;
 }
 
 /** Typed proposed action for edit_note */

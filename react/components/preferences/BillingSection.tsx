@@ -119,6 +119,11 @@ const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promi
                             <div className="display-flex flex-row items-center gap-2" style={{ marginBottom: '4px' }}>
                                 <span className="text-base font-color-primary font-bold">{plan.name}</span>
                             </div>
+                            {plan.label && (
+                                <div className="text-sm font-color-secondary" style={{ marginBottom: '8px', marginTop: '-4px' }}>
+                                    {plan.label}
+                                </div>
+                            )}
                             <div className="text-xl font-color-primary font-bold">
                                 {price}<span className="text-sm font-normal font-color-secondary">/{plan.interval || 'mo'}</span>
                             </div>
@@ -158,6 +163,13 @@ const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promi
     );
 };
 
+const formatPlanName = (plan: string | undefined): string => {
+    if (!plan) return '';
+    const isAnnual = plan.includes('annual');
+    const base = plan.replace('_annual', '').split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    return isAnnual ? `${base} (Annual)` : base;
+};
+
 const formatTimeRemaining = (periodEnd: string, isAnnual: boolean): string => {
     const days = Math.max(0, Math.ceil((new Date(periodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
     if (isAnnual && days > 60) {
@@ -177,8 +189,12 @@ const BillingSection: React.FC = () => {
     const profileBalance = useAtomValue(profileBalanceAtom);
     const isPastDue = useAtomValue(isCreditPlanPastDueAtom);
     const hasPlan = useAtomValue(hasCreditPlanAtom);
-    const { subscribe, buyCredits, manageSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
+    const { subscribe, buyCredits, manageSubscription, upgradeSubscription, isLoading: isBillingLoading, plans, plansLoading, plansError, fetchPlans } = useBilling();
     const creditPacks = plans.filter(p => !p.interval);
+    const upgradePlan = hasPlan && !creditPlan.cancelAtPeriodEnd
+        ? plans.filter(p => p.interval && p.monthly_credits > (creditPlan.monthlyCredits || 0))
+            .sort((a, b) => a.monthly_credits - b.monthly_credits)[0] ?? null
+        : null;
 
     // --- Fetch plans when billing tab is active and user has no plan ---
     useEffect(() => {
@@ -248,16 +264,21 @@ const BillingSection: React.FC = () => {
                             <div className="display-flex flex-col">
                                 <div className="display-flex flex-row items-center gap-3">
                                     <div className="text-2xl font-color-primary font-bold">
-                                        {creditPlan.plan?.includes('annual')
-                                            ? creditPlan.plan.replace('_annual', '').charAt(0).toUpperCase() + creditPlan.plan.replace('_annual', '').slice(1) + ' (Annual)'
-                                            : creditPlan.plan ? creditPlan.plan.charAt(0).toUpperCase() + creditPlan.plan.slice(1) : ''}
+                                        {formatPlanName(creditPlan.plan ?? undefined)}
                                     </div>
-                                    {creditPlan.cancelAtPeriodEnd && (
+                                    {creditPlan.cancelAtPeriodEnd ? (
                                         <span
                                             className="text-xs px-15 py-05 rounded-md"
                                             style={{ color: 'var(--tag-orange-secondary)', border: '1px solid var(--tag-orange-tertiary)', background: 'var(--tag-orange-quinary)' }}
                                         >
                                             Cancellation pending
+                                        </span>
+                                    ) : creditPlan.pendingDowngrade && (
+                                        <span
+                                            className="text-xs px-15 py-05 rounded-md"
+                                            style={{ color: 'var(--tag-orange-secondary)', border: '1px solid var(--tag-orange-tertiary)', background: 'var(--tag-orange-quinary)' }}
+                                        >
+                                            Downgrade pending
                                         </span>
                                     )}
                                     {creditPlan.status === 'past_due' && (
@@ -283,7 +304,12 @@ const BillingSection: React.FC = () => {
                                 )}
                             </div>
                             <div className="flex-1" />
-                            <Button variant="outline" onClick={manageSubscription} disabled={isBillingLoading}>
+                            {upgradePlan && (
+                                <Button variant="outline" onClick={() => upgradeSubscription(upgradePlan.sku)} loading={isBillingLoading}>
+                                    Upgrade
+                                </Button>
+                            )}
+                            <Button variant="surface-light" onClick={manageSubscription} disabled={isBillingLoading} style={{ padding: '2px 6px' }}>
                                 {creditPlan.cancelAtPeriodEnd ? 'Resubscribe' : 'Manage'}
                             </Button>
                         </div>

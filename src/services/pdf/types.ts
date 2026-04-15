@@ -151,6 +151,63 @@ export interface RawPageData {
     blocks: RawBlock[];
 }
 
+// ============================================================================
+// Detailed (character-level) raw data — for sentence-level bbox extraction
+// ============================================================================
+
+/**
+ * A single character produced by MuPDF's structured-text walker.
+ *
+ * INVARIANT: within a RawLineDetailed, `text.length === chars.length` and
+ * `text[i] === chars[i].c`. The sequence must stay in lockstep. Any
+ * normalization (ligature expansion, whitespace collapse) must apply to both
+ * sides or neither.
+ */
+export interface RawChar {
+    /** Single Unicode code point (as produced by mupdf's onChar callback) */
+    c: string;
+    /** 8-float quadrilateral: [ulx,uly,urx,ury,llx,lly,lrx,lry] */
+    quad: QuadPoint;
+    /** Axis-aligned bbox computed from the quad (convenience) */
+    bbox: RawBBox;
+}
+
+/** A line enriched with per-character quads. */
+export interface RawLineDetailed extends RawLine {
+    /**
+     * One RawChar per code point in `text`.
+     * INVARIANT: `text.length === chars.length` and `text[i] === chars[i].c`.
+     */
+    chars: RawChar[];
+}
+
+/** A block enriched with detailed lines. */
+export interface RawBlockDetailed extends Omit<RawBlock, "lines"> {
+    lines?: RawLineDetailed[];
+}
+
+/** Page data enriched with detailed blocks. */
+export interface RawPageDataDetailed extends Omit<RawPageData, "blocks"> {
+    blocks: RawBlockDetailed[];
+}
+
+/**
+ * A sentence resolved to one bbox per line-fragment it occupies.
+ * Multi-line sentences produce multiple bboxes; short sentences produce one.
+ */
+export interface SentenceBBox {
+    pageIndex: number;
+    text: string;
+    /** One bbox per contiguous line-fragment */
+    bboxes: RawBBox[];
+    /** Optional per-fragment detail (line index, per-line text, per-line bbox) */
+    fragments?: Array<{
+        lineIndex: number;
+        text: string;
+        bbox: RawBBox;
+    }>;
+}
+
 /**
  * Complete raw document data from extraction pass.
  */

@@ -310,9 +310,13 @@ export async function openSource(source: SourceAttachment | CitationData) {
  * Uses Zotero.Notes.open() which respects the `extensions.zotero.openNoteInNewWindow` setting.
  */
 export async function openNoteById(itemId: number): Promise<void> {
-    try {
-        await (Zotero as any).Notes.open(itemId);
-    } catch {
+    if (typeof (Zotero as any).Notes?.open === 'function') {
+        try {
+            await (Zotero as any).Notes.open(itemId);
+        } catch (e) {
+            logger(`openNoteById: Notes.open failed for itemId=${itemId}: ${e}`, 1);
+        }
+    } else {
         // Fallback for older Zotero versions without Notes.open
         Zotero.getActiveZoteroPane()?.openNoteWindow?.(itemId);
     }
@@ -377,6 +381,8 @@ export async function openNoteAndSearchEdit(
     isApplied: boolean,
     undoBeforeContext?: string,
     undoAfterContext?: string,
+    targetBeforeContext?: string,
+    targetAfterContext?: string,
 ): Promise<void> {
     logger(`openNoteAndSearchEdit: called with libraryId=${libraryId}, zoteroKey=${zoteroKey}, isApplied=${isApplied}`, 1);
     logger(`openNoteAndSearchEdit: oldString (${oldString.length} chars): "${oldString.substring(0, 200)}"`, 1);
@@ -413,6 +419,7 @@ export async function openNoteAndSearchEdit(
     let selectText: string | undefined;
     let endSearchText: string | undefined;
     let selectOffsetInSearch: number | undefined;
+    let contextualSearches: Array<{ searchText: string; selectText: string; selectOffsetInSearch: number }> = [];
 
     // For applied edits, highlight the added text; for pending/undone edits,
     // highlight the text that will be replaced (the deleted portion).
@@ -454,6 +461,27 @@ export async function openNoteAndSearchEdit(
         logger(`openNoteAndSearchEdit: fell back to fallback search: ${searchText ? `"${searchText}"` : 'null'}`, 1);
     }
 
+    // When validation persisted explicit target context for an ambiguous raw
+    // match (e.g. duplicate citations with different refs), derive a text-level
+    // anchor for the editor search. The editor matcher operates on flattened
+    // plain text, so we convert the raw-note context to nearby text here
+    // instead of passing raw HTML into selectAndScrollInNoteEditor.
+    if (!endSearchText) {
+        contextualSearches = extractTargetContextSearches(
+            targetBeforeContext,
+            isApplied ? newString : oldString,
+            targetAfterContext,
+            selectText,
+        );
+        const contextualSearch = contextualSearches[0];
+        if (contextualSearch) {
+            searchText = contextualSearch.searchText;
+            selectText = contextualSearch.selectText;
+            selectOffsetInSearch = contextualSearch.selectOffsetInSearch;
+            logger(`openNoteAndSearchEdit: using target-context search "${searchText.substring(0, 80)}"`, 1);
+        }
+    }
+
     if (!searchText) {
         logger(`openNoteAndSearchEdit: no search text resolved, aborting search`, 1);
         return;
@@ -463,6 +491,22 @@ export async function openNoteAndSearchEdit(
     // Wait for the editor instance to be available and initialized,
     // then select the text and scroll to it.
     let found = await selectAndScrollInNoteEditor(itemId, searchText, selectText, endSearchText, selectOffsetInSearch);
+
+    // If the first target-context search variant failed, try alternate
+    // rendered variants before falling back to generic search terms.
+    if (!found && contextualSearches.length > 1) {
+        for (const candidate of contextualSearches.slice(1)) {
+            logger(`openNoteAndSearchEdit: retrying alternate target-context search "${candidate.searchText.substring(0, 80)}"`, 1);
+            found = await selectAndScrollInNoteEditor(
+                itemId,
+                candidate.searchText,
+                candidate.selectText,
+                undefined,
+                candidate.selectOffsetInSearch,
+            );
+            if (found) break;
+        }
+    }
 
     // Retry without placeholder tokens ([citation], [image]) that won't
     // match the editor DOM — citations render as formatted text and images
@@ -479,13 +523,11 @@ export async function openNoteAndSearchEdit(
         }
     }
 
-    // Fallback: if the primary search failed (e.g. applied edit but the
-    // editor DOM still has the old content — undo, manual revert, race
-    // condition), try the opposite text.
-    if (!found) {
-        const fallbackText = isApplied
-            ? extractSearchTerm(oldString)
-            : extractSearchTerm(newString);
+    // Fallback: only applied edits should try the opposite text. For pending,
+    // rejected, and undone actions the note is expected to contain oldString,
+    // so jumping to newString can select the wrong citation entirely.
+    if (!found && isApplied) {
+        const fallbackText = extractSearchTerm(oldString);
         if (fallbackText) {
             logger(`openNoteAndSearchEdit: primary search failed, trying fallback: "${fallbackText}"`, 1);
             await selectAndScrollInNoteEditor(itemId, fallbackText);
@@ -715,6 +757,88 @@ function extractEditPointContext(oldHtml: string, newHtml: string): string | nul
 
     logger(`extractEditPointContext: editPoint=${prefixLen}, context="${term.substring(0, 80)}"`, 1);
     return term;
+}
+
+function normalizeSearchFragment(html: string | undefined): string {
+    if (!html) return '';
+    return stripEllipsis(stripHtmlTags(html).replace(/\s+/g, ' ').trim());
+}
+
+function appendCitationPageWithStyle(tag: string, label: string, style: 'short' | 'word'): string {
+    const pageMatch = tag.match(/\bpage="([^"]*)"/);
+    if (!pageMatch || !pageMatch[1]) return label;
+    const page = pageMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+    const suffix = style === 'word' ? `, page ${page}` : `, p. ${page}`;
+    const locatorWithParen = /^(.*?)(,\s*(?:p{1,2}\.|page)\s+[^)]*)(\))$/i;
+    if (locatorWithParen.test(label)) {
+        return label.replace(locatorWithParen, `$1${suffix}$3`);
+    }
+    const locatorPlain = /^(.*?)(,\s*(?:p{1,2}\.|page)\s+.*)$/i;
+    if (locatorPlain.test(label)) {
+        return label.replace(locatorPlain, `$1${suffix}`);
+    }
+    if (label.endsWith(')')) {
+        return label.slice(0, -1) + suffix + ')';
+    }
+    return label + suffix;
+}
+
+function normalizeTargetSearchVariant(html: string, style: 'short' | 'word'): string {
+    const expandedCitations = html
+        .replace(
+            /<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\blabel="([^"]*)"(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi,
+            (match, label) => appendCitationPageWithStyle(match, label || '[citation]', style)
+        )
+        .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi, '[citation]');
+    return stripEllipsis(stripHtmlTags(expandedCitations).replace(/\s+/g, ' ').trim());
+}
+
+function extractTargetContextSearches(
+    beforeHtml: string | undefined,
+    targetHtml: string,
+    afterHtml: string | undefined,
+    preferredSelectText?: string,
+): Array<{ searchText: string; selectText: string; selectOffsetInSearch: number }> {
+    const beforeText = normalizeSearchFragment(beforeHtml);
+    const afterText = normalizeSearchFragment(afterHtml);
+    if (!beforeText && !afterText) return [];
+
+    const targetTextVariants = Array.from(new Set([
+        normalizeSearchFragment(targetHtml),
+        normalizeTargetSearchVariant(targetHtml, 'word'),
+        normalizeTargetSearchVariant(targetHtml, 'short'),
+    ].filter((text) => text && text.length >= 2)));
+    if (targetTextVariants.length === 0) return [];
+
+    const preferred = normalizeSearchFragment(preferredSelectText);
+    const beforeTail = beforeText ? beforeText.slice(-80) : '';
+    const afterHead = afterText ? afterText.slice(0, 80) : '';
+    const searches: Array<{ searchText: string; selectText: string; selectOffsetInSearch: number }> = [];
+
+    for (const targetText of targetTextVariants) {
+        const selectText = preferred && targetText.includes(preferred)
+            ? preferred
+            : targetText;
+        if (!selectText || selectText.length < 2) continue;
+
+        const parts = [beforeTail, targetText, afterHead].filter(Boolean);
+        if (parts.length === 0) continue;
+
+        const searchText = parts.join(' ').trim();
+        if (!searchText || searchText.length < 10) continue;
+
+        const selectOffsetInTarget = targetText.indexOf(selectText);
+        const selectOffsetInSearch = (beforeTail ? beforeTail.length + 1 : 0)
+            + (selectOffsetInTarget >= 0 ? selectOffsetInTarget : 0);
+
+        searches.push({
+            searchText,
+            selectText,
+            selectOffsetInSearch,
+        });
+    }
+
+    return searches;
 }
 
 /**
@@ -951,7 +1075,35 @@ export function buildEditorTextMap(editorDOM: HTMLElement): {
     const textNodes: { node: Node; start: number }[] = [];
     let fullText = '';
 
+    // Block-level tag names — when the tree walker crosses from one block
+    // ancestor into another, we insert a space so that text from adjacent
+    // paragraphs/headings doesn't run together. This matches how
+    // extractTargetContextSearches joins context fragments with spaces.
+    const blockTags = new Set([
+        'P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+        'LI', 'TR', 'BLOCKQUOTE', 'PRE', 'TABLE', 'UL', 'OL',
+        'SECTION', 'ARTICLE', 'HEADER', 'FOOTER',
+    ]);
+
+    function getBlockAncestor(node: Node): Node {
+        let current = node.parentNode;
+        while (current && current !== editorDOM) {
+            if ((current as Element).tagName && blockTags.has((current as Element).tagName)) {
+                return current;
+            }
+            current = current.parentNode;
+        }
+        return editorDOM;
+    }
+
+    let prevBlock: Node | null = null;
+
     while (walker.nextNode()) {
+        const currentBlock = getBlockAncestor(walker.currentNode);
+        if (prevBlock !== null && currentBlock !== prevBlock && fullText.length > 0) {
+            fullText += ' ';
+        }
+        prevBlock = currentBlock;
         textNodes.push({ node: walker.currentNode, start: fullText.length });
         fullText += walker.currentNode.textContent || '';
     }
@@ -980,11 +1132,14 @@ export function resolveRangeInTextMap(
         const nodeEnd = tn.start + (tn.node.textContent?.length || 0);
         if (!startNode && startIdx < nodeEnd) {
             startNode = tn.node;
-            startOffset = startIdx - tn.start;
+            // Clamp to 0: if startIdx falls on a virtual block separator
+            // (inserted by buildEditorTextMap between blocks), it may be
+            // before this text node's start position.
+            startOffset = Math.max(0, startIdx - tn.start);
         }
         if (endIdx <= nodeEnd) {
             endNode = tn.node;
-            endOffset = endIdx - tn.start;
+            endOffset = Math.max(0, endIdx - tn.start);
             break;
         }
     }

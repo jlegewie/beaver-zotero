@@ -36,6 +36,10 @@ import {
     // Notes
     handleReadNoteRequest,
 } from '../../src/services/agentDataProvider';
+import { wrapWithSchemaVersion } from '../utils/noteActions';
+import { undoEditNoteAction } from '../utils/editNoteActions';
+import { getLatestNoteHtml } from '../../src/utils/noteEditorIO';
+import type { AgentAction } from '../agents/agentActions';
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
@@ -108,6 +112,15 @@ const ENDPOINT_PATHS = [
     '/beaver/test/cache-clear-memory',
     '/beaver/test/cache-delete-content',
     '/beaver/test/resolve-item',
+    // Test-only endpoints (note seeding/teardown/inspection)
+    '/beaver/test/note-create',
+    '/beaver/test/note-delete',
+    '/beaver/test/note-read',
+    '/beaver/test/note-open-editor',
+    '/beaver/test/note-close-editor',
+    '/beaver/test/note-undo',
+    // Test-only endpoints (sentence bbox feasibility probe)
+    '/beaver/test/sentence-bboxes',
 ] as const;
 
 /**
@@ -457,7 +470,9 @@ async function handleAgentActionValidateHttpRequest(request: any) {
         valid: response.valid,
         error: response.error,
         error_code: response.error_code,
+        error_candidates: response.error_candidates,
         current_value: response.current_value,
+        normalized_action_data: response.normalized_action_data,
         preference: response.preference,
     };
 }
@@ -477,6 +492,7 @@ async function handleAgentActionExecuteHttpRequest(request: any) {
         success: response.success,
         error: response.error,
         error_code: response.error_code,
+        error_candidates: response.error_candidates,
         result_data: response.result_data,
     };
 }
@@ -575,6 +591,179 @@ async function handleTestCacheDeleteContentHttpRequest(request: any) {
     return { ok: true };
 }
 
+async function handleTestNoteCreateHttpRequest(request: any) {
+    const { library_id, html, title, parent_key, wrap_schema } = request as {
+        library_id?: number;
+        html: string;
+        title?: string;
+        parent_key?: string;
+        wrap_schema?: boolean;
+    };
+    if (typeof html !== 'string') {
+        return { error: 'html is required' };
+    }
+    const note = new Zotero.Item('note');
+    if (typeof library_id === 'number') note.libraryID = library_id;
+    if (parent_key) note.parentKey = parent_key;
+
+    const body = title ? `<h1>${title}</h1>${html}` : html;
+    const wrapped = wrap_schema === false ? body : wrapWithSchemaVersion(body);
+    note.setNote(wrapped);
+    await note.saveTx();
+
+    return {
+        library_id: note.libraryID,
+        zotero_key: note.key,
+        item_id: note.id,
+    };
+}
+
+async function handleTestNoteDeleteHttpRequest(request: any) {
+    const { library_id, zotero_key } = request;
+    if (library_id == null || zotero_key == null) {
+        return { error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) return { ok: true, deleted: false };
+    if (!item.isNote()) return { error: 'not_a_note' };
+    await Zotero.Items.erase([item.id]);
+    return { ok: true, deleted: true };
+}
+
+async function handleTestNoteReadHttpRequest(request: any) {
+    const { library_id, zotero_key } = request;
+    if (library_id == null || zotero_key == null) {
+        return { error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) return { error: 'not_found' };
+    if (!item.isNote()) return { error: 'not_a_note' };
+    await item.loadDataType('note');
+    const savedHtml: string = item.getNote();
+    let liveHtml: string | null = null;
+    try {
+        liveHtml = getLatestNoteHtml(item);
+    } catch {
+        liveHtml = null;
+    }
+    let inEditor = false;
+    try {
+        const instances = (Zotero as any).Notes._editorInstances;
+        if (Array.isArray(instances)) {
+            inEditor = instances.some((inst: any) => {
+                if (!inst._item || inst._item.id !== item.id) return false;
+                try {
+                    const frameElement = inst._iframeWindow?.frameElement;
+                    return frameElement?.isConnected === true;
+                } catch {
+                    return false;
+                }
+            });
+        }
+    } catch {
+        inEditor = false;
+    }
+    return {
+        library_id: item.libraryID,
+        zotero_key: item.key,
+        item_id: item.id,
+        saved_html: savedHtml,
+        live_html: liveHtml,
+        in_editor: inEditor,
+    };
+}
+
+async function handleTestNoteOpenEditorHttpRequest(request: any) {
+    const { library_id, zotero_key, open_in_window } = request;
+    if (library_id == null || zotero_key == null) {
+        return { error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) return { error: 'not_found' };
+    if (!item.isNote()) return { error: 'not_a_note' };
+
+    const openInWindow = open_in_window !== false;
+    await (Zotero as any).Notes.open(item.id, undefined, { openInWindow });
+
+    // Wait briefly for the editor instance to attach
+    let inEditor = false;
+    for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        try {
+            const instances = (Zotero as any).Notes._editorInstances;
+            if (Array.isArray(instances)) {
+                inEditor = instances.some((inst: any) => {
+                    if (!inst._item || inst._item.id !== item.id) return false;
+                    const frame = inst._iframeWindow?.frameElement;
+                    return frame?.isConnected === true;
+                });
+            }
+        } catch {
+            inEditor = false;
+        }
+        if (inEditor) break;
+    }
+    return { ok: true, in_editor: inEditor };
+}
+
+async function handleTestNoteCloseEditorHttpRequest(request: any) {
+    const { library_id, zotero_key } = request;
+    if (library_id == null || zotero_key == null) {
+        return { error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) return { error: 'not_found' };
+
+    let closed = 0;
+    try {
+        const instances = (Zotero as any).Notes._editorInstances ?? [];
+        for (const inst of [...instances]) {
+            if (!inst._item || inst._item.id !== item.id) continue;
+            const frame = inst._iframeWindow?.frameElement;
+            const instanceWin = frame?.ownerDocument?.defaultView;
+            try {
+                if (inst.viewMode === 'window' && instanceWin && instanceWin.close) {
+                    instanceWin.close();
+                    closed++;
+                    continue;
+                }
+                if (inst.tabID) {
+                    const mainWin: any = Zotero.getMainWindow?.();
+                    if (mainWin?.Zotero_Tabs?.close) {
+                        mainWin.Zotero_Tabs.close(inst.tabID);
+                        closed++;
+                        continue;
+                    }
+                }
+                if (typeof inst.uninit === 'function') {
+                    await inst.uninit();
+                    closed++;
+                }
+            } catch {
+                // best-effort
+            }
+        }
+    } catch {
+        // best-effort
+    }
+    // Let Zotero settle
+    await new Promise((r) => setTimeout(r, 150));
+    return { ok: true, closed };
+}
+
+async function handleTestNoteUndoHttpRequest(request: any) {
+    const { action } = request as { action: AgentAction };
+    if (!action || !action.proposed_data) {
+        return { error: 'action with proposed_data is required' };
+    }
+    try {
+        await undoEditNoteAction(action);
+        return { ok: true };
+    } catch (e: any) {
+        return { ok: false, error: e?.message || String(e) };
+    }
+}
+
 async function handleTestResolveItemHttpRequest(request: any) {
     const { library_id, zotero_key } = request;
     if (library_id == null || zotero_key == null) {
@@ -589,6 +778,92 @@ async function handleTestResolveItemHttpRequest(request: any) {
         parent_id: item.parentID || null,
         attachment_content_type: item.isAttachment() ? item.attachmentContentType : null,
     };
+}
+
+/**
+ * Sentence-level bbox feasibility probe.
+ *
+ * Runs both the page-wide (`SentenceMapper`) and the paragraph-scoped
+ * (`ParagraphSentenceMapper`) prototypes against a Zotero attachment and
+ * returns diagnostic reports for each. The two pipelines coexist — this
+ * endpoint is the side-by-side harness used by the integration test.
+ *
+ * Dev-only. Request body:
+ *   { library_id, zotero_key, page_index?, mode? }
+ * where `mode` is "page" (SentenceMapper only), "paragraph"
+ * (ParagraphSentenceMapper only), or "both" (default).
+ */
+async function handleTestSentenceBBoxesHttpRequest(request: any) {
+    const { MuPDFService } = await import('../../src/services/pdf/MuPDFService');
+    const { buildFeasibilityReport } = await import('../../src/services/pdf/SentenceMapper');
+    const { buildParagraphFeasibilityReport } = await import(
+        '../../src/services/pdf/ParagraphSentenceMapper'
+    );
+
+    const { library_id, zotero_key, page_index, mode } = request;
+    if (library_id == null || zotero_key == null) {
+        return { error: 'Provide library_id + zotero_key' };
+    }
+    const pageIndex = typeof page_index === 'number' ? page_index : 0;
+    const runMode: 'page' | 'paragraph' | 'both' =
+        mode === 'page' || mode === 'paragraph' ? mode : 'both';
+
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item || !item.isAttachment() || !item.isPDFAttachment()) {
+        return { error: 'Item is not a PDF attachment' };
+    }
+    const filePath = await item.getFilePathAsync();
+    if (!filePath) return { error: 'PDF file not available locally' };
+
+    const pdfData = await IOUtils.read(filePath);
+    const mupdf = new MuPDFService();
+    try {
+        await mupdf.open(pdfData);
+        const pageCount = mupdf.getPageCount();
+        if (pageIndex < 0 || pageIndex >= pageCount) {
+            return { error: `page_index out of range (0..${pageCount - 1})` };
+        }
+
+        // Time the shared walk pass once so we can report it.
+        const walkStart = Date.now();
+        const detailed = mupdf.extractRawPageDetailed(pageIndex);
+        const walkMs = Date.now() - walkStart;
+
+        let pageReport: unknown = null;
+        let pageMs = 0;
+        if (runMode === 'page' || runMode === 'both') {
+            const t = Date.now();
+            pageReport = buildFeasibilityReport(detailed);
+            pageMs = Date.now() - t;
+        }
+
+        let paragraphReport: unknown = null;
+        let paragraphMs = 0;
+        if (runMode === 'paragraph' || runMode === 'both') {
+            const t = Date.now();
+            paragraphReport = buildParagraphFeasibilityReport(detailed);
+            paragraphMs = Date.now() - t;
+        }
+
+        return {
+            ok: true,
+            page_count: pageCount,
+            page_width: detailed.width,
+            page_height: detailed.height,
+            num_blocks: detailed.blocks.length,
+            timings_ms: {
+                walk: walkMs,
+                page_mapper: pageMs,
+                paragraph_mapper: paragraphMs,
+            },
+            report: pageReport,
+            paragraph_report: paragraphReport,
+        };
+    } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+    } finally {
+        mupdf.close();
+    }
 }
 
 
@@ -679,6 +954,29 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);
+
+        // Note-specific test endpoints (seeding/teardown/inspection/undo)
+        Zotero.Server.Endpoints['/beaver/test/note-create'] =
+            createEndpoint(handleTestNoteCreateHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/note-delete'] =
+            createEndpoint(handleTestNoteDeleteHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/note-read'] =
+            createEndpoint(handleTestNoteReadHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/note-open-editor'] =
+            createEndpoint(handleTestNoteOpenEditorHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/note-close-editor'] =
+            createEndpoint(handleTestNoteCloseEditorHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/note-undo'] =
+            createEndpoint(handleTestNoteUndoHttpRequest);
+
+        // Sentence bbox feasibility probe (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/sentence-bboxes'] =
+            createEndpoint(handleTestSentenceBBoxesHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

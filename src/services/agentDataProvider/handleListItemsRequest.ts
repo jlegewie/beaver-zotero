@@ -142,16 +142,31 @@ export async function handleListItemsRequest(
         
         // Execute search
         const itemIds = await search.search();
-        const totalCount = itemIds.length;
-        
+
         // Batch fetch all items at once
         const allItems = await Zotero.Items.getAsync(itemIds);
-        const validItems = allItems.filter((item): item is Zotero.Item => item !== null);
-        
-        // Load item data in bulk for efficiency
-        if (validItems.length > 0) {
-            await Zotero.Items.loadDataTypes(validItems, ['primaryData', 'creators', 'itemData']);
+        let validItems = allItems.filter((item): item is Zotero.Item => item !== null);
+
+        // Load item data in bulk for efficiency (include childItems when filtering by attachment)
+        const dataTypes = ['primaryData', 'creators', 'itemData'];
+        if (request.has_attachments != null) {
+            dataTypes.push('childItems');
         }
+        if (validItems.length > 0) {
+            await Zotero.Items.loadDataTypes(validItems, dataTypes);
+        }
+
+        // Post-filter by attachment status if requested
+        if (request.has_attachments != null) {
+            validItems = validItems.filter(item => {
+                // Only apply attachment filter to regular items
+                if (!item.isRegularItem()) return true;
+                const hasAtt = item.numAttachments() > 0;
+                return request.has_attachments ? hasAtt : !hasAtt;
+            });
+        }
+
+        const totalCount = validItems.length;
         
         // Build items with sort values
         const itemsWithData: { id: number; item: Zotero.Item; sortValue: any }[] = [];

@@ -3,7 +3,7 @@
  */
 
 import { Setter } from 'jotai';
-import { AgentAction, isAnnotationAgentAction, isZoteroNoteAgentAction, hasAppliedZoteroItem, ackAgentActionsAtom, threadAgentActionsAtom } from '../agents/agentActions';
+import { AgentAction, isAnnotationAgentAction, isZoteroNoteAgentAction, isCreateNoteAgentAction, hasAppliedZoteroItem, ackAgentActionsAtom, threadAgentActionsAtom } from '../agents/agentActions';
 import { NoteProposedData } from '../types/agentActions/base';
 import { ModelMessage } from '../agents/types';
 import { ZoteroItemReference } from '../types/zotero';
@@ -51,6 +51,24 @@ export function extractItemReferencesFromAgentActions(actions: AgentAction[]): Z
                 const key = `${libraryId}-${zoteroKey}`;
                 if (!refs.has(key)) {
                     refs.set(key, { library_id: libraryId, zotero_key: zoteroKey });
+                }
+            }
+        }
+
+        // For create_note actions with parent item reference in proposed_data
+        if (isCreateNoteAgentAction(action)) {
+            const parentItemId = action.proposed_data.parent_item_id as string | undefined;
+            if (parentItemId) {
+                const dashIdx = parentItemId.indexOf('-');
+                if (dashIdx > 0) {
+                    const libraryId = parseInt(parentItemId.substring(0, dashIdx), 10);
+                    const zoteroKey = parentItemId.substring(dashIdx + 1);
+                    if (!isNaN(libraryId) && zoteroKey) {
+                        const key = `${libraryId}-${zoteroKey}`;
+                        if (!refs.has(key)) {
+                            refs.set(key, { library_id: libraryId, zotero_key: zoteroKey });
+                        }
+                    }
                 }
             }
         }

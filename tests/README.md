@@ -231,6 +231,21 @@ Integration tests exercise full pipelines. Same prerequisites as live tests plus
 | `POST /beaver/test/cache-clear-memory` | Clear in-memory LRU cache |
 | `POST /beaver/test/cache-delete-content` | Delete content file only (keep metadata) |
 | `POST /beaver/test/resolve-item` | Resolve library_id + zotero_key to item_id |
+| `POST /beaver/test/note-create` | Create a Zotero note (optionally wrapped with schema-version) — used by `editNote.live.test.ts` |
+| `POST /beaver/test/note-delete` | Erase a note by library_id + zotero_key |
+| `POST /beaver/test/note-read` | Return `{saved_html, live_html, in_editor}` for a note |
+| `POST /beaver/test/note-open-editor` | Open a note in the Zotero editor (tab or window) |
+| `POST /beaver/test/note-close-editor` | Close all editor instances for a note |
+| `POST /beaver/test/note-undo` | Invoke `undoEditNoteAction()` given an AgentAction payload |
+
+### edit_note live tests
+
+`tests/live/editNote.live.test.ts` needs the note-related test endpoints above and:
+
+- library_id 1 (user library) must be marked "searchable" in Beaver preferences.
+- Override with `ZOTERO_TEST_LIBRARY_ID=<id>` if you want to target a different library.
+- Run: `npm run test:live` (or target just this file: `npx vitest run --config vitest.live.config.ts tests/live/editNote.live.test.ts`).
+- Each test seeds and deletes its own notes — no manual fixture setup required.
 
 ## Conventions
 

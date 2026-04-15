@@ -237,7 +237,7 @@ export interface ConfirmExternalSearchProposedData {
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
 
 /**
  * Union type for all proposed data types

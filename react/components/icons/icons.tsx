@@ -7,6 +7,8 @@ export { default as Spinner } from './Spinner';
 export { default as ClockIcon } from './ClockIcon';
 export { default as FolderAddIcon } from './FolderAddIcon';
 export { default as FolderDetailIcon } from './FolderDetailIcon';
+export { default as FileDiffIcon } from './FileDiffIcon';
+export { default as UndoIcon } from './UndoIcon';
 export { default as PlusSignIcon } from './PlusSignIcon';
 export { default as SpeedIcon } from './SpeedIcon';
 export { default as StarIcon } from './StarIcon';
