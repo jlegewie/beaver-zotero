@@ -71,21 +71,17 @@
 }
 
 /* Separate window: sizing and constraints.
- * Set font-size on the root window element so rem units match the sidebar.
- * XUL windows default to 16px; Zotero sidepanes use ~13px.
- * Use !important to override Zotero.UIProperties.registerRoot() font scaling. */
+ * Root font-size is mirrored from the main Zotero window in beaverWindow.js
+ * so `rem` units resolve identically to the sidebar. */
 #beaver-window {
     min-width: 400px;
     min-height: 600px;
-    font-size: 13px !important;
 }
 
-/* Preferences window: sizing and constraints.
- * Use !important to override Zotero.UIProperties.registerRoot() font scaling. */
+/* Preferences window: sizing and constraints. */
 #beaver-preferences-window {
     min-width: 695px;
     min-height: 600px;
-    font-size: 13px !important;
 }
 
 /* Floating Popup Overlay - renders over main Zotero window, bottom-right */
