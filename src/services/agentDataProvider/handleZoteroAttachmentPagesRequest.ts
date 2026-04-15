@@ -160,7 +160,12 @@ export async function handleZoteroAttachmentPagesRequest(
         const extractor = new PDFExtractor();
         let pageLabels: Record<number, string> | null = null;
 
-        // 5a. Load page labels (only when a local file is available)
+        // 5a. Load page labels (only when a local file is available).
+        // Remote-only limitation: label-aware resolution requires the PDF bytes.
+        // On a cold cache for a remote file, pageLabels stays null and
+        // label-form page inputs (e.g. "iii") will fail with InvalidPageValueError.
+        // After a successful extraction below, labels are cached and subsequent
+        // calls resolve via `cachedMeta.page_labels`.
         if (prefer_page_labels && filePath) {
             const labelResult = await ensurePageLabelsForResolution(filePath, cachedMeta, extractor);
             pageLabels = labelResult.labels;
