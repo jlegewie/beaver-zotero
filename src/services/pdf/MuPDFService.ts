@@ -5,17 +5,21 @@
  * Handles initialization, caching, and provides typed access to raw PDF data.
  */
 
-import type { 
-    RawPageData, 
-    RawBlock, 
-    RawDocumentData, 
-    PageImageOptions, 
-    PageImageResult, 
+import type {
+    RawPageData,
+    RawBlock,
+    RawDocumentData,
+    PageImageOptions,
+    PageImageResult,
     ImageFormat,
     PDFPageSearchResult,
     PDFSearchHit,
     QuadPoint,
     RawBBox,
+    RawChar,
+    RawLineDetailed,
+    RawBlockDetailed,
+    RawPageDataDetailed,
 } from "./types";
 import { ExtractionError, ExtractionErrorCode, DEFAULT_PAGE_IMAGE_OPTIONS } from "./types";
 
@@ -37,6 +41,15 @@ import { ExtractionError, ExtractionErrorCode, DEFAULT_PAGE_IMAGE_OPTIONS } from
  */
 const STRUCTURED_TEXT_OPTIONS = "preserve-whitespace";
 const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES = "preserve-whitespace,preserve-images";
+
+/**
+ * Detailed options used for character-level walking.
+ * Keep in lockstep with whatever flags affect character output — enable (or
+ * not) dehyphenation in BOTH asJSON and walk passes.
+ */
+const STRUCTURED_TEXT_OPTIONS_DETAILED = "preserve-whitespace,preserve-ligatures";
+const STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES =
+    "preserve-whitespace,preserve-ligatures,preserve-images";
 
 // ============================================================================
 // MuPDF API Types
@@ -105,11 +118,59 @@ interface MuPDFPage {
     destroy(): void;
 }
 
+/**
+ * Tuple rectangle as returned by MuPDF's `fromRect` helper.
+ * Format: [x0, y0, x1, y1] (world-space, not {x,y,w,h}).
+ */
+type MuPDFRectTuple = [number, number, number, number];
+
+/** Walker callbacks forwarded by `StructuredText.walk()` in mupdf.mjs. */
+interface MuPDFStextWalker {
+    beginTextBlock?(bbox: MuPDFRectTuple): void;
+    endTextBlock?(): void;
+    beginLine?(bbox: MuPDFRectTuple, wmode: number, dir: [number, number]): void;
+    endLine?(): void;
+    /**
+     * `quad` matches our QuadPoint: [ulx, uly, urx, ury, llx, lly, lrx, lry].
+     * `font` and `color` are passed along by mupdf.mjs but unused here.
+     */
+    onChar?(
+        rune: string,
+        origin: [number, number],
+        font: unknown,
+        size: number,
+        quad: QuadPoint,
+        color: unknown,
+    ): void;
+    onImageBlock?(bbox: MuPDFRectTuple, matrix: unknown, image: unknown): void;
+}
+
 interface MuPDFStructuredText {
     pointer: number;
     asJSON(scale?: number): string;
     asText(): string;
+    walk(walker: MuPDFStextWalker): void;
     destroy(): void;
+}
+
+// ============================================================================
+// BBox Helpers (walker path)
+// ============================================================================
+
+/** Convert a [x0, y0, x1, y1] tuple (from walk() bboxes) to RawBBox. */
+function tupleToBBox(t: [number, number, number, number]): RawBBox {
+    return { x: t[0], y: t[1], w: t[2] - t[0], h: t[3] - t[1] };
+}
+
+/** Compute an axis-aligned RawBBox from a QuadPoint's four corners. */
+function bboxFromQuad(q: QuadPoint): RawBBox {
+    const xs = [q[0], q[2], q[4], q[6]];
+    const ys = [q[1], q[3], q[5], q[7]];
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const maxX = Math.max(...xs);
+    const maxY = Math.max(...ys);
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
 // ============================================================================
@@ -356,6 +417,130 @@ export class MuPDFService {
             pageCount,
             pages,
         };
+    }
+
+    /**
+     * Extract a page with full per-character detail (quads + bboxes).
+     *
+     * Uses `StructuredText.walk()` so that every code point carries its quad
+     * and axis-aligned bbox. This is the foundation for sentence-level bbox
+     * resolution — text and chars stay in lockstep inside each line.
+     *
+     * Notes on the text/chars invariant:
+     * - We emit `chars` and `text` from the same `onChar` calls, so they
+     *   start in lockstep by construction.
+     * - If you ever enable dehyphenation or other character-mutating flags,
+     *   make sure the same flag is used wherever you compare character
+     *   sequences; otherwise the invariant breaks.
+     */
+    extractRawPageDetailed(
+        pageIndex: number,
+        options?: { includeImages?: boolean },
+    ): RawPageDataDetailed {
+        this.ensureOpen();
+        const page = this.doc!.loadPage(pageIndex);
+
+        try {
+            const pageBounds = page.getBounds("CropBox");
+            const width = pageBounds[2] - pageBounds[0];
+            const height = pageBounds[3] - pageBounds[1];
+
+            let label: string | undefined;
+            try {
+                label = page.getLabel();
+            } catch {
+                // Label not available
+            }
+
+            const stextOptions = options?.includeImages
+                ? STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES
+                : STRUCTURED_TEXT_OPTIONS_DETAILED;
+            const stext = page.toStructuredText(stextOptions);
+
+            const blocks: RawBlockDetailed[] = [];
+            let currentBlock: RawBlockDetailed | null = null;
+            let currentLine: RawLineDetailed | null = null;
+
+            try {
+                stext.walk({
+                    beginTextBlock: (bbox) => {
+                        currentBlock = {
+                            type: "text",
+                            bbox: tupleToBBox(bbox),
+                            lines: [],
+                        };
+                    },
+                    endTextBlock: () => {
+                        if (currentBlock) {
+                            blocks.push(currentBlock);
+                            currentBlock = null;
+                        }
+                    },
+                    beginLine: (bbox, wmode) => {
+                        currentLine = {
+                            wmode,
+                            bbox: tupleToBBox(bbox),
+                            // Font info is not populated by the walker path;
+                            // sentence mapping does not need it. Callers that
+                            // need font info should use the JSON path.
+                            font: {
+                                name: "",
+                                family: "",
+                                weight: "normal",
+                                style: "normal",
+                                size: 0,
+                            },
+                            x: bbox[0],
+                            y: bbox[1],
+                            text: "",
+                            chars: [],
+                        };
+                    },
+                    endLine: () => {
+                        if (currentLine && currentBlock) {
+                            currentBlock.lines!.push(currentLine);
+                        }
+                        currentLine = null;
+                    },
+                    onChar: (rune, _origin, _font, _size, quad) => {
+                        if (!currentLine) return;
+                        // rune may be a multi-code-point cluster (ligature).
+                        // We append it verbatim and store one RawChar entry
+                        // per onChar call (not per code point). The invariant
+                        // is then: line.chars[i].c === substring that was
+                        // appended at step i. sentenceToBoxes is written
+                        // against this unit definition.
+                        currentLine.text += rune;
+                        currentLine.chars.push({
+                            c: rune,
+                            quad,
+                            bbox: bboxFromQuad(quad),
+                        });
+                    },
+                    onImageBlock: (bbox) => {
+                        if (options?.includeImages) {
+                            blocks.push({
+                                type: "image",
+                                bbox: tupleToBBox(bbox),
+                            });
+                        }
+                    },
+                });
+            } finally {
+                stext.destroy();
+            }
+
+            return {
+                pageIndex,
+                pageNumber: pageIndex + 1,
+                width,
+                height,
+                label,
+                blocks,
+            };
+        } finally {
+            page.destroy();
+        }
     }
 
     /**

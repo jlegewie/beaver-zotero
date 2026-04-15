@@ -6,18 +6,20 @@
  */
 
 import { logger } from "../../src/utils/logger";
-import { 
-    MuPDFService, 
-    detectColumns, 
+import {
+    MuPDFService,
+    detectColumns,
     detectLinesOnPage,
     detectParagraphs,
     lineBBoxToRect,
     logParagraphDetection,
-    Rect, 
+    extractPageSentenceBBoxes,
+    Rect,
     RawPageData,
     PageLineResult,
     PageParagraphResult,
     ContentItem,
+    SentenceBBox,
 } from "../../src/services/pdf";
 import { getCurrentReaderAndWaitForView } from "./readerUtils";
 import { getPageViewportInfo } from "./pdfUtils";
@@ -29,6 +31,14 @@ const COLUMN_COLOR = "#00bbff"; // Blue for columns
 const LINE_COLOR = "#ff9500";   // Orange for lines
 const PARAGRAPH_COLOR = "#34c759"; // Green for paragraphs
 const HEADER_COLOR = "#af52de";    // Purple for headers
+// Alternating colors for sentences so adjacent ones are visually distinct.
+const SENTENCE_COLORS = [
+    "#ff2d55", // pink/red
+    "#ffcc00", // yellow
+];
+// Degradation (fallback whole-paragraph bbox) highlighted in a muted color
+// so they're distinguishable from precise sentence bboxes.
+const SENTENCE_DEGRADED_COLOR = "#8e8e93"; // gray
 
 /**
  * Convert MuPDF Rect (top-left origin, x/y/w/h) to Zotero rect format (bottom-left origin, [x1, y1, x2, y2])
@@ -786,6 +796,341 @@ export async function visualizeCurrentPageParagraphs(): Promise<{
         return {
             success: false,
             message: `Paragraph visualization failed: ${errorMessage}`,
+        };
+    }
+}
+
+/**
+ * Create temporary highlight annotations for detected sentences.
+ *
+ * Each sentence becomes ONE annotation with potentially multiple rects
+ * (one per line-fragment). This lets multi-line sentences render as a
+ * single visual highlight that wraps correctly across line breaks,
+ * instead of N separate annotations.
+ *
+ * Sentences alternate between two colors so you can tell adjacent
+ * sentences apart at a glance. Degraded fallbacks (unmapped / invariant
+ * violation / empty split) are highlighted in gray so they stand out.
+ */
+async function createSentenceAnnotations(
+    sentences: SentenceBBox[],
+    degradedSentenceIndices: Set<number>,
+    pageIndex: number,
+    pageHeight: number,
+    reader: ZoteroReader,
+    viewBoxLL: [number, number] = [0, 0]
+): Promise<ZoteroItemReference[]> {
+    const annotationReferences: ZoteroItemReference[] = [];
+    const tempAnnotations: any[] = [];
+
+    for (let i = 0; i < sentences.length; i++) {
+        const sentence = sentences[i];
+        if (sentence.bboxes.length === 0) continue;
+
+        const isDegraded = degradedSentenceIndices.has(i);
+        const color = isDegraded
+            ? SENTENCE_DEGRADED_COLOR
+            : SENTENCE_COLORS[i % SENTENCE_COLORS.length];
+
+        // Convert each per-fragment bbox to Zotero coordinate format.
+        const rects = sentence.bboxes.map((bb) => {
+            const r: Rect = { x: bb.x, y: bb.y, w: bb.w, h: bb.h };
+            return rectToZoteroFormat(r, pageHeight, viewBoxLL);
+        });
+
+        // Sort index is based on the top-most rect so ordering in the
+        // Zotero annotations sidebar roughly matches reading order.
+        const topRect = rects.reduce(
+            (acc, r) => (r[1] > acc[1] ? r : acc),
+            rects[0],
+        );
+
+        const tempId = `sentence_${Date.now()}_${i}_${Math.random()
+            .toString(36)
+            .substr(2, 9)}`;
+
+        const textPreview =
+            sentence.text.length > 80
+                ? sentence.text.slice(0, 80) + "..."
+                : sentence.text;
+
+        const label = isDegraded
+            ? `Sentence ${i + 1} (fallback): ${textPreview}`
+            : `Sentence ${i + 1} (${sentence.bboxes.length} frag${sentence.bboxes.length === 1 ? "" : "s"}): ${textPreview}`;
+
+        const tempAnnotation = {
+            id: tempId,
+            key: tempId,
+            libraryID: (reader as any)._item.libraryID,
+            type: "highlight",
+            color,
+            sortIndex: `${pageIndex
+                .toString()
+                .padStart(5, "0")}|${String(Math.round(topRect[1])).padStart(
+                6,
+                "0",
+            )}|${String(Math.round(topRect[0])).padStart(5, "0")}`,
+            position: {
+                pageIndex,
+                rects,
+            },
+            tags: [],
+            comment: label,
+            text: textPreview,
+            authorName: "Beaver Visualizer",
+            pageLabel: (pageIndex + 1).toString(),
+            isExternal: false,
+            readOnly: false,
+            lastModifiedByUser: "",
+            dateModified: new Date().toISOString(),
+            annotationType: "highlight",
+            annotationAuthorName: "Beaver Visualizer",
+            annotationText: textPreview,
+            annotationComment: label,
+            annotationColor: color,
+            annotationPageLabel: (pageIndex + 1).toString(),
+            annotationSortIndex: `${pageIndex
+                .toString()
+                .padStart(5, "0")}|${String(Math.round(topRect[1])).padStart(
+                6,
+                "0",
+            )}|${String(Math.round(topRect[0])).padStart(5, "0")}`,
+            annotationPosition: JSON.stringify({
+                pageIndex,
+                rects,
+            }),
+            annotationIsExternal: false,
+            isTemporary: true,
+        };
+
+        tempAnnotations.push(tempAnnotation);
+        annotationReferences.push({
+            zotero_key: tempId,
+            library_id: (reader as any)._item.libraryID,
+        });
+    }
+
+    if (tempAnnotations.length > 0) {
+        (reader as any)._internalReader.setAnnotations(
+            Components.utils.cloneInto(
+                tempAnnotations,
+                (reader as any)._iframeWindow,
+            ),
+        );
+    }
+
+    return annotationReferences;
+}
+
+/**
+ * Visualize sentence-level bbox results for the current page in the reader.
+ *
+ * Uses `extractPageSentenceBBoxes` (the paragraph-scoped pipeline) under
+ * the hood. Each sentence becomes a single multi-rect highlight so
+ * multi-line sentences render as one coherent annotation. Alternating
+ * pink/yellow colors make adjacent sentences visually distinct. Degraded
+ * paragraphs (correctness-trap fallbacks) are highlighted in gray.
+ *
+ * Logs degradation stats to the console so you can spot ligature /
+ * astral-plane issues on real PDFs without leaving the Zotero UI.
+ */
+export async function visualizeCurrentPageSentences(): Promise<{
+    success: boolean;
+    message: string;
+    sentences?: number;
+    paragraphs?: number;
+    degradedParagraphs?: number;
+    unmappedParagraphs?: number;
+    pageIndex?: number;
+}> {
+    try {
+        // 1. Get the current reader
+        const reader = await getCurrentReaderAndWaitForView(undefined, true);
+        if (!reader || !reader._internalReader) {
+            return {
+                success: false,
+                message: "No active PDF reader found",
+            };
+        }
+
+        if (reader.type !== "pdf") {
+            return {
+                success: false,
+                message: "Current reader is not a PDF",
+            };
+        }
+
+        // Get current page (0-based)
+        const pdfViewer =
+            reader._internalReader._primaryView?._iframeWindow
+                ?.PDFViewerApplication?.pdfViewer;
+        if (!pdfViewer) {
+            return {
+                success: false,
+                message: "Could not access PDF viewer",
+            };
+        }
+        const currentPageIndex = pdfViewer.currentPageNumber - 1;
+
+        // 2. Get the PDF item and file path
+        const item = Zotero.Items.get(reader.itemID);
+        if (!item) {
+            return {
+                success: false,
+                message: "Could not find Zotero item",
+            };
+        }
+
+        const filePath = await item.getFilePathAsync();
+        if (!filePath) {
+            return {
+                success: false,
+                message: "Could not find PDF file",
+            };
+        }
+
+        // 3. Clean up any existing temporary annotations
+        await BeaverTemporaryAnnotations.cleanupAll(reader as ZoteroReader);
+
+        // 4. Load PDF and run the detailed walk + sentence pipeline.
+        //    We do both passes on the same open document for efficiency.
+        logger(
+            `[Visualizer] Loading PDF and mapping sentences on page ${
+                currentPageIndex + 1
+            }...`,
+        );
+        const pdfData = await IOUtils.read(filePath);
+
+        const mupdf = new MuPDFService();
+        await mupdf.open(pdfData);
+
+        let detailedPage;
+        let rawPage: RawPageData;
+        try {
+            // We need both the raw page (for height → coord conversion)
+            // and the detailed page (for the sentence mapper). They share
+            // the same coordinate space so either's `height` is fine.
+            rawPage = mupdf.extractRawPage(currentPageIndex);
+            detailedPage = mupdf.extractRawPageDetailed(currentPageIndex);
+        } finally {
+            mupdf.close();
+        }
+
+        // 5. Run the paragraph-scoped sentence pipeline.
+        const result = extractPageSentenceBBoxes(detailedPage);
+
+        if (result.sentences.length === 0) {
+            return {
+                success: true,
+                message: `No sentences detected on page ${currentPageIndex + 1}`,
+                sentences: 0,
+                paragraphs: 0,
+                pageIndex: currentPageIndex,
+            };
+        }
+
+        // 6. Build a set of sentence-list indices that are degradation
+        //    fallbacks, so the visualizer can color them differently.
+        //    Fallbacks are emitted one per degraded paragraph, in the
+        //    same reading order — the simplest way to tell them apart
+        //    is to mark the first sentence of every paragraph that
+        //    triggered a note. We walk `paragraphs` and tag matching
+        //    sentence indices in the flat list.
+        const degradedItemIndices = new Set(
+            result.degradationNotes.map((n) => n.itemIndex),
+        );
+        const degradedSentenceIndices = new Set<number>();
+        {
+            let flatIdx = 0;
+            for (let i = 0; i < result.paragraphs.length; i++) {
+                const pws = result.paragraphs[i];
+                // Find the ContentItem index this entry came from by
+                // matching item.id in the original paragraph list.
+                // A simpler proxy: the result.paragraphs array preserves
+                // the original order, so we can walk in lockstep and
+                // mark the first sentence when the item is degraded.
+                // But `result.paragraphs` doesn't carry the original
+                // itemIndex. Instead, use degradationNotes: we know
+                // the notes carry `itemIndex` into the PageParagraphResult;
+                // we don't have that mapping here. Fall back to text-match:
+                // degraded paragraphs have a single sentence whose text
+                // equals the item's whole text.
+                if (
+                    pws.sentences.length === 1 &&
+                    pws.sentences[0].text === pws.item.text &&
+                    degradedItemIndices.size > 0
+                ) {
+                    degradedSentenceIndices.add(flatIdx);
+                }
+                flatIdx += pws.sentences.length;
+            }
+        }
+
+        // 7. Get viewport info for coordinate conversion.
+        const { viewBox } = await getPageViewportInfo(
+            reader as ZoteroReader,
+            currentPageIndex,
+        );
+        const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
+        const pageHeight = rawPage.height;
+
+        // 8. Create annotations.
+        logger(
+            `[Visualizer] Creating ${result.sentences.length} sentence annotations (paragraphs: ${result.paragraphs.length}, degraded: ${result.degradedParagraphs}, unmapped: ${result.unmappedParagraphs})`,
+        );
+        if (result.degradationNotes.length > 0) {
+            // Surface the first few so ligature / invariant issues on real
+            // PDFs are easy to spot without opening the integration test.
+            const preview = result.degradationNotes.slice(0, 5);
+            for (const note of preview) {
+                logger(
+                    `  [degraded] item ${note.itemIndex} (${note.itemType}): ${note.reason}${note.message ? ` — ${note.message}` : ""}`,
+                );
+            }
+            if (result.degradationNotes.length > preview.length) {
+                logger(
+                    `  ... and ${result.degradationNotes.length - preview.length} more`,
+                );
+            }
+        }
+
+        const annotationRefs = await createSentenceAnnotations(
+            result.sentences,
+            degradedSentenceIndices,
+            currentPageIndex,
+            pageHeight,
+            reader as ZoteroReader,
+            viewBoxLL,
+        );
+
+        // Track annotations for cleanup
+        BeaverTemporaryAnnotations.addToTracking(annotationRefs);
+
+        const message = `Page ${currentPageIndex + 1}: ${
+            result.sentences.length
+        } sentences in ${result.paragraphs.length} paragraphs${
+            result.degradedParagraphs > 0 || result.unmappedParagraphs > 0
+                ? ` (degraded: ${result.degradedParagraphs}, unmapped: ${result.unmappedParagraphs})`
+                : ""
+        }`;
+
+        logger(`[Visualizer] ${message}`);
+
+        return {
+            success: true,
+            message,
+            sentences: result.sentences.length,
+            paragraphs: result.paragraphs.length,
+            degradedParagraphs: result.degradedParagraphs,
+            unmappedParagraphs: result.unmappedParagraphs,
+            pageIndex: currentPageIndex,
+        };
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger(`[Visualizer] Error: ${errorMessage}`);
+        return {
+            success: false,
+            message: `Sentence visualization failed: ${errorMessage}`,
         };
     }
 }

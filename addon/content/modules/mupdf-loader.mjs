@@ -383,6 +383,95 @@ export var MuPDFLoader = {
                 return fromStringFree(textPtr);
             }
 
+            /**
+             * Walk the structured-text tree, invoking user-supplied callbacks
+             * for each block, line, and character.
+             *
+             * Walker shape (all callbacks optional):
+             *   {
+             *     beginTextBlock(bbox)
+             *     endTextBlock()
+             *     beginLine(bbox, wmode, dir)
+             *     endLine()
+             *     onChar(rune, origin, font, size, quad, color)
+             *     onImageBlock(bbox, matrix, image)   // no-op if missing
+             *   }
+             *
+             * - `bbox` values are [x0, y0, x1, y1] tuples (matches fromRect).
+             * - `quad` is an 8-float array [ulx,uly,urx,ury,llx,lly,lrx,lry].
+             * - `origin` is [x, y]; `dir` is [x, y].
+             * - `font` is passed as the raw libmupdf font pointer (number);
+             *   callers who don't need font metadata can ignore it. This
+             *   avoids allocating a JS Font wrapper per character.
+             * - `color` is the raw ARGB integer; callers can decode if needed.
+             * - Image blocks: this wrapper does not materialize Image/Matrix
+             *   objects (we don't have those classes in the loader). If
+             *   `onImageBlock` is provided it receives (bbox, null, null) so
+             *   the caller at least knows an image block was seen.
+             *
+             * Implementation mirrors upstream mupdf.mjs StructuredText.walk,
+             * minus the upstream `Font` allocation (skipped for speed).
+             */
+            walk(walker) {
+                let block = libmupdf._wasm_stext_page_get_first_block(this.pointer);
+                while (block) {
+                    const blockType = libmupdf._wasm_stext_block_get_type(block);
+                    const blockBBox = fromRect(libmupdf._wasm_stext_block_get_bbox(block));
+                    if (blockType === 1) {
+                        // Image block. Expose minimally — we don't wrap Image
+                        // or Matrix in this loader, so we pass raw nulls.
+                        if (walker.onImageBlock) {
+                            walker.onImageBlock(blockBBox, null, null);
+                        }
+                    } else {
+                        if (walker.beginTextBlock) {
+                            walker.beginTextBlock(blockBBox);
+                        }
+                        let line = libmupdf._wasm_stext_block_get_first_line(block);
+                        while (line) {
+                            const lineBBox = fromRect(libmupdf._wasm_stext_line_get_bbox(line));
+                            const lineWmode = libmupdf._wasm_stext_line_get_wmode(line);
+                            // Direction vector: 2 floats at the returned ptr.
+                            const dirPtr = libmupdf._wasm_stext_line_get_dir(line) >> 2;
+                            const lineDir = [
+                                libmupdf.HEAPF32[dirPtr + 0],
+                                libmupdf.HEAPF32[dirPtr + 1],
+                            ];
+                            if (walker.beginLine) {
+                                walker.beginLine(lineBBox, lineWmode, lineDir);
+                            }
+                            if (walker.onChar) {
+                                let ch = libmupdf._wasm_stext_line_get_first_char(line);
+                                while (ch) {
+                                    const runeCode = libmupdf._wasm_stext_char_get_c(ch);
+                                    const rune = String.fromCharCode(runeCode);
+                                    // Origin: 2 floats
+                                    const originPtr = libmupdf._wasm_stext_char_get_origin(ch) >> 2;
+                                    const origin = [
+                                        libmupdf.HEAPF32[originPtr + 0],
+                                        libmupdf.HEAPF32[originPtr + 1],
+                                    ];
+                                    const fontPtr = libmupdf._wasm_stext_char_get_font(ch);
+                                    const size = libmupdf._wasm_stext_char_get_size(ch);
+                                    const quad = fromQuad(libmupdf._wasm_stext_char_get_quad(ch));
+                                    const color = libmupdf._wasm_stext_char_get_argb(ch);
+                                    walker.onChar(rune, origin, fontPtr, size, quad, color);
+                                    ch = libmupdf._wasm_stext_char_get_next(ch);
+                                }
+                            }
+                            if (walker.endLine) {
+                                walker.endLine();
+                            }
+                            line = libmupdf._wasm_stext_line_get_next(line);
+                        }
+                        if (walker.endTextBlock) {
+                            walker.endTextBlock();
+                        }
+                    }
+                    block = libmupdf._wasm_stext_block_get_next(block);
+                }
+            }
+
             destroy() {
                 if (this.pointer) {
                     libmupdf._wasm_drop_stext_page(this.pointer);

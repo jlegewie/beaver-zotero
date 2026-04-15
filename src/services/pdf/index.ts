@@ -42,6 +42,11 @@ import {
     DEFAULT_SEARCH_SCORING_OPTIONS,
 } from "./types";
 import { SearchScorer } from "./SearchScorer";
+import {
+    extractPageSentenceBBoxes,
+    type PageSentenceBBoxOptions,
+    type PageSentenceBBoxResult,
+} from "./ParagraphSentenceMapper";
 
 // Re-export types and classes for convenience
 export * from "./types";
@@ -78,6 +83,32 @@ export type {
     ItemCounters,
 } from "./ParagraphDetector";
 export { SearchScorer } from "./SearchScorer";
+export {
+    simpleRegexSentenceSplit,
+    flattenPageText,
+    sentenceToBoxes,
+    extractSentenceBBoxes,
+    buildFeasibilityReport,
+} from "./SentenceMapper";
+export type {
+    SentenceRange,
+    SentenceSplitter,
+    PageText,
+    FeasibilityReport,
+} from "./SentenceMapper";
+export {
+    buildDetailedLineLookup,
+    buildParagraphText,
+    extractPageSentenceBBoxes,
+    buildParagraphFeasibilityReport,
+} from "./ParagraphSentenceMapper";
+export type {
+    ParagraphText,
+    ParagraphWithSentences,
+    PageSentenceBBoxResult,
+    PageSentenceBBoxOptions,
+    ParagraphFeasibilityReport,
+} from "./ParagraphSentenceMapper";
 
 /**
  * PDFExtractor - High-level API for extracting text from PDFs.
@@ -540,6 +571,59 @@ export class PDFExtractor {
     }
 
     /**
+     * Extract sentence-level bounding boxes for a single page.
+     *
+     * Runs the paragraph-scoped sentence mapper pipeline:
+     *   1. Character-level walk via `MuPDFService.extractRawPageDetailed`.
+     *   2. Column + line + paragraph detection (existing detectors reused).
+     *   3. Per-paragraph sentence split (default: simple regex; callers can
+     *      inject their own via `options.splitter`).
+     *   4. Each sentence range resolved to one bbox per line-fragment.
+     *
+     * **Graceful degradation.** A paragraph that fails the precise mapping
+     * path (unmapped, text/chars invariant violation, or empty-split)
+     * contributes a single fallback sentence covering the whole paragraph
+     * bbox, and is counted in `result.unmappedParagraphs` or
+     * `result.degradedParagraphs`. The function never throws on correctness
+     * traps; the whole-page answer is always usable.
+     *
+     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
+     * @param pageIndex - 0-based page index
+     * @param options - Pipeline options (splitter, paragraph detector settings)
+     * @returns Sentences grouped by paragraph, plus a flat sentence list and
+     *          degradation counters.
+     *
+     * @example
+     * ```typescript
+     * const extractor = new PDFExtractor();
+     * const result = await extractor.extractSentenceBBoxes(pdfData, 0);
+     * for (const sentence of result.sentences) {
+     *   console.log(sentence.text, sentence.bboxes);
+     * }
+     * ```
+     */
+    async extractSentenceBBoxes(
+        pdfData: Uint8Array | ArrayBuffer,
+        pageIndex: number,
+        options: PageSentenceBBoxOptions = {}
+    ): Promise<PageSentenceBBoxResult> {
+        try {
+            await this.mupdf.open(pdfData);
+            const pageCount = this.mupdf.getPageCount();
+            if (pageIndex < 0 || pageIndex >= pageCount) {
+                throw new ExtractionError(
+                    ExtractionErrorCode.PAGE_OUT_OF_RANGE,
+                    `Page index ${pageIndex} out of range (0..${pageCount - 1})`,
+                );
+            }
+            const detailed = this.mupdf.extractRawPageDetailed(pageIndex);
+            return extractPageSentenceBBoxes(detailed, options);
+        } finally {
+            this.mupdf.close();
+        }
+    }
+
+    /**
      * Render a single page to an image.
      * 
      * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
@@ -875,4 +959,44 @@ export async function searchFromZoteroItem(
     const pdfData = await IOUtils.read(path);
     const extractor = new PDFExtractor();
     return extractor.search(pdfData, query, options);
+}
+
+/**
+ * Extract sentence-level bounding boxes for a single page of a Zotero
+ * attachment item.
+ *
+ * Convenience wrapper around `PDFExtractor.extractSentenceBBoxes` that
+ * reads the PDF file from disk. Returns `null` when the file is not
+ * available locally. Graceful degradation applies — see the method docs
+ * for details on `unmappedParagraphs` / `degradedParagraphs`.
+ *
+ * @param item - Zotero attachment item (must be a PDF)
+ * @param pageIndex - 0-based page index
+ * @param options - Pipeline options forwarded to `extractSentenceBBoxes`
+ * @returns Sentences grouped by paragraph + flat sentence list, or `null`
+ *          if the file cannot be read.
+ *
+ * @example
+ * ```typescript
+ * const result = await extractSentenceBBoxesFromZoteroItem(item, 0);
+ * if (result) {
+ *   for (const p of result.paragraphs) {
+ *     console.log(`${p.item.type}: ${p.sentences.length} sentences`);
+ *   }
+ * }
+ * ```
+ */
+export async function extractSentenceBBoxesFromZoteroItem(
+    item: Zotero.Item,
+    pageIndex: number,
+    options: PageSentenceBBoxOptions = {}
+): Promise<PageSentenceBBoxResult | null> {
+    const path = await item.getFilePathAsync();
+    if (!path) {
+        return null;
+    }
+
+    const pdfData = await IOUtils.read(path);
+    const extractor = new PDFExtractor();
+    return extractor.extractSentenceBBoxes(pdfData, pageIndex, options);
 }
