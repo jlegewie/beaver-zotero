@@ -99,7 +99,7 @@ export async function handleZoteroAttachmentSearchRequest(
         const rawFilePath = await zoteroItem.getFilePathAsync();
         const filePath = rawFilePath || null;  // normalize false → null
         const isRemoteOnly = !filePath && isRemoteAccessAvailable(zoteroItem);
-        const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(zoteroItem.attachmentSyncedHash) : null);
+        const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(zoteroItem) : null);
         resolvedFilePath = effectiveFilePath;
 
         if (!effectiveFilePath) {

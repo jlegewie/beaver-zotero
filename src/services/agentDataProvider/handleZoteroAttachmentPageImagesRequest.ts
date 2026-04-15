@@ -90,7 +90,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         const rawFilePath = await pdfItem.getFilePathAsync();
         const filePath = rawFilePath || null;  // normalize false → null
         const isRemoteOnly = !filePath && isRemoteAccessAvailable(pdfItem);
-        const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(pdfItem.attachmentSyncedHash) : null);
+        const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(pdfItem) : null);
         resolvedFilePath = effectiveFilePath;
 
         if (!effectiveFilePath) {

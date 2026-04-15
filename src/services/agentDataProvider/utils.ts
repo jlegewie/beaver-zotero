@@ -96,21 +96,23 @@ export async function loadPdfData(
         return IOUtils.read(filePath);
     }
 
-    const hash = item.attachmentSyncedHash;
-    if (hash) {
-        const cached = _remoteDataCache.get(hash);
-        if (cached && Date.now() - cached.ts < REMOTE_CACHE_TTL_MS) {
-            cached.ts = Date.now(); // refresh TTL on read
-            return cached.data;
-        }
+    // Cache key: prefer the synced hash; fall back to libraryID-key for
+    // on-demand attachments that haven't been downloaded yet (hash is empty
+    // until first sync, see isAttachmentOnServer in utils/webAPI.ts).
+    const cacheKey = item.attachmentSyncedHash || `k:${item.libraryID}-${item.key}`;
 
-        // Coalesce with an in-flight download for the same hash
-        const inflight = _remoteInflight.get(hash);
-        if (inflight) return inflight;
+    const cached = _remoteDataCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < REMOTE_CACHE_TTL_MS) {
+        cached.ts = Date.now(); // refresh TTL on read
+        return cached.data;
     }
 
+    // Coalesce with an in-flight download for the same key
+    const inflight = _remoteInflight.get(cacheKey);
+    if (inflight) return inflight;
+
     const downloadPromise = getAttachmentDataInMemory(item, AGENT_DOWNLOAD_OPTIONS);
-    if (hash) _remoteInflight.set(hash, downloadPromise);
+    _remoteInflight.set(cacheKey, downloadPromise);
 
     let data: Uint8Array;
     try {
@@ -119,7 +121,7 @@ export async function loadPdfData(
         notifyRemoteDownloadFailure();
         throw error;
     } finally {
-        if (hash) _remoteInflight.delete(hash);
+        _remoteInflight.delete(cacheKey);
     }
 
     // Only cache data within the configured size limit to avoid pinning
@@ -127,7 +129,7 @@ export async function loadPdfData(
     const maxMB = getPref('maxFileSizeMB');
     const withinSizeLimit = (data.length / 1024 / 1024) <= maxMB;
 
-    if (hash && withinSizeLimit) {
+    if (withinSizeLimit) {
         // Evict expired entries when at capacity
         if (_remoteDataCache.size >= REMOTE_CACHE_MAX) {
             const now = Date.now();
@@ -139,7 +141,7 @@ export async function loadPdfData(
             const oldest = _remoteDataCache.keys().next().value;
             if (oldest !== undefined) _remoteDataCache.delete(oldest);
         }
-        _remoteDataCache.set(hash, { data, ts: Date.now() });
+        _remoteDataCache.set(cacheKey, { data, ts: Date.now() });
     }
 
     return data;
@@ -224,7 +226,7 @@ async function checkAttachmentAvailability(
         if (isRemoteAccessAvailable(attachment)) {
             // Report as available with a synthetic remote path.
             // The actual download will happen when content is requested.
-            const remotePath = makeRemoteFilePath(attachment.attachmentSyncedHash);
+            const remotePath = makeRemoteFilePath(attachment);
             return { available: true, filePath: remotePath, contentType };
         }
         const isFileAvailableOnServer = isAttachmentOnServer(attachment);

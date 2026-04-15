@@ -28,9 +28,17 @@ export function getStorageModeForLibrary(libraryID: number): StorageMode {
  */
 export function isAttachmentOnServer(item: Zotero.Item): boolean {
 	if (!item || !item.isStoredFileAttachment()) return false;
-	
-	// File is on server if it has a server hash
-	return Boolean(item.attachmentSyncedHash);
+
+	// Locally-synced file — hash populated after download/upload.
+	if (item.attachmentSyncedHash) return true;
+
+	// On-demand ("as needed") sync: item metadata is synced and the file is on
+	// the server, but it hasn't been downloaded yet, so the hash is still empty.
+	// Zotero sets syncState to TO_DOWNLOAD / FORCE_DOWNLOAD when the server has
+	// the file (see zotero/xpcom/sync/syncLocal.js _checkAttachmentForDownload).
+	const L = Zotero.Sync.Storage.Local;
+	const s = item.attachmentSyncState;
+	return s === L.SYNC_STATE_TO_DOWNLOAD || s === L.SYNC_STATE_FORCE_DOWNLOAD;
 }
 
 /**

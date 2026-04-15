@@ -28,9 +28,14 @@ const MEMORY_CACHE_MAX = 500;
 /** Prefix for synthetic file paths representing remote-only files. */
 export const REMOTE_PATH_PREFIX = 'remote:';
 
-/** Build a synthetic file path for a remote-only attachment (keyed by synced hash). */
-export function makeRemoteFilePath(syncedHash: string): string {
-    return `${REMOTE_PATH_PREFIX}${syncedHash}`;
+/** Build a synthetic file path for a remote-only attachment.
+ *  Prefers the synced hash — the path changes when the server file changes,
+ *  naturally invalidating the cache. Falls back to libraryID-key for on-demand
+ *  attachments whose hash isn't populated until the first actual download. */
+export function makeRemoteFilePath(item: Zotero.Item): string {
+    const hash = item.attachmentSyncedHash;
+    const id = hash ? `h:${hash}` : `k:${item.libraryID}-${item.key}`;
+    return `${REMOTE_PATH_PREFIX}${id}`;
 }
 
 /** Check if a file path represents a remote-only attachment. */
