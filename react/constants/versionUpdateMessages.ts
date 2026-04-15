@@ -406,7 +406,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 description: "A new action type for notes lets you trigger repeated AI workflows on your notes, just like you can for items and PDFs.",
             },
         ],
-        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.17.0-beta.1" target='_blank'>Full changelog</a>`
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.17.0" target='_blank'>Full changelog</a>`
     },
 ];
 
