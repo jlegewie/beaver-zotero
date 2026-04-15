@@ -4,6 +4,7 @@ import { isValidZoteroItem } from '../../react/utils/sourceUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
 import { planFeaturesAtom, searchableLibraryIdsAtom } from '../../react/atoms/profile';
+import { selectedModelAtom } from '../../react/atoms/models';
 import { isAttachmentOnServer } from '../utils/webAPI';
 import { getPref } from '../utils/prefs';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
@@ -349,13 +350,20 @@ class ItemValidationManager {
             }
 
             // Check if PDF needs OCR
-            // const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
-            // if (ocrAnalysis.needsOCR) {
-            //     return { 
-            //         isValid: false, 
-            //         reason: 'PDF requires OCR (no text layer)' 
-            //     };
-            // }
+            // Only fail if the selected model can't handle scanned PDFs:
+            // no vision support AND plus tools (server-side OCR) disabled.
+            const selectedModel = store.get(selectedModelAtom);
+            const supportsVision = selectedModel?.supports_vision === true;
+            const requestPlusTools = getPref('requestPlusTools');
+            if (!supportsVision && !requestPlusTools) {
+                const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
+                if (ocrAnalysis.needsOCR) {
+                    return {
+                        isValid: false,
+                        reason: 'PDF requires OCR (no text layer). Use a model with vision support or enable plus tools under Settings > API Keys.'
+                    };
+                }
+            }
 
             return { isValid: true };
 
