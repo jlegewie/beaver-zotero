@@ -160,12 +160,18 @@ function rawDisplayMath(latex: string): string {
 // Setup
 // =============================================================================
 
+// Capture the jsdom-backed getMainWindow from setup.ts so later tests that
+// replace Zotero.getMainWindow (e.g. getLatestNoteHtml) don't leak a stub
+// without a .document into tests that rely on ProseMirror normalization.
+const _originalGetMainWindow = (globalThis as any).Zotero.getMainWindow;
+
 beforeEach(() => {
     vi.clearAllMocks();
 
     // Reset Zotero globals used by expansion / rebuild
     (globalThis as any).Zotero = {
         ...(globalThis as any).Zotero,
+        getMainWindow: _originalGetMainWindow,
         Items: {
             getByLibraryAndKey: vi.fn((libId: number, key: string) => ({
                 id: `${libId}-${key}`,

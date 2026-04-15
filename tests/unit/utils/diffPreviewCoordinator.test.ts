@@ -26,7 +26,7 @@ const {
     // reference that gets set after imports.
     return {
         capturedHandlers: {
-            bannerAction: null as ((action: string) => void) | null,
+            bannerAction: null as ((action: string) => void | Promise<void>) | null,
             dismiss: null as (() => void) | null,
             previewNoteKey: null as { libraryId: number; zoteroKey: string } | null,
         },
@@ -165,14 +165,14 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
     // -----------------------------------------------------------------------
 
     describe('scopes to previewed note', () => {
-        it('approveAll only approves edits for the previewed note', () => {
+        it('approveAll only approves edits for the previewed note', async () => {
             capturedHandlers.previewNoteKey = { libraryId: 1, zoteroKey: 'NOTE_A' };
 
             seedApprovals(
                 makePendingApproval({ actionId: 'a1', library_id: 1, zotero_key: 'NOTE_A' }),
                 makePendingApproval({ actionId: 'b1', library_id: 1, zotero_key: 'NOTE_B' }),
             );
-            capturedHandlers.bannerAction!('approveAll');
+            await capturedHandlers.bannerAction!('approveAll');
 
             const responses = getApprovalResponses();
             expect(responses).toEqual([
@@ -184,7 +184,7 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
             expect(remaining.has('b1')).toBe(true);
         });
 
-        it('rejectAll only rejects edits for the previewed note', () => {
+        it('rejectAll only rejects edits for the previewed note', async () => {
             capturedHandlers.previewNoteKey = { libraryId: 1, zoteroKey: 'NOTE_A' };
 
             seedApprovals(
@@ -192,7 +192,7 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
                 makePendingApproval({ actionId: 'a2', library_id: 1, zotero_key: 'NOTE_A' }),
                 makePendingApproval({ actionId: 'b1', library_id: 1, zotero_key: 'NOTE_B' }),
             );
-            capturedHandlers.bannerAction!('rejectAll');
+            await capturedHandlers.bannerAction!('rejectAll');
 
             const responses = getApprovalResponses();
             expect(responses).toEqual([
@@ -206,14 +206,14 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
             expect(remaining.has('b1')).toBe(true);
         });
 
-        it('scopes correctly across different libraries', () => {
+        it('scopes correctly across different libraries', async () => {
             capturedHandlers.previewNoteKey = { libraryId: 2, zoteroKey: 'NOTE_A' };
 
             seedApprovals(
                 makePendingApproval({ actionId: 'lib1', library_id: 1, zotero_key: 'NOTE_A' }),
                 makePendingApproval({ actionId: 'lib2', library_id: 2, zotero_key: 'NOTE_A' }),
             );
-            capturedHandlers.bannerAction!('approveAll');
+            await capturedHandlers.bannerAction!('approveAll');
 
             const responses = getApprovalResponses();
             expect(responses).toEqual([
@@ -231,14 +231,14 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
     // -----------------------------------------------------------------------
 
     describe('fallback when previewKey is null', () => {
-        it('approves ALL edit_note approvals when no note is previewed', () => {
+        it('approves ALL edit_note approvals when no note is previewed', async () => {
             capturedHandlers.previewNoteKey = null;
 
             seedApprovals(
                 makePendingApproval({ actionId: 'a1', library_id: 1, zotero_key: 'NOTE_A' }),
                 makePendingApproval({ actionId: 'b1', library_id: 1, zotero_key: 'NOTE_B' }),
             );
-            capturedHandlers.bannerAction!('approveAll');
+            await capturedHandlers.bannerAction!('approveAll');
 
             const responses = getApprovalResponses();
             expect(responses).toHaveLength(2);
@@ -256,7 +256,7 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
     // -----------------------------------------------------------------------
 
     describe('ignores non-edit_note action types', () => {
-        it('does not approve/reject edit_metadata approvals', () => {
+        it('does not approve/reject edit_metadata approvals', async () => {
             capturedHandlers.previewNoteKey = { libraryId: 1, zoteroKey: 'NOTE_A' };
 
             seedApprovals(
@@ -268,7 +268,7 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
                     zotero_key: 'NOTE_A',
                 }),
             );
-            capturedHandlers.bannerAction!('approveAll');
+            await capturedHandlers.bannerAction!('approveAll');
 
             const responses = getApprovalResponses();
             expect(responses).toEqual([
@@ -285,20 +285,20 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
     // -----------------------------------------------------------------------
 
     describe('dismissal side effects', () => {
-        it('calls dismissDiffPreview and clears diffPreviewNoteKeyAtom', () => {
+        it('calls dismissDiffPreview and clears diffPreviewNoteKeyAtom', async () => {
             capturedHandlers.previewNoteKey = { libraryId: 1, zoteroKey: 'NOTE_A' };
             seedApprovals(
                 makePendingApproval({ actionId: 'a1', library_id: 1, zotero_key: 'NOTE_A' }),
             );
 
             storeRef.current.set(diffPreviewNoteKeyAtom, '1-NOTE_A');
-            capturedHandlers.bannerAction!('approveAll');
+            await capturedHandlers.bannerAction!('approveAll');
 
             expect(mockDismissDiffPreview).toHaveBeenCalledOnce();
             expect(storeRef.current.get(diffPreviewNoteKeyAtom)).toBeNull();
         });
 
-        it('captures preview key before dismiss clears it', () => {
+        it('captures preview key before dismiss clears it', async () => {
             // Simulate dismiss clearing the preview key (as real code does)
             capturedHandlers.previewNoteKey = { libraryId: 1, zoteroKey: 'NOTE_A' };
             mockDismissDiffPreview.mockImplementation(() => {
@@ -309,7 +309,7 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
                 makePendingApproval({ actionId: 'a1', library_id: 1, zotero_key: 'NOTE_A' }),
                 makePendingApproval({ actionId: 'b1', library_id: 1, zotero_key: 'NOTE_B' }),
             );
-            capturedHandlers.bannerAction!('approveAll');
+            await capturedHandlers.bannerAction!('approveAll');
 
             // Should still scope to NOTE_A despite dismiss clearing the key
             const responses = getApprovalResponses();
@@ -324,30 +324,30 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
     // -----------------------------------------------------------------------
 
     describe('edge cases', () => {
-        it('handles empty pending approvals gracefully', () => {
+        it('handles empty pending approvals gracefully', async () => {
             capturedHandlers.previewNoteKey = { libraryId: 1, zoteroKey: 'NOTE_A' };
             seedApprovals();
 
-            capturedHandlers.bannerAction!('approveAll');
+            await capturedHandlers.bannerAction!('approveAll');
 
             expect(getApprovalResponses()).toHaveLength(0);
             expect(mockDismissDiffPreview).toHaveBeenCalledOnce();
         });
 
-        it('handles all approvals being for other notes', () => {
+        it('handles all approvals being for other notes', async () => {
             capturedHandlers.previewNoteKey = { libraryId: 1, zoteroKey: 'NOTE_A' };
 
             seedApprovals(
                 makePendingApproval({ actionId: 'b1', library_id: 1, zotero_key: 'NOTE_B' }),
                 makePendingApproval({ actionId: 'c1', library_id: 1, zotero_key: 'NOTE_C' }),
             );
-            capturedHandlers.bannerAction!('approveAll');
+            await capturedHandlers.bannerAction!('approveAll');
 
             expect(getApprovalResponses()).toHaveLength(0);
             expect(storeRef.current.get(pendingApprovalsAtom).size).toBe(2);
         });
 
-        it('handles multiple edits for the same previewed note', () => {
+        it('handles multiple edits for the same previewed note', async () => {
             capturedHandlers.previewNoteKey = { libraryId: 1, zoteroKey: 'NOTE_A' };
 
             seedApprovals(
@@ -355,7 +355,7 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
                 makePendingApproval({ actionId: 'a2', library_id: 1, zotero_key: 'NOTE_A' }),
                 makePendingApproval({ actionId: 'a3', library_id: 1, zotero_key: 'NOTE_A' }),
             );
-            capturedHandlers.bannerAction!('approveAll');
+            await capturedHandlers.bannerAction!('approveAll');
 
             const responses = getApprovalResponses();
             expect(responses).toHaveLength(3);
