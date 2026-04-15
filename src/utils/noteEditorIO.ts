@@ -16,6 +16,7 @@ import { logger } from './logger';
 import { stripDataCitationItems } from './noteWrapper';
 import { decodeHtmlEntities } from './noteHtmlEntities';
 import { findRangeByContexts } from './editNoteRawPosition';
+import { assertNoPreviewMarkers } from './notePreviewGuard';
 
 // =============================================================================
 // Reading the note
@@ -346,6 +347,7 @@ export async function flushLiveEditorToDB(item: any): Promise<boolean> {
     if (latest === saved) return false;
 
     try {
+        assertNoPreviewMarkers(latest, 'flushLiveEditorToDB');
         item.setNote(latest);
         await item.saveTx();
     } catch (e: any) {

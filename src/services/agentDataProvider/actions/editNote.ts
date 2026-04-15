@@ -50,6 +50,7 @@ import {
     externalReferenceItemMappingAtom,
 } from '../../../../react/atoms/externalReferences';
 import { addOrUpdateEditFooter } from '../../../utils/noteEditFooter';
+import { assertNoPreviewMarkers } from '../../../utils/notePreviewGuard';
 import {
     WSAgentActionValidateRequest,
     WSAgentActionValidateResponse,
@@ -632,11 +633,15 @@ async function executeEditNoteAction(
 
         // Save
         try {
+            assertNoPreviewMarkers(newHtml, 'editNote:rewrite:apply');
             item.setNote(newHtml);
             await item.saveTx();
             logger(`executeEditNoteAction: Saved rewrite edit to ${noteId}`, 1);
         } catch (error) {
-            try { item.setNote(oldHtml); } catch (_) { /* best-effort */ }
+            try {
+                assertNoPreviewMarkers(oldHtml, 'editNote:rewrite:rollback');
+                item.setNote(oldHtml);
+            } catch (_) { /* best-effort */ }
             if (error instanceof TimeoutError) throw error;
             return {
                 type: 'agent_action_execute_response',
@@ -847,12 +852,14 @@ async function executeEditNoteAction(
 
     // 14. Save
     try {
+        assertNoPreviewMarkers(newHtml, 'editNote:strReplace:apply');
         item.setNote(newHtml);
         await item.saveTx();
         logger(`executeEditNoteAction: Saved note edit to ${noteId} (${replacementCount} occurrence(s) replaced)`, 1);
     } catch (error) {
         // Restore in-memory state on save failure
         try {
+            assertNoPreviewMarkers(oldHtml, 'editNote:strReplace:rollback');
             item.setNote(oldHtml);
         } catch (_) {
             // Best-effort restoration

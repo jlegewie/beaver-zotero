@@ -46,6 +46,7 @@ import { clearNoteEditorSelection } from './sourceUtils';
 import { store } from '../store';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { addOrUpdateEditFooter } from '../../src/utils/noteEditFooter';
+import { assertNoPreviewMarkers } from '../../src/utils/notePreviewGuard';
 import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
@@ -231,11 +232,15 @@ export async function executeEditNoteAction(
         }
 
         try {
+            assertNoPreviewMarkers(newHtml, 'editNoteActions:rewrite:apply');
             item.setNote(newHtml);
             await item.saveTx();
             logger(`executeEditNoteAction: Saved rewrite edit to ${noteId}`, 1);
         } catch (error) {
-            try { item.setNote(oldHtml); } catch (_) { /* best-effort */ }
+            try {
+                assertNoPreviewMarkers(oldHtml, 'editNoteActions:rewrite:rollback');
+                item.setNote(oldHtml);
+            } catch (_) { /* best-effort */ }
             throw new Error(`Failed to save note: ${error}`);
         }
 
@@ -406,12 +411,14 @@ export async function executeEditNoteAction(
 
     // 13. Save
     try {
+        assertNoPreviewMarkers(newHtml, 'editNoteActions:strReplace:apply');
         item.setNote(newHtml);
         await item.saveTx();
         logger(`executeEditNoteAction: Saved note edit to ${noteId} (${replacementCount} occurrence(s) replaced)`, 1);
     } catch (error) {
         // Restore in-memory state on save failure
         try {
+            assertNoPreviewMarkers(oldHtml, 'editNoteActions:strReplace:rollback');
             item.setNote(oldHtml);
         } catch (_) {
             // Best-effort restoration
@@ -497,6 +504,7 @@ export async function undoEditNoteAction(
         const currentHtml = getLatestNoteHtml(item);
         const existingCitationCache = extractDataCitationItems(currentHtml);
         const restoredHtml = rebuildDataCitationItems(resultData.undo_full_html, existingCitationCache);
+        assertNoPreviewMarkers(restoredHtml, 'editNoteActions:undoRewrite');
         item.setNote(restoredHtml);
         await item.saveTx();
         logger(`undoEditNoteAction: Restored full note content for ${noteId}`, 1);
@@ -735,6 +743,7 @@ export async function undoEditNoteAction(
 
     // Save
     try {
+        assertNoPreviewMarkers(restoredHtml, 'editNoteActions:undoStrReplace');
         item.setNote(restoredHtml);
         await item.saveTx();
         logger(`undoEditNoteAction: Reversed edit on note ${noteId}`, 1);
