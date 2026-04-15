@@ -186,22 +186,31 @@ export async function loadPdfData(
     // until first sync, see isAttachmentOnServer in utils/webAPI.ts).
     const cacheKey = item.attachmentSyncedHash || `k:${item.libraryID}-${item.key}`;
 
+    const itemRef = `${item.libraryID}-${item.key}`;
+
     const cached = _remoteDataCache.get(cacheKey);
     if (cached && Date.now() - cached.ts < REMOTE_CACHE_TTL_MS) {
         cached.ts = Date.now(); // refresh TTL on read
+        logger(`loadPdfData: remote cache hit for ${itemRef} (${(cached.data.length / 1024 / 1024).toFixed(2)}MB)`, 3);
         return cached.data;
     }
 
     // Coalesce with an in-flight download for the same key
     const inflight = _remoteInflight.get(cacheKey);
-    if (inflight) return inflight;
+    if (inflight) {
+        logger(`loadPdfData: awaiting in-flight remote download for ${itemRef}`, 3);
+        return inflight;
+    }
 
+    logger(`loadPdfData: downloading remote PDF for ${itemRef}`, 3);
+    const startedAt = Date.now();
     const downloadPromise = getAttachmentDataInMemory(item, AGENT_DOWNLOAD_OPTIONS);
     _remoteInflight.set(cacheKey, downloadPromise);
 
     let data: Uint8Array;
     try {
         data = await downloadPromise;
+        logger(`loadPdfData: downloaded remote PDF for ${itemRef} (${(data.length / 1024 / 1024).toFixed(2)}MB in ${Date.now() - startedAt}ms)`, 3);
     } catch (error) {
         notifyRemoteDownloadFailure(error);
         throw error;
