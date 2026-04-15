@@ -34,27 +34,29 @@ export function isRemoteAccessAvailable(item: Zotero.Item): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Remote download failure notification (once per session)
+// Remote download failure notification (rate-limited to once per 8 hours)
 // ---------------------------------------------------------------------------
 
-let _remoteDownloadFailureNotified = false;
+const REMOTE_FAILURE_NOTIFY_INTERVAL_MS = 8 * 60 * 60 * 1000;
+let _remoteDownloadFailureLastNotifiedAt = 0;
 
 function notifyRemoteDownloadFailure(): void {
-    if (_remoteDownloadFailureNotified) return;
-    _remoteDownloadFailureNotified = true;
+    const now = Date.now();
+    if (now - _remoteDownloadFailureLastNotifiedAt < REMOTE_FAILURE_NOTIFY_INTERVAL_MS) return;
+    _remoteDownloadFailureLastNotifiedAt = now;
 
     try {
         store.set(addPopupMessageAtom, {
             id: 'remote-download-failed',
-            type: 'warning' as any,
+            type: 'warning',
             title: 'Remote File Download Failed',
             text: 'A remotely stored attachment couldn\'t be downloaded. '
                 + 'To avoid this, sync your files locally in Zotero. '
                 + 'You can also disable remote file access in Settings \u203A Permissions.',
             expire: false,
         });
-    } catch {
-        // Popup system may not be available (e.g., during startup)
+    } catch (error) {
+        logger(`notifyRemoteDownloadFailure: failed to surface popup: ${error}`, 2);
     }
 }
 
