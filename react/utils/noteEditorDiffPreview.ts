@@ -181,9 +181,9 @@ function isEditorInstanceUsable(inst: any): boolean {
  * `isEditorInstanceUsable()` when an editor instance actually exists.
  *
  * This is a feature detection rather than a version check, and it is
- * independent from `DIFF_PREVIEW_ENABLED` (which remains a global kill
- * switch, e.g. to disable the feature in production without a code change).
- * The preview is considered live only when BOTH are true.
+ * independent from the user-facing `showDiffPreviewInNoteEditor` pref
+ * checked by `isDiffPreviewLive()` in diffPreviewCoordinator.ts. The
+ * preview is considered live only when BOTH are true.
  */
 export function isDiffPreviewSupported(): boolean {
     try {

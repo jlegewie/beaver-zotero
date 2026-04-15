@@ -27,29 +27,27 @@ import {
 } from './noteEditorDiffPreview';
 import { makeNoteKey } from '../atoms/editNoteAutoApprove';
 import { logger } from '../../src/utils/logger';
+import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { pendingApprovalsAtom } from '../agents/agentActions';
 import { sendApprovalResponseAtom } from '../atoms/agentRunAtoms';
 
 /**
- * Global kill switch for the diff preview feature.
- * Set to `false` to disable all in-editor diff previews regardless of
- * runtime capability. This is intentionally a compile-time constant so the
- * feature can be toggled off quickly without a settings round-trip.
- *
- * For runtime feature detection (e.g. Zotero 7 vs 8) use
- * `isDiffPreviewSupported()` from `noteEditorDiffPreview.ts`. The preview is
- * considered live only when BOTH flags are true; see `isDiffPreviewLive()`.
- */
-export const DIFF_PREVIEW_ENABLED = true;
-
-/**
- * Convenience gate that combines the kill switch and the runtime capability
- * check. Use this from UI components to decide whether to render
+ * Convenience gate that combines the user preference and the runtime
+ * capability check. Use this from UI components to decide whether to render
  * preview-related controls.
+ *
+ * The `showDiffPreviewInNoteEditor` pref defaults to `true` (see
+ * `addon/prefs.js`); the `!== false` form preserves the default-on intent
+ * even if the pref service returns `undefined` for any reason. If a Zotero
+ * release breaks the preview, users can flip this pref off in Beaver
+ * preferences without waiting for a plugin update.
+ *
+ * For runtime feature detection (e.g. Zotero 7 vs 8) see
+ * `isDiffPreviewSupported()` in `noteEditorDiffPreview.ts`.
  */
 export function isDiffPreviewLive(): boolean {
-    return DIFF_PREVIEW_ENABLED && isDiffPreviewSupported();
+    return getPref('showDiffPreviewInNoteEditor') !== false && isDiffPreviewSupported();
 }
 
 // Accessor for the Jotai store. The store is imported eagerly above

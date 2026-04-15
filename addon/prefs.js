@@ -30,6 +30,7 @@ pref("confirmExtractionCosts", true);
 pref("confirmExternalSearchCosts", true);
 pref("pauseLongRunningAgent", true);
 pref("requestPlusTools", false);
+pref("showDiffPreviewInNoteEditor", true);
 
 // Deferred tool preferences: maps tool group to preference (always_ask, always_apply, continue_without_applying)
 // Defaults are defined in react/atoms/deferredToolPreferences.ts and merged at load time.

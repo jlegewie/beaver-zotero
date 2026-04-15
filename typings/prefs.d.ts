@@ -30,6 +30,7 @@ declare namespace _ZoteroTypes {
       "confirmExternalSearchCosts": boolean;
       "pauseLongRunningAgent": boolean;
       "requestPlusTools": boolean;
+      "showDiffPreviewInNoteEditor": boolean;
       "deferredToolPreferences": string;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;
