@@ -517,6 +517,11 @@ async function validateEditNoteAction(
 /**
  * Execute an edit_note action.
  * Performs the string replacement on the note's raw HTML via the simplified format.
+ *
+ * Concurrency: relies on `AgentService.actionExecutionQueue` (src/services/agentService.ts)
+ * to serialize all agent action dispatches. This function assumes no other edit_note
+ * execution is running against the same note. Do not introduce parallel dispatch
+ * (e.g. Promise.all) at the caller level without adding a per-note lock here.
  */
 async function executeEditNoteAction(
     request: WSAgentActionExecuteRequest,
