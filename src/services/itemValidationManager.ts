@@ -349,13 +349,13 @@ class ItemValidationManager {
             }
 
             // Check if PDF needs OCR
-            const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
-            if (ocrAnalysis.needsOCR) {
-                return { 
-                    isValid: false, 
-                    reason: 'PDF requires OCR (no text layer)' 
-                };
-            }
+            // const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
+            // if (ocrAnalysis.needsOCR) {
+            //     return { 
+            //         isValid: false, 
+            //         reason: 'PDF requires OCR (no text layer)' 
+            //     };
+            // }
 
             return { isValid: true };
 
