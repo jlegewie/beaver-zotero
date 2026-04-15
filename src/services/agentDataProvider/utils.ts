@@ -81,7 +81,7 @@ function describeRemoteDownloadFailure(error: unknown): { title: string; text: s
     if (/Rate limited by/i.test(message)) {
         return {
             title: 'Remote Storage Rate Limited',
-            text: 'Your remote storage is temporarily rate-limiting requests so that Beaver can\'t access the file.'
+            text: 'Your remote storage is temporarily rate-limiting requests so that Beaver can\'t access the file. '
                 + DISABLE_HINT,
         };
     }
