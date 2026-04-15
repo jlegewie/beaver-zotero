@@ -64,6 +64,8 @@ export interface ItemValidationOptions {
     forceRefresh?: boolean;
 }
 
+const REMOTE_DOWNLOAD_TIMEOUT_MS = 20_000;
+
 /**
  * Manages item validation with caching and deduplication
  * 
@@ -308,12 +310,22 @@ class ItemValidationManager {
             }
 
             try {
-                const result = await Zotero.Sync.Runner.downloadFile(attachment);
+                const timeoutPromise = new Promise<'timeout'>((resolve) => {
+                    setTimeout(() => resolve('timeout'), REMOTE_DOWNLOAD_TIMEOUT_MS);
+                });
+                const result = await Promise.race([
+                    Zotero.Sync.Runner.downloadFile(attachment),
+                    timeoutPromise,
+                ]);
+                if (result === 'timeout') {
+                    logger(`ItemValidationManager: Remote download timed out after ${REMOTE_DOWNLOAD_TIMEOUT_MS}ms for ${attachment.libraryID}-${attachment.key}`, 2);
+                    return { isValid: false, reason: 'Unable to download file from remote storage.' };
+                }
                 if (!result || !result.localChanges) {
                     return { isValid: false, reason: 'Failed to download file from remote storage' };
                 }
             } catch (error: any) {
-                logger(`ItemValidationManager: Remote download failed for ${attachment.libraryID}-${attachment.key}: ${error.message}`, 2);
+                logger(`ItemValidationManager: Remote download failed for ${attachment.libraryID}-${attachment.key}: ${error?.message ?? error}`, 2);
                 return { isValid: false, reason: 'Failed to download file from remote storage' };
             }
 
