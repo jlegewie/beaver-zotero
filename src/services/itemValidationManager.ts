@@ -309,9 +309,10 @@ class ItemValidationManager {
                 return { isValid: false, reason };
             }
 
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
             try {
                 const timeoutPromise = new Promise<'timeout'>((resolve) => {
-                    setTimeout(() => resolve('timeout'), REMOTE_DOWNLOAD_TIMEOUT_MS);
+                    timeoutId = setTimeout(() => resolve('timeout'), REMOTE_DOWNLOAD_TIMEOUT_MS);
                 });
                 const result = await Promise.race([
                     Zotero.Sync.Runner.downloadFile(attachment),
@@ -327,6 +328,8 @@ class ItemValidationManager {
             } catch (error: any) {
                 logger(`ItemValidationManager: Remote download failed for ${attachment.libraryID}-${attachment.key}: ${error?.message ?? error}`, 2);
                 return { isValid: false, reason: 'Failed to download file from remote storage' };
+            } finally {
+                if (timeoutId !== undefined) clearTimeout(timeoutId);
             }
 
             filePath = await attachment.getFilePathAsync();
