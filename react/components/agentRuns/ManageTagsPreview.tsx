@@ -52,7 +52,6 @@ export const ManageTagsPreview: React.FC<ManageTagsPreviewProps> = ({
     const libraryId = actionData.library_id;
 
     const isApplied = status === 'applied';
-    const isRejectedOrUndone = status === 'rejected' || status === 'undone';
     const isError = status === 'error';
 
     // currentValue is only available while awaiting approval. After a final
