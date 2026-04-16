@@ -30,11 +30,16 @@ export const REMOTE_PATH_PREFIX = 'remote:';
 
 /** Build a synthetic file path for a remote-only attachment.
  *  Prefers the synced hash — the path changes when the server file changes,
- *  naturally invalidating the cache. Falls back to libraryID-key for on-demand
- *  attachments whose hash isn't populated until the first actual download. */
+ *  naturally invalidating the cache. Falls back to libraryID-key plus the
+ *  Zotero API item version for on-demand attachments whose hash isn't
+ *  populated until the first real download; the version bumps when the
+ *  server updates the item (including storage metadata), so the cache is
+ *  still invalidated when the remote file changes. */
 export function makeRemoteFilePath(item: Zotero.Item): string {
     const hash = item.attachmentSyncedHash;
-    const id = hash ? `h:${hash}` : `k:${item.libraryID}-${item.key}`;
+    const id = hash
+        ? `h:${hash}`
+        : `k:${item.libraryID}-${item.key}-v${item.version || 0}`;
     return `${REMOTE_PATH_PREFIX}${id}`;
 }
 

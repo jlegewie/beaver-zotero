@@ -322,6 +322,18 @@ export async function handleZoteroAttachmentPagesRequest(
                     'download_failed'
                 );
             }
+            // Remote size guard: the earlier check only runs on a cold page-count
+            // path. When cachedMeta had page_count, bytes were never loaded until
+            // now — we must enforce the size limit before extracting.
+            if (isRemoteOnly) {
+                const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                if (exceeded) {
+                    return errorResponse(
+                        `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                        'file_too_large'
+                    );
+                }
+            }
         }
         const pageIndices = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage - 1 + i);
         const result = await extractor.extract(pdfData, {

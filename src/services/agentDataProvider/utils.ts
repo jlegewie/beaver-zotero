@@ -181,10 +181,10 @@ export async function loadPdfData(
         return IOUtils.read(filePath);
     }
 
-    // Cache key: prefer the synced hash; fall back to libraryID-key for
-    // on-demand attachments that haven't been downloaded yet (hash is empty
-    // until first sync, see isAttachmentOnServer in utils/webAPI.ts).
-    const cacheKey = item.attachmentSyncedHash || `k:${item.libraryID}-${item.key}`;
+    // Cache key must track the same invalidation signal as makeRemoteFilePath:
+    // hash changes on synced-hash items, item.version bumps on on-demand items
+    // whose hash isn't populated until the first real download.
+    const cacheKey = makeRemoteFilePath(item);
 
     const itemRef = `${item.libraryID}-${item.key}`;
 
@@ -805,12 +805,24 @@ export async function computeItemStatus(
         } else if (options?.fileExistsLocally !== undefined) {
             // File existence already determined by caller (e.g. getAttachmentFileStatusLightweight)
             // — skip redundant safeFileExists() and syncingItemFilterAsync() I/O
-            availableLocallyOrOnServer = options.fileExistsLocally || isAttachmentOnServer(item);
-            passesSyncFilters = syncingItemFilter(item) && availableLocallyOrOnServer;
+            const onServerWithHash = isAttachmentOnServer(item);
+            // Beaver can access the file when it's local, has a synced hash, or
+            // is downloadable via the remote-file-access path (on-demand items
+            // in TO_DOWNLOAD/FORCE_DOWNLOAD state, gated by the pref).
+            availableLocallyOrOnServer =
+                options.fileExistsLocally || onServerWithHash || isRemoteAccessAvailable(item);
+            // Sync filters keep the stricter "hash or local" requirement — the
+            // backend needs a concrete hash to sync, so hashless remote-only
+            // items must not be reported as sync-eligible yet.
+            passesSyncFilters =
+                syncingItemFilter(item) && (options.fileExistsLocally || onServerWithHash);
         } else {
             // For file attachments, check if file exists locally or on server
-            availableLocallyOrOnServer = (await safeFileExists(item)) || isAttachmentOnServer(item);
-            passesSyncFilters = availableLocallyOrOnServer && (await syncingItemFilterAsync(item));
+            const isLocal = await safeFileExists(item);
+            const onServerWithHash = isAttachmentOnServer(item);
+            availableLocallyOrOnServer = isLocal || onServerWithHash || isRemoteAccessAvailable(item);
+            passesSyncFilters =
+                (isLocal || onServerWithHash) && (await syncingItemFilterAsync(item));
         }
     } else {
         // Regular items - check sync filters normally
