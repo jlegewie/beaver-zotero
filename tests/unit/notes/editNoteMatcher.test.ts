@@ -191,6 +191,204 @@ describe('findBestMatch strategies', () => {
         expect(result?.oldString).toBe('hello');
         expect(result?.newString).toBe('hi');
     });
+
+    it('markdown_to_html: converts **bold** in old_string to <strong>', () => {
+        const result = match(makeInput({
+            oldString: 'the **important** part',
+            newString: 'the **critical** part',
+            strippedHtml: '<p>the <strong>important</strong> part</p>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('the <strong>important</strong> part');
+        expect(result?.newString).toBe('the <strong>critical</strong> part');
+        expect(result?.matchCount).toBe(1);
+    });
+
+    it('markdown_to_html: converts __bold__ (GFM alt syntax) to <strong>', () => {
+        const result = match(makeInput({
+            oldString: 'the __important__ part',
+            newString: 'the __critical__ part',
+            strippedHtml: '<p>the <strong>important</strong> part</p>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('the <strong>important</strong> part');
+        expect(result?.newString).toBe('the <strong>critical</strong> part');
+    });
+
+    it('markdown_to_html: converts ATX headings on their own line', () => {
+        const result = match(makeInput({
+            oldString: '## 系统组件',
+            newString: '## 核心组件',
+            strippedHtml: '<h2>系统组件</h2>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('<h2>系统组件</h2>');
+        expect(result?.newString).toBe('<h2>核心组件</h2>');
+    });
+
+    it('markdown_to_html: handles multiple heading levels (# through ######)', () => {
+        const result = match(makeInput({
+            oldString: '#### a',
+            newString: '#### b',
+            strippedHtml: '<h4>a</h4>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('<h4>a</h4>');
+    });
+
+    it('markdown_to_html: strips optional ATX closing fence (## Title ##)', () => {
+        // CommonMark: closing `#+` preceded by whitespace is not part of the
+        // heading text. Without stripping it, `## Title ##` would convert to
+        // `<h2>Title ##</h2>` and never match the rendered `<h2>Title</h2>`.
+        const result = match(makeInput({
+            oldString: '## Title ##',
+            newString: '## NewTitle ###',
+            strippedHtml: '<h2>Title</h2>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('<h2>Title</h2>');
+        expect(result?.newString).toBe('<h2>NewTitle</h2>');
+    });
+
+    it('markdown_to_html: accepts tab between # and heading text (CommonMark)', () => {
+        const result = match(makeInput({
+            oldString: '##\tHeading',
+            newString: '##\tNew',
+            strippedHtml: '<h2>Heading</h2>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('<h2>Heading</h2>');
+        expect(result?.newString).toBe('<h2>New</h2>');
+    });
+
+    it('markdown_to_html: accepts up to 3 leading spaces before # (CommonMark)', () => {
+        const result = match(makeInput({
+            oldString: '   ## Heading',
+            newString: '   ## New',
+            strippedHtml: '<h2>Heading</h2>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('<h2>Heading</h2>');
+    });
+
+    it('markdown_to_html: rejects 4+ leading spaces (would be a code block in CommonMark)', () => {
+        const result = match(makeInput({
+            oldString: '    ## Heading',
+            newString: '    ## New',
+            strippedHtml: '<h2>Heading</h2>',
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('markdown_to_html: rejects # without trailing whitespace (#Heading is not ATX)', () => {
+        const result = match(makeInput({
+            oldString: '##Heading',
+            newString: '##New',
+            strippedHtml: '<h2>Heading</h2>',
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('markdown_to_html: trims trailing whitespace from heading text', () => {
+        // CommonMark strips trailing whitespace from heading text. Without
+        // this, `<h2>Heading   </h2>` would not match the rendered `<h2>Heading</h2>`.
+        const result = match(makeInput({
+            oldString: '## Heading   ',
+            newString: '## New   ',
+            strippedHtml: '<h2>Heading</h2>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('<h2>Heading</h2>');
+        expect(result?.newString).toBe('<h2>New</h2>');
+    });
+
+    it('markdown_to_html: absorbs CRLF \\r so heading text never carries it', () => {
+        // Stored notes use LF line endings. If model sends CRLF, the captured
+        // heading text must still produce `<h2>Heading</h2>` and not
+        // `<h2>Heading\r</h2>`, which would never match.
+        const result = match(makeInput({
+            oldString: '## Heading\r\nNext line',
+            newString: '## New\r\nNext line',
+            strippedHtml: '<h2>Heading</h2>\nNext line',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('<h2>Heading</h2>\nNext line');
+    });
+
+    it('markdown_to_html: keeps trailing # when not preceded by whitespace (## Section#5)', () => {
+        // CommonMark requires whitespace before the closing fence; `Section#5`
+        // must stay intact in the heading text.
+        const result = match(makeInput({
+            oldString: '## Section#5',
+            newString: '## Section#6',
+            strippedHtml: '<h2>Section#5</h2>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('<h2>Section#5</h2>');
+        expect(result?.newString).toBe('<h2>Section#6</h2>');
+    });
+
+    it('markdown_to_html: does not convert markdown inside HTML tag attributes', () => {
+        // `**x**` inside a tag attribute stays literal — attribute safety via
+        // split-on-tags. The `<citation .../>` tag itself is unchanged.
+        const result = match(makeInput({
+            oldString: 'pre <citation label="**x**"/> **real** post',
+            newString: 'pre <citation label="**x**"/> **changed** post',
+            strippedHtml: 'pre <citation label="**x**"/> <strong>real</strong> post',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('pre <citation label="**x**"/> <strong>real</strong> post');
+        expect(result?.newString).toBe('pre <citation label="**x**"/> <strong>changed</strong> post');
+    });
+
+    it('markdown_to_html: returns null when old_string has no markdown markers', () => {
+        // Plain text without markdown falls through past markdown_to_html to null.
+        const result = match(makeInput({
+            oldString: 'plain text not in note',
+            newString: 'replacement',
+            strippedHtml: '<p>totally different content</p>',
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('markdown_to_html: returns null when converted markdown still does not match', () => {
+        const result = match(makeInput({
+            oldString: '**missing**',
+            newString: '**new**',
+            strippedHtml: '<p>no match here</p>',
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('markdown_to_html: supports insert_after with markdown old_string', () => {
+        // Validation-time: new_string is the bare payload (no merge yet).
+        const result = match(makeInput({
+            operation: 'insert_after' as EditNoteOperation,
+            oldString: '**title**',
+            newString: ' tail',
+            strippedHtml: '<p><strong>title</strong> body</p>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('<strong>title</strong>');
+        expect(result?.newString).toBe(' tail');
+    });
+
+    it('markdown_to_html: symmetrically converts merged insert_after new_string', () => {
+        // Execution-time: new_string = old + injected (merged by caller).
+        // Converting both sides keeps the prefix aligned.
+        const result = match(makeInput({
+            operation: 'insert_after' as EditNoteOperation,
+            oldString: '**title**',
+            newString: '**title** injected',
+            strippedHtml: '<p><strong>title</strong> body</p>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('<strong>title</strong>');
+        expect(result?.newString).toBe('<strong>title</strong> injected');
+        // Replacement must start with the transformed anchor so the merged
+        // form still "inserts after" the anchor in raw HTML space.
+        expect(result?.newString.startsWith(result!.oldString)).toBe(true);
+    });
 });
 
 // =============================================================================
@@ -227,6 +425,27 @@ describe('findBestMatch priority', () => {
             strippedHtml: '<p>plain text</p>',
         }));
         expect(result?.strategy).toBe('trim_trailing_newlines');
+    });
+
+    it('prefers exact over markdown_to_html when old_string already has <strong>', () => {
+        // Regression guard: markdown_to_html must never shadow an exact match.
+        const result = match(makeInput({
+            oldString: 'the <strong>important</strong> part',
+            newString: 'replacement',
+            strippedHtml: '<p>the <strong>important</strong> part here</p>',
+        }));
+        expect(result?.strategy).toBe('exact');
+    });
+
+    it('markdown_to_html runs last: tried only after all other strategies fail', () => {
+        // Construct a case where only markdown_to_html can win by making all
+        // earlier strategies definitively fail.
+        const result = match(makeInput({
+            oldString: '**x**',
+            newString: '**y**',
+            strippedHtml: '<p><strong>x</strong></p>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
     });
 });
 
@@ -282,5 +501,56 @@ describe('findBestMatch multi-match', () => {
         expect(result?.strategy).toBe('exact');
         expect(result?.matchCount).toBe(2);
         expect(result?.rawPositionHint).toBeUndefined();
+    });
+});
+
+// =============================================================================
+// Production replay: real old_string_not_found failures from thread analysis
+// (see /tmp/beaver-threads/diff_detailed.json). Each seeds the haystack with
+// the actual rendered HTML from create_note's note_content and the needle
+// with the markdown the model submitted.
+// =============================================================================
+
+describe('markdown_to_html production replay', () => {
+    it('CJK bold: model sent **扩展** but note has <strong>扩展</strong>', () => {
+        const result = match(makeInput({
+            oldString: '该研究**扩展**了现有光操控文献中的观点',
+            newString: '该研究**深化**了现有光操控文献中的观点',
+            strippedHtml:
+                '<p>一、研究主要内容</p>\n'
+                + '<p>本文研究了<strong>在外部光照下的旋转粒子动力学</strong>，'
+                + '该研究<strong>扩展</strong>了现有光操控文献中的观点，'
+                + '突破了经典系统中无法实现净光放大的传统认知。</p>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('该研究<strong>扩展</strong>了现有光操控文献中的观点');
+        expect(result?.newString).toBe('该研究<strong>深化</strong>了现有光操控文献中的观点');
+    });
+
+    it('English inline bold: **Key insight:** matches rendered <strong>Key insight:</strong>', () => {
+        const result = match(makeInput({
+            oldString: '<p>**Key insight:** Recession gave way to **stagflation in India**</p>',
+            newString: '<p>**Key insight:** Recession yielded to **stagflation**</p>',
+            strippedHtml:
+                '<p><strong>Key insight:</strong> Recession gave way to '
+                + '<strong>stagflation in India</strong></p>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe(
+            '<p><strong>Key insight:</strong> Recession gave way to <strong>stagflation in India</strong></p>',
+        );
+    });
+
+    it('ATX heading: ## 系统组件与技术选择 matches rendered <h2>', () => {
+        const result = match(makeInput({
+            oldString: '## 系统组件与技术选择',
+            newString: '## 核心系统组件',
+            strippedHtml:
+                '<p>强度，$\\rho$ 为密度。</p>\n'
+                + '<h2>系统组件与技术选择</h2>\n'
+                + '<h3>2.1 飞轮/转子材料</h3>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+        expect(result?.oldString).toBe('<h2>系统组件与技术选择</h2>');
     });
 });

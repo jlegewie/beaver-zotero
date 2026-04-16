@@ -436,9 +436,7 @@ async function validateEditNoteAction(
     }
 
     // 13. Run the ranked matcher. The first strategy that produces a match
-    //     wins (exact → entity_decode → entity_encode → nfkc →
-    //     trim_trailing_newlines → json_unescape → partial_element_strip →
-    //     spurious_wrap_strip). See editNoteMatcher.ts.
+    //     wins. See editNoteMatcher.ts for the full chain.
     const match = findBestMatch(matchInput, base);
     if (!match) {
         const hint = buildZeroMatchHint(simplified, old_string ?? '');

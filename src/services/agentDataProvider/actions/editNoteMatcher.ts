@@ -16,6 +16,7 @@
  *   6. json_unescape            — convert literal `\n`, `\"`, `\\` etc.
  *   7. partial_element_strip    — strip malformed `<citation.../>` fragments
  *   8. spurious_wrap_strip      — unwrap surrounding `<p>…</p>` etc.
+ *   9. markdown_to_html         — convert `**bold**` / `## h` to HTML equivalents
  */
 
 import {
@@ -50,7 +51,8 @@ export type MatchStrategyName =
     | 'trim_trailing_newlines'
     | 'json_unescape'
     | 'partial_element_strip'
-    | 'spurious_wrap_strip';
+    | 'spurious_wrap_strip'
+    | 'markdown_to_html';
 
 export interface MatchInput {
     /** Enriched, simplified-space old_string. */
@@ -145,6 +147,53 @@ export function expandBase(input: MatchInput): BaseExpansion {
             input.externalRefContext,
         ),
     };
+}
+
+/**
+ * Convert a small, conservative set of CommonMark/GFM inline patterns to the
+ * HTML the rendered note contains. Only `**bold**`, `__bold__`, and ATX
+ * headings on their own line are handled — these are the patterns production
+ * data shows the model reverts to when copying `old_string` from the markdown
+ * it originally wrote in `create_note`, instead of the rendered `note_content`.
+ *
+ * Skipped entirely: italic (ambiguous with bold), links, lists, tables, code,
+ * math, smart-punctuation drift. Splits on `<...>` boundaries so content inside
+ * HTML tag attributes (e.g. `<citation label="**x**"/>`) is never transformed.
+ *
+ * ATX headings follow CommonMark: up to 3 leading spaces, one or more
+ * spaces/tabs after the `#`s, optional closing `#+` fence preceded by
+ * whitespace, trailing whitespace (including a stray `\r` from CRLF input)
+ * stripped from the heading text. `## Section#5` keeps the trailing `#5`
+ * because there is no whitespace before the second `#`.
+ *
+ * Returns the input unchanged when nothing matches.
+ */
+function convertMarkdownToHtml(s: string): string {
+    if (!s) return s;
+    // Text at even indices, tags at odd indices — same pattern as noteHtmlEntities.
+    const parts = s.split(/(<[^>]*>)/);
+    let changed = false;
+    for (let i = 0; i < parts.length; i += 2) {
+        const before = parts[i];
+        let after = before;
+        // ATX headings: `# h` through `###### h`, each on its own line.
+        // `\r?` lets `$` (which matches before `\n`) absorb a stray `\r` from
+        // CRLF input so the captured text never contains a trailing `\r`.
+        after = after.replace(
+            /^ {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*\r?$/gm,
+            (_m, hashes, text) => `<h${hashes.length}>${text}</h${hashes.length}>`,
+        );
+        // Strong emphasis: `**text**` and `__text__`. Non-greedy and
+        // same-line so `**a** plain **b**` becomes two independent matches and
+        // markers can't straddle paragraph breaks.
+        after = after.replace(/\*\*([^\n*]+?)\*\*/g, '<strong>$1</strong>');
+        after = after.replace(/__([^\n_]+?)__/g, '<strong>$1</strong>');
+        if (after !== before) {
+            parts[i] = after;
+            changed = true;
+        }
+    }
+    return changed ? parts.join('') : s;
 }
 
 // =============================================================================
@@ -441,6 +490,59 @@ const spuriousWrapStripStrategy: Strategy = {
     },
 };
 
+const markdownToHtmlStrategy: Strategy = {
+    name: 'markdown_to_html',
+    tryMatch(input) {
+        if (!input.oldString) return null;
+        const convertedOld = convertMarkdownToHtml(input.oldString);
+        if (convertedOld === input.oldString) return null;
+
+        let expandedOld: string;
+        try {
+            expandedOld = expandToRawHtml(convertedOld, input.metadata, 'old');
+        } catch {
+            return null;
+        }
+        const matchCount = countOccurrences(input.strippedHtml, expandedOld);
+        if (matchCount === 0) return null;
+
+        // Convert new_string the same way so the replacement is HTML too.
+        // For insert_after / insert_before at execution time, `newString` is
+        // the already-merged `old + injected`; converting the whole thing
+        // keeps the prefix aligned with `convertedOld` because the same
+        // transform is applied on both sides.
+        //
+        // Tradeoff: a caller that genuinely wants literal `**` / `##` in the
+        // saved note cannot reach this branch anyway — exact match runs first
+        // and wins for HTML old_strings like `<strong>bold</strong>`. The
+        // only way to land here is to use markdown in old_string, which
+        // signals "speaking markdown" and makes symmetric conversion of
+        // new_string the consistent choice. Leaving new_string literal would
+        // instead persist raw `**` into HTML (rendered as plain asterisks),
+        // which is almost never what the model intended.
+        const convertedNew = convertMarkdownToHtml(input.newString);
+
+        let expandedNew: string;
+        try {
+            expandedNew = expandToRawHtml(
+                convertedNew, input.metadata, 'new', input.externalRefContext,
+            );
+        } catch {
+            return null;
+        }
+
+        return {
+            strategy: 'markdown_to_html',
+            oldString: convertedOld,
+            newString: convertedNew,
+            expandedOld,
+            expandedNew,
+            matchCount,
+            normalizeAnchor: identity,
+        };
+    },
+};
+
 // =============================================================================
 // Public API
 // =============================================================================
@@ -454,6 +556,7 @@ const STRATEGIES: Strategy[] = [
     jsonUnescapeStrategy,
     partialElementStripStrategy,
     spuriousWrapStripStrategy,
+    markdownToHtmlStrategy,
 ];
 
 /**
