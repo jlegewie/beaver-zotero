@@ -489,11 +489,14 @@ async function deleteAppliedZoteroItems(actions: AgentAction[]): Promise<number>
 /**
  * Undo applied metadata edits from agent actions.
  * Reverts fields to their original values, but preserves user's manual changes.
+ * Actions are reversed so that later edits on the same field are undone first —
+ * otherwise the manual-modification check sees the later value and skips the earlier edit.
  * Returns the number of actions processed (regardless of whether fields were actually reverted).
  */
 async function undoAppliedMetadataEdits(actions: AgentAction[]): Promise<number> {
     let processedCount = 0;
-    for (const action of actions) {
+    const reversed = [...actions].reverse();
+    for (const action of reversed) {
         if (action.status === 'applied' && isEditMetadataAgentAction(action)) {
             try {
                 // Don't force revert - skip fields that user manually modified
@@ -1833,12 +1836,15 @@ export const regenerateFromRunAtom = atom(
                     if (createItemsToUndo.length > 0) {
                         await undoCreateItemActions(createItemsToUndo);
                     }
-                    // Undo created collections (delete from Zotero)
-                    for (const action of createCollectionsToUndo) {
+                    // Undo created collections (delete from Zotero).
+                    // Reverse in case a later action moved a collection into an earlier one.
+                    for (const action of [...createCollectionsToUndo].reverse()) {
                         await undoCreateCollectionAction(action);
                     }
-                    // Undo organize items (restore original tags/collections)
-                    for (const action of organizeItemsToUndo) {
+                    // Undo organize items (restore original tags/collections).
+                    // Reverse so later changes on the same item are reverted first —
+                    // each snapshot only captured the state that run saw.
+                    for (const action of [...organizeItemsToUndo].reverse()) {
                         await undoOrganizeItemsAction(action);
                     }
                     // Undo manage_tags (rename back or re-add deleted tag).
@@ -1861,8 +1867,9 @@ export const regenerateFromRunAtom = atom(
                             logger(`regenerate: Failed to undo manage_collections action ${action.id}: ${error}`, 1);
                         }
                     }
-                    // Undo created notes (delete from Zotero)
-                    for (const action of createNotesToUndo) {
+                    // Undo created notes (delete from Zotero).
+                    // Reverse for consistency with other undo loops.
+                    for (const action of [...createNotesToUndo].reverse()) {
                         await undoCreateNoteAction(action);
                     }
                 }
@@ -2061,12 +2068,15 @@ export const regenerateWithEditedPromptAtom = atom(
                     if (createItemsToUndo.length > 0) {
                         await undoCreateItemActions(createItemsToUndo);
                     }
-                    // Undo created collections (delete from Zotero)
-                    for (const action of createCollectionsToUndo) {
+                    // Undo created collections (delete from Zotero).
+                    // Reverse in case a later action moved a collection into an earlier one.
+                    for (const action of [...createCollectionsToUndo].reverse()) {
                         await undoCreateCollectionAction(action);
                     }
-                    // Undo organize items (restore original tags/collections)
-                    for (const action of organizeItemsToUndo) {
+                    // Undo organize items (restore original tags/collections).
+                    // Reverse so later changes on the same item are reverted first —
+                    // each snapshot only captured the state that run saw.
+                    for (const action of [...organizeItemsToUndo].reverse()) {
                         await undoOrganizeItemsAction(action);
                     }
                     // Undo manage_tags (rename back or re-add deleted tag).
@@ -2089,8 +2099,9 @@ export const regenerateWithEditedPromptAtom = atom(
                             logger(`regenerate: Failed to undo manage_collections action ${action.id}: ${error}`, 1);
                         }
                     }
-                    // Undo created notes (delete from Zotero)
-                    for (const action of createNotesToUndo) {
+                    // Undo created notes (delete from Zotero).
+                    // Reverse for consistency with other undo loops.
+                    for (const action of [...createNotesToUndo].reverse()) {
                         await undoCreateNoteAction(action);
                     }
                 }
