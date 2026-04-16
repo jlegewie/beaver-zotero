@@ -9,6 +9,7 @@ import { isAttachmentOnServer } from '../utils/webAPI';
 import { getPref } from '../utils/prefs';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
 import { safeFileExists } from '../utils/zoteroUtils';
+import { isRemoteAccessAvailable } from './agentDataProvider/utils';
 
 /**
  * Types of item validation
@@ -63,6 +64,8 @@ export interface ItemValidationOptions {
     validationType: ItemValidationType;
     forceRefresh?: boolean;
 }
+
+const REMOTE_DOWNLOAD_TIMEOUT_MS = 20_000;
 
 /**
  * Manages item validation with caching and deduplication
@@ -296,14 +299,44 @@ class ItemValidationManager {
             };
         }
 
-        // 4. Check if file exists locally
-        const filePath = await attachment.getFilePathAsync();
+        // 4. Check if file exists locally; download from remote storage when possible
+        let filePath = await attachment.getFilePathAsync();
         if (!filePath) {
-            const isOnServer = isAttachmentOnServer(attachment);
-            const reason = isOnServer
-                ? 'File not available locally. It may be in remote storage.'
-                : 'File is not available locally';
-            return { isValid: false, reason };
+            if (!isRemoteAccessAvailable(attachment)) {
+                const isOnServer = isAttachmentOnServer(attachment);
+                const reason = isOnServer
+                    ? 'File not available locally and remote file access is disabled in settings.'
+                    : 'File is not available locally';
+                return { isValid: false, reason };
+            }
+
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+            try {
+                const timeoutPromise = new Promise<'timeout'>((resolve) => {
+                    timeoutId = setTimeout(() => resolve('timeout'), REMOTE_DOWNLOAD_TIMEOUT_MS);
+                });
+                const result = await Promise.race([
+                    Zotero.Sync.Runner.downloadFile(attachment),
+                    timeoutPromise,
+                ]);
+                if (result === 'timeout') {
+                    logger(`ItemValidationManager: Remote download timed out after ${REMOTE_DOWNLOAD_TIMEOUT_MS}ms for ${attachment.libraryID}-${attachment.key}`, 2);
+                    return { isValid: false, reason: 'Unable to download file from remote storage.' };
+                }
+                if (!result || !result.localChanges) {
+                    return { isValid: false, reason: 'Failed to download file from remote storage' };
+                }
+            } catch (error: any) {
+                logger(`ItemValidationManager: Remote download failed for ${attachment.libraryID}-${attachment.key}: ${error?.message ?? error}`, 2);
+                return { isValid: false, reason: 'Failed to download file from remote storage' };
+            } finally {
+                if (timeoutId !== undefined) clearTimeout(timeoutId);
+            }
+
+            filePath = await attachment.getFilePathAsync();
+            if (!filePath) {
+                return { isValid: false, reason: 'File is not available after remote download' };
+            }
         }
 
         const fileExists = await safeFileExists(attachment);

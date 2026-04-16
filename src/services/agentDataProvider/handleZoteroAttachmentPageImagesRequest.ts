@@ -10,7 +10,7 @@
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer } from '../../utils/webAPI';
+import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
     WSZoteroAttachmentPageImagesRequest,
     WSZoteroAttachmentPageImagesResponse,
@@ -18,7 +18,8 @@ import {
     WSPageImage,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError } from './utils';
+import { makeRemoteFilePath } from '../attachmentFileCache';
+import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
 
 /**
@@ -86,20 +87,24 @@ export async function handleZoteroAttachmentPageImagesRequest(
         resolvedPdfItem = pdfItem;
 
         // 3. Get the file path — returns false if missing or nonexistent
-        const filePath = await pdfItem.getFilePathAsync();
-        resolvedFilePath = filePath || null;
-        if (!filePath) {
-            const isOnServer = isAttachmentOnServer(pdfItem);
+        const rawFilePath = await pdfItem.getFilePathAsync();
+        const filePath = rawFilePath || null;  // normalize false → null
+        const isRemoteOnly = !filePath && isRemoteAccessAvailable(pdfItem);
+        const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(pdfItem) : null);
+        resolvedFilePath = effectiveFilePath;
+
+        if (!effectiveFilePath) {
+            const onServer = isAttachmentAvailableRemotely(pdfItem);
             return errorResponse(
-                isOnServer
-                    ? `The PDF file for ${pdfKey} is not available locally. It may be in remote storage, which cannot be accessed by Beaver.`
+                onServer
+                    ? `The PDF file for ${pdfKey} is not available locally and remote file access is disabled in settings.`
                     : `The PDF file for ${pdfKey} is not available locally.`,
                 'file_missing'
             );
         }
 
-        // 4. Check file size limit (skip if skip_local_limits is true)
-        if (!skip_local_limits) {
+        // 4. Check file size limit (skip if skip_local_limits is true; skip for remote — checked after download)
+        if (!skip_local_limits && !isRemoteOnly) {
             const maxFileSizeMB = getPref('maxFileSizeMB');
             const fileSize = await Zotero.Attachments.getTotalFileSize(pdfItem);
 
@@ -116,7 +121,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         // 4b. Try metadata cache for fast prechecks
         const cache = Zotero.Beaver?.attachmentFileCache;
-        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, filePath).catch(() => null) : null;
+        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, effectiveFilePath).catch(() => null) : null;
 
         // Determine once whether this is an all-pages request
         const requestingAllPages = !pages || pages.length === 0;
@@ -146,8 +151,13 @@ export async function handleZoteroAttachmentPageImagesRequest(
         let pageLabels: Record<number, string> | null = null;
         let totalPages: number | null = null;
 
-        // 5a. Load page labels
-        if (prefer_page_labels) {
+        // 5a. Load page labels (only when a local file is available).
+        // Remote-only limitation: label-aware resolution requires the PDF bytes.
+        // On a cold cache for a remote file, pageLabels stays null and
+        // label-form page inputs (e.g. "iii") will fail with InvalidPageValueError.
+        // After a successful extraction below, labels are cached and subsequent
+        // calls resolve via `cachedMeta.page_labels`.
+        if (prefer_page_labels && filePath) {
             const labelResult = await ensurePageLabelsForResolution(filePath, cachedMeta, extractor);
             pageLabels = labelResult.labels;
             if (labelResult.pageCount != null) {
@@ -165,7 +175,25 @@ export async function handleZoteroAttachmentPageImagesRequest(
                 totalPages = cachedMeta.page_count;
             } else {
                 if (!pdfData) {
-                    pdfData = await IOUtils.read(filePath);
+                    try {
+                        pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                    } catch (error) {
+                        if (!isRemoteOnly) throw error;
+                        logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
+                        return errorResponse(
+                            `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                            'download_failed'
+                        );
+                    }
+                    if (isRemoteOnly) {
+                        const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                        if (exceeded) {
+                            return errorResponse(
+                                `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                                'file_too_large'
+                            );
+                        }
+                    }
                 }
                 totalPages = await extractor.getPageCount(pdfData);
             }
@@ -173,7 +201,25 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         // Ensure PDF bytes are available for rendering (step 9).
         if (!pdfData) {
-            pdfData = await IOUtils.read(filePath);
+            try {
+                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+            } catch (error) {
+                if (!isRemoteOnly) throw error;
+                logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
+                return errorResponse(
+                    `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                    'download_failed'
+                );
+            }
+            if (isRemoteOnly) {
+                const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                if (exceeded) {
+                    return errorResponse(
+                        `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                        'file_too_large'
+                    );
+                }
+            }
         }
 
         // When prefer_page_labels is false, the normal fast path may render

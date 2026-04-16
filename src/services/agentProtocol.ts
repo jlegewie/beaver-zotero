@@ -547,6 +547,7 @@ export type AttachmentPagesErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
+    | 'download_failed'     // Remote file download failed
     | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'extraction_failed';  // General extraction failure
 
@@ -578,6 +579,7 @@ export type AttachmentPageImagesErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
+    | 'download_failed'     // Remote file download failed
     | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'render_failed';      // General rendering failure
 
@@ -608,6 +610,7 @@ export type AttachmentSearchErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'no_text_layer'       // PDF requires OCR — text search unavailable
     | 'too_many_pages'      // PDF exceeds page count limit
+    | 'download_failed'    // Remote file download failed
     | 'search_failed';      // General search failure
 
 /** Request from backend to search text within an attachment */

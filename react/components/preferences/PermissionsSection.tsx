@@ -12,6 +12,7 @@ const PermissionsSection: React.FC = () => {
     const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
     const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
     const [pauseLongRunningAgent, setPauseLongRunningAgent] = useState(() => getPref('pauseLongRunningAgent'));
+    const [accessRemoteFiles, setAccessRemoteFiles] = useState(() => getPref('accessRemoteFiles'));
 
     // --- Handle Auto-Apply Annotations Toggle ---
     const handleAutoApplyAnnotationsToggle = useCallback(() => {
@@ -47,6 +48,13 @@ const PermissionsSection: React.FC = () => {
         setPref('pauseLongRunningAgent', newValue);
         setPauseLongRunningAgent(newValue);
     }, [pauseLongRunningAgent]);
+
+    // --- Handle Access Remote Files Toggle ---
+    const handleAccessRemoteFilesToggle = useCallback(() => {
+        const newValue = !accessRemoteFiles;
+        setPref('accessRemoteFiles', newValue);
+        setAccessRemoteFiles(newValue);
+    }, [accessRemoteFiles]);
 
     return (
         <>
@@ -180,6 +188,25 @@ const PermissionsSection: React.FC = () => {
                             type="checkbox"
                             checked={autoCreateNotes}
                             onChange={handleAutoCreateNotesToggle}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ cursor: 'pointer', margin: 0 }}
+                        />
+                    }
+                />
+            </SettingsGroup>
+
+            <SectionLabel>File Access</SectionLabel>
+            <SettingsGroup>
+                <SettingsRow
+                    title="Access Remote Files"
+                    description="Download PDF files from the Zotero server when not available locally"
+                    onClick={handleAccessRemoteFilesToggle}
+                    tooltip="When enabled, Beaver will attempt to download PDFs from the Zotero server or WebDAV if the file is not on your local machine. Disable this if you experience slow responses or don't want remote file downloads."
+                    control={
+                        <input
+                            type="checkbox"
+                            checked={accessRemoteFiles}
+                            onChange={handleAccessRemoteFilesToggle}
                             onClick={(e) => e.stopPropagation()}
                             style={{ cursor: 'pointer', margin: 0 }}
                         />
