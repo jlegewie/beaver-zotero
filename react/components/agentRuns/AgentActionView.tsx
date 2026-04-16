@@ -28,6 +28,8 @@ import { executeCreateCollectionAction, undoCreateCollectionAction } from '../..
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
 import { executeCreateItemActions, undoCreateItemActions } from '../../utils/createItemActions';
 import { executeCreateNoteAction, undoCreateNoteAction } from '../../utils/createNoteActions';
+import { executeManageTagsAction, undoManageTagsAction } from '../../utils/manageTagsActions';
+import { executeManageCollectionsAction, undoManageCollectionsAction } from '../../utils/manageCollectionsActions';
 import type { CreateItemProposedData } from '../../types/agentActions/items';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
@@ -44,7 +46,10 @@ import {
     PropertyEditIcon,
     ArrowUpRightIcon,
     FolderAddIcon,
+    FolderDetailIcon,
     TaskDoneIcon,
+    TagIcon,
+    DeleteIcon,
     DocumentValidationIcon,
     DollarCircleIcon,
     GlobalSearchIcon,
@@ -290,6 +295,20 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     result_data: result,
                 }]);
                 logger(`AgentActionView: Applied organize_items action ${action!.id}`, 1);
+            } else if (toolName === 'manage_tags') {
+                const result = await executeManageTagsAction(action!);
+                await ackAgentActions(runId, [{
+                    action_id: action!.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied manage_tags action ${action!.id}`, 1);
+            } else if (toolName === 'manage_collections') {
+                const result = await executeManageCollectionsAction(action!);
+                await ackAgentActions(runId, [{
+                    action_id: action!.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied manage_collections action ${action!.id}`, 1);
             } else if (toolName === 'create_note') {
                 const result = await executeCreateNoteAction(action!, runId);
                 await ackAgentActions(runId, [{
@@ -395,6 +414,14 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 await undoOrganizeItemsAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone organize_items action ${action.id}`, 1);
+            } else if (toolName === 'manage_tags') {
+                await undoManageTagsAction(action);
+                undoAgentAction(action.id);
+                logger(`AgentActionView: Undone manage_tags action ${action.id}`, 1);
+            } else if (toolName === 'manage_collections') {
+                await undoManageCollectionsAction(action);
+                undoAgentAction(action.id);
+                logger(`AgentActionView: Undone manage_collections action ${action.id}`, 1);
             } else if (toolName === 'create_note') {
                 await undoCreateNoteAction(action);
                 undoAgentAction(action.id);
@@ -467,6 +494,16 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             if (toolName === 'create_note') return FileDiffIcon;
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
+            if (toolName === 'manage_tags') {
+                const act = (action?.proposed_data as any)?.action;
+                return act === 'delete' ? DeleteIcon : TagIcon;
+            }
+            if (toolName === 'manage_collections') {
+                const act = (action?.proposed_data as any)?.action;
+                if (act === 'delete') return DeleteIcon;
+                if (act === 'move') return FolderDetailIcon;
+                return PropertyEditIcon;
+            }
             if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
             if (toolName === 'confirm_extraction') return DollarCircleIcon;
             if (toolName === 'confirm_external_search') return GlobalSearchIcon;

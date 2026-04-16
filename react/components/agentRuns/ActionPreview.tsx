@@ -9,6 +9,8 @@ import { ConfirmExtractionPreview } from './ConfirmExtractionPreview';
 import { ConfirmExternalSearchPreview } from './ConfirmExternalSearchPreview';
 import { EditNotePreview } from './EditNotePreview';
 import { CreateNotePreview } from './CreateNotePreview';
+import { ManageTagsPreview } from './ManageTagsPreview';
+import { ManageCollectionsPreview } from './ManageCollectionsPreview';
 import type { ActionStatus, PreviewData } from './agentActionViewHelpers';
 
 /**
@@ -95,6 +97,28 @@ export const ActionPreview: React.FC<{
                 collections={collections}
                 status={status}
                 resultData={previewData.resultData as OrganizeItemsResultData | undefined}
+            />
+        );
+    }
+
+    if (toolName === 'manage_tags' || previewData.actionType === 'manage_tags') {
+        return (
+            <ManageTagsPreview
+                actionData={previewData.actionData}
+                currentValue={previewData.currentValue}
+                status={status}
+                resultData={previewData.resultData as any}
+            />
+        );
+    }
+
+    if (toolName === 'manage_collections' || previewData.actionType === 'manage_collections') {
+        return (
+            <ManageCollectionsPreview
+                actionData={previewData.actionData}
+                currentValue={previewData.currentValue}
+                status={status}
+                resultData={previewData.resultData as any}
             />
         );
     }

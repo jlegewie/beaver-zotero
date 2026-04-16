@@ -83,6 +83,8 @@ import {
     isCreateItemAgentAction,
     isCreateCollectionAgentAction,
     isOrganizeItemsAgentAction,
+    isManageTagsAgentAction,
+    isManageCollectionsAgentAction,
     isEditNoteAgentAction,
     isCreateNoteAgentAction,
     hasAppliedZoteroItem,
@@ -97,6 +99,8 @@ import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemActions } from '../utils/createItemActions';
 import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
+import { undoManageTagsAction } from '../utils/manageTagsActions';
+import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
 import { undoEditNoteAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
@@ -543,6 +547,8 @@ interface ActionsToUndo {
     createItems: AgentAction[];
     createCollections: AgentAction[];
     organizeItems: AgentAction[];
+    manageTags: AgentAction[];
+    manageCollections: AgentAction[];
     createNotes: AgentAction[];
 }
 
@@ -555,12 +561,13 @@ type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
  * or 'cancel' to abort regeneration entirely.
  */
 function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
-    const { annotations, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, createNotes } = actions;
+    const { annotations, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes } = actions;
     const totalActions = annotations.length + zoteroNotes.length + metadataEdits.length +
-                         noteEdits.length + createItems.length + createCollections.length + organizeItems.length + createNotes.length;
+                         noteEdits.length + createItems.length + createCollections.length + organizeItems.length +
+                         manageTags.length + manageCollections.length + createNotes.length;
 
     if (totalActions === 0) return 'skip';
-    
+
     // Build a list of changes
     const changeLines: string[] = [];
     if (annotations.length > 0) {
@@ -583,6 +590,12 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
     }
     if (organizeItems.length > 0) {
         changeLines.push(`• ${organizeItems.length} organize action${organizeItems.length === 1 ? '' : 's'}`);
+    }
+    if (manageTags.length > 0) {
+        changeLines.push(`• ${manageTags.length} tag change${manageTags.length === 1 ? '' : 's'}`);
+    }
+    if (manageCollections.length > 0) {
+        changeLines.push(`• ${manageCollections.length} collection change${manageCollections.length === 1 ? '' : 's'}`);
     }
     if (createNotes.length > 0) {
         changeLines.push(`• ${createNotes.length} created note${createNotes.length === 1 ? '' : 's'}`);
@@ -1763,6 +1776,12 @@ export const regenerateFromRunAtom = atom(
             const organizeItemsToUndo = actionsInRemovedRuns
                 .filter(isOrganizeItemsAgentAction)
                 .filter(a => a.status === 'applied');
+            const manageTagsToUndo = actionsInRemovedRuns
+                .filter(isManageTagsAgentAction)
+                .filter(a => a.status === 'applied');
+            const manageCollectionsToUndo = actionsInRemovedRuns
+                .filter(isManageCollectionsAgentAction)
+                .filter(a => a.status === 'applied');
             const noteEditsToUndo = actionsInRemovedRuns
                 .filter(isEditNoteAgentAction)
                 .filter(a => a.status === 'applied');
@@ -1775,6 +1794,7 @@ export const regenerateFromRunAtom = atom(
                                      metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
                                      createItemsToUndo.length > 0 ||
                                      createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
+                                     manageTagsToUndo.length > 0 || manageCollectionsToUndo.length > 0 ||
                                      createNotesToUndo.length > 0;
             if (hasActionsToUndo) {
                 const confirmResult = confirmUndoAppliedActions({
@@ -1785,6 +1805,8 @@ export const regenerateFromRunAtom = atom(
                     createItems: createItemsToUndo,
                     createCollections: createCollectionsToUndo,
                     organizeItems: organizeItemsToUndo,
+                    manageTags: manageTagsToUndo,
+                    manageCollections: manageCollectionsToUndo,
                     createNotes: createNotesToUndo,
                 });
                 if (confirmResult === 'cancel') {
@@ -1818,6 +1840,26 @@ export const regenerateFromRunAtom = atom(
                     // Undo organize items (restore original tags/collections)
                     for (const action of organizeItemsToUndo) {
                         await undoOrganizeItemsAction(action);
+                    }
+                    // Undo manage_tags (rename back or re-add deleted tag).
+                    // Reverse so later ops on the same tag are undone first —
+                    // e.g. a later delete must be undone before an earlier rename
+                    // can target the restored tag.
+                    for (const action of [...manageTagsToUndo].reverse()) {
+                        try {
+                            await undoManageTagsAction(action);
+                        } catch (error) {
+                            logger(`regenerate: Failed to undo manage_tags action ${action.id}: ${error}`, 1);
+                        }
+                    }
+                    // Undo manage_collections (rename back, restore parent, or recreate).
+                    // Reverse for the same reason as manage_tags above.
+                    for (const action of [...manageCollectionsToUndo].reverse()) {
+                        try {
+                            await undoManageCollectionsAction(action);
+                        } catch (error) {
+                            logger(`regenerate: Failed to undo manage_collections action ${action.id}: ${error}`, 1);
+                        }
                     }
                     // Undo created notes (delete from Zotero)
                     for (const action of createNotesToUndo) {
@@ -1962,6 +2004,12 @@ export const regenerateWithEditedPromptAtom = atom(
             const organizeItemsToUndo = actionsInRemovedRuns
                 .filter(isOrganizeItemsAgentAction)
                 .filter(a => a.status === 'applied');
+            const manageTagsToUndo = actionsInRemovedRuns
+                .filter(isManageTagsAgentAction)
+                .filter(a => a.status === 'applied');
+            const manageCollectionsToUndo = actionsInRemovedRuns
+                .filter(isManageCollectionsAgentAction)
+                .filter(a => a.status === 'applied');
             const noteEditsToUndo = actionsInRemovedRuns
                 .filter(isEditNoteAgentAction)
                 .filter(a => a.status === 'applied');
@@ -1974,6 +2022,7 @@ export const regenerateWithEditedPromptAtom = atom(
                                      metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
                                      createItemsToUndo.length > 0 ||
                                      createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
+                                     manageTagsToUndo.length > 0 || manageCollectionsToUndo.length > 0 ||
                                      createNotesToUndo.length > 0;
             if (hasActionsToUndo) {
                 const confirmResult = confirmUndoAppliedActions({
@@ -1984,6 +2033,8 @@ export const regenerateWithEditedPromptAtom = atom(
                     createItems: createItemsToUndo,
                     createCollections: createCollectionsToUndo,
                     organizeItems: organizeItemsToUndo,
+                    manageTags: manageTagsToUndo,
+                    manageCollections: manageCollectionsToUndo,
                     createNotes: createNotesToUndo,
                 });
                 if (confirmResult === 'cancel') {
@@ -2017,6 +2068,26 @@ export const regenerateWithEditedPromptAtom = atom(
                     // Undo organize items (restore original tags/collections)
                     for (const action of organizeItemsToUndo) {
                         await undoOrganizeItemsAction(action);
+                    }
+                    // Undo manage_tags (rename back or re-add deleted tag).
+                    // Reverse so later ops on the same tag are undone first —
+                    // e.g. a later delete must be undone before an earlier rename
+                    // can target the restored tag.
+                    for (const action of [...manageTagsToUndo].reverse()) {
+                        try {
+                            await undoManageTagsAction(action);
+                        } catch (error) {
+                            logger(`regenerate: Failed to undo manage_tags action ${action.id}: ${error}`, 1);
+                        }
+                    }
+                    // Undo manage_collections (rename back, restore parent, or recreate).
+                    // Reverse for the same reason as manage_tags above.
+                    for (const action of [...manageCollectionsToUndo].reverse()) {
+                        try {
+                            await undoManageCollectionsAction(action);
+                        } catch (error) {
+                            logger(`regenerate: Failed to undo manage_collections action ${action.id}: ${error}`, 1);
+                        }
                     }
                     // Undo created notes (delete from Zotero)
                     for (const action of createNotesToUndo) {

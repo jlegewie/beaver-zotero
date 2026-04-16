@@ -115,6 +115,20 @@ export const isOrganizeItemsAgentAction = (action: AgentAction): boolean => {
 };
 
 /**
+ * Type guard for manage tags actions
+ */
+export const isManageTagsAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'manage_tags';
+};
+
+/**
+ * Type guard for manage collections actions
+ */
+export const isManageCollectionsAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'manage_collections';
+};
+
+/**
  * Type guard for edit note actions
  */
 export const isEditNoteAgentAction = (action: AgentAction): boolean => {

@@ -107,6 +107,13 @@ const PermissionsSection: React.FC = () => {
                         description="Creating collections and organizing items into collections and by tags"
                     />
                 </div>
+                <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
+                    <DeferredToolPreferenceSetting
+                        toolName="manage_tags"
+                        label="Library Structure"
+                        description="Library-wide tag and collection operations (rename, merge, move, delete)"
+                    />
+                </div>
             </SettingsGroup>
 
             <SectionLabel>Checkpoints</SectionLabel>
