@@ -100,7 +100,7 @@ import { undoCreateItemActions } from '../utils/createItemActions';
 import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../utils/manageTagsActions';
-import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
+import { undoManageCollectionsActions } from '../utils/manageCollectionsActions';
 import { undoEditNoteAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
@@ -126,7 +126,6 @@ import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
-import type { ManageCollectionsProposedData } from '../types/agentActions/base';
 import { appendRunIfMissing, findResumeChainRoot, findRunForResume, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 
 // =============================================================================
@@ -1860,22 +1859,10 @@ export const regenerateFromRunAtom = atom(
                         }
                     }
                     // Undo manage_collections (rename back, restore parent, or recreate).
-                    // Reverse for the same reason as manage_tags above.
-                    // Build an oldKey→newKey map across the loop so a child undo
-                    // whose parent was recreated earlier in this pass resolves
-                    // to the new key instead of the gone-forever original.
-                    const collectionKeyMap = new Map<string, string>();
-                    for (const action of [...manageCollectionsToUndo].reverse()) {
-                        try {
-                            const res = await undoManageCollectionsAction(action, collectionKeyMap);
-                            if (res?.action === 'delete' && res.new_collection_key) {
-                                const data = action.proposed_data as ManageCollectionsProposedData;
-                                collectionKeyMap.set(data.collection_key, res.new_collection_key);
-                            }
-                        } catch (error) {
-                            logger(`regenerate: Failed to undo manage_collections action ${action.id}: ${error}`, 1);
-                        }
-                    }
+                    // Reverse for the same reason as manage_tags above; the helper
+                    // also builds an oldKey→newKey map so a child undo whose parent
+                    // was recreated earlier in this pass resolves to the new key.
+                    await undoManageCollectionsActions(manageCollectionsToUndo);
                     // Undo created notes (delete from Zotero).
                     // Reverse for consistency with other undo loops.
                     for (const action of [...createNotesToUndo].reverse()) {
@@ -2100,19 +2087,8 @@ export const regenerateWithEditedPromptAtom = atom(
                         }
                     }
                     // Undo manage_collections (rename back, restore parent, or recreate).
-                    // See sibling loop above for why we build a keyMap here.
-                    const collectionKeyMap = new Map<string, string>();
-                    for (const action of [...manageCollectionsToUndo].reverse()) {
-                        try {
-                            const res = await undoManageCollectionsAction(action, collectionKeyMap);
-                            if (res?.action === 'delete' && res.new_collection_key) {
-                                const data = action.proposed_data as ManageCollectionsProposedData;
-                                collectionKeyMap.set(data.collection_key, res.new_collection_key);
-                            }
-                        } catch (error) {
-                            logger(`regenerate: Failed to undo manage_collections action ${action.id}: ${error}`, 1);
-                        }
-                    }
+                    // See sibling loop above; helper builds the oldKey→newKey map.
+                    await undoManageCollectionsActions(manageCollectionsToUndo);
                     // Undo created notes (delete from Zotero).
                     // Reverse for consistency with other undo loops.
                     for (const action of [...createNotesToUndo].reverse()) {

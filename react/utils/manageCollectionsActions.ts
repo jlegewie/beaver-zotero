@@ -23,7 +23,7 @@
  *   - new Zotero.Collection({name, libraryID, parentID?}): create for undo.
  */
 
-import { AgentAction } from '../agents/agentActions';
+import { AgentAction, ManageCollectionsAgentAction } from '../agents/agentActions';
 import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '../types/agentActions/base';
 import { logger } from '../../src/utils/logger';
 
@@ -225,4 +225,30 @@ export async function undoManageCollectionsAction(
     }
 
     throw new Error(`Unsupported manage_collections action: ${op}`);
+}
+
+
+/**
+ * Undo a batch of manage_collections actions in reverse-chronological order.
+ *
+ * Builds an oldKey→newKey map across the loop so that when a former parent
+ * was itself deleted and is recreated earlier in this pass, a later child
+ * undo resolves its old_parent_key to the new key instead of the
+ * gone-forever original. Per-action failures are logged and do not stop
+ * the loop (matches prior inline behavior).
+ */
+export async function undoManageCollectionsActions(
+    actions: ManageCollectionsAgentAction[]
+): Promise<void> {
+    const collectionKeyMap = new Map<string, string>();
+    for (const action of [...actions].reverse()) {
+        try {
+            const res = await undoManageCollectionsAction(action, collectionKeyMap);
+            if (res?.action === 'delete' && res.new_collection_key) {
+                collectionKeyMap.set(action.proposed_data.collection_key, res.new_collection_key);
+            }
+        } catch (error) {
+            logger(`undoManageCollectionsActions: Failed to undo action ${action.id}: ${error}`, 1);
+        }
+    }
 }

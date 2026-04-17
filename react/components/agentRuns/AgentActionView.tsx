@@ -14,7 +14,6 @@ import {
     isManageCollectionsAgentAction,
 } from '../../agents/agentActions';
 import { store } from '../../store';
-import type { ManageCollectionsProposedData } from '../../types/agentActions/base';
 import {
     approvalResponseIntentsAtom,
     isWSChatPendingAtom,
@@ -426,14 +425,19 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 // Build oldKey→newKey map from earlier-undone manage_collections
                 // deletes in this thread. `undo_new_collection_key` on proposed_data
                 // is preserved by undoAgentActionAtom from result_data.new_collection_key
-                // before result_data is cleared. Lets a child undo resolve its
-                // old_parent_key after the parent was deleted and recreated with
-                // a new key.
+                // before result_data is cleared.
+                //
+                // Limitation: unlike the regenerate flow, this user-driven path
+                // cannot enforce reverse-chronological order. The map only
+                // resolves a child's former parent when the user has already
+                // undone the parent's delete — undoing the child first will
+                // recreate it at top-level, and a later parent undo will not
+                // re-home it.
                 const allActions = store.get(threadAgentActionsAtom);
                 const collectionKeyMap = new Map<string, string>();
                 for (const other of allActions) {
                     if (!isManageCollectionsAgentAction(other) || other.id === action.id) continue;
-                    const p = other.proposed_data as ManageCollectionsProposedData;
+                    const p = other.proposed_data;
                     if (p.action === 'delete' && p.undo_new_collection_key) {
                         collectionKeyMap.set(p.collection_key, p.undo_new_collection_key);
                     }
