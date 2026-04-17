@@ -494,16 +494,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             if (toolName === 'create_note') return FileDiffIcon;
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
-            if (toolName === 'manage_tags') {
-                const act = (action?.proposed_data as any)?.action;
-                return act === 'delete' ? DeleteIcon : TagIcon;
-            }
-            if (toolName === 'manage_collections') {
-                const act = (action?.proposed_data as any)?.action;
-                if (act === 'delete') return DeleteIcon;
-                if (act === 'move') return FolderDetailIcon;
-                return PropertyEditIcon;
-            }
+            if (toolName === 'manage_tags') return TagIcon;
+            if (toolName === 'manage_collections') return FolderDetailIcon;
             if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
             if (toolName === 'confirm_extraction') return DollarCircleIcon;
             if (toolName === 'confirm_external_search') return GlobalSearchIcon;
