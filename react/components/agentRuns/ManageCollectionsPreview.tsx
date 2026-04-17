@@ -101,6 +101,7 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
         currentValue?.collection_name
         ?? currentValue?.old_name
         ?? fallback.collectionName
+        ?? resultData?.old_name
         ?? '(unknown)';
     const libraryName = currentValue?.library_name ?? fallback.libraryName;
     const oldParentKey = currentValue?.old_parent_key ?? fallback.oldParentKey ?? null;
@@ -159,7 +160,7 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
                             <span className="font-color-primary">Library:</span> {libraryName}
                             {action === 'delete' && itemCount > 0 && (
                                 <span>
-                                    {' '}({itemCount} item{itemCount !== 1 ? 's' : ''} {isApplied ? 'became' : 'will become'} unfiled)
+                                    {' '}({itemCount} item{itemCount !== 1 ? 's' : ''} affected)
                                 </span>
                             )}
                         </div>
