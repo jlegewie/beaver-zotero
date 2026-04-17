@@ -7,7 +7,6 @@
  */
 
 import { vi } from 'vitest';
-import { JSDOM } from 'jsdom';
 
 // ---------------------------------------------------------------------------
 // IOUtils — Mozilla's async file I/O
@@ -46,14 +45,14 @@ const pathUtils = {
 };
 
 // ---------------------------------------------------------------------------
-// jsdom window — lazy-initialized for ProseMirror normalization DOM access
+// Window lookup
 // ---------------------------------------------------------------------------
-let _jsdomWindow: any = null;
-function getJsdomWindow() {
-    if (!_jsdomWindow) {
-        _jsdomWindow = new JSDOM('').window;
-    }
-    return _jsdomWindow;
+// Unit tests run in the Node environment by default. Only suites that opt into
+// a DOM environment should expose `window`, so avoid eagerly importing jsdom
+// here. That import currently fails in this toolchain before any tests load.
+const fallbackWindow = {};
+function getTestWindow() {
+    return typeof (globalThis as any).Zotero.getMainWindow !== 'undefined' ? (globalThis as any).Zotero.getMainWindow() : fallbackWindow;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,7 +81,7 @@ function getJsdomWindow() {
         clear: vi.fn(),
     },
     debug: vi.fn(),
-    getMainWindow: vi.fn(() => getJsdomWindow()),
+    getMainWindow: vi.fn(() => getTestWindow()),
 };
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,11 @@
  *   7. partial_element_strip    — strip malformed `<citation.../>` fragments
  *   8. spurious_wrap_strip      — unwrap surrounding `<p>…</p>` etc.
  *   9. markdown_to_html         — convert `**bold**` / `## h` to HTML equivalents
+ *  10. whitespace_relaxed       — allow whitespace runs to vary between needle
+ *                                 and note (NBSP vs space, extra newlines,
+ *                                 tab/space drift). Gated on uniqueness and a
+ *                                 non-ws character floor; conservative last
+ *                                 resort.
  */
 
 import {
@@ -32,6 +37,7 @@ import {
     decodeHtmlEntities,
     encodeTextEntities,
     ENTITY_FORMS,
+    normalizeWS,
 } from '../../../utils/noteHtmlEntities';
 import {
     stripPartialSimplifiedElements,
@@ -52,7 +58,8 @@ export type MatchStrategyName =
     | 'json_unescape'
     | 'partial_element_strip'
     | 'spurious_wrap_strip'
-    | 'markdown_to_html';
+    | 'markdown_to_html'
+    | 'whitespace_relaxed';
 
 export interface MatchInput {
     /** Enriched, simplified-space old_string. */
@@ -544,6 +551,146 @@ const markdownToHtmlStrategy: Strategy = {
 };
 
 // =============================================================================
+// whitespace_relaxed
+// =============================================================================
+
+/**
+ * Minimum normalized length for the needle. Below this the strategy refuses
+ * to act — short strings collide too easily under whitespace collapse.
+ */
+const MIN_WS_RELAXED_NORMALIZED_LENGTH = 20;
+/**
+ * Minimum number of non-whitespace characters in the normalized needle.
+ * Guards against needles that pass the length check but are mostly whitespace.
+ */
+const MIN_WS_RELAXED_NON_WS_LENGTH = 12;
+/**
+ * Defensive cap on needle length to bound regex work. Production edit_note
+ * old_strings are routinely under 3 000 chars; 5 000 is slack.
+ */
+const MAX_WS_RELAXED_INPUT_LENGTH = 5000;
+
+const REGEX_ESCAPE_PATTERN = /[.*+?^${}()|[\]\\]/g;
+function escapeRegExp(s: string): string {
+    return s.replace(REGEX_ESCAPE_PATTERN, '\\$&');
+}
+
+/**
+ * Build a regex that matches the needle with any non-empty whitespace run
+ * substituted for each `\s+` span. Non-whitespace segments are regex-escaped
+ * and must match byte-for-byte. Caller guarantees first/last char of `needle`
+ * is non-whitespace; the split never yields leading/trailing empties.
+ */
+function buildWhitespaceRelaxedPattern(needle: string): RegExp {
+    const segments = needle.split(/\s+/).map(escapeRegExp);
+    return new RegExp(segments.join('\\s+'), 'g');
+}
+
+const whitespaceRelaxedStrategy: Strategy = {
+    name: 'whitespace_relaxed',
+    tryMatch(input, base) {
+        if (!input.oldString) return null;
+        if (input.oldString.length > MAX_WS_RELAXED_INPUT_LENGTH) return null;
+
+        // Bracket the needle with non-whitespace anchors so the regex cannot
+        // greedy-match across the wrapper div or degenerate into all-whitespace.
+        const first = input.oldString.charAt(0);
+        const last = input.oldString.charAt(input.oldString.length - 1);
+        if (!/\S/.test(first) || !/\S/.test(last)) return null;
+
+        // Needle must be identity under expandToRawHtml (no citations /
+        // annotations / math delimiters). Keeps simplified-space == raw-space
+        // for the needle so the returned `expandedOld` is literally a slice of
+        // `strippedHtml` and the validate→execute round-trip is byte-stable.
+        if (input.oldString !== base.expandedOld) return null;
+
+        // Defensive: if the needle has no whitespace at all, `exact` would
+        // already have matched. Skip to keep the strategy focused.
+        if (!/\s/.test(input.oldString)) return null;
+
+        const normalizedOld = normalizeWS(input.oldString);
+        if (normalizedOld.length < MIN_WS_RELAXED_NORMALIZED_LENGTH) return null;
+        if (normalizedOld.replace(/\s/g, '').length < MIN_WS_RELAXED_NON_WS_LENGTH) return null;
+
+        // `str_replace_all` expects multiple replacements; our uniqueness gate
+        // contradicts that contract. Refuse so the model picks a more specific
+        // anchor or switches operation.
+        if (input.operation === 'str_replace_all') return null;
+
+        const pattern = buildWhitespaceRelaxedPattern(input.oldString);
+        const matches = [...input.strippedHtml.matchAll(pattern)];
+        if (matches.length !== 1) return null;
+
+        const m = matches[0];
+        const actualRawSlice = m[0];
+        const rawPos = m.index ?? -1;
+        if (rawPos === -1) return null;
+
+        // Normalized-space uniqueness: catches scenarios where the regex
+        // happened to find a single shape but the model's reference is
+        // ambiguous because the normalized form repeats elsewhere.
+        const normalizedHaystack = normalizeWS(input.strippedHtml);
+        const normFirst = normalizedHaystack.indexOf(normalizedOld);
+        if (normFirst === -1) return null;
+        if (normalizedHaystack.indexOf(normalizedOld, normFirst + 1) !== -1) return null;
+
+        // Sanity: the matched raw slice must normalize to the same form as the
+        // needle. Guards against adversarial input where the regex engine
+        // interpreted the pattern differently than `normalizeWS` would.
+        if (normalizeWS(actualRawSlice) !== normalizedOld) return null;
+
+        // Build expandedNew. For insert ops, mirror `rewriteInsertReplacementForTrim`:
+        // when `input.newString` is the already-merged `oldString + injected`
+        // form (execute-time from normalized_action_data), strip the prefix
+        // before expanding so we splice `actualRawSlice + injected` and not
+        // `actualRawSlice + oldString + injected`.
+        let expandedNew: string;
+        try {
+            if (input.operation === 'insert_after') {
+                const injected = input.newString.startsWith(input.oldString)
+                    ? input.newString.substring(input.oldString.length)
+                    : input.newString;
+                const expandedInjected = expandToRawHtml(
+                    injected, input.metadata, 'new', input.externalRefContext,
+                );
+                expandedNew = actualRawSlice + expandedInjected;
+            } else if (input.operation === 'insert_before') {
+                const injected = input.newString.endsWith(input.oldString)
+                    ? input.newString.substring(0, input.newString.length - input.oldString.length)
+                    : input.newString;
+                const expandedInjected = expandToRawHtml(
+                    injected, input.metadata, 'new', input.externalRefContext,
+                );
+                expandedNew = expandedInjected + actualRawSlice;
+            } else {
+                expandedNew = expandToRawHtml(
+                    input.newString, input.metadata, 'new', input.externalRefContext,
+                );
+            }
+        } catch {
+            return null;
+        }
+
+        // Invariant: for insert ops, the splice result must start/end with the
+        // actual raw slice. Cheap post-hoc check that catches refactor
+        // regressions (e.g., someone changes `rewriteInsertReplacementForTrim`
+        // and breaks the shared contract).
+        if (input.operation === 'insert_after' && !expandedNew.startsWith(actualRawSlice)) return null;
+        if (input.operation === 'insert_before' && !expandedNew.endsWith(actualRawSlice)) return null;
+
+        return {
+            strategy: 'whitespace_relaxed',
+            oldString: actualRawSlice,
+            newString: input.newString,
+            expandedOld: actualRawSlice,
+            expandedNew,
+            matchCount: 1,
+            normalizeAnchor: identity,
+        };
+    },
+};
+
+// =============================================================================
 // Public API
 // =============================================================================
 
@@ -557,6 +704,7 @@ const STRATEGIES: Strategy[] = [
     partialElementStripStrategy,
     spuriousWrapStripStrategy,
     markdownToHtmlStrategy,
+    whitespaceRelaxedStrategy,
 ];
 
 /**
