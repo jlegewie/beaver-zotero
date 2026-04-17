@@ -261,6 +261,13 @@ export interface ManageCollectionsProposedData {
     new_name?: string | null;
     /** Target parent key for move; null means top-level */
     new_parent_key?: string | null;
+    /**
+     * Key of the collection recreated when this delete was undone. Preserved
+     * from result_data at undo time (which is otherwise cleared) so a later
+     * undo of a sibling/child action can translate its old_parent_key
+     * through a key-map when the original parent's key is gone.
+     */
+    undo_new_collection_key?: string | null;
 }
 
 /**

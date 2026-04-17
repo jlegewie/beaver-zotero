@@ -125,20 +125,28 @@ export async function executeManageCollectionsAction(
  * most recent apply). Falls back to empty with a warning if missing.
  *
  * - `rename`: restore old_name.
- * - `move`: restore old_parent_key.
+ * - `move`: restore old_parent_key (translated through keyMap if the former
+ *   parent was itself deleted and recreated earlier in this undo pass).
  * - `delete`: recreate a collection with the same name and parent, then
- *   re-add items from the snapshot. Recreated collection gets a NEW key.
- *   (Delete is refused if subcollections existed, so undo never has to
- *   reconstruct a subtree.)
+ *   re-add items from the snapshot. Recreated collection gets a NEW key,
+ *   which is returned in `new_collection_key` so callers can extend the
+ *   keyMap for subsequent undos. (Delete is refused if subcollections
+ *   existed, so undo never has to reconstruct a subtree.)
+ *
+ * keyMap: maps original-pre-delete keys to the newly-created keys. When a
+ *   parent collection was deleted and later undone, its key changed; this
+ *   map lets child undos resolve the new parent without relying on names.
  */
 export async function undoManageCollectionsAction(
-    action: AgentAction
+    action: AgentAction,
+    keyMap?: Map<string, string>,
 ): Promise<ManageCollectionsResultData | null> {
     const data = action.proposed_data as ManageCollectionsProposedData;
     const { library_id, action: op, collection_key } = data;
     const result = (action.result_data ?? {}) as Partial<ManageCollectionsResultData>;
     const old_name = result.old_name ?? null;
-    const old_parent_key = result.old_parent_key ?? null;
+    const rawOldParentKey = result.old_parent_key ?? null;
+    const old_parent_key = rawOldParentKey ? (keyMap?.get(rawOldParentKey) ?? rawOldParentKey) : null;
     const old_item_ids = result.old_item_ids ?? [];
 
     if (op === 'rename') {

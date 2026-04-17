@@ -712,6 +712,9 @@ export const undoAgentActionAtom = atom(
                 if (action.result_data?.undo_full_html && !proposed_data?.undo_full_html) {
                     proposed_data = { ...proposed_data, undo_full_html: action.result_data.undo_full_html };
                 }
+                if (action.result_data?.new_collection_key && !proposed_data?.undo_new_collection_key) {
+                    proposed_data = { ...proposed_data, undo_new_collection_key: action.result_data.new_collection_key };
+                }
                 return { ...action, proposed_data, status: 'undone' as ActionStatus, result_data: undefined, error_message: undefined };
             });
         });
