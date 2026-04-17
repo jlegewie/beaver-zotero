@@ -52,7 +52,7 @@ const pathUtils = {
 // here. That import currently fails in this toolchain before any tests load.
 const fallbackWindow = {};
 function getTestWindow() {
-    return typeof window !== 'undefined' ? window : fallbackWindow;
+    return typeof (globalThis as any).Zotero.getMainWindow !== 'undefined' ? (globalThis as any).Zotero.getMainWindow() : fallbackWindow;
 }
 
 // ---------------------------------------------------------------------------
