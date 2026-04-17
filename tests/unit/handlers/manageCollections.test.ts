@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getDeferredToolPreference: vi.fn(() => 'always_ask'),
     isLibrarySearchable: vi.fn(() => true),
-    getSearchableLibraries: vi.fn(() => [{ library_id: 1, name: 'My Library' }]),
+    getCollectionByIdOrName: vi.fn(),
 }));
 
 vi.mock('../../../src/utils/logger', () => ({
@@ -48,6 +48,7 @@ import {
     validateManageCollectionsAction,
     executeManageCollectionsAction,
 } from '../../../src/services/agentDataProvider/actions/manageCollections';
+import { getCollectionByIdOrName } from '../../../src/services/agentDataProvider/utils';
 
 const Zot = (globalThis as any).Zotero;
 
@@ -62,6 +63,25 @@ beforeEach(() => {
     mockCollection.getDescendents.mockReturnValue([]);
     mockCollection.saveTx.mockReset();
     mockCollection.eraseTx.mockReset();
+    // Re-install default getByLibraryAndKeyAsync (individual tests may override
+    // it with .mockImplementation(), which persists across tests otherwise).
+    Zot.Collections.getByLibraryAndKeyAsync.mockImplementation(async (_libraryID: number, key: string) => {
+        return key === mockCollection.key ? mockCollection : null;
+    });
+    // Default: getCollectionByIdOrName resolves the plain key or the matching
+    // compound '<lib>-<key>' form. Compound form with a wrong library returns
+    // null, mirroring the real utils function's strict compound lookup.
+    (getCollectionByIdOrName as any).mockImplementation((input: string | number, _libId?: number) => {
+        if (typeof input !== 'string') return null;
+        if (input === mockCollection.key) {
+            return { collection: mockCollection, libraryID: mockCollection.libraryID };
+        }
+        const m = input.match(/^(\d+)-(.+)$/);
+        if (m && parseInt(m[1], 10) === mockCollection.libraryID && m[2] === mockCollection.key) {
+            return { collection: mockCollection, libraryID: mockCollection.libraryID };
+        }
+        return null;
+    });
 });
 
 
@@ -142,7 +162,7 @@ describe('validateManageCollectionsAction', () => {
         expect(resp.error_code).toBe('invalid_parent');
     });
 
-    it('accepts move to top-level (new_parent_key=null)', async () => {
+    it('accepts move to top-level (new_parent_key=null) and emits normalized plain keys', async () => {
         mockCollection.parentKey = 'SOMEPRNT';
         const resp = await validateManageCollectionsAction({
             event: 'agent_action_validate',
@@ -151,9 +171,114 @@ describe('validateManageCollectionsAction', () => {
             action_data: { action: 'move', collection_key: mockCollection.key, new_parent_key: null },
         } as any);
         expect(resp.valid).toBe(true);
-        // normalized_action_data only carries resolved library_id; move target
-        // flows through the original action_data unchanged.
         expect(resp.normalized_action_data?.library_id).toBe(1);
+        // collection_key is normalized to the resolved 8-char key (same as input here)
+        expect(resp.normalized_action_data?.collection_key).toBe(mockCollection.key);
+        // move emits new_parent_key explicitly so the backend can persist it
+        expect(resp.normalized_action_data?.new_parent_key).toBeNull();
+    });
+
+    it('accepts compound <lib>-<key> collection_key and normalizes to plain key', async () => {
+        const resp = await validateManageCollectionsAction({
+            event: 'agent_action_validate',
+            request_id: 'r7b',
+            action_type: 'manage_collections',
+            action_data: { action: 'rename', collection_key: `1-${mockCollection.key}`, new_name: 'Updated' },
+        } as any);
+        expect(resp.valid).toBe(true);
+        expect(resp.normalized_action_data?.library_id).toBe(1);
+        expect(resp.normalized_action_data?.collection_key).toBe(mockCollection.key);
+        // getCollectionByIdOrName receives the raw compound + the embedded
+        // libraryId as the scope — compound lookup is strict inside utils.
+        expect((getCollectionByIdOrName as any)).toHaveBeenCalledWith(`1-${mockCollection.key}`, 1);
+    });
+
+    it('rejects when compound collection_key library disagrees with separate library_id', async () => {
+        const resp = await validateManageCollectionsAction({
+            event: 'agent_action_validate',
+            request_id: 'r7b2',
+            action_type: 'manage_collections',
+            action_data: {
+                action: 'rename',
+                // Compound points to library 2, but library_id says 1 — conflict.
+                collection_key: `2-${mockCollection.key}`,
+                new_name: 'Updated',
+                library_id: 1,
+            },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error_code).toBe('invalid_library_id');
+        // The resolver must not be invoked when the consistency check fails.
+        expect((getCollectionByIdOrName as any)).not.toHaveBeenCalled();
+    });
+
+    it('accepts compound collection_key when separate library_id matches', async () => {
+        const resp = await validateManageCollectionsAction({
+            event: 'agent_action_validate',
+            request_id: 'r7b3',
+            action_type: 'manage_collections',
+            action_data: {
+                action: 'rename',
+                collection_key: `1-${mockCollection.key}`,
+                new_name: 'Updated',
+                library_id: 1,
+            },
+        } as any);
+        expect(resp.valid).toBe(true);
+    });
+
+    it('rejects compound new_parent_key from a different library', async () => {
+        const resp = await validateManageCollectionsAction({
+            event: 'agent_action_validate',
+            request_id: 'r7c',
+            action_type: 'manage_collections',
+            action_data: {
+                action: 'move',
+                collection_key: mockCollection.key,
+                // mockCollection is in library 1; passing a compound pointing to lib 2 must fail
+                new_parent_key: `2-${mockCollection.key}`,
+            },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error_code).toBe('invalid_parent');
+    });
+
+    it('accepts compound new_parent_key from the same library and normalizes to plain key', async () => {
+        const parentKey = 'PRNT0000';
+        const parentCollection = { id: 42, key: parentKey, libraryID: 1 };
+        // getCollectionByIdOrName resolves the child; parent is looked up via getByLibraryAndKeyAsync
+        Zot.Collections.getByLibraryAndKeyAsync.mockImplementation(async (_lib: number, key: string) => {
+            if (key === parentKey) return parentCollection;
+            return null;
+        });
+        const resp = await validateManageCollectionsAction({
+            event: 'agent_action_validate',
+            request_id: 'r7d',
+            action_type: 'manage_collections',
+            action_data: {
+                action: 'move',
+                collection_key: mockCollection.key,
+                new_parent_key: `1-${parentKey}`,
+            },
+        } as any);
+        expect(resp.valid).toBe(true);
+        expect(resp.normalized_action_data?.new_parent_key).toBe(parentKey);
+    });
+
+    it('passes explicit library_id through as a scope hint to getCollectionByIdOrName', async () => {
+        const resp = await validateManageCollectionsAction({
+            event: 'agent_action_validate',
+            request_id: 'r7e',
+            action_type: 'manage_collections',
+            action_data: {
+                action: 'rename',
+                collection_key: mockCollection.key,
+                new_name: 'Updated',
+                library_id: 1,
+            },
+        } as any);
+        expect(resp.valid).toBe(true);
+        expect((getCollectionByIdOrName as any)).toHaveBeenCalledWith(mockCollection.key, 1);
     });
 
     it('rejects no-op move (same parent)', async () => {
