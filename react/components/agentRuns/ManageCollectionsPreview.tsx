@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CSSIcon, Icon, ArrowRightIcon, DeleteIcon } from '../icons/icons';
+import { CSSIcon, Icon, ArrowRightIcon } from '../icons/icons';
 import type { ManageCollectionsResultData } from '../../types/agentActions/base';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
@@ -126,9 +126,14 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
     }, [libraryId, newParentKey, oldParentKey]);
 
     return (
-        <div className={`manage-collections-preview overflow-hidden ${isRejectedOrUndone ? 'opacity-60' : ''}`}>
+        <div className={`manage-collections-preview overflow-hidden`}>
             <div className="display-flex flex-col px-3 py-2 gap-2">
                 <div className="display-flex flex-row items-center gap-2 flex-wrap">
+                    {action === 'delete' && (
+                        <span className="display-flex">
+                            {isApplied ? 'Deleted' : 'Delete'}
+                        </span>
+                    )}
                     <CollectionPill name={collectionName} strike={action === 'delete'} />
                     {action === 'rename' && newName && (
                         <>
@@ -146,25 +151,22 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
                             <CollectionPill name={newParentKey ? (newParentName ?? newParentKey) : 'Library top level'} />
                         </>
                     )}
-                    {action === 'delete' && (
-                        <span className="scale-75 display-flex opacity-60">
-                            <Icon icon={DeleteIcon} className="icon-16" />
-                        </span>
-                    )}
                 </div>
 
-                <div className="display-flex flex-col gap-1 text-xs font-color-secondary px-1">
+                <div className="display-flex flex-col gap-1 text-sm font-color-secondary">
                     {libraryName && (
-                        <div>Library: <span className="font-color-primary">{libraryName}</span></div>
+                        <div>
+                            <span className="font-color-primary">Library:</span> {libraryName}
+                            {action === 'delete' && itemCount > 0 && (
+                                <span>
+                                    {' '}({itemCount} item{itemCount !== 1 ? 's' : ''} {isApplied ? 'became' : 'will become'} unfiled)
+                                </span>
+                            )}
+                        </div>
                     )}
                     {action === 'move' && oldParentKey && (
-                        <div>Was under: <span className="font-color-primary">{oldParentName ?? oldParentKey}</span></div>
-                    )}
-                    {action === 'delete' && itemCount > 0 && (
                         <div>
-                            {isApplied
-                                ? `${itemCount} item${itemCount !== 1 ? 's' : ''} became unfiled`
-                                : `${itemCount} item${itemCount !== 1 ? 's' : ''} will become unfiled (not deleted)`}
+                            <span className="font-color-primary">Was under:</span> {oldParentName ?? oldParentKey}
                         </div>
                     )}
                     {isError && (
