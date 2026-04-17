@@ -19,7 +19,6 @@ interface ManageCollectionsPreviewProps {
         old_name?: string;
         old_parent_key?: string | null;
         old_item_count?: number;
-        had_subcollections?: boolean;
     };
     status?: ActionStatus;
     resultData?: ManageCollectionsResultData;
@@ -42,7 +41,6 @@ interface Fallback {
     collectionName?: string;
     oldParentKey?: string | null;
     oldItemCount?: number;
-    hadSubcollections?: boolean;
 }
 
 /**
@@ -91,7 +89,6 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
                     collectionName: collection ? collection.name : undefined,
                     oldParentKey: collection && collection.parentKey ? String(collection.parentKey) : null,
                     oldItemCount,
-                    hadSubcollections: collection ? collection.hasChildCollections(false) : false,
                 });
             } catch {
                 // ignore — preview is best-effort
@@ -112,7 +109,6 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
         ?? currentValue?.old_item_count
         ?? fallback.oldItemCount
         ?? 0;
-    const hadSubcollections = Boolean(currentValue?.had_subcollections ?? fallback.hadSubcollections);
 
     useEffect(() => {
         if (typeof Zotero === 'undefined' || libraryId == null) return;
@@ -169,11 +165,6 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
                             {isApplied
                                 ? `${itemCount} item${itemCount !== 1 ? 's' : ''} became unfiled`
                                 : `${itemCount} item${itemCount !== 1 ? 's' : ''} will become unfiled (not deleted)`}
-                        </div>
-                    )}
-                    {action === 'delete' && hadSubcollections && !isApplied && (
-                        <div>
-                            Subcollections will also be trashed. Undo restores this collection with a new key; subcollections are NOT restored.
                         </div>
                     )}
                     {isError && (

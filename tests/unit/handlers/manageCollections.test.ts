@@ -24,6 +24,7 @@ const mockCollection: any = {
     eraseTx: vi.fn(async () => undefined),
     getChildItems: vi.fn(() => [] as number[]),
     hasChildCollections: vi.fn(() => false),
+    getChildCollections: vi.fn(() => [] as any[]),
     getDescendents: vi.fn(() => [] as Array<{ id: number }>),
 };
 
@@ -60,6 +61,7 @@ beforeEach(() => {
     mockCollection.parentKey = null;
     mockCollection.getChildItems.mockReturnValue([]);
     mockCollection.hasChildCollections.mockReturnValue(false);
+    mockCollection.getChildCollections.mockReturnValue([]);
     mockCollection.getDescendents.mockReturnValue([]);
     mockCollection.saveTx.mockReset();
     mockCollection.eraseTx.mockReset();
@@ -295,7 +297,7 @@ describe('validateManageCollectionsAction', () => {
 
     it('reports delete preview info in current_value but does NOT emit snapshot via normalized_action_data', async () => {
         mockCollection.getChildItems.mockReturnValue([101, 102, 103]);
-        mockCollection.hasChildCollections.mockReturnValue(true);
+        mockCollection.hasChildCollections.mockReturnValue(false);
         const resp = await validateManageCollectionsAction({
             event: 'agent_action_validate',
             request_id: 'r9',
@@ -305,11 +307,45 @@ describe('validateManageCollectionsAction', () => {
         expect(resp.valid).toBe(true);
         // Preview in current_value (for the approval card)
         expect(resp.current_value?.old_item_count).toBe(3);
-        expect(resp.current_value?.had_subcollections).toBe(true);
         // Snapshots are captured at execute time; not sent via normalized_action_data.
         expect(resp.normalized_action_data?.old_item_ids).toBeUndefined();
         expect(resp.normalized_action_data?.old_name).toBeUndefined();
         expect(resp.normalized_action_data?.library_id).toBe(1);
+    });
+
+    it('rejects delete when the collection has subcollections, listing each child with name/key/item_count', async () => {
+        const child1 = {
+            id: 21,
+            key: 'CHILD001',
+            name: 'Methods',
+            getChildItems: vi.fn(() => [201, 202, 203] as number[]),
+        };
+        const child2 = {
+            id: 22,
+            key: 'CHILD002',
+            name: 'Results',
+            getChildItems: vi.fn(() => [] as number[]),
+        };
+        mockCollection.hasChildCollections.mockReturnValue(true);
+        mockCollection.getChildCollections.mockReturnValue([child1, child2]);
+
+        const resp = await validateManageCollectionsAction({
+            event: 'agent_action_validate',
+            request_id: 'r10',
+            action_type: 'manage_collections',
+            action_data: { action: 'delete', collection_key: mockCollection.key },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error_code).toBe('has_subcollections');
+        // Error must include child name + key + item count so the agent can act.
+        expect(resp.error).toContain("'Methods'");
+        expect(resp.error).toContain('CHILD001');
+        expect(resp.error).toContain('3 items');
+        expect(resp.error).toContain("'Results'");
+        expect(resp.error).toContain('CHILD002');
+        expect(resp.error).toContain('0 items');
+        // eraseTx must NOT have been called from validation.
+        expect(mockCollection.eraseTx).not.toHaveBeenCalled();
     });
 });
 
@@ -371,7 +407,31 @@ describe('executeManageCollectionsAction', () => {
         expect(mockCollection.eraseTx).toHaveBeenCalled();
         expect(resp.result_data?.items_affected).toBe(2);
         expect(resp.result_data?.old_item_ids).toHaveLength(2);
-        expect(resp.result_data?.had_subcollections).toBe(false);
+    });
+
+    it('refuses delete at execute time if subcollections appeared between validate and execute', async () => {
+        // Subcollections weren't there at validate but show up now (race / manual edit).
+        const child = {
+            id: 31,
+            key: 'CHILD777',
+            name: 'AddedLater',
+            getChildItems: vi.fn(() => [] as number[]),
+        };
+        mockCollection.hasChildCollections.mockReturnValue(true);
+        mockCollection.getChildCollections.mockReturnValue([child]);
+        const resp = await executeManageCollectionsAction({
+            event: 'agent_action_execute',
+            request_id: 'e3b',
+            action_type: 'manage_collections',
+            action_data: {
+                action: 'delete',
+                collection_key: mockCollection.key,
+                library_id: 1,
+            },
+        } as any, ctx);
+        expect(resp.success).toBe(false);
+        expect(resp.error_code).toBe('has_subcollections');
+        expect(mockCollection.eraseTx).not.toHaveBeenCalled();
     });
 
     it('fails when library_id is missing', async () => {

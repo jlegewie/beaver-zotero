@@ -267,8 +267,9 @@ export interface ManageCollectionsProposedData {
  * Result data after applying a manage_collections action.
  *
  * Carries the authoritative pre-apply snapshot (old_name, old_parent_key,
- * old_item_ids, had_subcollections), captured at execute time. Undo consumes
- * these fields. A re-apply overwrites them with a fresh snapshot.
+ * old_item_ids), captured at execute time. Undo consumes these fields.
+ * A re-apply overwrites them with a fresh snapshot. Delete is refused when
+ * subcollections exist, so the snapshot never has to describe a subtree.
  */
 export interface ManageCollectionsResultData {
     library_id: number;
@@ -286,8 +287,6 @@ export interface ManageCollectionsResultData {
     old_parent_key?: string | null;
     /** Items immediately before delete (undo) */
     old_item_ids?: string[];
-    /** Whether the collection had subcollections (informational) */
-    had_subcollections?: boolean | null;
 }
 
 // =============================================================================

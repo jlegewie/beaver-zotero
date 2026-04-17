@@ -7,11 +7,13 @@
  *               Rejects cycles (moving into self or a descendant) and
  *               cross-library moves (Zotero requires copy+delete).
  *   - 'delete': erases the collection (eraseTx). Items in the collection
- *               are NOT deleted — they become unfiled. Subcollections ARE
- *               trashed with the parent.
+ *               are NOT deleted — they become unfiled. Refuses if the
+ *               collection has direct subcollections — the agent should
+ *               delete or move them first so the user has explicit control
+ *               (recursive delete cannot be cleanly undone).
  *
- * Snapshots (old_name, old_parent_key, old_item_ids, had_subcollections) are
- * captured at validation time to support undo.
+ * Snapshots (old_name, old_parent_key, old_item_ids) are captured at execute
+ * time to support undo.
  */
 
 import {
@@ -48,6 +50,35 @@ async function itemIdsToKeys(libraryID: number, itemIDs: number[]): Promise<stri
         await Zotero.Items.loadDataTypes(valid, ['primaryData']);
     }
     return valid.map((item) => `${libraryID}-${item.key}`);
+}
+
+
+interface SubcollectionSummary {
+    key: string;
+    name: string;
+    item_count: number;
+}
+
+
+/**
+ * Summarize direct child collections of `collection` (not deep descendants —
+ * the agent should walk one level at a time so deletion stays explicit).
+ * Returns name, key and direct item count for each, excluding trashed.
+ */
+function summarizeChildCollections(collection: any): SubcollectionSummary[] {
+    const children: any[] = collection.getChildCollections(false, false);
+    return children.map((child) => ({
+        key: String(child.key),
+        name: String(child.name),
+        item_count: (child.getChildItems(true, false) as number[]).length,
+    }));
+}
+
+
+function formatSubcollectionList(subs: SubcollectionSummary[]): string {
+    return subs
+        .map((s) => `  - '${s.name}' (key=${s.key}, ${s.item_count} item${s.item_count === 1 ? '' : 's'})`)
+        .join('\n');
 }
 
 
@@ -266,8 +297,25 @@ export async function validateManageCollectionsAction(
     // snapshot is captured at execute time — NOT here — so a re-apply after
     // manual library edits produces a fresh snapshot.
     let oldItemCount: number | undefined;
-    let hadSubcollections: boolean | undefined;
     if (action === 'delete') {
+        // Refuse delete when subcollections exist. Recursive delete would
+        // erase the whole subtree but undo can only restore the top-level
+        // collection (with a new key), losing structure silently. Force the
+        // agent to walk leaves first so the user sees and approves each level.
+        if (collection.hasChildCollections(false)) {
+            const subs = summarizeChildCollections(collection);
+            const list = formatSubcollectionList(subs);
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error:
+                    `Cannot delete collection '${collection.name}' because it contains ${subs.length} subcollection${subs.length === 1 ? '' : 's'}. ` +
+                    `Delete or move each subcollection first, then retry:\n${list}`,
+                error_code: 'has_subcollections',
+                preference: 'always_ask',
+            };
+        }
         const childItemIDs = collection.getChildItems(true, false) as number[];
         if (childItemIDs.length > MAX_SNAPSHOT_ITEMS) {
             return {
@@ -280,7 +328,6 @@ export async function validateManageCollectionsAction(
             };
         }
         oldItemCount = childItemIDs.length;
-        hadSubcollections = collection.hasChildCollections(false);
     }
 
     const preference = getDeferredToolPreference('manage_collections');
@@ -298,7 +345,6 @@ export async function validateManageCollectionsAction(
             old_name: oldName,
             old_parent_key: oldParentKey,
             old_item_count: oldItemCount,
-            had_subcollections: hadSubcollections,
         },
         // Normalize to plain scalars so execute, the persisted AgentAction, and
         // the UI apply/undo path all see the resolved library_id + 8-char keys
@@ -354,8 +400,23 @@ export async function executeManageCollectionsAction(
         const oldName: string = collection.name;
         const oldParentKey: string | null = collection.parentKey ? String(collection.parentKey) : null;
         let oldItemIds: string[] | undefined;
-        let hadSubcollections: boolean | undefined;
         if (action === 'delete') {
+            // Defensive re-check: subcollections may have been added between
+            // validation and execute (manual edit, race). Refuse here too so
+            // we never silently delete a subtree that undo cannot restore.
+            if (collection.hasChildCollections(false)) {
+                const subs = summarizeChildCollections(collection);
+                const list = formatSubcollectionList(subs);
+                return {
+                    type: 'agent_action_execute_response',
+                    request_id: request.request_id,
+                    success: false,
+                    error:
+                        `Cannot delete collection '${oldName}' because it now contains ${subs.length} subcollection${subs.length === 1 ? '' : 's'}. ` +
+                        `Delete or move each subcollection first, then retry:\n${list}`,
+                    error_code: 'has_subcollections',
+                };
+            }
             const childItemIDs = collection.getChildItems(true, false) as number[];
             if (childItemIDs.length > MAX_SNAPSHOT_ITEMS) {
                 return {
@@ -367,7 +428,6 @@ export async function executeManageCollectionsAction(
                 };
             }
             oldItemIds = await itemIdsToKeys(library_id, childItemIDs);
-            hadSubcollections = collection.hasChildCollections(false);
         }
 
         if (action === 'rename') {
@@ -419,7 +479,6 @@ export async function executeManageCollectionsAction(
                 old_name: oldName,
                 old_parent_key: oldParentKey,
                 old_item_ids: oldItemIds,
-                had_subcollections: hadSubcollections,
             },
         };
     } catch (error) {

@@ -10,13 +10,16 @@
  *    fresh snapshot.
  *  - `undoManageCollectionsAction` reads the snapshot from
  *    `action.result_data` — NOT `action.proposed_data`.
+ *  - Delete refuses if the collection has direct subcollections at apply
+ *    time. Recursive delete cannot be cleanly undone (the subtree would
+ *    silently vanish), so the agent must delete leaves first.
  *
  * Zotero APIs:
  *   - collection.name = ...; await collection.saveTx(): rename.
  *   - collection.parentKey = key | false; await collection.saveTx(): move.
  *     `false` promotes to top-level (see collection.js parentKey setter).
  *   - await collection.eraseTx(): delete. Items become unfiled, not trashed,
- *     when deleteItems option is not set. Subcollections ARE trashed.
+ *     when deleteItems option is not set.
  *   - new Zotero.Collection({name, libraryID, parentID?}): create for undo.
  */
 
@@ -62,14 +65,26 @@ export async function executeManageCollectionsAction(
     const oldName: string = collection.name;
     const oldParentKey: string | null = collection.parentKey ? String(collection.parentKey) : null;
     let oldItemIds: string[] | undefined;
-    let hadSubcollections: boolean | undefined;
     if (op === 'delete') {
+        // Mirror the validator: refuse delete when subcollections exist so a
+        // re-apply via the UI never silently erases a subtree.
+        if (collection.hasChildCollections(false)) {
+            const subs: any[] = collection.getChildCollections(false, false);
+            const list = subs
+                .map((c: any) => {
+                    const items = (c.getChildItems(true, false) as number[]).length;
+                    return `  - '${c.name}' (key=${c.key}, ${items} item${items === 1 ? '' : 's'})`;
+                })
+                .join('\n');
+            throw new Error(
+                `Cannot delete collection '${oldName}' because it contains ${subs.length} subcollection${subs.length === 1 ? '' : 's'}. Delete or move each subcollection first:\n${list}`
+            );
+        }
         const childItemIDs = collection.getChildItems(true, false) as number[];
         if (childItemIDs.length > MAX_SNAPSHOT_ITEMS) {
             throw new Error(`Collection '${oldName}' contains ${childItemIDs.length} items (over the ${MAX_SNAPSHOT_ITEMS} safety cap for undo snapshot)`);
         }
         oldItemIds = await itemIdsToKeys(library_id, childItemIDs);
-        hadSubcollections = collection.hasChildCollections(false);
     }
 
     if (op === 'rename') {
@@ -99,7 +114,6 @@ export async function executeManageCollectionsAction(
         old_name: oldName,
         old_parent_key: oldParentKey,
         old_item_ids: oldItemIds,
-        had_subcollections: hadSubcollections,
     };
 }
 
@@ -113,8 +127,9 @@ export async function executeManageCollectionsAction(
  * - `rename`: restore old_name.
  * - `move`: restore old_parent_key.
  * - `delete`: recreate a collection with the same name and parent, then
- *   re-add items from the snapshot. Recreated collection gets a NEW key;
- *   subcollections are NOT restored.
+ *   re-add items from the snapshot. Recreated collection gets a NEW key.
+ *   (Delete is refused if subcollections existed, so undo never has to
+ *   reconstruct a subtree.)
  */
 export async function undoManageCollectionsAction(
     action: AgentAction
