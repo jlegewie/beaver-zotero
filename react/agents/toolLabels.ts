@@ -129,6 +129,10 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     organize_items: 'Organize items',
     create_collection: 'Create collection',
 
+    // Tag tools
+    manage_tags: 'Manage tags',
+    manage_collections: 'Manage collections',
+
     // Reading tools
     read_pages: 'Reading',
     read_attachment: 'Reading',
@@ -666,6 +670,22 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                 }
             }
             return `${baseLabel}`;
+        }
+
+        case 'manage_tags': {
+            const tag = args.tag as string | undefined;
+            if (tag) {
+                return `${baseLabel}: "${truncate(tag, 20)}"`;
+            }
+            return baseLabel;
+        }
+
+        case 'manage_collections': {
+            const collection = args.collection as string | undefined;
+            if (collection) {
+                return `${baseLabel}: "${truncate(collection, 20)}"`;
+            }
+            return baseLabel;
         }
 
         // === Note tools ===
