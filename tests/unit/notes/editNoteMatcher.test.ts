@@ -46,6 +46,7 @@ import {
     type MatchInput,
     type BaseExpansion,
 } from '../../../src/services/agentDataProvider/actions/editNoteMatcher';
+import { expandToRawHtml } from '../../../src/utils/noteCitationExpand';
 import type { EditNoteOperation } from '../../../react/types/agentActions/editNote';
 
 // =============================================================================
@@ -552,5 +553,300 @@ describe('markdown_to_html production replay', () => {
         }));
         expect(result?.strategy).toBe('markdown_to_html');
         expect(result?.oldString).toBe('<h2>系统组件与技术选择</h2>');
+    });
+});
+
+// =============================================================================
+// whitespace_relaxed
+// =============================================================================
+
+describe('whitespace_relaxed strategy', () => {
+    // -- Positive cases --
+
+    it('matches when needle has an extra blank line between tags', () => {
+        // Thread-1 production repro: model's old_string had <hr>\n\n<p>…
+        // while note had <hr>\n<p>….
+        const rawSlice = '<hr>\n<p><strong>Synthese :</strong> long body text anchor</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: '<hr>\n\n<p><strong>Synthese :</strong> long body text anchor</p>',
+            newString: '<p>REPLACED</p>',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        expect(result?.matchCount).toBe(1);
+        expect(result?.expandedOld).toBe(rawSlice);
+        expect(result?.oldString).toBe(rawSlice);
+        expect(result?.expandedNew).toBe('<p>REPLACED</p>');
+        expect(result?.normalizeAnchor('abc')).toBe('abc');
+    });
+
+    it('matches when needle has multiple spaces where note has single spaces', () => {
+        // Pure ASCII whitespace drift — nfkc can't handle it (no full-width
+        // chars), so this isolates the whitespace_relaxed path.
+        const noteText = '<p>hello world with more padding text here for anchor</p>';
+        const result = match(makeInput({
+            oldString: 'hello   world with  more   padding text here for anchor',
+            newString: 'hi there',
+            strippedHtml: noteText,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        expect(result?.matchCount).toBe(1);
+        expect(result?.expandedOld).toBe('hello world with more padding text here for anchor');
+    });
+
+    it('pins JS `\\s` matching \\u00A0 (NBSP) via normalizeWS', () => {
+        // NBSP is also handled upstream by `nfkc`, so we assert the edit
+        // succeeds — not that this specific strategy wins. This pins the
+        // runtime behavior that NBSP is whitespace under `\s`.
+        const result = match(makeInput({
+            oldString: 'hello\u00A0world with more padding text here for anchor',
+            newString: 'hi there',
+            strippedHtml: '<p>hello world with more padding text here for anchor</p>',
+        }));
+        expect(result).not.toBeNull();
+        // Either nfkc (which would normalize NBSP) or whitespace_relaxed is
+        // acceptable — both produce a correct edit.
+        expect(['nfkc', 'whitespace_relaxed']).toContain(result?.strategy);
+    });
+
+    it('matches when needle has a tab where note has spaces', () => {
+        const html = '<p>key: value with enough chars after to pass the gate</p>';
+        const result = match(makeInput({
+            oldString: 'key:\tvalue with enough chars after to pass the gate',
+            newString: 'replaced',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        expect(result?.expandedOld).toBe('key: value with enough chars after to pass the gate');
+    });
+
+    it('insert_after (validate form): expandedNew starts with actual raw slice', () => {
+        const rawSlice = '<p>Anchor paragraph with plenty of text here</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            operation: 'insert_after' as EditNoteOperation,
+            oldString: '<p>Anchor  paragraph with plenty  of text here</p>',  // double spaces
+            newString: '<p>Injected payload</p>',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        expect(result?.expandedOld).toBe(rawSlice);
+        expect(result?.expandedNew.startsWith(rawSlice)).toBe(true);
+        expect(result?.expandedNew.endsWith('<p>Injected payload</p>')).toBe(true);
+    });
+
+    it('insert_after (execute form, pre-merged newString): strips prefix before expanding', () => {
+        const rawSlice = '<p>Anchor paragraph with plenty of text here</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const needle = '<p>Anchor  paragraph with plenty  of text here</p>';
+        const merged = needle + '<p>Injected</p>';
+        const result = match(makeInput({
+            operation: 'insert_after' as EditNoteOperation,
+            oldString: needle,
+            newString: merged,  // already merged form (from normalized_action_data)
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        // Must be rawSlice + '<p>Injected</p>', NOT rawSlice + merged.
+        expect(result?.expandedNew).toBe(rawSlice + '<p>Injected</p>');
+    });
+
+    it('insert_before (execute form, pre-merged newString): expandedNew ends with raw slice', () => {
+        const rawSlice = '<p>Anchor paragraph with plenty of text here</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const needle = '<p>Anchor  paragraph with plenty  of text here</p>';
+        const merged = '<p>Preamble</p>' + needle;
+        const result = match(makeInput({
+            operation: 'insert_before' as EditNoteOperation,
+            oldString: needle,
+            newString: merged,
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        expect(result?.expandedNew).toBe('<p>Preamble</p>' + rawSlice);
+        expect(result?.expandedNew.endsWith(rawSlice)).toBe(true);
+    });
+
+    // -- Safety gates --
+
+    it('rejects when normalized needle is shorter than the minimum length', () => {
+        const result = match(makeInput({
+            oldString: 'A B',  // normalized length 3, below threshold
+            newString: 'X',
+            strippedHtml: '<p>A    B here and more</p>',
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('rejects when non-whitespace char count in needle is too low', () => {
+        // Needle: 7 non-ws chars (a b c d e f g) — below 12. Must differ in
+        // whitespace shape from the haystack so exact/trim don't grab it.
+        const needle = 'a  b\n\n\n\nc  d   \t\t  e  f  g';
+        const haystack = '<p>a b c d e f g</p>';  // single spaces
+        expect(needle.length).toBeGreaterThanOrEqual(20);
+        expect(needle.replace(/\s/g, '').length).toBeLessThan(12);
+        const result = match(makeInput({
+            oldString: needle,
+            newString: 'x',
+            strippedHtml: haystack,
+        }));
+        // Other strategies don't apply (no exact, no entity, no trim match on
+        // this structure), so full chain returns null.
+        expect(result).toBeNull();
+    });
+
+    it('rejects when needle has leading whitespace', () => {
+        const result = match(makeInput({
+            oldString: '  anchor paragraph with enough length here',
+            newString: 'x',
+            strippedHtml: '<p>anchor  paragraph with enough length here</p>',
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('rejects when needle has trailing whitespace', () => {
+        const result = match(makeInput({
+            oldString: 'anchor paragraph with enough length here   ',
+            newString: 'x',
+            strippedHtml: '<p>anchor  paragraph with enough length here</p>',
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('rejects when the regex finds multiple raw matches', () => {
+        // Two ws-relaxed occurrences with whitespace shapes distinct from the
+        // needle so `exact` misses and whitespace_relaxed sees 2.
+        const result = match(makeInput({
+            oldString: 'foo\n\nbar with enough chars after to pass gate',
+            newString: 'x',
+            strippedHtml:
+                '<p>foo bar with enough chars after to pass gate</p>'
+                + '<p>foo\tbar with enough chars after to pass gate</p>',
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('rejects str_replace_all even when the normalized match is unique', () => {
+        const rawSlice = '<p>Anchor paragraph with plenty of text here</p>';
+        const result = match(makeInput({
+            operation: 'str_replace_all' as EditNoteOperation,
+            oldString: '<p>Anchor  paragraph with plenty  of text here</p>',
+            newString: 'x',
+            strippedHtml: `<div data-schema-version="9">${rawSlice}</div>`,
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('rejects when needle differs from base.expandedOld (citation indirection)', () => {
+        // Swap the identity `expandToRawHtml` mock for one that transforms the
+        // needle, so `base.expandedOld !== input.oldString`. The strategy must
+        // decline — it relies on simplified==raw for the needle to return
+        // `expandedOld = actualRawSlice` safely.
+        const mocked = vi.mocked(expandToRawHtml);
+        // Only the first call (expandBase for oldString) rewrites; subsequent
+        // calls fall back to identity.
+        mocked.mockImplementationOnce(
+            (s: string) => s.replace('CITE', '<span class="citation">X</span>'),
+        );
+        try {
+            const result = match(makeInput({
+                oldString: 'anchor CITE with enough body text to clear the length gate',
+                newString: 'x',
+                strippedHtml: '<p>anchor CITE with enough body  text to clear the length gate</p>',
+            }));
+            // whitespace_relaxed must refuse; no other strategy matches
+            // because strippedHtml has literal 'CITE' while base.expandedOld
+            // has the expanded span form. Full chain returns null.
+            expect(result).toBeNull();
+        } finally {
+            mocked.mockImplementation((s: string) => s);
+        }
+    });
+
+    it('rejects when needle has no whitespace at all', () => {
+        // Defensive gate: exact would've handled any no-ws needle already.
+        const result = match(makeInput({
+            oldString: 'singletokenwithnowhitespace',
+            newString: 'x',
+            strippedHtml: '<p>singletokenwithnowhitespace here</p>',
+        }));
+        // `exact` should claim this — `whitespace_relaxed` is not responsible.
+        expect(result?.strategy).toBe('exact');
+    });
+
+    it('rejects when needle length exceeds the ReDoS cap', () => {
+        const chunk = 'abc def ';
+        const huge = chunk.repeat(700);  // ~5600 chars > 5000 cap
+        expect(huge.length).toBeGreaterThan(5000);
+        const result = match(makeInput({
+            oldString: huge,
+            newString: 'x',
+            strippedHtml: `<p>${huge.replace(/ /g, '\t')}</p>`,
+        }));
+        // Other strategies don't match either (no exact, no entity, etc.), so
+        // the full chain returns null.
+        expect(result).toBeNull();
+    });
+
+    // -- Priority / regression --
+
+    it('exact wins over whitespace_relaxed when the needle matches byte-for-byte', () => {
+        const rawSlice = '<p>Anchor paragraph with plenty of text here</p>';
+        const result = match(makeInput({
+            oldString: rawSlice,
+            newString: 'x',
+            strippedHtml: `<div data-schema-version="9">${rawSlice}</div>`,
+        }));
+        expect(result?.strategy).toBe('exact');
+    });
+
+    it('markdown_to_html wins over whitespace_relaxed when whitespace is unchanged', () => {
+        // Needle uses markdown; note has same whitespace shape but HTML tags.
+        // markdown_to_html ranks before whitespace_relaxed — regression guard.
+        const result = match(makeInput({
+            oldString: 'the **important** anchor with enough chars here',
+            newString: 'replacement',
+            strippedHtml: '<p>the <strong>important</strong> anchor with enough chars here</p>',
+        }));
+        expect(result?.strategy).toBe('markdown_to_html');
+    });
+
+    it('falls through to whitespace_relaxed only after all other strategies fail', () => {
+        // No exact, no entity drift, no trim tail, no markdown — only ws diff.
+        const rawSlice = '<p>Unique anchor phrase with enough chars to pass</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: '<p>Unique  anchor  phrase  with  enough  chars  to  pass</p>',
+            newString: 'x',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+    });
+
+    // -- Sanity invariants --
+
+    it('normalizeAnchor is the identity function', () => {
+        const rawSlice = '<p>Anchor paragraph with plenty of text here</p>';
+        const result = match(makeInput({
+            oldString: '<p>Anchor  paragraph  with  plenty  of text here</p>',
+            newString: 'x',
+            strippedHtml: `<div data-schema-version="9">${rawSlice}</div>`,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        expect(result?.normalizeAnchor('<p>before</p>')).toBe('<p>before</p>');
+    });
+
+    it('returned expandedOld is a literal substring of strippedHtml', () => {
+        const rawSlice = '<p>Anchor paragraph with plenty of text here</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: '<p>Anchor  paragraph  with  plenty of text here</p>',
+            newString: 'x',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        // Executor's invariant: expandedOld must be in strippedHtml as-is.
+        expect(html.indexOf(result!.expandedOld)).toBeGreaterThanOrEqual(0);
     });
 });
