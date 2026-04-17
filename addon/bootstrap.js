@@ -81,10 +81,6 @@ async function shutdown({ id, version, resourceURI, rootURI }, reason) {
   }
   await Zotero.__addonInstance__?.hooks.onShutdown();
 
-  Cc["@mozilla.org/intl/stringbundle;1"]
-    .getService(Components.interfaces.nsIStringBundleService)
-    .flushBundles();
-
   if (chromeHandle) {
     chromeHandle.destruct();
     chromeHandle = null;
