@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Icon, TagIcon, ArrowRightIcon } from '../icons/icons';
 import type { ManageTagsResultData } from '../../types/agentActions/base';
+import { shortenActionError } from './agentActionViewHelpers';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -21,6 +22,22 @@ interface ManageTagsPreviewProps {
     };
     status?: ActionStatus;
     resultData?: ManageTagsResultData;
+    /** Server-provided error detail when status === 'error' */
+    errorMessage?: string;
+}
+
+function buildTagErrorText(
+    action: 'rename' | 'delete',
+    errorMessage: string | undefined,
+): string {
+    const verb = action === 'delete' ? 'delete' : 'rename';
+    const base = `Failed to ${verb} tag`;
+    if (!errorMessage) return `${base}.`;
+    const m = errorMessage.toLowerCase();
+    if (m.includes('safety cap') || m.includes('too many')) {
+        return `${base} because it is used on too many items.`;
+    }
+    return `${base}. ${shortenActionError(errorMessage)}.`;
 }
 
 const TagPill: React.FC<{ name: string; strike?: boolean }> = ({ name, strike }) => (
@@ -45,8 +62,9 @@ export const ManageTagsPreview: React.FC<ManageTagsPreviewProps> = ({
     currentValue,
     status = 'pending',
     resultData,
+    errorMessage,
 }) => {
-    const action = actionData.action ?? 'rename';
+    const action: 'rename' | 'delete' = actionData.action ?? 'rename';
     const name = actionData.name ?? '';
     const newName = actionData.new_name ?? undefined;
     const libraryId = actionData.library_id;
@@ -118,7 +136,9 @@ export const ManageTagsPreview: React.FC<ManageTagsPreviewProps> = ({
                         </div>
                     )}
                     {isError && (
-                        <div className="font-color-red">Operation failed.</div>
+                        <div className="font-color-red">
+                            {buildTagErrorText(action, errorMessage)}
+                        </div>
                     )}
                 </div>
             </div>

@@ -108,6 +108,7 @@ export const ActionPreview: React.FC<{
                 currentValue={previewData.currentValue}
                 status={status}
                 resultData={previewData.resultData as any}
+                errorMessage={previewData.errorMessage}
             />
         );
     }
@@ -119,6 +120,7 @@ export const ActionPreview: React.FC<{
                 currentValue={previewData.currentValue}
                 status={status}
                 resultData={previewData.resultData as any}
+                errorMessage={previewData.errorMessage}
             />
         );
     }

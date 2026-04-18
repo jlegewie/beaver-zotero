@@ -36,6 +36,23 @@ export function confirmOverwriteManualChanges(modifiedFields: string[]): boolean
 /** Tools that should remain expanded after approval resolves (never auto-collapse) */
 export const NEVER_AUTO_COLLAPSE_TOOLS = new Set(['create_note']);
 
+/**
+ * Shorten a backend error_message for inline display in action previews.
+ *
+ * Backend messages include agent-facing detail (multi-line lists, Zotero keys,
+ * "Cannot <verb> <entity> '<name>' because ..." framing) that duplicates what
+ * the headline + pill already show. Keep just the concise reason.
+ */
+export function shortenActionError(msg: string): string {
+    let s = msg.split('\n')[0].replace(/[:.\s]+$/, '').trim();
+    const becauseIdx = s.toLowerCase().indexOf(' because ');
+    if (becauseIdx >= 0) {
+        s = s.slice(becauseIdx + ' because '.length);
+        s = s.charAt(0).toUpperCase() + s.slice(1);
+    }
+    return s;
+}
+
 export interface StatusConfig {
     icon: React.FC<React.SVGProps<SVGSVGElement>> | null;
     label: string;
@@ -249,6 +266,7 @@ export interface PreviewData {
     actionData: Record<string, any>;
     currentValue?: any;
     resultData?: Record<string, any>;
+    errorMessage?: string;
 }
 
 /**
@@ -273,6 +291,7 @@ export function buildPreviewData(
             actionData: action.proposed_data,
             currentValue: undefined, // We don't have this for stored actions
             resultData: action.result_data,
+            errorMessage: action.error_message,
         };
     }
 

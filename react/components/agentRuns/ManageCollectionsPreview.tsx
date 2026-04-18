@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { CSSIcon, Icon, ArrowRightIcon } from '../icons/icons';
 import type { ManageCollectionsResultData } from '../../types/agentActions/base';
+import { shortenActionError } from './agentActionViewHelpers';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -22,6 +23,8 @@ interface ManageCollectionsPreviewProps {
     };
     status?: ActionStatus;
     resultData?: ManageCollectionsResultData;
+    /** Server-provided error detail when status === 'error' */
+    errorMessage?: string;
 }
 
 const CollectionPill: React.FC<{ name: string; strike?: boolean }> = ({ name, strike }) => (
@@ -43,6 +46,21 @@ interface Fallback {
     oldItemCount?: number;
 }
 
+function buildCollectionErrorText(
+    action: 'rename' | 'move' | 'delete',
+    errorMessage: string | undefined,
+): string {
+    const verb = action === 'delete' ? 'delete' : action === 'move' ? 'move' : 'rename';
+    const base = `Failed to ${verb} collection`;
+    if (!errorMessage) return `${base}.`;
+    const m = errorMessage.toLowerCase();
+    if (m.includes('subcollection')) return `${base} because it contains subcollections.`;
+    if (m.includes('not found') || m.includes('no longer exists') || m.includes('permanently deleted')) {
+        return `${base} because it no longer exists.`;
+    }
+    return `${base}. ${shortenActionError(errorMessage)}.`;
+}
+
 /**
  * Preview component for manage_collections actions.
  * The outer AgentActionView header already shows the operation summary,
@@ -53,8 +71,9 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
     currentValue,
     status = 'pending',
     resultData,
+    errorMessage,
 }) => {
-    const action = actionData.action ?? 'rename';
+    const action: 'rename' | 'move' | 'delete' = actionData.action ?? 'rename';
     const newName = actionData.new_name ?? undefined;
     const newParentKey = actionData.new_parent_key ?? null;
     const libraryId = currentValue?.library_id ?? actionData.library_id;
@@ -171,7 +190,9 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
                         </div>
                     )}
                     {isError && (
-                        <div className="font-color-red">Operation failed.</div>
+                        <div className="font-color-red">
+                            {buildCollectionErrorText(action, errorMessage)}
+                        </div>
                     )}
                 </div>
             </div>
