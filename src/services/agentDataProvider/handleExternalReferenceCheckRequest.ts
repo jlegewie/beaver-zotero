@@ -22,13 +22,14 @@ import {
  * Handle external_reference_check_request event.
  *
  * Uses batch lookups for optimal performance:
- * - Phase 1 & 2 run in parallel:
- *   - Phase 1: Batch DOI/ISBN lookup (DOI + ISBN also parallel, no getAsync needed)
- *   - Phase 2: Batch title candidate collection with keyword pre-filtering
- * - Phase 3: In-memory fuzzy matching
+ *   Phase 1 — Batch DOI/ISBN lookup.
+ *   Phase 2 — Title candidates (exact-value fast path + keyword LIKE scan),
+ *             meta fetch, creator fetch. Runs only for items not already
+ *             resolved by Phase 1.
+ *   Phase 3 — In-memory fuzzy match (title / DOI / ISBN / year / creator).
  *
- * If library_ids is provided, only search those libraries.
- * If library_ids is not provided or empty, search all accessible libraries.
+ * If library_ids is provided, only search those libraries. If library_ids
+ * is not provided or empty, search all accessible libraries.
  */
 export async function handleExternalReferenceCheckRequest(request: WSExternalReferenceCheckRequest): Promise<WSExternalReferenceCheckResponse> {
     const startTime = Date.now();
