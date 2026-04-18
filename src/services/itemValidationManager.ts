@@ -244,6 +244,26 @@ class ItemValidationManager {
     }
 
     /**
+     * Whether the client can handle OCR-only PDFs without backend text extraction.
+     * True when the selected model supports vision OR plus tools (server-side OCR) are enabled.
+     */
+    private canHandleOCRLocally(): boolean {
+        const selectedModel = store.get(selectedModelAtom);
+        const supportsVision = selectedModel?.supports_vision === true;
+        const requestPlusTools = getPref('requestPlusTools');
+        return supportsVision || requestPlusTools;
+    }
+
+    /**
+     * Detect whether a backend rejection message indicates the file requires OCR.
+     * The backend currently signals this through the `details` string
+     * (e.g. "File requires OCR (not yet supported)"), not a structured error code.
+     */
+    private isBackendOCRRejection(details?: string): boolean {
+        return !!details && /ocr/i.test(details);
+    }
+
+    /**
      * Perform backend validation
      * Checks if the item has been processed on the backend
      */
@@ -261,8 +281,16 @@ class ItemValidationManager {
             );
 
             // Item is valid if processed on backend
-            const isValid = backendResponse.processed;
-            const reason = isValid ? undefined : (backendResponse.details || 'File not processed');
+            let isValid = backendResponse.processed;
+            let reason = isValid ? undefined : (backendResponse.details || 'File not processed');
+
+            // OCR override: if backend rejected due to missing text layer but the client can
+            // handle scanned PDFs (vision model or plus tools), treat as valid.
+            if (!isValid && this.isBackendOCRRejection(backendResponse.details) && this.canHandleOCRLocally()) {
+                logger(`ItemValidationManager: Overriding backend OCR rejection for ${item.libraryID}-${item.key} — client can handle OCR`, 4);
+                isValid = true;
+                reason = undefined;
+            }
 
             return { isValid, reason };
         } catch (error: any) {
@@ -385,10 +413,7 @@ class ItemValidationManager {
             // Check if PDF needs OCR
             // Only fail if the selected model can't handle scanned PDFs:
             // no vision support AND plus tools (server-side OCR) disabled.
-            const selectedModel = store.get(selectedModelAtom);
-            const supportsVision = selectedModel?.supports_vision === true;
-            const requestPlusTools = getPref('requestPlusTools');
-            if (!supportsVision && !requestPlusTools) {
+            if (!this.canHandleOCRLocally()) {
                 const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
                 if (ocrAnalysis.needsOCR) {
                     return {
@@ -902,9 +927,20 @@ class ItemValidationManager {
                         continue;
                     }
 
+                    let isValid = backendData.processed;
+                    let reason = isValid ? undefined : (backendData.details || 'File not processed');
+
+                    // OCR override: if backend rejected due to missing text layer but the client can
+                    // handle scanned PDFs (vision model or plus tools), treat as valid.
+                    if (!isValid && this.isBackendOCRRejection(backendData.details) && this.canHandleOCRLocally()) {
+                        logger(`ItemValidationManager: Overriding backend OCR rejection for ${key} — client can handle OCR`, 4);
+                        isValid = true;
+                        reason = undefined;
+                    }
+
                     const backendResult: AttachmentValidationResult = {
-                        isValid: backendData.processed,
-                        reason: backendData.processed ? undefined : (backendData.details || 'File not processed'),
+                        isValid,
+                        reason,
                         backendChecked: true
                     };
 
