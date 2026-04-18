@@ -96,11 +96,11 @@ import {
     clearAllPendingApprovalsAtom,
 } from '../agents/agentActions';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
-import { undoCreateItemActions } from '../utils/createItemActions';
+import { undoCreateItemAction } from '../utils/createItemActions';
 import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../utils/manageTagsActions';
-import { undoManageCollectionsActions } from '../utils/manageCollectionsActions';
+import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
 import { undoEditNoteAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
@@ -563,81 +563,64 @@ async function startAutoRetryRun(
 }
 
 /**
- * Delete applied Zotero items (annotations, notes) from agent actions.
- * Returns the number of items successfully deleted.
+ * Undo all applied agent actions from removed runs in reverse chronological order.
+ *
+ * A single ordered loop is required because actions have cross-type dependencies.
+ * Undoing in reverse chronological order restores the original state.
+ *
+ * Per-action failures are logged and do not stop the loop.
  */
-async function deleteAppliedZoteroItems(actions: AgentAction[]): Promise<number> {
-    let deletedCount = 0;
-    for (const action of actions) {
-        if (hasAppliedZoteroItem(action)) {
-            try {
+async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void> {
+    // Filter applied actions, keeping their original array position as the
+    // tiebreaker for chronological ordering.
+    const indexed = actions
+        .map((action, index) => ({ action, index }))
+        .filter(({ action }) => {
+            if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
+                return hasAppliedZoteroItem(action);
+            }
+            return action.status === 'applied';
+        });
+
+    // Sort reverse-chronologically by `created_at`, falling back to array
+    // position (which reflects insertion order in threadAgentActionsAtom).
+    indexed.sort((a, b) => {
+        const ta = a.action.created_at ? Date.parse(a.action.created_at) : NaN;
+        const tb = b.action.created_at ? Date.parse(b.action.created_at) : NaN;
+        if (!Number.isNaN(ta) && !Number.isNaN(tb) && ta !== tb) return tb - ta;
+        return b.index - a.index;
+    });
+
+    for (const { action } of indexed) {
+        try {
+            if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(
                     action.result_data!.library_id,
                     action.result_data!.zotero_key
                 );
-                if (item) {
-                    await item.eraseTx();
-                    deletedCount++;
-                }
-            } catch (error) {
-                logger(`deleteAppliedZoteroItems: Failed to delete item for action ${action.id}: ${error}`, 1);
-            }
-        }
-    }
-    return deletedCount;
-}
-
-/**
- * Undo applied metadata edits from agent actions.
- * Reverts fields to their original values, but preserves user's manual changes.
- * Actions are reversed so that later edits on the same field are undone first —
- * otherwise the manual-modification check sees the later value and skips the earlier edit.
- * Returns the number of actions processed (regardless of whether fields were actually reverted).
- */
-async function undoAppliedMetadataEdits(actions: AgentAction[]): Promise<number> {
-    let processedCount = 0;
-    const reversed = [...actions].reverse();
-    for (const action of reversed) {
-        if (action.status === 'applied' && isEditMetadataAgentAction(action)) {
-            try {
-                // Don't force revert - skip fields that user manually modified
-                const result = await undoEditMetadataAction(action, false);
-                processedCount++;
-                
-                // Log summary for debugging
-                if (result.manuallyModified.length > 0) {
-                    logger(`undoAppliedMetadataEdits: Preserved ${result.manuallyModified.length} manually modified field(s) for action ${action.id}`, 1);
-                }
-            } catch (error) {
-                logger(`undoAppliedMetadataEdits: Failed to undo action ${action.id}: ${error}`, 1);
-            }
-        }
-    }
-    return processedCount;
-}
-
-/**
- * Undo applied note edits from agent actions.
- * Actions are reversed before processing so that edits on the same note are
- * undone in reverse chronological order — prevents failures from shifted content
- * when a later edit altered text near an earlier edit's replacement.
- * Returns the number of actions processed.
- */
-async function undoAppliedNoteEdits(actions: AgentAction[]): Promise<number> {
-    let processedCount = 0;
-    // Reverse so that later edits on the same note are undone first
-    const reversed = [...actions].reverse();
-    for (const action of reversed) {
-        if (action.status === 'applied' && isEditNoteAgentAction(action)) {
-            try {
+                if (item) await item.eraseTx();
+            } else if (isEditMetadataAgentAction(action)) {
+                // false = preserve fields the user manually modified after apply
+                await undoEditMetadataAction(action, false);
+            } else if (isEditNoteAgentAction(action)) {
                 await undoEditNoteAction(action);
-                processedCount++;
-            } catch (error) {
-                logger(`undoAppliedNoteEdits: Failed to undo action ${action.id}: ${error}`, 1);
+            } else if (isCreateItemAgentAction(action)) {
+                await undoCreateItemAction(action);
+            } else if (isCreateCollectionAgentAction(action)) {
+                await undoCreateCollectionAction(action);
+            } else if (isOrganizeItemsAgentAction(action)) {
+                await undoOrganizeItemsAction(action);
+            } else if (isManageTagsAgentAction(action)) {
+                await undoManageTagsAction(action);
+            } else if (isManageCollectionsAgentAction(action)) {
+                await undoManageCollectionsAction(action);
+            } else if (isCreateNoteAgentAction(action)) {
+                await undoCreateNoteAction(action);
             }
+        } catch (error) {
+            logger(`undoAppliedActionsInReverse: Failed to undo action ${action.id} (${action.action_type}): ${error}`, 1);
         }
     }
-    return processedCount;
 }
 
 /**
@@ -1940,58 +1923,12 @@ export const regenerateFromRunAtom = atom(
                     return;
                 }
                 if (confirmResult === 'undo') {
-                    // Undo annotations (delete Zotero items)
-                    if (annotationsToDelete.length > 0) {
-                        await deleteAppliedZoteroItems(annotationsToDelete);
-                    }
-                    // Undo Zotero notes (delete Zotero items)
-                    if (zoteroNotesToDelete.length > 0) {
-                        await deleteAppliedZoteroItems(zoteroNotesToDelete);
-                    }
-                    // Undo metadata edits (revert to original values)
-                    if (metadataEditsToUndo.length > 0) {
-                        await undoAppliedMetadataEdits(metadataEditsToUndo);
-                    }
-                    // Undo note edits (revert note HTML, in reverse chronological order)
-                    if (noteEditsToUndo.length > 0) {
-                        await undoAppliedNoteEdits(noteEditsToUndo);
-                    }
-                    // Undo created items (delete from Zotero)
-                    if (createItemsToUndo.length > 0) {
-                        await undoCreateItemActions(createItemsToUndo);
-                    }
-                    // Undo created collections (delete from Zotero).
-                    // Reverse in case a later action moved a collection into an earlier one.
-                    for (const action of [...createCollectionsToUndo].reverse()) {
-                        await undoCreateCollectionAction(action);
-                    }
-                    // Undo organize items (restore original tags/collections).
-                    // Reverse so later changes on the same item are reverted first —
-                    // each snapshot only captured the state that run saw.
-                    for (const action of [...organizeItemsToUndo].reverse()) {
-                        await undoOrganizeItemsAction(action);
-                    }
-                    // Undo manage_tags (rename back or re-add deleted tag).
-                    // Reverse so later ops on the same tag are undone first —
-                    // e.g. a later delete must be undone before an earlier rename
-                    // can target the restored tag.
-                    for (const action of [...manageTagsToUndo].reverse()) {
-                        try {
-                            await undoManageTagsAction(action);
-                        } catch (error) {
-                            logger(`regenerate: Failed to undo manage_tags action ${action.id}: ${error}`, 1);
-                        }
-                    }
-                    // Undo manage_collections (rename back, restore parent, or recreate).
-                    // Reverse for the same reason as manage_tags above; the helper
-                    // also builds an oldKey→newKey map so a child undo whose parent
-                    // was recreated earlier in this pass resolves to the new key.
-                    await undoManageCollectionsActions(manageCollectionsToUndo);
-                    // Undo created notes (delete from Zotero).
-                    // Reverse for consistency with other undo loops.
-                    for (const action of [...createNotesToUndo].reverse()) {
-                        await undoCreateNoteAction(action);
-                    }
+                    // Single reverse-chronological pass across all applied
+                    // actions. Cross-type ordering matters — e.g. a
+                    // create_collection undo cascades to descendants, so any
+                    // later manage_collections moves into it must be undone
+                    // first. See undoAppliedActionsInReverse for details.
+                    await undoAppliedActionsInReverse(actionsInRemovedRuns);
                 }
             }
 
@@ -2168,56 +2105,10 @@ export const regenerateWithEditedPromptAtom = atom(
                     return;
                 }
                 if (confirmResult === 'undo') {
-                    // Undo annotations (delete Zotero items)
-                    if (annotationsToDelete.length > 0) {
-                        await deleteAppliedZoteroItems(annotationsToDelete);
-                    }
-                    // Undo Zotero notes (delete Zotero items)
-                    if (zoteroNotesToDelete.length > 0) {
-                        await deleteAppliedZoteroItems(zoteroNotesToDelete);
-                    }
-                    // Undo metadata edits (revert to original values)
-                    if (metadataEditsToUndo.length > 0) {
-                        await undoAppliedMetadataEdits(metadataEditsToUndo);
-                    }
-                    // Undo note edits (revert note HTML, in reverse chronological order)
-                    if (noteEditsToUndo.length > 0) {
-                        await undoAppliedNoteEdits(noteEditsToUndo);
-                    }
-                    // Undo created items (delete from Zotero)
-                    if (createItemsToUndo.length > 0) {
-                        await undoCreateItemActions(createItemsToUndo);
-                    }
-                    // Undo created collections (delete from Zotero).
-                    // Reverse in case a later action moved a collection into an earlier one.
-                    for (const action of [...createCollectionsToUndo].reverse()) {
-                        await undoCreateCollectionAction(action);
-                    }
-                    // Undo organize items (restore original tags/collections).
-                    // Reverse so later changes on the same item are reverted first —
-                    // each snapshot only captured the state that run saw.
-                    for (const action of [...organizeItemsToUndo].reverse()) {
-                        await undoOrganizeItemsAction(action);
-                    }
-                    // Undo manage_tags (rename back or re-add deleted tag).
-                    // Reverse so later ops on the same tag are undone first —
-                    // e.g. a later delete must be undone before an earlier rename
-                    // can target the restored tag.
-                    for (const action of [...manageTagsToUndo].reverse()) {
-                        try {
-                            await undoManageTagsAction(action);
-                        } catch (error) {
-                            logger(`regenerate: Failed to undo manage_tags action ${action.id}: ${error}`, 1);
-                        }
-                    }
-                    // Undo manage_collections (rename back, restore parent, or recreate).
-                    // See sibling loop above; helper builds the oldKey→newKey map.
-                    await undoManageCollectionsActions(manageCollectionsToUndo);
-                    // Undo created notes (delete from Zotero).
-                    // Reverse for consistency with other undo loops.
-                    for (const action of [...createNotesToUndo].reverse()) {
-                        await undoCreateNoteAction(action);
-                    }
+                    // Single reverse-chronological pass — see
+                    // undoAppliedActionsInReverse for why cross-type ordering
+                    // matters (e.g. create_collection cascades on erase).
+                    await undoAppliedActionsInReverse(actionsInRemovedRuns);
                 }
             }
 
