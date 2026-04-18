@@ -126,7 +126,7 @@ import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
-import { appendRunIfMissing, findResumeChainRoot, findRunForResume, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
+import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 
 // =============================================================================
 // Helper Functions
@@ -454,6 +454,107 @@ async function startResumeRun(
             event: 'error',
             type: options.failureErrorType,
             message: error instanceof Error ? error.message : options.failureMessage,
+            is_retryable: true,
+        });
+        set(activeRunAtom, prev => (newRunId && prev?.id === newRunId ? null : prev));
+        set(isWSChatPendingAtom, false);
+    }
+}
+
+/**
+ * Retry a failed run by deleting it (and any preceding resume-chain runs) and
+ * starting fresh from the original user prompt. Used by auto-retry when the
+ * frontend has only received thinking content — nothing user-visible to keep.
+ */
+async function startAutoRetryRun(
+    get: Getter,
+    set: Setter,
+    failedRunId: string,
+): Promise<void> {
+    const logPrefix = 'autoRetryErroredRunAtom';
+    logger(`${logPrefix}: Retrying from run ${failedRunId}`, 1);
+
+    let newRunId: string | null = null;
+
+    try {
+        const model = get(selectedModelAtom);
+        if (!model) {
+            logger(`${logPrefix}: No model selected`, 1);
+            return;
+        }
+
+        const userId = get(userIdAtom);
+        if (!userId) {
+            logger(`${logPrefix}: No user ID found`, 1);
+            return;
+        }
+
+        const threadRuns = get(threadRunsAtom);
+        const activeRun = get(activeRunAtom);
+        const failedRun = findRunForResume(threadRuns, activeRun, failedRunId);
+
+        if (!failedRun) {
+            logger(`${logPrefix}: Failed run ${failedRunId} not found`, 1);
+            return;
+        }
+
+        if (failedRun.status !== 'error') {
+            logger(`${logPrefix}: Run ${failedRunId} is not in error state`, 1);
+            return;
+        }
+
+        const threadId = get(currentThreadIdAtom) || failedRun.thread_id;
+        if (!threadId) {
+            logger(`${logPrefix}: No thread ID found`, 1);
+            return;
+        }
+
+        // Walk back to the original user message — resume runs carry an empty
+        // user_prompt.content, so we need the root to preserve the question.
+        const allRunsForChain: AgentRun[] = activeRun && !threadRuns.some(r => r.id === activeRun.id)
+            ? [...threadRuns, activeRun]
+            : threadRuns;
+        const rootRun = findResumeChainRoot(failedRun, allRunsForChain);
+
+        // If the chain root lives in threadRuns, truncate from there so the UI
+        // reflects what the backend will delete via retry_run_id.
+        const rootIndex = threadRuns.findIndex(r => r.id === rootRun.id);
+        if (rootIndex >= 0) {
+            const runIdsToRemove = threadRuns.slice(rootIndex).map(r => r.id);
+            set(threadRunsAtom, threadRuns.slice(0, rootIndex));
+            set(threadAgentActionsAtom, prev => prev.filter(a => !runIdsToRemove.includes(a.run_id)));
+            set(citationMetadataAtom, prev => prev.filter(c => !runIdsToRemove.includes(c.run_id ?? '')));
+            set(updateCitationDataAtom);
+        }
+
+        set(prepareForNewRunAtom);
+        set(isWSChatPendingAtom, true);
+
+        const modelOptions = buildModelSelectionOptions(model);
+        const customInstructions = getPref('customInstructions') || undefined;
+
+        const { run: newRun, request } = createAgentRunShell(
+            rootRun.user_prompt,
+            threadId,
+            userId,
+            model.name,
+            modelOptions,
+            model.provider,
+            customInstructions,
+            model.is_custom ? model.custom_model : undefined,
+            rootRun.id,
+        );
+
+        newRunId = newRun.id;
+        set(activeRunAtom, newRun);
+
+        await executeWSRequest(newRun, request, get, set);
+    } catch (error) {
+        logger(`${logPrefix}: Unexpected error:`, error, 1);
+        set(wsErrorAtom, {
+            event: 'error',
+            type: 'auto_retry_error',
+            message: error instanceof Error ? error.message : 'Failed to automatically retry run',
             is_retryable: true,
         });
         set(activeRunAtom, prev => (newRunId && prev?.id === newRunId ? null : prev));
@@ -827,6 +928,7 @@ export interface RetryState {
     waitSeconds?: number | null;
 }
 export const wsRetryAtom = atom<RetryState | null>(null);
+/** Deduplicates concurrent auto-resume/auto-retry scheduling for the same run. */
 const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
 
 // =============================================================================
@@ -1157,15 +1259,37 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 errorRunId &&
                 !store.get(scheduledAutoResumeRunIdsAtom).has(errorRunId)
             ) {
+                // Retry when only thinking has streamed so far (nothing
+                // user-visible to preserve). Otherwise resume from the
+                // failure point so streamed text/tool calls are kept.
+                //
+                // If the failed run is itself a resume run, always auto-resume
+                // — earlier runs in the resume chain may hold user-visible
+                // content, and a retry would truncate the chain from its root.
+                const failedRun = findRunForResume(
+                    store.get(threadRunsAtom),
+                    store.get(activeRunAtom),
+                    errorRunId,
+                );
+                const retryInsteadOfResume =
+                    !failedRun?.user_prompt.is_resume &&
+                    hasOnlyThinkingParts(failedRun);
+
                 set(scheduledAutoResumeRunIdsAtom, (prev: Set<string>) => {
                     const next = new Set(prev);
                     next.add(errorRunId);
                     return next;
                 });
 
-                setTimeout(() => {
+                // Run synchronously so the replacement run is set in the
+                // same batch as the error state — React renders once with the
+                // final state, avoiding an intermediate flash of the error or
+                // resume placeholder.
+                if (retryInsteadOfResume) {
+                    store.set(autoRetryErroredRunAtom, errorRunId);
+                } else {
                     store.set(autoResumeErroredRunAtom, errorRunId);
-                }, 0);
+                }
             }
         },
 
@@ -2173,6 +2297,28 @@ export const autoResumeErroredRunAtom = atom(
                 failureErrorType: 'auto_resume_error',
                 failureMessage: 'Failed to automatically resume run',
             });
+        } finally {
+            set(scheduledAutoResumeRunIdsAtom, (prev: Set<string>) => {
+                const next = new Set(prev);
+                next.delete(failedRunId);
+                return next;
+            });
+        }
+    }
+);
+
+/**
+ * Auto-retry a failed run from the original user prompt.
+ *
+ * Used when the frontend has received only thinking content (no text or tool
+ * calls) at the time of the error — nothing user-visible to preserve, so we
+ * restart cleanly instead of resuming.
+ */
+export const autoRetryErroredRunAtom = atom(
+    null,
+    async (get, set, failedRunId: string) => {
+        try {
+            await startAutoRetryRun(get, set, failedRunId);
         } finally {
             set(scheduledAutoResumeRunIdsAtom, (prev: Set<string>) => {
                 const next = new Set(prev);
