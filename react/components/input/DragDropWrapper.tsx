@@ -6,6 +6,7 @@ import { isValidAnnotationType } from '../../types/attachments/apiTypes';
 import { addItemToCurrentMessageItemsAtom, addItemsToCurrentMessageItemsAtom, currentMessageFiltersAtom } from '../../atoms/messageComposition';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
+import { getCurrentReader } from '../../utils/readerUtils';
 
 interface DragDropWrapperProps {
     children: React.ReactNode;
@@ -78,15 +79,86 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         }
     }
 
+    // Zotero's reader sidebar doesn't set `zotero/annotation` on dragstart for area
+    // annotations. The <img> preview triggers the browser's native image-drag, which
+    // strips Zotero metadata. Detect this fallback shape via `text/_moz_htmlcontext`
+    // containing `data-sidebar-annotation-id`, then resolve via the current reader's
+    // selectedAnnotationIDs.
+    const isSidebarAnnotationFallback = (e: React.DragEvent<HTMLDivElement>): boolean => {
+        const types = e.dataTransfer.types;
+        if (types.includes('zotero/annotation')) return false;
+        if (!types.includes('text/_moz_htmlcontext')) return false;
+        const htmlContext = e.dataTransfer.getData('text/_moz_htmlcontext');
+        return !!htmlContext && htmlContext.includes('data-sidebar-annotation-id');
+    };
+
+    // _moz_htmlcontext carries the drag source's ancestor chain. Treat the innermost
+    // data-sidebar-annotation-id as the authoritative drag source, so right-click drags
+    // (or any drag where the element isn't pre-selected) still resolve correctly.
+    const parseSidebarAnnotationKey = (e: React.DragEvent<HTMLDivElement>): string | null => {
+        if (!e.dataTransfer.types.includes('text/_moz_htmlcontext')) return null;
+        const htmlContext = e.dataTransfer.getData('text/_moz_htmlcontext');
+        if (!htmlContext) return null;
+        const matches = [...htmlContext.matchAll(/data-sidebar-annotation-id="([^"]+)"/g)];
+        if (!matches.length) return null;
+        return matches[matches.length - 1][1];
+    };
+
+    const getSidebarAnnotationKeys = (e: React.DragEvent<HTMLDivElement>): string[] => {
+        const reader = getCurrentReader();
+        if (!reader) return [];
+        const selectedIds: string[] = reader._internalReader?._state?.selectedAnnotationIDs ?? [];
+        const dragSourceKey = parseSidebarAnnotationKey(e);
+        if (dragSourceKey) {
+            // Multi-select drag: drag source is one of the selected annotations.
+            // Otherwise (e.g. right-click drag), honor the drag source alone.
+            return selectedIds.includes(dragSourceKey) ? selectedIds : [dragSourceKey];
+        }
+        return selectedIds;
+    };
+
+    const resolveSidebarAnnotationItems = async (e: React.DragEvent<HTMLDivElement>): Promise<Zotero.Item[]> => {
+        const reader = getCurrentReader();
+        if (!reader) return [];
+        const keys = getSidebarAnnotationKeys(e);
+        if (!keys.length) return [];
+        const attachment = await Zotero.Items.getAsync(reader.itemID);
+        if (!attachment) return [];
+        const items: Zotero.Item[] = [];
+        for (const key of keys) {
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.libraryID, key);
+            if (item && item.isAnnotation() && isValidAnnotationType(item.annotationType)) {
+                items.push(item);
+            }
+        }
+        return items;
+    };
+
+    const getSidebarAnnotationPreview = (e: React.DragEvent<HTMLDivElement>): { count: number; annotationType: _ZoteroTypes.Annotations.AnnotationType | null } => {
+        const reader = getCurrentReader();
+        if (!reader) return { count: 0, annotationType: null };
+        const keys = getSidebarAnnotationKeys(e);
+        const annotations = reader._internalReader?._state?.annotations ?? [];
+        const first = annotations.find((a: any) => keys.includes(a.id));
+        return {
+            count: keys.length,
+            annotationType: first?.type ?? null
+        };
+    };
+
     // Handle drag events
     const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
         e.stopPropagation();
 
+        const sidebarFallback = isSidebarAnnotationFallback(e);
+
         const itemCount = e.dataTransfer.types.includes('zotero/item')
             ? e.dataTransfer.getData('zotero/item').split(',').length
             : e.dataTransfer.types.includes('zotero/annotation')
             ? JSON.parse(e.dataTransfer.getData('zotero/annotation')).length
+            : sidebarFallback
+            ? getSidebarAnnotationPreview(e).count
             : 0;
 
         if (itemCount > maxAddAttachmentToMessage) {
@@ -95,12 +167,13 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             showErrorMessage(`You can add up to ${maxAddAttachmentToMessage} items at a time.`);
             return;
         }
-        
+
         // Set appropriate drop effect
         if (
-            e.dataTransfer.types.includes('zotero/annotation') || 
+            e.dataTransfer.types.includes('zotero/annotation') ||
             e.dataTransfer.types.includes('zotero/item') ||
-            e.dataTransfer.types.includes('zotero/collection')
+            e.dataTransfer.types.includes('zotero/collection') ||
+            sidebarFallback
         ) {
             e.dataTransfer.dropEffect = 'copy';
         }
@@ -186,18 +259,32 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 console.error("Error handling item data:", error);
             }
         }
+
+        else if (sidebarFallback) {
+            const { count, annotationType } = getSidebarAnnotationPreview(e);
+            if (count > 0) {
+                setObjectIcon(getObjectIcon(annotationType ?? 'image'));
+                setIsDragging(true);
+                setDragType('annotation');
+                setDragCount(count);
+            }
+        }
     };
 
     const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
         e.stopPropagation();
 
+        const sidebarFallback = isSidebarAnnotationFallback(e);
+
         const itemCount = e.dataTransfer.types.includes('zotero/item')
             ? e.dataTransfer.getData('zotero/item').split(',').length
             : e.dataTransfer.types.includes('zotero/annotation')
             ? JSON.parse(e.dataTransfer.getData('zotero/annotation')).length
+            : sidebarFallback
+            ? getSidebarAnnotationPreview(e).count
             : 0;
-        
+
         if (itemCount > maxAddAttachmentToMessage) {
             e.dataTransfer.dropEffect = 'none';
             if (isDragging) setIsDragging(false);
@@ -268,7 +355,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 if (itemIDs) {
                     const ids = itemIDs.split(',').map(id => parseInt(id));
                     setDragCount(ids.length);
-                    
+
                     // Set icon based on first item
                     if (ids.length > 0) {
                         const item = Zotero.Items.get(ids[0]);
@@ -282,6 +369,16 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 }
             } catch (error) {
                 console.error("Error handling item data:", error);
+            }
+        }
+
+        else if (sidebarFallback) {
+            const { count, annotationType } = getSidebarAnnotationPreview(e);
+            if (count > 0) {
+                setObjectIcon(getObjectIcon(annotationType ?? 'image'));
+                setIsDragging(true);
+                setDragType('annotation');
+                setDragCount(count);
             }
         }
     };
@@ -309,11 +406,15 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         setDragType(null);
         setDragCount(0);
 
+        const sidebarFallback = isSidebarAnnotationFallback(e);
+
         // Do not proceed if the number of items is too large
         const itemCount = e.dataTransfer.types.includes('zotero/item')
             ? e.dataTransfer.getData('zotero/item').split(',').length
             : e.dataTransfer.types.includes('zotero/annotation')
             ? JSON.parse(e.dataTransfer.getData('zotero/annotation')).length
+            : sidebarFallback
+            ? getSidebarAnnotationPreview(e).count
             : 0;
 
         if (itemCount > maxAddAttachmentToMessage) {
@@ -373,8 +474,23 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 const attachment = Zotero.Items.get(data.attachmentItemID);
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.libraryID, data.id);
                 // Skip if item is not an annotation or has an invalid annotation type
-                if(!item || !item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
+                if(!item || !item.isAnnotation() || !isValidAnnotationType(item.annotationType)) continue;
                 // Add the annotation to the current message items
+                await addItemToCurrentMessageItems(item);
+            }
+            return;
+        }
+
+        // Fallback for area annotations dragged from the reader sidebar, where Zotero's
+        // <img> preview triggers the browser's native image-drag and drops `zotero/annotation`.
+        // Resolve from the current reader's selected annotation IDs instead.
+        if (sidebarFallback) {
+            const items = await resolveSidebarAnnotationItems(e);
+            if (!items.length) {
+                showErrorMessage("Annotation not supported");
+                return;
+            }
+            for (const item of items) {
                 await addItemToCurrentMessageItems(item);
             }
             return;
