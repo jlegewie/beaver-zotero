@@ -6,11 +6,13 @@
  * Execution model:
  *   Phase 1 — Identifier match (DOI + ISBN) in a single SQL pass each.
  *   Phase 2 — Title match for items not already matched by Phase 1:
- *     2a. Exact-value title fast path: uses the UNIQUE index on
+ *     2a. Exact-value title fast path: BINARY equality against
  *         itemDataValues.value. Catches most titles that match byte-for-byte
  *         between input source (OpenAlex, etc.) and the Zotero DB.
- *     2b. Keyword LIKE fallback — only for normalized input titles NOT
- *         resolved by 2a (diacritics / punctuation / casing mismatch).
+ *     2b. Keyword LIKE scan: runs for every normalized input title (not
+ *         just ones 2a missed). 2a can return a wrong candidate that
+ *         Phase 3 later rejects; 2b must still scan so a case/whitespace
+ *         variant isn't missed. Dedup on itemID.
  *     2c. Meta fetch — DOI / ISBN / date / creators — for candidate itemIDs.
  *   Phase 3 — In-memory fuzzy match (title / DOI / ISBN / year / creator).
  *
@@ -295,7 +297,11 @@ function prepareTitleSearch(items: BatchReferenceCheckItem[]) {
         }
     }
 
-    // Original-case title strings to pass into the exact-match SQL IN()
+    // Original-case title strings to pass into the exact-match SQL IN().
+    // We .trim() input but not DB values — if a DB row has leading/trailing
+    // whitespace (rare, can come from imports) the BINARY equality in 2a
+    // misses it. 2b's keyword LIKE picks those up, so correctness is
+    // preserved.
     const originalTitleStrings = new Set<string>();
     for (const entries of normalizedInputTitles.values()) {
         for (const it of entries) {
@@ -374,12 +380,11 @@ async function batchFindTitleByExactValue(
 }
 
 /**
- * Phase 2b: Keyword LIKE fallback.
+ * Phase 2b: Keyword LIKE scan.
  *
- * Runs only for normalized input titles NOT resolved by the exact-match fast
- * path. Uses LOWER(title) LIKE '%kw%' to catch diacritic / casing / punctuation
- * mismatches. Each remaining input title contributes a single keyword
- * (longest ASCII word) to keep the OR clause count small.
+ * Runs for normalized input title. Each input title contributes a single keyword
+ * (longest ASCII word) to keep the OR clause count small. LOWER(title) LIKE '%kw%'
+ * catches diacritic / casing / punctuation / whitespace mismatches.
  *
  * Title-only SELECT (no LEFT JOINs to DOI/ISBN/date) keeps this query
  * simple; meta is fetched for matched itemIDs separately.
@@ -387,16 +392,16 @@ async function batchFindTitleByExactValue(
 async function batchFindTitleByKeyword(
     allTitleFieldIDs: number[],
     libraryIds: number[],
-    unresolvedNormalizedTitles: Map<string, BatchReferenceCheckItem[]>
+    normalizedInputTitles: Map<string, BatchReferenceCheckItem[]>
 ): Promise<TitleMatchRow[]> {
     const rows: TitleMatchRow[] = [];
-    if (unresolvedNormalizedTitles.size === 0 || libraryIds.length === 0 || allTitleFieldIDs.length === 0) {
+    if (normalizedInputTitles.size === 0 || libraryIds.length === 0 || allTitleFieldIDs.length === 0) {
         return rows;
     }
 
-    // One keyword per unresolved title (longest ASCII word)
+    // One keyword per input title (longest ASCII word)
     const titleKeywordSets: string[][] = [];
-    for (const entries of unresolvedNormalizedTitles.values()) {
+    for (const entries of normalizedInputTitles.values()) {
         const originalTitle = entries[0].data.title;
         if (originalTitle) {
             const keywords = extractFilterKeywords(originalTitle, 1);
@@ -448,7 +453,7 @@ async function batchFindTitleByKeyword(
             const key = row.getResultByIndex(2);
             const title = row.getResultByIndex(3);
             const normalized = normalizeString(title);
-            if (normalized && unresolvedNormalizedTitles.has(normalized)) {
+            if (normalized && normalizedInputTitles.has(normalized)) {
                 rows.push({ itemID, libraryID, key, normalizedTitle: normalized });
             }
         }
@@ -507,9 +512,15 @@ async function fetchMetaForItems(
                     meta.doi = value;
                 } else if (fieldID === isbnFieldID) {
                     meta.isbn = value;
-                } else {
-                    // Any date-ish field. Prefer the first seen value per item.
-                    if (meta.date == null) meta.date = value;
+                } else if (dateFieldID && fieldID === dateFieldID) {
+                    // Base 'date' field always wins over mapped date fields.
+                    meta.date = value;
+                } else if (meta.date == null) {
+                    // Mapped date field (e.g. filingDate, issueDate) — only
+                    // used if the base 'date' hasn't been seen yet, and
+                    // still deterministic because a base 'date' arriving
+                    // later will overwrite this.
+                    meta.date = value;
                 }
             }
         });

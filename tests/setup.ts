@@ -50,9 +50,23 @@ const pathUtils = {
 // Unit tests run in the Node environment by default. Only suites that opt into
 // a DOM environment should expose `window`, so avoid eagerly importing jsdom
 // here. That import currently fails in this toolchain before any tests load.
-const fallbackWindow = {};
+// Build a lazy, jsdom-backed window for tests that need real DOM APIs
+// (e.g. ProseMirror normalization in the notes suites). We try to load
+// jsdom at first access; if it isn't available or fails to initialize,
+// the fallback is an empty object and DOM-dependent tests will surface
+// their own descriptive errors rather than a stack-overflow recursion.
+let fallbackWindow: any = null;
 function getTestWindow() {
-    return typeof (globalThis as any).Zotero.getMainWindow !== 'undefined' ? (globalThis as any).Zotero.getMainWindow() : fallbackWindow;
+    if (fallbackWindow) return fallbackWindow;
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { JSDOM } = require('jsdom');
+        const dom = new JSDOM('<!doctype html><html><body></body></html>');
+        fallbackWindow = dom.window;
+    } catch {
+        fallbackWindow = {};
+    }
+    return fallbackWindow;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,6 +84,7 @@ const TEST_FIELD_IDS: Record<string, number> = {
     date: 14,
     publicationTitle: 12,   // a title-mapped field on journalArticle
     bookTitle: 90,          // a title-mapped field on bookSection
+    filingDate: 150,        // a date-mapped field for testing precedence
 };
 
 const TEST_TYPE_IDS: Record<string, number> = {
@@ -143,7 +158,7 @@ function testRemoveDiacritics(s: string): string {
         getID: vi.fn((name: string) => TEST_FIELD_IDS[name] ?? 0),
         getTypeFieldsFromBase: vi.fn((baseField: string) => {
             if (baseField === 'title') return [TEST_FIELD_IDS.publicationTitle, TEST_FIELD_IDS.bookTitle];
-            if (baseField === 'date') return [];
+            if (baseField === 'date') return [TEST_FIELD_IDS.filingDate];
             return [];
         }),
     },

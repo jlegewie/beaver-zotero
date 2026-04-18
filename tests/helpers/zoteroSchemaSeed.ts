@@ -19,7 +19,8 @@ export interface SeededItem {
     titleFieldName?: 'title' | 'publicationTitle' | 'bookTitle';  // for testing mapped fields
     doi?: string;
     isbn?: string;
-    date?: string;
+    date?: string;           // stored in 'date' field
+    filingDate?: string;     // stored in mapped 'filingDate' field, for date-precedence tests
     creators?: string[];     // last names in order
     deleted?: boolean;
 }
@@ -161,6 +162,7 @@ export async function seedZoteroItem(
     await addField('DOI', item.doi);
     await addField('ISBN', item.isbn);
     await addField('date', item.date);
+    await addField('filingDate', item.filingDate);
 
     if (item.deleted) {
         await conn.queryAsync(`INSERT INTO deletedItems (itemID) VALUES (?)`, [itemID]);

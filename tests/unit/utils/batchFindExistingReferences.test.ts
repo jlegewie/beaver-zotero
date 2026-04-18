@@ -362,6 +362,45 @@ describe('batchFindExistingReferences — deleted / wrong-type items skipped', (
     });
 });
 
+describe('batchFindExistingReferences — mapped title field', () => {
+    it('finds items whose title is stored in a title-mapped field (not the base title field)', async () => {
+        // Seed an item whose title lives in the `publicationTitle` field
+        // (a field that `getTypeFieldsFromBase('title')` returns in the
+        // test setup). The real code path queries all title-mapped field IDs.
+        await seedZoteroItem(conn, ctx, {
+            title: 'Journal Title As Title',
+            titleFieldName: 'publicationTitle',
+            creators: ['Editor'],
+        });
+
+        const items = [makeItem('a', { title: 'Journal Title As Title', creators: ['Editor'] })];
+        const { results } = await batchFindExistingReferences(items, [1]);
+
+        expect(results[0].item).not.toBeNull();
+    });
+});
+
+describe('batchFindExistingReferences — date field precedence', () => {
+    it('prefers base date over mapped date fields regardless of row order', async () => {
+        // Seed an item that has BOTH a base 'date' and a mapped 'filingDate'.
+        // findMatchInCandidates parses the year from whatever meta.date
+        // contains — the year check tolerates ±1, so we pick values that
+        // differ by more than 1 so the wrong choice would reject the match.
+        await seedZoteroItem(conn, ctx, {
+            title: 'Dated Work',
+            creators: ['Author'],
+            date: '2020',
+            filingDate: '2010',
+        });
+
+        // Input claims 2020 — should match only if base 'date' (2020) wins.
+        const items = [makeItem('a', { title: 'Dated Work', creators: ['Author'], date: '2020' })];
+        const { results } = await batchFindExistingReferences(items, [1]);
+
+        expect(results[0].item).not.toBeNull();
+    });
+});
+
 describe('batchFindExistingReferences — chunking', () => {
     it('handles more than 500 items without exceeding the SQL variable limit', async () => {
         // Seed 600 items with distinct titles and matching creators.
