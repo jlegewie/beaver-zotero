@@ -11,6 +11,8 @@ import { validateEditNoteAction } from './actions/editNote';
 import { validateEditMetadataAction } from './actions/editMetadata';
 import { validateOrganizeItemsAction } from './actions/organizeItems';
 import { validateCreateNoteAction } from './actions/createNote';
+import { validateManageTagsAction } from './actions/manageTags';
+import { validateManageCollectionsAction } from './actions/manageCollections';
 
 
 /**
@@ -46,6 +48,14 @@ export async function handleAgentActionValidateRequest(
 
         if (request.action_type === 'create_note') {
             return await validateCreateNoteAction(request);
+        }
+
+        if (request.action_type === 'manage_tags') {
+            return await validateManageTagsAction(request);
+        }
+
+        if (request.action_type === 'manage_collections') {
+            return await validateManageCollectionsAction(request);
         }
 
         // Unsupported action type.

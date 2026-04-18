@@ -8,6 +8,8 @@ import { executeEditNoteAction } from './actions/editNote';
 import { executeEditMetadataAction } from './actions/editMetadata';
 import { executeOrganizeItemsAction } from './actions/organizeItems';
 import { executeCreateNoteAction } from './actions/createNote';
+import { executeManageTagsAction } from './actions/manageTags';
+import { executeManageCollectionsAction } from './actions/manageCollections';
 import { TimingAccumulator } from '../../utils/timing';
 
 
@@ -56,6 +58,10 @@ export async function handleAgentActionExecuteRequest(
             result = await executeEditNoteAction(request, ctx);
         } else if (request.action_type === 'create_note') {
             result = await executeCreateNoteAction(request, ctx);
+        } else if (request.action_type === 'manage_tags') {
+            result = await executeManageTagsAction(request, ctx);
+        } else if (request.action_type === 'manage_collections') {
+            result = await executeManageCollectionsAction(request, ctx);
         } else {
             return {
                 type: 'agent_action_execute_response',

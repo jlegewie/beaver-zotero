@@ -195,6 +195,95 @@ export interface OrganizeItemsResultData {
 }
 
 // =============================================================================
+// Manage Tags Types
+// =============================================================================
+
+/** Tag color snapshot (mirrors Zotero.Tags.getColor output) */
+export interface TagColorSnapshot {
+    color: string;
+    position?: number;
+}
+
+/**
+ * Proposed data for a library-wide tag operation.
+ *
+ * Rename merges if new_name already exists (Zotero-native atomic merge).
+ * This is the immutable agent proposal; it does NOT carry pre-action
+ * snapshots. Snapshots live on ManageTagsResultData and are captured at
+ * execute time so a re-apply after manual library edits produces a fresh,
+ * correct snapshot for the next undo.
+ */
+export interface ManageTagsProposedData {
+    library_id: number;
+    action: 'rename' | 'delete';
+    name: string;
+    new_name?: string | null;
+}
+
+/**
+ * Result data after applying a manage_tags action.
+ *
+ * Carries the authoritative pre-apply snapshot (affected_item_ids, old_color,
+ * is_merge), captured at execute time. Undo consumes these fields. A re-apply
+ * overwrites them with a fresh snapshot.
+ */
+export interface ManageTagsResultData {
+    library_id: number;
+    action: 'rename' | 'delete';
+    name: string;
+    new_name?: string | null;
+    items_affected: number;
+    /** Items that had the tag immediately before the execute op */
+    affected_item_ids?: string[];
+    /** Tag color at execute time (restored on undo) */
+    old_color?: TagColorSnapshot | null;
+    /** True iff a rename merged into an existing tag (re-checked at execute) */
+    is_merge?: boolean | null;
+}
+
+// =============================================================================
+// Manage Collections Types
+// =============================================================================
+
+/**
+ * Proposed data for a library-wide collection operation.
+ *
+ * This is the immutable agent proposal; it does NOT carry pre-action
+ * snapshots. Snapshots live on ManageCollectionsResultData and are captured
+ * at execute time so a re-apply after manual library edits produces a fresh,
+ * correct snapshot for the next undo.
+ */
+export interface ManageCollectionsProposedData {
+    library_id: number;
+    action: 'rename' | 'move' | 'delete';
+    collection_key: string;
+    new_name?: string | null;
+    /** Target parent key for move; null means top-level */
+    new_parent_key?: string | null;
+}
+
+/**
+ * Result data after applying a manage_collections action.
+ *
+ * Carries the authoritative pre-apply snapshot (old_name, old_parent_key)
+ * captured at execute time; a re-apply overwrites it with a fresh snapshot.
+ * Delete undo is a pure restore-from-trash — no item-level snapshot needed.
+ */
+export interface ManageCollectionsResultData {
+    library_id: number;
+    action: 'rename' | 'move' | 'delete';
+    collection_key: string;
+    new_name?: string | null;
+    new_parent_key?: string | null;
+    /** Items in the collection at apply time (delete only, for preview display) */
+    items_affected?: number | null;
+    /** Collection name immediately before the execute op (undo + rejected-preview fallback) */
+    old_name?: string | null;
+    /** Parent key immediately before the execute op (undo) */
+    old_parent_key?: string | null;
+}
+
+// =============================================================================
 // Confirm Extraction Types
 // =============================================================================
 
@@ -237,7 +326,7 @@ export interface ConfirmExternalSearchProposedData {
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
 
 /**
  * Union type for all proposed data types
@@ -281,6 +370,8 @@ export type ActionResultDataType =
     CreateItemResultData |
     CreateCollectionResultData |
     OrganizeItemsResultData |
+    ManageTagsResultData |
+    ManageCollectionsResultData |
     EditMetadataResultData |
     EditNoteResultData;
 
