@@ -20,6 +20,7 @@ const mockCollection: any = {
     name: 'Original',
     key: 'ABCD2345',
     parentKey: null,
+    deleted: false,
     saveTx: vi.fn(async () => undefined),
     eraseTx: vi.fn(async () => undefined),
     getChildItems: vi.fn(() => [] as number[]),
@@ -59,6 +60,7 @@ beforeEach(() => {
     // Reset collection state
     mockCollection.name = 'Original';
     mockCollection.parentKey = null;
+    mockCollection.deleted = false;
     mockCollection.getChildItems.mockReturnValue([]);
     mockCollection.hasChildCollections.mockReturnValue(false);
     mockCollection.getChildCollections.mockReturnValue([]);
@@ -344,8 +346,9 @@ describe('validateManageCollectionsAction', () => {
         expect(resp.error).toContain("'Results'");
         expect(resp.error).toContain('CHILD002');
         expect(resp.error).toContain('0 items');
-        // eraseTx must NOT have been called from validation.
-        expect(mockCollection.eraseTx).not.toHaveBeenCalled();
+        // Validate must be side-effect-free.
+        expect(mockCollection.saveTx).not.toHaveBeenCalled();
+        expect(mockCollection.deleted).toBe(false);
     });
 });
 
@@ -390,7 +393,7 @@ describe('executeManageCollectionsAction', () => {
         expect(resp.result_data?.old_parent_key).toBe('SOMEPRNT');
     });
 
-    it('delete re-snapshots items at execute time and returns them in result_data', async () => {
+    it('delete soft-deletes via collection.deleted=true + saveTx, and never calls eraseTx', async () => {
         mockCollection.getChildItems.mockReturnValue([42, 43]);
         mockCollection.hasChildCollections.mockReturnValue(false);
         const resp = await executeManageCollectionsAction({
@@ -404,9 +407,12 @@ describe('executeManageCollectionsAction', () => {
             },
         } as any, ctx);
         expect(resp.success).toBe(true);
-        expect(mockCollection.eraseTx).toHaveBeenCalled();
+        expect(mockCollection.deleted).toBe(true);
+        expect(mockCollection.saveTx).toHaveBeenCalled();
+        expect(mockCollection.eraseTx).not.toHaveBeenCalled();
         expect(resp.result_data?.items_affected).toBe(2);
-        expect(resp.result_data?.old_item_ids).toHaveLength(2);
+        // old_item_ids has been removed from the result shape; confirm absence.
+        expect((resp.result_data as any)?.old_item_ids).toBeUndefined();
     });
 
     it('refuses delete at execute time if subcollections appeared between validate and execute', async () => {
@@ -431,6 +437,8 @@ describe('executeManageCollectionsAction', () => {
         } as any, ctx);
         expect(resp.success).toBe(false);
         expect(resp.error_code).toBe('has_subcollections');
+        expect(mockCollection.saveTx).not.toHaveBeenCalled();
+        expect(mockCollection.deleted).toBe(false);
         expect(mockCollection.eraseTx).not.toHaveBeenCalled();
     });
 

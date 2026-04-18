@@ -6,14 +6,12 @@
  *   - 'move':   reparents the collection. new_parent_key=null means top-level.
  *               Rejects cycles (moving into self or a descendant) and
  *               cross-library moves (Zotero requires copy+delete).
- *   - 'delete': erases the collection (eraseTx). Items in the collection
- *               are NOT deleted — they become unfiled. Refuses if the
- *               collection has direct subcollections — the agent should
- *               delete or move them first so the user has explicit control
- *               (recursive delete cannot be cleanly undone).
+ *   - 'delete': soft-deletes the collection (collection.deleted = true; saveTx)
+ *               Refuses if the collection has direct subcollections.
  *
- * Snapshots (old_name, old_parent_key, old_item_ids) are captured at execute
- * time to support undo.
+ * Snapshots (old_name, old_parent_key) are captured at execute time to
+ * support undo for rename/move. Delete undo is a plain restore-from-trash
+ * and doesn't need an item-level snapshot.
  */
 
 import {
@@ -26,8 +24,6 @@ import { getDeferredToolPreference, isLibrarySearchable, getCollectionByIdOrName
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
 
-const MAX_SNAPSHOT_ITEMS = 5000;
-
 /**
  * Parse a collection identifier that may be a plain 8-char Zotero key or a
  * compound '<libraryID>-<key>' string. Returns { libraryId, key } where
@@ -39,17 +35,6 @@ function parseCollectionRef(ref: string): { libraryId: number | null; key: strin
         return { libraryId: parseInt(compound[1], 10), key: compound[2] };
     }
     return { libraryId: null, key: ref };
-}
-
-
-async function itemIdsToKeys(libraryID: number, itemIDs: number[]): Promise<string[]> {
-    if (itemIDs.length === 0) return [];
-    const items = await Zotero.Items.getAsync(itemIDs);
-    const valid = items.filter((i): i is Zotero.Item => i !== null);
-    if (valid.length > 0) {
-        await Zotero.Items.loadDataTypes(valid, ['primaryData']);
-    }
-    return valid.map((item) => `${libraryID}-${item.key}`);
 }
 
 
@@ -316,18 +301,7 @@ export async function validateManageCollectionsAction(
                 preference: 'always_ask',
             };
         }
-        const childItemIDs = collection.getChildItems(true, false) as number[];
-        if (childItemIDs.length > MAX_SNAPSHOT_ITEMS) {
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: `Collection '${collection.name}' contains ${childItemIDs.length} items (over the ${MAX_SNAPSHOT_ITEMS} safety cap for undo snapshot). Ask the user to perform this deletion in Zotero directly.`,
-                error_code: 'too_many_items',
-                preference: 'always_ask',
-            };
-        }
-        oldItemCount = childItemIDs.length;
+        oldItemCount = (collection.getChildItems(true, false) as number[]).length;
     }
 
     const preference = getDeferredToolPreference('manage_collections');
@@ -399,11 +373,12 @@ export async function executeManageCollectionsAction(
         // that the next undo can correctly reverse.
         const oldName: string = collection.name;
         const oldParentKey: string | null = collection.parentKey ? String(collection.parentKey) : null;
-        let oldItemIds: string[] | undefined;
+        let itemsAffected: number | null = null;
         if (action === 'delete') {
             // Defensive re-check: subcollections may have been added between
             // validation and execute (manual edit, race). Refuse here too so
-            // we never silently delete a subtree that undo cannot restore.
+            // the undo contract ("single collection, items stay attached")
+            // always holds.
             if (collection.hasChildCollections(false)) {
                 const subs = summarizeChildCollections(collection);
                 const list = formatSubcollectionList(subs);
@@ -417,17 +392,7 @@ export async function executeManageCollectionsAction(
                     error_code: 'has_subcollections',
                 };
             }
-            const childItemIDs = collection.getChildItems(true, false) as number[];
-            if (childItemIDs.length > MAX_SNAPSHOT_ITEMS) {
-                return {
-                    type: 'agent_action_execute_response',
-                    request_id: request.request_id,
-                    success: false,
-                    error: `Collection '${oldName}' contains ${childItemIDs.length} items (over the ${MAX_SNAPSHOT_ITEMS} safety cap for undo snapshot).`,
-                    error_code: 'too_many_items',
-                };
-            }
-            oldItemIds = await itemIdsToKeys(library_id, childItemIDs);
+            itemsAffected = (collection.getChildItems(true, false) as number[]).length;
         }
 
         if (action === 'rename') {
@@ -453,8 +418,15 @@ export async function executeManageCollectionsAction(
             logger(`executeManageCollectionsAction: Moved collection ${library_id}-${collection_key} to parent ${new_parent_key ?? 'top-level'}`, 1);
         } else if (action === 'delete') {
             checkAborted(ctx, 'manage_collections:before_delete');
-            await collection.eraseTx();
-            logger(`executeManageCollectionsAction: Deleted collection ${library_id}-${collection_key}`, 1);
+            // Soft-delete (trash): collection is hidden from the library view,
+            // items stay attached via collectionItems. Reversible with
+            // `collection.deleted = false; saveTx()` until the user explicitly
+            // empties the trash — Zotero's `trashAutoEmptyDays` timer only
+            // auto-empties trashed items, not trashed collections
+            // (see Zotero.Items.startEmptyTrashTimer in items.js).
+            (collection as any).deleted = true;
+            await collection.saveTx();
+            logger(`executeManageCollectionsAction: Trashed collection ${library_id}-${collection_key}`, 1);
         } else {
             return {
                 type: 'agent_action_execute_response',
@@ -475,10 +447,9 @@ export async function executeManageCollectionsAction(
                 collection_key,
                 new_name: new_name ?? null,
                 new_parent_key: new_parent_key ?? null,
-                items_affected: action === 'delete' ? (oldItemIds?.length ?? 0) : null,
+                items_affected: itemsAffected,
                 old_name: oldName,
                 old_parent_key: oldParentKey,
-                old_item_ids: oldItemIds,
             },
         };
     } catch (error) {

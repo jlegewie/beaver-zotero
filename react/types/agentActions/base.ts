@@ -248,7 +248,6 @@ export interface ManageTagsResultData {
 /**
  * Proposed data for a library-wide collection operation.
  *
- * Collection delete removes the folder only; items become unfiled.
  * This is the immutable agent proposal; it does NOT carry pre-action
  * snapshots. Snapshots live on ManageCollectionsResultData and are captured
  * at execute time so a re-apply after manual library edits produces a fresh,
@@ -261,22 +260,14 @@ export interface ManageCollectionsProposedData {
     new_name?: string | null;
     /** Target parent key for move; null means top-level */
     new_parent_key?: string | null;
-    /**
-     * Key of the collection recreated when this delete was undone. Preserved
-     * from result_data at undo time (which is otherwise cleared) so a later
-     * undo of a sibling/child action can translate its old_parent_key
-     * through a key-map when the original parent's key is gone.
-     */
-    undo_new_collection_key?: string | null;
 }
 
 /**
  * Result data after applying a manage_collections action.
  *
- * Carries the authoritative pre-apply snapshot (old_name, old_parent_key,
- * old_item_ids), captured at execute time. Undo consumes these fields.
- * A re-apply overwrites them with a fresh snapshot. Delete is refused when
- * subcollections exist, so the snapshot never has to describe a subtree.
+ * Carries the authoritative pre-apply snapshot (old_name, old_parent_key)
+ * captured at execute time; a re-apply overwrites it with a fresh snapshot.
+ * Delete undo is a pure restore-from-trash — no item-level snapshot needed.
  */
 export interface ManageCollectionsResultData {
     library_id: number;
@@ -284,16 +275,12 @@ export interface ManageCollectionsResultData {
     collection_key: string;
     new_name?: string | null;
     new_parent_key?: string | null;
-    /** Items in the collection at apply time (delete only) */
+    /** Items in the collection at apply time (delete only, for preview display) */
     items_affected?: number | null;
-    /** Key of the recreated collection when undoing a delete (new key differs) */
-    new_collection_key?: string | null;
-    /** Collection name immediately before the execute op (undo) */
+    /** Collection name immediately before the execute op (undo + rejected-preview fallback) */
     old_name?: string | null;
     /** Parent key immediately before the execute op (undo) */
     old_parent_key?: string | null;
-    /** Items immediately before delete (undo) */
-    old_item_ids?: string[];
 }
 
 // =============================================================================

@@ -2,7 +2,6 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus } from '../../agents/types';
 import {
-    AgentAction,
     PendingApproval,
     getAgentActionsByToolcallAtom,
     removePendingApprovalAtom,
@@ -10,10 +9,7 @@ import {
     ackAgentActionsAtom,
     rejectAgentActionAtom,
     setAgentActionsToErrorAtom,
-    threadAgentActionsAtom,
-    isManageCollectionsAgentAction,
 } from '../../agents/agentActions';
-import { store } from '../../store';
 import {
     approvalResponseIntentsAtom,
     isWSChatPendingAtom,
@@ -422,43 +418,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone manage_tags action ${action.id}`, 1);
             } else if (toolName === 'manage_collections') {
-                // Build oldKey→newKey map from earlier-undone manage_collections
-                // deletes in this thread. `undo_new_collection_key` on proposed_data
-                // is preserved by undoAgentActionAtom from result_data.new_collection_key
-                // before result_data is cleared.
-                //
-                // Limitation: unlike the regenerate flow, this user-driven path
-                // cannot enforce reverse-chronological order. The map only
-                // resolves a child's former parent when the user has already
-                // undone the parent's delete — undoing the child first will
-                // recreate it at top-level, and a later parent undo will not
-                // re-home it.
-                const allActions = store.get(threadAgentActionsAtom);
-                const collectionKeyMap = new Map<string, string>();
-                for (const other of allActions) {
-                    if (!isManageCollectionsAgentAction(other) || other.id === action.id) continue;
-                    const p = other.proposed_data;
-                    if (p.action === 'delete' && p.undo_new_collection_key) {
-                        collectionKeyMap.set(p.collection_key, p.undo_new_collection_key);
-                    }
-                }
-                const undoRes = await undoManageCollectionsAction(action, collectionKeyMap);
-                // Stash the recreated collection's new key onto result_data so
-                // undoAgentActionAtom can preserve it into proposed_data.
-                // executeManageCollectionsAction never sets new_collection_key
-                // (it's a post-undo artifact), so without this write the
-                // preservation guard would never fire and the keyMap above
-                // would always be empty.
-                if (undoRes?.action === 'delete' && undoRes.new_collection_key) {
-                    const newKey = undoRes.new_collection_key;
-                    store.set(threadAgentActionsAtom, (prev: AgentAction[]) =>
-                        prev.map((a: AgentAction) =>
-                            a.id === action.id
-                                ? { ...a, result_data: { ...(a.result_data ?? {}), new_collection_key: newKey } }
-                                : a
-                        )
-                    );
-                }
+                await undoManageCollectionsAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone manage_collections action ${action.id}`, 1);
             } else if (toolName === 'create_note') {
