@@ -44,6 +44,7 @@ vi.mock('../../../src/utils/noteHtmlEntities', () => ({
     decodeHtmlEntities: vi.fn((s: string) => s),
     encodeTextEntities: vi.fn((s: string) => s),
     ENTITY_FORMS: ['hex', 'decimal', 'named'],
+    normalizeWS: vi.fn((s: string) => s.replace(/\s+/g, ' ').trim()),
 }));
 
 vi.mock('../../../src/utils/noteWrapper', () => ({
