@@ -113,7 +113,7 @@ export const ManageTagsPreview: React.FC<ManageTagsPreviewProps> = ({
                             {isApplied ? 'Deleted' : 'Delete'}
                         </span>
                     )}
-                    <TagPill name={name} />
+                    <TagPill name={name} strike={isApplied && action === 'delete'} />
                     {action === 'rename' && newName && (
                         <>
                             <span className="scale-75 display-flex opacity-60">

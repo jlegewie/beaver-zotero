@@ -154,7 +154,7 @@ export const ManageCollectionsPreview: React.FC<ManageCollectionsPreviewProps> =
                             {isApplied ? 'Deleted' : 'Delete'}
                         </span>
                     )}
-                    <CollectionPill name={collectionName} />
+                    <CollectionPill name={collectionName} strike={isApplied && action === 'delete'} />
                     {action === 'rename' && newName && (
                         <>
                             <span className="scale-75 display-flex opacity-60">
