@@ -5,6 +5,7 @@ import {
     appendRunIfMissing,
     findResumeChainRoot,
     findRunForResume,
+    hasOnlyThinkingParts,
     resolveErrorRunId,
     toRunError,
 } from '../../../react/agents/runResumeHelpers';
@@ -107,6 +108,80 @@ describe('runResumeHelpers', () => {
             // it detects the cycle.
             const root = findResumeChainRoot(runA, [runA, runB]);
             expect([runA, runB]).toContain(root);
+        });
+    });
+
+    describe('hasOnlyThinkingParts', () => {
+        it('returns false for a null run', () => {
+            expect(hasOnlyThinkingParts(null)).toBe(false);
+        });
+
+        it('returns true when the run has no model messages', () => {
+            expect(hasOnlyThinkingParts(makeRun('run-1'))).toBe(true);
+        });
+
+        it('returns true when only thinking parts have streamed', () => {
+            const run = makeRun('run-1');
+            run.model_messages = [
+                {
+                    kind: 'response',
+                    run_id: run.id,
+                    parts: [{ part_kind: 'thinking', content: 'hmm' }],
+                },
+            ];
+            expect(hasOnlyThinkingParts(run)).toBe(true);
+        });
+
+        it('returns false once any text part has streamed', () => {
+            const run = makeRun('run-1');
+            run.model_messages = [
+                {
+                    kind: 'response',
+                    run_id: run.id,
+                    parts: [
+                        { part_kind: 'thinking', content: 'hmm' },
+                        { part_kind: 'text', content: 'partial answer' },
+                    ],
+                },
+            ];
+            expect(hasOnlyThinkingParts(run)).toBe(false);
+        });
+
+        it('returns false once any tool call has streamed', () => {
+            const run = makeRun('run-1');
+            run.model_messages = [
+                {
+                    kind: 'response',
+                    run_id: run.id,
+                    parts: [
+                        {
+                            part_kind: 'tool-call',
+                            tool_name: 'rag_search',
+                            args: {},
+                            tool_call_id: 'tc-1',
+                        },
+                    ],
+                },
+            ];
+            expect(hasOnlyThinkingParts(run)).toBe(false);
+        });
+
+        it('ignores request-kind messages (tool returns, user prompts)', () => {
+            const run = makeRun('run-1');
+            run.model_messages = [
+                {
+                    kind: 'request',
+                    run_id: run.id,
+                    parts: [{ part_kind: 'user-prompt', content: 'question' }],
+                    instructions: '',
+                },
+                {
+                    kind: 'response',
+                    run_id: run.id,
+                    parts: [{ part_kind: 'thinking', content: 'hmm' }],
+                },
+            ];
+            expect(hasOnlyThinkingParts(run)).toBe(true);
         });
     });
 
