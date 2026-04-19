@@ -14,13 +14,9 @@ import {
 } from '../../agents/agentActions';
 import { isWSChatPendingAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
-import {
-    agentActionItemTitlesAtom,
-    setAgentActionItemTitleAtom,
-    toolExpandedAtom,
-    setToolExpandedAtom,
-} from '../../atoms/messageUIState';
 import { addAutoApproveNoteKeyAtom, makeNoteKey } from '../../atoms/editNoteAutoApprove';
+import { useAgentActionExpansion } from '../../hooks/useAgentActionExpansion';
+import { useZoteroItemTitle } from '../../hooks/useZoteroItemTitle';
 import { STATUS_CONFIGS, type ActionStatus } from './agentActionViewHelpers';
 import {
     ArrowDownIcon,
@@ -157,12 +153,15 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         ? `${resolvedTarget.libraryId}-${resolvedTarget.zoteroKey}`
         : `pending:${parts[0]?.tool_call_id ?? 'unknown'}`;
 
-    const itemTitleKey = resolvedTarget
-        ? `${responseIndex}:group:${resolvedTarget.libraryId}-${resolvedTarget.zoteroKey}`
-        : null;
-    const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
-    const noteTitle = itemTitleKey ? (itemTitleMap[itemTitleKey] ?? null) : null;
-    const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
+    const noteTitle = useZoteroItemTitle({
+        libraryId: resolvedTarget?.libraryId ?? null,
+        zoteroKey: resolvedTarget?.zoteroKey ?? null,
+        cacheKey: resolvedTarget
+            ? `${responseIndex}:group:${resolvedTarget.libraryId}-${resolvedTarget.zoteroKey}`
+            : null,
+        resolveTitle: (item) =>
+            item.isNote?.() ? (item.getNoteTitle?.() || '(untitled)') : '(untitled)',
+    });
 
     const pendingApprovalCount = pendingApprovalsForGroup.length;
     const hasPendingApprovals = pendingApprovalCount > 0;
@@ -203,68 +202,14 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
     const aggregateStatus: ActionStatus | 'awaiting' = getOverallEditNoteDisplayStatus(rowStatuses);
 
-    const expansionKey = getEditNoteGroupExpansionKey(runId, responseIndex, parts);
-    const expansionState = useAtomValue(toolExpandedAtom);
-    const setExpanded = useSetAtom(setToolExpandedAtom);
-    const hasExistingExpandState = expansionState[expansionKey] !== undefined;
-    const isExpanded = hasStreamingChild
-        ? false
-        : (expansionState[expansionKey]
-            ?? (hasPendingApprovals || (errorCount > 0 && reapplicableActions.length === 0 && appliedCount === 0)));
-
-    const prevHasPendingApprovalsRef = useRef(hasPendingApprovals);
-    const hasInitializedRef = useRef(false);
-    useEffect(() => {
-        if (!hasInitializedRef.current) {
-            hasInitializedRef.current = true;
-            if (!hasExistingExpandState) {
-                setExpanded({
-                    key: expansionKey,
-                    expanded: hasPendingApprovals || (errorCount > 0 && reapplicableActions.length === 0 && appliedCount === 0),
-                });
-            }
-            prevHasPendingApprovalsRef.current = hasPendingApprovals;
-            return;
-        }
-
-        if (prevHasPendingApprovalsRef.current && !hasPendingApprovals) {
-            setExpanded({ key: expansionKey, expanded: false });
-        } else if (!prevHasPendingApprovalsRef.current && hasPendingApprovals) {
-            setExpanded({ key: expansionKey, expanded: true });
-        }
-        prevHasPendingApprovalsRef.current = hasPendingApprovals;
-    }, [
-        hasPendingApprovals,
-        errorCount,
-        reapplicableActions.length,
-        appliedCount,
-        expansionKey,
-        hasExistingExpandState,
-        setExpanded,
-    ]);
-
-    useEffect(() => {
-        if (!resolvedTarget || !itemTitleKey || noteTitle) return;
-        let cancelled = false;
-        (async () => {
-            try {
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                    resolvedTarget.libraryId,
-                    resolvedTarget.zoteroKey,
-                );
-                if (!item || cancelled) return;
-                setItemTitle({
-                    key: itemTitleKey,
-                    title: item.isNote?.() ? (item.getNoteTitle?.() || '(untitled)') : '(untitled)',
-                });
-            } catch {
-                /* best-effort */
-            }
-        })();
-        return () => {
-            cancelled = true;
-        };
-    }, [resolvedTarget, itemTitleKey, noteTitle, setItemTitle]);
+    const { isExpanded, setExpanded, toggleExpanded } = useAgentActionExpansion({
+        expansionKey: getEditNoteGroupExpansionKey(runId, responseIndex, parts),
+        autoExpandWhen: hasPendingApprovals,
+        initialExpanded:
+            hasPendingApprovals
+            || (errorCount > 0 && reapplicableActions.length === 0 && appliedCount === 0),
+        forceCollapsedWhen: hasStreamingChild,
+    });
 
     const [isLocallyProcessing, setIsLocallyProcessing] = useState(false);
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
@@ -476,7 +421,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             const failureCount = Object.keys(newFailures).length;
             if (failureCount > 0) {
                 setPerEditUndoErrors((prev) => ({ ...prev, ...newFailures }));
-                setExpanded({ key: expansionKey, expanded: true });
+                setExpanded(true);
                 logger(`EditNoteGroupView: ${failureCount} edit_note undo(s) failed for ${noteKeyLabel}`, 1);
             }
         }
@@ -490,7 +435,6 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         markExternalReferenceImported,
         markExternalReferenceDeleted,
         setExpanded,
-        expansionKey,
         noteKeyLabel,
     ]);
 
@@ -550,9 +494,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             return { ...prev, [childToolcallId]: error };
         });
         if (error !== null) {
-            setExpanded({ key: expansionKey, expanded: true });
+            setExpanded(true);
         }
-    }, [setExpanded, expansionKey]);
+    }, [setExpanded]);
 
     useEffect(() => {
         setPerEditUndoErrors((prev) => {
@@ -619,11 +563,6 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         handleApplyAll,
         handleRejectAll,
     ]);
-
-    const toggleExpanded = useCallback(() => {
-        if (hasStreamingChild) return;
-        setExpanded({ key: expansionKey, expanded: !isExpanded });
-    }, [setExpanded, expansionKey, isExpanded, hasStreamingChild]);
 
     const baseConfig = STATUS_CONFIGS[aggregateStatus];
     const headerIcon = (() => {

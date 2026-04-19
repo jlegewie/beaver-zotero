@@ -16,14 +16,9 @@ import {
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
 } from '../../atoms/agentRunAtoms';
-import {
-    agentActionItemTitlesAtom,
-    setAgentActionItemTitleAtom,
-    toolExpandedAtom,
-    setToolExpandedAtom,
-} from '../../atoms/messageUIState';
 import { TOOL_ACTION_REGISTRY, canonicalizeToolName } from '../../utils/toolActionRegistry';
-import { shortItemTitle } from '../../../src/utils/zoteroUtils';
+import { useAgentActionExpansion } from '../../hooks/useAgentActionExpansion';
+import { useZoteroItemTitle } from '../../hooks/useZoteroItemTitle';
 import { logger } from '../../../src/utils/logger';
 import {
     TickIcon,
@@ -108,32 +103,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         && Object.keys(streamingArgs).length > 0
         && runIsStreamable;
 
-    const expansionKey = `${runId}:${responseIndex}:${toolcallId}`;
-    const expansionState = useAtomValue(toolExpandedAtom);
-    const setExpanded = useSetAtom(setToolExpandedAtom);
-    const hasExistingState = expansionState[expansionKey] !== undefined;
-    const neverAutoCollapse = NEVER_AUTO_COLLAPSE_TOOLS.has(toolName);
-    const isExpanded = expansionState[expansionKey] ?? (isAwaitingApproval || neverAutoCollapse);
-
-    const prevAwaitingRef = useRef(isAwaitingApproval);
-    const hasInitializedRef = useRef(false);
-    useEffect(() => {
-        if (!hasInitializedRef.current) {
-            hasInitializedRef.current = true;
-            if (!hasExistingState) {
-                setExpanded({ key: expansionKey, expanded: isAwaitingApproval || neverAutoCollapse });
-            }
-            return;
-        }
-
-        if (prevAwaitingRef.current !== isAwaitingApproval) {
-            setExpanded({
-                key: expansionKey,
-                expanded: neverAutoCollapse ? true : isAwaitingApproval,
-            });
-        }
-        prevAwaitingRef.current = isAwaitingApproval;
-    }, [isAwaitingApproval, expansionKey, hasExistingState, neverAutoCollapse, setExpanded]);
+    const { isExpanded, toggleExpanded } = useAgentActionExpansion({
+        expansionKey: `${runId}:${responseIndex}:${toolcallId}`,
+        autoExpandWhen: isAwaitingApproval,
+        forceExpandedWhen: NEVER_AUTO_COLLAPSE_TOOLS.has(toolName),
+    });
 
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
     const [isProcessingAction, setIsProcessingAction] = useState(false);
@@ -156,35 +130,16 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
     const markExternalReferenceDeleted = useSetAtom(markExternalReferenceDeletedAtom);
 
-    const itemTitleKey = `${responseIndex}:${toolcallId}`;
-    const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
-    const itemTitle = itemTitleMap[itemTitleKey] ?? null;
-    const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
-
-    const hasAssociatedItem =
-        toolName === 'edit_metadata' ||
-        toolName === 'edit_item';
-
-    useEffect(() => {
-        if (!hasAssociatedItem || itemTitle) return;
-
-        const fetchTitle = async () => {
-            const libraryId: number | undefined =
-                action?.proposed_data?.library_id ?? pendingApproval?.actionData?.library_id;
-            const zoteroKey: string | undefined =
-                action?.proposed_data?.zotero_key ?? pendingApproval?.actionData?.zotero_key;
-
-            if (!libraryId || !zoteroKey) return;
-
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
-            if (item) {
-                const title = await shortItemTitle(item);
-                setItemTitle({ key: itemTitleKey, title });
-            }
-        };
-
-        fetchTitle();
-    }, [action, pendingApproval, itemTitle, itemTitleKey, hasAssociatedItem, setItemTitle]);
+    const hasAssociatedItem = toolName === 'edit_metadata' || toolName === 'edit_item';
+    const titleLibraryId: number | undefined =
+        action?.proposed_data?.library_id ?? pendingApproval?.actionData?.library_id;
+    const titleZoteroKey: string | undefined =
+        action?.proposed_data?.zotero_key ?? pendingApproval?.actionData?.zotero_key;
+    const itemTitle = useZoteroItemTitle({
+        libraryId: hasAssociatedItem ? titleLibraryId : null,
+        zoteroKey: hasAssociatedItem ? titleZoteroKey : null,
+        cacheKey: hasAssociatedItem ? `${responseIndex}:${toolcallId}` : null,
+    });
 
     useEffect(() => {
         const previousPendingApproval = prevPendingApprovalRef.current;
@@ -371,7 +326,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
     }, [isUndoError, handleUndo, handleApplyPending]);
 
-    const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
     const previewData = buildPreviewData(toolName, pendingApproval, action);
 
     const getHeaderIcon = () => {
