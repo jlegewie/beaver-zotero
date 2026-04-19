@@ -13,6 +13,18 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// The hook module imports shortItemTitle from zoteroUtils, which transitively
+// pulls in apiService/supabase env validation. Stubbing here keeps the pure-
+// helper tests runnable in the Node-only unit environment. Matches the
+// pattern used in tests/unit/notes/editNote.test.ts.
+vi.mock('../../../src/utils/zoteroUtils', () => ({
+    shortItemTitle: vi.fn(async (_item: any) => 'stubbed-title'),
+}));
+vi.mock('../../../src/utils/logger', () => ({
+    logger: vi.fn(),
+}));
+
 import { resolveAndCacheTitle, type ResolveAndCacheTitleInput } from '../../../react/hooks/useZoteroItemTitle';
 import { createMockItem } from '../../helpers/factories';
 
