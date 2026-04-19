@@ -808,6 +808,8 @@ export interface WSZoteroSearchResponse {
     error_code?: string | null;
     /** Available libraries (only included when error_code is 'library_not_found') */
     available_libraries?: AvailableLibraryInfo[] | null;
+    /** Non-fatal warnings (e.g., conditions Zotero rejected). Search still executed. */
+    warnings?: string[] | null;
 }
 
 /** Request from backend for list_items */
