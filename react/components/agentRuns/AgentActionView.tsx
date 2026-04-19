@@ -22,14 +22,7 @@ import {
     toolExpandedAtom,
     setToolExpandedAtom,
 } from '../../atoms/messageUIState';
-import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
-import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
-import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
-import { executeCreateItemActions, undoCreateItemActions } from '../../utils/createItemActions';
-import { executeCreateNoteAction, undoCreateNoteAction } from '../../utils/createNoteActions';
-import { executeManageTagsAction, undoManageTagsAction } from '../../utils/manageTagsActions';
-import { executeManageCollectionsAction, undoManageCollectionsAction } from '../../utils/manageCollectionsActions';
-import type { CreateItemProposedData } from '../../types/agentActions/items';
+import { TOOL_ACTION_REGISTRY, canonicalizeToolName } from '../../utils/toolActionRegistry';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
 import {
@@ -66,7 +59,6 @@ import {
     ActionStatus,
     STATUS_CONFIGS,
     NEVER_AUTO_COLLAPSE_TOOLS,
-    confirmOverwriteManualChanges,
     getOverallStatus,
     getActionLabel,
     getActionTitle,
@@ -268,83 +260,22 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const handleApplyPending = useCallback(async () => {
         if (actions.length === 0 || isProcessing) return;
+        const tool = canonicalizeToolName(toolName);
+        if (!tool) return;
 
         setIsUndoError(false);
         setIsProcessingAction(true);
         setClickedButton('approve');
         try {
-            if (toolName === 'edit_metadata') {
-                const result = await executeEditMetadataAction(action!);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied edit_metadata action ${action!.id}`, 1);
-            } else if (toolName === 'create_collection') {
-                const result = await executeCreateCollectionAction(action!);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied create_collection action ${action!.id}`, 1);
-            } else if (toolName === 'organize_items') {
-                const result = await executeOrganizeItemsAction(action!);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied organize_items action ${action!.id}`, 1);
-            } else if (toolName === 'manage_tags') {
-                const result = await executeManageTagsAction(action!);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied manage_tags action ${action!.id}`, 1);
-            } else if (toolName === 'manage_collections') {
-                const result = await executeManageCollectionsAction(action!);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied manage_collections action ${action!.id}`, 1);
-            } else if (toolName === 'create_note') {
-                const result = await executeCreateNoteAction(action!, runId);
-                await ackAgentActions(runId, [{
-                    action_id: action!.id,
-                    result_data: result,
-                }]);
-                logger(`AgentActionView: Applied create_note action ${action!.id}`, 1);
-            } else if (toolName === 'create_items' || toolName === 'create_item') {
-                const actionsToApply = actions.filter((candidate) => candidate.status !== 'applied');
-                if (actionsToApply.length === 0) return;
-
-                const batchResult = await executeCreateItemActions(actionsToApply);
-                if (batchResult.successes.length > 0) {
-                    await ackAgentActions(runId, batchResult.successes.map((success) => ({
-                        action_id: success.action.id,
-                        result_data: success.result,
-                    })));
-                    logger(`AgentActionView: Applied ${batchResult.successes.length} create_item actions`, 1);
-
-                    for (const success of batchResult.successes) {
-                        const proposedData = success.action.proposed_data as CreateItemProposedData;
-                        if (proposedData?.item?.source_id) {
-                            markExternalReferenceImported(proposedData.item.source_id, {
-                                library_id: success.result.library_id,
-                                zotero_key: success.result.zotero_key,
-                            });
-                        }
-                    }
-                }
-
-                if (batchResult.failures.length > 0) {
-                    for (const failure of batchResult.failures) {
-                        setAgentActionsToError([failure.action.id], failure.error, failure.errorDetails);
-                    }
-                    logger(`AgentActionView: Failed to apply ${batchResult.failures.length} create_item actions`, 1);
-                }
-            }
+            await TOOL_ACTION_REGISTRY[tool].apply({
+                actions,
+                runId,
+                ackAgentActions,
+                setAgentActionsToError,
+                undoAgentAction,
+                markExternalReferenceImported,
+                markExternalReferenceDeleted,
+            });
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to apply action';
             const stackTrace = error?.stack || '';
@@ -358,14 +289,15 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             setClickedButton(null);
         }
     }, [
-        action,
         actions,
         isProcessing,
         toolName,
         runId,
         ackAgentActions,
         setAgentActionsToError,
+        undoAgentAction,
         markExternalReferenceImported,
+        markExternalReferenceDeleted,
     ]);
 
     const handleRejectPending = useCallback(() => {
@@ -385,69 +317,21 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const handleUndo = useCallback(async () => {
         if (!action || isProcessing) return;
+        const tool = canonicalizeToolName(toolName);
+        if (!tool) return;
 
         setIsProcessingAction(true);
         setClickedButton('undo');
         try {
-            if (toolName === 'edit_metadata') {
-                let result: UndoResult = await undoEditMetadataAction(action, false);
-                if (result.needsConfirmation && result.manuallyModified.length > 0) {
-                    const shouldOverwrite = confirmOverwriteManualChanges(result.manuallyModified);
-                    if (shouldOverwrite) {
-                        result = await undoEditMetadataAction(action, true);
-                        logger(`AgentActionView: Force-reverted ${result.fieldsReverted} fields after user confirmation`, 1);
-                    } else {
-                        logger(`AgentActionView: User declined to overwrite ${result.manuallyModified.length} manually modified fields`, 1);
-                    }
-                }
-                if (result.alreadyReverted.length > 0) {
-                    logger(`AgentActionView: Fields already at original value: ${result.alreadyReverted.join(', ')}`, 1);
-                }
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone edit_metadata action ${action.id} (${result.fieldsReverted} fields reverted)`, 1);
-            } else if (toolName === 'create_collection') {
-                await undoCreateCollectionAction(action);
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone create_collection action ${action.id}`, 1);
-            } else if (toolName === 'organize_items') {
-                await undoOrganizeItemsAction(action);
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone organize_items action ${action.id}`, 1);
-            } else if (toolName === 'manage_tags') {
-                await undoManageTagsAction(action);
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone manage_tags action ${action.id}`, 1);
-            } else if (toolName === 'manage_collections') {
-                await undoManageCollectionsAction(action);
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone manage_collections action ${action.id}`, 1);
-            } else if (toolName === 'create_note') {
-                await undoCreateNoteAction(action);
-                undoAgentAction(action.id);
-                logger(`AgentActionView: Undone create_note action ${action.id}`, 1);
-            } else if (toolName === 'create_items' || toolName === 'create_item') {
-                const actionsToUndo = actions.filter((candidate) => candidate.status === 'applied');
-                if (actionsToUndo.length === 0) return;
-
-                const batchResult = await undoCreateItemActions(actionsToUndo);
-                for (const actionId of batchResult.successes) {
-                    undoAgentAction(actionId);
-                    const undoneAction = actionsToUndo.find((candidate) => candidate.id === actionId);
-                    if (undoneAction) {
-                        const proposedData = undoneAction.proposed_data as CreateItemProposedData;
-                        if (proposedData?.item?.source_id) {
-                            markExternalReferenceDeleted(proposedData.item.source_id);
-                        }
-                    }
-                }
-                for (const failure of batchResult.failures) {
-                    setAgentActionsToError([failure.actionId], failure.error, failure.errorDetails);
-                }
-                logger(`AgentActionView: Undone ${batchResult.successes.length} create_item actions`, 1);
-                if (batchResult.failures.length > 0) {
-                    logger(`AgentActionView: Failed to undo ${batchResult.failures.length} create_item actions`, 1);
-                }
-            }
+            await TOOL_ACTION_REGISTRY[tool].undo({
+                actions,
+                runId,
+                ackAgentActions,
+                setAgentActionsToError,
+                undoAgentAction,
+                markExternalReferenceImported,
+                markExternalReferenceDeleted,
+            });
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to undo action';
             const stackTrace = error?.stack || '';
@@ -470,8 +354,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         actions,
         isProcessing,
         toolName,
+        runId,
+        ackAgentActions,
         undoAgentAction,
         setAgentActionsToError,
+        markExternalReferenceImported,
         markExternalReferenceDeleted,
     ]);
 
