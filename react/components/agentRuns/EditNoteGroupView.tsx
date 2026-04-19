@@ -13,6 +13,7 @@ import {
     undoAgentActionAtom,
 } from '../../agents/agentActions';
 import { isWSChatPendingAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
+import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
 import {
     agentActionItemTitlesAtom,
     setAgentActionItemTitleAtom,
@@ -39,7 +40,7 @@ import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import SplitApplyButton from '../ui/buttons/SplitApplyButton';
 import { openNoteByKey } from '../../utils/sourceUtils';
-import { executeEditNoteAction, undoEditNoteAction } from '../../utils/editNoteActions';
+import { TOOL_ACTION_REGISTRY } from '../../utils/toolActionRegistry';
 import { logger } from '../../../src/utils/logger';
 import { EditNoteRowView } from './EditNoteRowView';
 import { isDiffPreviewLive } from '../../utils/diffPreviewCoordinator';
@@ -92,6 +93,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
+    const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
+    const markExternalReferenceDeleted = useSetAtom(markExternalReferenceDeletedAtom);
     const addAutoApproveNoteKey = useSetAtom(addAutoApproveNoteKeyAtom);
 
     const partStates = useMemo(() => {
@@ -311,12 +314,15 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
             for (const action of reapplicableActions) {
                 try {
-                    const result = await executeEditNoteAction(action);
-                    await ackAgentActions(runId, [{
-                        action_id: action.id,
-                        result_data: result,
-                    }]);
-                    logger(`EditNoteGroupView: Applied edit_note action ${action.id}`, 1);
+                    await TOOL_ACTION_REGISTRY.edit_note.apply({
+                        actions: [action],
+                        runId,
+                        ackAgentActions,
+                        setAgentActionsToError,
+                        undoAgentAction,
+                        markExternalReferenceImported,
+                        markExternalReferenceDeleted,
+                    });
                 } catch (error: any) {
                     const errorMessage = error?.message || 'Failed to apply edit_note';
                     const stackTrace = error?.stack || '';
@@ -345,6 +351,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         ackAgentActions,
         runId,
         setAgentActionsToError,
+        undoAgentAction,
+        markExternalReferenceImported,
+        markExternalReferenceDeleted,
     ]);
 
     const handleApproveAllForNote = useCallback(() => {
@@ -443,9 +452,15 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
             for (const action of [...appliedActions].reverse()) {
                 try {
-                    await undoEditNoteAction(action);
-                    undoAgentAction(action.id);
-                    logger(`EditNoteGroupView: Undone edit_note action ${action.id}`, 1);
+                    await TOOL_ACTION_REGISTRY.edit_note.undo({
+                        actions: [action],
+                        runId,
+                        ackAgentActions,
+                        setAgentActionsToError,
+                        undoAgentAction,
+                        markExternalReferenceImported,
+                        markExternalReferenceDeleted,
+                    });
                 } catch (error: any) {
                     const errorMessage = error?.message || 'Failed to undo edit_note';
                     const stackTrace = error?.stack || '';
@@ -468,7 +483,12 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     }, [
         isProcessing,
         allActions,
+        runId,
+        ackAgentActions,
+        setAgentActionsToError,
         undoAgentAction,
+        markExternalReferenceImported,
+        markExternalReferenceDeleted,
         setExpanded,
         expansionKey,
         noteKeyLabel,
@@ -484,12 +504,15 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
             for (const action of errorActions) {
                 try {
-                    const result = await executeEditNoteAction(action);
-                    await ackAgentActions(runId, [{
-                        action_id: action.id,
-                        result_data: result,
-                    }]);
-                    logger(`EditNoteGroupView: Retried + applied edit_note action ${action.id}`, 1);
+                    await TOOL_ACTION_REGISTRY.edit_note.apply({
+                        actions: [action],
+                        runId,
+                        ackAgentActions,
+                        setAgentActionsToError,
+                        undoAgentAction,
+                        markExternalReferenceImported,
+                        markExternalReferenceDeleted,
+                    });
                 } catch (error: any) {
                     const errorMessage = error?.message || 'Failed to retry edit_note';
                     const stackTrace = error?.stack || '';
@@ -504,7 +527,16 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             setIsLocallyProcessing(false);
             setClickedButton(null);
         }
-    }, [isProcessing, errorActions, ackAgentActions, runId, setAgentActionsToError]);
+    }, [
+        isProcessing,
+        errorActions,
+        ackAgentActions,
+        runId,
+        setAgentActionsToError,
+        undoAgentAction,
+        markExternalReferenceImported,
+        markExternalReferenceDeleted,
+    ]);
 
     const handleChildUndoErrorChange = useCallback((childToolcallId: string, error: string | null) => {
         setPerEditUndoErrors((prev) => {

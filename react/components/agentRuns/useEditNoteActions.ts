@@ -19,7 +19,8 @@ import {
     sendApprovalResponseAtom,
 } from '../../atoms/agentRunAtoms';
 import { getToolCallStatus, toolResultsMapAtom } from '../../agents/atoms';
-import { executeEditNoteAction, undoEditNoteAction } from '../../utils/editNoteActions';
+import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
+import { TOOL_ACTION_REGISTRY } from '../../utils/toolActionRegistry';
 import { openNoteAndSearchEdit, openNoteByKey } from '../../utils/sourceUtils';
 import {
     dismissDiffPreview,
@@ -160,6 +161,8 @@ export function useEditNoteActions({
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
+    const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
+    const markExternalReferenceDeleted = useSetAtom(markExternalReferenceDeletedAtom);
     const isRunPending = useAtomValue(isWSChatPendingAtom);
 
     const actions = getAgentActionsByToolcall(toolcallId, (a) => a.run_id === runId);
@@ -276,12 +279,15 @@ export function useEditNoteActions({
         setClickedButton(button);
         try {
             await dismissActiveEditNotePreview();
-            const result = await executeEditNoteAction(action);
-            await ackAgentActions(runId, [{
-                action_id: action.id,
-                result_data: result,
-            }]);
-            logger(`useEditNoteActions: Applied edit_note action ${action.id}`, 1);
+            await TOOL_ACTION_REGISTRY.edit_note.apply({
+                actions: [action],
+                runId,
+                ackAgentActions,
+                setAgentActionsToError,
+                undoAgentAction,
+                markExternalReferenceImported,
+                markExternalReferenceDeleted,
+            });
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to apply edit_note';
             const stackTrace = error?.stack || '';
@@ -294,7 +300,16 @@ export function useEditNoteActions({
             setIsProcessingAction(false);
             setClickedButton(null);
         }
-    }, [action, isProcessing, ackAgentActions, runId, setAgentActionsToError]);
+    }, [
+        action,
+        isProcessing,
+        ackAgentActions,
+        runId,
+        setAgentActionsToError,
+        undoAgentAction,
+        markExternalReferenceImported,
+        markExternalReferenceDeleted,
+    ]);
 
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
@@ -336,9 +351,15 @@ export function useEditNoteActions({
         setClickedButton('undo');
         try {
             await dismissActiveEditNotePreview();
-            await undoEditNoteAction(action);
-            undoAgentAction(action.id);
-            logger(`useEditNoteActions: Undone edit_note action ${action.id}`, 1);
+            await TOOL_ACTION_REGISTRY.edit_note.undo({
+                actions: [action],
+                runId,
+                ackAgentActions,
+                setAgentActionsToError,
+                undoAgentAction,
+                markExternalReferenceImported,
+                markExternalReferenceDeleted,
+            });
         } catch (error: any) {
             const errorMessage = error?.message || 'Failed to undo edit_note';
             const stackTrace = error?.stack || '';
@@ -352,7 +373,18 @@ export function useEditNoteActions({
             setIsProcessingAction(false);
             setClickedButton(null);
         }
-    }, [action, isProcessing, onUndoErrorChange, toolcallId, undoAgentAction]);
+    }, [
+        action,
+        isProcessing,
+        onUndoErrorChange,
+        toolcallId,
+        runId,
+        ackAgentActions,
+        setAgentActionsToError,
+        undoAgentAction,
+        markExternalReferenceImported,
+        markExternalReferenceDeleted,
+    ]);
 
     const handleRetry = useCallback(async () => {
         await runApply('retry');

@@ -47,6 +47,11 @@ vi.mock('../../../react/utils/manageCollectionsActions', () => ({
     undoManageCollectionsAction: vi.fn(),
 }));
 
+vi.mock('../../../react/utils/editNoteActions', () => ({
+    executeEditNoteAction: vi.fn(),
+    undoEditNoteAction: vi.fn(),
+}));
+
 vi.mock('../../../react/components/agentRuns/agentActionViewHelpers', () => ({
     confirmOverwriteManualChanges: vi.fn(),
 }));
@@ -64,6 +69,7 @@ import { executeCreateItemActions, undoCreateItemActions } from '../../../react/
 import { executeCreateNoteAction, undoCreateNoteAction } from '../../../react/utils/createNoteActions';
 import { executeManageTagsAction, undoManageTagsAction } from '../../../react/utils/manageTagsActions';
 import { executeManageCollectionsAction, undoManageCollectionsAction } from '../../../react/utils/manageCollectionsActions';
+import { executeEditNoteAction, undoEditNoteAction } from '../../../react/utils/editNoteActions';
 import { confirmOverwriteManualChanges } from '../../../react/components/agentRuns/agentActionViewHelpers';
 
 function makeCtx(overrides: Partial<ToolActionContext> = {}): ToolActionContext {
@@ -107,18 +113,20 @@ describe('canonicalizeToolName', () => {
         expect(canonicalizeToolName('manage_tags')).toBe('manage_tags');
         expect(canonicalizeToolName('manage_collections')).toBe('manage_collections');
         expect(canonicalizeToolName('create_note')).toBe('create_note');
+        expect(canonicalizeToolName('edit_note')).toBe('edit_note');
     });
 
-    it('returns null for tools not dispatched by AgentActionView', () => {
-        expect(canonicalizeToolName('edit_note')).toBeNull();
+    it('returns null for tools not in the registry', () => {
         expect(canonicalizeToolName('confirm_extraction')).toBeNull();
+        expect(canonicalizeToolName('confirm_external_search')).toBeNull();
         expect(canonicalizeToolName('search')).toBeNull();
         expect(canonicalizeToolName('')).toBeNull();
     });
 
     it('isAgentActionTool narrows correctly', () => {
         expect(isAgentActionTool('create_item')).toBe(true);
-        expect(isAgentActionTool('edit_note')).toBe(false);
+        expect(isAgentActionTool('edit_note')).toBe(true);
+        expect(isAgentActionTool('confirm_extraction')).toBe(false);
     });
 });
 
@@ -295,6 +303,7 @@ describe('single-action undo handlers rethrow on failure (preserves Retry Undo s
         { tool: 'manage_tags', undoMock: undoManageTagsAction },
         { tool: 'manage_collections', undoMock: undoManageCollectionsAction },
         { tool: 'create_note', undoMock: undoCreateNoteAction },
+        { tool: 'edit_note', undoMock: undoEditNoteAction },
     ];
 
     it.each(cases)('$tool undo rethrows', async ({ tool, undoMock }) => {
@@ -314,6 +323,7 @@ describe('single-action apply handlers rethrow on failure', () => {
         { tool: 'manage_tags', executeMock: executeManageTagsAction },
         { tool: 'manage_collections', executeMock: executeManageCollectionsAction },
         { tool: 'create_note', executeMock: executeCreateNoteAction },
+        { tool: 'edit_note', executeMock: executeEditNoteAction },
     ];
 
     it.each(cases)('$tool apply rethrows and does not ack', async ({ tool, executeMock }) => {
@@ -336,6 +346,24 @@ describe('single-action apply handlers happy-path ack', () => {
         expect(ctx.ackAgentActions).toHaveBeenCalledWith('r-42', [
             { action_id: 'n1', result_data: { library_id: 1, zotero_key: 'NK' } },
         ]);
+    });
+
+    it('edit_note apply acks result, undo calls undoAgentAction', async () => {
+        const action = makeAction({ id: 'en1', action_type: 'edit_note' });
+        (executeEditNoteAction as any).mockResolvedValue({ library_id: 1, zotero_key: 'NK' });
+        (undoEditNoteAction as any).mockResolvedValue(undefined);
+
+        const applyCtx = makeCtx({ actions: [action], runId: 'r-7' });
+        await TOOL_ACTION_REGISTRY.edit_note.apply(applyCtx);
+        expect(executeEditNoteAction).toHaveBeenCalledWith(action);
+        expect(applyCtx.ackAgentActions).toHaveBeenCalledWith('r-7', [
+            { action_id: 'en1', result_data: { library_id: 1, zotero_key: 'NK' } },
+        ]);
+
+        const undoCtx = makeCtx({ actions: [action] });
+        await TOOL_ACTION_REGISTRY.edit_note.undo(undoCtx);
+        expect(undoEditNoteAction).toHaveBeenCalledWith(action);
+        expect(undoCtx.undoAgentAction).toHaveBeenCalledWith('en1');
     });
 
     it('create_collection, organize_items, manage_tags, manage_collections call undoAgentAction on undo success', async () => {

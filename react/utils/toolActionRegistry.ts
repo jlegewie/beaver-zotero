@@ -29,6 +29,7 @@ import { executeCreateCollectionAction, undoCreateCollectionAction } from './cre
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from './organizeItemsActions';
 import { executeCreateItemActions, undoCreateItemActions } from './createItemActions';
 import { executeCreateNoteAction, undoCreateNoteAction } from './createNoteActions';
+import { executeEditNoteAction, undoEditNoteAction } from './editNoteActions';
 import { executeManageTagsAction, undoManageTagsAction } from './manageTagsActions';
 import { executeManageCollectionsAction, undoManageCollectionsAction } from './manageCollectionsActions';
 import { confirmOverwriteManualChanges } from '../components/agentRuns/agentActionViewHelpers';
@@ -41,6 +42,7 @@ export type AgentActionToolName =
     | 'manage_tags'
     | 'manage_collections'
     | 'create_note'
+    | 'edit_note'
     | 'create_items';
 
 export interface ToolActionContext {
@@ -72,6 +74,7 @@ export function canonicalizeToolName(name: string): AgentActionToolName | null {
         || name === 'manage_tags'
         || name === 'manage_collections'
         || name === 'create_note'
+        || name === 'edit_note'
         || name === 'create_items'
     ) {
         return name;
@@ -183,6 +186,27 @@ export const TOOL_ACTION_REGISTRY: Record<AgentActionToolName, ToolActionHandler
             await undoCreateNoteAction(action);
             ctx.undoAgentAction(action.id);
             logger(`AgentActionView: Undone create_note action ${action.id}`, 1);
+        },
+    },
+
+    edit_note: {
+        // Callers (EditNoteGroupView, useEditNoteActions) dispatch one row at a
+        // time, so this handler is single-action like edit_metadata. Preview
+        // dismissal is the caller's responsibility: group-level callers dismiss
+        // once before iterating, and reject-all also dismisses without going
+        // through the registry — so keeping dismissal out of here keeps the
+        // registry uniform.
+        async apply(ctx) {
+            const action = ctx.actions[0];
+            const result = await executeEditNoteAction(action);
+            await ctx.ackAgentActions(ctx.runId, [{ action_id: action.id, result_data: result }]);
+            logger(`toolActionRegistry: Applied edit_note action ${action.id}`, 1);
+        },
+        async undo(ctx) {
+            const action = ctx.actions[0];
+            await undoEditNoteAction(action);
+            ctx.undoAgentAction(action.id);
+            logger(`toolActionRegistry: Undone edit_note action ${action.id}`, 1);
         },
     },
 
