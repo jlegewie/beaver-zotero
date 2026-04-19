@@ -22,6 +22,8 @@ export interface MockItemOptions {
     noteIDs?: number[];
     attachmentIDs?: number[];
     parentID?: number | null;
+    parentItem?: any;
+    isTopLevelItem?: boolean;
     isAttachment?: boolean;
     isNote?: boolean;
     isRegularItem?: boolean;
@@ -50,6 +52,8 @@ export function createMockItem(opts: MockItemOptions = {}) {
         noteIDs = [],
         attachmentIDs = [],
         parentID = null,
+        parentItem = null,
+        isTopLevelItem = parentID === null,
         isAttachment = false,
         isNote = false,
         isRegularItem = !isAttachment && !isNote,
@@ -64,6 +68,7 @@ export function createMockItem(opts: MockItemOptions = {}) {
         libraryID,
         itemType,
         parentID,
+        parentItem,
         attachmentContentType,
         attachmentPath,
         getField: vi.fn((field: string) => fields[field] ?? ''),
@@ -73,6 +78,7 @@ export function createMockItem(opts: MockItemOptions = {}) {
         getNotes: vi.fn(() => noteIDs),
         getAttachments: vi.fn(() => attachmentIDs),
         getCollections: vi.fn(() => []),
+        isTopLevelItem: vi.fn(() => isTopLevelItem),
         isAttachment: vi.fn(() => isAttachment),
         isNote: vi.fn(() => isNote),
         isRegularItem: vi.fn(() => isRegularItem),
@@ -95,18 +101,28 @@ export interface MockNoteOptions {
     libraryID?: number;
     parentID?: number | null;
     noteHTML?: string;
+    /**
+     * Title returned by getNoteTitle(). Only note factories expose this method —
+     * real Zotero.Item.getNoteTitle throws for non-note items.
+     */
+    noteTitle?: string;
 }
 
 /**
  * Create a mock Zotero note item.
  */
 export function createMockNote(opts: MockNoteOptions = {}) {
-    return createMockItem({
+    const { noteTitle = '(untitled)', ...rest } = opts;
+    const base = createMockItem({
         itemType: 'note',
         isNote: true,
         isRegularItem: false,
-        ...opts,
+        ...rest,
     });
+    return {
+        ...base,
+        getNoteTitle: vi.fn(() => noteTitle),
+    };
 }
 
 // =============================================================================
