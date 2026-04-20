@@ -178,6 +178,7 @@ export const creditPlanAtom = atom<CreditPlan>((get) => {
         status: (profile?.credit_plan_status || 'none') as CreditPlanStatus,
         monthlyCredits: profile?.credit_plan_monthly_credits || 0,
         periodEnd: profile?.credit_period_end || null,
+        monthlyResetAt: profile?.credit_monthly_reset_at || null,
         cancelAtPeriodEnd: profile?.credit_cancel_at_period_end || false,
         pendingDowngrade: profile?.credit_pending_downgrade || false,
     };
