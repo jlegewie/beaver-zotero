@@ -264,10 +264,13 @@ describe('enrichOldStringCitationRefs (att_id)', () => {
             metadata,
         );
         // Translated lookup for "iii" misses (metadata has "3"); fallback to
-        // the raw "3" matches. Enriched tag uses the translated label so the
-        // downstream matcher sees the current simplified-form shape.
+        // the raw "3" matches. The enriched tag carries the page variant that
+        // actually matched in metadata ("3"), NOT the translated form —
+        // otherwise the downstream `attrsChanged` check in expandToRawHtml
+        // would treat the citation as modified and fabricate a new one with
+        // locator "iii", which wouldn't match the note's stored "3" locator.
         expect(result).toBe(
-            '<p><citation item_id="1-PARENT1234" page="iii" ref="c_PARENT_0"/></p>',
+            '<p><citation item_id="1-PARENT1234" page="3" ref="c_PARENT_0"/></p>',
         );
     });
 

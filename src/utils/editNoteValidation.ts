@@ -295,18 +295,23 @@ export function enrichOldStringCitationRefs(
             // on a fresh session and we don't want the enrichment to be all-
             // or-nothing in that case.
             const translatedPage = translateAttIdPageLocator(attachmentItem, page);
-            const candidateRef
-                = findUniqueCitationRef(metadata, parentItemId, translatedPage)
-                ?? (translatedPage !== page
-                    ? findUniqueCitationRef(metadata, parentItemId, page)
-                    : null);
+            let matchedPage = translatedPage;
+            let candidateRef = findUniqueCitationRef(metadata, parentItemId, translatedPage);
+            if (candidateRef === null && translatedPage !== page) {
+                candidateRef = findUniqueCitationRef(metadata, parentItemId, page);
+                if (candidateRef !== null) matchedPage = page;
+            }
             if (candidateRef === null) continue;
 
             // Drop `att_id` and write the parent `item_id` + `ref`. Use the
-            // translated page so the enriched tag matches the simplified
-            // form the matcher will see downstream.
-            const finalPageAttr = translatedPage !== undefined
-                ? ` page="${translatedPage}"`
+            // page variant that actually matched in metadata so the downstream
+            // `attrsChanged` check in expandToRawHtml treats the enriched tag
+            // as identical to the stored citation — which returns stored.rawHtml
+            // verbatim and guarantees the expanded old_string is a literal slice
+            // of the note. Writing the translated form here when only the raw
+            // form matched would fabricate a citation with the wrong locator.
+            const finalPageAttr = matchedPage !== undefined
+                ? ` page="${matchedPage}"`
                 : '';
             replacements.push({
                 start: m.index,
