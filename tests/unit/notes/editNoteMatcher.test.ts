@@ -451,6 +451,231 @@ describe('findBestMatch priority', () => {
 });
 
 // =============================================================================
+// quote_normalized
+// =============================================================================
+
+describe('quote_normalized strategy', () => {
+    it('German low quotes: needle has "…" and haystack has „…"', () => {
+        const rawSlice = '<p>Onfray, „Les sagesses antiques."</p>';
+        const html = `<div data-schema-version="9">${rawSlice} other content</div>`;
+        const result = match(makeInput({
+            oldString: '<p>Onfray, "Les sagesses antiques."</p>',
+            newString: '<p>Onfray, Les sagesses.</p>',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('quote_normalized');
+        expect(result?.matchCount).toBe(1);
+        // The returned expandedOld is the raw slice with curly quotes preserved.
+        expect(result?.expandedOld).toBe(rawSlice);
+        expect(result?.expandedNew).toBe('<p>Onfray, Les sagesses.</p>');
+        // Anchors fold on their way to the executor's raw-space lookup.
+        expect(result?.normalizeAnchor('„literal"')).toBe('"literal"');
+    });
+
+    it('English curly double quotes: \u201C…\u201D → "…"', () => {
+        const rawSlice = '<p>\u201CImportant\u201D note here with body text</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: '<p>"Important" note here with body text</p>',
+            newString: '<p>updated</p>',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('quote_normalized');
+        expect(result?.expandedOld).toBe(rawSlice);
+    });
+
+    it('French guillemets: «…» → "…"', () => {
+        const rawSlice = '<p>Et «voilà» la preuve</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: '<p>Et "voilà" la preuve</p>',
+            newString: '<p>fini</p>',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('quote_normalized');
+        expect(result?.expandedOld).toBe(rawSlice);
+    });
+
+    it('smart single quotes: it\u2019s → it\'s', () => {
+        const rawSlice = '<p>it\u2019s a test sentence</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: "<p>it's a test sentence</p>",
+            newString: "<p>REPLACED</p>",
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('quote_normalized');
+        expect(result?.expandedOld).toBe(rawSlice);
+    });
+
+    it('falls through to `exact` when both sides use ASCII quotes only', () => {
+        const result = match(makeInput({
+            oldString: '<p>"plain ASCII"</p>',
+            newString: '<p>replaced</p>',
+            strippedHtml: '<div data-schema-version="9"><p>"plain ASCII"</p></div>',
+        }));
+        expect(result?.strategy).toBe('exact');
+    });
+
+    it('`entity_decode` wins over `quote_normalized` (ordering regression)', () => {
+        // Needle uses entity form, haystack has the decoded ASCII. entity_decode
+        // should claim this case because it runs earlier in the chain.
+        const result = match(makeInput({
+            oldString: 'it&#x27;s fine',
+            newString: 'it&#x27;s done',
+            strippedHtml: "<p>it's fine here</p>",
+        }));
+        expect(result?.strategy).toBe('entity_decode');
+    });
+
+    it('rejects when mixed curly shapes fold to the same ASCII form (ambiguous)', () => {
+        // Safety: when the model's ASCII needle folds to the same form as two
+        // differently-quoted spans in the note (e.g., one „…" and one "…"),
+        // picking the first folded position's raw slice would silently edit
+        // the wrong one. The strategy refuses so the retry_prompt's candidate
+        // hints can show both forms and the model can pick explicitly.
+        // Both rawSlices must fold to the same text as the needle — same
+        // surrounding letters, different quote styles.
+        const rawSliceA = '<p>Quote \u201Etest case\u201D text</p>';
+        const rawSliceB = '<p>Quote \u201Ctest case\u201D text</p>';
+        const html = `<div data-schema-version="9">${rawSliceA}${rawSliceB}</div>`;
+        const result = match(makeInput({
+            oldString: '<p>Quote "test case" text</p>',
+            newString: '<p>X</p>',
+            strippedHtml: html,
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('matches when distinct surrounding text disambiguates the folded form', () => {
+        // Same haystack topology as the rejection case above, but here only
+        // one folded occurrence matches — the other paragraph's letter
+        // sequence differs. foldedCount = 1 so the uniqueness gate passes.
+        const rawSlice = '<p>Quote \u201Etest case\u201D A text</p>';
+        const html = `<div data-schema-version="9">${rawSlice}<p>Quote "test case" B text</p></div>`;
+        const result = match(makeInput({
+            oldString: '<p>Quote "test case" A text</p>',
+            newString: '<p>X</p>',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('quote_normalized');
+        expect(result?.matchCount).toBe(1);
+        expect(result?.expandedOld).toBe(rawSlice);
+    });
+
+    it('rejects str_replace_all when folded matches carry different raw slices', () => {
+        // Safety gate: splitting on actualRawSlice would miss occurrences with
+        // a different curly shape. Both rawSlices must be non-ASCII so that
+        // `exact` can't win before this strategy runs.
+        const rawSliceA = '<p>\u201Etest case\u201D example text</p>';  // low-9 + curly close
+        const rawSliceB = '<p>\u201Ctest case\u201D example text</p>';  // curly open + curly close
+        const html = `<div data-schema-version="9">${rawSliceA}${rawSliceB}</div>`;
+        const result = match(makeInput({
+            operation: 'str_replace_all' as EditNoteOperation,
+            oldString: '<p>"test case" example text</p>',
+            newString: '<p>X</p>',
+            strippedHtml: html,
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('allows str_replace_all when all folded matches share the same raw slice', () => {
+        // Two occurrences of the same curly shape → split/join works cleanly.
+        // Use a curly-only slice so `exact` can't win.
+        const rawSlice = '<p>\u201Etest\u201D repeat body</p>';
+        const html = `<div data-schema-version="9">${rawSlice}${rawSlice}</div>`;
+        const result = match(makeInput({
+            operation: 'str_replace_all' as EditNoteOperation,
+            oldString: '<p>"test" repeat body</p>',
+            newString: '<p>X</p>',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('quote_normalized');
+        expect(result?.matchCount).toBe(2);
+    });
+
+    it('returns null when no curly variants are present in either side', () => {
+        // Defensive: foldedOld === base.expandedOld means nothing to do.
+        const result = match(makeInput({
+            oldString: 'ASCII only here',
+            newString: 'something else',
+            strippedHtml: '<p>totally different</p>',
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('insert_after (execute form): preserves curly glyphs in the actual raw slice', () => {
+        // Model wrote ASCII `"…"` in old_string, the note has German low
+        // quotes. The merged newString (execute-time shape) starts with the
+        // ASCII old_string prefix; if we naively expanded the whole merged
+        // form, the inserted region would lose the note's `„…"` glyphs.
+        const rawSlice = '<p>Foucault, \u201EHistoire\u201C</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const needle = '<p>Foucault, "Histoire"</p>';
+        const merged = needle + '<p>Injected payload</p>';
+        const result = match(makeInput({
+            operation: 'insert_after' as EditNoteOperation,
+            oldString: needle,
+            newString: merged,
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('quote_normalized');
+        // Must be rawSlice (with „…") + injected payload, NOT needle + injected.
+        expect(result?.expandedNew).toBe(rawSlice + '<p>Injected payload</p>');
+        expect(result?.expandedNew.startsWith(rawSlice)).toBe(true);
+    });
+
+    it('insert_before (execute form): preserves curly glyphs in the actual raw slice', () => {
+        const rawSlice = '<p>Foucault, \u201EHistoire\u201C</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const needle = '<p>Foucault, "Histoire"</p>';
+        const merged = '<p>Preamble</p>' + needle;
+        const result = match(makeInput({
+            operation: 'insert_before' as EditNoteOperation,
+            oldString: needle,
+            newString: merged,
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('quote_normalized');
+        expect(result?.expandedNew).toBe('<p>Preamble</p>' + rawSlice);
+        expect(result?.expandedNew.endsWith(rawSlice)).toBe(true);
+    });
+
+    it('insert_after (validate form): expandedNew still starts with the preserved raw slice', () => {
+        // Validate-time shape: newString is just the raw injected payload,
+        // not prefixed by oldString. Insert branch falls through to expanding
+        // newString as-is, then concatenates with actualRawSlice.
+        const rawSlice = '<p>Foucault, \u201EHistoire\u201C long enough body</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            operation: 'insert_after' as EditNoteOperation,
+            oldString: '<p>Foucault, "Histoire" long enough body</p>',
+            newString: '<p>Injected payload</p>',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('quote_normalized');
+        expect(result?.expandedNew.startsWith(rawSlice)).toBe(true);
+        expect(result?.expandedNew.endsWith('<p>Injected payload</p>')).toBe(true);
+    });
+
+    it('normalizeAnchor folds curly quotes on target context strings', () => {
+        const rawSlice = '<p>Onfray, „Les sagesses antiques."</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: '<p>Onfray, "Les sagesses antiques."</p>',
+            newString: '<p>X</p>',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('quote_normalized');
+        // Executor calls normalizeAnchor on validator-supplied target_before/
+        // after_context before matching. Curly shapes collapse to ASCII so
+        // anchors can match no matter which quote style the validator stored.
+        expect(result?.normalizeAnchor('Before „test" and')).toBe('Before "test" and');
+        expect(result?.normalizeAnchor("after \u2018single\u2019")).toBe("after 'single'");
+    });
+});
+
+// =============================================================================
 // No-match
 // =============================================================================
 
@@ -738,27 +963,28 @@ describe('whitespace_relaxed strategy', () => {
         expect(result).toBeNull();
     });
 
-    it('rejects when needle differs from base.expandedOld (citation indirection)', () => {
-        // Swap the identity `expandToRawHtml` mock for one that transforms the
-        // needle, so `base.expandedOld !== input.oldString`. The strategy must
-        // decline — it relies on simplified==raw for the needle to return
-        // `expandedOld = actualRawSlice` safely.
+    it('matches when needle contains a citation and haystack shares the expanded form', () => {
+        // Regression guard for the extended behavior: whitespace_relaxed now
+        // builds the regex from `base.expandedOld` (raw space), so needles
+        // that contain <citation>/<annotation>/math delimiters can still
+        // match through whitespace drift. The needle's simplified form
+        // differs from its expanded form, but the haystack carries the
+        // expanded form — the strategy should find it.
         const mocked = vi.mocked(expandToRawHtml);
-        // Only the first call (expandBase for oldString) rewrites; subsequent
-        // calls fall back to identity.
         mocked.mockImplementationOnce(
             (s: string) => s.replace('CITE', '<span class="citation">X</span>'),
         );
         try {
+            const rawSlice
+                = 'anchor <span class="citation">X</span> with enough body text to clear the length gate';
+            const html = `<p>${rawSlice}</p>`;
             const result = match(makeInput({
-                oldString: 'anchor CITE with enough body text to clear the length gate',
+                oldString: 'anchor CITE with enough body  text to clear the length gate',
                 newString: 'x',
-                strippedHtml: '<p>anchor CITE with enough body  text to clear the length gate</p>',
+                strippedHtml: html,
             }));
-            // whitespace_relaxed must refuse; no other strategy matches
-            // because strippedHtml has literal 'CITE' while base.expandedOld
-            // has the expanded span form. Full chain returns null.
-            expect(result).toBeNull();
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            expect(html.indexOf(result!.expandedOld)).toBeGreaterThanOrEqual(0);
         } finally {
             mocked.mockImplementation((s: string) => s);
         }
@@ -848,5 +1074,41 @@ describe('whitespace_relaxed strategy', () => {
         expect(result?.strategy).toBe('whitespace_relaxed');
         // Executor's invariant: expandedOld must be in strippedHtml as-is.
         expect(html.indexOf(result!.expandedOld)).toBeGreaterThanOrEqual(0);
+    });
+
+    it('matches a needle whose simplified form contains a `<citation>` tag', () => {
+        // d35fc72d repro: the model's old_string differs from the note only
+        // in whitespace, but contains a <citation> — so the pre-extension
+        // gate `input.oldString !== base.expandedOld` used to reject it.
+        const mocked = vi.mocked(expandToRawHtml);
+        const expand = (s: string) =>
+            s.replace(
+                /<citation ref="([^"]+)" item_id="([^"]+)"\/>/g,
+                '<span class="citation" data-ref="$1" data-item="$2">(…)</span>',
+            );
+        mocked.mockImplementation(expand);
+        try {
+            const rawSlice =
+                '<p>Anchor paragraph intro '
+                + '<span class="citation" data-ref="c_A_0" data-item="1-AAAAAAAA">(…)</span>'
+                + ' with enough body text to clear the length gate</p>';
+            const html = `<div data-schema-version="9">${rawSlice}</div>`;
+            // Needle uses double whitespace where the note has single — classic
+            // whitespace drift, now tolerated even with the <citation>.
+            const needleWithDrift =
+                '<p>Anchor   paragraph intro\n\n'
+                + '<citation ref="c_A_0" item_id="1-AAAAAAAA"/>'
+                + '  with enough body text to clear the length gate</p>';
+            const result = match(makeInput({
+                oldString: needleWithDrift,
+                newString: '<p>REWRITTEN</p>',
+                strippedHtml: html,
+            }));
+            expect(result?.strategy).toBe('whitespace_relaxed');
+            // expandedOld is a literal slice of strippedHtml.
+            expect(html.indexOf(result!.expandedOld)).toBeGreaterThanOrEqual(0);
+        } finally {
+            mocked.mockImplementation((s: string) => s);
+        }
     });
 });

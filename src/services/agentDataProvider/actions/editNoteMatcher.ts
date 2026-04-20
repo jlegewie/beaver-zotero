@@ -12,12 +12,15 @@
  *   2. entity_decode            — `&#x27;` → `'` on the search needle
  *   3. entity_encode            — `'` → `&#x27;` / `&#39;` / `&apos;`
  *   4. nfkc                     — CJK full-width → half-width
- *   5. trim_trailing_newlines   — strip extra `\n` at end of old_string
- *   6. json_unescape            — convert literal `\n`, `\"`, `\\` etc.
- *   7. partial_element_strip    — strip malformed `<citation.../>` fragments
- *   8. spurious_wrap_strip      — unwrap surrounding `<p>…</p>` etc.
- *   9. markdown_to_html         — convert `**bold**` / `## h` to HTML equivalents
- *  10. whitespace_relaxed       — allow whitespace runs to vary between needle
+ *   5. quote_normalized         — fold typographic / guillemet quotes (`„"«»'`)
+ *                                 to ASCII so needle and note can differ only
+ *                                 in quote style
+ *   6. trim_trailing_newlines   — strip extra `\n` at end of old_string
+ *   7. json_unescape            — convert literal `\n`, `\"`, `\\` etc.
+ *   8. partial_element_strip    — strip malformed `<citation.../>` fragments
+ *   9. spurious_wrap_strip      — unwrap surrounding `<p>…</p>` etc.
+ *  10. markdown_to_html         — convert `**bold**` / `## h` to HTML equivalents
+ *  11. whitespace_relaxed       — allow whitespace runs to vary between needle
  *                                 and note (NBSP vs space, extra newlines,
  *                                 tab/space drift). Gated on uniqueness and a
  *                                 non-ws character floor; conservative last
@@ -37,6 +40,7 @@ import {
     decodeHtmlEntities,
     encodeTextEntities,
     ENTITY_FORMS,
+    foldTypographicQuotes,
     normalizeWS,
 } from '../../../utils/noteHtmlEntities';
 import {
@@ -54,6 +58,7 @@ export type MatchStrategyName =
     | 'entity_decode'
     | 'entity_encode'
     | 'nfkc'
+    | 'quote_normalized'
     | 'trim_trailing_newlines'
     | 'json_unescape'
     | 'partial_element_strip'
@@ -289,6 +294,90 @@ const nfkcStrategy: Strategy = {
             expandedNew: base.expandedNew.normalize('NFKC'),
             matchCount,
             normalizeAnchor: (s) => s.normalize('NFKC'),
+        };
+    },
+};
+
+const quoteNormalizedStrategy: Strategy = {
+    name: 'quote_normalized',
+    tryMatch(input, base) {
+        // Quote-style drift: either side uses typographic / curly / guillemet
+        // quotes where the other uses ASCII (or a different curly form).
+        const foldedOld = foldTypographicQuotes(base.expandedOld);
+        const foldedHaystack = foldTypographicQuotes(input.strippedHtml);
+
+        // If neither side has typographic quotes, nothing to normalize — let
+        // earlier strategies (which already ran) or later ones claim this case.
+        if (
+            foldedOld === base.expandedOld
+            && foldedHaystack === input.strippedHtml
+        ) {
+            return null;
+        }
+
+        const foldedCount = countOccurrences(foldedHaystack, foldedOld);
+        if (foldedCount === 0) return null;
+
+        // Preserve the note's original quote characters outside the replaced
+        // region by slicing `actualRawSlice` from the original strippedHtml
+        // at the folded position. 1:1 character map guarantees positions
+        // line up between foldedHaystack and strippedHtml.
+        const rawPos = foldedHaystack.indexOf(foldedOld);
+        const actualRawSlice = input.strippedHtml.substring(
+            rawPos, rawPos + foldedOld.length,
+        );
+        const rawMatchCount = countOccurrences(input.strippedHtml, actualRawSlice);
+
+        // Uniqueness gate (mirrors `whitespace_relaxed`'s normalized-space
+        // check). When the folded form matches more places in the haystack
+        // than the first occurrence's raw form, the model's ASCII needle is
+        // genuinely ambiguous across curly variants — picking the first
+        // folded position's raw slice silently would edit the wrong one.
+        // Refuse and let the retry_prompt's candidate hints show both forms
+        // so the model can pick explicitly. Same rule applies to
+        // `str_replace_all`, where the executor's split/join on the chosen
+        // raw slice would miss the non-matching shapes.
+        if (foldedCount !== rawMatchCount) return null;
+
+        // Build expandedNew. For insert ops, mirror `whitespaceRelaxedStrategy`
+        // and strip the merged `oldString` prefix/suffix from `newString`
+        let expandedNew: string;
+        try {
+            if (input.operation === 'insert_after') {
+                const injected = input.newString.startsWith(input.oldString)
+                    ? input.newString.substring(input.oldString.length)
+                    : input.newString;
+                const expandedInjected = expandToRawHtml(
+                    injected, input.metadata, 'new', input.externalRefContext,
+                );
+                expandedNew = actualRawSlice + expandedInjected;
+            } else if (input.operation === 'insert_before') {
+                const injected = input.newString.endsWith(input.oldString)
+                    ? input.newString.substring(0, input.newString.length - input.oldString.length)
+                    : input.newString;
+                const expandedInjected = expandToRawHtml(
+                    injected, input.metadata, 'new', input.externalRefContext,
+                );
+                expandedNew = expandedInjected + actualRawSlice;
+            } else {
+                expandedNew = base.expandedNew;
+            }
+        } catch {
+            return null;
+        }
+
+        // Post-hoc invariants for insert ops (mirror `whitespaceRelaxedStrategy`).
+        if (input.operation === 'insert_after' && !expandedNew.startsWith(actualRawSlice)) return null;
+        if (input.operation === 'insert_before' && !expandedNew.endsWith(actualRawSlice)) return null;
+
+        return {
+            strategy: 'quote_normalized',
+            oldString: input.oldString,
+            newString: input.newString,
+            expandedOld: actualRawSlice,
+            expandedNew,
+            matchCount: rawMatchCount,
+            normalizeAnchor: foldTypographicQuotes,
         };
     },
 };
@@ -589,26 +678,24 @@ function buildWhitespaceRelaxedPattern(needle: string): RegExp {
 const whitespaceRelaxedStrategy: Strategy = {
     name: 'whitespace_relaxed',
     tryMatch(input, base) {
-        if (!input.oldString) return null;
-        if (input.oldString.length > MAX_WS_RELAXED_INPUT_LENGTH) return null;
+        // Operate in raw-HTML space so needles that contain `<citation>` /
+        // `<annotation>` / math delimiters can still match despite whitespace
+        // drift
+        const needle = base.expandedOld;
+        if (!needle) return null;
+        if (needle.length > MAX_WS_RELAXED_INPUT_LENGTH) return null;
 
         // Bracket the needle with non-whitespace anchors so the regex cannot
         // greedy-match across the wrapper div or degenerate into all-whitespace.
-        const first = input.oldString.charAt(0);
-        const last = input.oldString.charAt(input.oldString.length - 1);
+        const first = needle.charAt(0);
+        const last = needle.charAt(needle.length - 1);
         if (!/\S/.test(first) || !/\S/.test(last)) return null;
-
-        // Needle must be identity under expandToRawHtml (no citations /
-        // annotations / math delimiters). Keeps simplified-space == raw-space
-        // for the needle so the returned `expandedOld` is literally a slice of
-        // `strippedHtml` and the validate→execute round-trip is byte-stable.
-        if (input.oldString !== base.expandedOld) return null;
 
         // Defensive: if the needle has no whitespace at all, `exact` would
         // already have matched. Skip to keep the strategy focused.
-        if (!/\s/.test(input.oldString)) return null;
+        if (!/\s/.test(needle)) return null;
 
-        const normalizedOld = normalizeWS(input.oldString);
+        const normalizedOld = normalizeWS(needle);
         if (normalizedOld.length < MIN_WS_RELAXED_NORMALIZED_LENGTH) return null;
         if (normalizedOld.replace(/\s/g, '').length < MIN_WS_RELAXED_NON_WS_LENGTH) return null;
 
@@ -617,7 +704,7 @@ const whitespaceRelaxedStrategy: Strategy = {
         // anchor or switches operation.
         if (input.operation === 'str_replace_all') return null;
 
-        const pattern = buildWhitespaceRelaxedPattern(input.oldString);
+        const pattern = buildWhitespaceRelaxedPattern(needle);
         const matches = [...input.strippedHtml.matchAll(pattern)];
         if (matches.length !== 1) return null;
 
@@ -663,9 +750,7 @@ const whitespaceRelaxedStrategy: Strategy = {
                 );
                 expandedNew = expandedInjected + actualRawSlice;
             } else {
-                expandedNew = expandToRawHtml(
-                    input.newString, input.metadata, 'new', input.externalRefContext,
-                );
+                expandedNew = base.expandedNew;
             }
         } catch {
             return null;
@@ -699,6 +784,7 @@ const STRATEGIES: Strategy[] = [
     entityDecodeStrategy,
     entityEncodeStrategy,
     nfkcStrategy,
+    quoteNormalizedStrategy,
     trimTrailingNewlinesStrategy,
     jsonUnescapeStrategy,
     partialElementStripStrategy,

@@ -394,6 +394,12 @@ async function validateEditNoteAction(
     // 10. Pre-check new_string (tag validity, citation items exist, dry-run expand)
     const pre = precheckNewString(request.request_id, new_string, metadata, externalRefContext);
     if (!pre.ok) return pre.response;
+    // 10b. Preload page labels for any `att_id` citations that may appear in
+    //      old_string so the att_id enrichment branch can translate 1-based
+    //      page numbers to the display labels stored at insert time.
+    //      (executeEditNoteAction preloads for new_string at step 3; old_string
+    //      may reference different attachments, and enrichment runs here.)
+    await preloadPageLabelsForNewCitations(old_string ?? '');
     // 10c. Enrich no-ref citations in old_string with refs from metadata.
     //      When the model reuses the form it wrote in an earlier edit_note
     //      (citation without ref) as its old_string in a follow-up edit,
@@ -678,6 +684,11 @@ async function executeEditNoteAction(
     }
 
     // ── String replacement mode (default) ──
+
+    // 5a. Preload labels for `att_id` citations in old_string so the enrichment
+    //     below can translate page numbers to labels for skipped/stale
+    //     validation paths. Step 3 above preloaded for new_string only.
+    await preloadPageLabelsForNewCitations(old_string ?? '');
 
     // 5b. Defense-in-depth: validator normally already enriched, re-run for
     //     skipped/stale validation paths. See applyOldStringEnrichment.

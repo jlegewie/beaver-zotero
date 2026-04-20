@@ -142,6 +142,33 @@ export function encodeTextEntities(s: string, form: EntityForm = 'hex'): string 
 }
 
 // =============================================================================
+// Typographic quote folding
+// =============================================================================
+
+// Double-quote variants → "
+//   U+201C left double, U+201D right double, U+201E German low-9,
+//   U+00AB « guillemet, U+00BB » guillemet, U+2033 double prime.
+// Single-quote variants → '
+//   U+2018 left single, U+2019 right single / apostrophe, U+201A single low-9,
+//   U+2032 prime.
+const TYPOGRAPHIC_DOUBLE_QUOTES = /[\u201C\u201D\u201E\u00AB\u00BB\u2033]/g;
+const TYPOGRAPHIC_SINGLE_QUOTES = /[\u2018\u2019\u201A\u2032]/g;
+
+/**
+ * Fold typographic / curly / guillemet quote characters to their ASCII
+ * equivalents. Used by the edit_note matcher so the model can write ASCII
+ * quotes in `old_string` and still match notes whose prose uses German low
+ * quotes (`„…"`), English curly quotes (`"…"`), French guillemets (`«…»`),
+ * etc. The transformation is 1:1 per codepoint, so byte positions in the
+ * folded form map directly back to positions in the original string.
+ */
+export function foldTypographicQuotes(s: string): string {
+    return s
+        .replace(TYPOGRAPHIC_DOUBLE_QUOTES, '"')
+        .replace(TYPOGRAPHIC_SINGLE_QUOTES, "'");
+}
+
+// =============================================================================
 // Whitespace
 // =============================================================================
 
