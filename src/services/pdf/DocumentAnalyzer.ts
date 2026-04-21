@@ -75,8 +75,10 @@ function analyzeTextQuality(
         }
     }
 
-    // Check alphanumeric ratio (low ratio suggests garbled/symbol-heavy text)
-    const alphanumMatches = strippedText.match(/[a-zA-Z0-9]/g);
+    // Check alphanumeric ratio (low ratio suggests garbled/symbol-heavy text).
+    // Unicode-aware: \p{L} matches letters in any script (Latin, Cyrillic,
+    // Greek, Arabic, CJK, etc.) and \p{N} matches any number character.
+    const alphanumMatches = strippedText.match(/[\p{L}\p{N}]/gu);
     const alphanumCount = alphanumMatches ? alphanumMatches.length : 0;
     if (contentChars > 0) {
         const alphanumRatio = alphanumCount / contentChars;

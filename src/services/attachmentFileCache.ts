@@ -20,7 +20,7 @@ import { logger } from '../utils/logger';
  * Bump this when the extraction output semantics change.
  * All cached data with a different version will be treated as stale.
  */
-export const EXTRACTION_VERSION = '1';
+export const EXTRACTION_VERSION = '2';
 
 /** Maximum entries in the in-memory metadata cache. */
 const MEMORY_CACHE_MAX = 500;
