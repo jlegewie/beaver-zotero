@@ -12,6 +12,7 @@ import {
     validateNewString,
     checkNewCitationItemsExist,
     applyOldStringEnrichment,
+    applyNewStringNormalization,
 } from '../../../utils/editNoteValidation';
 import {
     expandToRawHtml,
@@ -223,26 +224,36 @@ function buildAmbiguousMatchResponse(
 async function validateEditNoteAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    // `old_string` is `let` because step 10c may enrich no-ref citations in
-    // place (see `applyOldStringEnrichment`). All downstream code operates on
-    // the enriched value, and `buildNormalizedActionData` below automatically
-    // propagates the enrichment into `normalized_action_data`.
-    const { library_id, zotero_key, new_string, operation: rawOp } = request.action_data as EditNoteProposedData;
+    // `old_string` and `new_string` are `let` because steps 10a/10c may
+    // normalize citation refs in place (see `applyOldStringEnrichment` /
+    // `applyNewStringNormalization`). All downstream code operates on the
+    // normalized values, and `buildNormalizedActionData` below automatically
+    // propagates the changes into `normalized_action_data`.
+    const { library_id, zotero_key, operation: rawOp } = request.action_data as EditNoteProposedData;
     const baseActionData = request.action_data as EditNoteProposedData;
-    let { old_string } = baseActionData;
+    let { old_string, new_string } = baseActionData;
     const operation: EditNoteOperation = rawOp ?? 'str_replace';
 
     // Build a `normalized_action_data` payload that auto-includes any
-    // post-enrichment `old_string`. Returns `undefined` when neither the
-    // supplied `overrides` nor enrichment changed anything from the input,
-    // letting callers skip emitting `normalized_action_data` unconditionally.
+    // post-normalization `old_string` / `new_string`. Returns `undefined`
+    // when neither the supplied `overrides` nor normalization changed
+    // anything from the input, letting callers skip emitting
+    // `normalized_action_data` unconditionally.
     // Callers should NOT pass `old_string` via `overrides` — rely on the
-    // mutating local binding.
+    // mutating local binding. For `new_string`, an explicit override (e.g.
+    // from the matcher or insert-merge) takes precedence over the mutated
+    // local so matcher-level transforms aren't clobbered.
     const buildNormalizedActionData = (
         overrides: Partial<EditNoteProposedData> = {},
     ): EditNoteProposedData | undefined => {
         const changed: Partial<EditNoteProposedData> = { ...overrides };
         if (old_string !== baseActionData.old_string) changed.old_string = old_string;
+        if (
+            new_string !== baseActionData.new_string
+            && changed.new_string === undefined
+        ) {
+            changed.new_string = new_string;
+        }
         return Object.keys(changed).length > 0
             ? { ...baseActionData, ...changed }
             : undefined;
@@ -346,6 +357,17 @@ async function validateEditNoteAction(
 
     // ── rewrite mode: skip old_string matching, validate new_string only ──
     if (operation === 'rewrite') {
+        // Preload labels for any `att_id` citations in new_string so the
+        // stale-ref repair path can translate 1-based page numbers to the
+        // stored display labels. Without this, a cold label cache causes
+        // att_id repairs to miss here and diverge from the executor, which
+        // preloads before its own normalization pass.
+        await preloadPageLabelsForNewCitations(new_string);
+        // Repair stale refs in new_string so expandToRawHtml('new') preserves
+        // existing citations the model copied (instead of rebuilding them as
+        // fresh citations when refs have drifted from a prior edit this turn).
+        new_string = applyNewStringNormalization(new_string, metadata) ?? new_string;
+
         const pre = precheckNewString(request.request_id, new_string, metadata, externalRefContext);
         if (!pre.ok) return pre.response;
 
@@ -363,6 +385,7 @@ async function validateEditNoteAction(
                 match_count: 1,
                 old_content: simplified,
             },
+            normalized_action_data: buildNormalizedActionData(),
             preference,
         };
     }
@@ -391,22 +414,28 @@ async function validateEditNoteAction(
         };
     }
 
-    // 10. Pre-check new_string (tag validity, citation items exist, dry-run expand)
+    // 10. Preload + normalize new_string before precheck. Old_string gets the
+    //     same treatment after the precheck (10b/10c) — it's not needed for
+    //     the dry-run expansion that precheckNewString runs. Preload BEFORE
+    //     `applyNewStringNormalization` so its att_id translation path can
+    //     resolve 1-based page numbers to stored display labels; a cold cache
+    //     would otherwise leave stale att_id refs unrepaired here and diverge
+    //     from the executor.
+    await preloadPageLabelsForNewCitations(new_string);
+    new_string = applyNewStringNormalization(new_string, metadata) ?? new_string;
     const pre = precheckNewString(request.request_id, new_string, metadata, externalRefContext);
     if (!pre.ok) return pre.response;
     // 10b. Preload page labels for any `att_id` citations that may appear in
-    //      old_string so the att_id enrichment branch can translate 1-based
-    //      page numbers to the display labels stored at insert time.
-    //      (executeEditNoteAction preloads for new_string at step 3; old_string
-    //      may reference different attachments, and enrichment runs here.)
+    //      old_string (old_string may reference different attachments than
+    //      new_string).
     await preloadPageLabelsForNewCitations(old_string ?? '');
-    // 10c. Enrich no-ref citations in old_string with refs from metadata.
-    //      When the model reuses the form it wrote in an earlier edit_note
-    //      (citation without ref) as its old_string in a follow-up edit,
-    //      we look up the corresponding ref from metadata and inject it so
-    //      expansion succeeds instead of throwing "New citations (without a
-    //      ref) can only appear in new_string". `buildNormalizedActionData`
-    //      propagates the enriched value to the executor automatically.
+    // 10c. Normalize citation refs in old_string (enrich no-ref citations,
+    //      repair stale refs). When the model reuses a form from an earlier
+    //      read_note or edit_note whose refs have drifted, we look up the
+    //      current ref by (item_id, page) so expansion succeeds instead of
+    //      throwing "Unknown citation ref" or silently retargeting.
+    //      `buildNormalizedActionData` propagates the normalized value to
+    //      the executor automatically.
     old_string = applyOldStringEnrichment(old_string, metadata);
 
     // 11. Normalize raw HTML to match what simplifyNoteHtml exposes to the
@@ -534,12 +563,13 @@ async function executeEditNoteAction(
     const {
         library_id,
         zotero_key,
-        new_string,
         operation: rawOp,
     } = request.action_data as EditNoteProposedData;
-    // `old_string` is `let` because step 5b re-runs `applyOldStringEnrichment`
-    // as defense-in-depth for skipped/stale validation.
-    let { old_string } = request.action_data as EditNoteProposedData;
+    // `old_string` and `new_string` are `let` because step 5b re-runs
+    // `applyOldStringEnrichment` / `applyNewStringNormalization` as
+    // defense-in-depth for skipped/stale validation (e.g. `always_apply`
+    // paths or cases where the note drifted after validation).
+    let { old_string, new_string } = request.action_data as EditNoteProposedData;
     const operation: EditNoteOperation = rawOp ?? 'str_replace';
     let {
         target_before_context,
@@ -586,6 +616,12 @@ async function executeEditNoteAction(
 
     // ── rewrite mode: replace entire note body ──
     if (operation === 'rewrite') {
+        // Defense-in-depth: re-run new_string normalization against the
+        // current metadata. The validator already did this, but action_data
+        // may be stale if validation was skipped (always_apply) or if the
+        // note drifted between validate and execute.
+        new_string = applyNewStringNormalization(new_string, metadata) ?? new_string;
+
         let expandedNew: string;
         try {
             expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
@@ -690,9 +726,12 @@ async function executeEditNoteAction(
     //     validation paths. Step 3 above preloaded for new_string only.
     await preloadPageLabelsForNewCitations(old_string ?? '');
 
-    // 5b. Defense-in-depth: validator normally already enriched, re-run for
-    //     skipped/stale validation paths. See applyOldStringEnrichment.
+    // 5b. Defense-in-depth: validator normally already normalized both
+    //     strings, re-run for skipped/stale validation paths (e.g.
+    //     `always_apply` or when the note drifted between validate and
+    //     execute). See applyOldStringEnrichment / applyNewStringNormalization.
     old_string = applyOldStringEnrichment(old_string, metadata);
+    new_string = applyNewStringNormalization(new_string, metadata) ?? new_string;
 
     // 6. Normalize + strip data-citation-items from raw HTML for matching.
     //    Snapshot the cache first so rebuild can preserve itemData for URIs

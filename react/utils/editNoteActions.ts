@@ -11,7 +11,11 @@ import {
     countOccurrences,
     invalidateSimplificationCache,
 } from '../../src/utils/noteHtmlSimplifier';
-import { checkDuplicateCitations } from '../../src/utils/editNoteValidation';
+import {
+    applyNewStringNormalization,
+    applyOldStringEnrichment,
+    checkDuplicateCitations,
+} from '../../src/utils/editNoteValidation';
 import { findRangeByContexts } from '../../src/utils/editNoteRawPosition';
 import {
     expandToRawHtml,
@@ -140,17 +144,24 @@ export async function executeEditNoteAction(
     const {
         library_id,
         zotero_key,
-        old_string,
-        new_string,
         operation: rawOp,
     } = action.proposed_data as {
         library_id: number;
         zotero_key: string;
+        operation?: EditNoteOperation;
+    };
+    // `old_string` / `new_string` are `let` so the stale-ref normalizers
+    // below can rewrite citation refs in place. Apply/Retry runs this
+    // function directly from the UI after the validator already normalized
+    // once; refs can still drift between validate and apply when the note
+    // was edited (by the model or the user) in between, so we re-normalize
+    // defensively against the current metadata.
+    let {
+        old_string,
+        new_string,
+    } = action.proposed_data as {
         old_string?: string;
         new_string: string;
-        operation?: EditNoteOperation;
-        target_before_context?: string;
-        target_after_context?: string;
     };
     // For insert_after / insert_before, new_string is already normalized by
     // validation to merge old_string with new_string (via normalized_action_data):
@@ -179,15 +190,32 @@ export async function executeEditNoteAction(
     //     the same HTML validation saw. See flushLiveEditorToDB for rationale.
     await flushLiveEditorToDB(item);
 
-    // 3. Get current note HTML
+    // 2c. Pre-load page labels for both strings BEFORE reading the note.
+    //     Keeping these awaits before `item.getNote()` avoids an async gap
+    //     between read and write: if the user keeps typing in the open note
+    //     while a cold label cache is fetching, the later replacement would
+    //     otherwise be computed from stale HTML and overwrite those keystrokes
+    //     on save. The service executor enforces the same ordering.
+    await preloadPageLabelsForNewCitations(new_string);
+    await preloadPageLabelsForNewCitations(old_string ?? '');
+
+    // 3. Get current note HTML. Avoid async operations between here and
+    //    item.setNote() to preserve atomicity.
     const oldHtml: string = item.getNote();
 
     // 4. Get metadata from cache or re-simplify
     const noteId = `${library_id}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
 
-    // 5. Pre-load page labels so new citations resolve page indices to labels
-    await preloadPageLabelsForNewCitations(new_string);
+    // 5. Repair stale citation refs in both strings against the current
+    //    metadata. Validator already normalized once, but refs may have
+    //    drifted if the note was edited (by the model or the user) between
+    //    validate and apply — without this repair, expandToRawHtml('new')
+    //    would rebuild preserved citations as new ones (re-translating
+    //    numeric pages), and expandToRawHtml('old') would fail with
+    //    "Unknown citation ref" or match the wrong fragment.
+    old_string = applyOldStringEnrichment(old_string, metadata);
+    new_string = applyNewStringNormalization(new_string, metadata) ?? new_string;
 
     // Snapshot external-reference state once so every expandToRawHtml('new', ...)
     // below can resolve `<citation external_id="..."/>` consistently.

@@ -25,17 +25,26 @@ vi.mock('../../../src/utils/editNoteValidation', () => {
     // `applyOldStringEnrichment` delegates to `enrichOldStringCitationRefs`,
     // mirroring the production wrapper so existing tests that mock
     // `enrichOldStringCitationRefs` (including `.toHaveBeenCalled()` assertions)
-    // keep working without change.
+    // keep working without change. `applyNewStringNormalization` mirrors the
+    // same shape for `new_string` stale-ref repair.
     const enrichMock = vi.fn(() => null as string | null);
+    const normalizeNewMock = vi.fn(() => null as string | null);
     return {
         validateNewString: vi.fn(() => null),
         checkNewCitationItemsExist: vi.fn(() => null),
         checkDuplicateCitations: vi.fn(() => null),
         enrichOldStringCitationRefs: enrichMock,
+        normalizeOldStringCitations: enrichMock,
+        normalizeNewStringCitations: normalizeNewMock,
         applyOldStringEnrichment: vi.fn((oldString: string | undefined, metadata: any) => {
             if (!oldString) return oldString;
             const enriched = enrichMock(oldString, metadata);
             return enriched ?? oldString;
+        }),
+        applyNewStringNormalization: vi.fn((newString: string | undefined, metadata: any) => {
+            if (!newString) return newString;
+            const normalized = normalizeNewMock(newString, metadata);
+            return normalized ?? newString;
         }),
     };
 });
