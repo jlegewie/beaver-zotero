@@ -149,7 +149,7 @@ function isPlotMarker(text: string): boolean {
 function isRepeatedNonAlnum(text: string): boolean {
     if (text.length < 2) return false;
     const firstChar = text[0];
-    if (/[a-zA-Z0-9]/.test(firstChar)) return false;
+    if (/[\p{L}\p{N}]/u.test(firstChar)) return false;
     return text.split("").every(c => c === firstChar);
 }
 
@@ -550,8 +550,8 @@ function extractFilteredBlocks(
             // Skip whitespace-only lines
             if (/^\s*$/.test(lineText)) continue;
 
-            // Count alphanumeric characters
-            const alnumCount = (lineText.match(/[a-zA-Z0-9]/g) || []).length;
+            // Count alphanumeric characters (any script via Unicode properties)
+            const alnumCount = (lineText.match(/[\p{L}\p{N}]/gu) || []).length;
             const totalLength = lineText.length;
 
             // Keep line if: ≥2 alnum chars OR (≥1 alnum AND ≥3 total chars)
@@ -596,8 +596,9 @@ function isPlotSymbolBlock(block: RawBlock): boolean {
         // Check plot marker
         if (isPlotMarker(text)) continue;
 
-        // Check small non-alnum text
-        if (font && font.size < 8 && text.length <= 3 && !/[a-zA-Z0-9]/.test(text)) {
+        // Check small non-alnum text (Unicode-aware, so small non-Latin
+        // snippets are not treated as plot symbols)
+        if (font && font.size < 8 && text.length <= 3 && !/[\p{L}\p{N}]/u.test(text)) {
             continue;
         }
 
