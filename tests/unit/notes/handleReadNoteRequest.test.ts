@@ -127,14 +127,13 @@ describe('handleReadNoteRequest — success', () => {
         expect(response.parent_title).toBe('Parent Article');
     });
 
-    it('handles empty note', async () => {
+    it('returns error for empty note', async () => {
         const item = makeMockItem({ getNote: vi.fn(() => ''), getNoteTitle: vi.fn(() => '') });
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
 
         const response = await handleReadNoteRequest(makeRequest());
-        expect(response.success).toBe(true);
-        expect(response.total_lines).toBe(0);
-        expect(response.content).toBe('(empty note)');
+        expect(response.success).toBe(false);
+        expect(response.error).toContain('is empty');
     });
 
     it('returns (untitled) for note without title', async () => {
