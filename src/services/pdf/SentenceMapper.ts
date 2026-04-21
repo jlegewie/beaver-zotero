@@ -52,8 +52,12 @@ export type SentenceSplitter = (text: string) => SentenceRange[];
  * Split text into sentences using a trivial regex.
  *
  * Rules:
- *   - A sentence ends at the first `.`, `!`, or `?` followed by whitespace
- *     (or end-of-string).
+ *   - A sentence ends at an ASCII terminator (`.`, `!`, `?`) followed by
+ *     whitespace (or end-of-string).
+ *   - A sentence also ends at an unambiguous non-Latin terminator — `。`,
+ *     `！`, `？` (CJK full/wide), `؟` (Arabic), `।` (Devanagari danda),
+ *     `።` (Ethiopic) — regardless of what follows, since those characters
+ *     are not used inside words, abbreviations, or numbers.
  *   - Leading whitespace between sentences is skipped; the returned range
  *     starts at the first non-whitespace character.
  *   - No handling of abbreviations, quotations, decimals, ellipses, etc.
@@ -63,6 +67,16 @@ export type SentenceSplitter = (text: string) => SentenceRange[];
  * Returned ranges are half-open offsets `[start, end)` into `text` and are
  * non-overlapping, in order.
  */
+const UNAMBIGUOUS_SENTENCE_TERMINATORS = new Set([
+    "。", // 。 CJK full stop
+    "！", // ！ fullwidth exclamation
+    "？", // ？ fullwidth question
+    "؟", // ؟ Arabic question mark
+    "।", // । Devanagari danda
+    "॥", // ॥ Devanagari double danda
+    "።", // ። Ethiopic full stop
+]);
+
 export function simpleRegexSentenceSplit(text: string): SentenceRange[] {
     const ranges: SentenceRange[] = [];
     if (!text) return ranges;
@@ -86,6 +100,9 @@ export function simpleRegexSentenceSplit(text: string): SentenceRange[] {
                     end = j + 1; // include the terminator
                     break;
                 }
+            } else if (UNAMBIGUOUS_SENTENCE_TERMINATORS.has(c)) {
+                end = j + 1;
+                break;
             }
         }
 

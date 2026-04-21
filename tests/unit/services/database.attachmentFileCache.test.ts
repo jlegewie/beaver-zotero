@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BeaverDB, AttachmentFileCacheRecord } from '../../../src/services/database';
+import { EXTRACTION_VERSION } from '../../../src/services/attachmentFileCache';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 
 // ---------------------------------------------------------------------------
@@ -29,7 +30,7 @@ function makeRecord(overrides: Partial<Omit<AttachmentFileCacheRecord, 'cached_a
         needs_ocr: false,
         is_encrypted: false,
         is_invalid: false,
-        extraction_version: '1',
+        extraction_version: EXTRACTION_VERSION,
         ...overrides,
     };
 }
@@ -77,7 +78,7 @@ describe('BeaverDB — attachment_file_cache methods', () => {
             expect(result!.needs_ocr).toBe(false);
             expect(result!.is_encrypted).toBe(false);
             expect(result!.is_invalid).toBe(false);
-            expect(result!.extraction_version).toBe('1');
+            expect(result!.extraction_version).toBe(EXTRACTION_VERSION);
             expect(result!.cached_at).toBeTruthy();
         });
 
@@ -203,8 +204,8 @@ describe('BeaverDB — attachment_file_cache methods', () => {
                 INSERT INTO attachment_file_cache
                     (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
                      content_type, extraction_version, page_labels_json, cached_at)
-                VALUES (999, 1, 'MALFORM1', '/x.pdf', 0, 0, 'application/pdf', '1', '{broken', datetime('now'))
-            `).run();
+                VALUES (999, 1, 'MALFORM1', '/x.pdf', 0, 0, 'application/pdf', ?, '{broken', datetime('now'))
+            `).run(EXTRACTION_VERSION);
 
             const result = await db.getAttachmentFileCache(999);
             expect(result).not.toBeNull();
