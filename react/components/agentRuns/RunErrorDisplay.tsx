@@ -187,8 +187,18 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                 {isExpanded && (
                     <div className="p-3" id={`run-error-content-${runId}`}>
                         <div className="display-flex flex-col gap-4">
-                            <div className="text-base font-color-red">
-                                {parseTextWithLinksAndNewlines(displayMessage, "text-link-red")}
+                            <div className="display-flex flex-col gap-1">
+                                <div className="text-base font-color-red">
+                                    {parseTextWithLinksAndNewlines(displayMessage, "text-link-red")}
+                                </div>
+                                {error.details && (
+                                    <div
+                                        className="text-sm font-color-red user-select-text"
+                                        style={{ opacity: 0.75 }}
+                                    >
+                                        {error.details}
+                                    </div>
+                                )}
                             </div>
 
                             <div className="display-flex flex-row gap-3 items-center">

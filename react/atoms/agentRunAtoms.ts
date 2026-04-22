@@ -7,7 +7,7 @@
 
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { agentService } from '../../src/services/agentService';
+import { agentService, WSConnectionError } from '../../src/services/agentService';
 import {
     WSCallbacks,
     AgentRunRequest,
@@ -1336,7 +1336,7 @@ async function executeWSRequest(
         logger('WS Connection established and ready');
     } catch (error: any) {
         logger('WS connection error:', error, 1);
-        
+
         // Check if an error was already set by the onError callback
         // If so, don't overwrite it with a generic connection_error
         const currentError = get(wsErrorAtom);
@@ -1346,13 +1346,19 @@ async function executeWSRequest(
             set(isWSChatPendingAtom, false);
             return;
         }
-        
-        // No error was set yet, so set a generic connection error
+
+        // No error was set yet, so set a generic connection error.
+        // If the failure came from the WebSocket connect phase, surface the
+        // close code and a human-readable label as details — useful for
+        // triaging corporate proxy/firewall blocks (1006), TLS failures
+        // (1015), and server-side rejections (4xxx codes).
         const errorMessage = 'Could not connect to the server. Please check your internet connection and try again.';
+        const details = buildConnectionErrorDetails(error);
         set(wsErrorAtom, {
             event: 'error',
             type: 'connection_error',
             message: errorMessage,
+            details,
             is_retryable: true,
         });
         set(activeRunAtom, (prev) => prev ? {
@@ -1361,11 +1367,65 @@ async function executeWSRequest(
             error: {
                 type: 'connection_error',
                 message: errorMessage,
+                details,
                 is_retryable: true,
             }
         } : prev);
         set(isWSChatPendingAtom, false);
     }
+}
+
+/**
+ * Human-readable label for standard WebSocket close codes (RFC 6455) plus
+ * a short hint at likely causes. Backend-specific 4xxx codes fall through
+ * and are only shown numerically.
+ */
+function labelForCloseCode(code: number): string {
+    switch (code) {
+        case 1000: return 'Normal closure';
+        case 1001: return 'Going away';
+        case 1002: return 'Protocol error';
+        case 1003: return 'Unsupported data';
+        case 1005: return 'No status received';
+        case 1006: return 'Abnormal closure — often a proxy, firewall, or TLS inspector blocking WebSocket traffic';
+        case 1007: return 'Invalid frame payload';
+        case 1008: return 'Policy violation';
+        case 1009: return 'Message too big';
+        case 1010: return 'Missing extension';
+        case 1011: return 'Server error';
+        case 1012: return 'Service restart';
+        case 1013: return 'Try again later';
+        case 1014: return 'Bad gateway';
+        case 1015: return 'TLS handshake failure';
+        default:
+            if (code >= 4000 && code <= 4999) return 'Application-specific (server-defined)';
+            return 'Unknown close code';
+    }
+}
+
+/** Build a `details` string for connection_error suitable for copy-paste into support tickets. */
+function buildConnectionErrorDetails(error: any): string | undefined {
+    if (error instanceof WSConnectionError) {
+        const parts: string[] = [];
+        if (error.close_code !== undefined) {
+            parts.push(`close code ${error.close_code} (${labelForCloseCode(error.close_code)})`);
+        }
+        if (error.close_reason) {
+            parts.push(`reason: ${error.close_reason}`);
+        }
+        if (error.was_clean !== undefined) {
+            parts.push(`clean=${error.was_clean}`);
+        }
+        if (error.phase === 'setup' && parts.length === 0) {
+            return error.message || undefined;
+        }
+        return parts.length > 0 ? parts.join(', ') : undefined;
+    }
+    // Non-WS errors (e.g., auth token fetch failures) — include the message if any.
+    if (error && typeof error.message === 'string' && error.message) {
+        return error.message;
+    }
+    return undefined;
 }
 
 /**

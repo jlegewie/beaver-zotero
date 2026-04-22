@@ -46,6 +46,35 @@ import {
 // Agent Service
 // =============================================================================
 
+/**
+ * Error thrown when the WebSocket connect phase fails.
+ * Carries the underlying close code/reason so callers can distinguish
+ * proxy/firewall blocks (commonly 1006) from TLS failures (1015) or
+ * server-side rejections (4xxx close codes used by the backend).
+ */
+export class WSConnectionError extends Error {
+    close_code?: number;
+    close_reason?: string;
+    was_clean?: boolean;
+    /** 'error' if the failure came from ws.onerror without a close frame, 'close' if it came from ws.onclose, 'setup' for pre-connect errors (auth etc.) */
+    phase: 'error' | 'close' | 'setup';
+
+    constructor(
+        message: string,
+        phase: 'error' | 'close' | 'setup',
+        opts?: { close_code?: number; close_reason?: string; was_clean?: boolean }
+    ) {
+        super(message);
+        this.name = 'WSConnectionError';
+        this.phase = phase;
+        if (opts) {
+            this.close_code = opts.close_code;
+            this.close_reason = opts.close_reason;
+            this.was_clean = opts.was_clean;
+        }
+    }
+}
+
 export class AgentService {
     private baseUrl: string;
     private ws: WebSocket | null = null;
@@ -238,15 +267,12 @@ export class AgentService {
                     });
                 };
 
-                this.ws.onerror = (event) => {
-                    logger(`AgentService: Connecting to Beaver failed`, 1);
-                    // Note: The error event doesn't contain useful info in browsers
-                    // The actual error will come through onclose
-                    if (!hasResolved) {
-                        hasResolved = true;
-                        this.connecting = false;
-                        reject(new Error('Connecting to Beaver failed'));
-                    }
+                // Note: onerror carries no useful info in browsers. Per the WebSocket
+                // spec, onclose always fires after onerror, so we defer rejection to
+                // onclose to capture the close code (useful for distinguishing proxy
+                // blocks, TLS failures, and server-side rejects).
+                this.ws.onerror = () => {
+                    logger(`AgentService: WebSocket error event (close will follow)`, 1);
                 };
 
                 this.ws.onclose = (event) => {
@@ -261,7 +287,17 @@ export class AgentService {
                     if (!hasResolved) {
                         hasResolved = true;
                         this.connecting = false;
-                        reject(new Error(`Connection closed: ${event.reason || 'Unknown reason. Please try again.'}`));
+                        reject(new WSConnectionError(
+                            event.reason
+                                ? `Connection closed: ${event.reason}`
+                                : `Connection closed before ready (code ${event.code})`,
+                            'close',
+                            {
+                                close_code: event.code,
+                                close_reason: event.reason,
+                                was_clean: event.wasClean,
+                            }
+                        ));
                     }
                 };
             });

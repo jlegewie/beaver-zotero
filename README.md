@@ -117,6 +117,30 @@ If you are trying to use your own OpenAI API key, you might run into to the veri
 
 If this requirement motivates you to try a different provider, I suggest adding an API key for Gemini ([link](https://aistudio.google.com/app/apikey)).
 
+### Corporate networks, VPNs, and IT administrators
+
+If you see **"Connection Failed — Could not connect to the server"** on a work computer, the request is most likely being blocked before it reaches Beaver's servers. This is almost always a corporate proxy, firewall, or TLS-inspection appliance blocking WebSocket traffic.
+
+**What Beaver needs:**
+
+- Outbound **HTTPS (TCP 443)** to the Beaver API host (for example `api.beaverapp.ai`) and to `*.supabase.co` for authentication.
+- Outbound **WebSocket Secure (`wss://`, also TCP 443)** to the Beaver API host. Beaver streams agent responses over WebSocket, so allowing `https://` alone is not enough.
+- The proxy must preserve the `Upgrade: websocket` and `Connection: Upgrade` request headers.
+- If your organization uses TLS/SSL inspection (Zscaler, Netskope, Blue Coat, Palo Alto, Fortinet, etc.), please **exempt the Beaver API host** from inspection. Re-signed certificates typically break the WebSocket handshake.
+
+**For your IT helpdesk:** please whitelist the Beaver API host for both HTTPS and WSS on port 443, and add it to the TLS-inspection bypass list. The exact host is configured at build time and appears in the Zotero debug log on the line `AgentService: Connecting to wss://...`.
+
+**Quick self-diagnosis:**
+
+1. In Zotero, go to **Help → Debug Output Logging → Enable**, reproduce the error, then **Help → Debug Output Logging → View Output**.
+2. Search the log for lines starting with `[Beaver]`. The error display in Beaver also shows a WebSocket close code (e.g. `close code 1006`). Common codes:
+   - **1006** (Abnormal Closure) — almost always a proxy, firewall, or TLS inspector dropping the WebSocket.
+   - **1015** — TLS handshake failure (likely a cert-inspection issue).
+   - **4xxx** — server-side rejection (authentication, version, or policy).
+3. If `https://` works in your browser on the same network but Beaver fails, WebSocket is being blocked specifically.
+
+If you run Zotero through a corporate HTTP proxy, Zotero (based on Firefox) honors proxy settings from **Edit → Preferences → Advanced → Config Editor**, keys under `network.proxy.*`.
+
 ### Is Beaver open source?
 
 The Zotero plugin is open source under the [AGPL‑3.0 License](LICENSE). The backend, server, and file‑processing code are not open source.
