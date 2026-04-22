@@ -229,11 +229,37 @@ export async function validateOrganizeItemsAction(
         // Safe to use first value since we verified libraryIds.size >= 1 (from item_ids validation)
         const libraryId = [...libraryIds][0];
 
+        // Collections are library-scoped: a key that exists in another library is
+        // not usable here. Distinguish "exists elsewhere" from "doesn't exist at all"
+        // so the agent doesn't loop calling create_collection for a key we just returned.
+        const findCollectionLibrary = async (collKey: string): Promise<number | null> => {
+            for (const lib of Zotero.Libraries.getAll()) {
+                const found = await Zotero.Collections.getByLibraryAndKeyAsync(lib.libraryID, collKey);
+                if (found) return lib.libraryID;
+            }
+            return null;
+        };
+
         // Validate collection keys exist (for add operations)
         if (collections?.add && collections.add.length > 0) {
             for (const collKey of collections.add) {
                 const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
                 if (!collection) {
+                    const otherLibraryId = await findCollectionLibrary(collKey);
+                    if (otherLibraryId !== null) {
+                        const otherLibrary = Zotero.Libraries.get(otherLibraryId);
+                        const otherLibraryName = otherLibrary ? otherLibrary.name : `library ${otherLibraryId}`;
+                        const currentLibrary = Zotero.Libraries.get(libraryId);
+                        const currentLibraryName = currentLibrary ? currentLibrary.name : `library ${libraryId}`;
+                        return {
+                            type: 'agent_action_validate_response',
+                            request_id: request.request_id,
+                            valid: false,
+                            error: `Collection '${collKey}' belongs to '${otherLibraryName}' (library ${otherLibraryId}), but the items are in '${currentLibraryName}' (library ${libraryId}). Collections are library-scoped; create a separate collection in library ${libraryId} or only pass items from library ${otherLibraryId}.`,
+                            error_code: 'collection_in_different_library',
+                            preference: 'always_ask',
+                        };
+                    }
                     return {
                         type: 'agent_action_validate_response',
                         request_id: request.request_id,
@@ -251,6 +277,21 @@ export async function validateOrganizeItemsAction(
             for (const collKey of collections.remove) {
                 const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
                 if (!collection) {
+                    const otherLibraryId = await findCollectionLibrary(collKey);
+                    if (otherLibraryId !== null) {
+                        const otherLibrary = Zotero.Libraries.get(otherLibraryId);
+                        const otherLibraryName = otherLibrary ? otherLibrary.name : `library ${otherLibraryId}`;
+                        const currentLibrary = Zotero.Libraries.get(libraryId);
+                        const currentLibraryName = currentLibrary ? currentLibrary.name : `library ${libraryId}`;
+                        return {
+                            type: 'agent_action_validate_response',
+                            request_id: request.request_id,
+                            valid: false,
+                            error: `Collection '${collKey}' belongs to '${otherLibraryName}' (library ${otherLibraryId}), but the items are in '${currentLibraryName}' (library ${libraryId}). Collections are library-scoped.`,
+                            error_code: 'collection_in_different_library',
+                            preference: 'always_ask',
+                        };
+                    }
                     return {
                         type: 'agent_action_validate_response',
                         request_id: request.request_id,
