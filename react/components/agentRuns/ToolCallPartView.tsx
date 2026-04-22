@@ -300,7 +300,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     // Streaming argument preview for tools that support live preview (e.g., create_note)
     const streamingArgs = part.streaming_args;
     const showStreamingPreview = !!streamingArgs && runStatus === 'in_progress'
-        && STREAMING_PREVIEW_TOOLS.has(part.tool_name) && !showAgentActionView;
+        && STREAMING_PREVIEW_TOOLS.has(part.tool_name) && !showAgentActionView && !hasError;
 
     if (showStreamingPreview && streamingArgs) {
         return (
