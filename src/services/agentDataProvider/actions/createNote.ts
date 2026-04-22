@@ -189,15 +189,21 @@ async function validateCreateNoteAction(
         };
     }
 
-    // Resolve collection if specified
+    // Resolve collection if specified.
+    // Child notes cannot belong to collections directly (Zotero's
+    // fki_collectionItems_itemID_parentItemID trigger aborts the insert),
+    // so silently drop the collection when a parent is set — the note
+    // inherits collection membership from the parent.
     let resolvedCollectionKey: string | null = null;
-    if (collectionNameOrKey) {
+    if (collectionNameOrKey && !parentKey) {
         const collectionResult = getCollectionByIdOrName(collectionNameOrKey, resolvedLibraryId);
         if (collectionResult) {
             resolvedCollectionKey = collectionResult.collection.key;
         } else {
             logger(`validateCreateNoteAction: Collection "${collectionNameOrKey}" not found, will skip collection assignment`, 1);
         }
+    } else if (collectionNameOrKey && parentKey) {
+        logger(`validateCreateNoteAction: Ignoring collection "${collectionNameOrKey}" because note has parent_key ${parentKey}`, 1);
     }
 
     // Standalone fallback: if parent resolution dropped to a standalone related
@@ -347,13 +353,18 @@ async function executeCreateNoteAction(
         }
 
         // Stage the collection assignment on the in-memory item so saveTx persists it too.
-        if (collectionKey) {
+        // Child notes (with parentKey) cannot be in collections — Zotero's
+        // fki_collectionItems_itemID_parentItemID trigger aborts saveTx if we try.
+        // Validation should already have dropped collectionKey in that case; guard anyway.
+        if (collectionKey && !parentKey) {
             try {
                 zoteroNote.addToCollection(collectionKey);
             } catch (collectionError: any) {
                 logger(`executeCreateNoteAction: Failed to stage collection assignment: ${collectionError.message}`, 1);
                 // Don't fail the whole operation for a collection assignment failure
             }
+        } else if (collectionKey && parentKey) {
+            logger(`executeCreateNoteAction: Skipping addToCollection(${collectionKey}) because note has parent_key ${parentKey} (child notes cannot be in collections directly)`, 1);
         }
 
         await zoteroNote.saveTx();
