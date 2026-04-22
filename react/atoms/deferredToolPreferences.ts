@@ -33,8 +33,12 @@ export interface DeferredToolPreferencesData {
 const DEFAULT_TOOL_GROUPS: Record<string, string> = {
     'edit_metadata': 'metadata_edits',
     'edit_item': 'metadata_edits',
+    'edit_note': 'note_edits',
+    'create_note': 'note_creation',
     'create_collection': 'library_modifications',
     'organize_items': 'library_modifications',
+    'manage_tags': 'library_structure',
+    'manage_collections': 'library_structure',
     'create_item': 'create_items',
     'create_items': 'create_items',
 };
@@ -42,7 +46,10 @@ const DEFAULT_TOOL_GROUPS: Record<string, string> = {
 // Default preferences for groups
 const DEFAULT_GROUP_PREFERENCES: Record<string, DeferredToolPreference> = {
     'metadata_edits': 'always_ask',
+    'note_edits': 'always_ask',
+    'note_creation': 'always_apply',
     'library_modifications': 'always_ask',
+    'library_structure': 'always_ask',
     'create_items': 'always_ask',
 };
 

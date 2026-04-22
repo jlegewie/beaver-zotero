@@ -1,6 +1,7 @@
 import React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
 import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom, currentMessageCollectionsAtom } from '../../atoms/messageComposition';
+import { currentNoteItemAtom } from '../../atoms/zoteroContext';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
@@ -32,6 +33,7 @@ const MessageAttachmentDisplay = ({
     verticalPosition?: 'above' | 'below';
 }) => {
     const currentReaderAttachment = useAtomValue(currentReaderAttachmentAtom);
+    const currentNoteItem = useAtomValue(currentNoteItemAtom);
     const readerTextSelection = useAtomValue(readerTextSelectionAtom);
     const currentMessageFilters = useAtomValue(currentMessageFiltersAtom);
     const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
@@ -55,7 +57,8 @@ const MessageAttachmentDisplay = ({
         .filter((collection): collection is Zotero.Collection => Boolean(collection));
 
     const filteredMessageItems = currentMessageItems.filter(
-        (item) => !currentReaderAttachment || item.key !== currentReaderAttachment.key
+        (item) => (!currentReaderAttachment || item.key !== currentReaderAttachment.key)
+            && (!currentNoteItem || item.key !== currentNoteItem.key)
     );
     const displayedMessageItems = filteredMessageItems.slice(0, MAX_ATTACHMENTS);
     const overflowMessageItems = filteredMessageItems.slice(MAX_ATTACHMENTS);
@@ -70,7 +73,7 @@ const MessageAttachmentDisplay = ({
         <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
             <AddSourcesMenu
                 // showText={currentMessageItems.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
-                showText={currentMessageItems.length == 0 && !currentReaderAttachment && selectedLibraries.length == 0 && selectedCollections.length == 0 && currentTagSelections.length == 0}
+                showText={currentMessageItems.length == 0 && !currentReaderAttachment && !currentNoteItem && selectedLibraries.length == 0 && selectedCollections.length == 0 && currentTagSelections.length == 0}
                 onClose={() => {
                     inputRef.current?.focus();
                     setIsAddAttachmentMenuOpen(false);
@@ -105,7 +108,12 @@ const MessageAttachmentDisplay = ({
 
             {/* Current reader attachment */}
             {currentReaderAttachment && (
-                <MessageItemButton item={currentReaderAttachment} canEdit={false} isReaderAttachment={true} />
+                <MessageItemButton item={currentReaderAttachment} canEdit={false} tabContextType="reader" />
+            )}
+
+            {/* Current note tab item */}
+            {currentNoteItem && (
+                <MessageItemButton item={currentNoteItem} canEdit={false} tabContextType="note" />
             )}
 
             {/* Current message items */}

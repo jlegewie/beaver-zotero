@@ -425,7 +425,12 @@ export const loadThreadAtom = atom(
 
                 // Set agent runs
                 set(threadRunsAtom, processedRuns);
-                
+
+                // Reconcile toolcall_id mismatches between REST API and model messages
+                if (agent_actions && agent_actions.length > 0) {
+                    reconcileToolcallIds(processedRuns, agent_actions);
+                }
+
                 // Set agent actions
                 set(threadAgentActionsAtom, agent_actions || []);
 

@@ -86,6 +86,7 @@ export interface CreditPlan {
     status: CreditPlanStatus;
     monthlyCredits: number; // monthly credits for the plan
     periodEnd: string | null; // period end date
+    monthlyResetAt: string | null; // annual plans: next intra-year credit reset
     cancelAtPeriodEnd: boolean; // whether to cancel at period end
     pendingDowngrade: boolean; // whether a downgrade is pending at period end
 }
@@ -115,6 +116,7 @@ export interface SafeProfileModel {
     credit_plan_monthly_credits: number;
     credit_period_start: string | null;
     credit_period_end: string | null;
+    credit_monthly_reset_at: string | null;
     credit_cancel_at_period_end: boolean;
     credit_pending_downgrade: boolean;
     rolled_over_credits: number;

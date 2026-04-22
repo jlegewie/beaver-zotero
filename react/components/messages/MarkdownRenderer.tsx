@@ -245,7 +245,9 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
 
         // Remove invisible or control characters
         // Includes: zero-width space, zero-width non-joiner, soft hyphen, etc.
-        processed = processed.normalize("NFKC").replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '');
+        processed = exportRendering
+            ? processed.normalize("NFC").replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '')
+            : processed.normalize("NFKC").replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '');
             
         // Complete unclosed code blocks
         // const codeBlockRegex = /```(?:\w+)?\s+[^`]*$/;

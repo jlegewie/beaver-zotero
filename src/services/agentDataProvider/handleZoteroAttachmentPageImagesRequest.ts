@@ -10,7 +10,7 @@
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer } from '../../utils/webAPI';
+import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
     WSZoteroAttachmentPageImagesRequest,
     WSZoteroAttachmentPageImagesResponse,
@@ -18,7 +18,9 @@ import {
     WSPageImage,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError } from './utils';
+import { makeRemoteFilePath } from '../attachmentFileCache';
+import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
+import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
 
 /**
  * Handle zotero_attachment_page_images_request event.
@@ -27,7 +29,7 @@ import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataFo
 export async function handleZoteroAttachmentPageImagesRequest(
     request: WSZoteroAttachmentPageImagesRequest
 ): Promise<WSZoteroAttachmentPageImagesResponse> {
-    const { attachment, pages, scale, dpi, format, jpeg_quality, skip_local_limits, request_id } = request;
+    const { attachment, pages, scale, dpi, format, jpeg_quality, skip_local_limits, prefer_page_labels, request_id } = request;
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
     let errorKey = requestKey;
 
@@ -85,20 +87,24 @@ export async function handleZoteroAttachmentPageImagesRequest(
         resolvedPdfItem = pdfItem;
 
         // 3. Get the file path — returns false if missing or nonexistent
-        const filePath = await pdfItem.getFilePathAsync();
-        resolvedFilePath = filePath || null;
-        if (!filePath) {
-            const isOnServer = isAttachmentOnServer(pdfItem);
+        const rawFilePath = await pdfItem.getFilePathAsync();
+        const filePath = rawFilePath || null;  // normalize false → null
+        const isRemoteOnly = !filePath && isRemoteAccessAvailable(pdfItem);
+        const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(pdfItem) : null);
+        resolvedFilePath = effectiveFilePath;
+
+        if (!effectiveFilePath) {
+            const onServer = isAttachmentAvailableRemotely(pdfItem);
             return errorResponse(
-                isOnServer
-                    ? `The PDF file for ${pdfKey} is not available locally. It may be in remote storage, which cannot be accessed by Beaver.`
+                onServer
+                    ? `The PDF file for ${pdfKey} is not available locally and remote file access is disabled in settings.`
                     : `The PDF file for ${pdfKey} is not available locally.`,
                 'file_missing'
             );
         }
 
-        // 4. Check file size limit (skip if skip_local_limits is true)
-        if (!skip_local_limits) {
+        // 4. Check file size limit (skip if skip_local_limits is true; skip for remote — checked after download)
+        if (!skip_local_limits && !isRemoteOnly) {
             const maxFileSizeMB = getPref('maxFileSizeMB');
             const fileSize = await Zotero.Attachments.getTotalFileSize(pdfItem);
 
@@ -115,7 +121,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         // 4b. Try metadata cache for fast prechecks
         const cache = Zotero.Beaver?.attachmentFileCache;
-        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, filePath).catch(() => null) : null;
+        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, effectiveFilePath).catch(() => null) : null;
 
         // Determine once whether this is an all-pages request
         const requestingAllPages = !pages || pages.length === 0;
@@ -139,15 +145,100 @@ export async function handleZoteroAttachmentPageImagesRequest(
             }
         }
 
-        // 5. Read PDF and get page count
-        const pdfData = await IOUtils.read(filePath);
+        // 5. Resolve page count, page labels, and PDF bytes.
         const extractor = new PDFExtractor();
-        let totalPages: number;
+        let pdfData: Uint8Array | null = null;
+        let pageLabels: Record<number, string> | null = null;
+        let totalPages: number | null = null;
 
-        if (cachedMeta?.page_count != null) {
-            totalPages = cachedMeta.page_count;
-        } else {
-            totalPages = await extractor.getPageCount(pdfData);
+        // 5a. Load page labels (only when a local file is available).
+        // Remote-only limitation: label-aware resolution requires the PDF bytes.
+        // On a cold cache for a remote file, pageLabels stays null and
+        // label-form page inputs (e.g. "iii") will fail with InvalidPageValueError.
+        // After a successful extraction below, labels are cached and subsequent
+        // calls resolve via `cachedMeta.page_labels`.
+        if (prefer_page_labels && filePath) {
+            const labelResult = await ensurePageLabelsForResolution(filePath, cachedMeta, extractor);
+            pageLabels = labelResult.labels;
+            if (labelResult.pageCount != null) {
+                totalPages = labelResult.pageCount;
+            }
+            if (labelResult.pdfData) {
+                pdfData = labelResult.pdfData;
+            }
+        } else if (cachedMeta?.page_labels && Object.keys(cachedMeta.page_labels).length > 0) {
+            pageLabels = cachedMeta.page_labels;
+        }
+
+        if (totalPages == null) {
+            if (cachedMeta?.page_count != null) {
+                totalPages = cachedMeta.page_count;
+            } else {
+                if (!pdfData) {
+                    try {
+                        pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                    } catch (error) {
+                        if (!isRemoteOnly) throw error;
+                        logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
+                        return errorResponse(
+                            `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                            'download_failed'
+                        );
+                    }
+                    if (isRemoteOnly) {
+                        const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                        if (exceeded) {
+                            return errorResponse(
+                                `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                                'file_too_large'
+                            );
+                        }
+                    }
+                }
+                totalPages = await extractor.getPageCount(pdfData);
+            }
+        }
+
+        // Ensure PDF bytes are available for rendering (step 9).
+        if (!pdfData) {
+            try {
+                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+            } catch (error) {
+                if (!isRemoteOnly) throw error;
+                logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
+                return errorResponse(
+                    `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                    'download_failed'
+                );
+            }
+            if (isRemoteOnly) {
+                const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                if (exceeded) {
+                    return errorResponse(
+                        `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                        'file_too_large'
+                    );
+                }
+            }
+        }
+
+        // When prefer_page_labels is false, the normal fast path may render
+        // from cached metadata without ever loading labels. Hydrate them once
+        // on cold caches so image responses still populate page_label.
+        if (
+            prefer_page_labels !== true
+            && !pageLabels
+            && (!cachedMeta || cachedMeta.page_labels === null)
+        ) {
+            try {
+                const { count, labels } = await extractor.getPageCountAndLabels(pdfData);
+                pageLabels = Object.keys(labels).length > 0 ? labels : null;
+                if (totalPages == null) {
+                    totalPages = count;
+                }
+            } catch (error) {
+                logger(`handleZoteroAttachmentPageImagesRequest: page label hydration failed for ${requestKey}: ${error}`, 1);
+            }
         }
 
         // 6. Check page count limit for all-pages requests (skip if skip_local_limits is true)
@@ -164,8 +255,18 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // 7. Determine which pages to render
         let pageIndices: number[];
         if (pages && pages.length > 0) {
+            let resolvedPages: number[];
+            try {
+                resolvedPages = pages.map(p => resolvePageValue(p, pageLabels, prefer_page_labels === true));
+            } catch (error) {
+                if (error instanceof InvalidPageValueError) {
+                    return errorResponse(error.message, 'invalid_page_value', totalPages);
+                }
+                throw error;
+            }
+
             // Filter out invalid pages: keep only pages in [1, totalPages]
-            const validPages = pages.filter(p => p >= 1 && p <= totalPages);
+            const validPages = resolvedPages.filter(p => p >= 1 && p <= totalPages);
 
             if (validPages.length === 0) {
                 return errorResponse(
@@ -203,6 +304,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
             return {
                 page_number: result.pageIndex + 1, // Convert back to 1-indexed
+                page_label: pageLabels?.[result.pageIndex],
                 image_data: base64Data,
                 format: result.format,
                 width: result.width,

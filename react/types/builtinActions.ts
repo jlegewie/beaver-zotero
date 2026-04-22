@@ -133,25 +133,25 @@ export const BUILTIN_ACTIONS: Action[] = [
     // ═══════════════════════════════════════════════════════════════════
 
     {
-        id: 'builtin-expand-note',
-        title: 'Expand and improve this note',
-        text: 'Review this note and expand it. Add more detail where the writing is thin, improve clarity, and fill in any gaps using information from the parent item and related papers in my library. Preserve my original points and voice.',
+        id: 'builtin-review-note',
+        title: 'Review and give feedback on this note',
+        text: 'Review this note and provide feedback. Identify where arguments are unclear or underdeveloped, flag claims that lack supporting evidence, point out logical gaps or inconsistencies, and suggest where additional detail or citations would strengthen the note. Do not rewrite the note. Provide your feedback as comments so I can decide what to revise.',
         targetType: 'note',
         sortOrder: 300,
     },
 
     {
         id: 'builtin-note-check-citations',
-        title: 'Review and strengthen citations',
+        title: 'Check and strengthen citations',
         text: 'Review this note and check every claim and citation. For unsupported claims, search my library for papers that could back them up and add citations. For existing citations, verify they actually support the point being made. Flag any claims you cannot find support for in my library. Update the note with improved citations.',
         targetType: 'note',
         sortOrder: 320,
     },
 
     {
-        id: 'builtin-note-to-outline',
-        title: 'Turn this note into a structured outline',
-        text: 'Take this note and reorganize its contents into a structured outline suitable for a literature review or paper section. Group related points under thematic headings, add connections between ideas, and flag any gaps in the argument. Save as a new note.',
+        id: 'builtin-edit-note',
+        title: 'Edit this note for clarity and structure',
+        text: 'Edit this note to improve clarity, structure, and flow. Tighten the prose, fix awkward phrasing, and improve the logical progression of ideas. Do not change the substance. Preserve my arguments, conclusions, and voice. Flag any spots where evidence is thin or citations are needed.',
         targetType: 'note',
         sortOrder: 310,
     },

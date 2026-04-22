@@ -12,7 +12,7 @@ export const RunResumeDisplay: React.FC<RunResumeDisplayProps> = ({ runId }) => 
         <div className="px-4">
             <div className="display-flex flex-col gap-3">
                 <div className="text-base font-color-tertiary">
-                    Resuming failed request...
+                    Resuming interrupted request...
                 </div>
             </div>
         </div>

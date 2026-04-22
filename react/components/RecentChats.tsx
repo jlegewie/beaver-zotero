@@ -12,9 +12,11 @@ import { logger } from '../../src/utils/logger';
 const MAX_RECENT = 3;
 const CACHE_TTL = 60_000; // 1 minute
 
+type ContextType = 'recent' | 'file' | 'note';
+
 interface CacheEntry {
     threads: ThreadData[];
-    isContextSpecific: boolean;
+    contextType: ContextType;
     timestamp: number;
 }
 
@@ -100,7 +102,7 @@ const RecentChats: React.FC = () => {
     const hasPopupsOrPreviews = useAtomValue(hasPopupsOrPreviewsAtom);
 
     const [threads, setThreads] = useState<ThreadData[]>([]);
-    const [isContextSpecific, setIsContextSpecific] = useState(false);
+    const [contextType, setContextType] = useState<ContextType>('recent');
     const [isLoaded, setIsLoaded] = useState(false);
     const [isFetching, setIsFetching] = useState(false);
 
@@ -110,14 +112,16 @@ const RecentChats: React.FC = () => {
     const fetchRecentChats = useCallback(async (isCancelled: () => boolean) => {
         if (!user) return;
 
-        // Read reader attachment info synchronously from Zotero APIs
+        // Read reader/note info synchronously from Zotero APIs
         // instead of waiting for the async zoteroContextAtom update chain
         let attachmentKey: string | null = null;
+        let noteKey: string | null = null;
         let libraryId: number | undefined;
 
         const itemKeys: string[] = [];
 
         if (!isLibraryTab && selectedTabId) {
+            // Try reader tab first
             try {
                 const reader = Zotero.Reader.getByTabID(selectedTabId);
                 if (reader && reader.itemID) {
@@ -139,12 +143,40 @@ const RecentChats: React.FC = () => {
             } catch (e) {
                 console.error('RecentChats: error getting reader info:', e);
             }
+
+            // If not a reader tab, check for note tab
+            if (itemKeys.length === 0) {
+                try {
+                    const mainWindow = Zotero.getMainWindow();
+                    const tab = mainWindow?.Zotero_Tabs?._tabs?.find(
+                        (t: any) => t.id === selectedTabId,
+                    );
+                    if (tab && (tab.type === 'note' || tab.type === 'note-unloaded' || tab.type === 'note-loading') && tab.data?.itemID) {
+                        const item = Zotero.Items.get(tab.data.itemID);
+                        if (item) {
+                            noteKey = item.key;
+                            libraryId = item.libraryID;
+                            itemKeys.push(item.key);
+                            if (item.parentItemID) {
+                                const parent = Zotero.Items.get(item.parentItemID);
+                                if (parent) {
+                                    itemKeys.push(parent.key);
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('RecentChats: error getting note tab info:', e);
+                }
+            }
         }
 
-        // Cache key: differentiate library vs reader-per-attachment
+        // Cache key: differentiate library vs reader-per-attachment vs note
         let cacheKey: string;
         if (!isLibraryTab && attachmentKey) {
             cacheKey = `${user.id}:reader:${attachmentKey}`;
+        } else if (!isLibraryTab && noteKey) {
+            cacheKey = `${user.id}:note:${noteKey}`;
         } else {
             cacheKey = `${user.id}:library`;
         }
@@ -160,7 +192,7 @@ const RecentChats: React.FC = () => {
         if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
             if (isCancelled()) return;
             setThreads(cached.threads);
-            setIsContextSpecific(cached.isContextSpecific);
+            setContextType(cached.contextType);
             setIsLoaded(true);
             return;
         }
@@ -168,9 +200,9 @@ const RecentChats: React.FC = () => {
         setIsFetching(true);
         try {
             let resultThreads: ThreadData[] = [];
-            let contextSpecific = false;
+            let resultContextType: ContextType = 'recent';
 
-            // Reader context: try attachment-specific threads first
+            // Reader/note context: try item-specific threads first
             if (!isLibraryTab && itemKeys.length > 0 && libraryId != null) {
                 try {
                     const matches = await threadService.findThreadsByItem(
@@ -180,11 +212,11 @@ const RecentChats: React.FC = () => {
                     const deduped = deduplicateByThread(matches);
                     if (deduped.length > 0) {
                         resultThreads = deduped.slice(0, MAX_RECENT);
-                        contextSpecific = true;
+                        resultContextType = noteKey ? 'note' : 'file';
                     }
                 } catch (err) {
                     if (isCancelled()) return;
-                    console.error('RecentChats: error fetching attachment threads:', err);
+                    console.error('RecentChats: error fetching item threads:', err);
                 }
             }
 
@@ -198,16 +230,16 @@ const RecentChats: React.FC = () => {
                     createdAt: t.created_at,
                     updatedAt: t.updated_at,
                 }));
-                contextSpecific = false;
+                resultContextType = 'recent';
             }
 
             if (isCancelled()) return;
             setThreads(resultThreads);
-            setIsContextSpecific(contextSpecific);
+            setContextType(resultContextType);
 
             recentCache.set(cacheKey, {
                 threads: resultThreads,
-                isContextSpecific: contextSpecific,
+                contextType: resultContextType,
                 timestamp: Date.now(),
             });
         } catch (error) {
@@ -256,7 +288,9 @@ const RecentChats: React.FC = () => {
     // Loaded but no threads exist
     if (isLoaded && threads.length === 0 && !isFetching) return null;
 
-    const headerLabel = isContextSpecific ? 'Related to this file' : 'Recent';
+    const headerLabel = contextType === 'file' ? 'Related to this file'
+        : contextType === 'note' ? 'Related to this note'
+        : 'Recent';
 
     return (
         <div className={`recent-chats${hasPopupsOrPreviews ? ' recent-chats-faded' : ''}`}>

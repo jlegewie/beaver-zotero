@@ -1,12 +1,14 @@
 import React, { useRef } from 'react';
-import { AgentRunStatus, ModelResponse } from '../../agents/types';
+import { AgentRunStatus, ModelResponse, ToolCallPart } from '../../agents/types';
 import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
 import { ToolCallPartView } from './ToolCallPartView';
 import { AnnotationToolCallView } from './AnnotationToolCallView';
+import { EditNoteGroupView } from './EditNoteGroupView';
 import { isAnnotationToolResult } from '../../agents/toolResultTypes';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
+import { buildEditNoteRenderItems, getEditNoteGroupInstanceId } from './editNoteShared';
 
 interface ModelResponseViewProps {
     /** The model response */
@@ -26,6 +28,8 @@ interface ModelResponseViewProps {
 /**
  * Renders a single model response with all its parts.
  * Parts are rendered in order: thinking, text, and tool calls.
+ * All edit_note runs are routed through EditNoteGroupView, including
+ * single-call runs, so note edits have one container path.
  */
 export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
     message,
@@ -93,9 +97,22 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
             {/* Tool call parts */}
             {toolCallParts.length > 0 && (
                 <div className="display-flex flex-col py-2 gap-1">
-                    {toolCallParts.map((part) => {
-                        if (part.part_kind !== 'tool-call') return null;
-                        
+                    {buildEditNoteRenderItems(toolCallParts as ToolCallPart[]).map((item) => {
+                        if (item.kind === 'edit-note-group') {
+                            return (
+                                <EditNoteGroupView
+                                    key={`edit-note-group-${getEditNoteGroupInstanceId(item.parts)}`}
+                                    parts={item.parts}
+                                    target={item.target}
+                                    runId={runId}
+                                    responseIndex={responseIndex}
+                                    runStatus={runStatus}
+                                />
+                            );
+                        }
+
+                        const part = item.part;
+
                         // Use specialized view for annotation tools
                         if (isAnnotationToolResult(part.tool_name)) {
                             return (
@@ -107,7 +124,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
                                 />
                             );
                         }
-                        
+
                         // Default view for other tools
                         return (
                             <ToolCallPartView
@@ -135,4 +152,3 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
 };
 
 export default ModelResponseView;
-

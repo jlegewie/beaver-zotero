@@ -4,7 +4,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { isStreamingAtom } from "../agents/atoms";
 import { isWSChatPendingAtom } from "../atoms/agentRunAtoms";
 import { Action, ActionTargetType } from "../types/actions";
-import { actionsForContextAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom, actionsAtom } from "../atoms/actions";
+import { actionsForContextAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom } from "../atoms/actions";
 import { getDisplayNameFromItem } from "../utils/sourceUtils";
 import { truncateText } from "../utils/stringUtils";
 import { ActionContext, GroupIconInfo, getIconInfoForItem, isActionableItem } from "../utils/actionVisibility";
@@ -153,7 +153,6 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     const isStreaming = useAtomValue(isStreamingAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
     const contextActions = useAtomValue(actionsForContextAtom);
-    const allActionsUnfiltered = useAtomValue(actionsAtom);
     const sendResolvedAction = useSetAtom(sendResolvedActionAtom);
     const markActionUsed = useSetAtom(markActionUsedAtom);
     const ctx = useAtomValue(actionContextAtom);
@@ -167,13 +166,9 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
 
     // Determine the single winning target type — never mix types
     const active = getActiveTarget(ctx);
-    const isNoteContext = active?.targetType === 'note';
 
-    // For note context, pull note actions from unfiltered list (they may be excluded by isActionVisible)
     const targetActions = active
-        ? (isNoteContext
-            ? allActionsUnfiltered.filter(a => a.targetType === 'note')
-            : contextActions.filter(a => a.targetType === active.targetType))
+        ? contextActions.filter(a => a.targetType === active.targetType)
         : [];
     const globalActions = contextActions.filter(a => a.targetType === 'global');
 
@@ -246,7 +241,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                     key={action.id}
                     variant="ghost"
                     onClick={() => handleAction(action)}
-                    disabled={isPending || isStreaming || !isLibrarySupported || isNoteContext}
+                    disabled={isPending || isStreaming || !isLibrarySupported}
                     className="w-full justify-between"
                     style={{ padding: '6px 6px' }}
                 >
@@ -255,15 +250,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
                     </span>
                 </Button>
             ))}
-            {isNoteContext && (
-                <div className="display-flex flex-row gap-1 items-start font-color-tertiary mt-3">
-                    <Icon icon={AlertIcon} className="mt-010" />
-                    <div className="text-sm">
-                        Note actions are not yet supported
-                    </div>
-                </div>
-            )}
-            {!isNoteContext && !isLibrarySupported && (
+            {!isLibrarySupported && (
                 <div className="display-flex flex-row gap-1 items-start font-color-tertiary mt-3">
                     <Icon icon={AlertIcon} className="mt-010" />
                     <div className="text-sm">

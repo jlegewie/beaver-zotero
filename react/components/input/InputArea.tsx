@@ -11,6 +11,7 @@ import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
 import { logger } from '../../../src/utils/logger';
 import { isLibraryTabAtom, isWebSearchAllowedAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
+import { currentNoteItemAtom } from '../../atoms/zoteroContext';
 import { selectedModelAtom, isUsingBeaverCreditsAtom } from '../../atoms/models';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
@@ -52,6 +53,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const backendHighTokenUsageRuns = useAtomValue(backendHighTokenUsageRunsAtom);
     const softCapTriggeredRuns = useAtomValue(softCapTriggeredRunsAtom);
     const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
+    const currentNoteItem = useAtomValue(currentNoteItemAtom);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -212,6 +214,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         if (isAwaitingApproval) return "Add instructions to reject";
         if (shouldShowSoftCapWarning && !shouldShowHighTokenWarning) return "Yes to continue, or add instructions to adjust";
         if (isLibraryTab) return "@ to add a source, / for actions";
+        if (currentNoteItem) return "@ to add a source, / for actions";
         return "@ to add a source, / for actions, drag to add annotations";
     }
 

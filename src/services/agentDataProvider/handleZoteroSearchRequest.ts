@@ -13,7 +13,10 @@ import {
     WSZoteroSearchRequest,
     WSZoteroSearchResponse,
     ZoteroSearchResultItem,
+    RegularSearchResultItem,
+    AttachmentResultItem,
 } from '../agentProtocol';
+import { serializeNote } from '../../utils/zoteroSerializers';
 import { validateLibraryAccess, extractYear, formatCreatorsString } from './utils';
 
 
@@ -25,7 +28,7 @@ export async function handleZoteroSearchRequest(
     request: WSZoteroSearchRequest
 ): Promise<WSZoteroSearchResponse> {
     logger(`handleZoteroSearchRequest: Processing ${request.conditions.length} conditions`, 1);
-    
+
     try {
         // Validate library (checks both existence and searchability)
         const validation = validateLibraryAccess(request.library_id);
@@ -41,21 +44,26 @@ export async function handleZoteroSearchRequest(
             };
         }
         const library = validation.library!;
-        
+
         // Create search object
         const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
         search.libraryID = library.libraryID;
-        
+
         // Set join mode first (if 'any')
         if (request.join_mode === 'any') {
             search.addCondition('joinMode', 'any', '');
         }
-        
+
+        // Warnings are surfaced to the backend so the agent can correct bad
+        // conditions rather than receive a silently-relaxed result set.
+        const warnings: string[] = [];
+
         // Add search conditions
         for (const condition of request.conditions) {
             let operator = condition.operator;
             let value = condition.value ?? '';
-            
+            const originalOperator = operator;
+
             // Map operator names if needed
             const operatorMap: Record<string, string> = {
                 'is': 'is',
@@ -69,7 +77,7 @@ export async function handleZoteroSearchRequest(
                 'isAfter': 'isAfter',
                 'isInTheLast': 'isInTheLast',
             };
-            
+
             operator = operatorMap[operator] || operator;
 
             // Handle search for empty fields (Zotero quirk)
@@ -78,7 +86,7 @@ export async function handleZoteroSearchRequest(
                 operator = 'doesNotContain';
                 value = '';
             }
-            
+
             try {
                 search.addCondition(
                     condition.field as _ZoteroTypes.Search.Conditions,
@@ -86,7 +94,11 @@ export async function handleZoteroSearchRequest(
                     String(value)  // Ensure value is always a string
                 );
             } catch (err) {
-                logger(`handleZoteroSearchRequest: Invalid condition ${condition.field} ${operator}: ${err}`, 1);
+                const msg = err instanceof Error ? err.message : String(err);
+                logger(`handleZoteroSearchRequest: Invalid condition ${condition.field} ${originalOperator}: ${msg}`, 1);
+                warnings.push(
+                    `Dropped condition field='${condition.field}' operator='${originalOperator}' value='${String(condition.value ?? '')}': ${msg}`
+                );
             }
         }
 
@@ -119,7 +131,25 @@ export async function handleZoteroSearchRequest(
         }
         
         // Execute search
-        const itemIds = await search.search();
+        let itemIds = await search.search();
+
+        // Post-filter by attachment status if requested
+        if (request.has_attachments != null) {
+            const allForFilter = await Zotero.Items.getAsync(itemIds);
+            const validForFilter = allForFilter.filter((item): item is Zotero.Item => item !== null);
+            if (validForFilter.length > 0) {
+                await Zotero.Items.loadDataTypes(validForFilter, ['childItems']);
+            }
+            itemIds = validForFilter
+                .filter(item => {
+                    // Only apply attachment filter to regular items
+                    if (!item.isRegularItem()) return true;
+                    const hasAtt = item.numAttachments() > 0;
+                    return request.has_attachments ? hasAtt : !hasAtt;
+                })
+                .map(item => item.id);
+        }
+
         const totalCount = itemIds.length;
 
         // Apply pagination
@@ -209,70 +239,112 @@ export async function handleZoteroSearchRequest(
             }
         }
 
+        // Batch-load parent items for child items (notes, attachments)
+        const childParentIds = new Set<number>();
+        for (const item of paginatedZoteroItems) {
+            if ((item.isNote() || item.isAttachment()) && item.parentItemID) {
+                childParentIds.add(item.parentItemID);
+            }
+        }
+        const parentMap = new Map<number, { item_id: string; title: string }>();
+        if (childParentIds.size > 0) {
+            const parentItems = await Zotero.Items.getAsync([...childParentIds]);
+            const validParents = parentItems.filter((p): p is Zotero.Item => p !== null);
+            if (validParents.length > 0) {
+                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData']);
+            }
+            for (const parent of validParents) {
+                let title = '';
+                try { title = (parent.getField('title', false, true) as string) || ''; }
+                catch { title = parent.getDisplayTitle?.() || ''; }
+                parentMap.set(parent.id, { item_id: `${parent.libraryID}-${parent.key}`, title });
+            }
+        }
+
         // Build results
         const items: ZoteroSearchResultItem[] = [];
 
         for (const item of paginatedZoteroItems) {
-            // Get creators
-            const creators = item.getCreators();
+            if (item.isNote()) {
+                const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
+                items.push(serializeNote(item, parentInfo));
+            } else if (item.isAttachment()) {
+                const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
+                const attachmentItem: AttachmentResultItem = {
+                    result_type: 'attachment',
+                    item_id: `${item.libraryID}-${item.key}`,
+                    title: item.getDisplayTitle?.() || '',
+                    filename: item.attachmentFilename || null,
+                    content_type: item.attachmentContentType || null,
+                    parent_item_id: parentInfo?.item_id ?? null,
+                    parent_title: parentInfo?.title ?? null,
+                    date_modified: item.dateModified,
+                };
+                items.push(attachmentItem);
+            } else {
+                // Get creators
+                const creators = item.getCreators();
 
-            // Get date and extract year
-            let year: number | null = null;
-            try {
-                const dateStr = item.getField('date', false, true) as string;
-                if (dateStr) {
-                    year = extractYear(dateStr);
+                // Get date and extract year
+                let year: number | null = null;
+                try {
+                    const dateStr = item.getField('date', false, true) as string;
+                    if (dateStr) {
+                        year = extractYear(dateStr);
+                    }
+                } catch {
+                    // Date field may not exist for some item types
                 }
-            } catch {
-                // Date field may not exist for some item types
-            }
 
-            // Get title safely
-            let title = '';
-            try {
-                title = (item.getField('title', false, true) as string) || '';
-            } catch {
-                // Some item types (like annotations) may not have title field
-                title = item.getDisplayTitle?.() || '';
-            }
+                // Get title safely
+                let title = '';
+                try {
+                    title = (item.getField('title', false, true) as string) || '';
+                } catch {
+                    // Some item types (like annotations) may not have title field
+                    title = item.getDisplayTitle?.() || '';
+                }
 
-            const resultItem: ZoteroSearchResultItem = {
-                item_id: `${item.libraryID}-${item.key}`,
-                item_type: item.itemType,
-                title,
-                creators: formatCreatorsString(creators),
-                year,
-            };
+                const resultItem: RegularSearchResultItem = {
+                    result_type: 'regular',
+                    item_id: `${item.libraryID}-${item.key}`,
+                    item_type: item.itemType,
+                    title,
+                    creators: formatCreatorsString(creators),
+                    year,
+                };
 
-            // Include extra fields if requested
-            if (request.fields && request.fields.length > 0) {
-                const extraFields: Record<string, any> = {};
-                for (const field of request.fields) {
-                    try {
-                        // includeBaseMapped=true so base fields resolve to type-specific fields
-                        const value = item.getField(field, false, true);
-                        if (value !== undefined && value !== '') {
-                            extraFields[field] = value;
+                // Include extra fields if requested
+                if (request.fields && request.fields.length > 0) {
+                    const extraFields: Record<string, any> = {};
+                    for (const field of request.fields) {
+                        try {
+                            // includeBaseMapped=true so base fields resolve to type-specific fields
+                            const value = item.getField(field, false, true);
+                            if (value !== undefined && value !== '') {
+                                extraFields[field] = value;
+                            }
+                        } catch {
+                            // Field not valid for this item type - skip silently
                         }
-                    } catch {
-                        // Field not valid for this item type - skip silently
+                    }
+                    if (Object.keys(extraFields).length > 0) {
+                        resultItem.extra_fields = extraFields;
                     }
                 }
-                if (Object.keys(extraFields).length > 0) {
-                    resultItem.extra_fields = extraFields;
-                }
-            }
 
-            items.push(resultItem);
+                items.push(resultItem);
+            }
         }
 
-        logger(`handleZoteroSearchRequest: Returning ${items.length}/${totalCount} items${sortRequested ? ` (sorted by ${request.sort_by} ${request.sort_order || 'desc'})` : ''}`, 1);
-        
+        logger(`handleZoteroSearchRequest: Returning ${items.length}/${totalCount} items${sortRequested ? ` (sorted by ${request.sort_by} ${request.sort_order || 'desc'})` : ''}${warnings.length ? ` with ${warnings.length} warning(s)` : ''}`, 1);
+
         return {
             type: 'zotero_search',
             request_id: request.request_id,
             items,
             total_count: totalCount,
+            warnings: warnings.length ? warnings : undefined,
         };
     } catch (error) {
         logger(`handleZoteroSearchRequest: Error: ${error}`, 1);

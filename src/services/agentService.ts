@@ -29,6 +29,7 @@ import {
     handleGetMetadataRequest,
     handleAgentActionValidateRequest,
     handleAgentActionExecuteRequest,
+    handleReadNoteRequest,
 } from './agentDataProvider';
 import { AgentRunRequest } from './agentProtocol';
 import {
@@ -52,11 +53,21 @@ export class AgentService {
     private connecting: boolean = false;
     /** Queue to serialize async message processing */
     private messageQueue: Promise<void> = Promise.resolve();
+    /** Queue to serialize action execution (prevents concurrent edits to the same resource) */
+    private actionExecutionQueue: Promise<void> = Promise.resolve();
     /** Monotonic counter incremented on close to invalidate stale queued messages */
     private connectionId: number = 0;
 
     constructor(baseUrl: string) {
         this.baseUrl = baseUrl;
+    }
+
+    private resetConnectionState(): void {
+        this.ws = null;
+        this.callbacks = null;
+        this.connectionId++;
+        this.messageQueue = Promise.resolve();
+        this.actionExecutionQueue = Promise.resolve();
     }
 
     /**
@@ -137,7 +148,7 @@ export class AgentService {
         }
         
         // Close existing connection if any
-        this.close();
+        this.close(1000, 'Client closing', { notifyClose: false });
 
         this.callbacks = callbacks;
 
@@ -239,10 +250,13 @@ export class AgentService {
                 };
 
                 this.ws.onclose = (event) => {
+                    if (this.ws !== wsInstance || this.connectionId !== connId) {
+                        logger('AgentService: Ignoring stale close event from superseded connection', 1);
+                        return;
+                    }
                     logger(`AgentService: Connection closed - code=${event.code}, reason=${event.reason}, clean=${event.wasClean}`, 1);
                     callbacks.onClose?.(event.code, event.reason, event.wasClean);
-                    this.ws = null;
-                    this.callbacks = null;
+                    this.resetConnectionState();
                     // If we haven't resolved yet, the connection closed before ready
                     if (!hasResolved) {
                         hasResolved = true;
@@ -353,8 +367,16 @@ export class AgentService {
                     this.callbacks.onToolCallProgress(event);
                     break;
 
+                case 'tool_call_args_stream':
+                    this.callbacks.onToolCallArgsStream(event);
+                    break;
+
                 case 'run_complete':
                     await this.callbacks.onRunComplete(event);
+                    break;
+
+                case 'streaming_done':
+                    this.callbacks.onStreamingDone?.(event);
                     break;
 
                 case 'done':
@@ -369,21 +391,29 @@ export class AgentService {
                     this.callbacks.onThreadName?.(event);
                     break;
 
-                case 'error':
+                case 'error': {
                     // Call onError callback
                     this.callbacks.onError(event);
                     // Backend behavior: some errors close connection (auth, internal), 
                     // others keep it open (LLM errors, rate limits, invalid_request).
                     // Since each connect() is for a single run (for now), close on any error.
                     // Use a small delay to avoid race with server-initiated close.
+                    const errorSocket = this.ws;
+                    const errorConnectionId = this.connectionId;
                     setTimeout(() => {
-                        if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
+                        if (
+                            this.connectionId === errorConnectionId &&
+                            this.ws === errorSocket &&
+                            this.ws &&
+                            this.ws.readyState !== WebSocket.CLOSED
+                        ) {
                             // Firefox/Zotero only allows code 1000 or 3000-4999 for close()
                             // 1011 causes InvalidAccessError, so we use 1000 (Normal Closure)
                             this.close(1000, `Client closing after error: ${event.type}`);
                         }
                     }, 100);
                     break;
+                }
 
                 case 'warning':
                     this.callbacks.onWarning(event);
@@ -631,6 +661,22 @@ export class AgentService {
                         });
                     break;
 
+                // Note tools
+                case 'read_note_request':
+                    logger("AgentService: Received read_note_request", event, 1);
+                    handleReadNoteRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: read_note_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'read_note',
+                                request_id: event.request_id,
+                                success: false,
+                                error: String(err),
+                            });
+                        });
+                    break;
+
                 // Deferred tool events
                 case 'agent_action_validate':
                     logger("AgentService: Received agent_action_validate", event, 1);
@@ -649,21 +695,32 @@ export class AgentService {
                         });
                     break;
 
-                case 'agent_action_execute':
+                case 'agent_action_execute': {
                     logger("AgentService: Received agent_action_execute", event, 1);
-                    handleAgentActionExecuteRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: agent_action_execute failed: ${err}`, 1);
-                            this.send({
-                                type: 'agent_action_execute_response',
-                                request_id: event.request_id,
-                                success: false,
-                                error: String(err),
-                                error_code: 'internal_error',
+                    // Chain onto actionExecutionQueue to serialize actions.
+                    // Without this, concurrent edit_note actions on the same note
+                    // race: each reads the original HTML and saves its own edit,
+                    // so only the last save survives.
+                    // Capture connectionId so stale queued actions are skipped
+                    // after a close/reconnect (same guard as messageQueue).
+                    const actionConnId = this.connectionId;
+                    this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
+                        if (this.connectionId !== actionConnId) return;
+                        return handleAgentActionExecuteRequest(event)
+                            .then(res => this.send(res))
+                            .catch(err => {
+                                logger(`AgentService: agent_action_execute failed: ${err}`, 1);
+                                this.send({
+                                    type: 'agent_action_execute_response',
+                                    request_id: event.request_id,
+                                    success: false,
+                                    error: String(err),
+                                    error_code: 'internal_error',
+                                });
                             });
-                        });
+                    });
                     break;
+                }
 
                 case 'deferred_approval_request':
                     logger("AgentService: Received deferred_approval_request", event, 1);
@@ -703,26 +760,34 @@ export class AgentService {
      * @param code Optional close code (default: 1000 for normal closure)
      * @param reason Optional close reason
      */
-    close(code: number = 1000, reason: string = 'Client closing'): void {
-        if (this.ws) {
+    close(
+        code: number = 1000,
+        reason: string = 'Client closing',
+        options: { notifyClose?: boolean } = {},
+    ): void {
+        const { notifyClose = true } = options;
+        const wsToClose = this.ws;
+        const callbacks = this.callbacks;
+
+        if (wsToClose) {
             // Only attempt to close if not already closing/closed
             // CLOSING = 2, CLOSED = 3
-            if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+            if (wsToClose.readyState === WebSocket.OPEN || wsToClose.readyState === WebSocket.CONNECTING) {
                 logger(`AgentService: Closing connection - code=${code}, reason=${reason}`, 1);
                 try {
-                    this.ws.close(code, reason);
+                    wsToClose.close(code, reason);
                 } catch (error) {
                     // Log but don't throw - the connection may already be closing from server side
-                    logger(`AgentService: Error closing WebSocket (state=${this.ws.readyState}): ${error}`, 1);
+                    logger(`AgentService: Error closing WebSocket (state=${wsToClose.readyState}): ${error}`, 1);
                 }
             } else {
-                logger(`AgentService: WebSocket already closing/closed (state=${this.ws.readyState})`, 1);
+                logger(`AgentService: WebSocket already closing/closed (state=${wsToClose.readyState})`, 1);
             }
-            this.ws = null;
         }
-        this.callbacks = null;
-        this.connectionId++;
-        this.messageQueue = Promise.resolve();
+        this.resetConnectionState();
+        if (notifyClose) {
+            callbacks?.onClose?.(code, reason, true);
+        }
     }
 
     /**

@@ -4,6 +4,7 @@ import { logger } from '../../src/utils/logger';
 import { getZoteroTargetContext } from '../../src/utils/zoteroUtils';
 import { scheduleBackgroundTask, generateTaskId, isPdfFetchInProgress, deduplicatedSync } from '../../src/utils/backgroundTasks';
 import { ensureItemSynced } from '../../src/utils/sync';
+import { TimingAccumulator } from '../../src/utils/timing';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
 
@@ -16,12 +17,26 @@ export interface ImportItemOptions {
     collectionId?: number;
     /** Whether to select the item after import */
     selectAfterImport?: boolean;
-    /** 
-     * Skip scheduling background PDF fetch. 
+    /**
+     * Skip scheduling background PDF fetch.
      * Set to true when the caller will handle PDF fetching separately (e.g., applyCreateItemData).
      * Default: false (PDF fetch is scheduled)
      */
     skipBackgroundPdfFetch?: boolean;
+    /**
+     * Skip URL-based translation via HiddenBrowser.
+     * URL translation can block for 15–30s+ on slow publisher sites, so it is
+     * disabled on latency-bounded paths (e.g., the agent WebSocket executor).
+     * Identifier translation (DOI/ISBN/PMID/arXiv) is still attempted.
+     * Default: false.
+     */
+    skipUrlTranslation?: boolean;
+    /**
+     * Optional timing accumulator. When provided, createZoteroItem records
+     * per-phase durations (library resolution, identifier translation, manual
+     * creation, collection attach, PDF check) so callers can surface them.
+     */
+    timing?: TimingAccumulator;
 }
 
 /**
@@ -299,9 +314,13 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation:
  * @param options - Import options including target library and collection
  */
 export async function createZoteroItem(reference: ExternalReference, options?: ImportItemOptions): Promise<Zotero.Item> {
+    const timing = options?.timing;
+    const track = <T>(name: string, fn: () => Promise<T>): Promise<T> =>
+        timing ? timing.track(name, fn) : fn();
+
     // Resolve target library and collection
-    const { libraryId, collectionId } = await resolveImportTarget(options);
-    
+    const { libraryId, collectionId } = await track('resolve_target_ms', () => resolveImportTarget(options));
+
     let item: Zotero.Item | null = null;
 
     // 1. Try to import using identifiers (DOI, arXiv, ISBN, etc.)
@@ -309,7 +328,9 @@ export async function createZoteroItem(reference: ExternalReference, options?: I
     // to avoid duplicate items if the translation completes after timeout
     if (reference.identifiers) {
         try {
-            item = await tryImportFromIdentifiers(reference.identifiers, libraryId);
+            item = await track('identifier_translation_ms', () =>
+                tryImportFromIdentifiers(reference.identifiers, libraryId)
+            );
             if (item) {
                 logger("createZoteroItem: Successfully imported item via identifiers", 2);
             }
@@ -318,11 +339,12 @@ export async function createZoteroItem(reference: ExternalReference, options?: I
         }
     }
 
-    // 2. Try URL Translation (Semantic Scholar / Article Page)
-    // No timeout here for the same reason as above
-    if (!item && reference.url) {
+    // 2. Try URL Translation (Semantic Scholar / Article Page).
+    // Skipped on latency-bounded paths: HiddenBrowser page loads on publisher
+    // sites routinely take 15–30s+ and blow the WebSocket executor budget.
+    if (!item && reference.url && !options?.skipUrlTranslation) {
         try {
-            item = await importFromUrl(reference.url, libraryId);
+            item = await track('url_translation_ms', () => importFromUrl(reference.url!, libraryId));
             if (item) {
                 logger("createZoteroItem: Successfully imported item via URL", 2);
             }
@@ -334,16 +356,18 @@ export async function createZoteroItem(reference: ExternalReference, options?: I
     // 3. Fallback: Create item manually from available metadata
     if (!item) {
         logger("createZoteroItem: Falling back to manual item creation", 2);
-        item = await createItemManually(reference, libraryId);
+        item = await track('manual_creation_ms', () => createItemManually(reference, libraryId));
     }
-    
+
     // 4. Add to collection if specified
     if (collectionId) {
         const collection = Zotero.Collections.get(collectionId);
         if (collection) {
-            await Zotero.DB.executeTransaction(async () => {
-                await collection.addItem(item!.id);
-            });
+            await track('add_to_collection_ms', () =>
+                Zotero.DB.executeTransaction(async () => {
+                    await collection.addItem(item!.id);
+                })
+            );
             logger(`createZoteroItem: Added item to collection ${collection.name}`, 2);
         }
     }
@@ -353,7 +377,7 @@ export async function createZoteroItem(reference: ExternalReference, options?: I
         // Check if item already has a PDF (may have been added by translation)
         const existingAttachments = await item.getAttachments();
         const existingPdfAttachments = await filterPdfAttachments(existingAttachments);
-        
+
         if (existingPdfAttachments.length === 0 && !isPdfFetchInProgress(libraryId, item.key)) {
             schedulePdfFetchTask(libraryId, item.key, {
                 openAccessUrl: reference.open_access_url,
@@ -379,17 +403,22 @@ export async function createZoteroItem(reference: ExternalReference, options?: I
  * @param options - Import options including target library and collection
  */
 export async function applyCreateItemData(
-    proposedData: CreateItemProposedData, 
+    proposedData: CreateItemProposedData,
     options?: ImportItemOptions
 ): Promise<CreateItemResultData> {
     const itemData = proposedData.item;
+    const timing = options?.timing;
+    const track = <T>(name: string, fn: () => Promise<T>): Promise<T> =>
+        timing ? timing.track(name, fn) : fn();
 
     // Create or Import the item (handles library/collection resolution internally)
     // Skip background PDF fetch here - we'll schedule it below with more context
-    const item = await createZoteroItem(itemData, { 
-        ...options, 
-        skipBackgroundPdfFetch: true 
-    });
+    const item = await track('create_zotero_item_ms', () =>
+        createZoteroItem(itemData, {
+            ...options,
+            skipBackgroundPdfFetch: true,
+        })
+    );
     const libraryId = item.libraryID;
     const itemKey = item.key;
     
@@ -451,13 +480,15 @@ export async function applyCreateItemData(
 
     // Single consolidated save for all modifications
     if (needsSave) {
-        await item.saveTx();
+        await track('post_save_ms', () => item.saveTx());
         logger(`applyCreateItemData: Saved item with extra fields, collections, and tags`, 2);
     }
 
     // Check for existing PDF attachments (may have been added by translation)
-    const existingAttachments = await item.getAttachments();
+    const pdfCheckStart = Date.now();
+    const existingAttachments = item.getAttachments();
     const existingPdfAttachments = await filterPdfAttachments(existingAttachments);
+    timing?.record('pdf_check_ms', Date.now() - pdfCheckStart);
     const attachmentKeys = existingPdfAttachments.length > 0 
         ? existingPdfAttachments.map(a => a.key).join(',') 
         : '';

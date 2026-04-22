@@ -8,6 +8,7 @@ import IndexingCompleteMessageContent from './IndexingCompleteMessageContent';
 import VersionUpdateMessageContent from './VersionUpdateMessageContent';
 import WelcomeOnboardingContent from './WelcomeOnboardingContent';
 import ReaderTipContent from './ReaderTipContent';
+import NoteTipContent from './NoteTipContent';
 import { CitationTipContent } from '../../sources/CitationTipContent';
 import EmbeddingIndexingMessageContent from './EmbeddingIndexingMessageContent';
 import Button from "../Button";
@@ -116,7 +117,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
         >
             <div className="p-3 display-flex flex-col items-start gap-2">
                 {/* Floating version_update/welcome_onboarding/reader_tip render their own headers */}
-                {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip')) && (
+                {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip' || message.type === 'note_tip')) && (
                     <PopupMessageHeader
                         icon={message.icon || getDefaultIcon()}
                         title={message.title}
@@ -186,6 +187,10 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
 
                 {message.type === 'reader_tip' && (
                     <ReaderTipContent onDismiss={handleDismiss} />
+                )}
+
+                {message.type === 'note_tip' && (
+                    <NoteTipContent onDismiss={handleDismiss} />
                 )}
 
                 {message.type === 'citation_tip' && (

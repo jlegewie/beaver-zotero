@@ -307,18 +307,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     // Create ztoolkit for every window
     addon.data.ztoolkit = createZToolkit();
 
-    // Use optional flag to prevent breaking non-English Zotero UI.
-    // insertFTLIfNeeded adds FTL as a required resource, which causes the
-    // entire locale bundle to fail if the plugin only ships en-US, forcing
-    // all Zotero strings to fall back to English.
-    const ftlPath = `${addon.data.config.addonRef}-mainWindow.ftl`;
-    if (win.document.l10n) {
-        win.document.l10n.addResourceIds([
-            { path: ftlPath, optional: true },
-        ]);
-    } else {
-        win.MozXULElement.insertFTLIfNeeded(ftlPath);
-    }
+    registerMainWindowFtl(win);
 
     // Wait for the UI to be ready
     await Promise.all([
@@ -403,6 +392,12 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // React cleanup effects run here — they will see the shutdown
         // flag and skip any fire-and-forget DB/network operations.
         BeaverUIFactory.removeChatPanel(win);
+
+        // Remove the <link rel="localization"> we added in onMainWindowLoad.
+        // Leaving it behind after disable causes the locale bundle to log
+        // "Missing resource" and emits an uncaught promise rejection on the
+        // next popup translation, breaking Zotero's right-click menu.
+        unregisterMainWindowFtl(win);
 
         if (!isLastWindow) {
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
@@ -538,6 +533,43 @@ function unloadKatexStylesheet(win: Window) {
 }
 
 /**
+ * Register Beaver's mainWindow.ftl as a <link rel="localization"> in the
+ * window's DOM, mirroring MozXULElement.insertFTLIfNeeded
+ */
+function registerMainWindowFtl(win: Window): void {
+    if (!win?.document) return;
+    const doc = win.document;
+    const ftlPath = `${addon.data.config.addonRef}-mainWindow.ftl`;
+    const XUL_NS = 'http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul';
+    const XHTML_NS = 'http://www.w3.org/1999/xhtml';
+    let container: Element | null = doc.head || doc.querySelector('linkset');
+    if (!container) {
+        if (doc.documentElement.namespaceURI === XUL_NS) {
+            container = doc.createXULElement('linkset');
+            doc.documentElement.appendChild(container);
+        } else {
+            container = doc.documentElement;
+        }
+    }
+    const alreadyPresent = Array.from(container.querySelectorAll('link')).some(
+        (l: any) => l?.getAttribute('href') === ftlPath,
+    );
+    if (alreadyPresent) return;
+    const link = doc.createElementNS(XHTML_NS, 'link');
+    link.setAttribute('rel', 'localization');
+    link.setAttribute('href', ftlPath);
+    container.appendChild(link);
+}
+
+function unregisterMainWindowFtl(win: Window): void {
+    if (!win?.document) return;
+    const doc = win.document;
+    const ftlPath = `${addon.data.config.addonRef}-mainWindow.ftl`;
+    const link = doc.querySelector(`link[rel="localization"][href="${ftlPath}"]`);
+    if (link) link.remove();
+}
+
+/**
  * Plugin shutdown handler.
  * 
  * NOTE: Most cleanup should happen in onMainWindowUnload() instead.
@@ -588,9 +620,13 @@ async function onShutdown(): Promise<void> {
         BeaverUIFactory.closeBeaverWindow();
         BeaverUIFactory.closePreferencesWindow();
 
-        const mainWin = Zotero.getMainWindow();
-        if (mainWin) {
-            unloadKatexStylesheet(mainWin);
+        // Remove the FTL <link> from any still-open main windows so the
+        // locale bundle doesn't try to resolve Beaver's FTL after disable,
+        // which breaks Zotero's right-click menu.
+        const openWins = Zotero.getMainWindows?.().filter(w => w && !w.closed) ?? [];
+        for (const w of openWins) {
+            unregisterMainWindowFtl(w as Window);
+            unloadKatexStylesheet(w as Window);
         }
         unloadStylesheet();
         

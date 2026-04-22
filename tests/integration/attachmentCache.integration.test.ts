@@ -27,19 +27,19 @@ import {
     NON_PDF,
     LINKED_URL,
     IMAGE,
-} from './helpers/fixtures';
+} from '../helpers/fixtures';
 import {
     fetchPages,
     fetchPageImages,
     searchAttachment,
-} from './helpers/zoteroClient';
+} from '../helpers/zoteroHttpClient';
 import {
     ping,
     getCacheMetadata,
     invalidateCache,
     clearMemoryCache,
     deleteContentCache,
-} from './helpers/cacheInspector';
+} from '../helpers/cacheInspector';
 
 // ---------------------------------------------------------------------------
 // Global availability flag

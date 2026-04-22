@@ -22,12 +22,12 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { ZoteroItemReference } from '../../types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
-import { resolvePageLabel } from '../../utils/pageLabels';
+import { resolvePageLabel, translatePageNumberToLabel } from '../../utils/pageLabels';
 import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
 } from '../../atoms/ui';
-import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon } from '../icons/icons';
+import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon } from '../icons/icons';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -250,8 +250,16 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         
         // Strip URLs from formatted citation and preview text (they clutter the tooltip)
         const stripUrls = (s: string) => s.replace(/\s*https?:\/\/\S+/g, '').trim();
-        formatted_citation = stripUrls(formatted_citation);
-        previewText = stripUrls(previewText);
+        // Convert <br> tags to newlines and strip any remaining HTML tags
+        // (note previews arrive as HTML fragments and would otherwise render as literal markup)
+        const stripHtml = (s: string) => s
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/(p|div|h[1-6]|li)>/gi, '\n')
+            .replace(/<[^>]*>/g, '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+        formatted_citation = stripHtml(stripUrls(formatted_citation));
+        previewText = stripHtml(stripUrls(previewText));
 
         const pages = [...new Set(getCitationPages(citationMetadata))];
         const firstPage = pages.length > 0 ? pages[0] : null;
@@ -310,10 +318,14 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             return;
         }
 
-        // Handle note links
+        // Handle note links using Zotero.Notes.open()
         if (item.isNote()) {
             logger(`ZoteroCitation: Note Link (${item.id})`);
-            await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
+            if (typeof Zotero.Notes?.open === 'function') {
+                await Zotero.Notes.open(item.id);
+            } else {
+                await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
+            }
             return;
         }
 
@@ -453,8 +465,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             const item = Zotero.Items.getByLibraryAndKey(effectiveLibraryID, effectiveItemKey);
             if (!item) return null;
             const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
-            const startPage = Array.isArray(pages) ? pages[0] : pages;
-            const navLocator = startPage ? resolvePageLabel(item.id, startPage) : undefined;
+            const startPage = pages.length > 0 ? pages[0] : undefined;
+            // Fallback: use page prop directly when metadata doesn't provide pages
+            const navLocator = startPage
+                ? resolvePageLabel(item.id, startPage)
+                : (page ? translatePageNumberToLabel(item.id, page) : undefined);
             const citationObj = {
                 citationItems: [{
                     uris: [Zotero.URI.getItemURI(item.parentItem || item)],
@@ -465,13 +480,14 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 properties: {}
             };
             const formatted = Zotero.EditorInstanceUtilities.formatCitation(citationObj);
+            // Use dangerouslySetInnerHTML because formatCitation() returns HTML
+            // (e.g., "(<span class="citation-item">Author, 2024</span>)").
             return (
                 <span
-                    className="citation" 
+                    className="citation"
                     data-citation={encodeURIComponent(JSON.stringify(citationObj))}
-                >
-                    {formatted}
-                </span>
+                    dangerouslySetInnerHTML={{ __html: formatted }}
+                />
             );
         } catch (e) {
             logger(`ZoteroCitation: Item not loaded for ${effectiveLibraryID}/${effectiveItemKey}: ${e}`);
@@ -480,7 +496,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }
 
     // Determine the CSS class based on citation type and state
-    const hasLocator = pages.length > 0 || (citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0);
+    const isNoteCitation = citationMetadata?.type === 'note';
+    const hasLocator = !isNoteCitation && (pages.length > 0 || (citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0));
     const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
         : hasLocator
@@ -515,38 +532,48 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     <span className="font-color-secondary text-sm">Page {pages[0]}</span>
                 )}
             </span>
-            <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+            <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
                 {previewText}
             </span>
             {isExternal && !mappedZoteroItem && (
-                <div className="px-3 py-15 border-top-quinary block">
-                    <div className="display-flex flex-row items-center gap-15">
+                <span className="px-3 py-15 border-top-quinary block">
+                    <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={GlobalSearchIcon} className="font-color-tertiary" />
                         <span className="text-sm font-color-tertiary">
                             View details
                         </span>
-                    </div>
-                </div>
+                    </span>
+                </span>
+            )}
+            {isNoteCitation && (!isExternal || !!mappedZoteroItem) && (
+                <span className="px-3 py-15 border-top-quinary block">
+                    <span className="display-flex flex-row items-center gap-15">
+                        <Icon icon={NoteIcon} className="font-color-tertiary" />
+                        <span className="text-sm font-color-tertiary">
+                            Opens note
+                        </span>
+                    </span>
+                </span>
             )}
             {hasLocator && (!isExternal || !!mappedZoteroItem) && (
-                <div className="px-3 py-15 border-top-quinary block">
-                    <div className="display-flex flex-row items-center gap-15">
+                <span className="px-3 py-15 border-top-quinary block">
+                    <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={PdfIcon} className="font-color-tertiary" />
                         <span className="text-sm font-color-tertiary">
                             {pages[0] != null ? `Opens PDF on page ${pages[0]}` : 'Opens PDF at location'}
                         </span>
-                    </div>
-                </div>
+                    </span>
+                </span>
             )}
-            {!hasLocator && (!isExternal || !!mappedZoteroItem) && (
-                <div className="px-3 py-15 border-top-quinary block">
-                    <div className="display-flex flex-row items-center gap-15">
+            {!hasLocator && !isNoteCitation && (!isExternal || !!mappedZoteroItem) && (
+                <span className="px-3 py-15 border-top-quinary block">
+                    <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={LibraryIcon} className="font-color-tertiary" />
                         <span className="text-sm font-color-tertiary">
                             Reveals item in library
                         </span>
-                    </div>
-                </div>
+                    </span>
+                </span>
             )}
         </span>
     )
