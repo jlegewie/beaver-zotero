@@ -547,6 +547,7 @@ export type AttachmentPagesErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
+    | 'download_failed'     // Remote file download failed
     | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'extraction_failed';  // General extraction failure
 
@@ -578,6 +579,7 @@ export type AttachmentPageImagesErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
+    | 'download_failed'     // Remote file download failed
     | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'render_failed';      // General rendering failure
 
@@ -608,6 +610,7 @@ export type AttachmentSearchErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'no_text_layer'       // PDF requires OCR — text search unavailable
     | 'too_many_pages'      // PDF exceeds page count limit
+    | 'download_failed'    // Remote file download failed
     | 'search_failed';      // General search failure
 
 /** Request from backend to search text within an attachment */
@@ -805,6 +808,8 @@ export interface WSZoteroSearchResponse {
     error_code?: string | null;
     /** Available libraries (only included when error_code is 'library_not_found') */
     available_libraries?: AvailableLibraryInfo[] | null;
+    /** Non-fatal warnings (e.g., conditions Zotero rejected). Search still executed. */
+    warnings?: string[] | null;
 }
 
 /** Request from backend for list_items */
@@ -983,7 +988,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {

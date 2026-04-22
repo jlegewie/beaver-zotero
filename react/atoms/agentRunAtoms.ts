@@ -83,6 +83,8 @@ import {
     isCreateItemAgentAction,
     isCreateCollectionAgentAction,
     isOrganizeItemsAgentAction,
+    isManageTagsAgentAction,
+    isManageCollectionsAgentAction,
     isEditNoteAgentAction,
     isCreateNoteAgentAction,
     hasAppliedZoteroItem,
@@ -94,9 +96,11 @@ import {
     clearAllPendingApprovalsAtom,
 } from '../agents/agentActions';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
-import { undoCreateItemActions } from '../utils/createItemActions';
+import { undoCreateItemAction } from '../utils/createItemActions';
 import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
+import { undoManageTagsAction } from '../utils/manageTagsActions';
+import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
 import { undoEditNoteAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
@@ -122,7 +126,7 @@ import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
-import { appendRunIfMissing, findResumeChainRoot, findRunForResume, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
+import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 
 // =============================================================================
 // Helper Functions
@@ -458,78 +462,165 @@ async function startResumeRun(
 }
 
 /**
- * Delete applied Zotero items (annotations, notes) from agent actions.
- * Returns the number of items successfully deleted.
+ * Retry a failed run by deleting it (and any preceding resume-chain runs) and
+ * starting fresh from the original user prompt. Used by auto-retry when the
+ * frontend has only received thinking content — nothing user-visible to keep.
  */
-async function deleteAppliedZoteroItems(actions: AgentAction[]): Promise<number> {
-    let deletedCount = 0;
-    for (const action of actions) {
-        if (hasAppliedZoteroItem(action)) {
-            try {
+async function startAutoRetryRun(
+    get: Getter,
+    set: Setter,
+    failedRunId: string,
+): Promise<void> {
+    const logPrefix = 'autoRetryErroredRunAtom';
+    logger(`${logPrefix}: Retrying from run ${failedRunId}`, 1);
+
+    let newRunId: string | null = null;
+
+    try {
+        const model = get(selectedModelAtom);
+        if (!model) {
+            logger(`${logPrefix}: No model selected`, 1);
+            return;
+        }
+
+        const userId = get(userIdAtom);
+        if (!userId) {
+            logger(`${logPrefix}: No user ID found`, 1);
+            return;
+        }
+
+        const threadRuns = get(threadRunsAtom);
+        const activeRun = get(activeRunAtom);
+        const failedRun = findRunForResume(threadRuns, activeRun, failedRunId);
+
+        if (!failedRun) {
+            logger(`${logPrefix}: Failed run ${failedRunId} not found`, 1);
+            return;
+        }
+
+        if (failedRun.status !== 'error') {
+            logger(`${logPrefix}: Run ${failedRunId} is not in error state`, 1);
+            return;
+        }
+
+        const threadId = get(currentThreadIdAtom) || failedRun.thread_id;
+        if (!threadId) {
+            logger(`${logPrefix}: No thread ID found`, 1);
+            return;
+        }
+
+        // Walk back to the original user message — resume runs carry an empty
+        // user_prompt.content, so we need the root to preserve the question.
+        const allRunsForChain: AgentRun[] = activeRun && !threadRuns.some(r => r.id === activeRun.id)
+            ? [...threadRuns, activeRun]
+            : threadRuns;
+        const rootRun = findResumeChainRoot(failedRun, allRunsForChain);
+
+        // If the chain root lives in threadRuns, truncate from there so the UI
+        // reflects what the backend will delete via retry_run_id.
+        const rootIndex = threadRuns.findIndex(r => r.id === rootRun.id);
+        if (rootIndex >= 0) {
+            const runIdsToRemove = threadRuns.slice(rootIndex).map(r => r.id);
+            set(threadRunsAtom, threadRuns.slice(0, rootIndex));
+            set(threadAgentActionsAtom, prev => prev.filter(a => !runIdsToRemove.includes(a.run_id)));
+            set(citationMetadataAtom, prev => prev.filter(c => !runIdsToRemove.includes(c.run_id ?? '')));
+            set(updateCitationDataAtom);
+        }
+
+        set(prepareForNewRunAtom);
+        set(isWSChatPendingAtom, true);
+
+        const modelOptions = buildModelSelectionOptions(model);
+        const customInstructions = getPref('customInstructions') || undefined;
+
+        const { run: newRun, request } = createAgentRunShell(
+            rootRun.user_prompt,
+            threadId,
+            userId,
+            model.name,
+            modelOptions,
+            model.provider,
+            customInstructions,
+            model.is_custom ? model.custom_model : undefined,
+            rootRun.id,
+        );
+
+        newRunId = newRun.id;
+        set(activeRunAtom, newRun);
+
+        await executeWSRequest(newRun, request, get, set);
+    } catch (error) {
+        logger(`${logPrefix}: Unexpected error:`, error, 1);
+        set(wsErrorAtom, {
+            event: 'error',
+            type: 'auto_retry_error',
+            message: error instanceof Error ? error.message : 'Failed to automatically retry run',
+            is_retryable: true,
+        });
+        set(activeRunAtom, prev => (newRunId && prev?.id === newRunId ? null : prev));
+        set(isWSChatPendingAtom, false);
+    }
+}
+
+/**
+ * Undo all applied agent actions from removed runs in reverse chronological order.
+ *
+ * A single ordered loop is required because actions have cross-type dependencies.
+ * Undoing in reverse chronological order restores the original state.
+ *
+ * Per-action failures are logged and do not stop the loop.
+ */
+async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void> {
+    // Filter applied actions, keeping their original array position as the
+    // tiebreaker for chronological ordering.
+    const indexed = actions
+        .map((action, index) => ({ action, index }))
+        .filter(({ action }) => {
+            if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
+                return hasAppliedZoteroItem(action);
+            }
+            return action.status === 'applied';
+        });
+
+    // Sort reverse-chronologically by `created_at`, falling back to array
+    // position (which reflects insertion order in threadAgentActionsAtom).
+    indexed.sort((a, b) => {
+        const ta = a.action.created_at ? Date.parse(a.action.created_at) : NaN;
+        const tb = b.action.created_at ? Date.parse(b.action.created_at) : NaN;
+        if (!Number.isNaN(ta) && !Number.isNaN(tb) && ta !== tb) return tb - ta;
+        return b.index - a.index;
+    });
+
+    for (const { action } of indexed) {
+        try {
+            if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(
                     action.result_data!.library_id,
                     action.result_data!.zotero_key
                 );
-                if (item) {
-                    await item.eraseTx();
-                    deletedCount++;
-                }
-            } catch (error) {
-                logger(`deleteAppliedZoteroItems: Failed to delete item for action ${action.id}: ${error}`, 1);
-            }
-        }
-    }
-    return deletedCount;
-}
-
-/**
- * Undo applied metadata edits from agent actions.
- * Reverts fields to their original values, but preserves user's manual changes.
- * Returns the number of actions processed (regardless of whether fields were actually reverted).
- */
-async function undoAppliedMetadataEdits(actions: AgentAction[]): Promise<number> {
-    let processedCount = 0;
-    for (const action of actions) {
-        if (action.status === 'applied' && isEditMetadataAgentAction(action)) {
-            try {
-                // Don't force revert - skip fields that user manually modified
-                const result = await undoEditMetadataAction(action, false);
-                processedCount++;
-                
-                // Log summary for debugging
-                if (result.manuallyModified.length > 0) {
-                    logger(`undoAppliedMetadataEdits: Preserved ${result.manuallyModified.length} manually modified field(s) for action ${action.id}`, 1);
-                }
-            } catch (error) {
-                logger(`undoAppliedMetadataEdits: Failed to undo action ${action.id}: ${error}`, 1);
-            }
-        }
-    }
-    return processedCount;
-}
-
-/**
- * Undo applied note edits from agent actions.
- * Actions are reversed before processing so that edits on the same note are
- * undone in reverse chronological order — prevents failures from shifted content
- * when a later edit altered text near an earlier edit's replacement.
- * Returns the number of actions processed.
- */
-async function undoAppliedNoteEdits(actions: AgentAction[]): Promise<number> {
-    let processedCount = 0;
-    // Reverse so that later edits on the same note are undone first
-    const reversed = [...actions].reverse();
-    for (const action of reversed) {
-        if (action.status === 'applied' && isEditNoteAgentAction(action)) {
-            try {
+                if (item) await item.eraseTx();
+            } else if (isEditMetadataAgentAction(action)) {
+                // false = preserve fields the user manually modified after apply
+                await undoEditMetadataAction(action, false);
+            } else if (isEditNoteAgentAction(action)) {
                 await undoEditNoteAction(action);
-                processedCount++;
-            } catch (error) {
-                logger(`undoAppliedNoteEdits: Failed to undo action ${action.id}: ${error}`, 1);
+            } else if (isCreateItemAgentAction(action)) {
+                await undoCreateItemAction(action);
+            } else if (isCreateCollectionAgentAction(action)) {
+                await undoCreateCollectionAction(action);
+            } else if (isOrganizeItemsAgentAction(action)) {
+                await undoOrganizeItemsAction(action);
+            } else if (isManageTagsAgentAction(action)) {
+                await undoManageTagsAction(action);
+            } else if (isManageCollectionsAgentAction(action)) {
+                await undoManageCollectionsAction(action);
+            } else if (isCreateNoteAgentAction(action)) {
+                await undoCreateNoteAction(action);
             }
+        } catch (error) {
+            logger(`undoAppliedActionsInReverse: Failed to undo action ${action.id} (${action.action_type}): ${error}`, 1);
         }
     }
-    return processedCount;
 }
 
 /**
@@ -543,6 +634,8 @@ interface ActionsToUndo {
     createItems: AgentAction[];
     createCollections: AgentAction[];
     organizeItems: AgentAction[];
+    manageTags: AgentAction[];
+    manageCollections: AgentAction[];
     createNotes: AgentAction[];
 }
 
@@ -555,12 +648,13 @@ type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
  * or 'cancel' to abort regeneration entirely.
  */
 function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
-    const { annotations, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, createNotes } = actions;
+    const { annotations, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes } = actions;
     const totalActions = annotations.length + zoteroNotes.length + metadataEdits.length +
-                         noteEdits.length + createItems.length + createCollections.length + organizeItems.length + createNotes.length;
+                         noteEdits.length + createItems.length + createCollections.length + organizeItems.length +
+                         manageTags.length + manageCollections.length + createNotes.length;
 
     if (totalActions === 0) return 'skip';
-    
+
     // Build a list of changes
     const changeLines: string[] = [];
     if (annotations.length > 0) {
@@ -583,6 +677,12 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
     }
     if (organizeItems.length > 0) {
         changeLines.push(`• ${organizeItems.length} organize action${organizeItems.length === 1 ? '' : 's'}`);
+    }
+    if (manageTags.length > 0) {
+        changeLines.push(`• ${manageTags.length} tag change${manageTags.length === 1 ? '' : 's'}`);
+    }
+    if (manageCollections.length > 0) {
+        changeLines.push(`• ${manageCollections.length} collection change${manageCollections.length === 1 ? '' : 's'}`);
     }
     if (createNotes.length > 0) {
         changeLines.push(`• ${createNotes.length} created note${createNotes.length === 1 ? '' : 's'}`);
@@ -811,6 +911,7 @@ export interface RetryState {
     waitSeconds?: number | null;
 }
 export const wsRetryAtom = atom<RetryState | null>(null);
+/** Deduplicates concurrent auto-resume/auto-retry scheduling for the same run. */
 const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
 
 // =============================================================================
@@ -1141,15 +1242,37 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 errorRunId &&
                 !store.get(scheduledAutoResumeRunIdsAtom).has(errorRunId)
             ) {
+                // Retry when only thinking has streamed so far (nothing
+                // user-visible to preserve). Otherwise resume from the
+                // failure point so streamed text/tool calls are kept.
+                //
+                // If the failed run is itself a resume run, always auto-resume
+                // — earlier runs in the resume chain may hold user-visible
+                // content, and a retry would truncate the chain from its root.
+                const failedRun = findRunForResume(
+                    store.get(threadRunsAtom),
+                    store.get(activeRunAtom),
+                    errorRunId,
+                );
+                const retryInsteadOfResume =
+                    !failedRun?.user_prompt.is_resume &&
+                    hasOnlyThinkingParts(failedRun);
+
                 set(scheduledAutoResumeRunIdsAtom, (prev: Set<string>) => {
                     const next = new Set(prev);
                     next.add(errorRunId);
                     return next;
                 });
 
-                setTimeout(() => {
+                // Run synchronously so the replacement run is set in the
+                // same batch as the error state — React renders once with the
+                // final state, avoiding an intermediate flash of the error or
+                // resume placeholder.
+                if (retryInsteadOfResume) {
+                    store.set(autoRetryErroredRunAtom, errorRunId);
+                } else {
                     store.set(autoResumeErroredRunAtom, errorRunId);
-                }, 0);
+                }
             }
         },
 
@@ -1763,6 +1886,12 @@ export const regenerateFromRunAtom = atom(
             const organizeItemsToUndo = actionsInRemovedRuns
                 .filter(isOrganizeItemsAgentAction)
                 .filter(a => a.status === 'applied');
+            const manageTagsToUndo = actionsInRemovedRuns
+                .filter(isManageTagsAgentAction)
+                .filter(a => a.status === 'applied');
+            const manageCollectionsToUndo = actionsInRemovedRuns
+                .filter(isManageCollectionsAgentAction)
+                .filter(a => a.status === 'applied');
             const noteEditsToUndo = actionsInRemovedRuns
                 .filter(isEditNoteAgentAction)
                 .filter(a => a.status === 'applied');
@@ -1775,6 +1904,7 @@ export const regenerateFromRunAtom = atom(
                                      metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
                                      createItemsToUndo.length > 0 ||
                                      createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
+                                     manageTagsToUndo.length > 0 || manageCollectionsToUndo.length > 0 ||
                                      createNotesToUndo.length > 0;
             if (hasActionsToUndo) {
                 const confirmResult = confirmUndoAppliedActions({
@@ -1785,44 +1915,20 @@ export const regenerateFromRunAtom = atom(
                     createItems: createItemsToUndo,
                     createCollections: createCollectionsToUndo,
                     organizeItems: organizeItemsToUndo,
+                    manageTags: manageTagsToUndo,
+                    manageCollections: manageCollectionsToUndo,
                     createNotes: createNotesToUndo,
                 });
                 if (confirmResult === 'cancel') {
                     return;
                 }
                 if (confirmResult === 'undo') {
-                    // Undo annotations (delete Zotero items)
-                    if (annotationsToDelete.length > 0) {
-                        await deleteAppliedZoteroItems(annotationsToDelete);
-                    }
-                    // Undo Zotero notes (delete Zotero items)
-                    if (zoteroNotesToDelete.length > 0) {
-                        await deleteAppliedZoteroItems(zoteroNotesToDelete);
-                    }
-                    // Undo metadata edits (revert to original values)
-                    if (metadataEditsToUndo.length > 0) {
-                        await undoAppliedMetadataEdits(metadataEditsToUndo);
-                    }
-                    // Undo note edits (revert note HTML, in reverse chronological order)
-                    if (noteEditsToUndo.length > 0) {
-                        await undoAppliedNoteEdits(noteEditsToUndo);
-                    }
-                    // Undo created items (delete from Zotero)
-                    if (createItemsToUndo.length > 0) {
-                        await undoCreateItemActions(createItemsToUndo);
-                    }
-                    // Undo created collections (delete from Zotero)
-                    for (const action of createCollectionsToUndo) {
-                        await undoCreateCollectionAction(action);
-                    }
-                    // Undo organize items (restore original tags/collections)
-                    for (const action of organizeItemsToUndo) {
-                        await undoOrganizeItemsAction(action);
-                    }
-                    // Undo created notes (delete from Zotero)
-                    for (const action of createNotesToUndo) {
-                        await undoCreateNoteAction(action);
-                    }
+                    // Single reverse-chronological pass across all applied
+                    // actions. Cross-type ordering matters — e.g. a
+                    // create_collection undo cascades to descendants, so any
+                    // later manage_collections moves into it must be undone
+                    // first. See undoAppliedActionsInReverse for details.
+                    await undoAppliedActionsInReverse(actionsInRemovedRuns);
                 }
             }
 
@@ -1962,6 +2068,12 @@ export const regenerateWithEditedPromptAtom = atom(
             const organizeItemsToUndo = actionsInRemovedRuns
                 .filter(isOrganizeItemsAgentAction)
                 .filter(a => a.status === 'applied');
+            const manageTagsToUndo = actionsInRemovedRuns
+                .filter(isManageTagsAgentAction)
+                .filter(a => a.status === 'applied');
+            const manageCollectionsToUndo = actionsInRemovedRuns
+                .filter(isManageCollectionsAgentAction)
+                .filter(a => a.status === 'applied');
             const noteEditsToUndo = actionsInRemovedRuns
                 .filter(isEditNoteAgentAction)
                 .filter(a => a.status === 'applied');
@@ -1974,6 +2086,7 @@ export const regenerateWithEditedPromptAtom = atom(
                                      metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
                                      createItemsToUndo.length > 0 ||
                                      createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
+                                     manageTagsToUndo.length > 0 || manageCollectionsToUndo.length > 0 ||
                                      createNotesToUndo.length > 0;
             if (hasActionsToUndo) {
                 const confirmResult = confirmUndoAppliedActions({
@@ -1984,44 +2097,18 @@ export const regenerateWithEditedPromptAtom = atom(
                     createItems: createItemsToUndo,
                     createCollections: createCollectionsToUndo,
                     organizeItems: organizeItemsToUndo,
+                    manageTags: manageTagsToUndo,
+                    manageCollections: manageCollectionsToUndo,
                     createNotes: createNotesToUndo,
                 });
                 if (confirmResult === 'cancel') {
                     return;
                 }
                 if (confirmResult === 'undo') {
-                    // Undo annotations (delete Zotero items)
-                    if (annotationsToDelete.length > 0) {
-                        await deleteAppliedZoteroItems(annotationsToDelete);
-                    }
-                    // Undo Zotero notes (delete Zotero items)
-                    if (zoteroNotesToDelete.length > 0) {
-                        await deleteAppliedZoteroItems(zoteroNotesToDelete);
-                    }
-                    // Undo metadata edits (revert to original values)
-                    if (metadataEditsToUndo.length > 0) {
-                        await undoAppliedMetadataEdits(metadataEditsToUndo);
-                    }
-                    // Undo note edits (revert note HTML, in reverse chronological order)
-                    if (noteEditsToUndo.length > 0) {
-                        await undoAppliedNoteEdits(noteEditsToUndo);
-                    }
-                    // Undo created items (delete from Zotero)
-                    if (createItemsToUndo.length > 0) {
-                        await undoCreateItemActions(createItemsToUndo);
-                    }
-                    // Undo created collections (delete from Zotero)
-                    for (const action of createCollectionsToUndo) {
-                        await undoCreateCollectionAction(action);
-                    }
-                    // Undo organize items (restore original tags/collections)
-                    for (const action of organizeItemsToUndo) {
-                        await undoOrganizeItemsAction(action);
-                    }
-                    // Undo created notes (delete from Zotero)
-                    for (const action of createNotesToUndo) {
-                        await undoCreateNoteAction(action);
-                    }
+                    // Single reverse-chronological pass — see
+                    // undoAppliedActionsInReverse for why cross-type ordering
+                    // matters (e.g. create_collection cascades on erase).
+                    await undoAppliedActionsInReverse(actionsInRemovedRuns);
                 }
             }
 
@@ -2030,7 +2117,7 @@ export const regenerateWithEditedPromptAtom = atom(
             set(threadRunsAtom, truncatedRuns);
 
             // Clear agent actions for removed runs
-            set(threadAgentActionsAtom, (prev) => 
+            set(threadAgentActionsAtom, (prev) =>
                 prev.filter(a => !runIdsToRemove.includes(a.run_id))
             );
 
@@ -2101,6 +2188,28 @@ export const autoResumeErroredRunAtom = atom(
                 failureErrorType: 'auto_resume_error',
                 failureMessage: 'Failed to automatically resume run',
             });
+        } finally {
+            set(scheduledAutoResumeRunIdsAtom, (prev: Set<string>) => {
+                const next = new Set(prev);
+                next.delete(failedRunId);
+                return next;
+            });
+        }
+    }
+);
+
+/**
+ * Auto-retry a failed run from the original user prompt.
+ *
+ * Used when the frontend has received only thinking content (no text or tool
+ * calls) at the time of the error — nothing user-visible to preserve, so we
+ * restart cleanly instead of resuming.
+ */
+export const autoRetryErroredRunAtom = atom(
+    null,
+    async (get, set, failedRunId: string) => {
+        try {
+            await startAutoRetryRun(get, set, failedRunId);
         } finally {
             set(scheduledAutoResumeRunIdsAtom, (prev: Set<string>) => {
                 const next = new Set(prev);

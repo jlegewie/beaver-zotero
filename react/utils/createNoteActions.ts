@@ -12,6 +12,7 @@ import { renderToHTML } from './citationRenderers';
 import { preloadPageLabelsForContent } from './pageLabels';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from './noteActions';
 import { logger } from '../../src/utils/logger';
+import { resolveCreateNoteParent } from '../../src/services/agentDataProvider/actions/resolveCreateNoteParent';
 
 
 export interface CreateNoteResultData {
@@ -23,6 +24,10 @@ export interface CreateNoteResultData {
     note_content?: string;
     /** Formatted revision instructions from automated review (set by backend) */
     revision_instructions?: string;
+    /** Set when the note was created as a standalone related item (fallback path) */
+    related_item_key?: string;
+    /** Human-readable warning about the fallback, if any */
+    warning?: string;
 }
 
 
@@ -48,26 +53,27 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
         throw new Error('Title and content are required');
     }
 
-    // Use resolved library_id from normalized data, or parse from parent_item_id, or default
+    // Re-resolve the parent on manual apply whenever parent_item_id is set.
+    // The resolver is the source of truth for the standalone-fallback path
+    // (relatedItemKey/warning); stored normalized fields like library_id or
+    // parent_key don't carry that data, so skipping resolution when they're
+    // present would lose the fallback link.
     let targetLibraryId = proposed.library_id ?? Zotero.Libraries.userLibraryID;
-    let parentKey = proposed.parent_key || null;
+    let parentKey: string | null = proposed.parent_key || null;
+    let relatedItemKey: string | null = null;
+    let warning: string | null = null;
 
-    // If no resolved values, parse parent_item_id
-    if (!proposed.library_id && !proposed.parent_key && proposed.parent_item_id) {
-        const dashIdx = proposed.parent_item_id.indexOf('-');
-        if (dashIdx > 0) {
-            const libId = parseInt(proposed.parent_item_id.substring(0, dashIdx), 10);
-            const zKey = proposed.parent_item_id.substring(dashIdx + 1);
-            if (!isNaN(libId) && zKey) {
-                targetLibraryId = libId;
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(libId, zKey);
-                if (item) {
-                    parentKey = (item.isAttachment() && item.parentKey) ? item.parentKey : zKey;
-                } else {
-                    parentKey = zKey;
-                }
-            }
+    if (proposed.parent_item_id) {
+        const resolution = await resolveCreateNoteParent(proposed.parent_item_id);
+        if (!resolution.ok) {
+            throw new Error(resolution.error);
         }
+        if (resolution.resolvedLibraryId != null) {
+            targetLibraryId = resolution.resolvedLibraryId;
+        }
+        parentKey = resolution.parentKey;
+        relatedItemKey = resolution.relatedItemKey;
+        warning = resolution.warning;
     }
 
     const collectionKey = proposed.collection_key || null;
@@ -96,28 +102,75 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
         htmlContent += getBeaverNoteFooterHTML(threadId, runId);
     }
 
-    // Create the Zotero note item
-    const zoteroNote = new Zotero.Item('note');
-
-    if (parentKey) {
-        zoteroNote.libraryID = targetLibraryId;
-        zoteroNote.parentKey = parentKey;
-    } else {
-        zoteroNote.libraryID = targetLibraryId;
+    // Fetch the standalone-fallback target once; used for both the forward
+    // relation (staged pre-save) and collection inheritance.
+    let relatedItem: Zotero.Item | null = null;
+    if (relatedItemKey) {
+        try {
+            const found = await Zotero.Items.getByLibraryAndKeyAsync(targetLibraryId, relatedItemKey);
+            if (found) {
+                relatedItem = found;
+            }
+        } catch (relationError: any) {
+            logger(`executeCreateNoteAction: Failed to look up standalone parent: ${relationError.message}`, 1);
+        }
     }
 
+    // Inherit collection from the standalone parent when none was specified.
+    let effectiveCollectionKey = collectionKey;
+    if (relatedItem && !effectiveCollectionKey) {
+        try {
+            await Zotero.Items.loadDataTypes([relatedItem], ['collections']);
+            const collectionIds = relatedItem.getCollections();
+            if (collectionIds && collectionIds.length > 0) {
+                const firstCollection = Zotero.Collections.get(collectionIds[0]);
+                if (firstCollection) {
+                    effectiveCollectionKey = firstCollection.key;
+                }
+            }
+        } catch (error: any) {
+            logger(`executeCreateNoteAction: Failed to inherit collection from standalone parent: ${error.message}`, 1);
+        }
+    }
+
+    // Create the Zotero note item and stage relation + collection on the
+    // unsaved item so a single saveTx persists everything together.
+    const zoteroNote = new Zotero.Item('note');
+    zoteroNote.libraryID = targetLibraryId;
+    if (parentKey) {
+        zoteroNote.parentKey = parentKey;
+    }
     zoteroNote.setNote(wrapWithSchemaVersion(htmlContent));
+
+    if (relatedItem) {
+        try {
+            zoteroNote.addRelatedItem(relatedItem);
+        } catch (relationError: any) {
+            logger(`executeCreateNoteAction: Failed to stage relation on note: ${relationError.message}`, 1);
+        }
+    }
+
+    if (effectiveCollectionKey) {
+        try {
+            zoteroNote.addToCollection(effectiveCollectionKey);
+        } catch (error: any) {
+            logger(`executeCreateNoteAction: Failed to stage collection assignment: ${error.message}`, 1);
+        }
+    }
+
     await zoteroNote.saveTx();
 
     logger(`executeCreateNoteAction: Created note "${title}" with key ${zoteroNote.key}`, 1);
 
-    // Add to collection if specified
-    if (collectionKey) {
+    // Mirror the relation on the related item so the "Related" pane shows the
+    // link from either side. Requires the note's key, so runs post-save.
+    if (relatedItem) {
         try {
-            zoteroNote.addToCollection(collectionKey);
-            await zoteroNote.saveTx();
-        } catch (error: any) {
-            logger(`executeCreateNoteAction: Failed to add note to collection: ${error.message}`, 1);
+            if (relatedItem.addRelatedItem(zoteroNote)) {
+                await relatedItem.saveTx({ skipDateModifiedUpdate: true });
+            }
+        } catch (reverseErr: any) {
+            logger(`executeCreateNoteAction: Failed to mirror relation on related item: ${reverseErr.message}`, 1);
         }
     }
 
@@ -125,7 +178,9 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
         library_id: zoteroNote.libraryID,
         zotero_key: zoteroNote.key,
         ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {}),
-        ...(collectionKey ? { collection_key: collectionKey } : {}),
+        ...(effectiveCollectionKey ? { collection_key: effectiveCollectionKey } : {}),
+        ...(relatedItemKey ? { related_item_key: relatedItemKey } : {}),
+        ...(warning ? { warning } : {}),
     };
 }
 

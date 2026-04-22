@@ -17,6 +17,7 @@ import {
     normalizeNotePosition,
 } from '../types/agentActions/annotations';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
+import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '../types/agentActions/base';
 import type { WSDeferredApprovalRequest, AgentActionType } from '../../src/services/agentProtocol';
 
 // =============================================================================
@@ -115,6 +116,20 @@ export const isOrganizeItemsAgentAction = (action: AgentAction): boolean => {
 };
 
 /**
+ * Type guard for manage tags actions
+ */
+export const isManageTagsAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'manage_tags';
+};
+
+/**
+ * Type guard for manage collections actions
+ */
+export const isManageCollectionsAgentAction = (action: AgentAction): action is ManageCollectionsAgentAction => {
+    return action.action_type === 'manage_collections';
+};
+
+/**
  * Type guard for edit note actions
  */
 export const isEditNoteAgentAction = (action: AgentAction): boolean => {
@@ -142,6 +157,15 @@ export type CreateItemAgentAction = AgentAction & {
     action_type: 'create_item';
     proposed_data: CreateItemProposedData;
     result_data?: CreateItemResultData;
+};
+
+/**
+ * Typed agent action for manage_collections actions
+ */
+export type ManageCollectionsAgentAction = AgentAction & {
+    action_type: 'manage_collections';
+    proposed_data: ManageCollectionsProposedData;
+    result_data?: ManageCollectionsResultData;
 };
 
 /**

@@ -27,7 +27,7 @@ import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
 } from '../../atoms/ui';
-import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon } from '../icons/icons';
+import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon } from '../icons/icons';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -250,8 +250,16 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         
         // Strip URLs from formatted citation and preview text (they clutter the tooltip)
         const stripUrls = (s: string) => s.replace(/\s*https?:\/\/\S+/g, '').trim();
-        formatted_citation = stripUrls(formatted_citation);
-        previewText = stripUrls(previewText);
+        // Convert <br> tags to newlines and strip any remaining HTML tags
+        // (note previews arrive as HTML fragments and would otherwise render as literal markup)
+        const stripHtml = (s: string) => s
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/(p|div|h[1-6]|li)>/gi, '\n')
+            .replace(/<[^>]*>/g, '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+        formatted_citation = stripHtml(stripUrls(formatted_citation));
+        previewText = stripHtml(stripUrls(previewText));
 
         const pages = [...new Set(getCitationPages(citationMetadata))];
         const firstPage = pages.length > 0 ? pages[0] : null;
@@ -488,7 +496,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     }
 
     // Determine the CSS class based on citation type and state
-    const hasLocator = pages.length > 0 || (citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0);
+    const isNoteCitation = citationMetadata?.type === 'note';
+    const hasLocator = !isNoteCitation && (pages.length > 0 || (citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0));
     const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
         : hasLocator
@@ -523,7 +532,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     <span className="font-color-secondary text-sm">Page {pages[0]}</span>
                 )}
             </span>
-            <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+            <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
                 {previewText}
             </span>
             {isExternal && !mappedZoteroItem && (
@@ -532,6 +541,16 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                         <Icon icon={GlobalSearchIcon} className="font-color-tertiary" />
                         <span className="text-sm font-color-tertiary">
                             View details
+                        </span>
+                    </span>
+                </span>
+            )}
+            {isNoteCitation && (!isExternal || !!mappedZoteroItem) && (
+                <span className="px-3 py-15 border-top-quinary block">
+                    <span className="display-flex flex-row items-center gap-15">
+                        <Icon icon={NoteIcon} className="font-color-tertiary" />
+                        <span className="text-sm font-color-tertiary">
+                            Opens note
                         </span>
                     </span>
                 </span>
@@ -546,7 +565,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     </span>
                 </span>
             )}
-            {!hasLocator && (!isExternal || !!mappedZoteroItem) && (
+            {!hasLocator && !isNoteCitation && (!isExternal || !!mappedZoteroItem) && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={LibraryIcon} className="font-color-tertiary" />
@@ -554,11 +573,6 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                             Reveals item in library
                         </span>
                     </span>
-                </span>
-            )}
-            {citationMetadata?.type === 'note' && (
-                <span className="px-3 py-15 text-xs font-color-tertiary border-top-quinary block">
-                    Click to open note
                 </span>
             )}
         </span>

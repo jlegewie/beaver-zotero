@@ -21,6 +21,7 @@ pref("readerExplainPrompt", "Explain the selected passage or annotation(s) from 
 // Beaver Free file limits
 pref("maxFileSizeMB", 50);
 pref("maxPageCount", 300);
+pref("accessRemoteFiles", true);
 
 // Agent actions
 pref("autoApplyAnnotations", true);

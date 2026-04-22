@@ -183,15 +183,9 @@ export async function handleReadNoteRequest(
         // 5. Get raw HTML (reads from open editor if available, to capture unsaved changes)
         const rawHtml = getLatestNoteHtml(item);
         if (!rawHtml || rawHtml.trim() === '') {
-            return {
-                type: 'read_note',
-                request_id,
-                success: true,
-                note_id,
-                title: item.getNoteTitle() || '(empty note)',
-                total_lines: 0,
-                content: '(empty note)',
-            };
+            return errorResponse(
+                `Note ${note_id} is empty. There is no content to read.`
+            );
         }
 
         // 6. Simplify (also warms cache for subsequent edit_note calls).

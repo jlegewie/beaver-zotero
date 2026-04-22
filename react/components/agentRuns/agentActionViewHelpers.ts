@@ -36,6 +36,23 @@ export function confirmOverwriteManualChanges(modifiedFields: string[]): boolean
 /** Tools that should remain expanded after approval resolves (never auto-collapse) */
 export const NEVER_AUTO_COLLAPSE_TOOLS = new Set(['create_note']);
 
+/**
+ * Shorten a backend error_message for inline display in action previews.
+ *
+ * Backend messages include agent-facing detail (multi-line lists, Zotero keys,
+ * "Cannot <verb> <entity> '<name>' because ..." framing) that duplicates what
+ * the headline + pill already show. Keep just the concise reason.
+ */
+export function shortenActionError(msg: string): string {
+    let s = msg.split('\n')[0].replace(/[:.\s]+$/, '').trim();
+    const becauseIdx = s.toLowerCase().indexOf(' because ');
+    if (becauseIdx >= 0) {
+        s = s.slice(becauseIdx + ' because '.length);
+        s = s.charAt(0).toUpperCase() + s.slice(1);
+    }
+    return s;
+}
+
 export interface StatusConfig {
     icon: React.FC<React.SVGProps<SVGSVGElement>> | null;
     label: string;
@@ -149,6 +166,10 @@ export function getActionLabel(toolName: string): string {
             return 'Create';
         case 'organize_items':
             return 'Organize';
+        case 'manage_tags':
+            return 'Tag';
+        case 'manage_collections':
+            return 'Collection';
         case 'confirm_extraction':
             return 'Extract';
         case 'confirm_external_search':
@@ -179,6 +200,35 @@ export function getActionTitle(
             return itemCount === 1 && itemTitle
                 ? itemTitle
                 : `${itemCount} item${itemCount !== 1 ? 's' : ''}`;
+        }
+        case 'manage_tags': {
+            const name = actionData?.name;
+            const op = actionData?.action;
+            if (!name) return null;
+            if (op === 'delete') return `Delete tag "${name}"`;
+            const newName = actionData?.new_name;
+            if (newName) {
+                return actionData?.is_merge
+                    ? `Merge "${name}" → "${newName}"`
+                    : `Rename "${name}" → "${newName}"`;
+            }
+            return `Tag "${name}"`;
+        }
+        case 'manage_collections': {
+            const op = actionData?.action;
+            const collectionName = actionData?.collection_name ?? actionData?.old_name ?? actionData?.name;
+            if (op === 'delete') {
+                return collectionName ? `Delete "${collectionName}"` : 'Delete collection';
+            }
+            if (op === 'move') {
+                return collectionName ? `Move "${collectionName}"` : 'Move collection';
+            }
+            if (op === 'rename') {
+                const newName = actionData?.new_name;
+                if (collectionName && newName) return `Rename "${collectionName}" → "${newName}"`;
+                if (newName) return `Rename → "${newName}"`;
+            }
+            return collectionName ?? null;
         }
         case 'confirm_extraction': {
             const count = actionData?.attachment_count ?? 0;
@@ -216,6 +266,7 @@ export interface PreviewData {
     actionData: Record<string, any>;
     currentValue?: any;
     resultData?: Record<string, any>;
+    errorMessage?: string;
 }
 
 /**
@@ -240,6 +291,7 @@ export function buildPreviewData(
             actionData: action.proposed_data,
             currentValue: undefined, // We don't have this for stored actions
             resultData: action.result_data,
+            errorMessage: action.error_message,
         };
     }
 

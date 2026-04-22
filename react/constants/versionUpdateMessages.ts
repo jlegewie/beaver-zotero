@@ -390,7 +390,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.17.0",
-        title: "New in Beaver 0.17 (beta)",
+        title: "New in Beaver 0.17",
         subtitle: "Turn Beaver into a full-featured writing and reviewing assistant for your research notes.",
         steps: [
             {
@@ -407,6 +407,30 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
         ],
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.17.0" target='_blank'>Full changelog</a>`
+    },
+    {
+        version: "0.18.0",
+        title: "New in Beaver 0.18",
+        // subtitle: "Visual PDF understanding and better library management.",
+        steps: [
+            {
+                title: "Beaver can now see PDF pages",
+                description: "Understands figures, tables, and scanned PDFs without a text layer.",
+            },
+            {
+                title: "Image-based extraction (Plus Tools)",
+                description: "The extract tool now works on scanned, OCR-only PDFs (25 pages max).",
+            },
+            {
+                title: "Collection and tag management",
+                description: "Rename, move, and delete collections and tags directly.",
+            },
+            {
+                title: "Remote files",
+                description: "Support for remotely-stored attachments (disabled in settings).",
+            },
+        ],
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.18.0" target='_blank'>Full changelog</a>`
     },
 ];
 

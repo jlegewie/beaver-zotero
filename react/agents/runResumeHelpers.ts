@@ -49,6 +49,25 @@ export function findResumeChainRoot(run: AgentRun, allRuns: AgentRun[]): AgentRu
     return current;
 }
 
+/**
+ * Returns true when the failed run has received only thinking content so far —
+ * no assistant text and no tool calls. Used to decide between auto-retry (safe
+ * when nothing user-visible was produced) and auto-resume (continue from the
+ * failure point).
+ */
+export function hasOnlyThinkingParts(run: AgentRun | null): boolean {
+    if (!run) return false;
+    for (const message of run.model_messages) {
+        if (message.kind !== 'response') continue;
+        for (const part of message.parts) {
+            if (part.part_kind === 'text' || part.part_kind === 'tool-call') {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 export function toRunError(event: WSErrorEvent): NonNullable<AgentRun['error']> {
     return {
         type: event.type,

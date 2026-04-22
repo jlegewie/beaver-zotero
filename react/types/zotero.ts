@@ -250,9 +250,21 @@ export interface ZoteroItemStatus {
     is_synced_library: boolean;
     /** Whether the item is in Zotero trash (filtered out of sync) */
     is_in_trash: boolean;
-    /** Whether the item is available locally or on server */
+    /**
+     * Whether Beaver can access the file: true when the file exists locally,
+     * has a synced server hash, OR is downloadable on demand via the
+     * remote-file-access path (TO_DOWNLOAD/FORCE_DOWNLOAD with the
+     * `accessRemoteFiles` pref enabled).
+     */
     available_locally_or_on_server: boolean;
-    /** Whether item passes all sync filters (library synced, not in trash, is PDF, etc.) */
+    /**
+     * Whether the item is eligible for backend sync. Stricter than
+     * `available_locally_or_on_server`: requires a local file or a real
+     * synced hash, since backend sync is content-addressed and needs the
+     * hash for de-duplication. Hashless on-demand items can be reached by
+     * the agent (so `available_locally_or_on_server=true`) but cannot be
+     * synced (so `passes_sync_filters=false`).
+     */
     passes_sync_filters: boolean;
     /**
      * Whether item was added/modified after the last sync time.

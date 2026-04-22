@@ -28,7 +28,7 @@ export async function handleZoteroSearchRequest(
     request: WSZoteroSearchRequest
 ): Promise<WSZoteroSearchResponse> {
     logger(`handleZoteroSearchRequest: Processing ${request.conditions.length} conditions`, 1);
-    
+
     try {
         // Validate library (checks both existence and searchability)
         const validation = validateLibraryAccess(request.library_id);
@@ -44,21 +44,26 @@ export async function handleZoteroSearchRequest(
             };
         }
         const library = validation.library!;
-        
+
         // Create search object
         const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
         search.libraryID = library.libraryID;
-        
+
         // Set join mode first (if 'any')
         if (request.join_mode === 'any') {
             search.addCondition('joinMode', 'any', '');
         }
-        
+
+        // Warnings are surfaced to the backend so the agent can correct bad
+        // conditions rather than receive a silently-relaxed result set.
+        const warnings: string[] = [];
+
         // Add search conditions
         for (const condition of request.conditions) {
             let operator = condition.operator;
             let value = condition.value ?? '';
-            
+            const originalOperator = operator;
+
             // Map operator names if needed
             const operatorMap: Record<string, string> = {
                 'is': 'is',
@@ -72,7 +77,7 @@ export async function handleZoteroSearchRequest(
                 'isAfter': 'isAfter',
                 'isInTheLast': 'isInTheLast',
             };
-            
+
             operator = operatorMap[operator] || operator;
 
             // Handle search for empty fields (Zotero quirk)
@@ -81,7 +86,7 @@ export async function handleZoteroSearchRequest(
                 operator = 'doesNotContain';
                 value = '';
             }
-            
+
             try {
                 search.addCondition(
                     condition.field as _ZoteroTypes.Search.Conditions,
@@ -89,7 +94,11 @@ export async function handleZoteroSearchRequest(
                     String(value)  // Ensure value is always a string
                 );
             } catch (err) {
-                logger(`handleZoteroSearchRequest: Invalid condition ${condition.field} ${operator}: ${err}`, 1);
+                const msg = err instanceof Error ? err.message : String(err);
+                logger(`handleZoteroSearchRequest: Invalid condition ${condition.field} ${originalOperator}: ${msg}`, 1);
+                warnings.push(
+                    `Dropped condition field='${condition.field}' operator='${originalOperator}' value='${String(condition.value ?? '')}': ${msg}`
+                );
             }
         }
 
@@ -328,13 +337,14 @@ export async function handleZoteroSearchRequest(
             }
         }
 
-        logger(`handleZoteroSearchRequest: Returning ${items.length}/${totalCount} items${sortRequested ? ` (sorted by ${request.sort_by} ${request.sort_order || 'desc'})` : ''}`, 1);
-        
+        logger(`handleZoteroSearchRequest: Returning ${items.length}/${totalCount} items${sortRequested ? ` (sorted by ${request.sort_by} ${request.sort_order || 'desc'})` : ''}${warnings.length ? ` with ${warnings.length} warning(s)` : ''}`, 1);
+
         return {
             type: 'zotero_search',
             request_id: request.request_id,
             items,
             total_count: totalCount,
+            warnings: warnings.length ? warnings : undefined,
         };
     } catch (error) {
         logger(`handleZoteroSearchRequest: Error: ${error}`, 1);

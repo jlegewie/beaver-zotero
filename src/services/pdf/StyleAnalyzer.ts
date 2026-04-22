@@ -73,8 +73,9 @@ function shouldIgnoreText(text: string, minChars: number): boolean {
     const trimmed = text.trim();
     if (trimmed.length === 0) return true;
 
-    // Only non-alphanumeric (like "...", "---", etc.)
-    if (!/[a-zA-Z0-9]/.test(trimmed)) return true;
+    // Only non-alphanumeric (like "...", "---", etc.). Unicode-aware so
+    // non-Latin scripts (Cyrillic, Greek, Arabic, CJK, ...) are not ignored.
+    if (!/[\p{L}\p{N}]/u.test(trimmed)) return true;
 
     return false;
 }

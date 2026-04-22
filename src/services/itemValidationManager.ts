@@ -4,10 +4,12 @@ import { isValidZoteroItem } from '../../react/utils/sourceUtils';
 import { logger } from '../utils/logger';
 import { store } from '../../react/store';
 import { planFeaturesAtom, searchableLibraryIdsAtom } from '../../react/atoms/profile';
+import { selectedModelAtom } from '../../react/atoms/models';
 import { isAttachmentOnServer } from '../utils/webAPI';
 import { getPref } from '../utils/prefs';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
 import { safeFileExists } from '../utils/zoteroUtils';
+import { isRemoteAccessAvailable } from './agentDataProvider/utils';
 
 /**
  * Types of item validation
@@ -62,6 +64,8 @@ export interface ItemValidationOptions {
     validationType: ItemValidationType;
     forceRefresh?: boolean;
 }
+
+const REMOTE_DOWNLOAD_TIMEOUT_MS = 20_000;
 
 /**
  * Manages item validation with caching and deduplication
@@ -240,6 +244,26 @@ class ItemValidationManager {
     }
 
     /**
+     * Whether the client can handle OCR-only PDFs without backend text extraction.
+     * True when the selected model supports vision OR plus tools (server-side OCR) are enabled.
+     */
+    private canHandleOCRLocally(): boolean {
+        const selectedModel = store.get(selectedModelAtom);
+        const supportsVision = selectedModel?.supports_vision === true;
+        const requestPlusTools = getPref('requestPlusTools');
+        return supportsVision || requestPlusTools;
+    }
+
+    /**
+     * Detect whether a backend rejection message indicates the file requires OCR.
+     * The backend currently signals this through the `details` string
+     * (e.g. "File requires OCR (not yet supported)"), not a structured error code.
+     */
+    private isBackendOCRRejection(details?: string): boolean {
+        return !!details && /ocr/i.test(details);
+    }
+
+    /**
      * Perform backend validation
      * Checks if the item has been processed on the backend
      */
@@ -257,8 +281,16 @@ class ItemValidationManager {
             );
 
             // Item is valid if processed on backend
-            const isValid = backendResponse.processed;
-            const reason = isValid ? undefined : (backendResponse.details || 'File not processed');
+            let isValid = backendResponse.processed;
+            let reason = isValid ? undefined : (backendResponse.details || 'File not processed');
+
+            // OCR override: if backend rejected due to missing text layer but the client can
+            // handle scanned PDFs (vision model or plus tools), treat as valid.
+            if (!isValid && this.isBackendOCRRejection(backendResponse.details) && this.canHandleOCRLocally()) {
+                logger(`ItemValidationManager: Overriding backend OCR rejection for ${item.libraryID}-${item.key} — client can handle OCR`, 4);
+                isValid = true;
+                reason = undefined;
+            }
 
             return { isValid, reason };
         } catch (error: any) {
@@ -295,14 +327,44 @@ class ItemValidationManager {
             };
         }
 
-        // 4. Check if file exists locally
-        const filePath = await attachment.getFilePathAsync();
+        // 4. Check if file exists locally; download from remote storage when possible
+        let filePath = await attachment.getFilePathAsync();
         if (!filePath) {
-            const isOnServer = isAttachmentOnServer(attachment);
-            const reason = isOnServer
-                ? 'File not available locally. It may be in remote storage.'
-                : 'File is not available locally';
-            return { isValid: false, reason };
+            if (!isRemoteAccessAvailable(attachment)) {
+                const isOnServer = isAttachmentOnServer(attachment);
+                const reason = isOnServer
+                    ? 'File not available locally and remote file access is disabled in settings.'
+                    : 'File is not available locally';
+                return { isValid: false, reason };
+            }
+
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+            try {
+                const timeoutPromise = new Promise<'timeout'>((resolve) => {
+                    timeoutId = setTimeout(() => resolve('timeout'), REMOTE_DOWNLOAD_TIMEOUT_MS);
+                });
+                const result = await Promise.race([
+                    Zotero.Sync.Runner.downloadFile(attachment),
+                    timeoutPromise,
+                ]);
+                if (result === 'timeout') {
+                    logger(`ItemValidationManager: Remote download timed out after ${REMOTE_DOWNLOAD_TIMEOUT_MS}ms for ${attachment.libraryID}-${attachment.key}`, 2);
+                    return { isValid: false, reason: 'Unable to download file from remote storage.' };
+                }
+                if (!result || !result.localChanges) {
+                    return { isValid: false, reason: 'Failed to download file from remote storage' };
+                }
+            } catch (error: any) {
+                logger(`ItemValidationManager: Remote download failed for ${attachment.libraryID}-${attachment.key}: ${error?.message ?? error}`, 2);
+                return { isValid: false, reason: 'Failed to download file from remote storage' };
+            } finally {
+                if (timeoutId !== undefined) clearTimeout(timeoutId);
+            }
+
+            filePath = await attachment.getFilePathAsync();
+            if (!filePath) {
+                return { isValid: false, reason: 'File is not available after remote download' };
+            }
         }
 
         const fileExists = await safeFileExists(attachment);
@@ -349,12 +411,16 @@ class ItemValidationManager {
             }
 
             // Check if PDF needs OCR
-            const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
-            if (ocrAnalysis.needsOCR) {
-                return { 
-                    isValid: false, 
-                    reason: 'PDF requires OCR (no text layer)' 
-                };
+            // Only fail if the selected model can't handle scanned PDFs:
+            // no vision support AND plus tools (server-side OCR) disabled.
+            if (!this.canHandleOCRLocally()) {
+                const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
+                if (ocrAnalysis.needsOCR) {
+                    return {
+                        isValid: false,
+                        reason: 'PDF requires OCR (no text layer). Use a model with vision support or enable plus tools under Settings > API Keys.'
+                    };
+                }
             }
 
             return { isValid: true };
@@ -861,9 +927,20 @@ class ItemValidationManager {
                         continue;
                     }
 
+                    let isValid = backendData.processed;
+                    let reason = isValid ? undefined : (backendData.details || 'File not processed');
+
+                    // OCR override: if backend rejected due to missing text layer but the client can
+                    // handle scanned PDFs (vision model or plus tools), treat as valid.
+                    if (!isValid && this.isBackendOCRRejection(backendData.details) && this.canHandleOCRLocally()) {
+                        logger(`ItemValidationManager: Overriding backend OCR rejection for ${key} — client can handle OCR`, 4);
+                        isValid = true;
+                        reason = undefined;
+                    }
+
                     const backendResult: AttachmentValidationResult = {
-                        isValid: backendData.processed,
-                        reason: backendData.processed ? undefined : (backendData.details || 'File not processed'),
+                        isValid,
+                        reason,
                         backendChecked: true
                     };
 

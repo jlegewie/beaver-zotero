@@ -23,6 +23,7 @@ declare namespace _ZoteroTypes {
       "readerExplainPrompt": string;
       "maxFileSizeMB": number;
       "maxPageCount": number;
+      "accessRemoteFiles": boolean;
       "autoApplyAnnotations": boolean;
       "autoCreateNotes": boolean;
       "autoImportItems": boolean;

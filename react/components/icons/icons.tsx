@@ -6,6 +6,7 @@ export { CSSItemTypeIcon, CSSIcon } from './zotero';
 export { default as Spinner } from './Spinner';
 export { default as ClockIcon } from './ClockIcon';
 export { default as FolderAddIcon } from './FolderAddIcon';
+export { default as NoteIcon } from './NoteIcon';
 export { default as FolderDetailIcon } from './FolderDetailIcon';
 export { default as FileDiffIcon } from './FileDiffIcon';
 export { default as UndoIcon } from './UndoIcon';
