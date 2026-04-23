@@ -678,22 +678,29 @@ export class AgentService {
                     break;
 
                 // Deferred tool events
-                case 'agent_action_validate':
+                case 'agent_action_validate': {
                     logger("AgentService: Received agent_action_validate", event, 1);
-                    handleAgentActionValidateRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: agent_action_validate failed: ${err}`, 1);
-                            this.send({
-                                type: 'agent_action_validate_response',
-                                request_id: event.request_id,
-                                valid: false,
-                                error: String(err),
-                                error_code: 'internal_error',
-                                preference: 'always_ask',
+                    // Chain onto actionExecutionQueue so validates see a consistent
+                    // state snapshot
+                    const validateConnId = this.connectionId;
+                    this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
+                        if (this.connectionId !== validateConnId) return;
+                        return handleAgentActionValidateRequest(event)
+                            .then(res => this.send(res))
+                            .catch(err => {
+                                logger(`AgentService: agent_action_validate failed: ${err}`, 1);
+                                this.send({
+                                    type: 'agent_action_validate_response',
+                                    request_id: event.request_id,
+                                    valid: false,
+                                    error: String(err),
+                                    error_code: 'internal_error',
+                                    preference: 'always_ask',
+                                });
                             });
-                        });
+                    });
                     break;
+                }
 
                 case 'agent_action_execute': {
                     logger("AgentService: Received agent_action_execute", event, 1);
