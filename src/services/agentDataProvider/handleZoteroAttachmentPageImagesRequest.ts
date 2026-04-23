@@ -22,6 +22,17 @@ import { makeRemoteFilePath } from '../attachmentFileCache';
 import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
 
+// Convert raw bytes to base64 in 32 KB chunks
+function uint8ToBase64(bytes: Uint8Array): string {
+    const CHUNK_SIZE = 0x8000;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+        const chunk = bytes.subarray(i, i + CHUNK_SIZE);
+        binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+    }
+    return btoa(binary);
+}
+
 /**
  * Handle zotero_attachment_page_images_request event.
  * Renders PDF attachment pages as images using the PDF extraction service.
@@ -296,11 +307,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         // 10. Convert to base64 and build response
         const pageImages: WSPageImage[] = renderResults.map((result) => {
-            // Convert Uint8Array to base64
-            const binaryStr = Array.from(result.data)
-                .map(byte => String.fromCharCode(byte))
-                .join('');
-            const base64Data = btoa(binaryStr);
+            const base64Data = uint8ToBase64(result.data);
 
             return {
                 page_number: result.pageIndex + 1, // Convert back to 1-indexed
