@@ -17,7 +17,7 @@ import {
     AttachmentPageImagesErrorCode,
     WSPageImage,
 } from '../agentProtocol';
-import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { PDFExtractor, ExtractionError, ExtractionErrorCode, runHeavyPdfOp } from '../pdf';
 import { makeRemoteFilePath } from '../attachmentFileCache';
 import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
@@ -170,129 +170,154 @@ export async function handleZoteroAttachmentPageImagesRequest(
             pageLabels = cachedMeta.page_labels;
         }
 
-        if (totalPages == null) {
-            if (cachedMeta?.page_count != null) {
-                totalPages = cachedMeta.page_count;
-            } else {
-                if (!pdfData) {
-                    try {
-                        pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
-                    } catch (error) {
-                        if (!isRemoteOnly) throw error;
-                        logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
-                        return errorResponse(
-                            `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
-                            'download_failed'
-                        );
-                    }
-                    if (isRemoteOnly) {
-                        const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
-                        if (exceeded) {
-                            return errorResponse(
-                                `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
-                                'file_too_large'
-                            );
+        // Gate the heavy region: ensure pdfData is loaded, hydrate labels if
+        // needed, validate page indices, and render
+        const heavy = await runHeavyPdfOp(async () => {
+            // 5b. Determine totalPages when not already known.
+            if (totalPages == null) {
+                if (cachedMeta?.page_count != null) {
+                    totalPages = cachedMeta.page_count;
+                } else {
+                    if (!pdfData) {
+                        try {
+                            pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                        } catch (error) {
+                            if (!isRemoteOnly) throw error;
+                            logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
+                            return {
+                                kind: 'early' as const,
+                                response: errorResponse(
+                                    `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                                    'download_failed'
+                                ),
+                            };
+                        }
+                        if (isRemoteOnly) {
+                            const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                            if (exceeded) {
+                                return {
+                                    kind: 'early' as const,
+                                    response: errorResponse(
+                                        `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                                        'file_too_large'
+                                    ),
+                                };
+                            }
                         }
                     }
-                }
-                totalPages = await extractor.getPageCount(pdfData);
-            }
-        }
-
-        // Ensure PDF bytes are available for rendering (step 9).
-        if (!pdfData) {
-            try {
-                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
-            } catch (error) {
-                if (!isRemoteOnly) throw error;
-                logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
-                return errorResponse(
-                    `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
-                    'download_failed'
-                );
-            }
-            if (isRemoteOnly) {
-                const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
-                if (exceeded) {
-                    return errorResponse(
-                        `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
-                        'file_too_large'
-                    );
+                    totalPages = await extractor.getPageCount(pdfData);
                 }
             }
-        }
 
-        // When prefer_page_labels is false, the normal fast path may render
-        // from cached metadata without ever loading labels. Hydrate them once
-        // on cold caches so image responses still populate page_label.
-        if (
-            prefer_page_labels !== true
-            && !pageLabels
-            && (!cachedMeta || cachedMeta.page_labels === null)
-        ) {
-            try {
-                const { count, labels } = await extractor.getPageCountAndLabels(pdfData);
-                pageLabels = Object.keys(labels).length > 0 ? labels : null;
-                if (totalPages == null) {
-                    totalPages = count;
+            // 5c. Ensure PDF bytes are available for rendering.
+            if (!pdfData) {
+                try {
+                    pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                } catch (error) {
+                    if (!isRemoteOnly) throw error;
+                    logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
+                    return {
+                        kind: 'early' as const,
+                        response: errorResponse(
+                            `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                            'download_failed'
+                        ),
+                    };
                 }
-            } catch (error) {
-                logger(`handleZoteroAttachmentPageImagesRequest: page label hydration failed for ${requestKey}: ${error}`, 1);
-            }
-        }
-
-        // 6. Check page count limit for all-pages requests (skip if skip_local_limits is true)
-        if (!skip_local_limits && requestingAllPages) {
-            const maxPageCount = getPref('maxPageCount');
-            if (totalPages > maxPageCount) {
-                return errorResponse(
-                    `The PDF file for ${pdfKey} has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
-                    'too_many_pages'
-                );
-            }
-        }
-
-        // 7. Determine which pages to render
-        let pageIndices: number[];
-        if (pages && pages.length > 0) {
-            let resolvedPages: number[];
-            try {
-                resolvedPages = pages.map(p => resolvePageValue(p, pageLabels, prefer_page_labels === true));
-            } catch (error) {
-                if (error instanceof InvalidPageValueError) {
-                    return errorResponse(error.message, 'invalid_page_value', totalPages);
+                if (isRemoteOnly) {
+                    const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                    if (exceeded) {
+                        return {
+                            kind: 'early' as const,
+                            response: errorResponse(
+                                `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                                'file_too_large'
+                            ),
+                        };
+                    }
                 }
-                throw error;
             }
 
-            // Filter out invalid pages: keep only pages in [1, totalPages]
-            const validPages = resolvedPages.filter(p => p >= 1 && p <= totalPages);
-
-            if (validPages.length === 0) {
-                return errorResponse(
-                    `All requested pages are out of range (document has ${totalPages} pages)`,
-                    'page_out_of_range',
-                    totalPages
-                );
+            // When prefer_page_labels is false, the normal fast path may render
+            // from cached metadata without ever loading labels. Hydrate them once
+            // on cold caches so image responses still populate page_label.
+            if (
+                prefer_page_labels !== true
+                && !pageLabels
+                && (!cachedMeta || cachedMeta.page_labels === null)
+            ) {
+                try {
+                    const { count, labels } = await extractor.getPageCountAndLabels(pdfData);
+                    pageLabels = Object.keys(labels).length > 0 ? labels : null;
+                    if (totalPages == null) {
+                        totalPages = count;
+                    }
+                } catch (error) {
+                    logger(`handleZoteroAttachmentPageImagesRequest: page label hydration failed for ${requestKey}: ${error}`, 1);
+                }
             }
 
-            // Convert 1-indexed page numbers to 0-indexed
-            pageIndices = validPages.map(p => p - 1);
-        } else {
-            // Default to all pages
-            pageIndices = Array.from({ length: totalPages }, (_, i) => i);
-        }
+            // 6. Check page count limit for all-pages requests (skip if skip_local_limits is true)
+            if (!skip_local_limits && requestingAllPages) {
+                const maxPageCount = getPref('maxPageCount');
+                if (totalPages! > maxPageCount) {
+                    return {
+                        kind: 'early' as const,
+                        response: errorResponse(
+                            `The PDF file for ${pdfKey} has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
+                            'too_many_pages'
+                        ),
+                    };
+                }
+            }
 
-        // 8. Build render options
-        const renderOptions = {
-            scale: scale ?? 1.0,
-            dpi: dpi ?? 0,
-            format: format ?? 'png' as const,
-            jpegQuality: jpeg_quality ?? 85,
-        };
+            // 7. Determine which pages to render
+            let pageIndices: number[];
+            if (pages && pages.length > 0) {
+                let resolvedPages: number[];
+                try {
+                    resolvedPages = pages.map(p => resolvePageValue(p, pageLabels, prefer_page_labels === true));
+                } catch (error) {
+                    if (error instanceof InvalidPageValueError) {
+                        return { kind: 'early' as const, response: errorResponse(error.message, 'invalid_page_value', totalPages) };
+                    }
+                    throw error;
+                }
 
-        // 9. Render pages
-        const renderResults = await extractor.renderPagesToImages(pdfData, pageIndices, renderOptions);
+                // Filter out invalid pages: keep only pages in [1, totalPages]
+                const validPages = resolvedPages.filter(p => p >= 1 && p <= totalPages!);
+
+                if (validPages.length === 0) {
+                    return {
+                        kind: 'early' as const,
+                        response: errorResponse(
+                            `All requested pages are out of range (document has ${totalPages} pages)`,
+                            'page_out_of_range',
+                            totalPages
+                        ),
+                    };
+                }
+
+                // Convert 1-indexed page numbers to 0-indexed
+                pageIndices = validPages.map(p => p - 1);
+            } else {
+                // Default to all pages
+                pageIndices = Array.from({ length: totalPages! }, (_, i) => i);
+            }
+
+            // 8. Build render options
+            const renderOptions = {
+                scale: scale ?? 1.0,
+                dpi: dpi ?? 0,
+                format: format ?? 'png' as const,
+                jpegQuality: jpeg_quality ?? 85,
+            };
+
+            // 9. Render pages
+            return { kind: 'ok' as const, renderResults: await extractor.renderPagesToImages(pdfData, pageIndices, renderOptions) };
+        });
+        if (heavy.kind === 'early') return heavy.response;
+        const renderResults = heavy.renderResults;
 
         // 10. Convert to base64 and build response
         const pageImages: WSPageImage[] = renderResults.map((result) => {

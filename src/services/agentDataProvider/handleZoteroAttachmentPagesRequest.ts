@@ -17,7 +17,7 @@ import {
     AttachmentPagesErrorCode,
     WSPageContent,
 } from '../agentProtocol';
-import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { PDFExtractor, ExtractionError, ExtractionErrorCode, runHeavyPdfOp } from '../pdf';
 import { EXTRACTION_VERSION, makeRemoteFilePath } from '../attachmentFileCache';
 import type { CachedPageContent } from '../attachmentFileCache';
 import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
@@ -183,28 +183,39 @@ export async function handleZoteroAttachmentPagesRequest(
             if (cachedMeta?.page_count != null) {
                 totalPages = cachedMeta.page_count;
             } else {
-                if (!pdfData) {
-                    try {
-                        pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
-                    } catch (error) {
-                        if (!isRemoteOnly) throw error;
-                        logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${error}`, 1);
-                        return errorResponse(
-                            `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
-                            'download_failed'
-                        );
-                    }
-                    if (isRemoteOnly) {
-                        const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
-                        if (exceeded) {
-                            return errorResponse(
-                                `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
-                                'file_too_large'
-                            );
+                // Gate the load+WASM pair
+                const heavy = await runHeavyPdfOp(async () => {
+                    if (!pdfData) {
+                        try {
+                            pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                        } catch (error) {
+                            if (!isRemoteOnly) throw error;
+                            logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${error}`, 1);
+                            return {
+                                kind: 'early' as const,
+                                response: errorResponse(
+                                    `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                                    'download_failed'
+                                ),
+                            };
+                        }
+                        if (isRemoteOnly) {
+                            const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                            if (exceeded) {
+                                return {
+                                    kind: 'early' as const,
+                                    response: errorResponse(
+                                        `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                                        'file_too_large'
+                                    ),
+                                };
+                            }
                         }
                     }
-                }
-                totalPages = await extractor.getPageCount(pdfData);
+                    return { kind: 'ok' as const, pageCount: await extractor.getPageCount(pdfData) };
+                });
+                if (heavy.kind === 'early') return heavy.response;
+                totalPages = heavy.pageCount;
             }
         }
 
@@ -311,35 +322,49 @@ export async function handleZoteroAttachmentPagesRequest(
 
         // 8. Cache miss — extract pages (convert to 0-indexed for extractor)
         logger(`handleZoteroAttachmentPagesRequest: Cache miss for ${requestKey} pages ${startPage}-${endPage}`, 3);
-        if (!pdfData) {
-            try {
-                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
-            } catch (error) {
-                if (!isRemoteOnly) throw error; // local I/O error — let outer handler deal with it
-                logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${error}`, 1);
-                return errorResponse(
-                    `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
-                    'download_failed'
-                );
-            }
-            // Remote size guard: the earlier check only runs on a cold page-count
-            // path. When cachedMeta had page_count, bytes were never loaded until
-            // now — we must enforce the size limit before extracting.
-            if (isRemoteOnly) {
-                const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
-                if (exceeded) {
-                    return errorResponse(
-                        `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
-                        'file_too_large'
-                    );
+        const pageIndices = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage - 1 + i);
+        // Gate the load+extract pair
+        const heavyResult = await runHeavyPdfOp(async () => {
+            if (!pdfData) {
+                try {
+                    pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                } catch (error) {
+                    if (!isRemoteOnly) throw error; // local I/O error — let outer handler deal with it
+                    logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${error}`, 1);
+                    return {
+                        kind: 'early' as const,
+                        response: errorResponse(
+                            `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                            'download_failed'
+                        ),
+                    };
+                }
+                // Remote size guard: the earlier check only runs on a cold page-count
+                // path. When cachedMeta had page_count, bytes were never loaded until
+                // now — we must enforce the size limit before extracting.
+                if (isRemoteOnly) {
+                    const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                    if (exceeded) {
+                        return {
+                            kind: 'early' as const,
+                            response: errorResponse(
+                                `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                                'file_too_large'
+                            ),
+                        };
+                    }
                 }
             }
-        }
-        const pageIndices = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage - 1 + i);
-        const result = await extractor.extract(pdfData, {
-            pages: pageIndices,
-            checkTextLayer: true,
+            return {
+                kind: 'ok' as const,
+                extracted: await extractor.extract(pdfData, {
+                    pages: pageIndices,
+                    checkTextLayer: true,
+                }),
+            };
         });
+        if (heavyResult.kind === 'early') return heavyResult.response;
+        const result = heavyResult.extracted;
 
         // Refresh pageLabels from the extraction result if we hadn't loaded
         // them earlier. This ensures response `page_label` is populated even

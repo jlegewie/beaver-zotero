@@ -51,6 +51,7 @@ import {
 // Re-export types and classes for convenience
 export * from "./types";
 export { MuPDFService, disposeMuPDF } from "./MuPDFService";
+export { runHeavyPdfOp } from "./heavyOpLimiter";
 export { DocumentAnalyzer } from "./DocumentAnalyzer";
 export type { TextLayerCheckOptions } from "./DocumentAnalyzer";
 export { StyleAnalyzer } from "./StyleAnalyzer";

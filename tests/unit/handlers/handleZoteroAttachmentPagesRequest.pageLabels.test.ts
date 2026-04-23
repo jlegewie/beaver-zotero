@@ -36,6 +36,8 @@ vi.mock('../../../src/services/pdf', () => {
             INVALID_PDF: 'invalid_pdf',
             PAGE_OUT_OF_RANGE: 'page_out_of_range',
         },
+        // Passthrough — concurrency is exercised in heavyOpLimiter.test.ts.
+        runHeavyPdfOp: <T,>(task: () => Promise<T>) => task(),
     };
 });
 

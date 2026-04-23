@@ -18,7 +18,7 @@ import {
     WSPageSearchResult,
     WSSearchHit,
 } from '../agentProtocol';
-import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { PDFExtractor, ExtractionError, ExtractionErrorCode, runHeavyPdfOp } from '../pdf';
 import { makeRemoteFilePath } from '../attachmentFileCache';
 import { validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
 
@@ -165,67 +165,81 @@ export async function handleZoteroAttachmentSearchRequest(
             }
         }
 
-        // 6. Read the PDF data
-        let pdfData: Uint8Array;
-        try {
-            pdfData = await loadPdfData(zoteroItem, effectiveFilePath, isRemoteOnly);
-        } catch (error) {
-            if (!isRemoteOnly) throw error; // local I/O error — let outer handler deal with it
-            logger(`handleZoteroAttachmentSearchRequest: Remote download failed: ${error}`, 1);
-            return errorResponse(
-                `Failed to download PDF from remote storage: ${error instanceof Error ? error.message : String(error)}`,
-                'download_failed'
-            );
-        }
-        if (isRemoteOnly) {
-            const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
-            if (exceeded) {
-                return errorResponse(
-                    `PDF file size of ${exceeded.sizeMB.toFixed(1)}MB exceeds the ${exceeded.maxMB}MB limit`,
-                    'file_too_large'
-                );
-            }
-        }
-
-        // 7. Create extractor and get page count first
+        // 6-9. Gate the heavy region
         const extractor = new PDFExtractor();
-        let totalPages: number;
-
-        if (cachedMeta?.page_count != null) {
-            totalPages = cachedMeta.page_count;
-        } else {
+        const heavy = await runHeavyPdfOp(async () => {
+            // 6. Read the PDF data
+            let pdfData: Uint8Array;
             try {
-                totalPages = await extractor.getPageCount(pdfData);
+                pdfData = await loadPdfData(zoteroItem, effectiveFilePath, isRemoteOnly);
             } catch (error) {
-                if (error instanceof ExtractionError) {
-                    if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                        // Let outer catch backfill encrypted metadata before returning.
-                        throw error;
-                    } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                        // Let outer catch backfill invalid metadata before returning.
-                        throw error;
-                    }
+                if (!isRemoteOnly) throw error; // local I/O error — let outer handler deal with it
+                logger(`handleZoteroAttachmentSearchRequest: Remote download failed: ${error}`, 1);
+                return {
+                    kind: 'early' as const,
+                    response: errorResponse(
+                        `Failed to download PDF from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                        'download_failed'
+                    ),
+                };
+            }
+            if (isRemoteOnly) {
+                const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                if (exceeded) {
+                    return {
+                        kind: 'early' as const,
+                        response: errorResponse(
+                            `PDF file size of ${exceeded.sizeMB.toFixed(1)}MB exceeds the ${exceeded.maxMB}MB limit`,
+                            'file_too_large'
+                        ),
+                    };
                 }
-                throw error;
             }
-        }
 
-        // 8. Check page count limit (skip if skip_local_limits is true)
-        if (!skip_local_limits) {
-            const maxPageCount = getPref('maxPageCount');
-            
-            if (totalPages > maxPageCount) {
-                return errorResponse(
-                    `PDF has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
-                    'too_many_pages'
-                );
+            // 7. Page count (from cache or PDF)
+            let totalPages: number;
+            if (cachedMeta?.page_count != null) {
+                totalPages = cachedMeta.page_count;
+            } else {
+                try {
+                    totalPages = await extractor.getPageCount(pdfData);
+                } catch (error) {
+                    if (error instanceof ExtractionError) {
+                        if (error.code === ExtractionErrorCode.ENCRYPTED) {
+                            // Let outer catch backfill encrypted metadata before returning.
+                            throw error;
+                        } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
+                            // Let outer catch backfill invalid metadata before returning.
+                            throw error;
+                        }
+                    }
+                    throw error;
+                }
             }
-        }
 
-        // 9. Perform search
-        const searchResult = await extractor.search(pdfData, query, {
-            maxHitsPerPage: max_hits_per_page ?? 100,
+            // 8. Check page count limit (skip if skip_local_limits is true)
+            if (!skip_local_limits) {
+                const maxPageCount = getPref('maxPageCount');
+
+                if (totalPages > maxPageCount) {
+                    return {
+                        kind: 'early' as const,
+                        response: errorResponse(
+                            `PDF has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
+                            'too_many_pages'
+                        ),
+                    };
+                }
+            }
+
+            // 9. Perform search
+            const searchResult = await extractor.search(pdfData, query, {
+                maxHitsPerPage: max_hits_per_page ?? 100,
+            });
+            return { kind: 'ok' as const, searchResult, totalPages };
         });
+        if (heavy.kind === 'early') return heavy.response;
+        const { searchResult, totalPages } = heavy;
 
         // 10. Convert to response format
         const pages: WSPageSearchResult[] = searchResult.pages.map((page) => ({
