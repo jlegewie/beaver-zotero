@@ -16,7 +16,22 @@ vi.mock('../../../src/utils/logger', () => ({
     logger: vi.fn(),
 }));
 
-// Provide Zotero.Tags + Zotero.Items on the global stub
+// Provide Zotero.Tags + Zotero.Items + Zotero.DB on the global stub.
+// Zotero.DB.queryAsync is driven by `dbRows` below: tests push shape-specific
+// row objects (each exposing `getResultByIndex(i)`) and the mock invokes
+// `onRow` for each once per call, then clears the queue.
+const dbRows: { getResultByIndex: (i: number) => unknown }[] = [];
+const queryAsyncMock = vi.fn(async (_sql: string, _params: unknown[], opts?: { onRow?: (row: any) => void }) => {
+    if (opts && typeof opts.onRow === 'function') {
+        for (const row of dbRows) opts.onRow(row);
+    }
+    dbRows.length = 0;
+});
+
+function queueDbRow(values: unknown[]) {
+    dbRows.push({ getResultByIndex: (i: number) => values[i] });
+}
+
 (globalThis as any).Zotero = {
     ...((globalThis as any).Zotero ?? {}),
     Tags: {
@@ -26,10 +41,14 @@ vi.mock('../../../src/utils/logger', () => ({
         rename: vi.fn(async () => undefined),
         removeFromLibrary: vi.fn(async () => undefined),
         setColor: vi.fn(async () => undefined),
+        init: vi.fn(async () => undefined),
     },
     Items: {
         getAsync: vi.fn(async (ids: number[]) => ids.map((id) => ({ id, key: `KEY${id}` }))),
         loadDataTypes: vi.fn(async () => undefined),
+    },
+    DB: {
+        queryAsync: queryAsyncMock,
     },
 };
 
@@ -58,6 +77,16 @@ beforeEach(() => {
     Zot.Tags.rename.mockReset();
     Zot.Tags.removeFromLibrary.mockReset();
     Zot.Tags.setColor.mockReset();
+    Zot.Tags.init.mockReset();
+    Zot.Tags.init.mockResolvedValue(undefined);
+    queryAsyncMock.mockClear();
+    queryAsyncMock.mockImplementation(async (_sql: string, _params: unknown[], opts?: { onRow?: (row: any) => void }) => {
+        if (opts && typeof opts.onRow === 'function') {
+            for (const row of dbRows) opts.onRow(row);
+        }
+        dbRows.length = 0;
+    });
+    dbRows.length = 0;
     (getDeferredToolPreference as any).mockReturnValue('always_ask');
     Zot.Tags.getColor.mockReturnValue(null);
     Zot.Tags.getTagItems.mockResolvedValue([]);
@@ -171,6 +200,99 @@ describe('validateManageTagsAction', () => {
         expect(resp.valid).toBe(false);
         expect(resp.error_code).toBe('invalid_new_name');
     });
+
+    it('rebuilds the tag cache and retries on miss (cache desync)', async () => {
+        okLibrary();
+        // First getID call misses, second (after init) hits. Target (new_name)
+        // getID calls also return false so this isn't a merge.
+        let callCount = 0;
+        Zot.Tags.getID.mockImplementation((n: string) => {
+            if (n === 'Arts') {
+                callCount++;
+                return callCount === 1 ? false : 77;
+            }
+            return false;
+        });
+        Zot.Tags.getTagItems.mockResolvedValue([10]);
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r-desync',
+            action_type: 'manage_tags',
+            action_data: { action: 'rename', name: 'Arts', new_name: 'arts' },
+        } as any);
+        expect(resp.valid).toBe(true);
+        expect(Zot.Tags.init).toHaveBeenCalledTimes(1);
+        // Cache rebuild produced a hit — no DB probe needed.
+        expect(queryAsyncMock).not.toHaveBeenCalled();
+    });
+
+    it('returns "Did you mean" hint when cache rebuild does not recover the tag', async () => {
+        okLibrary();
+        Zot.Tags.getID.mockImplementation(() => false);
+        queryAsyncMock.mockImplementationOnce(async (_sql: string, _params: unknown[], opts?: { onRow?: (row: any) => void }) => {
+            opts?.onRow?.({ getResultByIndex: (i: number) => ['scientific writing'][i] });
+        });
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r-hint',
+            action_type: 'manage_tags',
+            action_data: { action: 'rename', name: 'Scientific writing', new_name: 'scientific-writing' },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error_code).toBe('tag_not_found');
+        expect(resp.error).toContain("Did you mean: 'scientific writing'?");
+        expect(Zot.Tags.init).toHaveBeenCalledTimes(1);
+    });
+
+    it('preserves plain "Tag not found" error when there is no DB match at all', async () => {
+        okLibrary();
+        Zot.Tags.getID.mockImplementation(() => false);
+        // Case-insensitive DB probe returns no rows (default empty queue).
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r-nomatch',
+            action_type: 'manage_tags',
+            action_data: { action: 'delete', name: 'totally-missing' },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error_code).toBe('tag_not_found');
+        expect(resp.error).not.toContain('Did you mean');
+    });
+
+    it('shares a single cache rebuild across concurrent cache misses', async () => {
+        okLibrary();
+        // All source getID lookups miss initially; once init runs they all hit.
+        let initDone = false;
+        Zot.Tags.init.mockImplementation(async () => {
+            // Simulate some async work so the promise doesn't resolve synchronously.
+            await Promise.resolve();
+            initDone = true;
+        });
+        Zot.Tags.getID.mockImplementation((n: string) => {
+            // new_name lookups (merge detection) — always miss
+            if (!n.startsWith('Tag')) return false;
+            return initDone ? 100 + parseInt(n.slice(3), 10) : false;
+        });
+        Zot.Tags.getTagItems.mockResolvedValue([]);
+
+        const calls = [0, 1, 2, 3, 4].map((i) =>
+            validateManageTagsAction({
+                event: 'agent_action_validate',
+                request_id: `r-concurrent-${i}`,
+                action_type: 'manage_tags',
+                action_data: { action: 'rename', name: `Tag${i}`, new_name: `tag-${i}` },
+            } as any),
+        );
+        const results = await Promise.all(calls);
+
+        for (const r of results) expect(r.valid).toBe(true);
+        // The rebuild promise is shared, so init fires exactly once even
+        // though 5 concurrent calls all hit the miss path.
+        expect(Zot.Tags.init).toHaveBeenCalledTimes(1);
+    });
 });
 
 
@@ -254,5 +376,30 @@ describe('executeManageTagsAction', () => {
         } as any, ctx);
         expect(resp.success).toBe(false);
         expect(resp.error_code).toBe('invalid_library_id');
+    });
+
+    it('rebuilds the cache when stale at execute time and proceeds with rename', async () => {
+        // First getID for source misses; after init it resolves. new_name
+        // lookups (merge check) always miss.
+        let sourceCalls = 0;
+        Zot.Tags.getID.mockImplementation((n: string) => {
+            if (n === 'Arts') {
+                sourceCalls++;
+                return sourceCalls === 1 ? false : 88;
+            }
+            return false;
+        });
+        Zot.Tags.getTagItems.mockResolvedValue([10, 20]);
+
+        const resp = await executeManageTagsAction({
+            event: 'agent_action_execute',
+            request_id: 'e-desync',
+            action_type: 'manage_tags',
+            action_data: { action: 'rename', name: 'Arts', new_name: 'arts', library_id: 1 },
+        } as any, ctx);
+        expect(resp.success).toBe(true);
+        expect(Zot.Tags.init).toHaveBeenCalledTimes(1);
+        expect(Zot.Tags.rename).toHaveBeenCalledWith(1, 'Arts', 'arts');
+        expect(resp.result_data?.items_affected).toBe(2);
     });
 });

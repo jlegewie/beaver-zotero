@@ -42,6 +42,80 @@ async function itemIdsToKeys(libraryID: number, itemIDs: number[]): Promise<stri
 }
 
 
+/**
+ * Result of resolving a user/agent-supplied tag name against Zotero.
+ *
+ * 'cache'         — found via Zotero.Tags.getID (in-memory map, fast path)
+ * 'cache_rebuilt' — initial getID miss, but a fresh Zotero.Tags.init() then
+ *                   found the tag. Signals a transient cache desync; caller
+ *                   should log this.
+ * null tagID      — not found. `suggestions` holds up to 3 case-insensitive
+ *                   matches the agent could retry with.
+ */
+type TagResolution =
+    | { tagID: number; source: 'cache' | 'cache_rebuilt' }
+    | { tagID: null; suggestions: string[] };
+
+
+// Shared in-flight rebuild promise. If multiple concurrent callers miss the
+// cache at once (e.g. 10 parallel manage_tags calls), they all await the same
+// Zotero.Tags.init() rather than queuing N sequential rebuilds.
+let _pendingCacheRebuild: Promise<void> | null = null;
+
+function rebuildTagCache(): Promise<void> {
+    if (!_pendingCacheRebuild) {
+        _pendingCacheRebuild = Zotero.Tags.init()
+            .finally(() => {
+                _pendingCacheRebuild = null;
+            });
+    }
+    return _pendingCacheRebuild;
+}
+
+
+/**
+ * Resolve a tag name to its tagID
+ */
+async function resolveTagByName(name: string): Promise<TagResolution> {
+    const cacheID = Zotero.Tags.getID(name);
+    if (cacheID !== false && cacheID != null) {
+        return { tagID: cacheID, source: 'cache' };
+    }
+
+    // Cache miss → rebuild (shared across concurrent callers) and retry.
+    await rebuildTagCache();
+    const retryID = Zotero.Tags.getID(name);
+    if (retryID !== false && retryID != null) {
+        return { tagID: retryID, source: 'cache_rebuilt' };
+    }
+
+    // Still missing. Probe case-insensitively for suggestions — init() doesn't
+    // help with case typos since getID is exact-case.
+    const suggestions: string[] = [];
+    await Zotero.DB.queryAsync(
+        'SELECT name FROM tags WHERE LOWER(name) = LOWER(?) LIMIT 3',
+        [name],
+        {
+            onRow: (row: any) => {
+                suggestions.push(row.getResultByIndex(0) as string);
+            },
+        },
+    );
+    return { tagID: null, suggestions };
+}
+
+
+/**
+ * Format a "Did you mean" suggestion list for inclusion in an error string.
+ * Returns empty string if no suggestions.
+ */
+function formatSuggestions(suggestions: string[]): string {
+    if (suggestions.length === 0) return '';
+    if (suggestions.length === 1) return ` Did you mean: '${suggestions[0]}'?`;
+    return ` Did you mean: ${suggestions.map((s) => `'${s}'`).join(', ')}?`;
+}
+
+
 export async function validateManageTagsAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
@@ -96,17 +170,24 @@ export async function validateManageTagsAction(
         };
     }
 
-    // Resolve tag ID for the source tag (must exist)
-    const tagID = Zotero.Tags.getID(name);
-    if (tagID === false || tagID == null) {
+    // Resolve tag ID for the source tag (must exist). On a cache miss we
+    // rebuild Zotero.Tags' in-memory map — getID can return false for tags
+    // the DB has (list_tags SQL shows them, but _idsByTag is out of sync).
+    const resolution = await resolveTagByName(name);
+    if (resolution.tagID === null) {
+        const hint = formatSuggestions(resolution.suggestions);
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Tag not found in library '${library.name}': '${name}'`,
+            error: `Tag not found in library '${library.name}': '${name}'.${hint}`,
             error_code: 'tag_not_found',
             preference: 'always_ask',
         };
+    }
+    const tagID = resolution.tagID;
+    if (resolution.source === 'cache_rebuilt') {
+        logger(`manage_tags: cache desync repaired for '${name}' in library ${libraryID} (Zotero.Tags.init rebuilt, tagID=${tagID})`, 1);
     }
 
     // Validate action-specific fields
@@ -222,9 +303,14 @@ export async function executeManageTagsAction(
         // Re-snapshot the authoritative pre-apply state at execute time.
         // This ensures a re-apply after manual library edits produces a fresh
         // snapshot that the next undo can correctly reverse.
-        const tagID = Zotero.Tags.getID(name);
+        const resolution = await resolveTagByName(name);
+        const tagID = resolution.tagID;
+        if (resolution.tagID !== null && resolution.source === 'cache_rebuilt') {
+            logger(`executeManageTagsAction: cache desync repaired for '${name}' in library ${library_id} (Zotero.Tags.init rebuilt, tagID=${tagID})`, 1);
+        }
+
         let affectedItemIds: string[] = [];
-        if (tagID !== false && tagID != null) {
+        if (tagID !== null) {
             try {
                 const ids = await Zotero.Tags.getTagItems(library_id, tagID);
                 if (ids.length > MAX_SNAPSHOT_ITEMS) {
@@ -268,7 +354,7 @@ export async function executeManageTagsAction(
             await Zotero.Tags.rename(library_id, name, target);
             logger(`executeManageTagsAction: Renamed tag '${name}' → '${target}' in library ${library_id}`, 1);
         } else if (action === 'delete') {
-            if (tagID === false || tagID == null) {
+            if (tagID === null) {
                 // Already gone — treat as success with 0 affected items
                 logger(`executeManageTagsAction: Tag '${name}' not found in library ${library_id}; treating as already deleted`, 1);
             } else {
