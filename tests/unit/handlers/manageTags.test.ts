@@ -262,6 +262,43 @@ describe('validateManageTagsAction', () => {
         expect(resp.error).not.toContain('Did you mean');
     });
 
+    it('scopes the "Did you mean" suggestion query to the target library', async () => {
+        okLibrary();
+        Zot.Tags.getID.mockImplementation(() => false);
+        queryAsyncMock.mockImplementationOnce(async (sql: string, params: unknown[], opts?: { onRow?: (row: any) => void }) => {
+            // Verify SQL scopes to libraryID via itemTags join and that params are [libraryID, name].
+            expect(sql).toContain('itemTags');
+            expect(sql).toContain('libraryID');
+            expect(params).toEqual([1, 'IMPORTANT']);
+            opts?.onRow?.({ getResultByIndex: (i: number) => ['important'][i] });
+        });
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r-scope',
+            action_type: 'manage_tags',
+            action_data: { action: 'delete', name: 'IMPORTANT' },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error).toContain("Did you mean: 'important'?");
+    });
+
+    it('returns validation_failed when the resolver throws (e.g. DB lock in init)', async () => {
+        okLibrary();
+        Zot.Tags.getID.mockImplementation(() => false);
+        Zot.Tags.init.mockRejectedValueOnce(new Error('database is locked'));
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r-throw',
+            action_type: 'manage_tags',
+            action_data: { action: 'delete', name: 'whatever' },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error_code).toBe('validation_failed');
+        expect(resp.error).toContain('database is locked');
+    });
+
     it('shares a single cache rebuild across concurrent cache misses', async () => {
         okLibrary();
         // All source getID lookups miss initially; once init runs they all hit.

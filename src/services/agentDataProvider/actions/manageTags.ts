@@ -74,9 +74,12 @@ function rebuildTagCache(): Promise<void> {
 
 
 /**
- * Resolve a tag name to its tagID
+ * Resolve a tag name to its tagID. `libraryID` scopes the "Did you mean"
+ * suggestion probe so we don't cross-pollinate from other libraries
+ * (Zotero.Tags and the `tags` table are global; itemTags is what scopes a
+ * tag to a library).
  */
-async function resolveTagByName(name: string): Promise<TagResolution> {
+async function resolveTagByName(name: string, libraryID: number): Promise<TagResolution> {
     const cacheID = Zotero.Tags.getID(name);
     if (cacheID !== false && cacheID != null) {
         return { tagID: cacheID, source: 'cache' };
@@ -90,11 +93,15 @@ async function resolveTagByName(name: string): Promise<TagResolution> {
     }
 
     // Still missing. Probe case-insensitively for suggestions — init() doesn't
-    // help with case typos since getID is exact-case.
+    // help with case typos since getID is exact-case. Scope to the target
+    // library via itemTags so we only surface tags the user actually has here.
     const suggestions: string[] = [];
     await Zotero.DB.queryAsync(
-        'SELECT name FROM tags WHERE LOWER(name) = LOWER(?) LIMIT 3',
-        [name],
+        'SELECT DISTINCT t.name FROM tags t '
+            + 'JOIN itemTags it USING (tagID) '
+            + 'JOIN items i USING (itemID) '
+            + 'WHERE i.libraryID = ? AND LOWER(t.name) = LOWER(?) LIMIT 3',
+        [libraryID, name],
         {
             onRow: (row: any) => {
                 suggestions.push(row.getResultByIndex(0) as string);
@@ -173,7 +180,23 @@ export async function validateManageTagsAction(
     // Resolve tag ID for the source tag (must exist). On a cache miss we
     // rebuild Zotero.Tags' in-memory map — getID can return false for tags
     // the DB has (list_tags SQL shows them, but _idsByTag is out of sync).
-    const resolution = await resolveTagByName(name);
+    // The resolver is async and touches DB; guard it so an unexpected
+    // rejection (e.g. DB lock during init) still yields a structured
+    // validation response instead of breaking the caller contract.
+    let resolution: TagResolution;
+    try {
+        resolution = await resolveTagByName(name, libraryID);
+    } catch (e) {
+        logger(`validateManageTagsAction: resolveTagByName threw: ${e}`, 1);
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Failed to resolve tag '${name}' in library '${library.name}': ${String(e)}`,
+            error_code: 'validation_failed',
+            preference: 'always_ask',
+        };
+    }
     if (resolution.tagID === null) {
         const hint = formatSuggestions(resolution.suggestions);
         return {
@@ -303,7 +326,7 @@ export async function executeManageTagsAction(
         // Re-snapshot the authoritative pre-apply state at execute time.
         // This ensures a re-apply after manual library edits produces a fresh
         // snapshot that the next undo can correctly reverse.
-        const resolution = await resolveTagByName(name);
+        const resolution = await resolveTagByName(name, library_id);
         const tagID = resolution.tagID;
         if (resolution.tagID !== null && resolution.source === 'cache_rebuilt') {
             logger(`executeManageTagsAction: cache desync repaired for '${name}' in library ${library_id} (Zotero.Tags.init rebuilt, tagID=${tagID})`, 1);
