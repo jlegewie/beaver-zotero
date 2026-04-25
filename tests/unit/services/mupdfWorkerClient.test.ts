@@ -191,4 +191,195 @@ describe('MuPDFWorkerClient', () => {
             (globalThis as any).Zotero.__beaverMuPDFWorkerClient,
         ).toBeUndefined();
     });
+
+    // -----------------------------------------------------------------------
+    // PR #2 — broaden the worker surface
+    // -----------------------------------------------------------------------
+
+    describe('getPageCountAndLabels', () => {
+        it('round-trips count + labels and posts without a transfer list', async () => {
+            const client = getMuPDFWorkerClient();
+            const buf = new Uint8Array([1, 2, 3]);
+
+            const promise = client.getPageCountAndLabels(buf);
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: true,
+                result: { count: 3, labels: { 0: 'i', 1: 'ii' } },
+            });
+
+            await expect(promise).resolves.toEqual({
+                count: 3,
+                labels: { 0: 'i', 1: 'ii' },
+            });
+
+            const [message, transfer] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            expect(message).toMatchObject({ op: 'getPageCountAndLabels' });
+            expect(transfer).toBeUndefined();
+        });
+    });
+
+    describe('extractRawPages', () => {
+        it('round-trips RawDocumentData and posts without a transfer list', async () => {
+            const client = getMuPDFWorkerClient();
+            const buf = new Uint8Array([1, 2, 3]);
+
+            const promise = client.extractRawPages(buf, [0]);
+            const worker = MockWorker.instances[0];
+            const canned = {
+                pageCount: 1,
+                pages: [
+                    {
+                        pageIndex: 0,
+                        pageNumber: 1,
+                        width: 612,
+                        height: 792,
+                        blocks: [],
+                    },
+                ],
+            };
+            worker.replyToLast({ ok: true, result: canned });
+
+            await expect(promise).resolves.toEqual(canned);
+
+            const [message, transfer] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            expect(message).toMatchObject({
+                op: 'extractRawPages',
+                args: { pageIndices: [0] },
+            });
+            expect(transfer).toBeUndefined();
+        });
+    });
+
+    describe('extractRawPageDetailed', () => {
+        it('round-trips RawPageDataDetailed', async () => {
+            const client = getMuPDFWorkerClient();
+            const buf = new Uint8Array([1]);
+
+            const promise = client.extractRawPageDetailed(buf, 0);
+            const worker = MockWorker.instances[0];
+            const canned = {
+                pageIndex: 0,
+                pageNumber: 1,
+                width: 612,
+                height: 792,
+                blocks: [],
+            };
+            worker.replyToLast({ ok: true, result: canned });
+
+            await expect(promise).resolves.toEqual(canned);
+        });
+
+        it('rehydrates PAGE_OUT_OF_RANGE as ExtractionError', async () => {
+            const client = getMuPDFWorkerClient();
+            const buf = new Uint8Array([0]);
+
+            const promise = client.extractRawPageDetailed(buf, 99999);
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: 'PAGE_OUT_OF_RANGE',
+                    message: 'Page index 99999 out of range (0..2)',
+                },
+            });
+
+            await expect(promise).rejects.toBeInstanceOf(ExtractionError);
+            await expect(promise).rejects.toMatchObject({
+                code: ExtractionErrorCode.PAGE_OUT_OF_RANGE,
+                name: 'ExtractionError',
+            });
+        });
+
+        it('does not transfer the input buffer', async () => {
+            const client = getMuPDFWorkerClient();
+            const buf = new Uint8Array([1, 2, 3, 4]);
+
+            const promise = client.extractRawPageDetailed(buf, 0);
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({ ok: true, result: { pageIndex: 0 } });
+            await promise;
+
+            const [, transfer] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            expect(transfer).toBeUndefined();
+        });
+    });
+
+    describe('renderPagesToImages', () => {
+        it('round-trips PageImageResult[] and does not transfer the input', async () => {
+            const client = getMuPDFWorkerClient();
+            const buf = new Uint8Array([1, 2, 3]);
+
+            const promise = client.renderPagesToImages(buf, [0]);
+            const worker = MockWorker.instances[0];
+            const cannedBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+            const canned = [
+                {
+                    pageIndex: 0,
+                    data: cannedBytes,
+                    format: 'png' as const,
+                    width: 100,
+                    height: 100,
+                    scale: 1,
+                    dpi: 72,
+                },
+            ];
+            worker.replyToLast({ ok: true, result: canned });
+
+            await expect(promise).resolves.toEqual(canned);
+
+            const [message, transfer] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            expect(message).toMatchObject({ op: 'renderPagesToImages' });
+            expect(transfer).toBeUndefined();
+        });
+    });
+
+    describe('searchPages', () => {
+        it('round-trips PDFPageSearchResult[]', async () => {
+            const client = getMuPDFWorkerClient();
+            const buf = new Uint8Array([1, 2]);
+
+            const promise = client.searchPages(buf, 'foo');
+            const worker = MockWorker.instances[0];
+            const canned = [
+                {
+                    pageIndex: 2,
+                    matchCount: 1,
+                    hits: [
+                        {
+                            quads: [[0, 0, 1, 0, 0, 1, 1, 1]],
+                            bbox: { x: 0, y: 0, w: 1, h: 1 },
+                        },
+                    ],
+                    width: 612,
+                    height: 792,
+                },
+            ];
+            worker.replyToLast({ ok: true, result: canned });
+
+            await expect(promise).resolves.toEqual(canned);
+
+            const [message] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            expect(message).toMatchObject({
+                op: 'searchPages',
+                args: { query: 'foo' },
+            });
+        });
+    });
 });

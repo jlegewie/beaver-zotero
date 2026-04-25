@@ -1,8 +1,10 @@
 /**
  * MuPDFWorkerClient — main-thread client for the MuPDF WASM worker.
  *
- * PR #1 plumbing: only `getPageCount` is routed through the worker. All other
- * MuPDF calls still run on the main thread via `MuPDFService`.
+ * PR #2 surface: getPageCount, getPageCountAndLabels, extractRawPages,
+ * extractRawPageDetailed, renderPagesToImages, searchPages. Multi-step
+ * orchestration (extract, search-with-scoring, OCR analysis) still runs
+ * main-thread until PR #3.
  *
  * Cross-bundle singleton: the client lives on `Zotero.__beaverMuPDFWorkerClient`
  * because both bundles (esbuild `src/` and webpack `react/`) import this file
@@ -10,7 +12,15 @@
  * `src/hooks.ts` would only dispose the esbuild copy.
  */
 import { logger } from "../../utils/logger";
-import { ExtractionError, ExtractionErrorCode } from "./types";
+import {
+    ExtractionError,
+    ExtractionErrorCode,
+    type RawDocumentData,
+    type RawPageDataDetailed,
+    type PageImageOptions,
+    type PageImageResult,
+    type PDFPageSearchResult,
+} from "./types";
 
 const WORKER_URL = "chrome://beaver/content/modules/mupdf-worker.mjs";
 
@@ -228,6 +238,125 @@ export class MuPDFWorkerClient {
             pdfData: bytes,
         });
         return result.count;
+    }
+
+    /** Get page count + all custom page labels in one round-trip. */
+    async getPageCountAndLabels(
+        pdfData: Uint8Array | ArrayBuffer,
+    ): Promise<{ count: number; labels: Record<number, string> }> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<{ count: number; labels: Record<number, string> }>(
+            "getPageCountAndLabels",
+            { pdfData: bytes },
+        );
+    }
+
+    /**
+     * Extract raw structured-text pages.
+     *
+     * Mirrors `MuPDFService.extractRawPages` semantics: invalid indices in
+     * `pageIndices` are silently filtered, an empty/undefined `pageIndices`
+     * means "all pages."
+     */
+    async extractRawPages(
+        pdfData: Uint8Array | ArrayBuffer,
+        pageIndices?: number[],
+    ): Promise<RawDocumentData> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<RawDocumentData>("extractRawPages", {
+            pdfData: bytes,
+            pageIndices,
+        });
+    }
+
+    /**
+     * Extract one page with full per-character detail (quad + bbox).
+     *
+     * Single-page op — out-of-range `pageIndex` throws
+     * `ExtractionError(PAGE_OUT_OF_RANGE)` (rehydrated by `rehydrateError`).
+     */
+    async extractRawPageDetailed(
+        pdfData: Uint8Array | ArrayBuffer,
+        pageIndex: number,
+        options?: { includeImages?: boolean },
+    ): Promise<RawPageDataDetailed> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<RawPageDataDetailed>("extractRawPageDetailed", {
+            pdfData: bytes,
+            pageIndex,
+            includeImages: options?.includeImages,
+        });
+    }
+
+    /**
+     * Render multiple pages to images.
+     *
+     * Mirrors `MuPDFService.renderPagesToImages` semantics: invalid indices
+     * are silently filtered. The returned image bytes are transferred from
+     * the worker (the worker does not retain them after asPNG/asJPEG copies).
+     */
+    async renderPagesToImages(
+        pdfData: Uint8Array | ArrayBuffer,
+        pageIndices?: number[],
+        options?: PageImageOptions,
+    ): Promise<PageImageResult[]> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<PageImageResult[]>("renderPagesToImages", {
+            pdfData: bytes,
+            pageIndices,
+            options,
+        });
+    }
+
+    /**
+     * Render a single page to an image.
+     *
+     * Single-page op — out-of-range `pageIndex` throws
+     * `ExtractionError(PAGE_OUT_OF_RANGE)`. One doc-open per call (vs. the
+     * two-open cost of "getPageCountAndLabels + renderPagesToImages([idx])").
+     */
+    async renderPageToImage(
+        pdfData: Uint8Array | ArrayBuffer,
+        pageIndex: number,
+        options?: PageImageOptions,
+    ): Promise<PageImageResult> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<PageImageResult>("renderPageToImage", {
+            pdfData: bytes,
+            pageIndex,
+            options,
+        });
+    }
+
+    /**
+     * Search a PDF for a literal phrase. Returns unscored, page-level hits.
+     *
+     * Used by `PDFExtractor.search` once `SearchScorer` moves into the worker
+     * (PR #3). Not routed in PR #2 to avoid a two-open regression on the
+     * worker path.
+     *
+     * Mirrors `MuPDFService.searchPages` semantics: invalid indices are
+     * silently filtered.
+     */
+    async searchPages(
+        pdfData: Uint8Array | ArrayBuffer,
+        query: string,
+        pageIndices?: number[],
+        maxHitsPerPage?: number,
+    ): Promise<PDFPageSearchResult[]> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<PDFPageSearchResult[]>("searchPages", {
+            pdfData: bytes,
+            query,
+            pageIndices,
+            maxHitsPerPage,
+        });
     }
 
     /** Force WASM init in the worker. Useful for tests and pre-warm. */

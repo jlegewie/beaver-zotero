@@ -116,6 +116,174 @@ function bufferToBase64(bytes: Uint8Array): string {
     return (globalThis as any).btoa(binary);
 }
 
+function base64ToUint8Array(base64: string): Uint8Array {
+    if (typeof Buffer !== 'undefined') {
+        return new Uint8Array(Buffer.from(base64, 'base64'));
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const binary = (globalThis as any).atob(base64) as string;
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+}
+
+// ---------------------------------------------------------------------------
+// MuPDF worker plumbing helpers (PR #2)
+// ---------------------------------------------------------------------------
+
+export interface PdfPageImageOptions {
+    scale?: number;
+    dpi?: number;
+    alpha?: boolean;
+    showExtras?: boolean;
+    format?: 'png' | 'jpeg';
+    jpegQuality?: number;
+}
+
+export interface PdfRenderPagePayload {
+    pageIndex: number;
+    format: 'png' | 'jpeg';
+    width: number;
+    height: number;
+    scale: number;
+    dpi: number;
+    data_base64: string;
+    data_byte_length: number;
+}
+
+export interface PdfRenderPagesResponse {
+    ok: boolean;
+    pages?: PdfRenderPagePayload[];
+    error?: { name: string; code?: string; message: string };
+}
+
+export interface PdfPageLabelsResponse {
+    ok: boolean;
+    count?: number;
+    labels?: Record<number, string>;
+    error?: { name: string; code?: string; message: string };
+}
+
+export interface PdfExtractRawResponse {
+    ok: boolean;
+    result?: {
+        pageCount: number;
+        pages: Array<{
+            pageIndex: number;
+            pageNumber: number;
+            width: number;
+            height: number;
+            label?: string;
+            blocks: unknown[];
+        }>;
+    };
+    error?: { name: string; code?: string; message: string };
+}
+
+export interface PdfExtractRawDetailedResponse {
+    ok: boolean;
+    result?: {
+        pageIndex: number;
+        pageNumber: number;
+        width: number;
+        height: number;
+        label?: string;
+        blocks: unknown[];
+    };
+    error?: { name: string; code?: string; message: string };
+}
+
+export interface PdfSearchResponse {
+    ok: boolean;
+    pages?: Array<{
+        pageIndex: number;
+        label?: string;
+        matchCount: number;
+        hits: Array<{
+            quads: number[][];
+            bbox: { x: number; y: number; w: number; h: number };
+        }>;
+        width: number;
+        height: number;
+    }>;
+    error?: { name: string; code?: string; message: string };
+}
+
+export async function pdfPageLabels(
+    attachment: AttachmentFixture,
+): Promise<PdfPageLabelsResponse> {
+    return post<PdfPageLabelsResponse>('/beaver/test/pdf-page-labels', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+    });
+}
+
+export async function pdfRenderPages(
+    attachment: AttachmentFixture,
+    body: { page_indices?: number[]; options?: PdfPageImageOptions } = {},
+): Promise<PdfRenderPagesResponse> {
+    return post<PdfRenderPagesResponse>('/beaver/test/pdf-render-pages', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+        ...body,
+    });
+}
+
+export async function pdfRenderPagesFromBytes(
+    bytes: Uint8Array,
+    body: { page_indices?: number[]; options?: PdfPageImageOptions } = {},
+): Promise<PdfRenderPagesResponse> {
+    return post<PdfRenderPagesResponse>('/beaver/test/pdf-render-pages', {
+        raw_bytes_base64: bufferToBase64(bytes),
+        ...body,
+    });
+}
+
+export async function pdfExtractRaw(
+    attachment: AttachmentFixture,
+    body: { page_indices?: number[] } = {},
+): Promise<PdfExtractRawResponse> {
+    return post<PdfExtractRawResponse>('/beaver/test/pdf-extract-raw', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+        ...body,
+    });
+}
+
+export async function pdfExtractRawDetailed(
+    attachment: AttachmentFixture,
+    body: { page_index: number; include_images?: boolean },
+): Promise<PdfExtractRawDetailedResponse> {
+    return post<PdfExtractRawDetailedResponse>(
+        '/beaver/test/pdf-extract-raw-detailed',
+        {
+            library_id: attachment.library_id,
+            zotero_key: attachment.zotero_key,
+            ...body,
+        },
+    );
+}
+
+export async function pdfSearch(
+    attachment: AttachmentFixture,
+    body: {
+        query: string;
+        page_indices?: number[];
+        max_hits_per_page?: number;
+    },
+): Promise<PdfSearchResponse> {
+    return post<PdfSearchResponse>('/beaver/test/pdf-search', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+        ...body,
+    });
+}
+
+/** Decode a base64 image payload from `pdfRenderPages` for byte-level checks. */
+export function decodeRenderPayload(payload: PdfRenderPagePayload): Uint8Array {
+    return base64ToUint8Array(payload.data_base64);
+}
+
 export async function getCacheMetadata(
     libraryId: number,
     key: string,

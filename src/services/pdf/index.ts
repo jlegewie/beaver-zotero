@@ -556,6 +556,9 @@ export class PDFExtractor {
     async getPageCountAndLabels(
         pdfData: Uint8Array | ArrayBuffer
     ): Promise<{ count: number; labels: Record<number, string> }> {
+        if (getPref("mupdf.useWorker")) {
+            return getMuPDFWorkerClient().getPageCountAndLabels(pdfData);
+        }
         try {
             await this.mupdf.open(pdfData);
             return {
@@ -575,6 +578,9 @@ export class PDFExtractor {
         pdfData: Uint8Array | ArrayBuffer,
         pageIndices?: number[]
     ): Promise<RawDocumentData> {
+        if (getPref("mupdf.useWorker")) {
+            return getMuPDFWorkerClient().extractRawPages(pdfData, pageIndices);
+        }
         try {
             await this.mupdf.open(pdfData);
             return this.mupdf.extractRawPages(pageIndices);
@@ -620,6 +626,14 @@ export class PDFExtractor {
         pageIndex: number,
         options: PageSentenceBBoxOptions = {}
     ): Promise<PageSentenceBBoxResult> {
+        if (getPref("mupdf.useWorker")) {
+            // Worker validates pageIndex itself and throws PAGE_OUT_OF_RANGE.
+            const detailed = await getMuPDFWorkerClient().extractRawPageDetailed(
+                pdfData,
+                pageIndex,
+            );
+            return extractPageSentenceBBoxes(detailed, options);
+        }
         try {
             await this.mupdf.open(pdfData);
             const pageCount = this.mupdf.getPageCount();
@@ -657,6 +671,17 @@ export class PDFExtractor {
         pageIndex: number,
         options: PageImageOptions = {}
     ): Promise<PageImageResult> {
+        if (getPref("mupdf.useWorker")) {
+            // Single-shot worker op: validates pageIndex and renders in one
+            // doc-open. Throws structured ExtractionError(PAGE_OUT_OF_RANGE)
+            // instead of the main-thread loadPage error — intentional
+            // minor divergence, parity with extractSentenceBBoxes.
+            return getMuPDFWorkerClient().renderPageToImage(
+                pdfData,
+                pageIndex,
+                options,
+            );
+        }
         try {
             await this.mupdf.open(pdfData);
             return this.mupdf.renderPageToImage(pageIndex, options);
@@ -689,6 +714,13 @@ export class PDFExtractor {
         pageIndices?: number[],
         options: PageImageOptions = {}
     ): Promise<PageImageResult[]> {
+        if (getPref("mupdf.useWorker")) {
+            return getMuPDFWorkerClient().renderPagesToImages(
+                pdfData,
+                pageIndices,
+                options,
+            );
+        }
         try {
             await this.mupdf.open(pdfData);
             return this.mupdf.renderPagesToImages(pageIndices, options);
