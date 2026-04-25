@@ -138,9 +138,11 @@ export const IMAGE: AttachmentFixture = {
     description: 'PNG image attachment',
 };
 
-// Optional invalid/corrupted PDF fixture. Set env var:
+// Invalid/corrupted PDF fixture. Override with env var if needed:
 //   ZOTERO_INVALID_PDF_REF="1-ABCDEFGH"
-export const INVALID_PDF_FIXTURE = parseFixtureRef(
-    process.env.ZOTERO_INVALID_PDF_REF,
-    'Invalid/corrupted PDF',
-);
+export const INVALID_PDF_FIXTURE: AttachmentFixture =
+    parseFixtureRef(process.env.ZOTERO_INVALID_PDF_REF, 'Invalid/corrupted PDF') ?? {
+        library_id: 1,
+        zotero_key: 'XQ6M9NDM',
+        description: 'Invalid/corrupted PDF',
+    };

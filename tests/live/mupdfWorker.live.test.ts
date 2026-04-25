@@ -84,20 +84,15 @@ describe('mupdf.useWorker pref parity', () => {
         expect(onRes.error?.code).toBe('INVALID_PDF');
     });
 
-    // Optional: only runs when ZOTERO_INVALID_PDF_REF is set in the env,
-    // pointing at a real corrupted-PDF attachment in the test library.
-    it.skipIf(!INVALID_PDF_FIXTURE)(
-        'returns INVALID_PDF for a corrupt attachment fixture on both paths',
-        async () => {
-            const fixture = INVALID_PDF_FIXTURE!;
-            const offRes = await pdfPageCount(fixture);
-            expect(offRes.ok).toBe(false);
-            expect(offRes.error?.code).toBe('INVALID_PDF');
+    it('returns INVALID_PDF for a corrupt attachment fixture on both paths', async () => {
+        const fixture = INVALID_PDF_FIXTURE;
+        const offRes = await pdfPageCount(fixture);
+        expect(offRes.ok).toBe(false);
+        expect(offRes.error?.code).toBe('INVALID_PDF');
 
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfPageCount(fixture);
-            expect(onRes.ok).toBe(false);
-            expect(onRes.error?.code).toBe('INVALID_PDF');
-        },
-    );
+        await setPref('mupdf.useWorker', true);
+        const onRes = await pdfPageCount(fixture);
+        expect(onRes.ok).toBe(false);
+        expect(onRes.error?.code).toBe('INVALID_PDF');
+    });
 });
