@@ -5,10 +5,10 @@
  * Shared by live and integration tests.
  */
 
-import { BASE_URL, type AttachmentFixture } from './fixtures';
+import { getBaseUrl, type AttachmentFixture } from './fixtures';
 
 async function post<T>(path: string, body: unknown = {}): Promise<T> {
-    const res = await fetch(`${BASE_URL}${path}`, {
+    const res = await fetch(`${getBaseUrl()}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

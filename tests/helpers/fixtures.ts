@@ -5,8 +5,30 @@
  * live and integration tests.
  */
 
-export const ZOTERO_PORT = parseInt(process.env.ZOTERO_HTTP_PORT || '23119', 10);
-export const BASE_URL = `http://127.0.0.1:${ZOTERO_PORT}`;
+// Candidate ports probed by `isZoteroAvailable()`. The env var (if set) wins;
+// otherwise we try Zotero 7's default (23119) and the Zotero 10 beta default
+// (23124). The first port that answers `/beaver/test/ping` becomes the
+// resolved port for the rest of the run.
+const ENV_PORT = process.env.ZOTERO_HTTP_PORT
+    ? parseInt(process.env.ZOTERO_HTTP_PORT, 10)
+    : null;
+export const ZOTERO_PORT_CANDIDATES: number[] = Array.from(
+    new Set(
+        [ENV_PORT, 23119, 23124].filter(
+            (p): p is number => typeof p === 'number' && Number.isFinite(p),
+        ),
+    ),
+);
+
+let resolvedPort: number = ZOTERO_PORT_CANDIDATES[0] ?? 23119;
+
+export function setZoteroPort(port: number): void {
+    resolvedPort = port;
+}
+
+export function getBaseUrl(): string {
+    return `http://127.0.0.1:${resolvedPort}`;
+}
 
 export interface AttachmentFixture {
     library_id: number;
