@@ -11,6 +11,11 @@
  */
 
 import { MuPDFService, disposeMuPDF } from "./MuPDFService";
+import {
+    getMuPDFWorkerClient,
+    disposeMuPDFWorker,
+} from "./MuPDFWorkerClient";
+import { getPref } from "../../utils/prefs";
 import { DocumentAnalyzer } from "./DocumentAnalyzer";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 import { MarginFilter } from "./MarginFilter";
@@ -51,6 +56,11 @@ import {
 // Re-export types and classes for convenience
 export * from "./types";
 export { MuPDFService, disposeMuPDF } from "./MuPDFService";
+export {
+    MuPDFWorkerClient,
+    getMuPDFWorkerClient,
+    disposeMuPDFWorker,
+} from "./MuPDFWorkerClient";
 export { DocumentAnalyzer } from "./DocumentAnalyzer";
 export type { TextLayerCheckOptions } from "./DocumentAnalyzer";
 export { StyleAnalyzer } from "./StyleAnalyzer";
@@ -529,6 +539,9 @@ export class PDFExtractor {
      * Get page count without full extraction.
      */
     async getPageCount(pdfData: Uint8Array | ArrayBuffer): Promise<number> {
+        if (getPref("mupdf.useWorker")) {
+            return getMuPDFWorkerClient().getPageCount(pdfData);
+        }
         try {
             await this.mupdf.open(pdfData);
             return this.mupdf.getPageCount();

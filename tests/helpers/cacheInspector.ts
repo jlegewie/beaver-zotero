@@ -5,7 +5,7 @@
  * Shared by live and integration tests.
  */
 
-import { BASE_URL } from './fixtures';
+import { BASE_URL, type AttachmentFixture } from './fixtures';
 
 async function post<T>(path: string, body: unknown = {}): Promise<T> {
     const res = await fetch(`${BASE_URL}${path}`, {
@@ -55,6 +55,65 @@ export interface ResolveItemResponse {
 
 export async function ping(): Promise<PingResponse> {
     return post('/beaver/test/ping');
+}
+
+// ---------------------------------------------------------------------------
+// MuPDF worker plumbing helpers (PR #1)
+// ---------------------------------------------------------------------------
+
+export interface PdfPageCountResponse {
+    ok: boolean;
+    count?: number;
+    error?: {
+        name: string;
+        code?: string;
+        message: string;
+    };
+}
+
+export async function pdfPageCount(
+    attachment: AttachmentFixture,
+): Promise<PdfPageCountResponse> {
+    return post<PdfPageCountResponse>('/beaver/test/pdf-page-count', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+    });
+}
+
+export async function pdfPageCountFromBytes(
+    bytes: Uint8Array,
+): Promise<PdfPageCountResponse> {
+    const base64 = bufferToBase64(bytes);
+    return post<PdfPageCountResponse>('/beaver/test/pdf-page-count', {
+        raw_bytes_base64: base64,
+    });
+}
+
+export type SupportedPrefKey = 'mupdf.useWorker';
+
+export async function setPref(
+    key: SupportedPrefKey,
+    value: boolean,
+): Promise<void> {
+    const res = await post<{ ok?: boolean; error?: string }>(
+        '/beaver/test/set-pref',
+        { key, value },
+    );
+    if (res.error) throw new Error(res.error);
+}
+
+function bufferToBase64(bytes: Uint8Array): string {
+    let binary = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+        const slice = bytes.subarray(i, Math.min(i + chunk, bytes.length));
+        binary += String.fromCharCode(...slice);
+    }
+    if (typeof Buffer !== 'undefined') {
+        return Buffer.from(bytes).toString('base64');
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (globalThis as any).btoa(binary);
 }
 
 export async function getCacheMetadata(

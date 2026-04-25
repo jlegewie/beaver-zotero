@@ -121,6 +121,9 @@ const ENDPOINT_PATHS = [
     '/beaver/test/note-undo',
     // Test-only endpoints (sentence bbox feasibility probe)
     '/beaver/test/sentence-bboxes',
+    // Test-only endpoints (MuPDF worker plumbing)
+    '/beaver/test/pdf-page-count',
+    '/beaver/test/set-pref',
 ] as const;
 
 /**
@@ -866,6 +869,106 @@ async function handleTestSentenceBBoxesHttpRequest(request: any) {
     }
 }
 
+/**
+ * Dev-only PDF page-count endpoint.
+ *
+ * Bypasses `createEndpoint`'s thrown-error → HTTP 500 path so live tests can
+ * see structured `{ ok: false, error: { code } }` responses for parity checks
+ * (encrypted vs invalid PDFs).
+ *
+ * Request body:
+ *   { library_id, zotero_key }     // read attachment bytes
+ *   { raw_bytes_base64 }            // bypass attachment-type check
+ */
+async function handleTestPdfPageCountHttpRequest(request: any) {
+    const { PDFExtractor, ExtractionError } = await import(
+        '../../src/services/pdf'
+    );
+
+    let pdfData: Uint8Array;
+    if (typeof request?.raw_bytes_base64 === 'string') {
+        try {
+            const binary = atob(request.raw_bytes_base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            pdfData = bytes;
+        } catch (e) {
+            return {
+                ok: false,
+                error: {
+                    name: 'Error',
+                    message: `Invalid raw_bytes_base64: ${e instanceof Error ? e.message : String(e)}`,
+                },
+            };
+        }
+    } else {
+        const { library_id, zotero_key } = request || {};
+        if (library_id == null || zotero_key == null) {
+            return {
+                ok: false,
+                error: {
+                    name: 'Error',
+                    message: 'Provide library_id + zotero_key, or raw_bytes_base64',
+                },
+            };
+        }
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(
+            library_id,
+            zotero_key,
+        );
+        if (!item || !item.isAttachment() || !item.isPDFAttachment()) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: 'Item is not a PDF attachment' },
+            };
+        }
+        const filePath = await item.getFilePathAsync();
+        if (!filePath) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: 'PDF file not available locally' },
+            };
+        }
+        pdfData = await IOUtils.read(filePath);
+    }
+
+    try {
+        const count = await new PDFExtractor().getPageCount(pdfData);
+        return { ok: true, count };
+    } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                },
+            };
+        }
+        throw e;
+    }
+}
+
+/**
+ * Dev-only pref setter. Allowlisted to a single key for safety.
+ *
+ * Request body:  { key: "mupdf.useWorker", value: boolean }
+ */
+async function handleTestSetPrefHttpRequest(request: any) {
+    const { key, value } = request || {};
+    if (key !== 'mupdf.useWorker') {
+        return { ok: false, error: 'unsupported pref key' };
+    }
+    if (typeof value !== 'boolean') {
+        return { ok: false, error: 'value must be boolean' };
+    }
+    Zotero.Prefs.set('extensions.zotero.beaver.mupdf.useWorker', value, true);
+    return { ok: true };
+}
+
 
 // =============================================================================
 // Registration Functions
@@ -977,6 +1080,13 @@ function registerEndpoints(): boolean {
         // Sentence bbox feasibility probe (dev-only)
         Zotero.Server.Endpoints['/beaver/test/sentence-bboxes'] =
             createEndpoint(handleTestSentenceBBoxesHttpRequest);
+
+        // MuPDF worker plumbing (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/pdf-page-count'] =
+            createEndpoint(handleTestPdfPageCountHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/set-pref'] =
+            createEndpoint(handleTestSetPrefHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
