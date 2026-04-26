@@ -76,6 +76,24 @@ interface WorkerLogMessage {
 type WorkerReply = WorkerSuccessReply | WorkerFailureReply | WorkerLogMessage;
 
 /**
+ * Snapshot of the worker-side document cache. Mirrors the `CacheStats` type
+ * declared inside `src/services/pdf/worker/docCache.ts` so the wire shape
+ * stays explicit on both sides.
+ */
+export interface MuPDFWorkerCacheStats {
+    entries: number;
+    totalBytes: number;
+    hits: number;
+    misses: number;
+    evictions: number;
+    ttlMs: number;
+    maxEntries: number;
+    maxBytes: number;
+    /** null until the worker has run a cache lookup (lazy feature-detect). */
+    cryptoUsable: boolean | null;
+}
+
+/**
  * Sentinel rejection thrown when the worker dies mid-flight. Used to drive
  * a single transparent retry inside `call()`.
  */
@@ -98,6 +116,16 @@ export class MuPDFWorkerClient {
      * shutdown cleanup and tie it to a closing window realm).
      */
     private disposed = false;
+
+    /**
+     * Cumulative counters used by the dev-only `/beaver/test/worker-stats`
+     * endpoint to verify dispatch fan-out without log grepping. Incremented
+     * in `call()` (per-op) and `ensureWorker()` (spawn).
+     */
+    private spawnCount = 0;
+    private retryCount = 0;
+    private dispatchCounts: Record<string, number> = {};
+    private lastSpawnTime: number | null = null;
 
     /** The window that spawned the current worker. Used for stale detection. */
     get spawnedFromWindow(): Window | null {
@@ -134,6 +162,9 @@ export class MuPDFWorkerClient {
         }
 
         const worker = new WorkerCtor(WORKER_URL, { type: "module" });
+        this.spawnCount++;
+        this.lastSpawnTime = Date.now();
+        logger(`[MuPDFWorkerClient] spawned new worker`, 3);
         (worker as any).onmessage = (event: MessageEvent) =>
             this.onWorkerMessage(event);
         (worker as any).onerror = (event: any) => {
@@ -199,6 +230,11 @@ export class MuPDFWorkerClient {
             }
         }
 
+        const pendingCount = this.pending.size;
+        if (pendingCount > 0 || w) {
+            logger(`[MuPDFWorkerClient] markStale (${reason}); rejecting ${pendingCount} pending`, 2);
+        }
+
         const stale = new StaleWorkerError(`stale worker: ${reason}`);
         const pending = Array.from(this.pending.values());
         this.pending.clear();
@@ -212,6 +248,8 @@ export class MuPDFWorkerClient {
      * went stale between dispatch and reply.
      */
     async call<T>(op: string, args: Record<string, unknown> = {}): Promise<T> {
+        this.dispatchCounts[op] = (this.dispatchCounts[op] ?? 0) + 1;
+        logger(`[MuPDFWorkerClient] dispatch op=${op}`, 3);
         try {
             return await this.dispatch<T>(op, args);
         } catch (e) {
@@ -220,6 +258,8 @@ export class MuPDFWorkerClient {
             // and respawning would orphan the new worker from shutdown
             // cleanup — propagate the StaleWorkerError instead.
             if (e instanceof StaleWorkerError && !this.disposed) {
+                this.retryCount++;
+                logger(`[MuPDFWorkerClient] retry op=${op} after stale worker`, 2);
                 return await this.dispatch<T>(op, args);
             }
             throw e;
@@ -333,6 +373,37 @@ export class MuPDFWorkerClient {
     }
 
     /**
+     * Strict, fused render-pages variant for the agent images handler.
+     *
+     * Combines page-count + page-labels + render in a single doc-open. Uses
+     * the worker's strict resolvers — explicit-but-all-invalid `pageIndices`
+     * (or out-of-range `pageRange`) throws `ExtractionError(PAGE_OUT_OF_RANGE)`
+     * with the worker's known `pageCount` in the error payload.
+     *
+     * Image buffers are transferred from the worker.
+     */
+    async renderPagesToImagesWithMeta(
+        pdfData: Uint8Array | ArrayBuffer,
+        args?: {
+            pageIndices?: number[];
+            pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+            options?: PageImageOptions;
+        },
+    ): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: PageImageResult[] }> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<{ pageCount: number; pageLabels: Record<number, string>; pages: PageImageResult[] }>(
+            "renderPagesToImagesWithMeta",
+            {
+                pdfData: bytes,
+                pageIndices: args?.pageIndices,
+                pageRange: args?.pageRange,
+                options: args?.options,
+            },
+        );
+    }
+
+    /**
      * Render a single page to an image.
      *
      * Single-page op — out-of-range `pageIndex` throws
@@ -396,6 +467,36 @@ export class MuPDFWorkerClient {
         });
     }
 
+    /**
+     * Strict, fused extract variant for the agent pages handler.
+     *
+     * Combines page-count + page-labels + OCR check + extract in a single
+     * doc-open. Uses the worker's strict resolvers — explicit-but-all-invalid
+     * `pageIndices` (or out-of-range `pageRange`) throws
+     * `ExtractionError(PAGE_OUT_OF_RANGE)` with the worker's known `pageCount`
+     * in the error payload (rehydrated by `rehydrateError`).
+     *
+     * Rejects `settings.useLineDetection` — line-extraction callers must use
+     * `extractByLines` directly.
+     */
+    async extractWithMeta(
+        pdfData: Uint8Array | ArrayBuffer,
+        args?: {
+            settings?: ExtractionSettings;
+            pageIndices?: number[];
+            pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+        },
+    ): Promise<ExtractionResult> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<ExtractionResult>("extractWithMeta", {
+            pdfData: bytes,
+            settings: args?.settings,
+            pageIndices: args?.pageIndices,
+            pageRange: args?.pageRange,
+        });
+    }
+
     /** Line-detection variant of `extract`. */
     async extractByLines(
         pdfData: Uint8Array | ArrayBuffer,
@@ -429,7 +530,14 @@ export class MuPDFWorkerClient {
         return this.call<boolean>("hasTextLayer", { pdfData: bytes });
     }
 
-    /** Search + score within one round-trip. */
+    /**
+     * Search + score within one round-trip.
+     *
+     * `options.maxPageCount` is lifted to a top-level worker arg and stripped
+     * from the forwarded `options` payload. Keeps the `opSearch` worker-arg
+     * shape clean and lets the handler pass it through the existing options
+     * parameter without a separate signature change.
+     */
     async search(
         pdfData: Uint8Array | ArrayBuffer,
         query: string,
@@ -437,10 +545,18 @@ export class MuPDFWorkerClient {
     ): Promise<PDFSearchResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        let forwardedOptions: PDFSearchOptions | undefined = options;
+        let maxPageCount: number | undefined;
+        if (options && options.maxPageCount != null) {
+            const { maxPageCount: lifted, ...rest } = options;
+            maxPageCount = lifted;
+            forwardedOptions = rest;
+        }
         return this.call<PDFSearchResult>("search", {
             pdfData: bytes,
             query,
-            options,
+            options: forwardedOptions,
+            maxPageCount,
         });
     }
 
@@ -478,6 +594,151 @@ export class MuPDFWorkerClient {
         await this.call<void>("__init", {});
     }
 
+    /**
+     * Test-only: snapshot of dispatch / spawn counters. Surfaced via the
+     * dev-only `/beaver/test/worker-stats` HTTP endpoint so manual-test
+     * runners can verify fan-out without grepping logs.
+     */
+    getStats(): {
+        hasWorker: boolean;
+        disposed: boolean;
+        spawnCount: number;
+        retryCount: number;
+        pendingCount: number;
+        nextId: number;
+        dispatchCounts: Record<string, number>;
+        lastSpawnTime: number | null;
+    } {
+        return {
+            hasWorker: this.worker !== null,
+            disposed: this.disposed,
+            spawnCount: this.spawnCount,
+            retryCount: this.retryCount,
+            pendingCount: this.pending.size,
+            nextId: this.nextId,
+            dispatchCounts: { ...this.dispatchCounts },
+            lastSpawnTime: this.lastSpawnTime,
+        };
+    }
+
+    /** Test-only: zero out cumulative counters. Does not touch the worker. */
+    resetStats(): void {
+        this.spawnCount = 0;
+        this.retryCount = 0;
+        this.dispatchCounts = {};
+        this.lastSpawnTime = null;
+    }
+
+    /**
+     * Test-only: terminate the current worker as if it had died mid-flight.
+     * Drives the same code path as a real stale-worker event so the next
+     * `call()` either retries (live in-flight) or respawns on the next
+     * dispatch.
+     */
+    markStaleForTest(reason = "test"): void {
+        this.markStale(reason);
+    }
+
+    /**
+     * Snapshot of the worker-side document cache. Returns null when there is
+     * no live worker — this method NEVER spawns one, so reading stats from a
+     * fresh client (or after `markStale`/`dispose`) is non-mutating.
+     *
+     * Stale-window detection: if the existing worker was spawned for a
+     * different main window, mark it stale (so the next real op respawns
+     * cleanly) and return null without RPCing into a doomed worker.
+     *
+     * Uses the uncounted dispatch path so introspection ops do not pollute
+     * `dispatchCounts` (manual-test baselines depend on that).
+     */
+    async getCacheStats(): Promise<MuPDFWorkerCacheStats | null> {
+        const worker = this.probeLiveWorker();
+        if (!worker) return null;
+        try {
+            return await this.callUncounted<MuPDFWorkerCacheStats>(
+                worker,
+                "__cacheStats",
+                {},
+            );
+        } catch (e) {
+            logger(`[MuPDFWorkerClient] getCacheStats failed: ${e}`, 2);
+            return null;
+        }
+    }
+
+    /**
+     * Test-only: clear the worker-side document cache. No-op when there is
+     * no live worker. By default also resets the cache hit/miss/eviction
+     * counters so live tests can assert exact values.
+     *
+     * Pass `{ resetCounters: false }` to keep counter history (useful when
+     * the caller wants to inspect the running totals).
+     */
+    async clearWorkerCacheForTest(
+        opts: { resetCounters?: boolean } = {},
+    ): Promise<MuPDFWorkerCacheStats | null> {
+        const worker = this.probeLiveWorker();
+        if (!worker) return null;
+        try {
+            return await this.callUncounted<MuPDFWorkerCacheStats>(
+                worker,
+                "__cacheClear",
+                { resetCounters: opts.resetCounters !== false },
+            );
+        } catch (e) {
+            logger(`[MuPDFWorkerClient] clearWorkerCacheForTest failed: ${e}`, 2);
+            return null;
+        }
+    }
+
+    /**
+     * Probe `this.worker` without spawning one. If the existing worker was
+     * spawned for a different main window, mark it stale (so the next real
+     * op respawns cleanly) and return null. Otherwise return the live
+     * worker, or null when none exists.
+     */
+    private probeLiveWorker(): Worker | null {
+        if (this.disposed) return null;
+        const w = this.worker;
+        if (!w) return null;
+        const mainWindow = (Zotero.getMainWindow?.() ?? null) as Window | null;
+        if (
+            mainWindow &&
+            this.spawnedFromWindowInternal &&
+            this.spawnedFromWindowInternal !== mainWindow
+        ) {
+            this.markStale("stale window during introspection RPC");
+            return null;
+        }
+        return w;
+    }
+
+    /**
+     * Dispatch an introspection op against an already-validated worker
+     * without incrementing `dispatchCounts` and without the stale-worker
+     * retry that `call()` performs. Returns the worker's `result` payload.
+     */
+    private callUncounted<T>(
+        worker: Worker,
+        op: string,
+        args: Record<string, unknown>,
+    ): Promise<T> {
+        const id = this.nextId++;
+        return new Promise<T>((resolve, reject) => {
+            this.pending.set(id, { resolve, reject });
+            try {
+                worker.postMessage({ id, op, args });
+            } catch (e) {
+                this.pending.delete(id);
+                reject(
+                    new Error(
+                        `postMessage threw: ${e instanceof Error ? e.message : String(e)}`,
+                    ),
+                );
+            }
+        });
+    }
+
     dispose(): void {
         // Set BEFORE markStale so that any rejection that races with this
         // call (or runs synchronously inside it) sees the disposed flag and
@@ -495,9 +756,11 @@ function rehydrateError(payload: WorkerErrorPayload | undefined): Error {
     if (payload.name === "ExtractionError" && payload.code) {
         // ExtractionError stores OCR data on `details` (types.ts:599); the
         // wire field name stays `payload.ocrAnalysis` for self-documenting
-        // JSON. For NO_TEXT_LAYER the payload carries `{ ocrAnalysis,
-        // pageLabels, pageCount }`. Other codes leave `payload` undefined →
-        // constructor defaults apply (backward-compatible with PR #1/#2).
+        // JSON. Payload usage by code:
+        //   NO_TEXT_LAYER       → { ocrAnalysis, pageLabels, pageCount }
+        //   PAGE_OUT_OF_RANGE   → { pageCount } (from strict resolvers in docHelpers.ts)
+        //   ENCRYPTED/INVALID   → undefined
+        // The constructor's optional fields default cleanly when absent.
         const p = payload.payload;
         return new ExtractionError(
             payload.code as ExtractionErrorCode,

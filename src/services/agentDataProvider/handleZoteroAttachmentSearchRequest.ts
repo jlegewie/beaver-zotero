@@ -187,47 +187,32 @@ export async function handleZoteroAttachmentSearchRequest(
             }
         }
 
-        // 7. Create extractor and get page count first
+        // 7. Search — pageCount + maxPageCount gate are pushed into the worker.
+        // Cold-cache path goes from 2 doc-opens (getPageCount + search) → 1.
+        // The cache fast-path above (lines 157-165) already covers the
+        // `cachedMeta.page_count > maxPageCount` case before any worker call.
         const extractor = new PDFExtractor();
-        let totalPages: number;
-
-        if (cachedMeta?.page_count != null) {
-            totalPages = cachedMeta.page_count;
-        } else {
-            try {
-                totalPages = await extractor.getPageCount(pdfData);
-            } catch (error) {
-                if (error instanceof ExtractionError) {
-                    if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                        // Let outer catch backfill encrypted metadata before returning.
-                        throw error;
-                    } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                        // Let outer catch backfill invalid metadata before returning.
-                        throw error;
-                    }
-                }
-                throw error;
-            }
-        }
-
-        // 8. Check page count limit (skip if skip_local_limits is true)
-        if (!skip_local_limits) {
-            const maxPageCount = getPref('maxPageCount');
-            
-            if (totalPages > maxPageCount) {
-                return errorResponse(
-                    `PDF has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
-                    'too_many_pages'
-                );
-            }
-        }
-
-        // 9. Perform search
+        const maxPageCount = !skip_local_limits ? getPref('maxPageCount') : undefined;
         const searchResult = await extractor.search(pdfData, query, {
             maxHitsPerPage: max_hits_per_page ?? 100,
+            maxPageCount,
         });
 
-        // 10. Convert to response format
+        // 8. Worker page-count gate fired? Map to too_many_pages.
+        if (searchResult.exceedsPageCountLimit) {
+            logger(
+                `handleZoteroAttachmentSearchRequest: worker exceedsPageCountLimit for ${unique_key} (${searchResult.totalPages} pages)`,
+                3,
+            );
+            return errorResponse(
+                `PDF has ${searchResult.totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
+                'too_many_pages'
+            );
+        }
+
+        const totalPages = searchResult.totalPages;
+
+        // 9. Convert to response format
         const pages: WSPageSearchResult[] = searchResult.pages.map((page) => ({
             page_index: page.pageIndex,
             label: page.label,
@@ -269,6 +254,9 @@ export async function handleZoteroAttachmentSearchRequest(
                 case ExtractionErrorCode.INVALID_PDF:
                     return errorResponse('PDF file is invalid or corrupted', 'invalid_pdf');
                 case ExtractionErrorCode.NO_TEXT_LAYER:
+                    // Note: dead branch: opSearch does not run
+                    // OCR detection. Kept as cheap insurance against future
+                    // refactor that adds checkTextLayer to the search path.
                     return errorResponse('PDF requires OCR (no text layer) — text search unavailable', 'no_text_layer');
                 default:
                     return errorResponse(

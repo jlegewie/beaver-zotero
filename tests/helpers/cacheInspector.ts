@@ -144,6 +144,14 @@ export interface PdfRenderPagesResponse {
     error?: { name: string; code?: string; message: string };
 }
 
+export interface PdfRenderPagesWithMetaResponse {
+    ok: boolean;
+    pageCount?: number;
+    pageLabels?: Record<number, string>;
+    pages?: PdfRenderPagePayload[];
+    error?: { name: string; code?: string; message: string; pageCount?: number };
+}
+
 export interface PdfPageLabelsResponse {
     ok: boolean;
     count?: number;
@@ -222,6 +230,21 @@ export async function pdfRenderPagesFromBytes(
 ): Promise<PdfRenderPagesResponse> {
     return post<PdfRenderPagesResponse>('/beaver/test/pdf-render-pages', {
         raw_bytes_base64: bufferToBase64(bytes),
+        ...body,
+    });
+}
+
+export async function pdfRenderPagesWithMeta(
+    attachment: AttachmentFixture,
+    body: {
+        page_indices?: number[];
+        page_range?: { startIndex: number; endIndex?: number; maxPages?: number };
+        options?: PdfPageImageOptions;
+    } = {},
+): Promise<PdfRenderPagesWithMetaResponse> {
+    return post<PdfRenderPagesWithMetaResponse>('/beaver/test/pdf-render-pages-with-meta', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
         ...body,
     });
 }
@@ -502,4 +525,55 @@ export async function getSentenceBBoxReport(
         page_index: pageIndex,
         mode,
     });
+}
+
+// ---------------------------------------------------------------------------
+// MuPDF worker singleton stats / cache lifecycle (dev-only)
+// ---------------------------------------------------------------------------
+
+export interface WorkerCacheStats {
+    entries: number;
+    totalBytes: number;
+    hits: number;
+    misses: number;
+    evictions: number;
+    ttlMs: number;
+    maxEntries: number;
+    maxBytes: number;
+    cryptoUsable: boolean | null;
+}
+
+export interface WorkerStatsSnapshot {
+    hasWorker: boolean;
+    disposed: boolean;
+    spawnCount: number;
+    retryCount: number;
+    pendingCount: number;
+    nextId: number;
+    dispatchCounts: Record<string, number>;
+    lastSpawnTime: number | null;
+}
+
+export interface WorkerStatsResponse {
+    ok: boolean;
+    stats: WorkerStatsSnapshot;
+    cacheStats: WorkerCacheStats | null;
+}
+
+export async function workerStats(
+    body: { reset?: boolean } = {},
+): Promise<WorkerStatsResponse> {
+    return post<WorkerStatsResponse>('/beaver/test/worker-stats', body);
+}
+
+export async function workerCacheClear(
+    body: { resetCounters?: boolean } = {},
+): Promise<{ ok: boolean; cacheStats: WorkerCacheStats | null }> {
+    return post('/beaver/test/worker-cache-clear', body);
+}
+
+export async function workerMarkStale(
+    body: { reason?: string } = {},
+): Promise<{ ok: boolean; before: WorkerStatsSnapshot; after: WorkerStatsSnapshot }> {
+    return post('/beaver/test/worker-mark-stale', body);
 }
