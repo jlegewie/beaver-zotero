@@ -13,6 +13,12 @@
  * lands at `chrome://beaver/content/scripts/mupdf-worker.js`.
  */
 
+import {
+    clearAllCachedDocs,
+    getCacheStats,
+    sweepExpiredEntries,
+} from "./docCache";
+import { enqueue } from "./opQueue";
 import { ensureApi } from "./wasmInit";
 import {
     opAnalyzeOCRNeeds,
@@ -35,33 +41,27 @@ import {
 import { workerSelf } from "./workerScope";
 
 // ---------------------------------------------------------------------------
-// FIFO queue — serializes ops so concurrent requests can't race on shared
-// WASM heap state (`_wasm_string`, `_wasm_matrix`, `createBuffer`
-// allocations). Defense-in-depth.
-//
-// Limitation: a slow op (e.g. extractRawPages on a 1000-page doc) blocks
-// quick ops behind it. Worker pooling (PR #5) is the answer.
-// ---------------------------------------------------------------------------
-let _queue: Promise<unknown> = Promise.resolve();
-function enqueue<T>(work: () => Promise<T>): Promise<T> {
-    const next = _queue.then(work, work);
-    _queue = next.catch(() => {
-        // chain survives rejections
-    });
-    return next;
-}
-
-// ---------------------------------------------------------------------------
 // Dispatcher — returns { result, transfer? }. The onmessage success branch
 // pulls `transfer` out and forwards it to postMessage so per-op transfer
 // lists are declared at the op site (not centrally).
 // ---------------------------------------------------------------------------
 async function dispatch(op: string, args: Record<string, unknown> | undefined): Promise<OpReply> {
     const a = args || {};
+    // Sweep expired idle docs at the top of every queued turn (defense in
+    // depth — the cache's TTL timer also enqueues a sweep, this just makes
+    // sure no expired doc is ever reused even if a real op landed first).
+    sweepExpiredEntries();
     switch (op) {
         case "__init":
             await ensureApi();
             return { result: {} };
+        case "__cacheStats":
+            return { result: getCacheStats() };
+        case "__cacheClear": {
+            const resetCounters = a.resetCounters !== false;
+            clearAllCachedDocs(resetCounters);
+            return { result: getCacheStats() };
+        }
         case "getPageCount":
             return await opGetPageCount(a as Parameters<typeof opGetPageCount>[0]);
         case "getPageCountAndLabels":

@@ -39,6 +39,9 @@ import {
     pdfSearchScored,
     pdfSentenceBBoxes,
     pdfRenderPage,
+    workerCacheClear,
+    workerMarkStale,
+    workerStats,
 } from '../helpers/cacheInspector';
 import {
     SMALL_PDF,
@@ -360,5 +363,123 @@ describe('MuPDF worker smoke — orchestration ops', () => {
             expect(res.ok).toBe(false);
             expect(res.error?.code).toBe('PAGE_OUT_OF_RANGE');
         });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Doc cache — short-lived in-worker document cache.
+//
+// Tests verify the cache eliminates re-parses for back-to-back ops on the
+// same `pdfData` and that introspection RPCs (`worker-stats`,
+// `worker-cache-clear`) are non-spawning / non-mutating with respect to
+// dispatchCounts.
+// ---------------------------------------------------------------------------
+
+describe('MuPDF worker — doc cache', () => {
+    beforeEach((ctx) => {
+        skipIfNoZotero(ctx, available);
+    });
+
+    it('two back-to-back ops on the same fixture produce 1 miss + 1 hit', async () => {
+        // Reset both client-side dispatch counters and the worker-side
+        // cache counters so the assertion can use exact values.
+        await workerStats({ reset: true });
+        await workerCacheClear({ resetCounters: true });
+
+        const first = await pdfPageCount(SMALL_PDF);
+        expect(first.ok).toBe(true);
+
+        const second = await pdfPageCount(SMALL_PDF);
+        expect(second.ok).toBe(true);
+        expect(second.count).toBe(first.count);
+
+        const stats = await workerStats();
+        expect(stats.cacheStats).not.toBeNull();
+        expect(stats.cacheStats!.misses).toBe(1);
+        expect(stats.cacheStats!.hits).toBe(1);
+        expect(stats.cacheStats!.entries).toBe(1);
+        expect(stats.cacheStats!.cryptoUsable).toBe(true);
+    });
+
+    it('different fixtures produce two separate entries (no false hits)', async () => {
+        await workerStats({ reset: true });
+        await workerCacheClear({ resetCounters: true });
+
+        await pdfPageCount(SMALL_PDF);
+        await pdfPageCount(NORMAL_PDF);
+
+        const stats = await workerStats();
+        expect(stats.cacheStats!.misses).toBe(2);
+        expect(stats.cacheStats!.hits).toBe(0);
+        expect(stats.cacheStats!.entries).toBeGreaterThanOrEqual(1);
+        expect(stats.cacheStats!.entries).toBeLessThanOrEqual(2);
+    });
+
+    it('cache is cleared after worker-mark-stale (per-worker scope)', async () => {
+        await workerStats({ reset: true });
+        await workerCacheClear({ resetCounters: true });
+
+        await pdfPageCount(SMALL_PDF);
+        const before = await workerStats();
+        expect(before.cacheStats!.entries).toBeGreaterThanOrEqual(1);
+
+        await workerMarkStale({ reason: 'doc-cache test' });
+
+        // After mark-stale and a fresh op the cache must be empty before the
+        // miss, then hold one entry. Hits/misses also reset to 0/1 because
+        // the new worker has its own counters.
+        await pdfPageCount(SMALL_PDF);
+        const after = await workerStats();
+        expect(after.cacheStats!.misses).toBe(1);
+        expect(after.cacheStats!.hits).toBe(0);
+        expect(after.cacheStats!.entries).toBe(1);
+    });
+
+    it('worker-stats does NOT spawn a worker, dispose first to prove it', async () => {
+        // Force the worker to die so `getCacheStats()` cannot reach it.
+        await workerMarkStale({ reason: 'pre-spawn-test' });
+
+        const stats = await workerStats({ reset: true });
+        // hasWorker stays false: the introspection call did not respawn.
+        // (markStale clears `this.worker`; only a real op respawns it.)
+        expect(stats.stats.hasWorker).toBe(false);
+        expect(stats.cacheStats).toBeNull();
+        expect(Object.keys(stats.stats.dispatchCounts).length).toBe(0);
+    });
+
+    it('introspection ops do not pollute dispatchCounts', async () => {
+        await workerStats({ reset: true });
+        await workerCacheClear({ resetCounters: true });
+
+        // One real op.
+        await pdfPageCount(SMALL_PDF);
+
+        // Multiple introspection RPCs around the real op.
+        await workerStats();
+        await workerStats();
+        await workerCacheClear({ resetCounters: false });
+
+        const final = await workerStats();
+        // The real op is the only one that should have been counted.
+        expect(final.stats.dispatchCounts.getPageCount).toBe(1);
+        expect(final.stats.dispatchCounts).not.toHaveProperty('__cacheStats');
+        expect(final.stats.dispatchCounts).not.toHaveProperty('__cacheClear');
+    });
+
+    it('multi-call pattern on the same attachment hits cache on every reuse', async () => {
+        // The pages handler typically issues getPageCountAndLabels +
+        // getPageCount + (extract). Here we simulate the multi-call
+        // pattern with two cheap ops: page count and page labels. Both
+        // share the same pdfData, so the second one should be a cache hit.
+        await workerStats({ reset: true });
+        await workerCacheClear({ resetCounters: true });
+
+        await pdfPageCount(SMALL_PDF);
+        await pdfPageLabels(SMALL_PDF);
+
+        const stats = await workerStats();
+        expect(stats.cacheStats!.misses).toBe(1);
+        expect(stats.cacheStats!.hits).toBe(1);
+        expect(stats.cacheStats!.entries).toBe(1);
     });
 });

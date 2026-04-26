@@ -1,9 +1,12 @@
 /**
  * Worker op handlers.
  *
- * Each op opens the document via `openDocSafe`, runs work in terms of the
+ * Each op opens the document via `acquireDoc` (which routes through the
+ * short-lived doc cache, see `./docCache.ts`), runs work in terms of the
  * worker-internal helpers, and returns `{ result, transfer? }`. The
- * dispatcher in `index.ts` posts the reply.
+ * dispatcher in `index.ts` posts the reply. Pair every `acquireDoc` with
+ * `releaseDoc(doc)` in a finally block — never call `doc.destroy()`
+ * directly from cached ops.
  *
  * IMPORTANT: do NOT import from `../index` (the barrel). It re-exports
  * MuPDFService, MuPDFWorkerClient, and the getPref-using PDFExtractor —
@@ -46,13 +49,13 @@ import {
 } from "../types";
 import type { PageSentenceBBoxOptions, PageSentenceBBoxResult } from "../ParagraphSentenceMapper";
 import { ERROR_CODES, workerError } from "./errors";
+import { acquireDoc, releaseDoc } from "./docCache";
 import { ensureApi } from "./wasmInit";
 import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
     collectPageLabels,
     extractRawPageDetailedFromDoc,
     extractRawPageFromDoc,
-    openDocSafe,
     rawPageProviderFromDoc,
     renderOnePage,
     resolveExplicitPageIndicesOrThrow,
@@ -72,45 +75,45 @@ export interface OpReply<T = unknown> {
 // ---------------------------------------------------------------------------
 
 export async function opGetPageCount(args: { pdfData: Uint8Array | ArrayBuffer }): Promise<OpReply<{ count: number }>> {
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         return { result: { count: doc.countPages() } };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
 export async function opGetPageCountAndLabels(
     args: { pdfData: Uint8Array | ArrayBuffer },
 ): Promise<OpReply<{ count: number; labels: Record<number, string> }>> {
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         const count = doc.countPages();
         const labels = collectPageLabels(doc);
         return { result: { count, labels } };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
 export async function opExtractRawPages(
     args: { pdfData: Uint8Array | ArrayBuffer; pageIndices?: number[] },
 ): Promise<OpReply<RawDocumentData>> {
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         const pageCount = doc.countPages();
         const indices = resolvePageIndices(pageCount, args.pageIndices);
         const pages = indices.map((i) => extractRawPageFromDoc(doc, i));
         return { result: { pageCount, pages } as RawDocumentData };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
 export async function opExtractRawPageDetailed(
     args: { pdfData: Uint8Array | ArrayBuffer; pageIndex: number; includeImages?: boolean },
 ): Promise<OpReply<RawPageDataDetailed>> {
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         const pageCount = doc.countPages();
         if (
@@ -126,7 +129,7 @@ export async function opExtractRawPageDetailed(
         const result = extractRawPageDetailedFromDoc(doc, args.pageIndex, !!args.includeImages);
         return { result };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
@@ -134,7 +137,7 @@ export async function opRenderPagesToImages(
     args: { pdfData: Uint8Array | ArrayBuffer; pageIndices?: number[]; options?: PageImageOptions },
 ): Promise<OpReply<PageImageResult[]>> {
     const api = await ensureApi();
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         const opts = { ...DEFAULT_PAGE_IMAGE_OPTIONS, ...(args.options || {}) };
         const pageCount = doc.countPages();
@@ -148,7 +151,7 @@ export async function opRenderPagesToImages(
         }
         return { result: out, transfer };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
@@ -170,7 +173,7 @@ export async function opRenderPagesToImagesWithMeta(
     },
 ): Promise<OpReply<{ pageCount: number; pageLabels: Record<number, string>; pages: PageImageResult[] }>> {
     const api = await ensureApi();
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         const opts = { ...DEFAULT_PAGE_IMAGE_OPTIONS, ...(args.options || {}) };
         const pageCount = doc.countPages();
@@ -190,7 +193,7 @@ export async function opRenderPagesToImagesWithMeta(
             transfer,
         };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
@@ -198,7 +201,7 @@ export async function opRenderPageToImage(
     args: { pdfData: Uint8Array | ArrayBuffer; pageIndex: number; options?: PageImageOptions },
 ): Promise<OpReply<PageImageResult>> {
     const api = await ensureApi();
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         const pageCount = doc.countPages();
         if (
@@ -215,7 +218,7 @@ export async function opRenderPageToImage(
         const result = renderOnePage(api, doc, args.pageIndex, opts);
         return { result, transfer: [result.data.buffer] };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
@@ -227,7 +230,7 @@ export async function opSearchPages(
         maxHitsPerPage?: number;
     },
 ): Promise<OpReply<PDFPageSearchResult[]>> {
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     const limit = typeof args.maxHitsPerPage === "number" && args.maxHitsPerPage > 0
         ? args.maxHitsPerPage
         : 100;
@@ -241,7 +244,7 @@ export async function opSearchPages(
         }
         return { result: results };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
@@ -408,24 +411,24 @@ export async function opExtract(
     args: { pdfData: Uint8Array | ArrayBuffer; settings?: ExtractionSettings },
 ): Promise<OpReply<ExtractionResult | LineExtractionResult>> {
     const useLineDetection = !!args.settings?.useLineDetection;
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         const result = runExtractCommon(doc, args.settings, useLineDetection);
         return { result };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
 export async function opExtractByLines(
     args: { pdfData: Uint8Array | ArrayBuffer; settings?: ExtractionSettings },
 ): Promise<OpReply<LineExtractionResult>> {
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         const result = runExtractCommon(doc, args.settings, true) as LineExtractionResult;
         return { result };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
@@ -454,7 +457,7 @@ export async function opExtractWithMeta(
             "opExtractWithMeta does not support useLineDetection — call opExtractByLines instead",
         );
     }
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
         const provider = rawPageProviderFromDoc(doc);
@@ -487,34 +490,34 @@ export async function opExtractWithMeta(
         ) as ExtractionResult;
         return { result };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
 export async function opAnalyzeOCRNeeds(
     args: { pdfData: Uint8Array | ArrayBuffer; options?: OCRDetectionOptions },
 ): Promise<OpReply<OCRDetectionResult>> {
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         const provider = rawPageProviderFromDoc(doc);
         const analyzer = new DocumentAnalyzer(provider);
         const result = analyzer.getDetailedOCRAnalysis(args.options || {});
         return { result };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
 export async function opHasTextLayer(
     args: { pdfData: Uint8Array | ArrayBuffer },
 ): Promise<OpReply<boolean>> {
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         const provider = rawPageProviderFromDoc(doc);
         const analyzer = new DocumentAnalyzer(provider);
         return { result: analyzer.hasTextLayer() };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
@@ -530,7 +533,7 @@ export async function opSearch(
     const opts = { ...DEFAULT_PDF_SEARCH_OPTIONS, ...(args.options || {}) };
     const scoringOpts = { ...DEFAULT_SEARCH_SCORING_OPTIONS, ...(opts.scoring || {}) };
 
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         const totalPages = doc.countPages();
 
@@ -628,7 +631,7 @@ export async function opSearch(
             } as PDFSearchResult,
         };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }
 
@@ -639,7 +642,7 @@ export async function opExtractSentenceBBoxes(
         options?: PageSentenceBBoxOptions;
     },
 ): Promise<OpReply<PageSentenceBBoxResult>> {
-    const doc = await openDocSafe(args.pdfData);
+    const doc = await acquireDoc(args.pdfData);
     try {
         const pageCount = doc.countPages();
         if (
@@ -656,6 +659,6 @@ export async function opExtractSentenceBBoxes(
         const result = extractPageSentenceBBoxes(detailed, args.options);
         return { result };
     } finally {
-        doc.destroy();
+        releaseDoc(doc);
     }
 }

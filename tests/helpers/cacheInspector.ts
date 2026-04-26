@@ -526,3 +526,54 @@ export async function getSentenceBBoxReport(
         mode,
     });
 }
+
+// ---------------------------------------------------------------------------
+// MuPDF worker singleton stats / cache lifecycle (dev-only)
+// ---------------------------------------------------------------------------
+
+export interface WorkerCacheStats {
+    entries: number;
+    totalBytes: number;
+    hits: number;
+    misses: number;
+    evictions: number;
+    ttlMs: number;
+    maxEntries: number;
+    maxBytes: number;
+    cryptoUsable: boolean | null;
+}
+
+export interface WorkerStatsSnapshot {
+    hasWorker: boolean;
+    disposed: boolean;
+    spawnCount: number;
+    retryCount: number;
+    pendingCount: number;
+    nextId: number;
+    dispatchCounts: Record<string, number>;
+    lastSpawnTime: number | null;
+}
+
+export interface WorkerStatsResponse {
+    ok: boolean;
+    stats: WorkerStatsSnapshot;
+    cacheStats: WorkerCacheStats | null;
+}
+
+export async function workerStats(
+    body: { reset?: boolean } = {},
+): Promise<WorkerStatsResponse> {
+    return post<WorkerStatsResponse>('/beaver/test/worker-stats', body);
+}
+
+export async function workerCacheClear(
+    body: { resetCounters?: boolean } = {},
+): Promise<{ ok: boolean; cacheStats: WorkerCacheStats | null }> {
+    return post('/beaver/test/worker-cache-clear', body);
+}
+
+export async function workerMarkStale(
+    body: { reason?: string } = {},
+): Promise<{ ok: boolean; before: WorkerStatsSnapshot; after: WorkerStatsSnapshot }> {
+    return post('/beaver/test/worker-mark-stale', body);
+}

@@ -124,6 +124,7 @@ const ENDPOINT_PATHS = [
     // Test-only endpoints (MuPDF worker singleton stats / lifecycle)
     '/beaver/test/worker-stats',
     '/beaver/test/worker-mark-stale',
+    '/beaver/test/worker-cache-clear',
     // Test-only endpoint (file-status side-effect trigger)
     '/beaver/test/file-status',
     // Test-only endpoints (MuPDF worker plumbing)
@@ -789,11 +790,16 @@ async function handleTestNoteUndoHttpRequest(request: any) {
 }
 
 /**
- * Dev-only: snapshot of MuPDFWorkerClient dispatch / spawn counters.
+ * Dev-only: snapshot of MuPDFWorkerClient dispatch / spawn counters and
+ * the worker-side document cache.
  *
  * Lets manual-test runners (`docs-zotero/manual-tests-fused-worker-ops.md`)
  * verify "exactly one extractWithMeta dispatch", "no extra spawns", etc.
  * without log grepping. POST `{ reset: true }` to zero counters first.
+ *
+ * `cacheStats` is `null` when no worker has spawned yet — the call must
+ * never spawn one or pollute `dispatchCounts`, so the doc-cache fields stay
+ * absent until a real op has run.
  */
 async function handleTestWorkerStatsHttpRequest(request: any) {
     const { getMuPDFWorkerClient } = await import(
@@ -803,7 +809,9 @@ async function handleTestWorkerStatsHttpRequest(request: any) {
     if (request?.reset === true) {
         client.resetStats();
     }
-    return { ok: true, stats: client.getStats() };
+    const stats = client.getStats();
+    const cacheStats = await client.getCacheStats();
+    return { ok: true, stats, cacheStats };
 }
 
 /**
@@ -822,6 +830,23 @@ async function handleTestWorkerMarkStaleHttpRequest(request: any) {
     const before = client.getStats();
     client.markStaleForTest(reason);
     return { ok: true, before, after: client.getStats() };
+}
+
+/**
+ * Dev-only: clear the worker-side document cache. By default also resets
+ * the cache hit/miss/eviction counters so live tests can assert exact
+ * values; pass `{ resetCounters: false }` to keep history.
+ *
+ * No-op when no worker has spawned yet (returns `cacheStats: null`).
+ */
+async function handleTestWorkerCacheClearHttpRequest(request: any) {
+    const { getMuPDFWorkerClient } = await import(
+        '../../src/services/pdf/MuPDFWorkerClient'
+    );
+    const client = getMuPDFWorkerClient();
+    const resetCounters = request?.resetCounters !== false;
+    const cacheStats = await client.clearWorkerCacheForTest({ resetCounters });
+    return { ok: true, cacheStats };
 }
 
 /**
@@ -1619,6 +1644,9 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/worker-mark-stale'] =
             createEndpoint(handleTestWorkerMarkStaleHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/worker-cache-clear'] =
+            createEndpoint(handleTestWorkerCacheClearHttpRequest);
 
         // File-status side-effect trigger (dev-only)
         Zotero.Server.Endpoints['/beaver/test/file-status'] =

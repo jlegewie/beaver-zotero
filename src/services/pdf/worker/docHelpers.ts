@@ -143,6 +143,17 @@ export async function openDocSafe(pdfData: Uint8Array | ArrayBuffer): Promise<Do
 }
 
 /**
+ * Alias for `openDocSafe` re-exported for the doc cache (`./docCache.ts`).
+ *
+ * The two names exist so call sites read intent: ops that participate in the
+ * cache go through `acquireDoc` / `releaseDoc`, which internally calls
+ * `openDocUncached` on a miss. Direct callers of `openDocSafe` keep
+ * exclusive ownership of the returned doc and are responsible for
+ * `doc.destroy()` themselves — never mix `openDocSafe` with `releaseDoc`.
+ */
+export const openDocUncached = openDocSafe;
+
+/**
  * Extract a single page's structured-text JSON. Mirrors
  * `MuPDFService.extractRawPage(pageIndex, options)` exactly — including the
  * `includeImages` switch to STRUCTURED_TEXT_OPTIONS_WITH_IMAGES.

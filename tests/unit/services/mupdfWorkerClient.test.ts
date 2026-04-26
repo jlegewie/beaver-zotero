@@ -738,6 +738,126 @@ describe('MuPDFWorkerClient', () => {
         });
     });
 
+    describe('doc cache RPCs', () => {
+        it('getCacheStats returns null when no worker has spawned', async () => {
+            const client = getMuPDFWorkerClient();
+            // Fresh client, no prior op — probeLiveWorker should return null
+            // and getCacheStats must NOT spawn a worker.
+            const stats = await client.getCacheStats();
+            expect(stats).toBeNull();
+            expect(MockWorker.instances.length).toBe(0);
+        });
+
+        it('clearWorkerCacheForTest is a no-op when no worker exists', async () => {
+            const client = getMuPDFWorkerClient();
+            const result = await client.clearWorkerCacheForTest();
+            expect(result).toBeNull();
+            expect(MockWorker.instances.length).toBe(0);
+        });
+
+        it('getCacheStats round-trips __cacheStats without growing dispatchCounts', async () => {
+            const client = getMuPDFWorkerClient();
+            // Spawn a worker via a real op so we have something to probe.
+            const seed = client.getPageCount(new Uint8Array([1]));
+            MockWorker.instances[0].replyToLast({ ok: true, result: { count: 1 } });
+            await seed;
+
+            const before = client.getStats();
+            expect(before.dispatchCounts.getPageCount).toBe(1);
+
+            const cacheReply = {
+                entries: 0,
+                totalBytes: 0,
+                hits: 0,
+                misses: 0,
+                evictions: 0,
+                ttlMs: 30_000,
+                maxEntries: 3,
+                maxBytes: 200 * 1024 * 1024,
+                cryptoUsable: true,
+            };
+            const promise = client.getCacheStats();
+            MockWorker.instances[0].replyToLast({ ok: true, result: cacheReply });
+            await expect(promise).resolves.toEqual(cacheReply);
+
+            const after = client.getStats();
+            // __cacheStats must NOT pollute dispatchCounts.
+            expect(after.dispatchCounts).toEqual(before.dispatchCounts);
+            // Verify the wire op is __cacheStats, not 'getCacheStats' or similar.
+            const lastPosted = MockWorker.instances[0].posted[
+                MockWorker.instances[0].posted.length - 1
+            ];
+            expect((lastPosted.message as { op: string }).op).toBe('__cacheStats');
+        });
+
+        it('clearWorkerCacheForTest sends __cacheClear with resetCounters: true by default', async () => {
+            const client = getMuPDFWorkerClient();
+            const seed = client.getPageCount(new Uint8Array([1]));
+            MockWorker.instances[0].replyToLast({ ok: true, result: { count: 1 } });
+            await seed;
+
+            const before = client.getStats();
+            const promise = client.clearWorkerCacheForTest();
+            MockWorker.instances[0].replyToLast({
+                ok: true,
+                result: {
+                    entries: 0,
+                    totalBytes: 0,
+                    hits: 0,
+                    misses: 0,
+                    evictions: 0,
+                    ttlMs: 30_000,
+                    maxEntries: 3,
+                    maxBytes: 200 * 1024 * 1024,
+                    cryptoUsable: true,
+                },
+            });
+            await promise;
+
+            const after = client.getStats();
+            // __cacheClear must NOT pollute dispatchCounts either.
+            expect(after.dispatchCounts).toEqual(before.dispatchCounts);
+            const lastPosted = MockWorker.instances[0].posted[
+                MockWorker.instances[0].posted.length - 1
+            ];
+            expect(lastPosted.message).toMatchObject({
+                op: '__cacheClear',
+                args: { resetCounters: true },
+            });
+        });
+
+        it('clearWorkerCacheForTest forwards { resetCounters: false }', async () => {
+            const client = getMuPDFWorkerClient();
+            const seed = client.getPageCount(new Uint8Array([1]));
+            MockWorker.instances[0].replyToLast({ ok: true, result: { count: 1 } });
+            await seed;
+
+            const promise = client.clearWorkerCacheForTest({ resetCounters: false });
+            MockWorker.instances[0].replyToLast({
+                ok: true,
+                result: {
+                    entries: 0,
+                    totalBytes: 0,
+                    hits: 5,
+                    misses: 7,
+                    evictions: 1,
+                    ttlMs: 30_000,
+                    maxEntries: 3,
+                    maxBytes: 200 * 1024 * 1024,
+                    cryptoUsable: true,
+                },
+            });
+            await promise;
+            const lastPosted = MockWorker.instances[0].posted[
+                MockWorker.instances[0].posted.length - 1
+            ];
+            expect(lastPosted.message).toMatchObject({
+                op: '__cacheClear',
+                args: { resetCounters: false },
+            });
+        });
+    });
+
     describe('extractSentenceBBoxes', () => {
         it('round-trips a PageSentenceBBoxResult', async () => {
             const client = getMuPDFWorkerClient();

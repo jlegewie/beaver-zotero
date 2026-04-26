@@ -76,6 +76,24 @@ interface WorkerLogMessage {
 type WorkerReply = WorkerSuccessReply | WorkerFailureReply | WorkerLogMessage;
 
 /**
+ * Snapshot of the worker-side document cache. Mirrors the `CacheStats` type
+ * declared inside `src/services/pdf/worker/docCache.ts` so the wire shape
+ * stays explicit on both sides.
+ */
+export interface MuPDFWorkerCacheStats {
+    entries: number;
+    totalBytes: number;
+    hits: number;
+    misses: number;
+    evictions: number;
+    ttlMs: number;
+    maxEntries: number;
+    maxBytes: number;
+    /** null until the worker has run a cache lookup (lazy feature-detect). */
+    cryptoUsable: boolean | null;
+}
+
+/**
  * Sentinel rejection thrown when the worker dies mid-flight. Used to drive
  * a single transparent retry inside `call()`.
  */
@@ -619,6 +637,106 @@ export class MuPDFWorkerClient {
      */
     markStaleForTest(reason = "test"): void {
         this.markStale(reason);
+    }
+
+    /**
+     * Snapshot of the worker-side document cache. Returns null when there is
+     * no live worker — this method NEVER spawns one, so reading stats from a
+     * fresh client (or after `markStale`/`dispose`) is non-mutating.
+     *
+     * Stale-window detection: if the existing worker was spawned for a
+     * different main window, mark it stale (so the next real op respawns
+     * cleanly) and return null without RPCing into a doomed worker.
+     *
+     * Uses the uncounted dispatch path so introspection ops do not pollute
+     * `dispatchCounts` (manual-test baselines depend on that).
+     */
+    async getCacheStats(): Promise<MuPDFWorkerCacheStats | null> {
+        const worker = this.probeLiveWorker();
+        if (!worker) return null;
+        try {
+            return await this.callUncounted<MuPDFWorkerCacheStats>(
+                worker,
+                "__cacheStats",
+                {},
+            );
+        } catch (e) {
+            logger(`[MuPDFWorkerClient] getCacheStats failed: ${e}`, 2);
+            return null;
+        }
+    }
+
+    /**
+     * Test-only: clear the worker-side document cache. No-op when there is
+     * no live worker. By default also resets the cache hit/miss/eviction
+     * counters so live tests can assert exact values.
+     *
+     * Pass `{ resetCounters: false }` to keep counter history (useful when
+     * the caller wants to inspect the running totals).
+     */
+    async clearWorkerCacheForTest(
+        opts: { resetCounters?: boolean } = {},
+    ): Promise<MuPDFWorkerCacheStats | null> {
+        const worker = this.probeLiveWorker();
+        if (!worker) return null;
+        try {
+            return await this.callUncounted<MuPDFWorkerCacheStats>(
+                worker,
+                "__cacheClear",
+                { resetCounters: opts.resetCounters !== false },
+            );
+        } catch (e) {
+            logger(`[MuPDFWorkerClient] clearWorkerCacheForTest failed: ${e}`, 2);
+            return null;
+        }
+    }
+
+    /**
+     * Probe `this.worker` without spawning one. If the existing worker was
+     * spawned for a different main window, mark it stale (so the next real
+     * op respawns cleanly) and return null. Otherwise return the live
+     * worker, or null when none exists.
+     */
+    private probeLiveWorker(): Worker | null {
+        if (this.disposed) return null;
+        const w = this.worker;
+        if (!w) return null;
+        const mainWindow = (Zotero.getMainWindow?.() ?? null) as Window | null;
+        if (
+            mainWindow &&
+            this.spawnedFromWindowInternal &&
+            this.spawnedFromWindowInternal !== mainWindow
+        ) {
+            this.markStale("stale window during introspection RPC");
+            return null;
+        }
+        return w;
+    }
+
+    /**
+     * Dispatch an introspection op against an already-validated worker
+     * without incrementing `dispatchCounts` and without the stale-worker
+     * retry that `call()` performs. Returns the worker's `result` payload.
+     */
+    private callUncounted<T>(
+        worker: Worker,
+        op: string,
+        args: Record<string, unknown>,
+    ): Promise<T> {
+        const id = this.nextId++;
+        return new Promise<T>((resolve, reject) => {
+            this.pending.set(id, { resolve, reject });
+            try {
+                worker.postMessage({ id, op, args });
+            } catch (e) {
+                this.pending.delete(id);
+                reject(
+                    new Error(
+                        `postMessage threw: ${e instanceof Error ? e.message : String(e)}`,
+                    ),
+                );
+            }
+        });
     }
 
     dispose(): void {
