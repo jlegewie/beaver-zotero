@@ -638,7 +638,7 @@ async function onShutdown(): Promise<void> {
         ztoolkit.unregisterAll();
         addon.data.dialog?.window?.close();
         addon.data.alive = false;
-        delete Zotero[addon.data.config.addonInstance as keyof typeof Zotero];
+        // Note: the singleton is removed from Zotero in addon/bootstrap.js's
     } catch (error) {
         ztoolkit.log("onShutdown: Error during cleanup:", error);
     }

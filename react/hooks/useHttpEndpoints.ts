@@ -1593,8 +1593,8 @@ function registerEndpoints(): boolean {
     Zotero.Server.Endpoints['/beaver/note/read'] =
         createEndpoint(handleReadNoteHttpRequest);
 
-    // Test-only endpoints (cache inspection/manipulation) — dev builds only
-    if (Zotero.Beaver?.data?.env === 'development') {
+    // Test-only endpoints (dev builds only)
+    if (process.env.NODE_ENV === 'development') {
         Zotero.Server.Endpoints['/beaver/test/ping'] =
             createEndpoint(handleTestPingHttpRequest);
 
