@@ -1,11 +1,6 @@
 /**
  * MuPDFWorkerClient — main-thread client for the MuPDF WASM worker.
  *
- * PR #2 surface: getPageCount, getPageCountAndLabels, extractRawPages,
- * extractRawPageDetailed, renderPagesToImages, searchPages. Multi-step
- * orchestration (extract, search-with-scoring, OCR analysis) still runs
- * main-thread until PR #3.
- *
  * Cross-bundle singleton: the client lives on `Zotero.__beaverMuPDFWorkerClient`
  * because both bundles (esbuild `src/` and webpack `react/`) import this file
  * transitively. Module-scope state would create one worker per bundle and
@@ -20,19 +15,44 @@ import {
     type PageImageOptions,
     type PageImageResult,
     type PDFPageSearchResult,
+    type ExtractionSettings,
+    type ExtractionResult,
+    type LineExtractionResult,
+    type OCRDetectionOptions,
+    type OCRDetectionResult,
+    type PDFSearchOptions,
+    type PDFSearchResult,
 } from "./types";
+import type {
+    PageSentenceBBoxOptions,
+    PageSentenceBBoxResult,
+} from "./ParagraphSentenceMapper";
 
-const WORKER_URL = "chrome://beaver/content/modules/mupdf-worker.mjs";
+const WORKER_URL = "chrome://beaver/content/scripts/mupdf-worker.js";
 
 interface PendingEntry {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
 }
 
+/**
+ * Optional payload carried by ExtractionError envelopes. Populated by the
+ * worker when an error needs to convey additional context (e.g. NO_TEXT_LAYER
+ * carries `ocrAnalysis`, `pageLabels`, `pageCount`). The wire field name
+ * `ocrAnalysis` is preserved for self-documenting JSON; the rehydrated
+ * ExtractionError instance stores it on `error.details` (per types.ts:599).
+ */
+interface WorkerExtractionErrorPayload {
+    ocrAnalysis?: unknown;
+    pageLabels?: Record<number, string>;
+    pageCount?: number;
+}
+
 interface WorkerErrorPayload {
     name?: string;
     code?: string;
     message?: string;
+    payload?: WorkerExtractionErrorPayload;
 }
 
 interface WorkerSuccessReply {
@@ -336,10 +356,6 @@ export class MuPDFWorkerClient {
     /**
      * Search a PDF for a literal phrase. Returns unscored, page-level hits.
      *
-     * Used by `PDFExtractor.search` once `SearchScorer` moves into the worker
-     * (PR #3). Not routed in PR #2 to avoid a two-open regression on the
-     * worker path.
-     *
      * Mirrors `MuPDFService.searchPages` semantics: invalid indices are
      * silently filtered.
      */
@@ -356,6 +372,104 @@ export class MuPDFWorkerClient {
             query,
             pageIndices,
             maxHitsPerPage,
+        });
+    }
+
+    /**
+     * Run the full extraction orchestration in the worker.
+     *
+     * Returns an `ExtractionResult` (or `LineExtractionResult` if
+     * `settings.useLineDetection` is true). Throws `ExtractionError(NO_TEXT_LAYER)`
+     * when `checkTextLayer` is enabled and the document needs OCR — the
+     * `ocrAnalysis`, `pageLabels`, and `pageCount` fields are preserved
+     * across the worker boundary via the payload-aware rehydrateError.
+     */
+    async extract(
+        pdfData: Uint8Array | ArrayBuffer,
+        settings?: ExtractionSettings,
+    ): Promise<ExtractionResult> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<ExtractionResult>("extract", {
+            pdfData: bytes,
+            settings,
+        });
+    }
+
+    /** Line-detection variant of `extract`. */
+    async extractByLines(
+        pdfData: Uint8Array | ArrayBuffer,
+        settings?: ExtractionSettings,
+    ): Promise<LineExtractionResult> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<LineExtractionResult>("extractByLines", {
+            pdfData: bytes,
+            settings,
+        });
+    }
+
+    /** Detailed OCR analysis. */
+    async analyzeOCRNeeds(
+        pdfData: Uint8Array | ArrayBuffer,
+        options?: OCRDetectionOptions,
+    ): Promise<OCRDetectionResult> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<OCRDetectionResult>("analyzeOCRNeeds", {
+            pdfData: bytes,
+            options,
+        });
+    }
+
+    /** Cheap text-layer presence check. */
+    async hasTextLayer(pdfData: Uint8Array | ArrayBuffer): Promise<boolean> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<boolean>("hasTextLayer", { pdfData: bytes });
+    }
+
+    /** Search + score within one round-trip. */
+    async search(
+        pdfData: Uint8Array | ArrayBuffer,
+        query: string,
+        options?: PDFSearchOptions,
+    ): Promise<PDFSearchResult> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<PDFSearchResult>("search", {
+            pdfData: bytes,
+            query,
+            options,
+        });
+    }
+
+    /**
+     * Sentence-bbox extraction with full mapper inside the worker.
+     *
+     * Callers that need a custom `options.splitter` (a function value, not
+     * structurally cloneable) MUST route through the PR #2 split path:
+     * call `extractRawPageDetailed` here, then run `extractPageSentenceBBoxes`
+     * main-thread. `PDFExtractor.extractSentenceBBoxes` does this branch.
+     * If a caller reaches this method directly with a `splitter`, we strip
+     * it at runtime to avoid `DataCloneError` from postMessage; the worker
+     * then uses the default regex splitter. The runtime strip is defensive
+     * — direct callers should branch like PDFExtractor does.
+     */
+    async extractSentenceBBoxes(
+        pdfData: Uint8Array | ArrayBuffer,
+        pageIndex: number,
+        options?: PageSentenceBBoxOptions,
+    ): Promise<PageSentenceBBoxResult> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        const { splitter: _drop, ...rest } = (options ?? {}) as PageSentenceBBoxOptions & {
+            splitter?: unknown;
+        };
+        return this.call<PageSentenceBBoxResult>("extractSentenceBBoxes", {
+            pdfData: bytes,
+            pageIndex,
+            options: rest,
         });
     }
 
@@ -379,9 +493,18 @@ export class MuPDFWorkerClient {
 function rehydrateError(payload: WorkerErrorPayload | undefined): Error {
     if (!payload) return new Error("Unknown worker error");
     if (payload.name === "ExtractionError" && payload.code) {
+        // ExtractionError stores OCR data on `details` (types.ts:599); the
+        // wire field name stays `payload.ocrAnalysis` for self-documenting
+        // JSON. For NO_TEXT_LAYER the payload carries `{ ocrAnalysis,
+        // pageLabels, pageCount }`. Other codes leave `payload` undefined →
+        // constructor defaults apply (backward-compatible with PR #1/#2).
+        const p = payload.payload;
         return new ExtractionError(
             payload.code as ExtractionErrorCode,
             payload.message ?? "",
+            p?.ocrAnalysis,
+            p?.pageLabels,
+            p?.pageCount,
         );
     }
     return new Error(payload.message ?? "Unknown worker error");

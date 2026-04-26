@@ -28,12 +28,20 @@ import {
     pdfExtractRawDetailed,
     pdfSearch,
     setPref,
+    pdfExtract,
+    pdfExtractByLines,
+    pdfHasTextLayer,
+    pdfAnalyzeOcr,
+    pdfSearchScored,
+    pdfSentenceBBoxes,
+    pdfRenderPage,
 } from '../helpers/cacheInspector';
 import {
     SMALL_PDF,
     NORMAL_PDF,
     ENCRYPTED_PDF,
     INVALID_PDF_FIXTURE,
+    NO_TEXT_PDF,
 } from '../helpers/fixtures';
 
 let available = false;
@@ -276,5 +284,284 @@ describe('mupdf.useWorker pref parity — PR #2 ops', () => {
                 }
             }
         }
+    });
+});
+
+const FLOAT_TOL = 0.001;
+
+describe('orchestration parity (mupdf.useWorker)', () => {
+    beforeEach(async (ctx) => {
+        skipIfNoZotero(ctx, available);
+        await setPref('mupdf.useWorker', false);
+    });
+
+    afterEach(async () => {
+        if (available) {
+            await setPref('mupdf.useWorker', false);
+        }
+    });
+
+    describe('extract', () => {
+        it('returns parity for page-level extraction on a healthy PDF', async () => {
+            const settings = { styleSampleSize: 0 };
+            const offRes = await pdfExtract(SMALL_PDF, { settings });
+            expect(offRes.ok).toBe(true);
+
+            await setPref('mupdf.useWorker', true);
+            const onRes = await pdfExtract(SMALL_PDF, { settings });
+            expect(onRes.ok).toBe(true);
+
+            const off = offRes.result;
+            const on = onRes.result;
+            expect(on.pages.length).toBe(off.pages.length);
+            for (let i = 0; i < off.pages.length; i++) {
+                expect(on.pages[i].index).toBe(off.pages[i].index);
+                expect(on.pages[i].width).toBe(off.pages[i].width);
+                expect(on.pages[i].height).toBe(off.pages[i].height);
+                expect(on.pages[i].content).toBe(off.pages[i].content);
+                expect(on.pages[i].blocks.length).toBe(off.pages[i].blocks.length);
+            }
+            expect(on.fullText).toBe(off.fullText);
+            expect(on.analysis.pageCount).toBe(off.analysis.pageCount);
+            expect(on.analysis.styleProfile.primaryBodyStyle).toEqual(
+                off.analysis.styleProfile.primaryBodyStyle,
+            );
+            // Timestamps differ; version is constant — cover the latter only.
+            expect(on.metadata.version).toBe(off.metadata.version);
+        });
+
+        it('returns NO_TEXT_LAYER with full payload on both paths', async () => {
+            const offRes = await pdfExtract(NO_TEXT_PDF);
+            expect(offRes.ok).toBe(false);
+            expect(offRes.error?.code).toBe('NO_TEXT_LAYER');
+            expect(offRes.error?.payload?.ocrAnalysis).toBeDefined();
+            expect(typeof offRes.error?.payload?.pageCount).toBe('number');
+
+            await setPref('mupdf.useWorker', true);
+            const onRes = await pdfExtract(NO_TEXT_PDF);
+            expect(onRes.ok).toBe(false);
+            expect(onRes.error?.code).toBe('NO_TEXT_LAYER');
+            expect(onRes.error?.payload?.ocrAnalysis).toBeDefined();
+
+            // Parity on the OCR analysis — the load-bearing case for
+            // payload-passing through rehydrateError.
+            const offOcr = offRes.error!.payload!.ocrAnalysis as any;
+            const onOcr = onRes.error!.payload!.ocrAnalysis as any;
+            expect(onOcr.needsOCR).toBe(offOcr.needsOCR);
+            expect(onOcr.primaryReason).toBe(offOcr.primaryReason);
+            expect(onRes.error!.payload!.pageCount).toBe(
+                offRes.error!.payload!.pageCount,
+            );
+        });
+    });
+
+    describe('extractByLines', () => {
+        it('returns parity for line-based extraction', async () => {
+            const settings = { styleSampleSize: 0, useLineDetection: true };
+            const offRes = await pdfExtractByLines(SMALL_PDF, { settings });
+            expect(offRes.ok).toBe(true);
+
+            await setPref('mupdf.useWorker', true);
+            const onRes = await pdfExtractByLines(SMALL_PDF, { settings });
+            expect(onRes.ok).toBe(true);
+
+            const off = offRes.result;
+            const on = onRes.result;
+            expect(on.pages.length).toBe(off.pages.length);
+            expect(on.fullText).toBe(off.fullText);
+            for (let i = 0; i < off.pages.length; i++) {
+                expect(on.pages[i].lines?.length).toBe(off.pages[i].lines?.length);
+            }
+        });
+    });
+
+    describe('hasTextLayer', () => {
+        it('returns true on both paths for a healthy PDF', async () => {
+            const offRes = await pdfHasTextLayer(SMALL_PDF);
+            expect(offRes.ok).toBe(true);
+            expect(offRes.hasTextLayer).toBe(true);
+
+            await setPref('mupdf.useWorker', true);
+            const onRes = await pdfHasTextLayer(SMALL_PDF);
+            expect(onRes.ok).toBe(true);
+            expect(onRes.hasTextLayer).toBe(offRes.hasTextLayer);
+        });
+
+        it('returns parity on a no-text-layer PDF', async () => {
+            const offRes = await pdfHasTextLayer(NO_TEXT_PDF);
+            await setPref('mupdf.useWorker', true);
+            const onRes = await pdfHasTextLayer(NO_TEXT_PDF);
+            expect(onRes.hasTextLayer).toBe(offRes.hasTextLayer);
+        });
+    });
+
+    describe('analyzeOCRNeeds', () => {
+        it('returns parity on a healthy PDF', async () => {
+            const offRes = await pdfAnalyzeOcr(SMALL_PDF);
+            expect(offRes.ok).toBe(true);
+            await setPref('mupdf.useWorker', true);
+            const onRes = await pdfAnalyzeOcr(SMALL_PDF);
+            expect(onRes.ok).toBe(true);
+
+            const off = offRes.result;
+            const on = onRes.result;
+            expect(on.needsOCR).toBe(off.needsOCR);
+            expect(on.primaryReason).toBe(off.primaryReason);
+            expect(Math.abs(on.issueRatio - off.issueRatio)).toBeLessThanOrEqual(
+                FLOAT_TOL,
+            );
+            expect(on.issueBreakdown).toEqual(off.issueBreakdown);
+            expect(on.sampledPages).toBe(off.sampledPages);
+            expect(on.totalPages).toBe(off.totalPages);
+        });
+
+        it('returns parity on a no-text-layer PDF', async () => {
+            const offRes = await pdfAnalyzeOcr(NO_TEXT_PDF);
+            expect(offRes.ok).toBe(true);
+            await setPref('mupdf.useWorker', true);
+            const onRes = await pdfAnalyzeOcr(NO_TEXT_PDF);
+            expect(onRes.ok).toBe(true);
+            expect(onRes.result.needsOCR).toBe(offRes.result.needsOCR);
+            expect(onRes.result.primaryReason).toBe(
+                offRes.result.primaryReason,
+            );
+        });
+    });
+
+    describe('search (scored)', () => {
+        it('returns the same totalMatches and per-page scores', async () => {
+            const offRes = await pdfSearchScored(SMALL_PDF, {
+                query: 'the',
+            });
+            expect(offRes.ok).toBe(true);
+            await setPref('mupdf.useWorker', true);
+            const onRes = await pdfSearchScored(SMALL_PDF, {
+                query: 'the',
+            });
+            expect(onRes.ok).toBe(true);
+
+            const off = offRes.result;
+            const on = onRes.result;
+            expect(on.totalMatches).toBe(off.totalMatches);
+            expect(on.pages.length).toBe(off.pages.length);
+            for (let i = 0; i < off.pages.length; i++) {
+                expect(on.pages[i].pageIndex).toBe(off.pages[i].pageIndex);
+                expect(on.pages[i].matchCount).toBe(off.pages[i].matchCount);
+                expect(
+                    Math.abs(on.pages[i].score - off.pages[i].score),
+                ).toBeLessThanOrEqual(FLOAT_TOL);
+            }
+        });
+
+        it('returns no-match early-return parity', async () => {
+            // Known-absent query: hits the `pageResults.length === 0`
+            // early-return branch on both paths.
+            const offRes = await pdfSearchScored(SMALL_PDF, {
+                query: 'zzzz_nonexistent_xyzzy',
+            });
+            expect(offRes.ok).toBe(true);
+            expect(offRes.result.totalMatches).toBe(0);
+            expect(offRes.result.pages).toEqual([]);
+
+            await setPref('mupdf.useWorker', true);
+            const onRes = await pdfSearchScored(SMALL_PDF, {
+                query: 'zzzz_nonexistent_xyzzy',
+            });
+            expect(onRes.ok).toBe(true);
+            expect(onRes.result.totalMatches).toBe(0);
+            expect(onRes.result.pages).toEqual([]);
+        });
+    });
+
+    describe('extractSentenceBBoxes', () => {
+        it('returns parity for the full mapper pipeline (one round-trip)', async () => {
+            const offRes = await pdfSentenceBBoxes(SMALL_PDF, { page_index: 0 });
+            expect(offRes.ok).toBe(true);
+            await setPref('mupdf.useWorker', true);
+            const onRes = await pdfSentenceBBoxes(SMALL_PDF, { page_index: 0 });
+            expect(onRes.ok).toBe(true);
+
+            const off = offRes.result;
+            const on = onRes.result;
+            expect(on.paragraphs.length).toBe(off.paragraphs.length);
+            expect(on.sentences.length).toBe(off.sentences.length);
+            expect(on.unmappedParagraphs).toBe(off.unmappedParagraphs);
+            expect(on.degradedParagraphs).toBe(off.degradedParagraphs);
+            for (let i = 0; i < off.sentences.length; i++) {
+                expect(on.sentences[i].text).toBe(off.sentences[i].text);
+                expect(on.sentences[i].bboxes.length).toBe(
+                    off.sentences[i].bboxes.length,
+                );
+            }
+        });
+
+        it('returns PAGE_OUT_OF_RANGE on both paths for an invalid index', async () => {
+            const offRes = await pdfSentenceBBoxes(SMALL_PDF, {
+                page_index: 99999,
+            });
+            expect(offRes.ok).toBe(false);
+            expect(offRes.error?.code).toBe('PAGE_OUT_OF_RANGE');
+
+            await setPref('mupdf.useWorker', true);
+            const onRes = await pdfSentenceBBoxes(SMALL_PDF, {
+                page_index: 99999,
+            });
+            expect(onRes.ok).toBe(false);
+            expect(onRes.error?.code).toBe('PAGE_OUT_OF_RANGE');
+        });
+    });
+
+    describe('renderPageToImage (carry-forward)', () => {
+        it('returns parity for a single-page render', async () => {
+            const offRes = await pdfRenderPage(SMALL_PDF, { page_index: 0 });
+            expect(offRes.ok).toBe(true);
+            await setPref('mupdf.useWorker', true);
+            const onRes = await pdfRenderPage(SMALL_PDF, { page_index: 0 });
+            expect(onRes.ok).toBe(true);
+
+            const off = offRes.result!;
+            const on = onRes.result!;
+            expect(on.pageIndex).toBe(off.pageIndex);
+            expect(on.format).toBe(off.format);
+            expect(on.width).toBe(off.width);
+            expect(on.height).toBe(off.height);
+            expect(on.scale).toBe(off.scale);
+            expect(on.dpi).toBe(off.dpi);
+            // Encoder allocator state can shift compression details across
+            // MuPDF instances — byte-identical hashes flake. ±5% tolerance
+            // is the PR #2 rationale carried forward.
+            const tol = Math.max(off.data_byte_length * 0.05, 16);
+            expect(
+                Math.abs(on.data_byte_length - off.data_byte_length),
+            ).toBeLessThanOrEqual(tol);
+        });
+
+        it('worker path returns PAGE_OUT_OF_RANGE for an invalid index', async () => {
+            // Intentional behavioral divergence (documented in PR #1/#2/#3):
+            // - Pref-on: worker validates pageIndex in `opRenderPageToImage`
+            //   and throws `ExtractionError(PAGE_OUT_OF_RANGE)`. Better
+            //   structured error for downstream callers.
+            // - Pref-off: main-thread `MuPDFService.renderPageToImage` calls
+            //   `loadPage` directly with no range check, throwing a generic
+            //   `Error("Failed to load page N")`. This bubbles through the
+            //   dev endpoint as a 500.
+            // Asserting parity here is wrong because the divergence is by
+            // design; the worker-side behavior is verified in isolation by
+            // the unit test in `tests/unit/services/mupdfWorkerClient.test.ts`
+            // (`renderPageToImage > rehydrates PAGE_OUT_OF_RANGE`). The live
+            // assertion below covers only the worker path.
+            //
+            // TODO(post-PR#3): close the divergence by adding the same
+            // `pageIndex` range check to `MuPDFService.renderPageToImage`
+            // and throwing `ExtractionError(PAGE_OUT_OF_RANGE)` instead of
+            // the generic loadPage error. Then promote this back to a
+            // both-paths parity assertion.
+            await setPref('mupdf.useWorker', true);
+            const onRes = await pdfRenderPage(SMALL_PDF, {
+                page_index: 99999,
+            });
+            expect(onRes.ok).toBe(false);
+            expect(onRes.error?.code).toBe('PAGE_OUT_OF_RANGE');
+        });
     });
 });

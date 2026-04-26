@@ -279,6 +279,109 @@ export async function pdfSearch(
     });
 }
 
+export interface PdfErrorEnvelope {
+    name: string;
+    code?: string;
+    message: string;
+    payload?: {
+        ocrAnalysis?: unknown;
+        pageLabels?: Record<number, string>;
+        pageCount?: number;
+    };
+}
+
+export interface PdfExtractResponse {
+    ok: boolean;
+    result?: any;
+    error?: PdfErrorEnvelope;
+}
+
+export async function pdfExtract(
+    attachment: AttachmentFixture,
+    body: { settings?: Record<string, unknown> } = {},
+): Promise<PdfExtractResponse> {
+    return post<PdfExtractResponse>('/beaver/test/pdf-extract', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+        ...body,
+    });
+}
+
+export async function pdfExtractByLines(
+    attachment: AttachmentFixture,
+    body: { settings?: Record<string, unknown> } = {},
+): Promise<PdfExtractResponse> {
+    return post<PdfExtractResponse>('/beaver/test/pdf-extract-by-lines', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+        ...body,
+    });
+}
+
+export async function pdfHasTextLayer(
+    attachment: AttachmentFixture,
+): Promise<{ ok: boolean; hasTextLayer?: boolean; error?: PdfErrorEnvelope }> {
+    return post('/beaver/test/pdf-has-text-layer', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+    });
+}
+
+export async function pdfAnalyzeOcr(
+    attachment: AttachmentFixture,
+    body: { options?: Record<string, unknown> } = {},
+): Promise<PdfExtractResponse> {
+    return post<PdfExtractResponse>('/beaver/test/pdf-analyze-ocr', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+        ...body,
+    });
+}
+
+export async function pdfSearchScored(
+    attachment: AttachmentFixture,
+    body: { query: string; options?: Record<string, unknown> },
+): Promise<PdfExtractResponse> {
+    return post<PdfExtractResponse>('/beaver/test/pdf-search-scored', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+        ...body,
+    });
+}
+
+export async function pdfSentenceBBoxes(
+    attachment: AttachmentFixture,
+    body: { page_index: number; options?: Record<string, unknown> },
+): Promise<PdfExtractResponse> {
+    return post<PdfExtractResponse>('/beaver/test/pdf-sentence-bboxes', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+        ...body,
+    });
+}
+
+/**
+ * Single-page render — exercises the dedicated `renderPageToImage` op.
+ * The plural endpoint silently filters invalid indices, so this is the
+ * only way to test PAGE_OUT_OF_RANGE parity.
+ */
+export interface PdfRenderPageResponse {
+    ok: boolean;
+    result?: PdfRenderPagePayload;
+    error?: PdfErrorEnvelope;
+}
+
+export async function pdfRenderPage(
+    attachment: AttachmentFixture,
+    body: { page_index: number; options?: PdfPageImageOptions },
+): Promise<PdfRenderPageResponse> {
+    return post<PdfRenderPageResponse>('/beaver/test/pdf-render-page', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+        ...body,
+    });
+}
+
 /** Decode a base64 image payload from `pdfRenderPages` for byte-level checks. */
 export function decodeRenderPayload(payload: PdfRenderPagePayload): Uint8Array {
     return base64ToUint8Array(payload.data_base64);

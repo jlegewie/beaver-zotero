@@ -155,6 +155,10 @@ export class PDFExtractor {
             return this.extractByLines(pdfData, settings);
         }
 
+        if (getPref("mupdf.useWorker")) {
+            return getMuPDFWorkerClient().extract(pdfData, settings);
+        }
+
         try {
             // 1. Open the document
             await this.mupdf.open(pdfData);
@@ -323,6 +327,13 @@ export class PDFExtractor {
         settings: ExtractionSettings = {}
     ): Promise<LineExtractionResult> {
         const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...settings, useLineDetection: true };
+
+        if (getPref("mupdf.useWorker")) {
+            return getMuPDFWorkerClient().extractByLines(pdfData, {
+                ...settings,
+                useLineDetection: true,
+            });
+        }
 
         try {
             // 1. Open the document
@@ -497,6 +508,9 @@ export class PDFExtractor {
      * Useful for determining if OCR is needed before full extraction.
      */
     async hasTextLayer(pdfData: Uint8Array | ArrayBuffer): Promise<boolean> {
+        if (getPref("mupdf.useWorker")) {
+            return getMuPDFWorkerClient().hasTextLayer(pdfData);
+        }
         try {
             await this.mupdf.open(pdfData);
             const analyzer = new DocumentAnalyzer(this.mupdf);
@@ -526,6 +540,9 @@ export class PDFExtractor {
         pdfData: Uint8Array | ArrayBuffer,
         options: OCRDetectionOptions = {}
     ): Promise<OCRDetectionResult> {
+        if (getPref("mupdf.useWorker")) {
+            return getMuPDFWorkerClient().analyzeOCRNeeds(pdfData, options);
+        }
         try {
             await this.mupdf.open(pdfData);
             const analyzer = new DocumentAnalyzer(this.mupdf);
@@ -627,12 +644,25 @@ export class PDFExtractor {
         options: PageSentenceBBoxOptions = {}
     ): Promise<PageSentenceBBoxResult> {
         if (getPref("mupdf.useWorker")) {
-            // Worker validates pageIndex itself and throws PAGE_OUT_OF_RANGE.
-            const detailed = await getMuPDFWorkerClient().extractRawPageDetailed(
+            // Custom splitter is a function — not structurally cloneable
+            // across the worker boundary. Fall back to the PR #2 split
+            // routing: detailed page in the worker, mapper main-thread.
+            // Preserves the documented `options.splitter` API.
+            if (options.splitter) {
+                const detailed = await getMuPDFWorkerClient().extractRawPageDetailed(
+                    pdfData,
+                    pageIndex,
+                );
+                return extractPageSentenceBBoxes(detailed, options);
+            }
+            // Default splitter — full mapper runs in the worker (single
+            // round-trip). Worker validates pageIndex and throws
+            // PAGE_OUT_OF_RANGE.
+            return getMuPDFWorkerClient().extractSentenceBBoxes(
                 pdfData,
                 pageIndex,
+                options,
             );
-            return extractPageSentenceBBoxes(detailed, options);
         }
         try {
             await this.mupdf.open(pdfData);
@@ -766,6 +796,11 @@ export class PDFExtractor {
         query: string,
         options: PDFSearchOptions = {}
     ): Promise<PDFSearchResult> {
+        if (getPref("mupdf.useWorker")) {
+            // search + score within one worker round-trip.
+            return getMuPDFWorkerClient().search(pdfData, query, options);
+        }
+
         const startTime = Date.now();
         const opts = { ...DEFAULT_PDF_SEARCH_OPTIONS, ...options };
         const scoringOpts = { ...DEFAULT_SEARCH_SCORING_OPTIONS, ...opts.scoring };

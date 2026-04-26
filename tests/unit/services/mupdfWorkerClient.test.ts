@@ -382,4 +382,257 @@ describe('MuPDFWorkerClient', () => {
             });
         });
     });
+
+    // -----------------------------------------------------------------------
+    // PR #2 — renderPageToImage (carry-forward op; required so the TS port
+    // cannot silently regress the dedicated single-page render or its
+    // PAGE_OUT_OF_RANGE behavior).
+    // -----------------------------------------------------------------------
+
+    describe('renderPageToImage', () => {
+        it('round-trips a single PageImageResult', async () => {
+            const client = getMuPDFWorkerClient();
+            const buf = new Uint8Array([1, 2, 3]);
+
+            const promise = client.renderPageToImage(buf, 0);
+            const worker = MockWorker.instances[0];
+            const cannedBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+            const canned = {
+                pageIndex: 0,
+                data: cannedBytes,
+                format: 'png' as const,
+                width: 100,
+                height: 100,
+                scale: 1,
+                dpi: 72,
+            };
+            worker.replyToLast({ ok: true, result: canned });
+
+            await expect(promise).resolves.toEqual(canned);
+
+            const [message, transfer] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            expect(message).toMatchObject({
+                op: 'renderPageToImage',
+                args: { pageIndex: 0 },
+            });
+            expect(transfer).toBeUndefined();
+        });
+
+        it('rehydrates PAGE_OUT_OF_RANGE for an out-of-bounds index', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.renderPageToImage(new Uint8Array([0]), 99999);
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: 'PAGE_OUT_OF_RANGE',
+                    message: 'Page index 99999 out of range (0..0)',
+                },
+            });
+            await expect(promise).rejects.toBeInstanceOf(ExtractionError);
+            await expect(promise).rejects.toMatchObject({
+                code: ExtractionErrorCode.PAGE_OUT_OF_RANGE,
+                name: 'ExtractionError',
+            });
+        });
+    });
+
+    describe('extract', () => {
+        it('round-trips an ExtractionResult', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.extract(new Uint8Array([1, 2]));
+            const worker = MockWorker.instances[0];
+            const canned = {
+                pages: [],
+                analysis: { pageCount: 0, hasTextLayer: true, styleProfile: {}, marginAnalysis: {} },
+                fullText: '',
+                pageLabels: undefined,
+                metadata: { extractedAt: 'now', version: '2.0.0', settings: {} },
+            };
+            worker.replyToLast({ ok: true, result: canned });
+            await expect(promise).resolves.toEqual(canned);
+
+            const [message, transfer] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            expect(message).toMatchObject({ op: 'extract' });
+            expect(transfer).toBeUndefined();
+        });
+
+        it('rehydrates NO_TEXT_LAYER with the full payload (ocrAnalysis/pageLabels/pageCount)', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.extract(new Uint8Array([0]));
+            const worker = MockWorker.instances[0];
+            const ocrAnalysis = {
+                needsOCR: true,
+                primaryReason: 'image_only',
+                issueRatio: 0.95,
+            };
+            const pageLabels = { 0: 'i', 1: '1' };
+            worker.replyToLast({
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: 'NO_TEXT_LAYER',
+                    message: 'needs OCR',
+                    payload: {
+                        ocrAnalysis,
+                        pageLabels,
+                        pageCount: 50,
+                    },
+                },
+            });
+
+            await expect(promise).rejects.toBeInstanceOf(ExtractionError);
+            await expect(promise).rejects.toMatchObject({
+                name: 'ExtractionError',
+                code: ExtractionErrorCode.NO_TEXT_LAYER,
+                message: 'needs OCR',
+                // ExtractionError stores OCR data on `details` (per types.ts:599),
+                // even though the wire field is named `payload.ocrAnalysis`.
+                details: ocrAnalysis,
+                pageLabels,
+                pageCount: 50,
+            });
+        });
+
+        it('does not transfer the input buffer', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.extract(new Uint8Array([1, 2, 3, 4]));
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({ ok: true, result: { pages: [] } });
+            await promise;
+            const [, transfer] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            expect(transfer).toBeUndefined();
+        });
+    });
+
+    describe('extractByLines', () => {
+        it('round-trips a LineExtractionResult', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.extractByLines(new Uint8Array([1]));
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: true,
+                result: { pages: [], analysis: {}, fullText: '', metadata: {} },
+            });
+            await promise;
+            const [message] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            expect(message).toMatchObject({ op: 'extractByLines' });
+        });
+    });
+
+    describe('hasTextLayer', () => {
+        it('round-trips a boolean', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.hasTextLayer(new Uint8Array([1]));
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({ ok: true, result: true });
+            await expect(promise).resolves.toBe(true);
+        });
+    });
+
+    describe('analyzeOCRNeeds', () => {
+        it('round-trips an OCRDetectionResult', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.analyzeOCRNeeds(new Uint8Array([1]), {});
+            const worker = MockWorker.instances[0];
+            const canned = {
+                needsOCR: false,
+                primaryReason: 'sufficient_text',
+                issueRatio: 0,
+                issueBreakdown: {},
+                pageAnalyses: [],
+                sampledPages: 5,
+                totalPages: 5,
+            };
+            worker.replyToLast({ ok: true, result: canned });
+            await expect(promise).resolves.toEqual(canned);
+        });
+    });
+
+    describe('search (scored)', () => {
+        it('round-trips a PDFSearchResult', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.search(new Uint8Array([1]), 'foo');
+            const worker = MockWorker.instances[0];
+            const canned = {
+                query: 'foo',
+                totalMatches: 0,
+                pagesWithMatches: 0,
+                totalPages: 5,
+                pages: [],
+                metadata: { searchedAt: 'now', durationMs: 1, options: {}, scoringOptions: {} },
+            };
+            worker.replyToLast({ ok: true, result: canned });
+            await expect(promise).resolves.toEqual(canned);
+
+            const [message] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            expect(message).toMatchObject({ op: 'search', args: { query: 'foo' } });
+        });
+    });
+
+    describe('extractSentenceBBoxes', () => {
+        it('round-trips a PageSentenceBBoxResult', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.extractSentenceBBoxes(new Uint8Array([1]), 0);
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: true,
+                result: {
+                    paragraphs: [],
+                    sentences: [],
+                    unmappedParagraphs: 0,
+                    degradedParagraphs: 0,
+                },
+            });
+            await promise;
+            const [message] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            expect(message).toMatchObject({
+                op: 'extractSentenceBBoxes',
+                args: { pageIndex: 0 },
+            });
+        });
+
+        it('strips a function-typed splitter at runtime (would crash structured-clone)', async () => {
+            const client = getMuPDFWorkerClient();
+            const splitter = () => [];
+            const promise = client.extractSentenceBBoxes(
+                new Uint8Array([1]),
+                0,
+                { splitter } as any,
+            );
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: true,
+                result: { paragraphs: [], sentences: [] },
+            });
+            await promise;
+
+            const [message] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            // The wrapper must drop `splitter` before postMessage so a
+            // function-typed value never reaches structured-clone.
+            expect(message.args.options).not.toHaveProperty('splitter');
+        });
+    });
 });

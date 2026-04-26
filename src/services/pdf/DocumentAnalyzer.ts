@@ -8,7 +8,6 @@
  * - Image coverage detection
  */
 
-import type { MuPDFService } from "./MuPDFService";
 import type {
     RawPageData,
     RawBlock,
@@ -19,6 +18,17 @@ import type {
     OCRIssueReason,
 } from "./types";
 import { DEFAULT_OCR_DETECTION_OPTIONS, bboxToTuple } from "./types";
+
+/**
+ * Minimal interface that DocumentAnalyzer needs — implemented by
+ * `MuPDFService` (main thread) and by a worker-side adapter that wraps an
+ * open `Document`. Decouples the analyzer from the MuPDF lifecycle so the
+ * same code runs in both contexts.
+ */
+export interface RawPageProvider {
+    getPageCount(): number;
+    extractRawPage(pageIndex: number, options?: { includeImages?: boolean }): RawPageData;
+}
 
 /** Legacy options interface for backward compatibility */
 export interface TextLayerCheckOptions {
@@ -362,7 +372,7 @@ function analyzePage(
  * Document Analyzer class for document-wide analysis.
  */
 export class DocumentAnalyzer {
-    constructor(private mupdf: MuPDFService) {}
+    constructor(private mupdf: RawPageProvider) {}
 
     /**
      * Perform detailed OCR detection analysis.

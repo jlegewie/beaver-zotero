@@ -128,6 +128,14 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-extract-raw',
     '/beaver/test/pdf-extract-raw-detailed',
     '/beaver/test/pdf-search',
+    // orchestration parity endpoints
+    '/beaver/test/pdf-extract',
+    '/beaver/test/pdf-extract-by-lines',
+    '/beaver/test/pdf-has-text-layer',
+    '/beaver/test/pdf-analyze-ocr',
+    '/beaver/test/pdf-search-scored',
+    '/beaver/test/pdf-sentence-bboxes',
+    '/beaver/test/pdf-render-page',
     '/beaver/test/set-pref',
 ] as const;
 
@@ -1227,9 +1235,8 @@ async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
 /**
  * Dev-only PDF search endpoint — primitive level (no SearchScorer).
  *
- * `PDFExtractor.search` always runs the scorer pipeline on the main thread
- * in PR #2 (search migration is deferred to PR #3). To exercise the worker
- * primitive in isolation, this endpoint bypasses `PDFExtractor`:
+ * To exercise the worker primitive in isolation, this endpoint bypasses
+ * `PDFExtractor`:
  *   pref on  → `getMuPDFWorkerClient().searchPages`
  *   pref off → bare `MuPDFService` open + searchPages + close
  */
@@ -1298,6 +1305,143 @@ async function handleTestPdfSearchHttpRequest(request: any) {
         }
         throw e;
     }
+}
+
+/**
+ * Helper that wraps a PDFExtractor call and serializes ExtractionError
+ * (including the `details` payload) into the structured wire shape used by
+ * live parity tests.
+ */
+async function runPdfExtractorCall<T>(
+    request: any,
+    fn: (pdfData: Uint8Array) => Promise<T>,
+    onSuccess: (result: T) => any,
+): Promise<any> {
+    const { ExtractionError } = await import('../../src/services/pdf');
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    try {
+        const result = await fn(loaded.pdfData);
+        return onSuccess(result);
+    } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                    // ExtractionError stores OCR data on `e.details`
+                    // (types.ts:599); the wire field is named `ocrAnalysis`
+                    // for self-documenting JSON. Live tests assert the
+                    // wire shape; the rehydrated client-side instance
+                    // carries the same data on `error.details`.
+                    payload: {
+                        ocrAnalysis: e.details,
+                        pageLabels: e.pageLabels,
+                        pageCount: e.pageCount,
+                    },
+                },
+            };
+        }
+        throw e;
+    }
+}
+
+/** Dev-only `extract` parity endpoint. Routes through PDFExtractor. */
+async function handleTestPdfExtractHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    const settings = request?.settings || {};
+    return runPdfExtractorCall(
+        request,
+        (pdfData) => new PDFExtractor().extract(pdfData, settings),
+        (result) => ({ ok: true, result }),
+    );
+}
+
+/** Dev-only `extractByLines` parity endpoint. */
+async function handleTestPdfExtractByLinesHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    const settings = request?.settings || {};
+    return runPdfExtractorCall(
+        request,
+        (pdfData) => new PDFExtractor().extractByLines(pdfData, settings),
+        (result) => ({ ok: true, result }),
+    );
+}
+
+/** Dev-only `hasTextLayer` parity endpoint. */
+async function handleTestPdfHasTextLayerHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    return runPdfExtractorCall(
+        request,
+        (pdfData) => new PDFExtractor().hasTextLayer(pdfData),
+        (hasTextLayer) => ({ ok: true, hasTextLayer }),
+    );
+}
+
+/** Dev-only `analyzeOCRNeeds` parity endpoint. */
+async function handleTestPdfAnalyzeOcrHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    const options = request?.options || {};
+    return runPdfExtractorCall(
+        request,
+        (pdfData) => new PDFExtractor().analyzeOCRNeeds(pdfData, options),
+        (result) => ({ ok: true, result }),
+    );
+}
+
+/** Dev-only scored-search parity endpoint. */
+async function handleTestPdfSearchScoredHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    const query = String(request?.query ?? '');
+    const options = request?.options || {};
+    return runPdfExtractorCall(
+        request,
+        (pdfData) => new PDFExtractor().search(pdfData, query, options),
+        (result) => ({ ok: true, result }),
+    );
+}
+
+/** Dev-only `extractSentenceBBoxes` parity endpoint. */
+async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    const pageIndex = Number(request?.page_index);
+    const options = request?.options || {};
+    return runPdfExtractorCall(
+        request,
+        (pdfData) =>
+            new PDFExtractor().extractSentenceBBoxes(pdfData, pageIndex, options),
+        (result) => ({ ok: true, result }),
+    );
+}
+
+/**
+ * Dev-only single-page render endpoint — required for the carry-forward
+ * `renderPageToImage` PAGE_OUT_OF_RANGE parity case (the plural endpoint
+ * silently filters invalid indices and cannot exercise the throw).
+ */
+async function handleTestPdfRenderPageHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    const pageIndex = Number(request?.page_index);
+    const options = request?.options || {};
+    return runPdfExtractorCall(
+        request,
+        (pdfData) => new PDFExtractor().renderPageToImage(pdfData, pageIndex, options),
+        (r) => ({
+            ok: true,
+            result: {
+                pageIndex: r.pageIndex,
+                format: r.format,
+                width: r.width,
+                height: r.height,
+                scale: r.scale,
+                dpi: r.dpi,
+                data_base64: uint8ToBase64ForTest(r.data),
+                data_byte_length: r.data.byteLength,
+            },
+        }),
+    );
 }
 
 /**
@@ -1447,6 +1591,28 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/pdf-search'] =
             createEndpoint(handleTestPdfSearchHttpRequest);
+
+        // orchestration parity endpoints
+        Zotero.Server.Endpoints['/beaver/test/pdf-extract'] =
+            createEndpoint(handleTestPdfExtractHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-extract-by-lines'] =
+            createEndpoint(handleTestPdfExtractByLinesHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-has-text-layer'] =
+            createEndpoint(handleTestPdfHasTextLayerHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-analyze-ocr'] =
+            createEndpoint(handleTestPdfAnalyzeOcrHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-search-scored'] =
+            createEndpoint(handleTestPdfSearchScoredHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-sentence-bboxes'] =
+            createEndpoint(handleTestPdfSentenceBBoxesHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-render-page'] =
+            createEndpoint(handleTestPdfRenderPageHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/set-pref'] =
             createEndpoint(handleTestSetPrefHttpRequest);
