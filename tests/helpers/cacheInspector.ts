@@ -89,19 +89,6 @@ export async function pdfPageCountFromBytes(
     });
 }
 
-export type SupportedPrefKey = 'mupdf.useWorker';
-
-export async function setPref(
-    key: SupportedPrefKey,
-    value: boolean,
-): Promise<void> {
-    const res = await post<{ ok?: boolean; error?: string }>(
-        '/beaver/test/set-pref',
-        { key, value },
-    );
-    if (res.error) throw new Error(res.error);
-}
-
 function bufferToBase64(bytes: Uint8Array): string {
     let binary = '';
     const chunk = 0x8000;

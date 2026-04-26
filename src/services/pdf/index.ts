@@ -1,52 +1,25 @@
 /**
  * PDF Extraction Service
  *
- * Main entry point for PDF text extraction.
- * Orchestrates the extraction pipeline:
- *   1. Open document with MuPDFService
- *   2. Extract raw structured text (single pass)
- *   3. Analyze document (text layer, styles, margins)
- *   4. Process pages with filtering
- *   5. Combine results
+ * High-level facade over the MuPDF worker. Every `PDFExtractor` method
+ * delegates to `getMuPDFWorkerClient()` so the heavy WASM work runs off the
+ * Zotero UI thread
  */
 
-import { MuPDFService, disposeMuPDF } from "./MuPDFService";
-import {
-    getMuPDFWorkerClient,
-    disposeMuPDFWorker,
-} from "./MuPDFWorkerClient";
-import { getPref } from "../../utils/prefs";
-import { DocumentAnalyzer } from "./DocumentAnalyzer";
-import { StyleAnalyzer } from "./StyleAnalyzer";
-import { MarginFilter } from "./MarginFilter";
-import { PageExtractor } from "./PageExtractor";
-import { detectColumns, logColumnDetection } from "./ColumnDetector";
-import { detectLinesOnPage, logLineDetection } from "./LineDetector";
-import type { PageLineResult } from "./LineDetector";
+import { getMuPDFWorkerClient } from "./MuPDFWorkerClient";
 import {
     ExtractionSettings,
     ExtractionResult,
     LineExtractionResult,
-    DocumentAnalysis,
-    ProcessedPage,
     RawDocumentData,
-    MarginRemovalResult,
-    ExtractionError,
-    ExtractionErrorCode,
-    DEFAULT_EXTRACTION_SETTINGS,
-    ExtractedLine,
     OCRDetectionOptions,
     OCRDetectionResult,
     PageImageOptions,
     PageImageResult,
-    DEFAULT_PAGE_IMAGE_OPTIONS,
     PDFSearchOptions,
     PDFSearchResult,
-    DEFAULT_PDF_SEARCH_OPTIONS,
-    SearchScoringOptions,
-    DEFAULT_SEARCH_SCORING_OPTIONS,
+    DEFAULT_EXTRACTION_SETTINGS,
 } from "./types";
-import { SearchScorer } from "./SearchScorer";
 import {
     extractPageSentenceBBoxes,
     type PageSentenceBBoxOptions,
@@ -61,6 +34,7 @@ export {
     getMuPDFWorkerClient,
     disposeMuPDFWorker,
 } from "./MuPDFWorkerClient";
+export { prewarmMuPDFWorker } from "./prewarm";
 export { DocumentAnalyzer } from "./DocumentAnalyzer";
 export type { TextLayerCheckOptions } from "./DocumentAnalyzer";
 export { StyleAnalyzer } from "./StyleAnalyzer";
@@ -123,6 +97,11 @@ export type {
 /**
  * PDFExtractor - High-level API for extracting text from PDFs.
  *
+ * Every method delegates to the shared MuPDF worker (see
+ * `getMuPDFWorkerClient()`). This class is a thin worker facade — for
+ * synchronous main-thread access (e.g. dev tooling like
+ * `extractionVisualizer.ts`), use `MuPDFService` directly.
+ *
  * Usage:
  * ```typescript
  * const extractor = new PDFExtractor();
@@ -131,12 +110,6 @@ export type {
  * ```
  */
 export class PDFExtractor {
-    private mupdf: MuPDFService;
-
-    constructor() {
-        this.mupdf = new MuPDFService();
-    }
-
     /**
      * Extract text from a PDF file.
      *
@@ -155,141 +128,7 @@ export class PDFExtractor {
             return this.extractByLines(pdfData, settings);
         }
 
-        if (getPref("mupdf.useWorker")) {
-            return getMuPDFWorkerClient().extract(pdfData, settings);
-        }
-
-        try {
-            // 1. Open the document
-            await this.mupdf.open(pdfData);
-            const docAnalyzer = new DocumentAnalyzer(this.mupdf);
-
-            // 2. Get page count and labels before OCR check (always available once opened)
-            const pageCount = docAnalyzer.getPageCount();
-            const pageLabels = this.mupdf.getAllPageLabels();
-
-            // 3. Check text layer if requested
-            if (opts.checkTextLayer) {
-                const ocrAnalysis = docAnalyzer.getDetailedOCRAnalysis({
-                    minTextPerPage: opts.minTextPerPage,
-                });
-
-                if (ocrAnalysis.needsOCR) {
-                    throw new ExtractionError(
-                        ExtractionErrorCode.NO_TEXT_LAYER,
-                        `Document may require OCR: ${ocrAnalysis.primaryReason} (${Math.round(ocrAnalysis.issueRatio * 100)}% of sampled pages have issues)`,
-                        ocrAnalysis,
-                        pageLabels,
-                        pageCount,
-                    );
-                }
-            }
-
-            // 4. Determine pages to extract
-            const pageIndices = opts.pages?.length
-                ? opts.pages.filter(i => i >= 0 && i < pageCount)
-                : undefined; // undefined = all pages
-
-            // 5. EXTRACTION PASS: Get all raw data in one pass
-            if (process.env.NODE_ENV === "development") {
-                console.log("[PDFExtractor] Starting extraction pass...");
-            }
-            const rawData = this.mupdf.extractRawPages(pageIndices);
-            if (process.env.NODE_ENV === "development") {
-                console.log(`[PDFExtractor] Extracted ${rawData.pages.length} pages`);
-            }
-
-            // 5. DOCUMENT ANALYSIS
-
-            // 5a. Style analysis
-            if (process.env.NODE_ENV === "development") {
-                console.log("[PDFExtractor] Analyzing styles...");
-            }
-            const styleAnalyzer = new StyleAnalyzer();
-            const styleProfile = styleAnalyzer.analyze(
-                rawData.pages,
-                4, // minChars
-                0.15, // thresholdPerc
-                opts.styleSampleSize
-            );
-            StyleAnalyzer.logStyleProfile(styleProfile);
-
-            // 5b. Margin analysis (smart filtering - collect elements)
-            if (process.env.NODE_ENV === "development") {
-                console.log("[PDFExtractor] Analyzing margins...");
-            }
-            const marginAnalysis = MarginFilter.collectMarginElements(
-                rawData.pages,
-                opts.marginZone
-            );
-
-            // 5c. Identify repeating elements for smart removal
-            if (process.env.NODE_ENV === "development") {
-                console.log("[PDFExtractor] Identifying repeating margin elements...");
-            }
-            const removalResult = MarginFilter.identifyElementsToRemove(
-                marginAnalysis,
-                opts.repeatThreshold,
-                opts.detectPageSequences
-            );
-            MarginFilter.logRemovalCandidates(removalResult);
-
-            // 6. PAGE PROCESSING: Process each page with smart filtering and column detection
-            if (process.env.NODE_ENV === "development") {
-                console.log("[PDFExtractor] Processing pages with smart margin removal and column detection...");
-            }
-            const pageExtractor = new PageExtractor({ styleProfile });
-
-            const pages: ProcessedPage[] = rawData.pages.map(rawPage => {
-                // Apply smart margin filtering
-                const filteredPage = MarginFilter.filterPageWithSmartRemoval(
-                    rawPage,
-                    opts.margins,
-                    opts.marginZone,
-                    removalResult
-                );
-
-                // Detect columns
-                const columnResult = detectColumns(filteredPage);
-                logColumnDetection(rawPage.pageIndex, columnResult);
-
-                // Extract page content using column detection for correct reading order
-                return pageExtractor.extractPageWithColumns(
-                    filteredPage,
-                    columnResult,
-                    true // include column bboxes in output
-                );
-            });
-
-            // 7. Combine results
-            const fullText = pages.map(p => p.content).join("\n\n");
-
-            const analysis: DocumentAnalysis = {
-                pageCount: rawData.pageCount,
-                hasTextLayer: true, // We checked earlier
-                styleProfile,
-                marginAnalysis,
-            };
-
-            if (process.env.NODE_ENV === "development") {
-                console.log("[PDFExtractor] Extraction complete!");
-                console.log(`[PDFExtractor] Total text length: ${fullText.length} chars`);
-            }
-
-            return {
-                pages,
-                analysis,
-                fullText,
-                pageLabels: Object.keys(pageLabels).length > 0 ? pageLabels : undefined,
-                metadata: {
-                    extractedAt: new Date().toISOString(),
-                    version: "2.0.0",
-                    settings: opts,
-                },
-            };
-        } finally {
-            this.mupdf.close();
-        }
+        return getMuPDFWorkerClient().extract(pdfData, settings);
     }
 
     /**
@@ -306,18 +145,18 @@ export class PDFExtractor {
 
     /**
      * Extract high-quality content by page using line detection.
-     * 
+     *
      * This method provides superior text extraction by:
      * - Detecting text lines within columns
      * - Preserving proper reading order
      * - Including line-level metadata (bbox, font size, column)
      * - Maintaining structural information
-     * 
+     *
      * Use this when you need:
      * - Precise text positioning
      * - Line-by-line processing
      * - High-fidelity text extraction for RAG/indexing
-     * 
+     *
      * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
      * @param settings - Extraction settings
      * @returns Line-based extraction result with detailed page content
@@ -326,181 +165,10 @@ export class PDFExtractor {
         pdfData: Uint8Array | ArrayBuffer,
         settings: ExtractionSettings = {}
     ): Promise<LineExtractionResult> {
-        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...settings, useLineDetection: true };
-
-        if (getPref("mupdf.useWorker")) {
-            return getMuPDFWorkerClient().extractByLines(pdfData, {
-                ...settings,
-                useLineDetection: true,
-            });
-        }
-
-        try {
-            // 1. Open the document
-            await this.mupdf.open(pdfData);
-            const docAnalyzer = new DocumentAnalyzer(this.mupdf);
-
-            // 2. Get page count and labels before OCR check (always available once opened)
-            const pageCount = docAnalyzer.getPageCount();
-            const pageLabels = this.mupdf.getAllPageLabels();
-
-            // 3. Check text layer if requested
-            if (opts.checkTextLayer) {
-                const ocrAnalysis = docAnalyzer.getDetailedOCRAnalysis({
-                    minTextPerPage: opts.minTextPerPage,
-                });
-
-                if (ocrAnalysis.needsOCR) {
-                    throw new ExtractionError(
-                        ExtractionErrorCode.NO_TEXT_LAYER,
-                        `Document may require OCR: ${ocrAnalysis.primaryReason} (${Math.round(ocrAnalysis.issueRatio * 100)}% of sampled pages have issues)`,
-                        ocrAnalysis,
-                        pageLabels,
-                        pageCount,
-                    );
-                }
-            }
-
-            // 4. Determine pages to extract
-            const pageIndices = opts.pages?.length
-                ? opts.pages.filter(i => i >= 0 && i < pageCount)
-                : undefined; // undefined = all pages
-
-            // 5. EXTRACTION PASS: Get all raw data in one pass
-            if (process.env.NODE_ENV === "development") {
-                console.log("[PDFExtractor] Starting line-based extraction pass...");
-            }
-            const rawData = this.mupdf.extractRawPages(pageIndices);
-            if (process.env.NODE_ENV === "development") {
-                console.log(`[PDFExtractor] Extracted ${rawData.pages.length} pages`);
-            }
-
-            // 5. DOCUMENT ANALYSIS
-
-            // 5a. Style analysis
-            if (process.env.NODE_ENV === "development") {
-                console.log("[PDFExtractor] Analyzing styles...");
-            }
-            const styleAnalyzer = new StyleAnalyzer();
-            const styleProfile = styleAnalyzer.analyze(
-                rawData.pages,
-                4, // minChars
-                0.15, // thresholdPerc
-                opts.styleSampleSize
-            );
-            StyleAnalyzer.logStyleProfile(styleProfile);
-
-            // 5b. Margin analysis (smart filtering - collect elements)
-            if (process.env.NODE_ENV === "development") {
-                console.log("[PDFExtractor] Analyzing margins...");
-            }
-            const marginAnalysis = MarginFilter.collectMarginElements(
-                rawData.pages,
-                opts.marginZone
-            );
-
-            // 5c. Identify repeating elements for smart removal
-            if (process.env.NODE_ENV === "development") {
-                console.log("[PDFExtractor] Identifying repeating margin elements...");
-            }
-            const removalResult = MarginFilter.identifyElementsToRemove(
-                marginAnalysis,
-                opts.repeatThreshold,
-                opts.detectPageSequences
-            );
-            MarginFilter.logRemovalCandidates(removalResult);
-
-            // 6. PAGE PROCESSING: Process each page with line detection
-            if (process.env.NODE_ENV === "development") {
-                console.log("[PDFExtractor] Processing pages with line detection...");
-            }
-            const pages: ProcessedPage[] = [];
-
-            for (const rawPage of rawData.pages) {
-                // Apply smart margin filtering
-                const filteredPage = MarginFilter.filterPageWithSmartRemoval(
-                    rawPage,
-                    opts.margins,
-                    opts.marginZone,
-                    removalResult
-                );
-
-                // Detect columns
-                const columnResult = detectColumns(filteredPage);
-                logColumnDetection(rawPage.pageIndex, columnResult);
-
-                // Detect lines within columns
-                const lineResult: PageLineResult = detectLinesOnPage(
-                    filteredPage,
-                    columnResult.columns
-                );
-                logLineDetection(lineResult);
-
-                // Convert to ExtractedLine format
-                const extractedLines: ExtractedLine[] = [];
-                for (const colResult of lineResult.columnResults) {
-                    for (const line of colResult.lines) {
-                        extractedLines.push({
-                            text: line.text,
-                            bbox: line.bbox,
-                            fontSize: line.fontSize,
-                            columnIndex: colResult.columnIndex,
-                        });
-                    }
-                }
-
-                // Build page content from lines
-                const content = extractedLines.map(line => line.text).join("\n");
-
-                // Create processed page
-                const processedPage: ProcessedPage = {
-                    index: rawPage.pageIndex,
-                    label: rawPage.label,
-                    width: rawPage.width,
-                    height: rawPage.height,
-                    blocks: [], // Not populated for line-based extraction
-                    content,
-                    columns: columnResult.columns.map(col => ({
-                        l: col.x,
-                        t: col.y,
-                        r: col.x + col.w,
-                        b: col.y + col.h,
-                    })),
-                    lines: extractedLines,
-                };
-
-                pages.push(processedPage);
-            }
-
-            // 7. Combine results
-            const fullText = pages.map(p => p.content).join("\n\n");
-
-            const analysis: DocumentAnalysis = {
-                pageCount: rawData.pageCount,
-                hasTextLayer: true, // We checked earlier
-                styleProfile,
-                marginAnalysis,
-            };
-
-            if (process.env.NODE_ENV === "development") {
-                console.log("[PDFExtractor] Line-based extraction complete!");
-                console.log(`[PDFExtractor] Total text length: ${fullText.length} chars`);
-            }
-
-            return {
-                pages,
-                analysis,
-                fullText,
-                pageLabels: Object.keys(pageLabels).length > 0 ? pageLabels : undefined,
-                metadata: {
-                    extractedAt: new Date().toISOString(),
-                    version: "2.0.0",
-                    settings: opts,
-                },
-            };
-        } finally {
-            this.mupdf.close();
-        }
+        return getMuPDFWorkerClient().extractByLines(pdfData, {
+            ...settings,
+            useLineDetection: true,
+        });
     }
 
     /**
@@ -508,30 +176,21 @@ export class PDFExtractor {
      * Useful for determining if OCR is needed before full extraction.
      */
     async hasTextLayer(pdfData: Uint8Array | ArrayBuffer): Promise<boolean> {
-        if (getPref("mupdf.useWorker")) {
-            return getMuPDFWorkerClient().hasTextLayer(pdfData);
-        }
-        try {
-            await this.mupdf.open(pdfData);
-            const analyzer = new DocumentAnalyzer(this.mupdf);
-            return analyzer.hasTextLayer();
-        } finally {
-            this.mupdf.close();
-        }
+        return getMuPDFWorkerClient().hasTextLayer(pdfData);
     }
 
     /**
      * Perform detailed OCR detection analysis without full extraction.
-     * 
+     *
      * This method analyzes the document to determine if it needs OCR,
      * providing detailed information about why OCR might be needed.
-     * 
+     *
      * Checks performed:
      * - Text presence and sufficiency
      * - Text quality (whitespace ratio, alphanumeric ratio, invalid chars)
      * - Large image coverage (scanned page detection)
      * - Bounding box validation (overflow, overlapping lines)
-     * 
+     *
      * @param pdfData - PDF file data
      * @param options - Detection options
      * @returns Detailed OCR analysis result
@@ -540,31 +199,14 @@ export class PDFExtractor {
         pdfData: Uint8Array | ArrayBuffer,
         options: OCRDetectionOptions = {}
     ): Promise<OCRDetectionResult> {
-        if (getPref("mupdf.useWorker")) {
-            return getMuPDFWorkerClient().analyzeOCRNeeds(pdfData, options);
-        }
-        try {
-            await this.mupdf.open(pdfData);
-            const analyzer = new DocumentAnalyzer(this.mupdf);
-            return analyzer.getDetailedOCRAnalysis(options);
-        } finally {
-            this.mupdf.close();
-        }
+        return getMuPDFWorkerClient().analyzeOCRNeeds(pdfData, options);
     }
 
     /**
      * Get page count without full extraction.
      */
     async getPageCount(pdfData: Uint8Array | ArrayBuffer): Promise<number> {
-        if (getPref("mupdf.useWorker")) {
-            return getMuPDFWorkerClient().getPageCount(pdfData);
-        }
-        try {
-            await this.mupdf.open(pdfData);
-            return this.mupdf.getPageCount();
-        } finally {
-            this.mupdf.close();
-        }
+        return getMuPDFWorkerClient().getPageCount(pdfData);
     }
 
     /**
@@ -573,18 +215,7 @@ export class PDFExtractor {
     async getPageCountAndLabels(
         pdfData: Uint8Array | ArrayBuffer
     ): Promise<{ count: number; labels: Record<number, string> }> {
-        if (getPref("mupdf.useWorker")) {
-            return getMuPDFWorkerClient().getPageCountAndLabels(pdfData);
-        }
-        try {
-            await this.mupdf.open(pdfData);
-            return {
-                count: this.mupdf.getPageCount(),
-                labels: this.mupdf.getAllPageLabels(),
-            };
-        } finally {
-            this.mupdf.close();
-        }
+        return getMuPDFWorkerClient().getPageCountAndLabels(pdfData);
     }
 
     /**
@@ -595,15 +226,7 @@ export class PDFExtractor {
         pdfData: Uint8Array | ArrayBuffer,
         pageIndices?: number[]
     ): Promise<RawDocumentData> {
-        if (getPref("mupdf.useWorker")) {
-            return getMuPDFWorkerClient().extractRawPages(pdfData, pageIndices);
-        }
-        try {
-            await this.mupdf.open(pdfData);
-            return this.mupdf.extractRawPages(pageIndices);
-        } finally {
-            this.mupdf.close();
-        }
+        return getMuPDFWorkerClient().extractRawPages(pdfData, pageIndices);
     }
 
     /**
@@ -643,51 +266,29 @@ export class PDFExtractor {
         pageIndex: number,
         options: PageSentenceBBoxOptions = {}
     ): Promise<PageSentenceBBoxResult> {
-        if (getPref("mupdf.useWorker")) {
+        const client = getMuPDFWorkerClient();
+        if (options.splitter) {
             // Custom splitter is a function — not structurally cloneable
             // across the worker boundary. Fall back to the PR #2 split
             // routing: detailed page in the worker, mapper main-thread.
             // Preserves the documented `options.splitter` API.
-            if (options.splitter) {
-                const detailed = await getMuPDFWorkerClient().extractRawPageDetailed(
-                    pdfData,
-                    pageIndex,
-                );
-                return extractPageSentenceBBoxes(detailed, options);
-            }
-            // Default splitter — full mapper runs in the worker (single
-            // round-trip). Worker validates pageIndex and throws
-            // PAGE_OUT_OF_RANGE.
-            return getMuPDFWorkerClient().extractSentenceBBoxes(
-                pdfData,
-                pageIndex,
-                options,
-            );
-        }
-        try {
-            await this.mupdf.open(pdfData);
-            const pageCount = this.mupdf.getPageCount();
-            if (pageIndex < 0 || pageIndex >= pageCount) {
-                throw new ExtractionError(
-                    ExtractionErrorCode.PAGE_OUT_OF_RANGE,
-                    `Page index ${pageIndex} out of range (0..${pageCount - 1})`,
-                );
-            }
-            const detailed = this.mupdf.extractRawPageDetailed(pageIndex);
+            const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
             return extractPageSentenceBBoxes(detailed, options);
-        } finally {
-            this.mupdf.close();
         }
+        // Default splitter — full mapper runs in the worker (single
+        // round-trip). Worker validates pageIndex and throws
+        // PAGE_OUT_OF_RANGE.
+        return client.extractSentenceBBoxes(pdfData, pageIndex, options);
     }
 
     /**
      * Render a single page to an image.
-     * 
+     *
      * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
      * @param pageIndex - Page index (0-based)
      * @param options - Rendering options (scale, dpi, format, etc.)
      * @returns PageImageResult with image data and metadata
-     * 
+     *
      * @example
      * ```typescript
      * const extractor = new PDFExtractor();
@@ -701,33 +302,17 @@ export class PDFExtractor {
         pageIndex: number,
         options: PageImageOptions = {}
     ): Promise<PageImageResult> {
-        if (getPref("mupdf.useWorker")) {
-            // Single-shot worker op: validates pageIndex and renders in one
-            // doc-open. Throws structured ExtractionError(PAGE_OUT_OF_RANGE)
-            // instead of the main-thread loadPage error — intentional
-            // minor divergence, parity with extractSentenceBBoxes.
-            return getMuPDFWorkerClient().renderPageToImage(
-                pdfData,
-                pageIndex,
-                options,
-            );
-        }
-        try {
-            await this.mupdf.open(pdfData);
-            return this.mupdf.renderPageToImage(pageIndex, options);
-        } finally {
-            this.mupdf.close();
-        }
+        return getMuPDFWorkerClient().renderPageToImage(pdfData, pageIndex, options);
     }
 
     /**
      * Render multiple pages to images.
-     * 
+     *
      * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
      * @param pageIndices - Pages to render (0-based). If undefined, renders all.
      * @param options - Rendering options (scale, dpi, format, etc.)
      * @returns Array of PageImageResult
-     * 
+     *
      * @example
      * ```typescript
      * const extractor = new PDFExtractor();
@@ -744,47 +329,35 @@ export class PDFExtractor {
         pageIndices?: number[],
         options: PageImageOptions = {}
     ): Promise<PageImageResult[]> {
-        if (getPref("mupdf.useWorker")) {
-            return getMuPDFWorkerClient().renderPagesToImages(
-                pdfData,
-                pageIndices,
-                options,
-            );
-        }
-        try {
-            await this.mupdf.open(pdfData);
-            return this.mupdf.renderPagesToImages(pageIndices, options);
-        } finally {
-            this.mupdf.close();
-        }
+        return getMuPDFWorkerClient().renderPagesToImages(pdfData, pageIndices, options);
     }
 
     /**
      * Search for text within a PDF document.
-     * 
+     *
      * Search Behavior:
      * - Simple phrase search (grep-like) - matches literal text
      * - Case-insensitive matching (handled by MuPDF)
      * - No boolean operators (AND/OR) - for multiple terms, perform separate searches
      * - Returns whole pages ranked by relevance score (highest first)
      * - Each hit includes QuadPoint coordinates for highlighting
-     * 
+     *
      * Scoring Methodology:
      * - Each hit is weighted by text role (heading=3.0, body=1.0, caption=0.7, footnote=0.3)
      * - Page score = sum of weighted hits, normalized by sqrt(text_length)
      * - This prioritizes pages where matches appear in significant content
-     * 
+     *
      * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
      * @param query - Text to search for (literal phrase match)
      * @param options - Search options including scoring configuration
      * @returns PDFSearchResult with ranked pages and hit positions
-     * 
+     *
      * @example
      * ```typescript
      * const extractor = new PDFExtractor();
      * const result = await extractor.search(pdfData, "machine learning");
      * console.log(`Found ${result.totalMatches} matches in ${result.pagesWithMatches} pages`);
-     * 
+     *
      * // Iterate through ranked pages (highest score first)
      * for (const page of result.pages) {
      *   console.log(`Page ${page.pageIndex + 1}: score=${page.score.toFixed(2)}, matches=${page.matchCount}`);
@@ -796,75 +369,8 @@ export class PDFExtractor {
         query: string,
         options: PDFSearchOptions = {}
     ): Promise<PDFSearchResult> {
-        if (getPref("mupdf.useWorker")) {
-            // search + score within one worker round-trip.
-            return getMuPDFWorkerClient().search(pdfData, query, options);
-        }
-
-        const startTime = Date.now();
-        const opts = { ...DEFAULT_PDF_SEARCH_OPTIONS, ...options };
-        const scoringOpts = { ...DEFAULT_SEARCH_SCORING_OPTIONS, ...opts.scoring };
-
-        try {
-            await this.mupdf.open(pdfData);
-            const totalPages = this.mupdf.getPageCount();
-
-            // Determine pages to search
-            const pageIndices = opts.pages?.length
-                ? opts.pages.filter(i => i >= 0 && i < totalPages)
-                : undefined; // undefined = search all
-
-            // Perform search (returns unscored results)
-            const pageResults = this.mupdf.searchPages(query, pageIndices, opts.maxHitsPerPage);
-
-            if (pageResults.length === 0) {
-                // No matches - return early
-                const durationMs = Date.now() - startTime;
-                return {
-                    query,
-                    totalMatches: 0,
-                    pagesWithMatches: 0,
-                    totalPages,
-                    pages: [],
-                    metadata: {
-                        searchedAt: new Date().toISOString(),
-                        durationMs,
-                        options: opts,
-                        scoringOptions: scoringOpts,
-                    },
-                };
-            }
-
-            // Extract raw pages for scoring (only pages with matches)
-            const matchedPageIndices = pageResults.map(pr => pr.pageIndex);
-            const rawPages = this.mupdf.extractRawPages(matchedPageIndices);
-
-            // Score results using SearchScorer
-            const scorer = new SearchScorer(rawPages.pages, scoringOpts);
-            const scoredResults = scorer.scorePageResults(pageResults);
-
-            // Calculate totals
-            const totalMatches = scoredResults.reduce((sum, p) => sum + p.matchCount, 0);
-            const pagesWithMatches = scoredResults.length;
-
-            const durationMs = Date.now() - startTime;
-
-            return {
-                query,
-                totalMatches,
-                pagesWithMatches,
-                totalPages,
-                pages: scoredResults,
-                metadata: {
-                    searchedAt: new Date().toISOString(),
-                    durationMs,
-                    options: opts,
-                    scoringOptions: scoringOpts,
-                },
-            };
-        } finally {
-            this.mupdf.close();
-        }
+        // search + score within one worker round-trip.
+        return getMuPDFWorkerClient().search(pdfData, query, options);
     }
 }
 
@@ -909,7 +415,7 @@ export async function extractTextFromZoteroItem(
 
 /**
  * Extract high-quality content by lines from a Zotero attachment item.
- * 
+ *
  * This provides the best quality extraction with line-level granularity,
  * proper reading order, and structural metadata for each line.
  *
@@ -938,7 +444,7 @@ export async function extractByLinesFromZoteroItem(
  * @param pageIndex - Page index (0-based). Default: 0
  * @param options - Rendering options (scale, dpi, format, etc.)
  * @returns PageImageResult or null if file not found
- * 
+ *
  * @example
  * ```typescript
  * // Render first page at 150 DPI
@@ -971,7 +477,7 @@ export async function renderPageToImageFromZoteroItem(
  * @param pageIndices - Pages to render (0-based). If undefined, renders all.
  * @param options - Rendering options (scale, dpi, format, etc.)
  * @returns Array of PageImageResult or null if file not found
- * 
+ *
  * @example
  * ```typescript
  * // Render all pages as thumbnails (low resolution)
@@ -999,7 +505,7 @@ export async function renderPagesToImagesFromZoteroItem(
 
 /**
  * Search for text within a PDF from a Zotero attachment item.
- * 
+ *
  * Search Behavior:
  * - Simple phrase search (grep-like) - matches literal text
  * - Case-insensitive matching
@@ -1011,13 +517,13 @@ export async function renderPagesToImagesFromZoteroItem(
  * @param query - Text to search for (literal phrase match)
  * @param options - Search options
  * @returns PDFSearchResult or null if file not found
- * 
+ *
  * @example
  * ```typescript
  * const result = await searchFromZoteroItem(item, "machine learning");
  * if (result) {
  *   console.log(`Found ${result.totalMatches} matches in ${result.pagesWithMatches} pages`);
- *   
+ *
  *   // Get top 3 pages with most matches
  *   const topPages = result.pages.slice(0, 3);
  *   for (const page of topPages) {

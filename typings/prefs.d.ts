@@ -56,7 +56,6 @@ declare namespace _ZoteroTypes {
       "onboardingCitationTipShown": boolean;
       "onboardingWelcomeShownAt": string;
       "mcpServerEnabled": boolean;
-      "mupdf.useWorker": boolean;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;
       "runWebDAVSync": boolean;

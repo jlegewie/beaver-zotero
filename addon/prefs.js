@@ -83,11 +83,6 @@ pref("onboardingWelcomeShownAt", "");
 // MCP server
 pref("mcpServerEnabled", false);
 
-// MuPDF worker rollout flag — when true, route MuPDF calls through a
-// dedicated module worker so WASM work doesn't block the main thread.
-// PR #1 ships off-by-default; only PDFExtractor.getPageCount checks this.
-pref("mupdf.useWorker", false);
-
 // Flags to show notifications, run consistency check and collection sync on upgrade
 pref("runConsistencyCheck", false);
 pref("runCollectionSync", false);

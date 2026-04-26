@@ -1,19 +1,23 @@
 /**
- * Live tests for MuPDF worker plumbing (PR #1 + PR #2).
+ * MuPDF worker smoke suite.
  *
- * Asserts parity between the main-thread MuPDF path (pref off) and the
- * module-worker path (pref on) via the dev-only `/beaver/test/pdf-*`
- * endpoints. The pref is toggled via `/beaver/test/set-pref` so the test is
- * self-contained — no manual pref flip required between runs.
+ * Exercises the production worker path against real PDFs in a live Zotero
+ * process. Pre-PR #4 this file was a parity suite (main-thread vs worker);
+ * after PR #4 the main-thread path is gone, so the suite collapses to a
+ * single-path regression net. The unit tests in
+ * `tests/unit/services/mupdfWorkerClient.test.ts` cover client-wrapper
+ * correctness; this file's load-bearing value is the `NO_TEXT_LAYER`
+ * payload round-trip against `NO_TEXT_PDF`.
  *
  * Prerequisites (per tests/README.md):
  *   - Dev build of Beaver loaded in a running Zotero (NODE_ENV=development).
  *   - User authenticated so the test endpoints are registered.
- *   - Fixture attachments seeded (SMALL_PDF, NORMAL_PDF, ENCRYPTED_PDF).
+ *   - Fixture attachments seeded (SMALL_PDF, NORMAL_PDF, ENCRYPTED_PDF,
+ *     NO_TEXT_PDF, INVALID_PDF_FIXTURE).
  *
  * Run with: `npm run test:live -- mupdfWorker`
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
     isZoteroAvailable,
@@ -27,7 +31,6 @@ import {
     pdfExtractRaw,
     pdfExtractRawDetailed,
     pdfSearch,
-    setPref,
     pdfExtract,
     pdfExtractByLines,
     pdfHasTextLayer,
@@ -49,519 +52,277 @@ beforeAll(async () => {
     available = await isZoteroAvailable();
 });
 
-describe('mupdf.useWorker pref parity', () => {
-    beforeEach(async (ctx) => {
+const SMALL_PDF_PAGE_COUNT = 2;
+const NORMAL_PDF_PAGE_COUNT = 15;
+
+describe('MuPDF worker smoke — PR #1 ops', () => {
+    beforeEach((ctx) => {
         skipIfNoZotero(ctx, available);
-        // Baseline every test: pref off.
-        await setPref('mupdf.useWorker', false);
     });
 
-    afterEach(async () => {
-        if (available) {
-            // Restore so subsequent tests / manual runs aren't affected.
-            await setPref('mupdf.useWorker', false);
-        }
+    it('returns the expected page count for a healthy PDF', async () => {
+        const res = await pdfPageCount(SMALL_PDF);
+        expect(res.ok).toBe(true);
+        expect(res.count).toBe(SMALL_PDF_PAGE_COUNT);
     });
 
-    it('returns the same page count for a healthy PDF on both paths', async () => {
-        const offRes = await pdfPageCount(SMALL_PDF);
-        expect(offRes.ok).toBe(true);
-        expect(typeof offRes.count).toBe('number');
-
-        await setPref('mupdf.useWorker', true);
-        const onRes = await pdfPageCount(SMALL_PDF);
-        expect(onRes.ok).toBe(true);
-        expect(onRes.count).toBe(offRes.count);
+    it('returns ENCRYPTED for an encrypted PDF', async () => {
+        const res = await pdfPageCount(ENCRYPTED_PDF);
+        expect(res.ok).toBe(false);
+        expect(res.error?.code).toBe('ENCRYPTED');
     });
 
-    it('returns ENCRYPTED for an encrypted PDF on both paths', async () => {
-        const offRes = await pdfPageCount(ENCRYPTED_PDF);
-        expect(offRes.ok).toBe(false);
-        expect(offRes.error?.code).toBe('ENCRYPTED');
-
-        await setPref('mupdf.useWorker', true);
-        const onRes = await pdfPageCount(ENCRYPTED_PDF);
-        expect(onRes.ok).toBe(false);
-        expect(onRes.error?.code).toBe('ENCRYPTED');
-    });
-
-    it('returns INVALID_PDF for raw garbage bytes on both paths', async () => {
+    it('returns INVALID_PDF for raw garbage bytes', async () => {
         const garbage = new TextEncoder().encode('not a pdf');
-
-        const offRes = await pdfPageCountFromBytes(garbage);
-        expect(offRes.ok).toBe(false);
-        expect(offRes.error?.code).toBe('INVALID_PDF');
-
-        await setPref('mupdf.useWorker', true);
-        const onRes = await pdfPageCountFromBytes(garbage);
-        expect(onRes.ok).toBe(false);
-        expect(onRes.error?.code).toBe('INVALID_PDF');
+        const res = await pdfPageCountFromBytes(garbage);
+        expect(res.ok).toBe(false);
+        expect(res.error?.code).toBe('INVALID_PDF');
     });
 
-    it('returns INVALID_PDF for a corrupt attachment fixture on both paths', async () => {
-        const fixture = INVALID_PDF_FIXTURE;
-        const offRes = await pdfPageCount(fixture);
-        expect(offRes.ok).toBe(false);
-        expect(offRes.error?.code).toBe('INVALID_PDF');
-
-        await setPref('mupdf.useWorker', true);
-        const onRes = await pdfPageCount(fixture);
-        expect(onRes.ok).toBe(false);
-        expect(onRes.error?.code).toBe('INVALID_PDF');
+    it('returns INVALID_PDF for a corrupt attachment fixture', async () => {
+        const res = await pdfPageCount(INVALID_PDF_FIXTURE);
+        expect(res.ok).toBe(false);
+        expect(res.error?.code).toBe('INVALID_PDF');
     });
 });
 
 // ---------------------------------------------------------------------------
-// PR #2 — broaden the worker surface
+// PR #2 — worker primitives
 //
-// Each describe below toggles the pref between off and on inside the test
-// and asserts parity. JSON-shape parity (`extractRawPages`,
-// `extractRawPageDetailed`) relies on both paths going through MuPDF's
-// `stext.asJSON()` — a future MuPDF upgrade changes both paths together,
-// so these tests are not a regression net for MuPDF correctness.
-//
-// Render parity is structural + ±5% byte-length tolerance — PNG / JPEG
-// encoder allocator state can shift compression details across MuPDF
-// instances, so byte-identical hashes flake. Width/height/scale/dpi are
-// always exact.
+// These endpoints call worker primitives directly (no PDFExtractor /
+// SearchScorer). They prove the WS-driven worker path runs end-to-end
+// against real PDFs.
 // ---------------------------------------------------------------------------
 
-describe('mupdf.useWorker pref parity — PR #2 ops', () => {
-    beforeEach(async (ctx) => {
+describe('MuPDF worker smoke — PR #2 ops', () => {
+    beforeEach((ctx) => {
         skipIfNoZotero(ctx, available);
-        await setPref('mupdf.useWorker', false);
     });
 
-    afterEach(async () => {
-        if (available) {
-            await setPref('mupdf.useWorker', false);
+    it('getPageCountAndLabels returns count + labels', async () => {
+        const res = await pdfPageLabels(SMALL_PDF);
+        expect(res.ok).toBe(true);
+        expect(res.count).toBe(SMALL_PDF_PAGE_COUNT);
+        expect(res.labels).toBeDefined();
+    });
+
+    it('extractRawPages returns blocks for every page', async () => {
+        const res = await pdfExtractRaw(NORMAL_PDF);
+        expect(res.ok).toBe(true);
+        const doc = res.result!;
+        expect(doc.pageCount).toBe(NORMAL_PDF_PAGE_COUNT);
+        expect(doc.pages.length).toBe(NORMAL_PDF_PAGE_COUNT);
+        for (const page of doc.pages) {
+            expect(typeof page.pageIndex).toBe('number');
+            expect(page.width).toBeGreaterThan(0);
+            expect(page.height).toBeGreaterThan(0);
+            expect(Array.isArray(page.blocks)).toBe(true);
         }
     });
 
-    it('getPageCountAndLabels: count + labels match across paths', async () => {
-        const off = await pdfPageLabels(SMALL_PDF);
-        expect(off.ok).toBe(true);
-
-        await setPref('mupdf.useWorker', true);
-        const on = await pdfPageLabels(SMALL_PDF);
-        expect(on.ok).toBe(true);
-
-        expect(on.count).toBe(off.count);
-        expect(on.labels).toEqual(off.labels);
+    it('extractRawPages silently filters invalid indices', async () => {
+        const res = await pdfExtractRaw(SMALL_PDF, { page_indices: [0, 99999] });
+        expect(res.ok).toBe(true);
+        const pages = res.result!.pages;
+        expect(pages.length).toBe(1);
+        expect(pages[0].pageIndex).toBe(0);
     });
 
-    it('extractRawPages: pageCount + per-page block parity', async () => {
-        const off = await pdfExtractRaw(NORMAL_PDF);
-        expect(off.ok).toBe(true);
-        const offDoc = off.result!;
-
-        await setPref('mupdf.useWorker', true);
-        const on = await pdfExtractRaw(NORMAL_PDF);
-        expect(on.ok).toBe(true);
-        const onDoc = on.result!;
-
-        expect(onDoc.pageCount).toBe(offDoc.pageCount);
-        expect(onDoc.pages.length).toBe(offDoc.pages.length);
-        for (let i = 0; i < offDoc.pages.length; i++) {
-            const a = offDoc.pages[i];
-            const b = onDoc.pages[i];
-            expect(b.pageIndex).toBe(a.pageIndex);
-            expect(b.width).toBe(a.width);
-            expect(b.height).toBe(a.height);
-            // Both paths derive from `stext.asJSON()` — JSON.stringify parity
-            // is the cheapest deep-equal check.
-            expect(JSON.stringify(b.blocks)).toBe(JSON.stringify(a.blocks));
-        }
+    it('renderPagesToImages produces a non-empty image', async () => {
+        const res = await pdfRenderPages(SMALL_PDF, { page_indices: [0] });
+        expect(res.ok).toBe(true);
+        const page = res.pages![0];
+        expect(page.pageIndex).toBe(0);
+        expect(page.width).toBeGreaterThan(0);
+        expect(page.height).toBeGreaterThan(0);
+        expect(page.data_byte_length).toBeGreaterThan(0);
     });
 
-    it('extractRawPages: silently filters invalid indices on both paths', async () => {
-        const off = await pdfExtractRaw(SMALL_PDF, { page_indices: [0, 99999] });
-        expect(off.ok).toBe(true);
-        const offPages = off.result!.pages;
-        expect(offPages.length).toBe(1);
-        expect(offPages[0].pageIndex).toBe(0);
-
-        await setPref('mupdf.useWorker', true);
-        const on = await pdfExtractRaw(SMALL_PDF, { page_indices: [0, 99999] });
-        expect(on.ok).toBe(true);
-        const onPages = on.result!.pages;
-        expect(onPages.length).toBe(1);
-        expect(onPages[0].pageIndex).toBe(0);
+    it('extractRawPageDetailed returns blocks for the requested page', async () => {
+        const res = await pdfExtractRawDetailed(SMALL_PDF, { page_index: 0 });
+        expect(res.ok).toBe(true);
+        const page = res.result!;
+        expect(page.pageIndex).toBe(0);
+        expect(page.width).toBeGreaterThan(0);
+        expect(page.height).toBeGreaterThan(0);
+        expect(Array.isArray(page.blocks)).toBe(true);
     });
 
-    it('renderPagesToImages: structural parity + ±5% byte-length tolerance', async () => {
-        const off = await pdfRenderPages(SMALL_PDF, { page_indices: [0] });
-        expect(off.ok).toBe(true);
-        const offPage = off.pages![0];
-
-        await setPref('mupdf.useWorker', true);
-        const on = await pdfRenderPages(SMALL_PDF, { page_indices: [0] });
-        expect(on.ok).toBe(true);
-        const onPage = on.pages![0];
-
-        expect(onPage.pageIndex).toBe(offPage.pageIndex);
-        expect(onPage.format).toBe(offPage.format);
-        expect(onPage.width).toBe(offPage.width);
-        expect(onPage.height).toBe(offPage.height);
-        expect(onPage.scale).toBe(offPage.scale);
-        expect(onPage.dpi).toBe(offPage.dpi);
-
-        // ±5% byte-length tolerance — PNG/JPEG encoders aren't byte-deterministic
-        // across MuPDF instances.
-        const ratio = onPage.data_byte_length / offPage.data_byte_length;
-        expect(ratio).toBeGreaterThan(0.95);
-        expect(ratio).toBeLessThan(1.05);
+    it('extractRawPageDetailed throws PAGE_OUT_OF_RANGE for an invalid index', async () => {
+        const res = await pdfExtractRawDetailed(SMALL_PDF, { page_index: 99999 });
+        expect(res.ok).toBe(false);
+        expect(res.error?.code).toBe('PAGE_OUT_OF_RANGE');
     });
 
-    it('extractRawPageDetailed: per-page parity', async () => {
-        const off = await pdfExtractRawDetailed(SMALL_PDF, { page_index: 0 });
-        expect(off.ok).toBe(true);
-        const offPage = off.result!;
-
-        await setPref('mupdf.useWorker', true);
-        const on = await pdfExtractRawDetailed(SMALL_PDF, { page_index: 0 });
-        expect(on.ok).toBe(true);
-        const onPage = on.result!;
-
-        expect(onPage.pageIndex).toBe(offPage.pageIndex);
-        expect(onPage.width).toBe(offPage.width);
-        expect(onPage.height).toBe(offPage.height);
-        expect(JSON.stringify(onPage.blocks)).toBe(
-            JSON.stringify(offPage.blocks),
-        );
-    });
-
-    it('extractRawPageDetailed: PAGE_OUT_OF_RANGE parity', async () => {
-        const off = await pdfExtractRawDetailed(SMALL_PDF, {
-            page_index: 99999,
-        });
-        expect(off.ok).toBe(false);
-        expect(off.error?.code).toBe('PAGE_OUT_OF_RANGE');
-
-        await setPref('mupdf.useWorker', true);
-        const on = await pdfExtractRawDetailed(SMALL_PDF, {
-            page_index: 99999,
-        });
-        expect(on.ok).toBe(false);
-        expect(on.error?.code).toBe('PAGE_OUT_OF_RANGE');
-    });
-
-    it('searchPages: per-page hit parity (within float tolerance)', async () => {
-        // Use a query likely to match common terms in a paper.
-        const QUERY = 'the';
-        const off = await pdfSearch(NORMAL_PDF, { query: QUERY });
-        expect(off.ok).toBe(true);
-
-        await setPref('mupdf.useWorker', true);
-        const on = await pdfSearch(NORMAL_PDF, { query: QUERY });
-        expect(on.ok).toBe(true);
-
-        expect(on.pages!.length).toBe(off.pages!.length);
-
-        const TOL = 0.01;
-        for (let i = 0; i < off.pages!.length; i++) {
-            const a = off.pages![i];
-            const b = on.pages![i];
-            expect(b.pageIndex).toBe(a.pageIndex);
-            expect(b.matchCount).toBe(a.matchCount);
-            expect(b.width).toBe(a.width);
-            expect(b.height).toBe(a.height);
-            expect(b.label).toBe(a.label);
-            expect(b.hits.length).toBe(a.hits.length);
-            for (let h = 0; h < a.hits.length; h++) {
-                const aHit = a.hits[h];
-                const bHit = b.hits[h];
-                expect(bHit.quads.length).toBe(aHit.quads.length);
-                for (let q = 0; q < aHit.quads.length; q++) {
-                    const aq = aHit.quads[q];
-                    const bq = bHit.quads[q];
-                    expect(bq.length).toBe(aq.length);
-                    for (let c = 0; c < aq.length; c++) {
-                        expect(Math.abs(bq[c] - aq[c])).toBeLessThanOrEqual(
-                            TOL,
-                        );
-                    }
-                }
-            }
+    it('searchPages returns hits with quad coordinates', async () => {
+        const res = await pdfSearch(NORMAL_PDF, { query: 'the' });
+        expect(res.ok).toBe(true);
+        expect(Array.isArray(res.pages)).toBe(true);
+        // Most papers contain "the" — guard with a >= check to avoid flake.
+        expect(res.pages!.length).toBeGreaterThan(0);
+        for (const page of res.pages!) {
+            expect(typeof page.pageIndex).toBe('number');
+            expect(page.matchCount).toBeGreaterThan(0);
+            expect(page.hits.length).toBe(page.matchCount);
         }
     });
 });
 
-const FLOAT_TOL = 0.001;
-
-describe('orchestration parity (mupdf.useWorker)', () => {
-    beforeEach(async (ctx) => {
+describe('MuPDF worker smoke — orchestration ops', () => {
+    beforeEach((ctx) => {
         skipIfNoZotero(ctx, available);
-        await setPref('mupdf.useWorker', false);
-    });
-
-    afterEach(async () => {
-        if (available) {
-            await setPref('mupdf.useWorker', false);
-        }
     });
 
     describe('extract', () => {
-        it('returns parity for page-level extraction on a healthy PDF', async () => {
+        it('returns page-level extraction for a healthy PDF', async () => {
             const settings = { styleSampleSize: 0 };
-            const offRes = await pdfExtract(SMALL_PDF, { settings });
-            expect(offRes.ok).toBe(true);
+            const res = await pdfExtract(SMALL_PDF, { settings });
+            expect(res.ok).toBe(true);
 
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfExtract(SMALL_PDF, { settings });
-            expect(onRes.ok).toBe(true);
-
-            const off = offRes.result;
-            const on = onRes.result;
-            expect(on.pages.length).toBe(off.pages.length);
-            for (let i = 0; i < off.pages.length; i++) {
-                expect(on.pages[i].index).toBe(off.pages[i].index);
-                expect(on.pages[i].width).toBe(off.pages[i].width);
-                expect(on.pages[i].height).toBe(off.pages[i].height);
-                expect(on.pages[i].content).toBe(off.pages[i].content);
-                expect(on.pages[i].blocks.length).toBe(off.pages[i].blocks.length);
+            const result = res.result;
+            expect(result.pages.length).toBe(SMALL_PDF_PAGE_COUNT);
+            for (const page of result.pages) {
+                expect(typeof page.index).toBe('number');
+                expect(page.width).toBeGreaterThan(0);
+                expect(page.height).toBeGreaterThan(0);
+                expect(typeof page.content).toBe('string');
             }
-            expect(on.fullText).toBe(off.fullText);
-            expect(on.analysis.pageCount).toBe(off.analysis.pageCount);
-            expect(on.analysis.styleProfile.primaryBodyStyle).toEqual(
-                off.analysis.styleProfile.primaryBodyStyle,
-            );
-            // Timestamps differ; version is constant — cover the latter only.
-            expect(on.metadata.version).toBe(off.metadata.version);
+            expect(typeof result.fullText).toBe('string');
+            expect(result.fullText.length).toBeGreaterThan(0);
+            expect(result.analysis.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
+            expect(result.analysis.styleProfile).toBeDefined();
+            expect(result.metadata.version).toBeDefined();
         });
 
-        it('returns NO_TEXT_LAYER with full payload on both paths', async () => {
-            const offRes = await pdfExtract(NO_TEXT_PDF);
-            expect(offRes.ok).toBe(false);
-            expect(offRes.error?.code).toBe('NO_TEXT_LAYER');
-            expect(offRes.error?.payload?.ocrAnalysis).toBeDefined();
-            expect(typeof offRes.error?.payload?.pageCount).toBe('number');
-
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfExtract(NO_TEXT_PDF);
-            expect(onRes.ok).toBe(false);
-            expect(onRes.error?.code).toBe('NO_TEXT_LAYER');
-            expect(onRes.error?.payload?.ocrAnalysis).toBeDefined();
-
-            // Parity on the OCR analysis — the load-bearing case for
-            // payload-passing through rehydrateError.
-            const offOcr = offRes.error!.payload!.ocrAnalysis as any;
-            const onOcr = onRes.error!.payload!.ocrAnalysis as any;
-            expect(onOcr.needsOCR).toBe(offOcr.needsOCR);
-            expect(onOcr.primaryReason).toBe(offOcr.primaryReason);
-            expect(onRes.error!.payload!.pageCount).toBe(
-                offRes.error!.payload!.pageCount,
-            );
+        it('returns NO_TEXT_LAYER with full payload', async () => {
+            const res = await pdfExtract(NO_TEXT_PDF);
+            expect(res.ok).toBe(false);
+            expect(res.error?.code).toBe('NO_TEXT_LAYER');
+            // Payload-passing through rehydrateError — the load-bearing
+            // case for the structured-error contract.
+            expect(res.error?.payload?.ocrAnalysis).toBeDefined();
+            const ocr = res.error!.payload!.ocrAnalysis as any;
+            expect(ocr.needsOCR).toBe(true);
+            expect(typeof ocr.primaryReason).toBe('string');
+            expect(typeof res.error!.payload!.pageCount).toBe('number');
+            expect(res.error!.payload!.pageLabels).toBeDefined();
         });
     });
 
     describe('extractByLines', () => {
-        it('returns parity for line-based extraction', async () => {
+        it('returns line-based extraction for a healthy PDF', async () => {
             const settings = { styleSampleSize: 0, useLineDetection: true };
-            const offRes = await pdfExtractByLines(SMALL_PDF, { settings });
-            expect(offRes.ok).toBe(true);
+            const res = await pdfExtractByLines(SMALL_PDF, { settings });
+            expect(res.ok).toBe(true);
 
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfExtractByLines(SMALL_PDF, { settings });
-            expect(onRes.ok).toBe(true);
-
-            const off = offRes.result;
-            const on = onRes.result;
-            expect(on.pages.length).toBe(off.pages.length);
-            expect(on.fullText).toBe(off.fullText);
-            for (let i = 0; i < off.pages.length; i++) {
-                expect(on.pages[i].lines?.length).toBe(off.pages[i].lines?.length);
+            const result = res.result;
+            expect(result.pages.length).toBe(SMALL_PDF_PAGE_COUNT);
+            expect(typeof result.fullText).toBe('string');
+            for (const page of result.pages) {
+                expect(Array.isArray(page.lines)).toBe(true);
             }
         });
     });
 
     describe('hasTextLayer', () => {
-        it('returns true on both paths for a healthy PDF', async () => {
-            const offRes = await pdfHasTextLayer(SMALL_PDF);
-            expect(offRes.ok).toBe(true);
-            expect(offRes.hasTextLayer).toBe(true);
-
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfHasTextLayer(SMALL_PDF);
-            expect(onRes.ok).toBe(true);
-            expect(onRes.hasTextLayer).toBe(offRes.hasTextLayer);
+        it('returns true for a healthy PDF', async () => {
+            const res = await pdfHasTextLayer(SMALL_PDF);
+            expect(res.ok).toBe(true);
+            expect(res.hasTextLayer).toBe(true);
         });
 
-        it('returns parity on a no-text-layer PDF', async () => {
-            const offRes = await pdfHasTextLayer(NO_TEXT_PDF);
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfHasTextLayer(NO_TEXT_PDF);
-            expect(onRes.hasTextLayer).toBe(offRes.hasTextLayer);
+        it('returns false for a no-text-layer PDF', async () => {
+            const res = await pdfHasTextLayer(NO_TEXT_PDF);
+            expect(res.ok).toBe(true);
+            expect(res.hasTextLayer).toBe(false);
         });
     });
 
     describe('analyzeOCRNeeds', () => {
-        it('returns parity on a healthy PDF', async () => {
-            const offRes = await pdfAnalyzeOcr(SMALL_PDF);
-            expect(offRes.ok).toBe(true);
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfAnalyzeOcr(SMALL_PDF);
-            expect(onRes.ok).toBe(true);
+        it('returns needsOCR=false for a healthy PDF', async () => {
+            const res = await pdfAnalyzeOcr(SMALL_PDF);
+            expect(res.ok).toBe(true);
 
-            const off = offRes.result;
-            const on = onRes.result;
-            expect(on.needsOCR).toBe(off.needsOCR);
-            expect(on.primaryReason).toBe(off.primaryReason);
-            expect(Math.abs(on.issueRatio - off.issueRatio)).toBeLessThanOrEqual(
-                FLOAT_TOL,
-            );
-            expect(on.issueBreakdown).toEqual(off.issueBreakdown);
-            expect(on.sampledPages).toBe(off.sampledPages);
-            expect(on.totalPages).toBe(off.totalPages);
+            const result = res.result;
+            expect(result.needsOCR).toBe(false);
+            expect(typeof result.primaryReason).toBe('string');
+            expect(typeof result.issueRatio).toBe('number');
+            expect(result.issueBreakdown).toBeDefined();
+            expect(typeof result.sampledPages).toBe('number');
+            expect(typeof result.totalPages).toBe('number');
         });
 
-        it('returns parity on a no-text-layer PDF', async () => {
-            const offRes = await pdfAnalyzeOcr(NO_TEXT_PDF);
-            expect(offRes.ok).toBe(true);
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfAnalyzeOcr(NO_TEXT_PDF);
-            expect(onRes.ok).toBe(true);
-            expect(onRes.result.needsOCR).toBe(offRes.result.needsOCR);
-            expect(onRes.result.primaryReason).toBe(
-                offRes.result.primaryReason,
-            );
+        it('returns needsOCR=true for a no-text-layer PDF', async () => {
+            const res = await pdfAnalyzeOcr(NO_TEXT_PDF);
+            expect(res.ok).toBe(true);
+            expect(res.result.needsOCR).toBe(true);
+            expect(typeof res.result.primaryReason).toBe('string');
         });
     });
 
     describe('search (scored)', () => {
-        it('returns the same totalMatches and per-page scores', async () => {
-            const offRes = await pdfSearchScored(SMALL_PDF, {
-                query: 'the',
-            });
-            expect(offRes.ok).toBe(true);
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfSearchScored(SMALL_PDF, {
-                query: 'the',
-            });
-            expect(onRes.ok).toBe(true);
+        it('returns scored matches for a common term', async () => {
+            const res = await pdfSearchScored(SMALL_PDF, { query: 'the' });
+            expect(res.ok).toBe(true);
 
-            const off = offRes.result;
-            const on = onRes.result;
-            expect(on.totalMatches).toBe(off.totalMatches);
-            expect(on.pages.length).toBe(off.pages.length);
-            for (let i = 0; i < off.pages.length; i++) {
-                expect(on.pages[i].pageIndex).toBe(off.pages[i].pageIndex);
-                expect(on.pages[i].matchCount).toBe(off.pages[i].matchCount);
-                expect(
-                    Math.abs(on.pages[i].score - off.pages[i].score),
-                ).toBeLessThanOrEqual(FLOAT_TOL);
+            const result = res.result;
+            expect(typeof result.totalMatches).toBe('number');
+            for (const page of result.pages) {
+                expect(typeof page.pageIndex).toBe('number');
+                expect(page.matchCount).toBeGreaterThan(0);
+                expect(typeof page.score).toBe('number');
             }
         });
 
-        it('returns no-match early-return parity', async () => {
-            // Known-absent query: hits the `pageResults.length === 0`
-            // early-return branch on both paths.
-            const offRes = await pdfSearchScored(SMALL_PDF, {
+        it('returns no-match early-return for an absent term', async () => {
+            const res = await pdfSearchScored(SMALL_PDF, {
                 query: 'zzzz_nonexistent_xyzzy',
             });
-            expect(offRes.ok).toBe(true);
-            expect(offRes.result.totalMatches).toBe(0);
-            expect(offRes.result.pages).toEqual([]);
-
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfSearchScored(SMALL_PDF, {
-                query: 'zzzz_nonexistent_xyzzy',
-            });
-            expect(onRes.ok).toBe(true);
-            expect(onRes.result.totalMatches).toBe(0);
-            expect(onRes.result.pages).toEqual([]);
+            expect(res.ok).toBe(true);
+            expect(res.result.totalMatches).toBe(0);
+            expect(res.result.pages).toEqual([]);
         });
     });
 
     describe('extractSentenceBBoxes', () => {
-        it('returns parity for the full mapper pipeline (one round-trip)', async () => {
-            const offRes = await pdfSentenceBBoxes(SMALL_PDF, { page_index: 0 });
-            expect(offRes.ok).toBe(true);
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfSentenceBBoxes(SMALL_PDF, { page_index: 0 });
-            expect(onRes.ok).toBe(true);
+        it('returns sentences with bboxes for a healthy PDF page', async () => {
+            const res = await pdfSentenceBBoxes(SMALL_PDF, { page_index: 0 });
+            expect(res.ok).toBe(true);
 
-            const off = offRes.result;
-            const on = onRes.result;
-            expect(on.paragraphs.length).toBe(off.paragraphs.length);
-            expect(on.sentences.length).toBe(off.sentences.length);
-            expect(on.unmappedParagraphs).toBe(off.unmappedParagraphs);
-            expect(on.degradedParagraphs).toBe(off.degradedParagraphs);
-            for (let i = 0; i < off.sentences.length; i++) {
-                expect(on.sentences[i].text).toBe(off.sentences[i].text);
-                expect(on.sentences[i].bboxes.length).toBe(
-                    off.sentences[i].bboxes.length,
-                );
+            const result = res.result;
+            expect(Array.isArray(result.paragraphs)).toBe(true);
+            expect(Array.isArray(result.sentences)).toBe(true);
+            expect(typeof result.unmappedParagraphs).toBe('number');
+            expect(typeof result.degradedParagraphs).toBe('number');
+            for (const sentence of result.sentences) {
+                expect(typeof sentence.text).toBe('string');
+                expect(Array.isArray(sentence.bboxes)).toBe(true);
             }
         });
 
-        it('returns PAGE_OUT_OF_RANGE on both paths for an invalid index', async () => {
-            const offRes = await pdfSentenceBBoxes(SMALL_PDF, {
-                page_index: 99999,
-            });
-            expect(offRes.ok).toBe(false);
-            expect(offRes.error?.code).toBe('PAGE_OUT_OF_RANGE');
-
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfSentenceBBoxes(SMALL_PDF, {
-                page_index: 99999,
-            });
-            expect(onRes.ok).toBe(false);
-            expect(onRes.error?.code).toBe('PAGE_OUT_OF_RANGE');
+        it('returns PAGE_OUT_OF_RANGE for an invalid index', async () => {
+            const res = await pdfSentenceBBoxes(SMALL_PDF, { page_index: 99999 });
+            expect(res.ok).toBe(false);
+            expect(res.error?.code).toBe('PAGE_OUT_OF_RANGE');
         });
     });
 
-    describe('renderPageToImage (carry-forward)', () => {
-        it('returns parity for a single-page render', async () => {
-            const offRes = await pdfRenderPage(SMALL_PDF, { page_index: 0 });
-            expect(offRes.ok).toBe(true);
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfRenderPage(SMALL_PDF, { page_index: 0 });
-            expect(onRes.ok).toBe(true);
+    describe('renderPageToImage', () => {
+        it('renders a single page', async () => {
+            const res = await pdfRenderPage(SMALL_PDF, { page_index: 0 });
+            expect(res.ok).toBe(true);
 
-            const off = offRes.result!;
-            const on = onRes.result!;
-            expect(on.pageIndex).toBe(off.pageIndex);
-            expect(on.format).toBe(off.format);
-            expect(on.width).toBe(off.width);
-            expect(on.height).toBe(off.height);
-            expect(on.scale).toBe(off.scale);
-            expect(on.dpi).toBe(off.dpi);
-            // Encoder allocator state can shift compression details across
-            // MuPDF instances — byte-identical hashes flake. ±5% tolerance
-            // is the PR #2 rationale carried forward.
-            const tol = Math.max(off.data_byte_length * 0.05, 16);
-            expect(
-                Math.abs(on.data_byte_length - off.data_byte_length),
-            ).toBeLessThanOrEqual(tol);
+            const result = res.result!;
+            expect(result.pageIndex).toBe(0);
+            expect(result.width).toBeGreaterThan(0);
+            expect(result.height).toBeGreaterThan(0);
+            expect(result.data_byte_length).toBeGreaterThan(0);
         });
 
-        it('worker path returns PAGE_OUT_OF_RANGE for an invalid index', async () => {
-            // Intentional behavioral divergence (documented in PR #1/#2/#3):
-            // - Pref-on: worker validates pageIndex in `opRenderPageToImage`
-            //   and throws `ExtractionError(PAGE_OUT_OF_RANGE)`. Better
-            //   structured error for downstream callers.
-            // - Pref-off: main-thread `MuPDFService.renderPageToImage` calls
-            //   `loadPage` directly with no range check, throwing a generic
-            //   `Error("Failed to load page N")`. This bubbles through the
-            //   dev endpoint as a 500.
-            // Asserting parity here is wrong because the divergence is by
-            // design; the worker-side behavior is verified in isolation by
-            // the unit test in `tests/unit/services/mupdfWorkerClient.test.ts`
-            // (`renderPageToImage > rehydrates PAGE_OUT_OF_RANGE`). The live
-            // assertion below covers only the worker path.
-            //
-            // TODO(post-PR#3): close the divergence by adding the same
-            // `pageIndex` range check to `MuPDFService.renderPageToImage`
-            // and throwing `ExtractionError(PAGE_OUT_OF_RANGE)` instead of
-            // the generic loadPage error. Then promote this back to a
-            // both-paths parity assertion.
-            await setPref('mupdf.useWorker', true);
-            const onRes = await pdfRenderPage(SMALL_PDF, {
-                page_index: 99999,
-            });
-            expect(onRes.ok).toBe(false);
-            expect(onRes.error?.code).toBe('PAGE_OUT_OF_RANGE');
+        it('throws PAGE_OUT_OF_RANGE for an invalid index', async () => {
+            const res = await pdfRenderPage(SMALL_PDF, { page_index: 99999 });
+            expect(res.ok).toBe(false);
+            expect(res.error?.code).toBe('PAGE_OUT_OF_RANGE');
         });
     });
 });

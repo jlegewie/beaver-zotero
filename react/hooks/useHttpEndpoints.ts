@@ -136,7 +136,6 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-search-scored',
     '/beaver/test/pdf-sentence-bboxes',
     '/beaver/test/pdf-render-page',
-    '/beaver/test/set-pref',
 ] as const;
 
 /**
@@ -1038,8 +1037,8 @@ function uint8ToBase64ForTest(bytes: Uint8Array): string {
 }
 
 /**
- * Dev-only PDF page labels endpoint. Routes through `PDFExtractor`, so it
- * picks up the worker when `mupdf.useWorker` is on.
+ * Dev-only PDF page labels endpoint. Routes through `PDFExtractor`, which
+ * delegates to the MuPDF worker.
  */
 async function handleTestPdfPageLabelsHttpRequest(request: any) {
     const { PDFExtractor, ExtractionError } = await import(
@@ -1157,25 +1156,16 @@ async function handleTestPdfExtractRawHttpRequest(request: any) {
 /**
  * Dev-only PDF detailed-extract endpoint — primitive level.
  *
- * Pref on  → `getMuPDFWorkerClient().extractRawPageDetailed` (worker
- *            validates `pageIndex` and emits PAGE_OUT_OF_RANGE).
- * Pref off → bare `MuPDFService` open + explicit pageIndex bounds check
- *            (mirroring the precondition in
- *            `PDFExtractor.extractSentenceBBoxes`) + extractRawPageDetailed
- *            + close. We bypass `PDFExtractor.extractSentenceBBoxes` so the
- *            test exercises the raw detailed page, not the sentence mapper.
+ * Calls `getMuPDFWorkerClient().extractRawPageDetailed` directly (the worker
+ * validates `pageIndex` and emits PAGE_OUT_OF_RANGE). Bypasses
+ * `PDFExtractor.extractSentenceBBoxes` so the test exercises the raw
+ * detailed page, not the sentence mapper.
  */
 async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
-    const { ExtractionError, ExtractionErrorCode } = await import(
-        '../../src/services/pdf'
-    );
-    const { MuPDFService } = await import(
-        '../../src/services/pdf/MuPDFService'
-    );
+    const { ExtractionError } = await import('../../src/services/pdf');
     const { getMuPDFWorkerClient } = await import(
         '../../src/services/pdf/MuPDFWorkerClient'
     );
-    const { getPref } = await import('../../src/utils/prefs');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
@@ -1191,32 +1181,12 @@ async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
     const includeImages = request?.include_images === true;
 
     try {
-        if (getPref('mupdf.useWorker')) {
-            const result = await getMuPDFWorkerClient().extractRawPageDetailed(
-                pdfData,
-                pageIndex,
-                { includeImages },
-            );
-            return { ok: true, result };
-        }
-
-        const mupdf = new MuPDFService();
-        try {
-            await mupdf.open(pdfData);
-            const pageCount = mupdf.getPageCount();
-            if (pageIndex < 0 || pageIndex >= pageCount) {
-                throw new ExtractionError(
-                    ExtractionErrorCode.PAGE_OUT_OF_RANGE,
-                    `Page index ${pageIndex} out of range (0..${pageCount - 1})`,
-                );
-            }
-            const result = mupdf.extractRawPageDetailed(pageIndex, {
-                includeImages,
-            });
-            return { ok: true, result };
-        } finally {
-            mupdf.close();
-        }
+        const result = await getMuPDFWorkerClient().extractRawPageDetailed(
+            pdfData,
+            pageIndex,
+            { includeImages },
+        );
+        return { ok: true, result };
     } catch (e: any) {
         if (e instanceof ExtractionError) {
             return {
@@ -1235,20 +1205,15 @@ async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
 /**
  * Dev-only PDF search endpoint — primitive level (no SearchScorer).
  *
- * To exercise the worker primitive in isolation, this endpoint bypasses
- * `PDFExtractor`:
- *   pref on  → `getMuPDFWorkerClient().searchPages`
- *   pref off → bare `MuPDFService` open + searchPages + close
+ * Calls `getMuPDFWorkerClient().searchPages` directly. Bypasses
+ * `PDFExtractor.search` so the test exercises the raw `searchPages`
+ * primitive, not the scored search pipeline.
  */
 async function handleTestPdfSearchHttpRequest(request: any) {
     const { ExtractionError } = await import('../../src/services/pdf');
-    const { MuPDFService } = await import(
-        '../../src/services/pdf/MuPDFService'
-    );
     const { getMuPDFWorkerClient } = await import(
         '../../src/services/pdf/MuPDFWorkerClient'
     );
-    const { getPref } = await import('../../src/utils/prefs');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
@@ -1270,28 +1235,13 @@ async function handleTestPdfSearchHttpRequest(request: any) {
             : undefined;
 
     try {
-        if (getPref('mupdf.useWorker')) {
-            const pages = await getMuPDFWorkerClient().searchPages(
-                pdfData,
-                query,
-                pageIndices,
-                maxHitsPerPage,
-            );
-            return { ok: true, pages };
-        }
-
-        const mupdf = new MuPDFService();
-        try {
-            await mupdf.open(pdfData);
-            const pages = mupdf.searchPages(
-                query,
-                pageIndices,
-                maxHitsPerPage ?? 100,
-            );
-            return { ok: true, pages };
-        } finally {
-            mupdf.close();
-        }
+        const pages = await getMuPDFWorkerClient().searchPages(
+            pdfData,
+            query,
+            pageIndices,
+            maxHitsPerPage,
+        );
+        return { ok: true, pages };
     } catch (e: any) {
         if (e instanceof ExtractionError) {
             return {
@@ -1444,24 +1394,6 @@ async function handleTestPdfRenderPageHttpRequest(request: any) {
     );
 }
 
-/**
- * Dev-only pref setter. Allowlisted to a single key for safety.
- *
- * Request body:  { key: "mupdf.useWorker", value: boolean }
- */
-async function handleTestSetPrefHttpRequest(request: any) {
-    const { key, value } = request || {};
-    if (key !== 'mupdf.useWorker') {
-        return { ok: false, error: 'unsupported pref key' };
-    }
-    if (typeof value !== 'boolean') {
-        return { ok: false, error: 'value must be boolean' };
-    }
-    Zotero.Prefs.set('extensions.zotero.beaver.mupdf.useWorker', value, true);
-    return { ok: true };
-}
-
-
 // =============================================================================
 // Registration Functions
 // =============================================================================
@@ -1613,9 +1545,6 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/pdf-render-page'] =
             createEndpoint(handleTestPdfRenderPageHttpRequest);
-
-        Zotero.Server.Endpoints['/beaver/test/set-pref'] =
-            createEndpoint(handleTestSetPrefHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
