@@ -478,6 +478,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 14. Unregister protocol handler
         unregisterBeaverProtocolHandler();
 
+        // 15. Drop React-bundle cross-bundle globals attached to Zotero
+        Zotero.__beaverJotaiStore = undefined;
+        Zotero.__beaverShuttingDown = undefined;
+
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
     } catch (error: any) {
         ztoolkit.log(`onMainWindowUnload: Error during cleanup: ${error.message}`);
@@ -638,6 +642,12 @@ async function onShutdown(): Promise<void> {
         ztoolkit.unregisterAll();
         addon.data.dialog?.window?.close();
         addon.data.alive = false;
+
+        // Drop React-bundle cross-bundle globals so plugin disable doesn't
+        // leak the Jotai store (dead atom-keyed entries) or leave a stale
+        // shutdown flag that would short-circuit the next onStartup().
+        Zotero.__beaverJotaiStore = undefined;
+        Zotero.__beaverShuttingDown = undefined;
         // Note: the singleton is removed from Zotero in addon/bootstrap.js's
     } catch (error) {
         ztoolkit.log("onShutdown: Error during cleanup:", error);
