@@ -347,6 +347,128 @@ describe('MuPDFWorkerClient', () => {
         });
     });
 
+    describe('renderPagesToImagesWithMeta', () => {
+        it('round-trips { pageCount, pageLabels, pages } and forwards args', async () => {
+            const client = getMuPDFWorkerClient();
+            const buf = new Uint8Array([1, 2, 3]);
+
+            const promise = client.renderPagesToImagesWithMeta(buf, {
+                pageIndices: [0, 1],
+                options: { format: 'png' },
+            });
+            const worker = MockWorker.instances[0];
+            const cannedBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+            const canned = {
+                pageCount: 5,
+                pageLabels: { 0: 'i', 1: 'ii' },
+                pages: [
+                    {
+                        pageIndex: 0,
+                        data: cannedBytes,
+                        format: 'png' as const,
+                        width: 100,
+                        height: 100,
+                        scale: 1,
+                        dpi: 72,
+                    },
+                ],
+            };
+            worker.replyToLast({ ok: true, result: canned });
+
+            await expect(promise).resolves.toEqual(canned);
+
+            const [message, transfer] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            expect(message).toMatchObject({
+                op: 'renderPagesToImagesWithMeta',
+                args: {
+                    pageIndices: [0, 1],
+                    options: { format: 'png' },
+                },
+            });
+            // bytes posted by copy on the main side; transfer happens worker→main only.
+            expect(transfer).toBeUndefined();
+        });
+
+        it('forwards a pageRange', async () => {
+            const client = getMuPDFWorkerClient();
+            const buf = new Uint8Array([1]);
+            const promise = client.renderPagesToImagesWithMeta(buf, {
+                pageRange: { startIndex: 0, endIndex: 2, maxPages: 5 },
+            });
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: true,
+                result: { pageCount: 5, pageLabels: {}, pages: [] },
+            });
+            await promise;
+            const [message] = worker.postMessage.mock.calls[0] as [any, any];
+            expect(message.args.pageRange).toEqual({
+                startIndex: 0,
+                endIndex: 2,
+                maxPages: 5,
+            });
+        });
+    });
+
+    describe('extractWithMeta', () => {
+        it('forwards pageRange to op extractWithMeta', async () => {
+            const client = getMuPDFWorkerClient();
+            const buf = new Uint8Array([1]);
+            const promise = client.extractWithMeta(buf, {
+                settings: { checkTextLayer: true },
+                pageRange: { startIndex: 0, maxPages: 2 },
+            });
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: true,
+                result: {
+                    pages: [],
+                    analysis: { pageCount: 10, hasTextLayer: true, styleProfile: {}, marginAnalysis: {} },
+                    fullText: '',
+                    pageLabels: undefined,
+                    metadata: { extractedAt: 'now', version: '2.0.0', settings: {} },
+                },
+            });
+            await promise;
+            const [message] = worker.postMessage.mock.calls[0] as [any, any];
+            expect(message).toMatchObject({
+                op: 'extractWithMeta',
+                args: {
+                    settings: { checkTextLayer: true },
+                    pageRange: { startIndex: 0, maxPages: 2 },
+                },
+            });
+        });
+
+        it('rehydrates PAGE_OUT_OF_RANGE with pageCount from worker payload', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.extractWithMeta(new Uint8Array([1]), {
+                pageIndices: [99999],
+            });
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: ExtractionErrorCode.PAGE_OUT_OF_RANGE,
+                    message: 'All requested page indices are out of range or non-integer (document has 3 pages)',
+                    payload: { pageCount: 3 },
+                },
+            });
+            try {
+                await promise;
+                expect.fail('expected throw');
+            } catch (err) {
+                expect(err).toBeInstanceOf(ExtractionError);
+                expect((err as ExtractionError).code).toBe(ExtractionErrorCode.PAGE_OUT_OF_RANGE);
+                expect((err as ExtractionError).pageCount).toBe(3);
+            }
+        });
+    });
+
     describe('searchPages', () => {
         it('round-trips PDFPageSearchResult[]', async () => {
             const client = getMuPDFWorkerClient();
@@ -583,6 +705,36 @@ describe('MuPDFWorkerClient', () => {
                 Transferable[] | undefined,
             ];
             expect(message).toMatchObject({ op: 'search', args: { query: 'foo' } });
+        });
+
+        it('lifts options.maxPageCount to a top-level worker arg', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.search(new Uint8Array([1]), 'foo', {
+                maxHitsPerPage: 50,
+                maxPageCount: 100,
+            });
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: true,
+                result: {
+                    query: 'foo',
+                    totalMatches: 0,
+                    pagesWithMatches: 0,
+                    totalPages: 1,
+                    pages: [],
+                    metadata: { searchedAt: 'now', durationMs: 1, options: {}, scoringOptions: {} },
+                },
+            });
+            await promise;
+            const [message] = worker.postMessage.mock.calls[0] as [any, any];
+            // maxPageCount lifted out of options into the top-level args; remaining
+            // options are forwarded as-is.
+            expect(message.args).toMatchObject({
+                query: 'foo',
+                maxPageCount: 100,
+                options: { maxHitsPerPage: 50 },
+            });
+            expect(message.args.options).not.toHaveProperty('maxPageCount');
         });
     });
 

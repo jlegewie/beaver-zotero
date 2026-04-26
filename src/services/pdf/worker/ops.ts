@@ -55,9 +55,12 @@ import {
     openDocSafe,
     rawPageProviderFromDoc,
     renderOnePage,
+    resolveExplicitPageIndicesOrThrow,
     resolvePageIndices,
+    resolvePageRangeOrThrow,
     searchPageInDoc,
 } from "./docHelpers";
+import type { DocumentLike } from "./mupdfApi";
 
 export interface OpReply<T = unknown> {
     result: T;
@@ -149,6 +152,48 @@ export async function opRenderPagesToImages(
     }
 }
 
+/**
+ * Strict, fused render-pages op for the images handler.
+ *
+ * Combines `getPageCountAndLabels` + `renderPagesToImages` into a single
+ * doc-open. Returns metadata alongside the rendered pages so the handler
+ * can populate `total_pages` and per-page `page_label` in the response
+ * without an extra round-trip. Image buffers are transferred (per-page
+ * `r.data.buffer`).
+ */
+export async function opRenderPagesToImagesWithMeta(
+    args: {
+        pdfData: Uint8Array | ArrayBuffer;
+        pageIndices?: number[];
+        pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+        options?: PageImageOptions;
+    },
+): Promise<OpReply<{ pageCount: number; pageLabels: Record<number, string>; pages: PageImageResult[] }>> {
+    const api = await ensureApi();
+    const doc = await openDocSafe(args.pdfData);
+    try {
+        const opts = { ...DEFAULT_PAGE_IMAGE_OPTIONS, ...(args.options || {}) };
+        const pageCount = doc.countPages();
+        const pageLabels = collectPageLabels(doc);
+        const indices = args.pageRange
+            ? resolvePageRangeOrThrow(pageCount, args.pageRange)
+            : resolveExplicitPageIndicesOrThrow(pageCount, args.pageIndices);
+        const out: PageImageResult[] = [];
+        const transfer: Transferable[] = [];
+        for (const pageIndex of indices) {
+            const r = renderOnePage(api, doc, pageIndex, opts);
+            out.push(r);
+            transfer.push(r.data.buffer);
+        }
+        return {
+            result: { pageCount, pageLabels, pages: out },
+            transfer,
+        };
+    } finally {
+        doc.destroy();
+    }
+}
+
 export async function opRenderPageToImage(
     args: { pdfData: Uint8Array | ArrayBuffer; pageIndex: number; options?: PageImageOptions },
 ): Promise<OpReply<PageImageResult>> {
@@ -201,39 +246,24 @@ export async function opSearchPages(
 }
 
 /**
- * Shared body for `extract` / `extractByLines`. The two methods differ only
- * in the per-page loop: column detection + PageExtractor (extract) vs
- * column + line detection (extractByLines). All other steps (open, OCR
- * check, raw extraction, style + margin analysis) are identical.
+ * Shared body for `extract` / `extractByLines` / `extractWithMeta`. Differs
+ * only in the per-page loop: column detection + PageExtractor (extract) vs
+ * column + line detection (extractByLines). All other steps (raw extraction,
+ * style + margin analysis, fullText assembly, analysis build) are identical.
+ *
+ * The caller is responsible for opening the doc, resolving the page indices,
+ * collecting page labels, and running the OCR text-layer check (NO_TEXT_LAYER
+ * needs `pageLabels` and `pageCount` in its payload, which the caller already
+ * has). This helper just turns those inputs into an ExtractionResult.
  */
-function runExtractCommon(
-    doc: ReturnType<typeof openDocSafe> extends Promise<infer D> ? D : never,
-    settings: ExtractionSettings | undefined,
+function runExtractFromIndices(
+    doc: DocumentLike,
+    opts: Required<Omit<ExtractionSettings, 'pages' | 'useLineDetection' | 'minTextPerPage' | 'styleSampleSize'>> & ExtractionSettings,
+    indices: number[],
+    pageCount: number,
+    pageLabels: Record<number, string>,
     useLineDetection: boolean,
 ): ExtractionResult | LineExtractionResult {
-    const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(settings || {}) };
-
-    const provider = rawPageProviderFromDoc(doc);
-    const docAnalyzer = new DocumentAnalyzer(provider);
-    const pageCount = docAnalyzer.getPageCount();
-    const pageLabels = collectPageLabels(doc);
-
-    if (opts.checkTextLayer) {
-        const ocr = docAnalyzer.getDetailedOCRAnalysis({ minTextPerPage: opts.minTextPerPage });
-        if (ocr.needsOCR) {
-            throw workerError(
-                ERROR_CODES.NO_TEXT_LAYER,
-                `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
-                { ocrAnalysis: ocr, pageLabels, pageCount },
-            );
-        }
-    }
-
-    const pageIndices = opts.pages?.length
-        ? opts.pages.filter((i: number) => i >= 0 && i < pageCount)
-        : undefined;
-
-    const indices = resolvePageIndices(pageCount, pageIndices);
     const rawPages: RawPageData[] = indices.map((i) => extractRawPageFromDoc(doc, i));
     const rawData: RawDocumentData = { pageCount, pages: rawPages };
 
@@ -335,6 +365,45 @@ function runExtractCommon(
     return baseResult as ExtractionResult | LineExtractionResult;
 }
 
+/**
+ * Legacy lenient pre-amble shared by `opExtract` / `opExtractByLines`. Runs
+ * page-count + label collection + OCR check, then resolves indices using the
+ * lenient `opts.pages?.length ? filter : undefined → resolvePageIndices`
+ * semantics (empty filter → all pages). Preserved for callers that have not
+ * been migrated to the strict resolver — dev tools, itemValidationManager,
+ * getAttachmentFileStatus.
+ */
+function runExtractCommon(
+    doc: DocumentLike,
+    settings: ExtractionSettings | undefined,
+    useLineDetection: boolean,
+): ExtractionResult | LineExtractionResult {
+    const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(settings || {}) };
+
+    const provider = rawPageProviderFromDoc(doc);
+    const docAnalyzer = new DocumentAnalyzer(provider);
+    const pageCount = docAnalyzer.getPageCount();
+    const pageLabels = collectPageLabels(doc);
+
+    if (opts.checkTextLayer) {
+        const ocr = docAnalyzer.getDetailedOCRAnalysis({ minTextPerPage: opts.minTextPerPage });
+        if (ocr.needsOCR) {
+            throw workerError(
+                ERROR_CODES.NO_TEXT_LAYER,
+                `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
+                { ocrAnalysis: ocr, pageLabels, pageCount },
+            );
+        }
+    }
+
+    const pageIndices = opts.pages?.length
+        ? opts.pages.filter((i: number) => i >= 0 && i < pageCount)
+        : undefined;
+    const indices = resolvePageIndices(pageCount, pageIndices);
+
+    return runExtractFromIndices(doc, opts as any, indices, pageCount, pageLabels, useLineDetection);
+}
+
 export async function opExtract(
     args: { pdfData: Uint8Array | ArrayBuffer; settings?: ExtractionSettings },
 ): Promise<OpReply<ExtractionResult | LineExtractionResult>> {
@@ -354,6 +423,68 @@ export async function opExtractByLines(
     const doc = await openDocSafe(args.pdfData);
     try {
         const result = runExtractCommon(doc, args.settings, true) as LineExtractionResult;
+        return { result };
+    } finally {
+        doc.destroy();
+    }
+}
+
+/**
+ * Strict, fused extract op for the agent handlers.
+ *
+ * Combines what the pages handler used to fetch as separate round-trips
+ * (`getPageCountAndLabels` + `getPageCount` + `extract`) into a single
+ * doc-open. Uses the strict resolvers — explicit-but-all-invalid page
+ * inputs throw PAGE_OUT_OF_RANGE with `{ pageCount }` in the payload so
+ * handlers can populate `total_pages` in error responses.
+ *
+ * Rejects useLineDetection — line extraction must go through opExtractByLines.
+ */
+export async function opExtractWithMeta(
+    args: {
+        pdfData: Uint8Array | ArrayBuffer;
+        settings?: ExtractionSettings;
+        pageIndices?: number[];
+        pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+    },
+): Promise<OpReply<ExtractionResult>> {
+    if (args.settings?.useLineDetection) {
+        throw workerError(
+            ERROR_CODES.WASM_ERROR,
+            "opExtractWithMeta does not support useLineDetection — call opExtractByLines instead",
+        );
+    }
+    const doc = await openDocSafe(args.pdfData);
+    try {
+        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
+        const provider = rawPageProviderFromDoc(doc);
+        const docAnalyzer = new DocumentAnalyzer(provider);
+        const pageCount = docAnalyzer.getPageCount();
+        const pageLabels = collectPageLabels(doc);
+
+        if (opts.checkTextLayer) {
+            const ocr = docAnalyzer.getDetailedOCRAnalysis({ minTextPerPage: opts.minTextPerPage });
+            if (ocr.needsOCR) {
+                throw workerError(
+                    ERROR_CODES.NO_TEXT_LAYER,
+                    `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
+                    { ocrAnalysis: ocr, pageLabels, pageCount },
+                );
+            }
+        }
+
+        const indices = args.pageRange
+            ? resolvePageRangeOrThrow(pageCount, args.pageRange)
+            : resolveExplicitPageIndicesOrThrow(pageCount, args.pageIndices);
+
+        const result = runExtractFromIndices(
+            doc,
+            opts as any,
+            indices,
+            pageCount,
+            pageLabels,
+            false,
+        ) as ExtractionResult;
         return { result };
     } finally {
         doc.destroy();
@@ -388,7 +519,12 @@ export async function opHasTextLayer(
 }
 
 export async function opSearch(
-    args: { pdfData: Uint8Array | ArrayBuffer; query: string; options?: PDFSearchOptions },
+    args: {
+        pdfData: Uint8Array | ArrayBuffer;
+        query: string;
+        options?: PDFSearchOptions;
+        maxPageCount?: number;
+    },
 ): Promise<OpReply<PDFSearchResult>> {
     const startTime = Date.now();
     const opts = { ...DEFAULT_PDF_SEARCH_OPTIONS, ...(args.options || {}) };
@@ -397,6 +533,30 @@ export async function opSearch(
     const doc = await openDocSafe(args.pdfData);
     try {
         const totalPages = doc.countPages();
+
+        // Page-count gate: lets cold-cache search drop the upfront getPageCount call.
+        // Returns a flagged result (NOT an error) so the handler can map it to
+        // the existing `too_many_pages` error response and write the page count
+        // to its metadata cache.
+        if (typeof args.maxPageCount === "number" && totalPages > args.maxPageCount) {
+            return {
+                result: {
+                    query: args.query,
+                    totalMatches: 0,
+                    pagesWithMatches: 0,
+                    totalPages,
+                    pages: [],
+                    exceedsPageCountLimit: true,
+                    metadata: {
+                        searchedAt: new Date().toISOString(),
+                        durationMs: Date.now() - startTime,
+                        options: opts,
+                        scoringOptions: scoringOpts,
+                    },
+                } as PDFSearchResult,
+            };
+        }
+
         const limit = typeof opts.maxHitsPerPage === "number" && opts.maxHitsPerPage > 0
             ? opts.maxHitsPerPage
             : 100;

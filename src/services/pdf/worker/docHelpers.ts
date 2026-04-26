@@ -409,6 +409,117 @@ export function resolvePageIndices(pageCount: number, pageIndices?: number[]): n
 }
 
 /**
+ * Strict variant of resolvePageIndices for fused ops that defer range
+ * validation to the worker.
+ *
+ * Semantics:
+ *  - undefined OR empty array            → returns all pages
+ *  - non-empty list, all indices invalid → throws PAGE_OUT_OF_RANGE
+ *  - non-empty list, some valid          → returns filtered list
+ *
+ * Treats undefined and `[]` identically so a caller passing merged-defaults
+ * (DEFAULT_EXTRACTION_SETTINGS.pages = []) is not punished for the empty
+ * default. Filter requires Number.isInteger because structured-clone passes
+ * NaN/0.5/Infinity through and `0.5 >= 0 && 0.5 < pageCount` is true.
+ *
+ * Throws workerError(PAGE_OUT_OF_RANGE, msg, { pageCount }) so the
+ * MuPDFWorkerClient rehydrator can populate ExtractionError.pageCount,
+ * which the handler maps into the response's `total_pages` field.
+ */
+export function resolveExplicitPageIndicesOrThrow(
+    pageCount: number,
+    pageIndices: number[] | undefined,
+): number[] {
+    if (!pageIndices || pageIndices.length === 0) {
+        return Array.from({ length: pageCount }, (_, i) => i);
+    }
+    const filtered = pageIndices.filter(
+        (i) => Number.isInteger(i) && i >= 0 && i < pageCount,
+    );
+    if (filtered.length === 0) {
+        throw workerError(
+            ERROR_CODES.PAGE_OUT_OF_RANGE,
+            `All requested page indices are out of range or non-integer (document has ${pageCount} pages)`,
+            { pageCount },
+        );
+    }
+    return filtered;
+}
+
+/**
+ * Resolve a (startIndex, endIndex?, maxPages?) tuple to a concrete index list.
+ * - startIndex 0-based, inclusive. Must be a non-negative integer.
+ * - endIndex 0-based, inclusive. When provided, must be a non-negative integer >= startIndex.
+ *   When undefined, defaults to pageCount-1.
+ * - maxPages clamps the resulting span. When provided, must be a positive integer.
+ *
+ * Throws workerError(PAGE_OUT_OF_RANGE, msg, { pageCount }) for ANY of:
+ *   - non-integer or negative startIndex
+ *   - non-integer or negative endIndex
+ *   - non-positive-integer maxPages
+ *   - endIndex < startIndex
+ *   - startIndex >= pageCount  (entire range past document end)
+ *   - resolved span is empty after clamping
+ *
+ * The pageCount payload lets the handler populate response `total_pages`
+ * instead of returning null in the error path.
+ */
+export function resolvePageRangeOrThrow(
+    pageCount: number,
+    range: { startIndex: number; endIndex?: number; maxPages?: number },
+): number[] {
+    const { startIndex, endIndex, maxPages } = range;
+    if (!Number.isInteger(startIndex) || startIndex < 0) {
+        throw workerError(
+            ERROR_CODES.PAGE_OUT_OF_RANGE,
+            `Start index ${startIndex} is invalid (must be a non-negative integer)`,
+            { pageCount },
+        );
+    }
+    if (endIndex != null && (!Number.isInteger(endIndex) || endIndex < 0)) {
+        throw workerError(
+            ERROR_CODES.PAGE_OUT_OF_RANGE,
+            `End index ${endIndex} is invalid (must be a non-negative integer)`,
+            { pageCount },
+        );
+    }
+    if (maxPages != null && (!Number.isInteger(maxPages) || maxPages <= 0)) {
+        throw workerError(
+            ERROR_CODES.PAGE_OUT_OF_RANGE,
+            `maxPages ${maxPages} is invalid (must be a positive integer)`,
+            { pageCount },
+        );
+    }
+    if (endIndex != null && endIndex < startIndex) {
+        throw workerError(
+            ERROR_CODES.PAGE_OUT_OF_RANGE,
+            `End index ${endIndex} is before start index ${startIndex}`,
+            { pageCount },
+        );
+    }
+    if (startIndex >= pageCount) {
+        throw workerError(
+            ERROR_CODES.PAGE_OUT_OF_RANGE,
+            `Start index ${startIndex} is out of range (document has ${pageCount} pages)`,
+            { pageCount },
+        );
+    }
+    let lastIndex = endIndex != null ? Math.min(endIndex, pageCount - 1) : pageCount - 1;
+    if (maxPages != null) {
+        lastIndex = Math.min(lastIndex, startIndex + maxPages - 1);
+    }
+    if (lastIndex < startIndex) {
+        // Defensive: should not happen given prior checks.
+        throw workerError(
+            ERROR_CODES.PAGE_OUT_OF_RANGE,
+            `Resolved page range is empty`,
+            { pageCount },
+        );
+    }
+    return Array.from({ length: lastIndex - startIndex + 1 }, (_, i) => startIndex + i);
+}
+
+/**
  * Build a RawPageProvider over an open Document. Lets DocumentAnalyzer run
  * inside the worker without a MuPDFService dependency.
  */

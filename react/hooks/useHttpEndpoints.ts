@@ -121,10 +121,16 @@ const ENDPOINT_PATHS = [
     '/beaver/test/note-undo',
     // Test-only endpoints (sentence bbox feasibility probe)
     '/beaver/test/sentence-bboxes',
+    // Test-only endpoints (MuPDF worker singleton stats / lifecycle)
+    '/beaver/test/worker-stats',
+    '/beaver/test/worker-mark-stale',
+    // Test-only endpoint (file-status side-effect trigger)
+    '/beaver/test/file-status',
     // Test-only endpoints (MuPDF worker plumbing)
     '/beaver/test/pdf-page-count',
     '/beaver/test/pdf-page-labels',
     '/beaver/test/pdf-render-pages',
+    '/beaver/test/pdf-render-pages-with-meta',
     '/beaver/test/pdf-extract-raw',
     '/beaver/test/pdf-extract-raw-detailed',
     '/beaver/test/pdf-search',
@@ -270,8 +276,10 @@ async function handleAttachmentPagesHttpRequest(request: any) {
         start_page: request.start_page,
         end_page: request.end_page,
         skip_local_limits: request.skip_local_limits,
+        prefer_page_labels: request.prefer_page_labels,
+        max_pages: request.max_pages,
     };
-    
+
     const response = await handleZoteroAttachmentPagesRequest(wsRequest);
     
     return {
@@ -294,6 +302,7 @@ async function handleAttachmentPageImagesHttpRequest(request: any) {
         format: request.format,
         jpeg_quality: request.jpeg_quality,
         skip_local_limits: request.skip_local_limits,
+        prefer_page_labels: request.prefer_page_labels,
     };
     
     const response = await handleZoteroAttachmentPageImagesRequest(wsRequest);
@@ -779,6 +788,68 @@ async function handleTestNoteUndoHttpRequest(request: any) {
     }
 }
 
+/**
+ * Dev-only: snapshot of MuPDFWorkerClient dispatch / spawn counters.
+ *
+ * Lets manual-test runners (`docs-zotero/manual-tests-fused-worker-ops.md`)
+ * verify "exactly one extractWithMeta dispatch", "no extra spawns", etc.
+ * without log grepping. POST `{ reset: true }` to zero counters first.
+ */
+async function handleTestWorkerStatsHttpRequest(request: any) {
+    const { getMuPDFWorkerClient } = await import(
+        '../../src/services/pdf/MuPDFWorkerClient'
+    );
+    const client = getMuPDFWorkerClient();
+    if (request?.reset === true) {
+        client.resetStats();
+    }
+    return { ok: true, stats: client.getStats() };
+}
+
+/**
+ * Dev-only: terminate the current MuPDF worker as if it had died mid-flight.
+ *
+ * Drives the same `markStale` code path as a real worker death, so the next
+ * `call()` either retries (if a request is in-flight) or respawns on the
+ * next dispatch. Used by manual test 1.3.
+ */
+async function handleTestWorkerMarkStaleHttpRequest(request: any) {
+    const { getMuPDFWorkerClient } = await import(
+        '../../src/services/pdf/MuPDFWorkerClient'
+    );
+    const reason = typeof request?.reason === 'string' ? request.reason : 'test';
+    const client = getMuPDFWorkerClient();
+    const before = client.getStats();
+    client.markStaleForTest(reason);
+    return { ok: true, before, after: client.getStats() };
+}
+
+/**
+ * Dev-only: invoke `getAttachmentFileStatus(item, isPrimary)` directly.
+ *
+ * Manual tests 2.3 (step 3), 5.4, and 7.2 need to trigger the file-status
+ * side-effect that, in production, runs from agent or sidebar flows. This
+ * endpoint short-circuits the trigger so a runner can assert on the cache
+ * write / log output that follows.
+ */
+async function handleTestFileStatusHttpRequest(request: any) {
+    const { getAttachmentFileStatus } = await import(
+        '../../src/services/agentDataProvider/utils'
+    );
+    const { library_id, zotero_key, is_primary } = request || {};
+    if (library_id == null || zotero_key == null) {
+        return { ok: false, error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(
+        library_id,
+        zotero_key,
+    );
+    if (!item) return { ok: false, error: 'not_found' };
+    if (!item.isAttachment()) return { ok: false, error: 'not_an_attachment' };
+    const status = await getAttachmentFileStatus(item, is_primary !== false);
+    return { ok: true, status };
+}
+
 async function handleTestResolveItemHttpRequest(request: any) {
     const { library_id, zotero_key } = request;
     if (library_id == null || zotero_key == null) {
@@ -1112,6 +1183,66 @@ async function handleTestPdfRenderPagesHttpRequest(request: any) {
                     name: 'ExtractionError',
                     code: e.code,
                     message: e.message,
+                },
+            };
+        }
+        throw e;
+    }
+}
+
+/**
+ * Dev-only fused render-pages endpoint exercising
+ * `PDFExtractor.renderPagesToImagesWithMeta`. Returns metadata alongside
+ * rendered pages so live tests can verify the fused-op shape end-to-end.
+ */
+async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) {
+    const { PDFExtractor, ExtractionError } = await import(
+        '../../src/services/pdf'
+    );
+
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    const { pdfData } = loaded;
+
+    const pageIndices: number[] | undefined = Array.isArray(request?.page_indices)
+        ? request.page_indices
+        : undefined;
+    const pageRange = request?.page_range && typeof request.page_range === 'object'
+        ? request.page_range
+        : undefined;
+    const options = request?.options || {};
+
+    try {
+        const result = await new PDFExtractor().renderPagesToImagesWithMeta(pdfData, {
+            pageIndices,
+            pageRange,
+            options,
+        });
+        const pages = result.pages.map((r) => ({
+            pageIndex: r.pageIndex,
+            format: r.format,
+            width: r.width,
+            height: r.height,
+            scale: r.scale,
+            dpi: r.dpi,
+            data_base64: uint8ToBase64ForTest(r.data),
+            data_byte_length: r.data.byteLength,
+        }));
+        return {
+            ok: true,
+            pageCount: result.pageCount,
+            pageLabels: result.pageLabels,
+            pages,
+        };
+    } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                    pageCount: e.pageCount,
                 },
             };
         }
@@ -1482,6 +1613,17 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);
 
+        // MuPDF worker singleton stats / lifecycle (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/worker-stats'] =
+            createEndpoint(handleTestWorkerStatsHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/worker-mark-stale'] =
+            createEndpoint(handleTestWorkerMarkStaleHttpRequest);
+
+        // File-status side-effect trigger (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/file-status'] =
+            createEndpoint(handleTestFileStatusHttpRequest);
+
         // Note-specific test endpoints (seeding/teardown/inspection/undo)
         Zotero.Server.Endpoints['/beaver/test/note-create'] =
             createEndpoint(handleTestNoteCreateHttpRequest);
@@ -1514,6 +1656,9 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/pdf-render-pages'] =
             createEndpoint(handleTestPdfRenderPagesHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-render-pages-with-meta'] =
+            createEndpoint(handleTestPdfRenderPagesWithMetaHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/pdf-extract-raw'] =
             createEndpoint(handleTestPdfExtractRawHttpRequest);

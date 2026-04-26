@@ -21,11 +21,13 @@ import {
     opExtractRawPageDetailed,
     opExtractRawPages,
     opExtractSentenceBBoxes,
+    opExtractWithMeta,
     opGetPageCount,
     opGetPageCountAndLabels,
     opHasTextLayer,
     opRenderPageToImage,
     opRenderPagesToImages,
+    opRenderPagesToImagesWithMeta,
     opSearch,
     opSearchPages,
     type OpReply,
@@ -70,6 +72,8 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opExtractRawPageDetailed(a as Parameters<typeof opExtractRawPageDetailed>[0]);
         case "renderPagesToImages":
             return await opRenderPagesToImages(a as Parameters<typeof opRenderPagesToImages>[0]);
+        case "renderPagesToImagesWithMeta":
+            return await opRenderPagesToImagesWithMeta(a as Parameters<typeof opRenderPagesToImagesWithMeta>[0]);
         case "renderPageToImage":
             return await opRenderPageToImage(a as Parameters<typeof opRenderPageToImage>[0]);
         case "searchPages":
@@ -77,6 +81,8 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
         // orchestration ops
         case "extract":
             return await opExtract(a as Parameters<typeof opExtract>[0]);
+        case "extractWithMeta":
+            return await opExtractWithMeta(a as Parameters<typeof opExtractWithMeta>[0]);
         case "extractByLines":
             return await opExtractByLines(a as Parameters<typeof opExtractByLines>[0]);
         case "analyzeOCRNeeds":

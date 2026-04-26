@@ -132,6 +132,32 @@ export class PDFExtractor {
     }
 
     /**
+     * Strict, fused extract for handlers that have deferred range validation
+     * to the worker. Returns the same `ExtractionResult` shape as `extract`
+     * (which already surfaces `analysis.pageCount` and `pageLabels`).
+     *
+     * Args:
+     *  - `pageIndices` (mutually exclusive with `pageRange`): explicit
+     *    0-based indices. Empty/undefined → all pages. Non-empty but all
+     *    invalid → `ExtractionError(PAGE_OUT_OF_RANGE)`.
+     *  - `pageRange`: `{ startIndex, endIndex?, maxPages? }` resolved inside
+     *    the worker (avoids a main-thread page-count round-trip for
+     *    open-ended end_page).
+     *
+     * Rejects `settings.useLineDetection` — line callers use `extractByLines`.
+     */
+    async extractWithMeta(
+        pdfData: Uint8Array | ArrayBuffer,
+        args: {
+            settings?: ExtractionSettings;
+            pageIndices?: number[];
+            pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+        } = {}
+    ): Promise<ExtractionResult> {
+        return getMuPDFWorkerClient().extractWithMeta(pdfData, args);
+    }
+
+    /**
      * Simple text extraction (convenience method).
      * Returns just the plain text without detailed analysis.
      */
@@ -330,6 +356,28 @@ export class PDFExtractor {
         options: PageImageOptions = {}
     ): Promise<PageImageResult[]> {
         return getMuPDFWorkerClient().renderPagesToImages(pdfData, pageIndices, options);
+    }
+
+    /**
+     * Strict, fused render-pages variant for the agent images handler.
+     *
+     * Returns `{ pageCount, pageLabels, pages }` from a single worker
+     * round-trip.
+     *
+     * Args mirror `extractWithMeta`. All-pages requests should pass
+     * `pageIndices: undefined` (or omit args entirely), NOT a pre-enumerated
+     * list — that requires knowing pageCount upfront, which is what we're
+     * trying to avoid.
+     */
+    async renderPagesToImagesWithMeta(
+        pdfData: Uint8Array | ArrayBuffer,
+        args: {
+            pageIndices?: number[];
+            pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+            options?: PageImageOptions;
+        } = {}
+    ): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: PageImageResult[] }> {
+        return getMuPDFWorkerClient().renderPagesToImagesWithMeta(pdfData, args);
     }
 
     /**

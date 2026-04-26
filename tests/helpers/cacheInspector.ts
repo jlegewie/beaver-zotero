@@ -144,6 +144,14 @@ export interface PdfRenderPagesResponse {
     error?: { name: string; code?: string; message: string };
 }
 
+export interface PdfRenderPagesWithMetaResponse {
+    ok: boolean;
+    pageCount?: number;
+    pageLabels?: Record<number, string>;
+    pages?: PdfRenderPagePayload[];
+    error?: { name: string; code?: string; message: string; pageCount?: number };
+}
+
 export interface PdfPageLabelsResponse {
     ok: boolean;
     count?: number;
@@ -222,6 +230,21 @@ export async function pdfRenderPagesFromBytes(
 ): Promise<PdfRenderPagesResponse> {
     return post<PdfRenderPagesResponse>('/beaver/test/pdf-render-pages', {
         raw_bytes_base64: bufferToBase64(bytes),
+        ...body,
+    });
+}
+
+export async function pdfRenderPagesWithMeta(
+    attachment: AttachmentFixture,
+    body: {
+        page_indices?: number[];
+        page_range?: { startIndex: number; endIndex?: number; maxPages?: number };
+        options?: PdfPageImageOptions;
+    } = {},
+): Promise<PdfRenderPagesWithMetaResponse> {
+    return post<PdfRenderPagesWithMetaResponse>('/beaver/test/pdf-render-pages-with-meta', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
         ...body,
     });
 }
