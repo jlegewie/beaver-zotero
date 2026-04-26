@@ -475,7 +475,7 @@ export class MuPDFWorkerClient {
 
     /** Force WASM init in the worker. Useful for tests and pre-warm. */
     async ping(): Promise<void> {
-        await this.call<{}>("__init", {});
+        await this.call<void>("__init", {});
     }
 
     dispose(): void {
