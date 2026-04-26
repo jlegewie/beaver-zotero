@@ -78,7 +78,7 @@ export const ENCRYPTED_PDF: AttachmentFixture = {
 // Scanned PDF without text layer
 export const NO_TEXT_PDF: AttachmentFixture = {
     library_id: 1,
-    zotero_key: 'QJH42RHD',
+    zotero_key: 'NV37VILU',
     description: 'No text layer (scanned)',
 };
 
