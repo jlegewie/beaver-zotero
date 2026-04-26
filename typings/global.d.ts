@@ -509,5 +509,11 @@ declare namespace _ZoteroTypes {
         __beaverJotaiStore?: import('jotai').createStore extends () => infer R ? R : never;
         /** Set to true at the start of shutdown to signal all in-flight operations to bail out */
         __beaverShuttingDown?: boolean;
+        /**
+         * Cross-bundle singleton MuPDFWorkerClient. Typed as `unknown` to avoid
+         * pulling the implementation file into the global typings (which would
+         * risk circular references). Callers cast at the boundary.
+         */
+        __beaverMuPDFWorkerClient?: unknown;
     }
 }

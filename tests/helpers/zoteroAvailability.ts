@@ -5,21 +5,16 @@
  * is not running.
  */
 
-import { ZOTERO_PORT } from './fixtures';
+import { ZOTERO_PORT_CANDIDATES, setZoteroPort } from './fixtures';
 
 let zoteroAvailable: boolean | null = null;
 
-/**
- * Check if Zotero is running and the Beaver plugin is loaded.
- * Result is cached for the lifetime of the test process.
- */
-export async function isZoteroAvailable(): Promise<boolean> {
-    if (zoteroAvailable !== null) return zoteroAvailable;
+async function probePort(port: number): Promise<boolean> {
     try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 3000);
         const res = await fetch(
-            `http://127.0.0.1:${ZOTERO_PORT}/beaver/test/ping`,
+            `http://127.0.0.1:${port}/beaver/test/ping`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -28,11 +23,29 @@ export async function isZoteroAvailable(): Promise<boolean> {
             },
         );
         clearTimeout(timer);
-        zoteroAvailable = res.ok;
+        return res.ok;
     } catch {
-        zoteroAvailable = false;
+        return false;
     }
-    return zoteroAvailable;
+}
+
+/**
+ * Check if Zotero is running and the Beaver plugin is loaded.
+ * Probes each candidate port in `ZOTERO_PORT_CANDIDATES` (env var first, then
+ * 23119, then 23124) and stores the first hit so subsequent helpers use the
+ * right base URL. Result is cached for the lifetime of the test process.
+ */
+export async function isZoteroAvailable(): Promise<boolean> {
+    if (zoteroAvailable !== null) return zoteroAvailable;
+    for (const port of ZOTERO_PORT_CANDIDATES) {
+        if (await probePort(port)) {
+            setZoteroPort(port);
+            zoteroAvailable = true;
+            return true;
+        }
+    }
+    zoteroAvailable = false;
+    return false;
 }
 
 /**
