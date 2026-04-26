@@ -35,3 +35,47 @@ export function formatNumberRanges(numbers: number[], separator: string = ", "):
 
     return parts.join(separator);
 }
+
+/**
+ * Format a list of page numbers using their display labels, while still
+ * collapsing consecutive page numbers into ranges (e.g., pages [1,2,3,5] with
+ * labels ['i','ii','iii','v'] → "i-iii, v").
+ *
+ * Range detection runs on the underlying numeric pages; the resulting range
+ * boundaries are rendered using the corresponding labels.
+ */
+export function formatPageRangesWithLabels(
+    pages: number[],
+    labels: string[],
+    separator: string = ", "
+): string {
+    if (pages.length === 0) return "";
+
+    const pairs = pages
+        .map((page, i) => ({ page, label: labels[i] ?? String(page) }))
+        .sort((a, b) => a.page - b.page);
+
+    // De-duplicate by page number, keeping the first label seen.
+    const dedup: { page: number; label: string }[] = [];
+    for (const pair of pairs) {
+        if (dedup.length === 0 || dedup[dedup.length - 1].page !== pair.page) {
+            dedup.push(pair);
+        }
+    }
+
+    const parts: string[] = [];
+    let startIdx = 0;
+    for (let i = 1; i <= dedup.length; i++) {
+        const continues = i < dedup.length && dedup[i].page === dedup[i - 1].page + 1;
+        if (continues) continue;
+
+        const startLabel = dedup[startIdx].label;
+        const endLabel = dedup[i - 1].label;
+        parts.push(startIdx === i - 1 || startLabel === endLabel
+            ? startLabel
+            : `${startLabel}-${endLabel}`);
+        startIdx = i;
+    }
+
+    return parts.join(separator);
+}

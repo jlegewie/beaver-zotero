@@ -70,7 +70,8 @@ import {
     resetRunMessages,
 } from '../agents/atoms';
 import { userIdAtom } from './auth';
-import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom } from './citations';
+import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom, bumpPageLabelsVersionAtom } from './citations';
+import { preloadPageLabelsForCitations } from '../utils/pageLabels';
 import {
     addAgentActionsAtom,
     upsertAgentActionsAtom,
@@ -1132,6 +1133,16 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                     ...event.citations!.map(c => ({ ...c, run_id: event.run_id }))
                 ]);
                 await set(updateCitationDataAtom);
+
+                // Preload PDF page labels for cited attachments so the rendering
+                // path can resolve page numbers to display labels synchronously.
+                // Runs after metadata is exposed to avoid blocking the UI on PDF
+                // extraction; citation components re-render via the version atom.
+                preloadPageLabelsForCitations(event.citations)
+                    .then(() => set(bumpPageLabelsVersionAtom))
+                    .catch((err) =>
+                        logger(`WS onRunComplete: Failed to preload page labels: ${err}`, 1)
+                    );
             }
 
             // Process agent actions from run complete event

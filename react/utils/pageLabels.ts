@@ -20,6 +20,7 @@
  */
 
 import { getAttachmentFileStatus } from '../../src/services/agentDataProvider/utils';
+import type { CitationMetadata } from '../types/citations';
 
 // Regex for citation tags — matches self-closing and non-self-closing forms
 const CITATION_REGEX = /<citation\s+([^>]+?)\s*(\/>|>(?:.*?<\/citation>)?)/g;
@@ -125,6 +126,47 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
             if (record) continue;
 
             // Cache miss → run full extraction (same as search path)
+            await getAttachmentFileStatus(item, false);
+        } catch {
+            // Skip items that can't be resolved
+        }
+    }
+}
+
+/**
+ * Pre-load attachment page labels into the in-memory cache for the given
+ * citation metadata records. Used when citation metadata is available directly
+ * (e.g., on run completion or thread load) so the rendering path can resolve
+ * page labels synchronously.
+ */
+export async function preloadPageLabelsForCitations(
+    citations: ReadonlyArray<Pick<CitationMetadata, 'library_id' | 'zotero_key' | 'pages' | 'parts'>>
+): Promise<void> {
+    const cache = Zotero.Beaver?.attachmentFileCache;
+    if (!cache) return;
+
+    const seen = new Set<number>();
+
+    for (const citation of citations) {
+        if (!citation.library_id || !citation.zotero_key) continue;
+
+        // Skip citations that don't have any page locators — labels aren't needed.
+        const hasPages =
+            (citation.pages && citation.pages.length > 0) ||
+            (citation.parts || []).some((p) => (p.locations || []).length > 0);
+        if (!hasPages) continue;
+
+        try {
+            const item = Zotero.Items.getByLibraryAndKey(citation.library_id, citation.zotero_key);
+            if (!item || seen.has(item.id)) continue;
+            seen.add(item.id);
+
+            const filePath = await item.getFilePathAsync();
+            if (!filePath) continue;
+
+            const record = await cache.getMetadata(item.id, filePath);
+            if (record) continue;
+
             await getAttachmentFileStatus(item, false);
         } catch {
             // Skip items that can't be resolved
