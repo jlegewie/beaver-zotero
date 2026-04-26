@@ -22,6 +22,7 @@ AGENTS.md
 archive
 .vscode/
 /scripts/*
+!/scripts/pack-xpi.mjs
 
 # compiled files
 reactBundle.js

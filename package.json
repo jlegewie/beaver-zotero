@@ -23,7 +23,7 @@
     "scripts": {
         "start": "concurrently \"zotero-plugin serve\" \"npm run watch-react\"",
         "build": "NODE_ENV=production npm run build-react:prod && NODE_ENV=production zotero-plugin build && tsc --noEmit",
-        "build:dev": "NODE_ENV=development npm run build-react:dev && NODE_ENV=development zotero-plugin build --dev && tsc --noEmit",
+        "build:dev": "NODE_ENV=development npm run build-react:dev && NODE_ENV=development zotero-plugin build --dev && npm run pack:xpi && tsc --noEmit",
         "build:staging": "BUILD_ENV=staging npm run build-react:staging && BUILD_ENV=staging zotero-plugin build && tsc --noEmit",
         "lint:check": "prettier --check . && eslint .",
         "lint:fix": "prettier --write . && eslint . --fix",
@@ -38,7 +38,8 @@
         "build-react:dev": "webpack --config webpack.config.js --mode=development",
         "build-react:prod": "webpack --config webpack.config.js --mode=production",
         "build-react:staging": "BUILD_ENV=staging webpack --config webpack.config.js --mode=production",
-        "watch-react": "webpack --config webpack.config.js --watch"
+        "watch-react": "webpack --config webpack.config.js --watch",
+        "pack:xpi": "node scripts/pack-xpi.mjs"
     },
     "dependencies": {
         "@babel/preset-typescript": "^7.26.0",
