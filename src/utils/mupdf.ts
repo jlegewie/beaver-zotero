@@ -10,6 +10,7 @@ export {
     extractFromZoteroItem,
     extractTextFromZoteroItem,
     disposeMuPDF,
+    disposeMuPDFWorker,
     MuPDFService,
 } from "../services/pdf";
 

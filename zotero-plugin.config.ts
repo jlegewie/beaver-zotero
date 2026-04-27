@@ -53,10 +53,28 @@ export default defineConfig({
         entryPoints: ["src/index.ts"],
         define: {
           __env__: `"${process.env.NODE_ENV}"`,
+          "process.env.NODE_ENV": `"${process.env.NODE_ENV ?? "production"}"`,
         },
         bundle: true,
         target: "firefox115",
         outfile: `.scaffold/build/addon/content/scripts/${pkg.config.addonRef}.js`,
+      },
+      {
+        // Bundled MuPDF worker — see src/services/pdf/worker/index.ts.
+        // Output is reachable from the main thread at
+        // `chrome://beaver/content/scripts/mupdf-worker.js`. The WASM factory
+        // at `chrome://beaver/content/lib/mupdf-wasm.mjs` is loaded at
+        // runtime via dynamic import; `external: ["chrome://*"]` keeps any
+        // chrome-URL imports from being resolved at bundle time.
+        entryPoints: ["src/services/pdf/worker/index.ts"],
+        define: {
+          "process.env.NODE_ENV": `"${process.env.NODE_ENV ?? "production"}"`,
+        },
+        bundle: true,
+        format: "esm",
+        target: "firefox115",
+        external: ["chrome://*"],
+        outfile: `.scaffold/build/addon/content/scripts/mupdf-worker.js`,
       },
     ],
     hooks: {

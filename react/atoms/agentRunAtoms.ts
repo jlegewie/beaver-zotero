@@ -128,6 +128,7 @@ import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero'
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
 import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
+import { prewarmMuPDFWorker } from '../../src/services/pdf/prewarm';
 
 // =============================================================================
 // Helper Functions
@@ -423,6 +424,7 @@ async function startResumeRun(
         }
 
         set(prepareForNewRunAtom);
+        prewarmMuPDFWorker();
         set(isWSChatPendingAtom, true);
 
         const modelOptions = buildModelSelectionOptions(model);
@@ -529,6 +531,7 @@ async function startAutoRetryRun(
         }
 
         set(prepareForNewRunAtom);
+        prewarmMuPDFWorker();
         set(isWSChatPendingAtom, true);
 
         const modelOptions = buildModelSelectionOptions(model);
@@ -1531,6 +1534,7 @@ export const sendWSMessageAtom = atom(
 
         // Reset state
         set(prepareForNewRunAtom);
+        prewarmMuPDFWorker();
         set(isWSChatPendingAtom, true);
 
         try {
@@ -1960,6 +1964,7 @@ export const regenerateFromRunAtom = atom(
 
             // Reset WS state and set pending
             set(prepareForNewRunAtom);
+            prewarmMuPDFWorker();
             set(isWSChatPendingAtom, true);
 
             // Build model selection options
@@ -2140,6 +2145,7 @@ export const regenerateWithEditedPromptAtom = atom(
 
             // Reset WS state and set pending
             set(prepareForNewRunAtom);
+            prewarmMuPDFWorker();
             set(isWSChatPendingAtom, true);
 
             // Build model selection options

@@ -12,28 +12,34 @@ vi.mock('../../../src/services/pdf', () => {
             return { count: renderBytesByPage.size, labels: {} };
         }
 
-        async renderPagesToImages(
-            _pdfData: Uint8Array,
-            pageIndices?: number[]
-        ): Promise<Array<{ pageIndex: number; data: Uint8Array; format: 'png'; width: number; height: number; scale: number; dpi: number }>> {
-            const indices = pageIndices ?? Array.from(renderBytesByPage.keys());
-            return indices.map((pageIndex) => ({
-                pageIndex,
-                data: renderBytesByPage.get(pageIndex) ?? new Uint8Array(),
-                format: 'png' as const,
-                width: 100,
-                height: 200,
-                scale: 1,
-                dpi: 72,
-            }));
+        async renderPagesToImagesWithMeta(
+            _pdfData: Uint8Array | ArrayBuffer,
+            args: any,
+        ): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: any[] }> {
+            const indices: number[] = args?.pageIndices ?? Array.from(renderBytesByPage.keys());
+            return {
+                pageCount: renderBytesByPage.size,
+                pageLabels: {},
+                pages: indices.map((pageIndex) => ({
+                    pageIndex,
+                    data: renderBytesByPage.get(pageIndex) ?? new Uint8Array(),
+                    format: 'png' as const,
+                    width: 100,
+                    height: 200,
+                    scale: 1,
+                    dpi: 72,
+                })),
+            };
         }
     }
 
     class MockExtractionError extends Error {
         code: string;
-        constructor(code: string, message: string) {
+        pageCount?: number;
+        constructor(code: string, message: string, _details?: unknown, _pageLabels?: Record<number, string>, pageCount?: number) {
             super(message);
             this.code = code;
+            this.pageCount = pageCount;
         }
     }
 

@@ -6,6 +6,7 @@ const {
     mockCleanupContextMenus,
     mockCancelAllActiveTasks,
     mockDisposeMuPDF,
+    mockDisposeMuPDFWorker,
     mockRegisterChatPanel,
     mockRegisterShortcuts,
     mockRemoveChatPanel,
@@ -18,6 +19,7 @@ const {
     mockCleanupContextMenus: vi.fn(),
     mockCancelAllActiveTasks: vi.fn(),
     mockDisposeMuPDF: vi.fn().mockResolvedValue(undefined),
+    mockDisposeMuPDFWorker: vi.fn().mockResolvedValue(undefined),
     mockRegisterChatPanel: vi.fn(),
     mockRegisterShortcuts: vi.fn(),
     mockRemoveChatPanel: vi.fn(),
@@ -39,6 +41,7 @@ vi.mock('../src/ui/ui', () => ({
 
 vi.mock('../src/utils/mupdf', () => ({
     disposeMuPDF: mockDisposeMuPDF,
+    disposeMuPDFWorker: mockDisposeMuPDFWorker,
 }));
 
 vi.mock('../react/ui/UIManager', () => ({
@@ -190,6 +193,7 @@ describe('hooks auth lock shutdown cleanup', () => {
         vi.clearAllMocks();
         setupGlobals();
         mockDisposeMuPDF.mockResolvedValue(undefined);
+        mockDisposeMuPDFWorker.mockResolvedValue(undefined);
     });
 
     afterEach(() => {
