@@ -42,7 +42,10 @@ export function formatNumberRanges(numbers: number[], separator: string = ", "):
  * labels ['i','ii','iii','v'] → "i-iii, v").
  *
  * Range detection runs on the underlying numeric pages; the resulting range
- * boundaries are rendered using the corresponding labels.
+ * boundaries are rendered using the corresponding labels. A range is split
+ * when adjacent labels appear to belong to different numbering schemes (e.g.,
+ * Roman front matter "xiii,xiv" followed by Arabic body "1,2") to avoid
+ * misleading output like "xiii-2".
  */
 export function formatPageRangesWithLabels(
     pages: number[],
@@ -63,10 +66,19 @@ export function formatPageRangesWithLabels(
         }
     }
 
+    // Coarse numbering-scheme bucket: labels that are pure digits (Arabic page
+    // numbers) shouldn't merge into a range with non-digit labels (Roman
+    // numerals, "A-1", "fn. 5", etc.). Same-scheme adjacency is preserved.
+    const labelKind = (label: string): 'digit' | 'other' =>
+        /^\d+$/.test(label) ? 'digit' : 'other';
+
     const parts: string[] = [];
     let startIdx = 0;
     for (let i = 1; i <= dedup.length; i++) {
-        const continues = i < dedup.length && dedup[i].page === dedup[i - 1].page + 1;
+        const continues =
+            i < dedup.length &&
+            dedup[i].page === dedup[i - 1].page + 1 &&
+            labelKind(dedup[i].label) === labelKind(dedup[i - 1].label);
         if (continues) continue;
 
         const startLabel = dedup[startIdx].label;

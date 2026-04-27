@@ -34,6 +34,24 @@ function makeRemoteItem(id: number, key: string) {
     };
 }
 
+// Mirrors real Zotero behavior: getFilePathAsync throws on non-attachment
+// items (e.g., parent items referenced via <citation item_id="...">).
+function makeParentItem(id: number, key: string) {
+    return {
+        id,
+        key,
+        libraryID: 1,
+        version: 7,
+        attachmentSyncedHash: null,
+        attachmentContentType: null,
+        isAttachment: () => false,
+        isStoredFileAttachment: () => false,
+        getFilePathAsync: vi.fn().mockRejectedValue(
+            new Error('getFilePathAsync() can only be called on attachment items')
+        ),
+    };
+}
+
 describe('preloadPageLabelsForContent', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -136,6 +154,27 @@ describe('preloadPageLabelsForContent', () => {
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
     });
 
+    it('skips non-attachment items without invoking getFilePathAsync', async () => {
+        // Citations may reference parent items via item_id — getFilePathAsync
+        // throws on non-attachment items in real Zotero, so the resolver must
+        // short-circuit before calling it.
+        const parent = makeParentItem(50, 'PARENT01');
+        const cache = {
+            getMetadata: vi.fn(),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => parent),
+        };
+        (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
+
+        await preloadPageLabelsForContent('<citation att_id="1-PARENT01" />');
+
+        expect(parent.getFilePathAsync).not.toHaveBeenCalled();
+        expect(cache.getMetadata).not.toHaveBeenCalled();
+        expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+    });
+
     it('deduplicates by item ID', async () => {
         const item = makeItem(45, 'MNOP3456');
         const cache = {
@@ -203,11 +242,70 @@ describe('preloadPageLabelsForCitations', () => {
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        await preloadPageLabelsForCitations([
+        const loaded = await preloadPageLabelsForCitations([
             { library_id: 1, zotero_key: 'REMOTE03', pages: [1], parts: [] },
         ]);
 
         expect(cache.getMetadata).toHaveBeenCalledWith(50, 'remote:h:syncedhash');
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+        expect(loaded).toBe(true);
+    });
+
+    it('returns false when nothing was loaded (all remote-only cache misses)', async () => {
+        mockIsRemoteAccessAvailable.mockReturnValue(true);
+        const item = makeRemoteItem(51, 'REMOTE04');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue(null),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => item),
+        };
+        (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
+
+        const loaded = await preloadPageLabelsForCitations([
+            { library_id: 1, zotero_key: 'REMOTE04', pages: [1], parts: [] },
+        ]);
+
+        expect(loaded).toBe(false);
+    });
+
+    it('returns false when all citations are non-attachment parent items', async () => {
+        const parent = makeParentItem(52, 'PARENT02');
+        const cache = {
+            getMetadata: vi.fn(),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => parent),
+        };
+        (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
+
+        const loaded = await preloadPageLabelsForCitations([
+            { library_id: 1, zotero_key: 'PARENT02', pages: [1], parts: [] },
+        ]);
+
+        expect(parent.getFilePathAsync).not.toHaveBeenCalled();
+        expect(cache.getMetadata).not.toHaveBeenCalled();
+        expect(loaded).toBe(false);
+    });
+
+    it('returns true after running extraction on a local cache miss', async () => {
+        const item = makeItem(53, 'LOCAL01');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue(null),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => item),
+        };
+        (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
+
+        const loaded = await preloadPageLabelsForCitations([
+            { library_id: 1, zotero_key: 'LOCAL01', pages: [1], parts: [] },
+        ]);
+
+        expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(item, false);
+        expect(loaded).toBe(true);
     });
 });

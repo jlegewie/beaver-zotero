@@ -33,6 +33,11 @@ type PreloadFilePath =
     | { filePath: string; isRemoteOnly: true };
 
 async function getPreloadFilePath(item: Zotero.Item): Promise<PreloadFilePath | null> {
+    // getFilePathAsync throws on non-attachment items (e.g., parent items
+    // referenced via <citation item_id="...">). Short-circuit here so callers
+    // don't pay for a thrown exception per parent-item citation.
+    if (!item.isAttachment()) return null;
+
     const filePath = await item.getFilePathAsync();
     if (filePath) return { filePath, isRemoteOnly: false };
 
@@ -160,14 +165,19 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
  * citation metadata records. Used when citation metadata is available directly
  * (e.g., on run completion or thread load) so the rendering path can resolve
  * page labels synchronously.
+ *
+ * Returns true when at least one item had its page labels loaded into the
+ * memory cache (either via `getMetadata` hydrating from DB or via full
+ * extraction), so callers can skip notifying subscribers when nothing changed.
  */
 export async function preloadPageLabelsForCitations(
     citations: ReadonlyArray<Pick<CitationMetadata, 'library_id' | 'zotero_key' | 'pages' | 'parts'>>
-): Promise<void> {
+): Promise<boolean> {
     const cache = Zotero.Beaver?.attachmentFileCache;
-    if (!cache) return;
+    if (!cache) return false;
 
     const seen = new Set<number>();
+    let loaded = false;
 
     for (const citation of citations) {
         if (!citation.library_id || !citation.zotero_key) continue;
@@ -187,13 +197,19 @@ export async function preloadPageLabelsForCitations(
             if (!preloadPath) continue;
 
             const record = await cache.getMetadata(item.id, preloadPath.filePath);
-            if (record) continue;
+            if (record) {
+                loaded = true;
+                continue;
+            }
 
             if (preloadPath.isRemoteOnly) continue;
 
             await getAttachmentFileStatus(item, false);
+            loaded = true;
         } catch {
             // Skip items that can't be resolved
         }
     }
+
+    return loaded;
 }

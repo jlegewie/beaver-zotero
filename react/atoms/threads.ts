@@ -427,7 +427,9 @@ export const loadThreadAtom = atom(
                 // Preload PDF page labels in the background so subsequent
                 // renders can resolve page locators to their display labels.
                 preloadPageLabelsForCitations(citationMetadata)
-                    .then(() => set(bumpPageLabelsVersionAtom))
+                    .then((loaded) => {
+                        if (loaded) set(bumpPageLabelsVersionAtom);
+                    })
                     .catch((err) =>
                         logger(`loadThreadAtom: Failed to preload page labels: ${err}`, 1)
                     );

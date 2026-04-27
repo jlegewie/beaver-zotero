@@ -1142,7 +1142,9 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 // Runs after metadata is exposed to avoid blocking the UI on PDF
                 // extraction; citation components re-render via the version atom.
                 preloadPageLabelsForCitations(event.citations)
-                    .then(() => set(bumpPageLabelsVersionAtom))
+                    .then((loaded) => {
+                        if (loaded) set(bumpPageLabelsVersionAtom);
+                    })
                     .catch((err) =>
                         logger(`WS onRunComplete: Failed to preload page labels: ${err}`, 1)
                     );
