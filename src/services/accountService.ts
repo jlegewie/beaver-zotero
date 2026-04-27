@@ -29,6 +29,7 @@ interface ProfileRequest {
     zotero_local_id: string;
     zotero_user_id: string | undefined;
     frontend_version: string;
+    register_first_device: boolean;
 }
 
 interface ProfileResponse {
@@ -147,7 +148,10 @@ export class AccountService extends ApiService {
             const result = await this.post<ProfileResponse>('/api/v1/account/profile', {
                 zotero_local_id: localUserKey,
                 zotero_user_id: userID,
-                frontend_version: version
+                frontend_version: version,
+                // Opt in to backend auto-registering this device. Backend guarded on 
+                // `has_authorized_free_access && zotero_local_ids == []`.
+                register_first_device: true,
             } as ProfileRequest);
             logger(`accountService.getProfileWithPlan: success, plan=${result.profile?.plan?.name}, has_authorized_access=${result.profile?.has_authorized_access}, has_authorized_free_access=${result.profile?.has_authorized_free_access}`);
             return result;
