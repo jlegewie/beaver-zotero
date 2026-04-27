@@ -39,7 +39,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ emailInputRef }) => {
             </div>
             <div className="flex-1"/>
             {showOnboardingText && (
-                <div className="display-flex flex-row gap-3 items-start bg-quinary p-2 rounded-lg">
+                <div className="display-flex flex-row gap-3 items-start bg-quinary p-25 rounded-lg">
                     <Icon icon={LockIcon} className="mt-020 scale-11" />
                     <span>
                         Signing in lets Beaver read your library.
