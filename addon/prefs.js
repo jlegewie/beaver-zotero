@@ -82,6 +82,7 @@ pref("onboardingReaderTipShown", false);
 pref("onboardingNoteTipShown", false);
 pref("onboardingCitationTipShown", false);
 pref("onboardingWelcomeShownAt", "");
+pref("onboardingSignInTextShown", false);
 
 // MCP server
 pref("mcpServerEnabled", false);

@@ -56,6 +56,7 @@ declare namespace _ZoteroTypes {
       "onboardingNoteTipShown": boolean;
       "onboardingCitationTipShown": boolean;
       "onboardingWelcomeShownAt": string;
+      "onboardingSignInTextShown": boolean;
       "mcpServerEnabled": boolean;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;
