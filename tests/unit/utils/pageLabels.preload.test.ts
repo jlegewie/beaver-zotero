@@ -2,27 +2,42 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getAttachmentFileStatus: vi.fn().mockResolvedValue(undefined),
+    isRemoteAccessAvailable: vi.fn(() => false),
 }));
 
-import { preloadPageLabelsForContent } from '../../../react/utils/pageLabels';
-import { getAttachmentFileStatus } from '../../../src/services/agentDataProvider/utils';
+import { preloadPageLabelsForCitations, preloadPageLabelsForContent } from '../../../react/utils/pageLabels';
+import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../../src/services/agentDataProvider/utils';
 
 const mockGetAttachmentFileStatus = vi.mocked(getAttachmentFileStatus);
+const mockIsRemoteAccessAvailable = vi.mocked(isRemoteAccessAvailable);
 
 function makeItem(id: number, key: string) {
     return {
         id,
         key,
         libraryID: 1,
+        version: 7,
+        attachmentSyncedHash: null,
         attachmentContentType: 'application/pdf',
         isAttachment: () => true,
+        isStoredFileAttachment: () => false,
         getFilePathAsync: vi.fn().mockResolvedValue(`/storage/${key}/test.pdf`),
+    };
+}
+
+function makeRemoteItem(id: number, key: string) {
+    return {
+        ...makeItem(id, key),
+        attachmentSyncedHash: 'syncedhash',
+        isStoredFileAttachment: () => true,
+        getFilePathAsync: vi.fn().mockResolvedValue(null),
     };
 }
 
 describe('preloadPageLabelsForContent', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        mockIsRemoteAccessAvailable.mockReturnValue(false);
     });
 
     it('no-ops when cache is unavailable', async () => {
@@ -85,6 +100,42 @@ describe('preloadPageLabelsForContent', () => {
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
     });
 
+    it('loads cached labels for remote-only attachments without downloading', async () => {
+        mockIsRemoteAccessAvailable.mockReturnValue(true);
+        const item = makeRemoteItem(48, 'REMOTE01');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue({ item_id: 48, page_labels: { 0: 'i' } }),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => item),
+        };
+        (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
+
+        await preloadPageLabelsForContent('<citation att_id="1-REMOTE01" />');
+
+        expect(cache.getMetadata).toHaveBeenCalledWith(48, 'remote:h:syncedhash');
+        expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+    });
+
+    it('does not download remote-only attachments on cache miss', async () => {
+        mockIsRemoteAccessAvailable.mockReturnValue(true);
+        const item = makeRemoteItem(49, 'REMOTE02');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue(null),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => item),
+        };
+        (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
+
+        await preloadPageLabelsForContent('<citation att_id="1-REMOTE02" />');
+
+        expect(cache.getMetadata).toHaveBeenCalledWith(49, 'remote:h:syncedhash');
+        expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+    });
+
     it('deduplicates by item ID', async () => {
         const item = makeItem(45, 'MNOP3456');
         const cache = {
@@ -131,5 +182,32 @@ describe('preloadPageLabelsForContent', () => {
 
         // Second item still processed despite first failing
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(item2, false);
+    });
+});
+
+describe('preloadPageLabelsForCitations', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockIsRemoteAccessAvailable.mockReturnValue(false);
+    });
+
+    it('loads cached labels for remote-only citation metadata', async () => {
+        mockIsRemoteAccessAvailable.mockReturnValue(true);
+        const item = makeRemoteItem(50, 'REMOTE03');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue({ item_id: 50, page_labels: { 0: 'i' } }),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => item),
+        };
+        (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
+
+        await preloadPageLabelsForCitations([
+            { library_id: 1, zotero_key: 'REMOTE03', pages: [1], parts: [] },
+        ]);
+
+        expect(cache.getMetadata).toHaveBeenCalledWith(50, 'remote:h:syncedhash');
+        expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
     });
 });

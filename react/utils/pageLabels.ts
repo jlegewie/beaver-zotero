@@ -16,15 +16,32 @@
  *
  * All lookups are synchronous (memory cache only). Call `preloadPageLabelsForContent`
  * before rendering to ensure the memory cache is populated. Preloading reuses the
- * full extraction path (`getAttachmentFileStatus`) on cache miss.
+ * full extraction path (`getAttachmentFileStatus`) on local cache miss; for
+ * remote-only files, it only hydrates already-cached metadata.
  */
 
-import { getAttachmentFileStatus } from '../../src/services/agentDataProvider/utils';
+import { makeRemoteFilePath } from '../../src/services/attachmentFileCache';
+import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../src/services/agentDataProvider/utils';
 import type { CitationMetadata } from '../types/citations';
 
 // Regex for citation tags — matches self-closing and non-self-closing forms
 const CITATION_REGEX = /<citation\s+([^>]+?)\s*(\/>|>(?:.*?<\/citation>)?)/g;
 const ATT_ID_REGEX = /(?:att_id|attachment_id)\s*=\s*"([^"]*)"/;
+
+type PreloadFilePath =
+    | { filePath: string; isRemoteOnly: false }
+    | { filePath: string; isRemoteOnly: true };
+
+async function getPreloadFilePath(item: Zotero.Item): Promise<PreloadFilePath | null> {
+    const filePath = await item.getFilePathAsync();
+    if (filePath) return { filePath, isRemoteOnly: false };
+
+    if (isRemoteAccessAvailable(item)) {
+        return { filePath: makeRemoteFilePath(item), isRemoteOnly: true };
+    }
+
+    return null;
+}
 
 /**
  * Resolve a 1-based page number (from getCitationPages) to its display label.
@@ -91,7 +108,8 @@ export function translatePageNumberToLabel(itemId: number, pageStr: string): str
  *
  * For each referenced attachment:
  * 1. Try the metadata cache (DB -> memory) via `getMetadata`.
- * 2. On cache miss, run full extraction via `getAttachmentFileStatus`.
+ * 2. On local cache miss, run full extraction via `getAttachmentFileStatus`.
+ *    On remote-only cache miss, skip rather than downloading during render.
  */
 export async function preloadPageLabelsForContent(content: string): Promise<void> {
     const cache = Zotero.Beaver?.attachmentFileCache;
@@ -118,14 +136,18 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
             if (!item || seen.has(item.id)) continue;
             seen.add(item.id);
 
-            const filePath = await item.getFilePathAsync();
-            if (!filePath) continue;
+            const preloadPath = await getPreloadFilePath(item);
+            if (!preloadPath) continue;
 
             // Cache hit → page_labels already in memory cache
-            const record = await cache.getMetadata(item.id, filePath);
+            const record = await cache.getMetadata(item.id, preloadPath.filePath);
             if (record) continue;
 
-            // Cache miss → run full extraction (same as search path)
+            // Do not download remote-only PDFs just to preload labels. A later
+            // explicit content request will populate the cache if needed.
+            if (preloadPath.isRemoteOnly) continue;
+
+            // Local cache miss → run full extraction.
             await getAttachmentFileStatus(item, false);
         } catch {
             // Skip items that can't be resolved
@@ -161,11 +183,13 @@ export async function preloadPageLabelsForCitations(
             if (!item || seen.has(item.id)) continue;
             seen.add(item.id);
 
-            const filePath = await item.getFilePathAsync();
-            if (!filePath) continue;
+            const preloadPath = await getPreloadFilePath(item);
+            if (!preloadPath) continue;
 
-            const record = await cache.getMetadata(item.id, filePath);
+            const record = await cache.getMetadata(item.id, preloadPath.filePath);
             if (record) continue;
+
+            if (preloadPath.isRemoteOnly) continue;
 
             await getAttachmentFileStatus(item, false);
         } catch {
