@@ -117,6 +117,11 @@ async function validateCreateNoteAction(
         };
     }
 
+    // pre_resolve_ms: any time spent before the first awaited resolution
+    // begins. Today this is just sync arg destructuring; if the message
+    // queue ever stalls before dispatch this captures it.
+    ta.record('pre_resolve_ms', Date.now() - start);
+
     // Resolve parent item if parent_item_id provided (format: "<library_id>-<zotero_key>").
     // The shared helper walks the item chain up to a regular item, or falls
     // back to standalone-with-related-item when the chain ends at a standalone.
@@ -139,12 +144,18 @@ async function validateCreateNoteAction(
     const relatedItemKey: string | null = parentResolution.relatedItemKey;
     const parentFallbackWarning: string | null = parentResolution.warning;
 
-    // Resolve target library from library parameter if not set from parent_item_id
+    // Resolve target library from library parameter if not set from parent_item_id.
+    // Sync, but groups all library-related lookups (getLibraryByIdOrName +
+    // getAll fallback + Libraries.get + searchable check + editability) under
+    // one bucket. Recorded before each early-return so failure paths attribute
+    // their cost too.
+    const tLib = Date.now();
     if (resolvedLibraryId == null && libraryNameOrId) {
         const libraryResult = getLibraryByIdOrName(libraryNameOrId);
         if (libraryResult.wasExplicitlyRequested && !libraryResult.library) {
             const allLibraries = Zotero.Libraries.getAll();
             const availableNames = allLibraries.map((lib) => lib.name).join(', ');
+            ta.record('library_resolution_ms', Date.now() - tLib);
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
@@ -168,6 +179,7 @@ async function validateCreateNoteAction(
     // Validate library exists
     const library = Zotero.Libraries.get(resolvedLibraryId);
     if (!library) {
+        ta.record('library_resolution_ms', Date.now() - tLib);
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -182,6 +194,7 @@ async function validateCreateNoteAction(
     // Validate library is searchable (synced with Beaver)
     const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
     if (!searchableLibraryIds.includes(resolvedLibraryId)) {
+        ta.record('library_resolution_ms', Date.now() - tLib);
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -195,6 +208,7 @@ async function validateCreateNoteAction(
 
     // Validate library is editable
     if (!library.editable) {
+        ta.record('library_resolution_ms', Date.now() - tLib);
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -205,6 +219,7 @@ async function validateCreateNoteAction(
             timing: buildTiming(),
         };
     }
+    ta.record('library_resolution_ms', Date.now() - tLib);
 
     // Resolve collection if specified.
     // Child notes cannot belong to collections directly (Zotero's
@@ -213,7 +228,9 @@ async function validateCreateNoteAction(
     // inherits collection membership from the parent.
     let resolvedCollectionKey: string | null = null;
     if (collectionNameOrKey && !parentKey) {
+        const tColl = Date.now();
         const collectionResult = getCollectionByIdOrName(collectionNameOrKey, resolvedLibraryId);
+        ta.record('collection_resolution_ms', Date.now() - tColl);
         if (collectionResult) {
             resolvedCollectionKey = collectionResult.collection.key;
         } else {
