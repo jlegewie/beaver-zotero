@@ -65,6 +65,21 @@ export const resetCitationMarkersAtom = atom(
     }
 );
 
+/**
+ * Monotonic counter incremented after page labels for citations have been
+ * preloaded into the attachment file cache. Citation components subscribe to
+ * this atom so they re-render once labels become available — the cache itself
+ * is mutable and doesn't drive React updates on its own.
+ */
+export const pageLabelsVersionAtom = atom(0);
+
+export const bumpPageLabelsVersionAtom = atom(
+    null,
+    (get, set) => {
+        set(pageLabelsVersionAtom, get(pageLabelsVersionAtom) + 1);
+    }
+);
+
 
 /*
  * Citation metadata

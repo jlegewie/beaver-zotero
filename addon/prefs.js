@@ -53,6 +53,9 @@ pref("recentItems", "[]");
 pref("citationFormat", "numeric");
 pref("citationStyle", "http://www.zotero.org/styles/chicago-author-date");
 pref("citationLocale", "en-US");
+// When true, in-text citations display PDF page labels (e.g., Roman numerals
+// for front matter) instead of raw 1-based page numbers.
+pref("usePageLabels", true);
 
 // Custom Prompts (versioned format: { version, prompts }; each prompt has a stable id)
 // Variables supported in prompt text: {{recent_items}}, {{recent_item}}, {{open_attachment}}, {{active_item}}, {{selected_items}}, {{current_collection}}
