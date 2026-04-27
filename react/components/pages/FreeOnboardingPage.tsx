@@ -86,6 +86,9 @@ const FreeOnboardingPage: React.FC = () => {
             setPref("userId", user?.id ?? "");
             setPref("userEmail", user?.email ?? "");
 
+            // Suppress the sign-in privacy notice if user signs out and back in
+            setPref("onboardingSignInTextShown", true);
+
         } catch (error) {
             logger(`FreeOnboardingPage: Error during free authorization: ${error}`);
         } finally {
