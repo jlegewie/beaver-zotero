@@ -52,10 +52,29 @@ class UIManager {
         }
     }
 
+    private isStackedLayout(): boolean {
+        try {
+            return Zotero?.Prefs?.get?.("layout") === "stacked";
+        } catch (e) {
+            return false;
+        }
+    }
+
+    private applyLibrarySidebarWidth(sidebar: HTMLElement): void {
+        // In stacked layout, #zotero-item-pane is flex-direction:column, so an
+        // explicit pixel width clamps the cross-axis instead of being overridden
+        // by flex-grow as it is in the standard (row) layout.
+        if (this.isStackedLayout()) {
+            sidebar.style.removeProperty('width');
+        } else {
+            sidebar.style.width = `${this.sidebarWidth}px`;
+        }
+    }
+
     private enforceConsistentWidth(): void {
         try {
             if (this.elements.librarySidebar) {
-                (this.elements.librarySidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
+                this.applyLibrarySidebarWidth(this.elements.librarySidebar as HTMLElement);
             }
             if (this.elements.readerSidebar) {
                 (this.elements.readerSidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
@@ -145,7 +164,7 @@ class UIManager {
                 this.elements.libraryContent?.forEach(el => (el as HTMLElement).style.display = 'none');
                 if (this.elements.librarySidebar) {
                     (this.elements.librarySidebar as HTMLElement).style.removeProperty('display');
-                    (this.elements.librarySidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
+                    this.applyLibrarySidebarWidth(this.elements.librarySidebar as HTMLElement);
                 }
             } else {
                 if (this.collapseState.library && itemPane) {
