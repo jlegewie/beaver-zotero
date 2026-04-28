@@ -5,6 +5,7 @@ import { getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
+import { TimingAccumulator } from '../../../utils/timing';
 
 
 /**
@@ -330,6 +331,18 @@ export async function executeOrganizeItemsAction(
     request: WSAgentActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
+    const start = Date.now();
+    const ta = new TimingAccumulator();
+    // tx_total_ms (wall-clock around executeTransaction) minus tx_work_ms
+    // (time inside the callback) = SQLite write-queue wait. Concurrent
+    // organize_items calls serialize on the single writer, so this gap is
+    // the answer to "is the slowness queue-wait or actual work?"
+    const buildTiming = (extra?: Record<string, number>): Record<string, number> => ({
+        total_ms: Date.now() - start,
+        ...ta.getAll(),
+        ...(extra ?? {}),
+    });
+
     const { item_ids, tags, collections } = request.action_data as {
         item_ids: string[];
         tags?: { add?: string[]; remove?: string[] } | null;
@@ -362,29 +375,44 @@ export async function executeOrganizeItemsAction(
     const hasCollectionChanges = !!(collections && ((collections.add && collections.add.length > 0) || (collections.remove && collections.remove.length > 0)));
     if (hasCollectionChanges && item_ids.length > 0) {
         const collectionLibraryId = parseInt(item_ids[0].split('-')[0], 10);
-        for (const collKey of collections?.add ?? []) {
-            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId, collKey);
-            if (collection) addCollections.set(collKey, collection);
-        }
-        for (const collKey of collections?.remove ?? []) {
-            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId, collKey);
-            if (collection) removeCollections.set(collKey, collection);
-        }
+        await ta.track('collection_resolve_ms', async () => {
+            for (const collKey of collections?.add ?? []) {
+                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId, collKey);
+                if (collection) addCollections.set(collKey, collection);
+            }
+            for (const collKey of collections?.remove ?? []) {
+                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId, collKey);
+                if (collection) removeCollections.set(collKey, collection);
+            }
+        });
     }
 
     try {
         // Checkpoint: abort before starting the transaction
         checkAborted(ctx, 'organize_items:before_transaction');
 
+        // pre_tx_ms: time from function entry to awaiting executeTransaction.
+        // Includes collection_resolve_ms; non-tracked remainder is sync setup.
+        ta.record('pre_tx_ms', Date.now() - start);
+
         // Batch all modifications in a single transaction for performance.
         // If any save fails (including TimeoutError), the entire transaction rolls back.
-        await Zotero.DB.executeTransaction(async () => {
+        //
+        // tx_total_ms wraps the await; tx_work_ms is recorded inside the
+        // callback. The difference = SQLite write-lock queue wait. Concurrent
+        // organize_items calls serialize on the single writer, so that gap
+        // tells us whether slowness is queue-wait or actual work.
+        await ta.track('tx_total_ms', () => Zotero.DB.executeTransaction(async () => {
+            const txWorkStart = Date.now();
+            try {
             for (const itemId of item_ids) {
                 const parts = itemId.split('-');
                 const libraryId = parseInt(parts[0], 10);
                 const zoteroKey = parts.slice(1).join('-');
 
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+                const item = await ta.track('item_lookup_ms', () =>
+                    Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey)
+                );
                 if (!item) {
                     // Item not found - skip but don't fail the transaction
                     skippedItems.push(itemId);
@@ -468,11 +496,14 @@ export async function executeOrganizeItemsAction(
                 // executeTransaction triggers full rollback
                 if (modified) {
                     checkAborted(ctx, 'organize_items:before_item_save');
-                    await item.save();
+                    await ta.track('item_save_ms', () => item.save());
                     itemsModified++;
                 }
             }
-        });
+            } finally {
+                ta.record('tx_work_ms', Date.now() - txWorkStart);
+            }
+        }));
     } catch (error) {
         // Restore in-memory state for all snapshotted items.
         // The DB transaction rolled back, but in-memory item objects still
@@ -489,6 +520,11 @@ export async function executeOrganizeItemsAction(
             success: false,
             error: `Failed to organize items: ${error}`,
             error_code: 'transaction_failed',
+            timing: buildTiming({
+                item_count: item_ids.length,
+                items_modified: itemsModified,
+                items_skipped: skippedItems.length,
+            }),
         };
     }
 
@@ -507,5 +543,10 @@ export async function executeOrganizeItemsAction(
             collections_removed: actualCollectionsRemoved.size > 0 ? [...actualCollectionsRemoved] : undefined,
             skipped_items: skippedItems.length > 0 ? skippedItems : undefined,
         },
+        timing: buildTiming({
+            item_count: item_ids.length,
+            items_modified: itemsModified,
+            items_skipped: skippedItems.length,
+        }),
     };
 }
