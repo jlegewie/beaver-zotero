@@ -377,10 +377,12 @@ export async function executeOrganizeItemsAction(
         const collectionLibraryId = parseInt(item_ids[0].split('-')[0], 10);
         await ta.track('collection_resolve_ms', async () => {
             for (const collKey of collections?.add ?? []) {
+                checkAborted(ctx, 'organize_items:collection_resolve');
                 const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId, collKey);
                 if (collection) addCollections.set(collKey, collection);
             }
             for (const collKey of collections?.remove ?? []) {
+                checkAborted(ctx, 'organize_items:collection_resolve');
                 const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId, collKey);
                 if (collection) removeCollections.set(collKey, collection);
             }
