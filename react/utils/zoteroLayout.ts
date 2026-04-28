@@ -21,6 +21,21 @@ export function isStackedLayout(): boolean {
     }
 }
 
+function restoreReaderSiblings(ctxPane: HTMLElement, ctxInner: HTMLElement | null): void {
+    const parents = new Set<HTMLElement>([ctxPane]);
+    if (ctxInner) {
+        parents.add(ctxInner);
+    }
+
+    for (const parent of parents) {
+        for (const child of Array.from(parent.children)) {
+            if (child.id !== "beaver-pane-reader") {
+                (child as HTMLElement).style.removeProperty('display');
+            }
+        }
+    }
+}
+
 /**
  * Place the Beaver reader mount in the right parent for the current layout
  * and toggle visibility of the surrounding Zotero panels accordingly.
@@ -36,12 +51,26 @@ export function isStackedLayout(): boolean {
  */
 export function applyReaderPaneVisibility(win: Window, show: boolean): void {
     const ctxPane = win.document.getElementById("zotero-context-pane");
+    if (!ctxPane) return;
+
+    const ctxInner = win.document.getElementById("zotero-context-pane-inner");
     const beaver = win.document.getElementById("beaver-pane-reader");
-    if (!ctxPane || !beaver) return;
+
+    if (!beaver) {
+        if (!show) {
+            restoreReaderSiblings(ctxPane as HTMLElement, ctxInner as HTMLElement | null);
+        }
+        return;
+    }
 
     const stacked = isStackedLayout();
-    const ctxInner = win.document.getElementById("zotero-context-pane-inner");
-    if (stacked && !ctxInner) return;
+    if (stacked && !ctxInner) {
+        if (!show) {
+            restoreReaderSiblings(ctxPane as HTMLElement, null);
+            (beaver as HTMLElement).style.display = 'none';
+        }
+        return;
+    }
 
     const targetParent = (stacked ? ctxInner : ctxPane) as HTMLElement;
 
@@ -71,7 +100,7 @@ export function applyReaderPaneVisibility(win: Window, show: boolean): void {
         (beaver as HTMLElement).style.removeProperty('pointer-events');
         (beaver as HTMLElement).style.removeProperty('display');
     } else {
-        siblings.forEach(el => (el as HTMLElement).style.removeProperty('display'));
+        restoreReaderSiblings(ctxPane as HTMLElement, ctxInner as HTMLElement | null);
         (beaver as HTMLElement).style.removeProperty('pointer-events');
         (beaver as HTMLElement).style.display = 'none';
     }
