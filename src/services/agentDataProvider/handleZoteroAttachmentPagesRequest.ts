@@ -387,8 +387,10 @@ export async function handleZoteroAttachmentPagesRequest(
             content: page.content,
         }));
 
-        // 10b. Write-through: persist metadata and content cache
-        if (cache) {
+        // 10b. Write-through: persist metadata and content cache.
+        // Skip during shutdown — DB writes here race Zotero's teardown
+        // (same guard as sync.ts:266 and FileUploader.ts:338).
+        if (cache && !Zotero.__beaverShuttingDown) {
             try {
                 // Always persist metadata after successful extraction.
                 // This handler produces document-level properties (page_labels)
@@ -401,6 +403,19 @@ export async function handleZoteroAttachmentPagesRequest(
                     const stat = await IOUtils.stat(filePath!);
                     file_mtime_ms = stat.lastModified ?? 0;
                     file_size_bytes = stat.size ?? 0;
+                }
+                // Recheck after the stat await — shutdown can race in
+                // during the I/O. Without this the entry-guard above
+                // doesn't cover writes whose preceding awaits yielded.
+                if (Zotero.__beaverShuttingDown) {
+                    logger(`handleZoteroAttachmentPagesRequest: skipping cache writes for ${requestKey} — shutdown signalled during stat`, 3);
+                    return {
+                        type: 'zotero_attachment_pages',
+                        request_id,
+                        attachment,
+                        pages,
+                        total_pages: resolvedPageCount,
+                    };
                 }
                 // page_labels semantics:
                 // - null => not checked yet (lightweight metadata path)
@@ -425,6 +440,20 @@ export async function handleZoteroAttachmentPagesRequest(
                     is_invalid: false,
                     extraction_version: EXTRACTION_VERSION,
                 });
+
+                // Recheck after the metadata write — shutdown can race in
+                // between the two awaits. Without this, setContentPages
+                // would still run against the closing DB.
+                if (Zotero.__beaverShuttingDown) {
+                    logger(`handleZoteroAttachmentPagesRequest: skipping content-page write for ${requestKey} — shutdown signalled after metadata write`, 3);
+                    return {
+                        type: 'zotero_attachment_pages',
+                        request_id,
+                        attachment,
+                        pages,
+                        total_pages: resolvedPageCount,
+                    };
+                }
 
                 // Persist content pages
                 const contentPages: CachedPageContent[] = result.pages.map((p) => ({
