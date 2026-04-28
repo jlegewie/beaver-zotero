@@ -353,6 +353,25 @@ export async function executeOrganizeItemsAction(
         collections: number[];
     }>();
 
+    // Resolve collection keys to objects once, before opening the write transaction.
+    // Validation guarantees all items share a library when collection changes are
+    // requested, and that every key in add/remove resolves — so a miss here is a
+    // benign race (collection deleted between validate and execute) and is skipped.
+    const addCollections = new Map<string, { id: number }>();
+    const removeCollections = new Map<string, { id: number }>();
+    const hasCollectionChanges = !!(collections && ((collections.add && collections.add.length > 0) || (collections.remove && collections.remove.length > 0)));
+    if (hasCollectionChanges && item_ids.length > 0) {
+        const collectionLibraryId = parseInt(item_ids[0].split('-')[0], 10);
+        for (const collKey of collections?.add ?? []) {
+            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId, collKey);
+            if (collection) addCollections.set(collKey, collection);
+        }
+        for (const collKey of collections?.remove ?? []) {
+            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId, collKey);
+            if (collection) removeCollections.set(collKey, collection);
+        }
+    }
+
     try {
         // Checkpoint: abort before starting the transaction
         checkAborted(ctx, 'organize_items:before_transaction');
@@ -421,7 +440,7 @@ export async function executeOrganizeItemsAction(
                 if (isTopLevel && collections?.add && collections.add.length > 0) {
                     for (const collKey of collections.add) {
                         if (!existingCollections.has(collKey)) {
-                            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                            const collection = addCollections.get(collKey);
                             if (collection) {
                                 item.addToCollection(collection.id);
                                 actualCollectionsAdded.add(collKey);
@@ -435,7 +454,7 @@ export async function executeOrganizeItemsAction(
                 if (isTopLevel && collections?.remove && collections.remove.length > 0) {
                     for (const collKey of collections.remove) {
                         if (existingCollections.has(collKey)) {
-                            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                            const collection = removeCollections.get(collKey);
                             if (collection) {
                                 item.removeFromCollection(collection.id);
                                 actualCollectionsRemoved.add(collKey);
