@@ -172,7 +172,24 @@ export function foldTypographicQuotes(s: string): string {
 // Whitespace
 // =============================================================================
 
-/** Normalize whitespace: collapse runs to single space and trim */
+// Treat the literal HTML entity `&nbsp;` as part of the whitespace class so the
+// edit_note matcher can fold drift between a model-supplied regular space and
+// note HTML PM stored as `&nbsp;` verbatim (and the symmetric reverse case).
+// Decoding `&nbsp;` to U+00A0 in `decodeHtmlEntities` is intentionally NOT done
+// because PM preserves the entity form in source.
+//
+// `WS_OR_NBSP_CLASS` is the source string (no flags, no anchors) so callers can
+// splice it into larger regex constructions. Use `+` for "one or more", `*` for
+// "zero or more", etc.
+export const WS_OR_NBSP_CLASS = '(?:\\s|&nbsp;)';
+const WS_OR_NBSP_RUN = new RegExp(`${WS_OR_NBSP_CLASS}+`, 'g');
+
+/** Normalize whitespace: collapse runs (incl. literal `&nbsp;`) to a single space and trim */
 export function normalizeWS(s: string): string {
-    return s.replace(/\s+/g, ' ').trim();
+    return s.replace(WS_OR_NBSP_RUN, ' ').trim();
+}
+
+/** True if `s` contains at least one whitespace char OR a literal `&nbsp;` entity. */
+export function hasWhitespaceOrNbsp(s: string): boolean {
+    return new RegExp(WS_OR_NBSP_CLASS).test(s);
 }

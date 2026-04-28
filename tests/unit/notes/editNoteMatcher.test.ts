@@ -731,13 +731,12 @@ describe('findBestMatch multi-match', () => {
 });
 
 // =============================================================================
-// Production replay: real old_string_not_found failures from thread analysis
-// (see /tmp/beaver-threads/diff_detailed.json). Each seeds the haystack with
-// the actual rendered HTML from create_note's note_content and the needle
+// Failure scenarios: real old_string_not_found failures. Each seeds the haystack
+// with the actual rendered HTML from create_note's note_content and the needle
 // with the markdown the model submitted.
 // =============================================================================
 
-describe('markdown_to_html production replay', () => {
+describe('markdown_to_html failure scenarios', () => {
     it('CJK bold: model sent **扩展** but note has <strong>扩展</strong>', () => {
         const result = match(makeInput({
             oldString: '该研究**扩展**了现有光操控文献中的观点',
@@ -789,7 +788,7 @@ describe('whitespace_relaxed strategy', () => {
     // -- Positive cases --
 
     it('matches when needle has an extra blank line between tags', () => {
-        // Thread-1 production repro: model's old_string had <hr>\n\n<p>…
+        // Failure scenario: model's old_string had <hr>\n\n<p>…
         // while note had <hr>\n<p>….
         const rawSlice = '<hr>\n<p><strong>Synthese :</strong> long body text anchor</p>';
         const html = `<div data-schema-version="9">${rawSlice}</div>`;
@@ -1110,5 +1109,268 @@ describe('whitespace_relaxed strategy', () => {
         } finally {
             mocked.mockImplementation((s: string) => s);
         }
+    });
+});
+
+// =============================================================================
+// whitespace_relaxed with literal `&nbsp;` entity
+// =============================================================================
+//
+// Failure scenario: the note's saved HTML contained literal `&nbsp;` (5 chars)
+// as the text between words, while the model's old_string used regular spaces.
+// The original `\s+` whitespace pattern matched U+00A0 the *character* but not
+// the 5-char *string* `&nbsp;`, so the strategy refused. Folding `&nbsp;` into
+// the whitespace class fixes both directions.
+
+describe('whitespace_relaxed handles literal &nbsp; entity failure scenario', () => {
+    it('matches model space against literal &nbsp; in haystack', () => {
+        // Long enough to clear MIN_WS_RELAXED_NORMALIZED_LENGTH (20) and
+        // MIN_WS_RELAXED_NON_WS_LENGTH (12).
+        const needle = 'analyzed using linear mixed-effects models with FDR correction';
+        const haystack = '<p>analyzed using&nbsp;linear mixed-effects models with FDR correction</p>';
+        const result = match(makeInput({
+            oldString: needle,
+            newString: needle + ' replaced',
+            strippedHtml: haystack,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        expect(result?.matchCount).toBe(1);
+        // expandedOld is the actual raw slice (preserving `&nbsp;`).
+        expect(result?.expandedOld).toContain('&nbsp;');
+    });
+
+    // Symmetric direction — proves the `hasWhitespaceOrNbsp()` gate works.
+    // Without the gate change, this case would skip whitespace_relaxed
+    // entirely (the old `/\s/.test(needle)` returns false for a needle
+    // whose only whitespace is `&nbsp;`).
+    it('matches model &nbsp; against regular space in haystack', () => {
+        const needle = 'analyzed using&nbsp;linear mixed-effects models with FDR correction';
+        const haystack = '<p>analyzed using linear mixed-effects models with FDR correction</p>';
+        const result = match(makeInput({
+            oldString: needle,
+            newString: 'analyzed using&nbsp;linear mixed-effects models with FDR correction (added)',
+            strippedHtml: haystack,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        expect(result?.matchCount).toBe(1);
+        // The replacement should splice in the haystack's actual raw slice
+        // (with regular spaces), not the model's `&nbsp;` form.
+        expect(result?.expandedOld).not.toContain('&nbsp;');
+    });
+});
+
+// =============================================================================
+// tag_attribute_strip
+// =============================================================================
+//
+// Failure scenario: when the model writes
+// `<p style="font-size: 0.85em; margin-left: 2em;">⁴ <strong>…</strong>…</p>`
+// in op=rewrite, Zotero's PM normalizer strips the inline `style` attribute,
+// leaving `<p>⁴ <strong>…</strong>…</p>`. A subsequent edit_note that uses
+// the model's original styled form fails. This strategy recovers by stripping
+// attributes from block-level structural tags (p, h1–h6, blockquote).
+
+describe('tag_attribute_strip strategy', () => {
+    // ── When tag_attribute_strip is strictly necessary ──
+    //
+    // `spurious_wrap_strip` already handles the symmetric case where old and
+    // new share the SAME wrapping tag (`<p style="x">…</p>` on both sides):
+    // it strips the shared wrap and matches inner content. So
+    // `tag_attribute_strip` only WINS the chain when old and new differ in
+    // their leading or trailing tag, e.g. insert_after where the injected
+    // payload has a bare `<p>`. Both strategies produce a correct edit when
+    // they apply; the dedicated tests below isolate cases tag_attribute_strip
+    // alone can solve.
+
+    it('wins for str_replace when old and new have different leading tag attributes', () => {
+        // Old has `<p style="x">`, new has plain `<p>` — they don't share the
+        // leading tag so spurious_wrap_strip can't strip it. tag_attribute_strip
+        // claims this by stripping the style off old's `<p>` to match the
+        // haystack's bare `<p>`.
+        const result = match(makeInput({
+            oldString: '<p style="font-size: 0.85em;">⁴ footnote text.</p>',
+            newString: '<p>⁴ footnote text. (added)</p>',
+            strippedHtml: '<p>⁴ footnote text.</p>',
+        }));
+        expect(result?.strategy).toBe('tag_attribute_strip');
+        expect(result?.expandedOld).toBe('<p>⁴ footnote text.</p>');
+        expect(result?.expandedNew).toBe('<p>⁴ footnote text. (added)</p>');
+        expect(result?.matchCount).toBe(1);
+    });
+
+    it('strips multiple attributes (style, class, id) on the same tag', () => {
+        const result = match(makeInput({
+            oldString: '<p id="x" class="y" style="z">body content here</p>',
+            newString: '<h2>different shape</h2>',  // different leading tag
+            strippedHtml: '<p>body content here</p>',
+        }));
+        expect(result?.strategy).toBe('tag_attribute_strip');
+        expect(result?.expandedOld).toBe('<p>body content here</p>');
+        expect(result?.expandedNew).toBe('<h2>different shape</h2>');
+    });
+
+    it('strips attributes from <h2> headings (asymmetric needle)', () => {
+        // Old has `<h2 class>`, new is bare `<h2>` — spurious_wrap_strip
+        // would only strip if both shared `<h2 class>`.
+        const result = match(makeInput({
+            oldString: '<h2 class="section">3.4 Title</h2>',
+            newString: '<h2>3.4 New Title</h2>',
+            strippedHtml: '<h2>3.4 Title</h2>',
+        }));
+        expect(result?.strategy).toBe('tag_attribute_strip');
+        expect(result?.expandedOld).toBe('<h2>3.4 Title</h2>');
+    });
+
+    it('strips attributes from <blockquote> (asymmetric needle)', () => {
+        const result = match(makeInput({
+            oldString: '<blockquote class="quote">cited text</blockquote>',
+            newString: '<blockquote>replaced</blockquote>',
+            strippedHtml: '<blockquote>cited text</blockquote>',
+        }));
+        expect(result?.strategy).toBe('tag_attribute_strip');
+    });
+
+    it('symmetric attribute-laden case is correctly handled by spurious_wrap_strip', () => {
+        // When old and new share the same wrapping `<p style="x">…</p>`, the
+        // earlier spurious_wrap_strip strategy claims the case (it strips the
+        // shared wrap and matches inner content). Either result produces a
+        // correct edit; this regression guard pins the actual ordering.
+        const result = match(makeInput({
+            oldString: '<p style="font-size: 0.85em;">⁴ footnote text.</p>',
+            newString: '<p style="font-size: 0.85em;">⁴ footnote text. (added)</p>',
+            strippedHtml: '<p>⁴ footnote text.</p>',
+        }));
+        expect(result?.strategy).toBe('spurious_wrap_strip');
+        expect(result?.matchCount).toBe(1);
+    });
+
+    it('does NOT touch <span> attributes (citation tags must keep their data)', () => {
+        // span/div/a are intentionally excluded so `<span class="citation"
+        // data-citation="…">` and similar carriers keep their attributes.
+        // This test sets up a haystack that would only match if span attrs
+        // were stripped — the strategy should refuse.
+        const result = match(makeInput({
+            oldString: '<span class="x">irrelevant payload</span>',
+            newString: '<span class="x">y</span>',
+            strippedHtml: '<p>completely different content here</p>',
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('does NOT touch <div> attributes (data-schema-version wrapper, etc.)', () => {
+        const result = match(makeInput({
+            oldString: '<div data-schema-version="9">wrapper content</div>',
+            newString: '<div data-schema-version="9">replaced</div>',
+            strippedHtml: '<p>unrelated content</p>',
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('returns null when the needle has no strippable block-tag attributes', () => {
+        // Without attributes to strip, the strategy correctly defers to later
+        // strategies (or the overall null result if none match).
+        const result = match(makeInput({
+            oldString: '<p>plain</p>',
+            newString: '<p>replaced</p>',
+            strippedHtml: '<p>completely different</p>',
+        }));
+        expect(result).toBeNull();
+    });
+
+    // Insert-op shapes — same coverage other strategies with insertion
+    // semantics (whitespace_relaxed, markdown_to_html) carry, so
+    // tag_attribute_strip doesn't regress when execution re-enters the
+    // matcher with the merged form from normalized_action_data.
+    it('insert_after with validate-time bare new_string preserves the anchor (regression: P2)', () => {
+        // Validate-time shape: new_string is just the injected payload.
+        // Without the insert-aware splice, expandedNew would be just
+        // `<p>injected</p>` and the executor's str_replace would REPLACE the
+        // anchor instead of inserting after it. The fix mirrors
+        // whitespace_relaxed/quote_normalized: build `expandedOld + injected`
+        // so the splice keeps the anchor.
+        const result = match(makeInput({
+            operation: 'insert_after' as EditNoteOperation,
+            oldString: '<p style="font-size: 0.85em;">anchor body text</p>',
+            newString: '<p>injected</p>',  // bare payload (validate-time shape)
+            strippedHtml: '<p>anchor body text</p>',
+        }));
+        expect(result?.strategy).toBe('tag_attribute_strip');
+        expect(result?.expandedOld).toBe('<p>anchor body text</p>');
+        // expandedNew = anchor + injected (splice preserves the anchor).
+        expect(result?.expandedNew).toBe('<p>anchor body text</p><p>injected</p>');
+        expect(result?.expandedNew.startsWith(result!.expandedOld)).toBe(true);
+    });
+
+    it('insert_after with execute-time merged new_string is handled by spurious_wrap_strip (leading-only)', () => {
+        // Document the actual ordering: when execute re-runs the matcher with
+        // normalized_action_data, the merged new_string is `oldString +
+        // injected`, so it always shares the leading wrap with oldString.
+        // spurious_wrap_strip's leading-only candidate strips the shared
+        // `<p style="…">` from both, then matches `anchor body text</p>` in
+        // the haystack's `<p>anchor body text</p>` and splices the injected
+        // payload after it. The end-to-end result is correct (the saved HTML
+        // has the bare `<p>` form) — tag_attribute_strip is not needed here.
+        const result = match(makeInput({
+            operation: 'insert_after' as EditNoteOperation,
+            oldString: '<p style="font-size: 0.85em;">anchor body text</p>',
+            newString: '<p style="font-size: 0.85em;">anchor body text</p><p>injected</p>',
+            strippedHtml: '<p>anchor body text</p>',
+        }));
+        expect(result?.strategy).toBe('spurious_wrap_strip');
+        expect(result?.matchCount).toBe(1);
+    });
+
+    // Note on execute-time merged inputs: when normalized_action_data is
+    // present, the merged new_string starts with oldString. spurious_wrap_strip
+    // (which runs first) handles all such cases by leading-strip — the
+    // tag_attribute_strip insert handler's prefix-strip path is the safety
+    // net for the merged shape if it ever falls through. The end-to-end
+    // round-trip test in editNote.test.ts covers the validate→normalize→
+    // execute cycle for tag_attribute_strip explicitly.
+
+    it('insert_before with bare validate-time new_string preserves the anchor (regression: P2)', () => {
+        // Validate-time: new_string is the bare injected payload (no merge yet).
+        // Old = `<p style=…>anchor</p>`, new = `<p>injected</p>`. They don't
+        // share the leading tag (different attributes) but DO share the
+        // trailing `</p>`. spurious_wrap_strip's trailing-only candidate
+        // produces `<p style=…>anchor` and `<p>injected` — the styled form
+        // doesn't appear in the bare-`<p>` haystack, so it fails. Falls
+        // through to tag_attribute_strip, which must build `injected + anchor`
+        // so the splice doesn't replace the anchor.
+        const result = match(makeInput({
+            operation: 'insert_before' as EditNoteOperation,
+            oldString: '<p style="font-size: 0.85em;">anchor body text</p>',
+            newString: '<p>injected</p>',
+            strippedHtml: '<p>anchor body text</p>',
+        }));
+        expect(result?.strategy).toBe('tag_attribute_strip');
+        expect(result?.expandedOld).toBe('<p>anchor body text</p>');
+        expect(result?.expandedNew).toBe('<p>injected</p><p>anchor body text</p>');
+        expect(result?.expandedNew.endsWith(result!.expandedOld)).toBe(true);
+    });
+
+    // Priority — make sure tag_attribute_strip slots in correctly and doesn't
+    // shadow more specific strategies that already handle the case.
+    it('exact wins when the model already wrote bare tags', () => {
+        const result = match(makeInput({
+            oldString: '<p>bare tag</p>',
+            newString: '<p>replaced</p>',
+            strippedHtml: '<p>bare tag</p>',
+        }));
+        expect(result?.strategy).toBe('exact');
+    });
+
+    it('runs before markdown_to_html (more specific signal)', () => {
+        // Asymmetric leading tags so spurious_wrap_strip cannot claim it.
+        // Falls through past spurious_wrap_strip to tag_attribute_strip,
+        // which must run before markdown_to_html so the strategy chain
+        // doesn't try to read `**…**` as markdown when it's actually plain
+        // text in an attribute-laden block tag.
+        const result = match(makeInput({
+            oldString: '<p style="x">plain body without markdown markers</p>',
+            newString: '<h2>different shape</h2>',
+            strippedHtml: '<p>plain body without markdown markers</p>',
+        }));
+        expect(result?.strategy).toBe('tag_attribute_strip');
     });
 });

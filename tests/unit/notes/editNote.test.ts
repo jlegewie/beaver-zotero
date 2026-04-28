@@ -45,7 +45,10 @@ vi.mock('../../../src/utils/noteHtmlEntities', () => ({
     encodeTextEntities: vi.fn((s: string) => s),
     ENTITY_FORMS: ['hex', 'decimal', 'named'],
     foldTypographicQuotes: vi.fn((s: string) => s),
-    normalizeWS: vi.fn((s: string) => s.replace(/\s+/g, ' ').trim()),
+    normalizeWS: vi.fn((s: string) =>
+        s.replace(/(?:\s|&nbsp;)+/g, ' ').trim()),
+    hasWhitespaceOrNbsp: vi.fn((s: string) => /(?:\s|&nbsp;)/.test(s)),
+    WS_OR_NBSP_CLASS: '(?:\\s|&nbsp;)',
 }));
 
 vi.mock('../../../src/utils/noteWrapper', () => ({
@@ -728,6 +731,71 @@ describe('validate → execute round-trip', () => {
         const valResponse = await handleAgentActionValidateRequest(makeValidateRequest());
         expect(valResponse.valid).toBe(false);
         expect(valResponse.error_code).toBe('old_string_not_found');
+    });
+
+    it('tag_attribute_strip: validate normalizes the styled <p> needle, execute applies the bare form', async () => {
+        // Failure scenario: The note's stored HTML has
+        // a bare `<p>`, but the model's old_string carries `<p style="…">`.
+        // Validate must succeed via tag_attribute_strip and surface the
+        // stripped old_string in normalized_action_data; execute then re-runs
+        // the matcher with that stripped form (mirroring what the backend
+        // does at notes.py:460) and saves the bare-tag replacement.
+        const noteHtml = '<div data-schema-version="9"><p>anchor body text</p><p>tail</p></div>';
+        const innerStripped = '<p>anchor body text</p><p>tail</p>';
+
+        // Tweak just enough mocks for this scenario:
+        //  - getOrSimplify exposes the bare-tag inner HTML as `simplified` and
+        //    `metadata`. The matcher operates on `strippedHtml`, which equals
+        //    the inner HTML because stripDataCitationItems is identity here.
+        //  - getNote returns the wrapped note so loadDataType + getLatestNoteHtml
+        //    paths are realistic.
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified: innerStripped,
+            metadata: { elements: new Map() } as any,
+            isStale: false,
+        });
+        vi.mocked(stripDataCitationItems).mockImplementation((html: string) =>
+            html.replace(/^<div[^>]*>|<\/div>$/g, ''),
+        );
+        const item = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+
+        const styledOld = '<p style="font-size: 0.85em;">anchor body text</p>';
+        const bareNew = '<h2>completely different shape</h2>';
+        const valReq = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: styledOld,
+                new_string: bareNew,
+            },
+        });
+        const valResponse = await handleAgentActionValidateRequest(valReq);
+
+        expect(valResponse.valid).toBe(true);
+        // tag_attribute_strip rewrote old_string to the bare form. The
+        // normalized_action_data must surface that so the executor matches
+        // exactly on the second pass.
+        const norm = (valResponse as any).normalized_action_data;
+        expect(norm).toBeDefined();
+        expect(norm.old_string).toBe('<p>anchor body text</p>');
+
+        // Now execute with the merged action_data (mirrors notes.py:460
+        // `{**action_data, **validation.normalized_action_data}`).
+        const exeReq = makeExecuteRequest({
+            action_data: { ...valReq.action_data, ...norm },
+        });
+        const exeResponse = await handleAgentActionExecuteRequest(exeReq);
+        expect(exeResponse.success).toBe(true);
+
+        // Verify the saved HTML reflects the intended replacement: the bare
+        // anchor was replaced with the bare new shape, leaving the second
+        // paragraph untouched.
+        expect(item.setNote).toHaveBeenCalled();
+        const savedHtml = item.setNote.mock.calls[0][0] as string;
+        expect(savedHtml).toContain('<h2>completely different shape</h2>');
+        expect(savedHtml).toContain('<p>tail</p>');
+        expect(savedHtml).not.toContain('<p>anchor body text</p>');
     });
 });
 
