@@ -22,6 +22,70 @@ import { assertNoPreviewMarkers } from './notePreviewGuard';
 // Reading the note
 // =============================================================================
 
+interface LiveCandidate {
+    instance: any;
+    html: string;
+    source: string;
+}
+
+/**
+ * Walk `Zotero.Notes._editorInstances` and return every connected, non-disabled
+ * editor instance that points at `item`. Empty/whitespace-only snapshots are
+ * INCLUDED so callers can decide whether to skip them. Throws are absorbed —
+ * a bad instance is just skipped.
+ */
+function collectLiveCandidates(item: any): LiveCandidate[] {
+    const instances = (Zotero as any).Notes?._editorInstances;
+    if (!Array.isArray(instances)) return [];
+
+    const candidates: LiveCandidate[] = [];
+    for (const instance of instances) {
+        if (!instance._item || instance._item.id !== item.id) continue;
+        // Skip instances where saving is disabled (e.g., during diff preview)
+        // — their content is not authoritative.
+        if (instance._disableSaving) continue;
+        try {
+            const frameElement = instance._iframeWindow?.frameElement;
+            if (frameElement?.isConnected !== true) continue;
+            let noteData = instance._iframeWindow.wrappedJSObject.getDataSync(true);
+            if (noteData) {
+                // Clone out of XPCOM sandbox wrapper
+                noteData = JSON.parse(JSON.stringify(noteData));
+            }
+            if (typeof noteData?.html === 'string') {
+                candidates.push({
+                    instance,
+                    html: noteData.html,
+                    source: instance.tabID
+                        ? `tab:${instance.tabID}`
+                        : (instance.viewMode ?? 'unknown'),
+                });
+            }
+        } catch {
+            continue;
+        }
+    }
+    return candidates;
+}
+
+/**
+ * Order live candidates the same way `getLatestNoteHtml` selects its preferred
+ * one: selected tab first, then any `viewMode === 'tab'`, then candidates whose
+ * html matches `savedHtml`, then the rest in array order. Stable so the
+ * read path can iterate candidates in preference order.
+ */
+function orderLiveCandidates(candidates: LiveCandidate[], savedHtml: string): LiveCandidate[] {
+    if (candidates.length <= 1) return [...candidates];
+    const selectedTabId = Zotero.getMainWindow?.()?.Zotero_Tabs?.selectedID;
+    const score = (c: LiveCandidate): number => {
+        if (selectedTabId && c.instance.tabID && c.instance.tabID === selectedTabId) return 0;
+        if (c.instance.viewMode === 'tab') return 1;
+        if (c.html === savedHtml) return 2;
+        return 3;
+    };
+    return [...candidates].sort((a, b) => score(a) - score(b));
+}
+
 /**
  * Get the latest note HTML, reading from any open editor to capture
  * unsaved changes. Falls back to item.getNote() if the note is not
@@ -30,53 +94,12 @@ import { assertNoPreviewMarkers } from './notePreviewGuard';
 export function getLatestNoteHtml(item: any): string {
     const savedHtml = item.getNote();
     try {
-        const instances = (Zotero as any).Notes._editorInstances;
-        if (!Array.isArray(instances)) return savedHtml;
-
-        const candidates: Array<{
-            instance: any;
-            html: string;
-            source: string;
-        }> = [];
-
-        for (const instance of instances) {
-            if (!instance._item || instance._item.id !== item.id) continue;
-            // Skip instances where saving is disabled (e.g., during diff
-            // preview) — their content is not authoritative.
-            if (instance._disableSaving) continue;
-            try {
-                const frameElement = instance._iframeWindow?.frameElement;
-                if (frameElement?.isConnected !== true) continue;
-                let noteData = instance._iframeWindow.wrappedJSObject.getDataSync(true);
-                if (noteData) {
-                    // Clone out of XPCOM sandbox wrapper
-                    noteData = JSON.parse(JSON.stringify(noteData));
-                }
-                if (typeof noteData?.html === 'string') {
-                    candidates.push({
-                        instance,
-                        html: noteData.html,
-                        source: instance.tabID
-                            ? `tab:${instance.tabID}`
-                            : (instance.viewMode ?? 'unknown'),
-                    });
-                }
-            } catch {
-                continue;
-            }
-        }
-
+        const candidates = collectLiveCandidates(item);
         if (candidates.length === 0) return savedHtml;
         if (candidates.length === 1) return candidates[0].html;
 
-        const selectedTabId = Zotero.getMainWindow?.()?.Zotero_Tabs?.selectedID;
-        const preferred = candidates.find((candidate) => (
-            selectedTabId
-            && candidate.instance.tabID
-            && candidate.instance.tabID === selectedTabId
-        )) ?? candidates.find((candidate) => candidate.instance.viewMode === 'tab')
-            ?? candidates.find((candidate) => candidate.html === savedHtml)
-            ?? candidates[0];
+        const ordered = orderLiveCandidates(candidates, savedHtml);
+        const preferred = ordered[0];
 
         const distinctSnapshots = new Set(candidates.map((candidate) => candidate.html)).size;
         if (distinctSnapshots > 1) {
@@ -92,6 +115,79 @@ export function getLatestNoteHtml(item: any): string {
         // Fall through
     }
     return savedHtml;
+}
+
+/**
+ * Return the HTML snapshot of every connected, non-disabled live editor
+ * instance for `item`, in `getLatestNoteHtml`'s preference order (selected
+ * tab > viewMode='tab' > savedHtml-matching > rest). Empty/whitespace-only
+ * snapshots are included so callers can decide whether to skip them.
+ *
+ * Extracted for the read path so it can pick the first NON-EMPTY candidate
+ * rather than blindly using the preferred one (which may be transiently
+ * empty during PM re-render after a recent edit, while another connected
+ * editor instance still has content).
+ */
+export function getLiveNoteHtmlCandidates(item: any): string[] {
+    try {
+        const candidates = collectLiveCandidates(item);
+        if (candidates.length === 0) return [];
+        const savedHtml = (typeof item.getNote === 'function') ? (item.getNote() ?? '') : '';
+        return orderLiveCandidates(candidates, savedHtml).map((c) => c.html);
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Read-only variant of `getLatestNoteHtml` suitable for `read_note`.
+ *
+ * Prefers the live editor (so unsaved typing is visible to the agent), but
+ * picks the first NON-EMPTY live candidate before falling back to
+ * `item.getNote()`. Briefly retries the live read to absorb the transient
+ * empty snapshot ProseMirror exposes during re-render after a rewrite (the
+ * snapshot typically recovers within 50–150ms).
+ *
+ * NEVER calls `item.setNote()`. Safe to use from the read path even when the
+ * live editor has not yet stabilized after a write — calling
+ * `flushLiveEditorToDB` here would persist a transient empty snapshot and
+ * erase the user's note content.
+ *
+ * Tradeoff: when the live editor is *intentionally* empty (e.g. user is
+ * mid-deletion, unsaved), this falls back to the previous saved HTML. The
+ * deletion becomes visible to the next read once the editor autosaves. This
+ * is preferred over surfacing transient PM-render empties.
+ */
+export async function getNoteHtmlForRead(item: any): Promise<string> {
+    const pickNonEmpty = (xs: string[]): string | undefined =>
+        xs.find((h) => h && h.trim() !== '');
+
+    let candidates = getLiveNoteHtmlCandidates(item);
+    let nonEmpty = pickNonEmpty(candidates);
+    if (nonEmpty) return nonEmpty;
+
+    // No non-empty live candidate. Three cases:
+    //   (a) the note really is empty,
+    //   (b) PM is mid-render after a recent edit and every connected editor
+    //       transiently returned empty, or
+    //   (c) there is no live editor at all (closed-note read).
+    // Only (b) can recover via retries — gate the retry loop on having at
+    // least one live candidate so closed-note reads (the common case) don't
+    // pay the ~150ms PM-recovery latency.
+    if (candidates.length > 0) {
+        for (let i = 0; i < 3; i++) {
+            await new Promise((r) => setTimeout(r, 50));
+            candidates = getLiveNoteHtmlCandidates(item);
+            nonEmpty = pickNonEmpty(candidates);
+            if (nonEmpty) return nonEmpty;
+            // If every live editor closed during the retry window, abandon
+            // the loop early — there's nothing to recover.
+            if (candidates.length === 0) break;
+        }
+    }
+
+    const saved = (typeof item.getNote === 'function') ? item.getNote() : '';
+    return saved ?? '';
 }
 
 /**
