@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import { isSidebarVisibleAtom, isLibraryTabAtom } from '../atoms/ui';
+import { applyReaderPaneVisibility } from '../utils/zoteroLayout';
 
 export function useSidebarDOMEffects() {
     const isSidebarVisible = useAtomValue(isSidebarVisibleAtom);
@@ -21,7 +22,6 @@ export function useSidebarDOMEffects() {
         const librarySidebar = libraryPane?.querySelector("#beaver-pane-library");        
         // Get reader pane
         const readerPane = win.document.querySelector("#zotero-context-pane");
-        const readerContent = readerPane?.querySelectorAll(":scope > *:not(#beaver-pane-reader)");
         const readerSidebar = readerPane?.querySelector("#beaver-pane-reader");
 
         // Handle library pane
@@ -55,7 +55,7 @@ export function useSidebarDOMEffects() {
         }
 
         // Handle reader pane
-        if (readerPane && readerContent && readerSidebar) {
+        if (readerPane && readerSidebar) {
             const contextPane = win.ZoteroContextPane;
             if (isSidebarVisible && !isLibraryTab) {
                 // Manage collapsed state
@@ -66,17 +66,11 @@ export function useSidebarDOMEffects() {
                     // @ts-ignore: collapsed is not typed
                     contextPane.togglePane();
                 }
-                
-                // @ts-ignore style is not typed
-                readerContent.forEach(el => el.style.display = 'none');
-                // @ts-ignore style is not typed
-                readerSidebar.style.removeProperty('display');
+
+                applyReaderPaneVisibility(win, true);
             } else {
-                // @ts-ignore style is not typed
-                readerContent.forEach(el => el.style.removeProperty('display'));
-                // @ts-ignore style is not typed
-                readerSidebar.style.display = 'none';
-                
+                applyReaderPaneVisibility(win, false);
+
                 // @ts-ignore: collapsed is not typed
                 const isCollapsed = contextPane.collapsed;
                 if (readerWasCollapsed.current && !isCollapsed) {
@@ -107,12 +101,9 @@ export function useSidebarDOMEffects() {
             }
 
             // Restore reader pane
-            if (readerPane && readerContent && readerSidebar) {
-                // @ts-ignore style is not typed
-                readerContent.forEach(el => el.style.removeProperty('display'));
-                // @ts-ignore style is not typed
-                readerSidebar.style.display = 'none';
-                
+            if (readerPane && readerSidebar) {
+                applyReaderPaneVisibility(win, false);
+
                 // const isCollapsed = win.ZoteroContextPane.collapsed;
                 // if (readerWasCollapsed.current && !isCollapsed) {
                 //     win.ZoteroContextPane.togglePane();

@@ -1,4 +1,5 @@
 import { DOMElements, SidebarLocation, UIState, CollapseState } from './types';
+import { applyReaderPaneVisibility, isStackedLayout } from '../utils/zoteroLayout';
 
 /**
  * UIManager handles the Beaver sidebar UI state and interactions.
@@ -52,19 +53,23 @@ class UIManager {
         }
     }
 
-    private isStackedLayout(): boolean {
-        try {
-            return Zotero?.Prefs?.get?.("layout") === "stacked";
-        } catch (e) {
-            return false;
-        }
-    }
-
     private applyLibrarySidebarWidth(sidebar: HTMLElement): void {
         // In stacked layout, #zotero-item-pane is flex-direction:column, so an
         // explicit pixel width clamps the cross-axis instead of being overridden
         // by flex-grow as it is in the standard (row) layout.
-        if (this.isStackedLayout()) {
+        if (isStackedLayout()) {
+            sidebar.style.removeProperty('width');
+        } else {
+            sidebar.style.width = `${this.sidebarWidth}px`;
+        }
+    }
+
+    private applyReaderSidebarWidth(sidebar: HTMLElement): void {
+        // In stacked layout the reader mount is parented inside the inner
+        // vbox (column flex), so an explicit pixel width clamps it. In
+        // standard layout flex-grow makes the pixel value harmless but
+        // keeps width-tracking from the reader sidebar slider working.
+        if (isStackedLayout()) {
             sidebar.style.removeProperty('width');
         } else {
             sidebar.style.width = `${this.sidebarWidth}px`;
@@ -77,7 +82,7 @@ class UIManager {
                 this.applyLibrarySidebarWidth(this.elements.librarySidebar as HTMLElement);
             }
             if (this.elements.readerSidebar) {
-                (this.elements.readerSidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
+                this.applyReaderSidebarWidth(this.elements.readerSidebar as HTMLElement);
             }
         } catch (e) {
             // Silently handle errors
@@ -142,9 +147,9 @@ class UIManager {
     }
 
     private handleReaderCleanup(): void {
-        this.elements.readerContent?.forEach(el => (el as HTMLElement).style.removeProperty('display'));
-        if (this.elements.readerSidebar) {
-            (this.elements.readerSidebar as HTMLElement).style.display = 'none';
+        const win = Zotero.getMainWindow();
+        if (win && !win.closed) {
+            applyReaderPaneVisibility(win, false);
         }
     }
 
@@ -185,17 +190,20 @@ class UIManager {
                 return;
             }
             const readerPane = win.ZoteroContextPane;
-            
+
             if (show) {
                 // @ts-ignore: collapsed is not typed
                 this.collapseState.reader = readerPane.collapsed || null;
                 if (this.collapseState.reader) {
                     readerPane.togglePane();
                 }
-                this.elements.readerContent?.forEach(el => (el as HTMLElement).style.display = 'none');
+                applyReaderPaneVisibility(win, true);
+                // Refresh cached element ref because applyReaderPaneVisibility
+                // may have moved the mount under a different parent in stacked
+                // layout.
+                this.elements.readerSidebar = win.document.querySelector("#beaver-pane-reader") as HTMLElement | null;
                 if (this.elements.readerSidebar) {
-                    (this.elements.readerSidebar as HTMLElement).style.removeProperty('display');
-                    (this.elements.readerSidebar as HTMLElement).style.width = `${this.sidebarWidth}px`;
+                    this.applyReaderSidebarWidth(this.elements.readerSidebar as HTMLElement);
                 }
             } else {
                 // @ts-ignore: collapsed is not typed
