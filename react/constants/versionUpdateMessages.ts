@@ -432,6 +432,12 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         ],
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.18.0" target='_blank'>Full changelog</a>`
     },
+    {
+        version: "0.19.0",
+        title: "Beaver 0.19: Performance and maintenance (beta)",
+        text: "Version 0.19 focuses on performance and maintenance including faster, more reliable PDF handling and UI responsiveness, support for stacked layout, page labels in citations and many more stability improvements.\n\nPlease report any issues you encounter on GitHub or contact us at contact@beaverapp.ai.",
+        inPanel: true,
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));

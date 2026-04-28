@@ -1046,6 +1046,11 @@ export interface WSAgentActionValidateResponse {
      */
     normalized_action_data?: Record<string, any>;
     preference: DeferredToolPreference;
+    /**
+     * Optional plugin-side timing breakdown in milliseconds. Free-form keys
+     * scoped to action_type. Backend logs as-is — do not interpret.
+     */
+    timing?: Record<string, number>;
 }
 
 /** Request from backend to execute an agent action */

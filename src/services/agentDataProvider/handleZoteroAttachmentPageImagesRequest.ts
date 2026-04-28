@@ -339,7 +339,10 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // record without disturbing OCR state. Otherwise leave the cache
         // alone — a later text-extraction or status call will seed it
         // correctly.
+        // Skip cache writes during shutdown — DB writes here race Zotero's
+        // teardown (same guard as sync.ts:266 and FileUploader.ts:338).
         const canSafelyExtendCache = cache != null
+            && !Zotero.__beaverShuttingDown
             && cachedMeta != null
             && cachedMeta.needs_ocr === false
             && cachedMeta.is_encrypted === false
@@ -359,24 +362,30 @@ export async function handleZoteroAttachmentPageImagesRequest(
                     file_mtime_ms = stat.lastModified ?? 0;
                     file_size_bytes = stat.size ?? 0;
                 }
-                const persistedPageLabels =
-                    Object.keys(renderResult.pageLabels).length > 0 ? renderResult.pageLabels : {};
-                await cache!.setMetadata({
-                    item_id: pdfItem.id,
-                    library_id: pdfItem.libraryID,
-                    zotero_key: pdfItem.key,
-                    file_path: effectiveFilePath,
-                    file_mtime_ms,
-                    file_size_bytes,
-                    content_type: pdfItem.attachmentContentType || 'application/pdf',
-                    page_count: renderResult.pageCount,
-                    page_labels: persistedPageLabels,
-                    has_text_layer: cachedMeta!.has_text_layer,
-                    needs_ocr: cachedMeta!.needs_ocr,
-                    is_encrypted: false,
-                    is_invalid: false,
-                    extraction_version: EXTRACTION_VERSION,
-                });
+                // Recheck after the stat await — shutdown can race in
+                // during the I/O. Without this the entry-guard above
+                // doesn't cover writes whose preceding awaits yielded.
+                if (Zotero.__beaverShuttingDown) {
+                    logger(`handleZoteroAttachmentPageImagesRequest: skipping metadata write for ${requestKey} — shutdown signalled during stat`, 3);
+                } else {
+                    const persistedPageLabels = Object.keys(renderResult.pageLabels).length > 0 ? renderResult.pageLabels : {};
+                    await cache!.setMetadata({
+                        item_id: pdfItem.id,
+                        library_id: pdfItem.libraryID,
+                        zotero_key: pdfItem.key,
+                        file_path: effectiveFilePath,
+                        file_mtime_ms,
+                        file_size_bytes,
+                        content_type: pdfItem.attachmentContentType || 'application/pdf',
+                        page_count: renderResult.pageCount,
+                        page_labels: persistedPageLabels,
+                        has_text_layer: cachedMeta!.has_text_layer,
+                        needs_ocr: cachedMeta!.needs_ocr,
+                        is_encrypted: false,
+                        is_invalid: false,
+                        extraction_version: EXTRACTION_VERSION,
+                    });
+                }
             } catch (error) {
                 logger(`handleZoteroAttachmentPageImagesRequest: cache write error: ${error}`, 1);
             }

@@ -77,6 +77,7 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
         vi.clearAllMocks();
         mockState.extractWithMetaImpl = null;
         mockState.extractWithMetaCalls = [];
+        (globalThis as any).Zotero.__beaverShuttingDown = undefined;
     });
 
     it('stores page_labels as {} when extraction checked labels and none were found', async () => {
@@ -333,6 +334,91 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
             startIndex: 0,
             maxPages: 5,
         });
+    });
+
+    it('skips cache writes when shutdown is signalled mid-extraction', async () => {
+        // Regression: if Zotero begins teardown after extractWithMeta resolves,
+        // the cache writes (setMetadata, setContentPages) must not run — they
+        // race the DB closing in onMainWindowUnload and risk crashing on shutdown.
+        // Mirrors the sync.ts:266 / FileUploader.ts:338 shutdown-guard pattern.
+        const { cache } = setupRequestScenario({ cachedPageCount: null });
+
+        mockState.extractWithMetaImpl = async () => {
+            // Simulate shutdown firing between extract resolution and the cache write.
+            (globalThis as any).Zotero.__beaverShuttingDown = true;
+            return {
+                pages: [{ index: 0, label: '1', content: 'page-1', width: 100, height: 200 }],
+                analysis: { pageCount: 3, hasTextLayer: true, styleProfile: {}, marginAnalysis: {} },
+                fullText: 'page-1',
+                pageLabels: {},
+                metadata: { extractedAt: 'now', version: '2.0.0', settings: {} },
+            };
+        };
+
+        const response = await handleZoteroAttachmentPagesRequest({
+            event: 'zotero_attachment_pages_request',
+            request_id: 'req-shutdown',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            start_page: 1,
+            end_page: 1,
+            skip_local_limits: true,
+        } as any);
+
+        // The in-memory response still settles cleanly so the WS promise resolves;
+        // only the persistence side-effects are skipped.
+        expect(response).toMatchObject({ type: 'zotero_attachment_pages', total_pages: 3 });
+        expect(cache.setMetadata).not.toHaveBeenCalled();
+        expect(cache.setContentPages).not.toHaveBeenCalled();
+    });
+
+    it('skips cache writes when shutdown is signalled during the post-extract stat', async () => {
+        // Regression: the entry-guard on the cache-write block is evaluated
+        // before `IOUtils.stat()` awaits. If shutdown fires during that I/O,
+        // execution resumes and would still call setMetadata/setContentPages
+        // against the closing DB. A second guard after the stat must catch this.
+        const { cache } = setupRequestScenario({ cachedPageCount: null });
+
+        mockIOUtils.stat.mockImplementation(async () => {
+            (globalThis as any).Zotero.__beaverShuttingDown = true;
+            return { lastModified: 1700000000000, size: 123456 };
+        });
+
+        const response = await handleZoteroAttachmentPagesRequest({
+            event: 'zotero_attachment_pages_request',
+            request_id: 'req-shutdown-stat',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            start_page: 1,
+            end_page: 1,
+            skip_local_limits: true,
+        } as any);
+
+        expect(response).toMatchObject({ type: 'zotero_attachment_pages', total_pages: 3 });
+        expect(cache.setMetadata).not.toHaveBeenCalled();
+        expect(cache.setContentPages).not.toHaveBeenCalled();
+    });
+
+    it('skips content-page write when shutdown is signalled between metadata and content writes', async () => {
+        // Regression: even with the post-stat guard, shutdown can race in
+        // between cache.setMetadata() and cache.setContentPages(). A third
+        // recheck is required so the second DB write doesn't run during teardown.
+        const { cache } = setupRequestScenario({ cachedPageCount: null });
+
+        cache.setMetadata.mockImplementation(async () => {
+            (globalThis as any).Zotero.__beaverShuttingDown = true;
+        });
+
+        const response = await handleZoteroAttachmentPagesRequest({
+            event: 'zotero_attachment_pages_request',
+            request_id: 'req-shutdown-between-writes',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            start_page: 1,
+            end_page: 1,
+            skip_local_limits: true,
+        } as any);
+
+        expect(response).toMatchObject({ type: 'zotero_attachment_pages', total_pages: 3 });
+        expect(cache.setMetadata).toHaveBeenCalledTimes(1);
+        expect(cache.setContentPages).not.toHaveBeenCalled();
     });
 
     it('returns invalid_page_value for an unparseable string start_page (resolvePageValue throws on main thread)', async () => {

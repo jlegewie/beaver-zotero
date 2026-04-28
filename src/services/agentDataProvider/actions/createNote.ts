@@ -24,6 +24,7 @@ import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZ
 import { WSDataError, NoteResultItem } from '../../agentProtocol';
 import { addAutoApproveNoteKeyAtom, makeNoteKey } from '../../../../react/atoms/editNoteAutoApprove';
 import { resolveCreateNoteParent } from './resolveCreateNoteParent';
+import { TimingAccumulator } from '../../../utils/timing';
 
 
 /**
@@ -76,6 +77,13 @@ interface CreateNoteResultData {
 async function validateCreateNoteAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
+    const start = Date.now();
+    const ta = new TimingAccumulator();
+    const buildTiming = (): Record<string, number> => ({
+        total_ms: Date.now() - start,
+        ...ta.getAll(),
+    });
+
     const {
         title,
         content,
@@ -93,6 +101,7 @@ async function validateCreateNoteAction(
             error: 'Note title cannot be empty',
             error_code: 'invalid_title',
             preference: 'always_ask',
+            timing: buildTiming(),
         };
     }
 
@@ -104,13 +113,21 @@ async function validateCreateNoteAction(
             error: 'Note content cannot be empty',
             error_code: 'invalid_content',
             preference: 'always_ask',
+            timing: buildTiming(),
         };
     }
+
+    // pre_resolve_ms: any time spent before the first awaited resolution
+    // begins. Today this is just sync arg destructuring; if the message
+    // queue ever stalls before dispatch this captures it.
+    ta.record('pre_resolve_ms', Date.now() - start);
 
     // Resolve parent item if parent_item_id provided (format: "<library_id>-<zotero_key>").
     // The shared helper walks the item chain up to a regular item, or falls
     // back to standalone-with-related-item when the chain ends at a standalone.
-    const parentResolution = await resolveCreateNoteParent(rawParentItemId);
+    const parentResolution = await ta.track('parent_resolution_ms', () =>
+        resolveCreateNoteParent(rawParentItemId)
+    );
     if (!parentResolution.ok) {
         return {
             type: 'agent_action_validate_response',
@@ -119,6 +136,7 @@ async function validateCreateNoteAction(
             error: parentResolution.error,
             error_code: parentResolution.errorCode,
             preference: 'always_ask',
+            timing: buildTiming(),
         };
     }
     const parentKey: string | null = parentResolution.parentKey;
@@ -126,12 +144,18 @@ async function validateCreateNoteAction(
     const relatedItemKey: string | null = parentResolution.relatedItemKey;
     const parentFallbackWarning: string | null = parentResolution.warning;
 
-    // Resolve target library from library parameter if not set from parent_item_id
+    // Resolve target library from library parameter if not set from parent_item_id.
+    // Sync, but groups all library-related lookups (getLibraryByIdOrName +
+    // getAll fallback + Libraries.get + searchable check + editability) under
+    // one bucket. Recorded before each early-return so failure paths attribute
+    // their cost too.
+    const tLib = Date.now();
     if (resolvedLibraryId == null && libraryNameOrId) {
         const libraryResult = getLibraryByIdOrName(libraryNameOrId);
         if (libraryResult.wasExplicitlyRequested && !libraryResult.library) {
             const allLibraries = Zotero.Libraries.getAll();
             const availableNames = allLibraries.map((lib) => lib.name).join(', ');
+            ta.record('library_resolution_ms', Date.now() - tLib);
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
@@ -139,6 +163,7 @@ async function validateCreateNoteAction(
                 error: `Library not found: "${libraryNameOrId}". Omit the library parameter to use the default library. Available libraries: ${availableNames}`,
                 error_code: 'library_not_found',
                 preference: 'always_ask',
+                timing: buildTiming(),
             };
         }
         if (libraryResult.library) {
@@ -154,6 +179,7 @@ async function validateCreateNoteAction(
     // Validate library exists
     const library = Zotero.Libraries.get(resolvedLibraryId);
     if (!library) {
+        ta.record('library_resolution_ms', Date.now() - tLib);
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -161,12 +187,14 @@ async function validateCreateNoteAction(
             error: `Library not found: ${resolvedLibraryId}`,
             error_code: 'library_not_found',
             preference: 'always_ask',
+            timing: buildTiming(),
         };
     }
 
     // Validate library is searchable (synced with Beaver)
     const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
     if (!searchableLibraryIds.includes(resolvedLibraryId)) {
+        ta.record('library_resolution_ms', Date.now() - tLib);
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -174,11 +202,13 @@ async function validateCreateNoteAction(
             error: `Library '${library.name}' is not synced with Beaver. The user can update this setting in Beaver Preferences.`,
             error_code: 'library_not_searchable',
             preference: 'always_ask',
+            timing: buildTiming(),
         };
     }
 
     // Validate library is editable
     if (!library.editable) {
+        ta.record('library_resolution_ms', Date.now() - tLib);
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -186,8 +216,10 @@ async function validateCreateNoteAction(
             error: `Library '${library.name}' is read-only and cannot be modified`,
             error_code: 'library_not_editable',
             preference: 'always_ask',
+            timing: buildTiming(),
         };
     }
+    ta.record('library_resolution_ms', Date.now() - tLib);
 
     // Resolve collection if specified.
     // Child notes cannot belong to collections directly (Zotero's
@@ -196,7 +228,9 @@ async function validateCreateNoteAction(
     // inherits collection membership from the parent.
     let resolvedCollectionKey: string | null = null;
     if (collectionNameOrKey && !parentKey) {
+        const tColl = Date.now();
         const collectionResult = getCollectionByIdOrName(collectionNameOrKey, resolvedLibraryId);
+        ta.record('collection_resolution_ms', Date.now() - tColl);
         if (collectionResult) {
             resolvedCollectionKey = collectionResult.collection.key;
         } else {
@@ -210,23 +244,25 @@ async function validateCreateNoteAction(
     // item and no collection was explicitly provided, inherit the related item's
     // first collection so the note stays near it in the library tree.
     if (relatedItemKey && !resolvedCollectionKey && !collectionNameOrKey) {
-        const sourceItem = await Zotero.Items.getByLibraryAndKeyAsync(resolvedLibraryId, relatedItemKey);
-        if (sourceItem) {
-            // getByLibraryAndKeyAsync only guarantees primaryData; getCollections()
-            // requires the 'collections' data type, so load it explicitly.
-            try {
-                await Zotero.Items.loadDataTypes([sourceItem], ['collections']);
-                const collectionIds = sourceItem.getCollections();
-                if (collectionIds && collectionIds.length > 0) {
-                    const firstCollection = Zotero.Collections.get(collectionIds[0]);
-                    if (firstCollection) {
-                        resolvedCollectionKey = firstCollection.key;
+        await ta.track('collection_inherit_ms', async () => {
+            const sourceItem = await Zotero.Items.getByLibraryAndKeyAsync(resolvedLibraryId!, relatedItemKey);
+            if (sourceItem) {
+                // getByLibraryAndKeyAsync only guarantees primaryData; getCollections()
+                // requires the 'collections' data type, so load it explicitly.
+                try {
+                    await Zotero.Items.loadDataTypes([sourceItem], ['collections']);
+                    const collectionIds = sourceItem.getCollections();
+                    if (collectionIds && collectionIds.length > 0) {
+                        const firstCollection = Zotero.Collections.get(collectionIds[0]);
+                        if (firstCollection) {
+                            resolvedCollectionKey = firstCollection.key;
+                        }
                     }
+                } catch (collErr: any) {
+                    logger(`validateCreateNoteAction: Failed to inherit collection from related item: ${collErr.message}`, 1);
                 }
-            } catch (collErr: any) {
-                logger(`validateCreateNoteAction: Failed to inherit collection from related item: ${collErr.message}`, 1);
             }
-        }
+        });
     }
 
     // Get user preference
@@ -255,6 +291,7 @@ async function validateCreateNoteAction(
         },
         normalized_action_data: normalizedActionData,
         preference,
+        timing: buildTiming(),
     };
 }
 
@@ -267,6 +304,13 @@ async function executeCreateNoteAction(
     request: WSAgentActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
+    const start = Date.now();
+    const ta = new TimingAccumulator();
+    const buildTiming = (): Record<string, number> => ({
+        total_ms: Date.now() - start,
+        ...ta.getAll(),
+    });
+
     // action_data is the merged original + normalized_action_data from validation
     const actionData = request.action_data as {
         title: string;
@@ -295,6 +339,7 @@ async function executeCreateNoteAction(
             success: false,
             error: 'Title and content are required',
             error_code: 'missing_data',
+            timing: buildTiming(),
         };
     }
 
@@ -310,14 +355,18 @@ async function executeCreateNoteAction(
         const markdownContent = `<h1>${title}</h1>\n\n${content}`;
 
         // Preload page labels for any citation references in content
-        await preloadPageLabelsForContent(markdownContent);
+        await ta.track('preload_page_labels_ms', () =>
+            preloadPageLabelsForContent(markdownContent)
+        );
 
         // Convert markdown to HTML with citation context
+        const renderStart = Date.now();
         let htmlContent = renderToHTML(
             markdownContent.trim(),
             "markdown",
             { citationDataMap, externalMapping, externalReferencesMap },
         );
+        ta.record('render_html_ms', Date.now() - renderStart);
 
         // Add Beaver footer with thread/run link
         const threadId = store.get(currentThreadIdAtom);
@@ -367,7 +416,7 @@ async function executeCreateNoteAction(
             logger(`executeCreateNoteAction: Skipping addToCollection(${collectionKey}) because note has parent_key ${parentKey} (child notes cannot be in collections directly)`, 1);
         }
 
-        await zoteroNote.saveTx();
+        await ta.track('save_tx_ms', () => zoteroNote.saveTx());
 
         logger(`executeCreateNoteAction: Created note "${title}" with key ${zoteroNote.key} in library ${targetLibraryId}`, 1);
 
@@ -394,7 +443,9 @@ async function executeCreateNoteAction(
             const noteId = `${zoteroNote.libraryID}-${zoteroNote.key}`;
             const rawHtml = getLatestNoteHtml(zoteroNote);
             if (rawHtml) {
+                const simplifyStart = Date.now();
                 const { simplified } = getOrSimplify(noteId, rawHtml, zoteroNote.libraryID);
+                ta.record('simplify_ms', Date.now() - simplifyStart);
                 noteContent = simplified;
             }
         } catch (simplifyError: any) {
@@ -409,11 +460,13 @@ async function executeCreateNoteAction(
             invalidCitationKeys = invalidKeys;
             if (citationRefs.length > 0) {
                 logger(`executeCreateNoteAction: Resolving ${citationRefs.length} citation reference(s)`, 1);
-                citedItemsData = await lookupZoteroReferences(citationRefs, {
-                    include_attachments: true,
-                    include_parents: true,
-                    file_status_level: 'none',  // metadata only
-                });
+                citedItemsData = await ta.track('lookup_references_ms', () =>
+                    lookupZoteroReferences(citationRefs, {
+                        include_attachments: true,
+                        include_parents: true,
+                        file_status_level: 'none',  // metadata only
+                    })
+                );
             }
             if (invalidKeys.length > 0) {
                 logger(`executeCreateNoteAction: Found ${invalidKeys.length} invalid citation key(s): ${invalidKeys.join(', ')}`, 1);
@@ -450,6 +503,7 @@ async function executeCreateNoteAction(
             request_id: request.request_id,
             success: true,
             result_data: resultData,
+            timing: buildTiming(),
         };
     } catch (error: any) {
         // Re-throw TimeoutError so it propagates to the main handler
@@ -464,6 +518,7 @@ async function executeCreateNoteAction(
             success: false,
             error: errorMsg,
             error_code: 'create_failed',
+            timing: buildTiming(),
         };
     }
 }

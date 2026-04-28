@@ -10,9 +10,13 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     normalizeNoteHtml: vi.fn((html: string) => html),
 }));
 
-// Mock noteEditorIO
+// Mock noteEditorIO. Must export every symbol handleReadNoteRequest imports;
+// missing exports surface as `undefined` at module load and cause cryptic
+// "x is not a function" failures.
 vi.mock('../../../src/utils/noteEditorIO', () => ({
     getLatestNoteHtml: vi.fn((item: any) => item.getNote()),
+    getNoteHtmlForRead: vi.fn(async (item: any) => item.getNote()),
+    getLiveNoteHtmlCandidates: vi.fn(() => []),
 }));
 
 // Mock logger
@@ -42,7 +46,7 @@ vi.mock('../../../react/store', () => ({
 
 import { handleReadNoteRequest } from '../../../src/services/agentDataProvider/handleReadNoteRequest';
 import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
-import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
+import { getLatestNoteHtml, getNoteHtmlForRead } from '../../../src/utils/noteEditorIO';
 import type { WSReadNoteRequest } from '../../../src/services/agentProtocol';
 
 
@@ -272,5 +276,59 @@ describe('handleReadNoteRequest — errors', () => {
         const response = await handleReadNoteRequest(makeRequest());
         expect(response.success).toBe(false);
         expect(response.error).toContain('Simplification failed');
+    });
+});
+
+
+// =============================================================================
+// Read-only path integration
+// =============================================================================
+//
+// Narrow scope: this only verifies the handler integrates correctly with
+// `getNoteHtmlForRead`. The fallback / multi-editor / retry behavior is
+// covered against fake `Zotero.Notes._editorInstances` in
+// `tests/unit/notes/noteEditorIO.test.ts` — testing it through a mocked
+// helper here would not exercise the real fallback.
+
+describe('handleReadNoteRequest — read-only path', () => {
+    it('awaits getNoteHtmlForRead and surfaces its return value', async () => {
+        // Helper returns content distinct from getNote so we can prove the
+        // handler sourced its raw HTML from the helper, not from item.getNote.
+        const sentinel = '<div data-schema-version="9"><p>FROM HELPER</p></div>';
+        vi.mocked(getNoteHtmlForRead).mockResolvedValueOnce(sentinel);
+
+        const response = await handleReadNoteRequest(makeRequest());
+        expect(response.success).toBe(true);
+        expect(getNoteHtmlForRead).toHaveBeenCalledTimes(1);
+        // The simplifier mock just returns its preset lines, but the handler
+        // must have called it — proving rawHtml made it through.
+        expect(getOrSimplify).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(getOrSimplify).mock.calls[0][1]).toBe(sentinel);
+    });
+
+    it('returns empty_note error when getNoteHtmlForRead resolves empty', async () => {
+        vi.mocked(getNoteHtmlForRead).mockResolvedValueOnce('');
+        const response = await handleReadNoteRequest(makeRequest());
+        expect(response.success).toBe(false);
+        expect(response.error).toContain('is empty');
+    });
+
+    it('returns empty_note error when helper resolves whitespace-only HTML', async () => {
+        vi.mocked(getNoteHtmlForRead).mockResolvedValueOnce('   \n\t');
+        const response = await handleReadNoteRequest(makeRequest());
+        expect(response.success).toBe(false);
+        expect(response.error).toContain('is empty');
+    });
+
+    it('NEVER calls item.setNote from the read path (regression guard)', async () => {
+        // The whole point of using getNoteHtmlForRead instead of
+        // flushLiveEditorToDB is that the read path must never persist a
+        // transient empty live-editor snapshot.
+        const setNote = vi.fn();
+        const item = makeMockItem({ setNote });
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+
+        await handleReadNoteRequest(makeRequest());
+        expect(setNote).not.toHaveBeenCalled();
     });
 });
