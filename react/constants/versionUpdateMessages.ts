@@ -434,8 +434,8 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.19.0",
-        title: "Beaver 0.19: Performance and maintenance",
-        text: "Focus on faster, more reliable PDF handling and UI responsiveness, plus fixes across layout, tags, and organization.",
+        title: "Beaver 0.19: Performance and maintenance (beta)",
+        text: "Version 0.19 focuses on performance and maintenance including faster, more reliable PDF handling and UI responsiveness, support for stacked layout, page labels in citations and many more stability improvements.\n\nPlease report any issues you encounter on GitHub or contact us at contact@beaverapp.ai.",
         inPanel: true,
     },
 ];
