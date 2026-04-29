@@ -13,6 +13,7 @@ import {
     CollectionReference,
 } from './messageComposition';
 import { sendWSMessageAtom } from './agentRunAtoms';
+import { newThreadAtom } from './threads';
 import { logger } from '../../src/utils/logger';
 
 export const firstRunSuggestionsAtom = atom<LibrarySuggestionsResponse | null>(null);
@@ -102,18 +103,15 @@ async function hydrateAttachments(
 export const submitFirstRunCardAtom = atom(
     null,
     async (get, set, card: SuggestionCard) => {
+        await set(newThreadAtom, { skipAutoPopulate: true });
+
         const { items, collections } = await hydrateAttachments(card.attachments);
 
         if (items.length > 0) {
-            const current = get(currentMessageItemsAtom);
-            const existingKeys = new Set(current.map((i) => `${i.libraryID}-${i.key}`));
-            const newItems = items.filter((i) => !existingKeys.has(`${i.libraryID}-${i.key}`));
-            if (newItems.length > 0) {
-                set(currentMessageItemsAtom, [...current, ...newItems]);
-            }
+            set(currentMessageItemsAtom, items);
         }
 
-        if (collections.length > 0 && get(currentMessageCollectionsAtom).length === 0) {
+        if (collections.length > 0) {
             set(currentMessageCollectionsAtom, collections);
         }
 
