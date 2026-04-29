@@ -21,6 +21,7 @@ import {
 } from '../../../utils/extractionVisualizer';
 import { getCurrentReaderAndWaitForView } from '../../../utils/readerUtils';
 import { semanticSearchService } from '../../../../src/services/semanticSearchService';
+import { librarySuggestionsService } from '../../../../src/services/librarySuggestionsService';
 import { BeaverDB } from '../../../../src/services/database';
 import { threadService } from '../../../../src/services/threadService';
 import { useAtomValue } from 'jotai';
@@ -702,6 +703,54 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
     };
 
+    // Test library suggestions endpoint
+    const handleTestLibrarySuggestions = async () => {
+        console.log("[Library Suggestions] Calling endpoint...");
+        try {
+            const payload = await librarySuggestionsService.buildPayload({ purpose: "dev_tools" });
+            console.log("[Library Suggestions] Assembled payload:", payload);
+
+            console.time("[Library Suggestions] Request");
+            const response = await librarySuggestionsService.getSuggestions({ purpose: "dev_tools" });
+            console.timeEnd("[Library Suggestions] Request");
+
+            console.log("[Library Suggestions] Response:", response);
+            console.log(
+                `[Library Suggestions] cards=${response.cards.length}, `
+                + `topics=${response.topics.length}, `
+                + `library_size=${response.facts.library_size}, `
+                + `unfiled=${response.facts.unfiled_item_count}, `
+                + `tags=${response.facts.total_tag_count}, `
+                + `collections=${response.facts.user_collection_count}`,
+            );
+
+            if (response.cards.length > 0) {
+                console.group("[Library Suggestions] Cards");
+                for (const card of response.cards) {
+                    console.log(
+                        `  [slot ${card.slot_index}${card.is_emphasized ? " ★" : ""}] `
+                        + `${card.kind}: "${card.title}" — ${card.description} `
+                        + `(prompt: "${card.prompt}", attachments: ${card.attachments?.length ?? 0})`,
+                    );
+                }
+                console.groupEnd();
+            }
+
+            if (response.topics.length > 0) {
+                console.group("[Library Suggestions] Topics");
+                for (const topic of response.topics) {
+                    console.log(
+                        `  [${topic.source}/${topic.confidence}] "${topic.label}" `
+                        + `(${topic.item_count} items)`,
+                    );
+                }
+                console.groupEnd();
+            }
+        } catch (error) {
+            console.error("[Library Suggestions] Failed:", error);
+        }
+    };
+
     // Create menu items for dev testing functions
     const menuItems: MenuItem[] = [
         {
@@ -713,6 +762,12 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         {
             label: "Test Semantic Search",
             onClick: handleTestSemanticSearch,
+            icon: SearchIcon,
+            disabled: false,
+        },
+        {
+            label: "Test Library Suggestions",
+            onClick: handleTestLibrarySuggestions,
             icon: SearchIcon,
             disabled: false,
         },
