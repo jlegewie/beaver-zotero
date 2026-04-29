@@ -73,7 +73,15 @@ const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card }) => 
                     <Icon width={16} height={16} className="font-color-accent-blue" />
                     <div className="font-medium">{card.title}</div>
                 </div>
-                <div className="text-sm font-color-secondary">{card.description}</div>
+                <div className="text-sm font-color-secondary">
+                    {card.description_segments && card.description_segments.length > 0
+                        ? card.description_segments.map((seg, i) =>
+                            seg.emphasized
+                                ? <span key={i} className="font-medium font-color-accent-blue">{seg.text}</span>
+                                : <span key={i}>{seg.text}</span>
+                        )
+                        : card.description}
+                </div>
             </div>
         </div>
     );

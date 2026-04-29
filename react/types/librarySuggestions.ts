@@ -91,12 +91,18 @@ export type CardKind =
     | "organize_library"
     | "organize_tags";
 
+export interface DescriptionSegment {
+    text: string;
+    emphasized: boolean;
+}
+
 export interface SuggestionCard {
     kind: CardKind;
     slot_index: number;
     is_emphasized: boolean;
     title: string;
     description: string;
+    description_segments: DescriptionSegment[];
     prompt: string;
     attachments?: MessageAttachment[] | null;
 }
