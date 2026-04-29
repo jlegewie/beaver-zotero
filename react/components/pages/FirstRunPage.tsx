@@ -89,6 +89,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
                 message={remainingCredits > 0 ? `${remainingCredits} credits to start` : undefined}
                 buttonLabel="Skip"
                 onButtonClick={() => setReturnRequested(false)}
+                isLoading={isLoading}
             />
         </div>
     );
