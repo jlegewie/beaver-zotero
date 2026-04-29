@@ -39,6 +39,8 @@ import {
     updateRequiredAtom
 } from '../atoms/profile';
 import UpdateRequiredPage from './pages/UpdateRequiredPage';
+import FirstRunPage from './pages/FirstRunPage';
+import { firstRunReturnRequestedAtom } from '../atoms/firstRun';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -69,6 +71,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const updateRequired = useAtomValue(updateRequiredAtom);
     const allWarnings = useAtomValue(threadWarningsAtom);
     const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
+    const firstRunReturnRequested = useAtomValue(firstRunReturnRequestedAtom);
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -179,6 +182,17 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
             <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
                 <Header isWindow={isWindow} />
                 <DeviceAuthorizationPage />
+                <DialogContainer />
+            </div>
+        );
+    }
+
+    {/* First-run suggestions page */}
+    if (firstRunReturnRequested) {
+        return (
+            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                <Header isWindow={isWindow} />
+                <FirstRunPage isWindow={isWindow} inputRef={inputRef} />
                 <DialogContainer />
             </div>
         );

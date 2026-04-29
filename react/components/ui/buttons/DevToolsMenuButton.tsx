@@ -21,11 +21,11 @@ import {
 } from '../../../utils/extractionVisualizer';
 import { getCurrentReaderAndWaitForView } from '../../../utils/readerUtils';
 import { semanticSearchService } from '../../../../src/services/semanticSearchService';
-import { librarySuggestionsService } from '../../../../src/services/librarySuggestionsService';
 import { BeaverDB } from '../../../../src/services/database';
 import { threadService } from '../../../../src/services/threadService';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { zoteroContextAtom } from '../../../atoms/zoteroContext';
+import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
 import { logger } from '../../../../src/utils/logger';
 
 interface DevToolsMenuButtonProps {
@@ -44,6 +44,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
     currentMessageContent = '',
 }) => {
     const zoteroContext = useAtomValue(zoteroContextAtom);
+    const setFirstRunReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
 
     // Log Zotero context state
     const handleLogZoteroContext = () => {
@@ -703,52 +704,9 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
     };
 
-    // Test library suggestions endpoint
-    const handleTestLibrarySuggestions = async () => {
-        console.log("[Library Suggestions] Calling endpoint...");
-        try {
-            const payload = await librarySuggestionsService.buildPayload({ purpose: "dev_tools" });
-            console.log("[Library Suggestions] Assembled payload:", payload);
-
-            console.time("[Library Suggestions] Request");
-            const response = await librarySuggestionsService.getSuggestions({ purpose: "dev_tools" });
-            console.timeEnd("[Library Suggestions] Request");
-
-            console.log("[Library Suggestions] Response:", response);
-            console.log(
-                `[Library Suggestions] cards=${response.cards.length}, `
-                + `topics=${response.topics.length}, `
-                + `library_size=${response.facts.library_size}, `
-                + `unfiled=${response.facts.unfiled_item_count}, `
-                + `tags=${response.facts.total_tag_count}, `
-                + `collections=${response.facts.user_collection_count}`,
-            );
-
-            if (response.cards.length > 0) {
-                console.group("[Library Suggestions] Cards");
-                for (const card of response.cards) {
-                    console.log(
-                        `  [slot ${card.slot_index}${card.is_emphasized ? " ★" : ""}] `
-                        + `${card.kind}: "${card.title}" — ${card.description} `
-                        + `(prompt: "${card.prompt}", attachments: ${card.attachments?.length ?? 0})`,
-                    );
-                }
-                console.groupEnd();
-            }
-
-            if (response.topics.length > 0) {
-                console.group("[Library Suggestions] Topics");
-                for (const topic of response.topics) {
-                    console.log(
-                        `  [${topic.source}/${topic.confidence}] "${topic.label}" `
-                        + `(${topic.item_count} items)`,
-                    );
-                }
-                console.groupEnd();
-            }
-        } catch (error) {
-            console.error("[Library Suggestions] Failed:", error);
-        }
+    // Show the first-run suggestions page via the routing atom
+    const handleShowFirstRunPage = () => {
+        setFirstRunReturnRequested(true);
     };
 
     // Create menu items for dev testing functions
@@ -766,8 +724,8 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             disabled: false,
         },
         {
-            label: "Test Library Suggestions",
-            onClick: handleTestLibrarySuggestions,
+            label: "Show First Run Page",
+            onClick: handleShowFirstRunPage,
             icon: SearchIcon,
             disabled: false,
         },
