@@ -15,6 +15,7 @@ import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
 import ThreadMenuButton from './ui/buttons/ThreadMenuButton';
 import { hasCompletedOnboardingAtom, isDatabaseSyncSupportedAtom, updateRequiredAtom, isProfileLoadedAtom } from '../atoms/profile';
+import { firstRunReturnRequestedAtom } from '../atoms/firstRun';
 import { getWindowFromElement } from '../utils/windowContext';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
 import { getPref } from '../../src/utils/prefs';
@@ -37,6 +38,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
     const currentMessageContent = useAtomValue(currentMessageContentAtom);
     const threadId = useAtomValue(currentThreadIdAtom);
     const [isThreadListView, setIsThreadListView] = useAtom(isThreadListViewAtom);
+    const firstRunReturnRequested = useAtomValue(firstRunReturnRequestedAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
 
     const handleNewThread = async () => {
@@ -85,7 +87,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                 )}
 
                 {/* Chat history and new chat */}
-                {isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
+                {isAuthenticated && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && !firstRunReturnRequested && (
                     <>
                     <Tooltip content="Chat history" showArrow singleLine>
                         <IconButton
@@ -112,11 +114,11 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
             {isAuthenticated && (
                 <div className="display-flex gap-4">
                     {/* Embedding index status for users without databaseSync */}
-                    {!isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
+                    {!isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && !firstRunReturnRequested && (
                         <EmbeddingIndexStatusButton />
                     )}
                     {/* Database status for users with databaseSync */}
-                    {isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
+                    {isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && !firstRunReturnRequested && (
                         <DatabaseStatusButton />
                     )}
                     {/* Development tools */}
@@ -127,14 +129,14 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                             currentMessageContent={currentMessageContent}
                         />
                     )}
-                    {threadId && (
+                    {threadId && !firstRunReturnRequested && (
                         <ThreadMenuButton
                             className="scale-14"
                             ariaLabel="Chat actions"
                         />
                     )}
                     {/* Open in separate window */}
-                    {!isWindow && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && (
+                    {!isWindow && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && !firstRunReturnRequested && (
                         <Tooltip content="Open in separate window" secondaryContent={openWindowShortcut} showArrow singleLine>
                             <IconButton
                                 icon={PictureInPictureIcon}
