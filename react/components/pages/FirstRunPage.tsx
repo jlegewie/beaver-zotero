@@ -3,7 +3,6 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import {
     firstRunSuggestionsAtom,
     firstRunSuggestionsLoadingAtom,
-    firstRunSuggestionsErrorAtom,
     loadFirstRunSuggestionsAtom,
     refreshFirstRunSuggestionsAtom,
 } from '../../atoms/firstRun';
@@ -22,38 +21,11 @@ interface FirstRunPageProps {
 
 const isDev = process.env.NODE_ENV === 'development';
 
-function getIntroLine(opts: {
-    isLoading: boolean;
-    cardCount: number;
-    librarySize: number;
-    hasError: boolean;
-}): string {
-    const { isLoading, cardCount, librarySize, hasError } = opts;
-    if (isLoading) {
-        return 'Looking through your library to find a few good starting points…';
-    }
-    if (hasError) {
-        return "Couldn't load personalized suggestions. Ask me anything below to get started.";
-    }
-    if (cardCount === 3) {
-        return 'I took a quick look at your library. Here are three things you can try:';
-    }
-    if (cardCount === 2) {
-        return 'I took a quick look at your library. Here are two things you can try:';
-    }
-    if (cardCount === 1) {
-        return "I took a quick look at your library. Here's a starting point you can try:";
-    }
-    if (librarySize === 0) {
-        return "Beaver works best with papers in your library. Add some with the Zotero connector — or ask below and I'll help you find papers to get started.";
-    }
-    return "I couldn't pick out clear themes from your library yet. Open a paper or pick a collection, or just ask me anything below.";
-}
+const INTRO_LINE = 'Here are a few things you can try:';
 
 const FirstRunPage: React.FC<FirstRunPageProps> = ({ inputRef }) => {
     const suggestions = useAtomValue(firstRunSuggestionsAtom);
     const isLoading = useAtomValue(firstRunSuggestionsLoadingAtom);
-    const error = useAtomValue(firstRunSuggestionsErrorAtom);
     const remainingCredits = useAtomValue(remainingBeaverCreditsAtom);
     const load = useSetAtom(loadFirstRunSuggestionsAtom);
     const refresh = useSetAtom(refreshFirstRunSuggestionsAtom);
@@ -63,14 +35,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = ({ inputRef }) => {
     }, [load]);
 
     const cards = suggestions?.cards ?? [];
-    const librarySize = suggestions?.facts.library_size ?? 0;
     const showSkeletons = isLoading && cards.length === 0;
-    const introLine = getIntroLine({
-        isLoading: showSkeletons,
-        cardCount: cards.length,
-        librarySize,
-        hasError: !!error && cards.length === 0,
-    });
 
     return (
         <div
@@ -109,7 +74,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = ({ inputRef }) => {
                 </div>
 
                 {/* Intro line */}
-                <div className="text-sm font-color-secondary px-1">{introLine}</div>
+                <div className="text-sm font-color-secondary px-1">{INTRO_LINE}</div>
 
                 {/* Cards */}
                 <div className="display-flex flex-col gap-3">
