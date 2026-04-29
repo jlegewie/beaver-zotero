@@ -29,11 +29,17 @@ const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
     verticalPosition?: 'above' | 'below';
+    placeholder?: string;
+    hideModelSelector?: boolean;
+    hideAttachmentMenu?: boolean;
 }
 
 const InputArea: React.FC<InputAreaProps> = ({
     inputRef,
     verticalPosition = 'above',
+    placeholder,
+    hideModelSelector = false,
+    hideAttachmentMenu = false,
 }) => {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const [currentMessageItems, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
@@ -211,6 +217,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     };
 
     const getPlaceholderText = () => {
+        if (placeholder !== undefined) return placeholder;
         if (isAwaitingApproval) return "Add instructions to reject";
         if (shouldShowSoftCapWarning && !shouldShowHighTokenWarning) return "Yes to continue, or add instructions to adjust";
         if (isLibraryTab) return "@ to add a source, / for actions";
@@ -245,15 +252,17 @@ const InputArea: React.FC<InputAreaProps> = ({
             )}
 
             {/* Message attachments */}
-            <MessageAttachmentDisplay
-                isAddAttachmentMenuOpen={isAddAttachmentMenuOpen}
-                setIsAddAttachmentMenuOpen={setIsAddAttachmentMenuOpen}
-                menuPosition={menuPosition}
-                setMenuPosition={setMenuPosition}
-                inputRef={inputRef as React.RefObject<HTMLTextAreaElement>}
-                disabled={isAwaitingApproval}
-                verticalPosition={verticalPosition}
-            />
+            {!hideAttachmentMenu && (
+                <MessageAttachmentDisplay
+                    isAddAttachmentMenuOpen={isAddAttachmentMenuOpen}
+                    setIsAddAttachmentMenuOpen={setIsAddAttachmentMenuOpen}
+                    menuPosition={menuPosition}
+                    setMenuPosition={setMenuPosition}
+                    inputRef={inputRef as React.RefObject<HTMLTextAreaElement>}
+                    disabled={isAwaitingApproval}
+                    verticalPosition={verticalPosition}
+                />
+            )}
 
             {/* Slash command menu */}
             <SearchMenu
@@ -289,8 +298,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                             // Detect `/` trigger: at start or after whitespace/newline
                             if (!isAddAttachmentMenuOpen && handleSlashTrigger(value, e.currentTarget.getBoundingClientRect())) return;
 
-                            // Don't open attachment menu when awaiting approval
-                            if (e.target.value.endsWith('@') && !isAwaitingApproval) {
+                            // Don't open attachment menu when awaiting approval, or when explicitly hidden
+                            if (e.target.value.endsWith('@') && !isAwaitingApproval && !hideAttachmentMenu) {
                                 const rect = e.currentTarget.getBoundingClientRect();
                                 const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
                                 setMenuPosition({
@@ -325,7 +334,9 @@ const InputArea: React.FC<InputAreaProps> = ({
 
                 {/* Button Row */}
                 <div className="display-flex flex-row items-center pt-2">
-                    <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} disabled={isAwaitingApproval} />
+                    {!hideModelSelector && (
+                        <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} disabled={isAwaitingApproval} />
+                    )}
                     <div className="flex-1" />
                     <div className="display-flex flex-row items-center gap-4">
                         <Tooltip
