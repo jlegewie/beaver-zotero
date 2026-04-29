@@ -147,6 +147,106 @@ export async function handleListItemsRequest(
         const allItems = await Zotero.Items.getAsync(itemIds);
         let validItems = allItems.filter((item): item is Zotero.Item => item !== null);
 
+        // Zotero's `collectionID is X` only matches items directly in the collection.
+        // Child items (notes/attachments/annotations) are linked to a collection
+        // through their parent, so they aren't returned by the primary search. When
+        // a child category is requested with a collection filter, walk the parents
+        // and pull their children of the requested type(s).
+        const wantsChildItems =
+            itemCategory === 'note' ||
+            itemCategory === 'attachment' ||
+            itemCategory === 'annotation' ||
+            itemCategory === 'all';
+
+        if (resolvedCollectionId !== null && wantsChildItems) {
+            const wantNotes = itemCategory === 'note' || itemCategory === 'all';
+            const wantAttachments = itemCategory === 'attachment' || itemCategory === 'all';
+            const wantAnnotations = itemCategory === 'annotation' || itemCategory === 'all';
+
+            const parentSearch = new Zotero.Search() as unknown as ZoteroSearchWritable;
+            parentSearch.libraryID = library.libraryID;
+            parentSearch.addCondition('collectionID', 'is', String(resolvedCollectionId));
+            if (request.recursive !== false) {
+                parentSearch.addCondition('recursive', 'true', '');
+            }
+            parentSearch.addCondition('noChildren', 'true', '');
+            parentSearch.addCondition('itemType', 'isNot', 'note');
+            parentSearch.addCondition('itemType', 'isNot', 'annotation');
+            // Top-level attachments can themselves own annotations, so keep them
+            // as candidates when annotations are requested.
+            if (!wantAnnotations) {
+                parentSearch.addCondition('itemType', 'isNot', 'attachment');
+            }
+
+            const parentIds = await parentSearch.search();
+            const parents = (await Zotero.Items.getAsync(parentIds))
+                .filter((p): p is Zotero.Item => p !== null);
+            if (parents.length > 0) {
+                await Zotero.Items.loadDataTypes(parents, ['childItems']);
+            }
+
+            const childIds = new Set<number>();
+            const attachmentsForAnnotations: Zotero.Item[] = [];
+            const childAttachmentIds: number[] = [];
+            for (const parent of parents) {
+                if (parent.isAttachment()) {
+                    if (wantAnnotations && parent.isFileAttachment()) {
+                        attachmentsForAnnotations.push(parent);
+                    }
+                    continue;
+                }
+                if (wantNotes) {
+                    for (const id of parent.getNotes()) childIds.add(id);
+                }
+                if (wantAttachments) {
+                    for (const id of parent.getAttachments()) childIds.add(id);
+                }
+                if (wantAnnotations) {
+                    childAttachmentIds.push(...parent.getAttachments());
+                }
+            }
+
+            if (wantAnnotations && childAttachmentIds.length > 0) {
+                const childAttachments = (await Zotero.Items.getAsync(childAttachmentIds))
+                    .filter((a): a is Zotero.Item => a !== null);
+                if (childAttachments.length > 0) {
+                    await Zotero.Items.loadDataTypes(childAttachments, ['childItems']);
+                }
+                for (const att of childAttachments) {
+                    if (att.isFileAttachment()) {
+                        attachmentsForAnnotations.push(att);
+                    }
+                }
+            }
+
+            for (const att of attachmentsForAnnotations) {
+                const anns = att.getAnnotations();
+                for (const ann of anns) {
+                    if (ann && typeof ann.id === 'number') childIds.add(ann.id);
+                }
+            }
+
+            const existingIds = new Set(validItems.map(i => i.id));
+            const newChildIds = [...childIds].filter(id => !existingIds.has(id));
+
+            if (newChildIds.length > 0) {
+                const children = (await Zotero.Items.getAsync(newChildIds))
+                    .filter((c): c is Zotero.Item => c !== null);
+
+                let filteredChildren = children;
+                if (request.tag) {
+                    await Zotero.Items.loadDataTypes(children, ['tags']);
+                    const tagExact = request.tag;
+                    filteredChildren = children.filter(c => {
+                        const tags = c.getTags?.() ?? [];
+                        return tags.some((t: { tag: string }) => t.tag === tagExact);
+                    });
+                }
+
+                validItems.push(...filteredChildren);
+            }
+        }
+
         // Load item data in bulk for efficiency (include childItems when filtering by attachment)
         const dataTypes = ['primaryData', 'creators', 'itemData'];
         if (request.has_attachments != null) {
