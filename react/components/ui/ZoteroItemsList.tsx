@@ -5,6 +5,7 @@ import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { ItemMetadataAttachment, SourceAttachment } from '../../types/attachments/apiTypes';
 import { ZoteroItemReference } from '../../types/zotero';
 import { selectItemById } from '../../../src/utils/selectItem';
+import { getNoteContentPreviewText } from '../../utils/noteText';
 
 export interface ZoteroItemReferenceWithLabel extends ZoteroItemReference {
     label: string;
@@ -16,14 +17,7 @@ const NOTE_PREVIEW_MAX_LENGTH = 200;
 
 function getNoteContentPreview(item: Zotero.Item, maxLength: number): string {
     try {
-        // @ts-ignore unescapeHTML exists on Zotero.Utilities
-        let plainText: string = Zotero.Utilities.unescapeHTML(item.getNote());
-        const noteTitle = item.getNoteTitle();
-        if (noteTitle && plainText.startsWith(noteTitle)) {
-            plainText = plainText.substring(noteTitle.length);
-        }
-        plainText = plainText.replace(/^\s+/, '').replace(/\s+/g, ' ');
-        return truncateText(plainText, maxLength);
+        return getNoteContentPreviewText(item.getNote(), item.getNoteTitle(), maxLength);
     } catch {
         return '';
     }
