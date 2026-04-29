@@ -15,6 +15,7 @@ import {
     getRecentItems,
     getLibraryShape,
 } from "../utils/librarySignals";
+import { isSupportedItem } from "../utils/sync";
 import { store } from "../../react/store";
 import {
     libraryViewAtom,
@@ -106,7 +107,7 @@ export class LibrarySuggestionsService extends ApiService {
         if (firstSelected) {
             await Zotero.Items.loadDataTypes(
                 [firstSelected],
-                ["itemData", "creators", "tags", "collections"],
+                ["itemData", "creators", "tags", "collections", "childItems"],
             );
             selectedSignal = await toSignalItem(firstSelected);
         }
@@ -136,15 +137,20 @@ export class LibrarySuggestionsService extends ApiService {
         };
     }
 
-    /** Resolve an attachment item (reader view) up to its parent regular item before snippeting. */
+    /**
+     * Resolve an attachment item (reader view) up to its parent regular item
+     * before snippeting. Returns null when the open attachment isn't a type
+     * Beaver can process.
+     */
     private async toSignalForParent(item: Zotero.Item): Promise<SignalItem | null> {
+        if (item.isAttachment() && !isSupportedItem(item)) return null;
         const target = item.isAttachment() && item.parentItemID
             ? await Zotero.Items.getAsync(item.parentItemID)
             : item;
         if (!target || !target.isRegularItem()) return null;
         await Zotero.Items.loadDataTypes(
             [target],
-            ["itemData", "creators", "tags", "collections"],
+            ["itemData", "creators", "tags", "collections", "childItems"],
         );
         return toSignalItem(target);
     }

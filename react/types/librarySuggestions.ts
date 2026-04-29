@@ -16,6 +16,10 @@ export interface SignalItem {
     creators?: string[] | null;   // primary-creator last names only, in author order
     year?: number | null;
     abstract?: string | null;     // truncated to ~500 chars
+    /**
+     * True iff the item has at least one child attachment Beaver can process
+     */
+    has_supported_attachment: boolean;
 }
 
 export type ActiveItemKind = "annotated" | "read" | "noted";

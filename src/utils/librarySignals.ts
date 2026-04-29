@@ -3,6 +3,7 @@
  */
 import { serializeItemSummary } from "./zoteroSerializers";
 import { logger } from "./logger";
+import { hasSupportedAttachment } from "./sync";
 import {
     ActiveItem,
     ActiveItemKind,
@@ -40,6 +41,8 @@ export async function toSignalItem(item: Zotero.Item): Promise<SignalItem> {
         ? truncate(summary.abstract, ABSTRACT_MAX_CHARS)
         : null;
 
+    const supported = await hasSupportedAttachment(item);
+
     return {
         library_id: summary.library_id,
         zotero_key: summary.zotero_key,
@@ -48,6 +51,7 @@ export async function toSignalItem(item: Zotero.Item): Promise<SignalItem> {
         creators: lastNames.length > 0 ? lastNames : null,
         year: summary.year ?? null,
         abstract,
+        has_supported_attachment: supported,
     };
 }
 
@@ -108,7 +112,7 @@ export async function getActiveItems(
         .slice(0, cap);
 
     const parents = await Zotero.Items.getAsync(ranked.map((r) => r.itemID));
-    await Zotero.Items.loadDataTypes(parents, ["itemData", "creators", "tags", "collections"]);
+    await Zotero.Items.loadDataTypes(parents, ["itemData", "creators", "tags", "collections", "childItems"]);
     const parentById = new Map(parents.map((p) => [p.id, p]));
 
     const out: ActiveItem[] = [];
@@ -358,7 +362,7 @@ export async function getRecentItems(
     if (rows.length === 0) return [];
 
     const items = await Zotero.Items.getAsync(rows.map((r) => r.itemID));
-    await Zotero.Items.loadDataTypes(items, ["itemData", "creators", "tags", "collections"]);
+    await Zotero.Items.loadDataTypes(items, ["itemData", "creators", "tags", "collections", "childItems"]);
     const byId = new Map(items.map((i) => [i.id, i]));
 
     const out: RecentItem[] = [];
@@ -420,7 +424,7 @@ export async function getLibraryShape(libraryID: number): Promise<{
 async function hydrateSignalItems(itemIDs: number[]): Promise<SignalItem[]> {
     if (itemIDs.length === 0) return [];
     const items = await Zotero.Items.getAsync(itemIDs);
-    await Zotero.Items.loadDataTypes(items, ["itemData", "creators", "tags", "collections"]);
+    await Zotero.Items.loadDataTypes(items, ["itemData", "creators", "tags", "collections", "childItems"]);
     const out: SignalItem[] = [];
     for (const item of items) {
         try {
