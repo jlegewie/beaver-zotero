@@ -11,7 +11,7 @@ import { remainingBeaverCreditsAtom } from '../../atoms/profile';
 import SuggestionCardButton from './firstRun/SuggestionCardButton';
 import SuggestionCardSkeleton from './firstRun/SuggestionCardSkeleton';
 import IconButton from '../ui/IconButton';
-import SyncIcon from '../icons/SyncIcon';
+import RepeatIcon from '../icons/RepeatIcon';
 import { OnboardingHeader, OnboardingFooter } from './onboarding';
 
 interface FirstRunPageProps {
@@ -51,11 +51,16 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
             {/* Scrollable content area */}
             <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1 display-flex flex-col">
                 {/* Header */}
-                <div className="display-flex flex-row items-start justify-between gap-3">
-                    <OnboardingHeader message={headerMessage} />
+                <OnboardingHeader message={headerMessage} />
+
+                {/* Intro line */}
+                <div className="display-flex flex-row items-center justify-between gap-3">
+                    <div className="text-base font-semibold mt-2 mb-3">
+                        A few ideas based on your library
+                    </div>
                     {isDev && (
                         <IconButton
-                            icon={SyncIcon}
+                            icon={RepeatIcon}
                             variant="ghost-secondary"
                             onClick={() => void refresh()}
                             disabled={isLoading}
@@ -63,12 +68,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
                         />
                     )}
                 </div>
-
-                {/* Intro line */}
-                <div className="text-base font-semibold mt-2 mb-3">
-                    A few ideas based on your library
-                </div>
-
+                
                 {/* Cards */}
                 <div className="display-flex flex-col gap-3">
                     {showSkeletons && (
