@@ -36,9 +36,7 @@ const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card }) => 
     };
 
     const baseClass = 'p-3 rounded-md cursor-pointer first-run-card';
-    const emphasisClass = card.is_emphasized
-        ? 'bg-quinary border-quarternary'
-        : 'bg-senary';
+    const emphasisClass = 'bg-quinary border-popup';
 
     return (
         <div
