@@ -4,7 +4,7 @@ import { CardKind, SuggestionCard } from '../../../types/librarySuggestions';
 import { submitFirstRunCardAtom } from '../../../atoms/firstRun';
 import BookmarkIcon from '../../icons/BookmarkIcon';
 import BrainIcon from '../../icons/BrainIcon';
-import SearchIcon from '../../icons/SearchIcon';
+import GlobalSearchIcon from '../../icons/GlobalSearchIcon';
 import FolderDetailIcon from '../../icons/FolderDetailIcon';
 import TagIcon from '../../icons/TagIcon';
 
@@ -15,7 +15,7 @@ interface SuggestionCardButtonProps {
 const ICON_BY_KIND: Record<CardKind, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
     reading_assistant: BrainIcon,
     literature_review: BookmarkIcon,
-    discover_research: SearchIcon,
+    discover_research: GlobalSearchIcon,
     organize_library: FolderDetailIcon,
     organize_tags: TagIcon,
 };
