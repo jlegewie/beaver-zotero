@@ -83,7 +83,7 @@ async function hydrateAttachments(
                     key: c.key,
                     name: c.name,
                     libraryID: c.libraryID,
-                    parentKey: (c as any).parentKey ?? null,
+                    parentKey: (c as any).parentKey || null,
                 });
             }
         } else {
