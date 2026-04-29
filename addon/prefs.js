@@ -93,3 +93,7 @@ pref("runCollectionSync", false);
 pref("runWebDAVSync", false);
 pref("runEmbeddingFullDiff", false);
 pref("pendingVersionNotifications", "[]");
+
+// Library suggestions cache (JSON-encoded LibrarySuggestionsResponse + ISO timestamp)
+pref("librarySuggestions", "");
+pref("librarySuggestionsGeneratedAt", "");
