@@ -31,7 +31,7 @@ export const BUILTIN_ACTIONS: Action[] = [
     {
         id: 'builtin-summarize',
         title: 'Summarize',
-        text: 'Write a concise summary of this paper covering the research question, methodology, key findings, and main conclusions. Save the summary as a Zotero note attached to the item.',
+        text: 'Write a concise summary of this paper covering the research question, methodology, key findings, and main conclusions. Save the summary as a Zotero note attached to the item. If available, cite specific pages or sentences from the attachment to support each claim.',
         targetType: 'items',
         sortOrder: 100,
     },
