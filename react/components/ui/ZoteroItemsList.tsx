@@ -5,15 +5,29 @@ import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { ItemMetadataAttachment, SourceAttachment } from '../../types/attachments/apiTypes';
 import { ZoteroItemReference } from '../../types/zotero';
 import { selectItemById } from '../../../src/utils/selectItem';
+import { getNoteContentPreviewText } from '../../utils/noteText';
 
 export interface ZoteroItemReferenceWithLabel extends ZoteroItemReference {
     label: string;
     faded?: boolean;
 }
 
+const NOTE_TITLE_MAX_LENGTH = 100;
+const NOTE_PREVIEW_MAX_LENGTH = 200;
+
+function getNoteContentPreview(item: Zotero.Item, maxLength: number): string {
+    try {
+        return getNoteContentPreviewText(item.getNote(), item.getNoteTitle(), maxLength);
+    } catch {
+        return '';
+    }
+}
+
 interface ItemWithSelectionId {
     item: Zotero.Item;
     selectionItemId: number;
+    displayName: string;
+    subtitle: string;
     muted?: boolean;
     label?: string;
     faded?: boolean;
@@ -47,15 +61,27 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                 const items: ItemWithSelectionId[] = [];
                 for (const attachment of messageAttachments) {
                     const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                        attachment.library_id, 
+                        attachment.library_id,
                         attachment.zotero_key
                     );
-                    if (item) items.push({
-                        item: showParentItem ? (item.parentItem || item) : item,
-                        selectionItemId: item.id,
-                        label: 'label' in attachment ? attachment.label : undefined,
-                        faded: 'faded' in attachment ? attachment.faded : false
-                    });
+                    if (item) {
+                        const displayItem = showParentItem ? (item.parentItem || item) : item;
+                        const isNote = displayItem.isNote();
+                        const displayName = isNote
+                            ? truncateText(displayItem.getNoteTitle(), NOTE_TITLE_MAX_LENGTH)
+                            : getDisplayNameFromItem(displayItem);
+                        const subtitle = isNote
+                            ? getNoteContentPreview(displayItem, NOTE_PREVIEW_MAX_LENGTH)
+                            : displayItem.getDisplayTitle();
+                        items.push({
+                            item: displayItem,
+                            selectionItemId: item.id,
+                            displayName,
+                            subtitle,
+                            label: 'label' in attachment ? attachment.label : undefined,
+                            faded: 'faded' in attachment ? attachment.faded : false
+                        });
+                    }
                 }
                 setResolvedItems(items);
             }
@@ -74,8 +100,9 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
     return (
         <div className="min-w-0">
             {resolvedItems.map((itemWithSelectionId: ItemWithSelectionId) => {
-                const {item, selectionItemId, label, faded} = itemWithSelectionId;
+                const {item, selectionItemId, displayName, subtitle, label, faded} = itemWithSelectionId;
                 const isHovered = hoveredItemId === selectionItemId;
+                const hasSubtitle = subtitle.length > 0;
                 
                 return (
                     <div
@@ -92,17 +119,19 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                         {oneLine ? (
                             <div className={`display-flex flex-row gap-1 min-w-0 ${fontColor}`}>
                                 <div className="text-sm whitespace-nowrap">
-                                    {getDisplayNameFromItem(item)}
+                                    {displayName}
                                 </div>
-                                <div className="truncate text-sm">
-                                    {item.getDisplayTitle()}
-                                </div>
+                                {hasSubtitle && (
+                                    <div className="truncate text-sm">
+                                        {subtitle}
+                                    </div>
+                                )}
                             </div>
                         ) : (
                             <div className={`display-flex flex-col flex-1 gap-1 min-w-0 ${fontColor}`}>
                                 <div className={`display-flex flex-row gap-1 min-w-0 ${fontColor}`}>
                                     <div className={`truncate text-sm ${fontColor}`}>
-                                        {getDisplayNameFromItem(item)}
+                                        {displayName}
                                     </div>
                                     {!oneLine && label &&
                                          <>
@@ -113,9 +142,11 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                                         </>
                                     }
                                 </div>
-                                <div className={`truncate text-sm ${muted ? 'font-color-tertiary' : 'font-color-secondary'}`}>
-                                    {item.getDisplayTitle()}
-                                </div>
+                                {hasSubtitle && (
+                                    <div className={`truncate text-sm ${muted ? 'font-color-tertiary' : 'font-color-secondary'}`}>
+                                        {subtitle}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
