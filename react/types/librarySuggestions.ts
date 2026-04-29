@@ -103,7 +103,6 @@ export interface SuggestionCard {
 
 export interface LibrarySuggestionsResponse {
     cards: SuggestionCard[];
-    topics: SuggestionTopic[];
     facts: LibraryFacts;
     generated_at: string;     // ISO datetime
 }
