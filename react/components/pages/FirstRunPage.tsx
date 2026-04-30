@@ -3,10 +3,12 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import {
     firstRunSuggestionsAtom,
     firstRunSuggestionsLoadingAtom,
+    firstRunSuggestionsErrorAtom,
     loadFirstRunSuggestionsAtom,
     refreshFirstRunSuggestionsAtom,
     firstRunReturnRequestedAtom,
     markFirstRunCompleteAtom,
+    padWithFallbackCards,
 } from '../../atoms/firstRun';
 import { remainingBeaverCreditsAtom } from '../../atoms/profile';
 import SuggestionCardButton from './firstRun/SuggestionCardButton';
@@ -26,6 +28,7 @@ const isDev = process.env.NODE_ENV === 'development';
 const FirstRunPage: React.FC<FirstRunPageProps> = () => {
     const suggestions = useAtomValue(firstRunSuggestionsAtom);
     const isLoading = useAtomValue(firstRunSuggestionsLoadingAtom);
+    const error = useAtomValue(firstRunSuggestionsErrorAtom);
     const remainingCredits = useAtomValue(remainingBeaverCreditsAtom);
     const load = useSetAtom(loadFirstRunSuggestionsAtom);
     const refresh = useSetAtom(refreshFirstRunSuggestionsAtom);
@@ -53,8 +56,10 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
         }
     };
 
-    const cards = suggestions?.cards ?? [];
-    const showSkeletons = isLoading && cards.length === 0;
+    const backendCards = suggestions?.cards ?? [];
+    const showSkeletons = isLoading && backendCards.length === 0;
+    const useFallback = !isLoading && (!!error || backendCards.length < 3);
+    const cards = useFallback ? padWithFallbackCards(backendCards) : backendCards;
 
     const headerMessage = (
         <div className="display-flex flex-col gap-2 py-2 mt-3">

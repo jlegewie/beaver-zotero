@@ -24,6 +24,68 @@ export const firstRunSuggestionsLoadingAtom = atom<boolean>(false);
 export const firstRunSuggestionsErrorAtom = atom<string | null>(null);
 
 /**
+ * Hand-authored fallback cards used when the backend fails or returns fewer
+ * than 3 cards. Prompts must work without item/collection attachments — they
+ * mirror the `targetType: 'global'` builtins in `react/types/builtinActions.ts`.
+ */
+const FALLBACK_FIRST_RUN_CARDS: SuggestionCard[] = [
+    {
+        kind: 'discover_research',
+        slot_index: 0,
+        is_emphasized: false,
+        title: "What's new in my research areas?",
+        description: 'Find recent papers in the topics you are working on.',
+        description_segments: [
+            { text: 'Find ', emphasized: false },
+            { text: 'recent papers', emphasized: true },
+            { text: ' in the topics you are working on.', emphasized: false },
+        ],
+        prompt: "Look at my recent additions to identify what I'm currently working on. Search for notable recent papers in these areas, prioritizing highly-cited and relevant results. Return up to 10 papers. Indicate which ones I already have.{{recent_items}}",
+        attachments: null,
+    },
+    {
+        kind: 'organize_library',
+        slot_index: 1,
+        is_emphasized: false,
+        title: 'Organize my recent additions',
+        description: 'Tag and file the items you added in the last 7 days.',
+        description_segments: [
+            { text: 'Tag and file the items you added in the ', emphasized: false },
+            { text: 'last 7 days', emphasized: true },
+            { text: '.', emphasized: false },
+        ],
+        prompt: "Look at items I've added in the last 7 days. For each one, assign appropriate tags and add them to the appropriate collection. If no existing collection fits, suggest creating a new one.{{recent_items}}",
+        attachments: null,
+    },
+    {
+        kind: 'organize_tags',
+        slot_index: 2,
+        is_emphasized: false,
+        title: 'Tag all untagged items',
+        description: 'Assign consistent subject tags to items that have none.',
+        description_segments: [
+            { text: 'Assign consistent ', emphasized: false },
+            { text: 'subject tags', emphasized: true },
+            { text: ' to items that have none.', emphasized: false },
+        ],
+        prompt: 'Find all items in my library that have no tags. Analyze each one and assign appropriate subject tags. Use existing tags from my library when they fit. Be consistent: similar papers should get similar tags.',
+        attachments: null,
+    },
+];
+
+/**
+ * Top up the cards array to at least 3 entries by appending fallbacks whose
+ * `kind` isn't already represented. Used for both the empty/error path and
+ * the sparse-response (1–2 cards) path.
+ */
+export function padWithFallbackCards(cards: SuggestionCard[]): SuggestionCard[] {
+    if (cards.length >= 3) return cards;
+    const usedKinds = new Set(cards.map((c) => c.kind));
+    const padding = FALLBACK_FIRST_RUN_CARDS.filter((c) => !usedKinds.has(c.kind));
+    return [...cards, ...padding].slice(0, Math.max(3, cards.length));
+}
+
+/**
  * Session-only override that forces the sidebar to render the first-run page.
  */
 export const firstRunReturnRequestedAtom = atom<boolean>(false);
