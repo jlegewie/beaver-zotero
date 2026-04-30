@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessageItemsAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessageItemsAtom, pendingActionInputFocusAtom } from '../../atoms/messageComposition';
+import { findNextUserInputVariable } from '../../utils/userInputVariables';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
@@ -54,6 +55,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const softCapTriggeredRuns = useAtomValue(softCapTriggeredRunsAtom);
     const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
     const currentNoteItem = useAtomValue(currentNoteItemAtom);
+    const pendingActionFocus = useAtomValue(pendingActionInputFocusAtom);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -116,6 +118,38 @@ const InputArea: React.FC<InputAreaProps> = ({
             inputRef.current.style.height = `${inputRef.current.scrollHeight}px`;
         }
     }, [messageContent]);
+
+    // When an action with `[[name]]` placeholders is staged, focus the textarea
+    // and select the first placeholder so the user can replace it by typing.
+    useEffect(() => {
+        if (pendingActionFocus === 0) return;
+        const ta = inputRef.current;
+        if (!ta) return;
+        // Defer to next tick so messageContent has propagated to the textarea value.
+        const timer = setTimeout(() => {
+            const first = findNextUserInputVariable(ta.value, 0);
+            ta.focus();
+            if (first) {
+                ta.setSelectionRange(first.start, first.end);
+            } else {
+                const end = ta.value.length;
+                ta.setSelectionRange(end, end);
+            }
+        }, 0);
+        return () => clearTimeout(timer);
+    }, [pendingActionFocus]);
+
+    /** Tab → select the next `[[name]]` after the cursor, or fall through. */
+    const handleVariableTab = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+        if (e.key !== 'Tab' || e.shiftKey) return false;
+        const ta = e.currentTarget;
+        const cursor = ta.selectionEnd;
+        const next = findNextUserInputVariable(ta.value, cursor);
+        if (!next) return false;
+        e.preventDefault();
+        ta.setSelectionRange(next.start, next.end);
+        return true;
+    };
 
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
@@ -311,6 +345,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                         onKeyDown={(e) => {
                             // When slash menu is open, handle navigation and dismiss keys
                             if (handleSlashMenuKeyDown(e)) return;
+                            // Tab cycles through [[name]] placeholders before any other handling
+                            if (handleVariableTab(e)) return;
                             handleKeyDown(e);
                             // Submit on Enter (without Shift) - guard against pending to prevent race with button click
                             // Don't trigger reject on Enter when awaiting approval (must click button)
