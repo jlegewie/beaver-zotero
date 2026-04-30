@@ -68,10 +68,10 @@ const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card }) => 
             </style>
             <div className="display-flex flex-col gap-2">
                 <div className="display-flex flex-row items-center gap-2">
-                    <Icon width={16} height={16} className="font-color-primary" />
-                    <div className="font-medium">{card.title}</div>
+                    <Icon width={17} height={17} className="font-color-primary" />
+                    <div className="font-medium" style={{ fontSize: '1.075rem' }}>{card.title}</div>
                 </div>
-                <div className="text-sm font-color-secondary">
+                <div className="text-base font-color-secondary">
                     {card.description_segments && card.description_segments.length > 0
                         ? card.description_segments.map((seg, i) =>
                             seg.emphasized
