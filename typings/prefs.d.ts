@@ -21,6 +21,8 @@ declare namespace _ZoteroTypes {
       "annotationToolEnabled": boolean;
       "maxAddAttachmentToMessage": number;
       "readerExplainPrompt": string;
+      "useCustomBeaverSidebarWidth": boolean;
+      "customBeaverSidebarWidth": number;
       "maxFileSizeMB": number;
       "maxPageCount": number;
       "accessRemoteFiles": boolean;

@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo } from "react";
 import { useAtom, useAtomValue } from 'jotai';
 import { logoutAtom, userAtom } from '../../atoms/auth';
 import { getPref, setPref } from '../../../src/utils/prefs';
+import { uiManager } from '../../ui/UIManager';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, DollarCircleIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
@@ -47,6 +48,14 @@ const PreferencePage: React.FC = () => {
     const [addSelectedOnNewThread, setAddSelectedOnNewThread] = useState(() => getPref('addSelectedItemsOnNewThread'));
     const [addSelectedOnOpen, setAddSelectedOnOpen] = useState(() => getPref('addSelectedItemsOnOpen'));
     const [showDiffPreview, setShowDiffPreview] = useState(() => getPref('showDiffPreviewInNoteEditor') !== false);
+    const [useCustomSidebarWidth, setUseCustomSidebarWidth] = useState(() => !!getPref('useCustomBeaverSidebarWidth'));
+    const [customSidebarWidth, setCustomSidebarWidth] = useState(() => {
+        const stored = Number(getPref('customBeaverSidebarWidth'));
+        return Number.isFinite(stored) && stored > 0 ? stored : 500;
+    });
+    const [customSidebarWidthDraft, setCustomSidebarWidthDraft] = useState(() => String(
+        Number(getPref('customBeaverSidebarWidth')) || 500
+    ));
     const diffPreviewSupported = isDiffPreviewSupported();
     const [consentToShare, setConsentToShare] = useState(() => profileWithPlan?.consent_to_share || false);
     const [emailNotifications, setEmailNotifications] = useState(() => profileWithPlan?.email_notifications || false);
@@ -66,6 +75,26 @@ const PreferencePage: React.FC = () => {
     React.useEffect(() => {
         const interval = setInterval(() => setNow(Date.now()), 10000);
         return () => clearInterval(interval);
+    }, []);
+
+    // Keep the displayed Beaver width in sync when the user resizes the pane
+    // while Beaver is open (the ResizeObserver in UIManager writes to the pref).
+    React.useEffect(() => {
+        const observerSymbol = Zotero.Prefs.registerObserver(
+            'extensions.zotero.beaver.customBeaverSidebarWidth',
+            () => {
+                const stored = Number(getPref('customBeaverSidebarWidth'));
+                const next = Number.isFinite(stored) && stored > 0 ? stored : 500;
+                setCustomSidebarWidth(next);
+                setCustomSidebarWidthDraft(String(next));
+            },
+            true,
+        );
+        return () => {
+            if (observerSymbol) {
+                Zotero.Prefs.unregisterObserver(observerSymbol);
+            }
+        };
     }, []);
 
     const handleManualRefresh = useCallback(async () => {
@@ -303,6 +332,44 @@ const PreferencePage: React.FC = () => {
         setPref("showDiffPreviewInNoteEditor", newValue);
         setShowDiffPreview(newValue);
     }, [showDiffPreview, diffPreviewSupported]);
+
+    const handleUseCustomSidebarWidthToggle = useCallback(() => {
+        const newValue = !useCustomSidebarWidth;
+        setPref("useCustomBeaverSidebarWidth", newValue);
+        setUseCustomSidebarWidth(newValue);
+        // Apply immediately if Beaver is currently open
+        try { uiManager.refreshCustomWidth(); } catch (e) { /* ignore */ }
+    }, [useCustomSidebarWidth]);
+
+    const commitCustomSidebarWidth = useCallback((rawValue: string) => {
+        const parsed = parseInt(rawValue, 10);
+        const clamped = Number.isFinite(parsed)
+            ? Math.max(200, Math.min(2000, parsed))
+            : customSidebarWidth;
+        setPref("customBeaverSidebarWidth", clamped);
+        setCustomSidebarWidth(clamped);
+        setCustomSidebarWidthDraft(String(clamped));
+        if (useCustomSidebarWidth) {
+            try { uiManager.refreshCustomWidth(); } catch (e) { /* ignore */ }
+        }
+    }, [customSidebarWidth, useCustomSidebarWidth]);
+
+    const handleCustomSidebarWidthChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        setCustomSidebarWidthDraft(event.target.value);
+    }, []);
+
+    const handleCustomSidebarWidthBlur = useCallback(() => {
+        commitCustomSidebarWidth(customSidebarWidthDraft);
+    }, [commitCustomSidebarWidth, customSidebarWidthDraft]);
+
+    const handleCustomSidebarWidthKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+        if (event.key === 'Enter') {
+            (event.target as HTMLInputElement).blur();
+        } else if (event.key === 'Escape') {
+            setCustomSidebarWidthDraft(String(customSidebarWidth));
+            (event.target as HTMLInputElement).blur();
+        }
+    }, [customSidebarWidth]);
 
     const handleConsentToggle = useCallback(() => {
         handleConsentChange(!consentToShare);
@@ -577,6 +644,47 @@ const PreferencePage: React.FC = () => {
                                         />
                                     }
                                 />
+                                <SettingsRow
+                                    title="Custom Beaver Sidebar Width"
+                                    description="Force the Zotero right pane to a specific width when Beaver is open. The original Zotero width is restored when Beaver closes."
+                                    onClick={handleUseCustomSidebarWidthToggle}
+                                    hasBorder
+                                    tooltip="When enabled, Beaver opens at a fixed width (independent of the Zotero info/abstract/notes pane width). Disable to share the width with Zotero's pane."
+                                    control={
+                                        <input
+                                            type="checkbox"
+                                            checked={useCustomSidebarWidth}
+                                            onChange={handleUseCustomSidebarWidthToggle}
+                                            onClick={(e) => e.stopPropagation()}
+                                            style={{ cursor: 'pointer', margin: 0 }}
+                                        />
+                                    }
+                                />
+                                {useCustomSidebarWidth && (
+                                    <SettingsRow
+                                        title="Beaver Sidebar Width"
+                                        description="Width in pixels (200–2000). Resizing the pane while Beaver is open updates this value automatically."
+                                        hasBorder
+                                        control={
+                                            <div className="display-flex flex-row items-center gap-1">
+                                                <input
+                                                    type="number"
+                                                    min={200}
+                                                    max={2000}
+                                                    step={10}
+                                                    value={customSidebarWidthDraft}
+                                                    onChange={handleCustomSidebarWidthChange}
+                                                    onBlur={handleCustomSidebarWidthBlur}
+                                                    onKeyDown={handleCustomSidebarWidthKeyDown}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="py-1 px-2 border preference-input text-sm"
+                                                    style={{ width: '72px', margin: 0 }}
+                                                />
+                                                <span className="font-color-secondary text-sm">px</span>
+                                            </div>
+                                        }
+                                    />
+                                )}
                                 <SettingsRow
                                     title="Preview Note Edits in Editor"
                                     description={diffPreviewSupported

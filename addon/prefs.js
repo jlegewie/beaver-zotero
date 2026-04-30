@@ -18,6 +18,12 @@ pref("annotationToolEnabled", true);
 pref("maxAddAttachmentToMessage", 10);
 pref("readerExplainPrompt", "Explain the selected passage or annotation(s) from this paper in plain language. Provide context for any technical terms, statistical methods, or domain-specific concepts. If it references other work, briefly explain that context too.");
 
+// Custom Beaver sidebar width: when enabled, Beaver forces the Zotero
+// right pane to a specific width on open and restores the original Zotero
+// width on close, so the Zotero pane and Beaver pane can have different sizes.
+pref("useCustomBeaverSidebarWidth", false);
+pref("customBeaverSidebarWidth", 500);
+
 // Beaver Free file limits
 pref("maxFileSizeMB", 50);
 pref("maxPageCount", 300);
