@@ -314,8 +314,9 @@ function createAgentRunShell(
     customInstructions?: string,
     customModel?: ModelConfig['custom_model'],
     rewriteFromRunId?: string,
+    runIdOverride?: string,
 ): { run: AgentRun; request: AgentRunRequest } {
-    const runId = uuidv4();
+    const runId = runIdOverride ?? uuidv4();
     
     // Get user preferences for charging permissions
     const permissions: ChargingPermissions = {
@@ -1521,7 +1522,7 @@ async function executeWSRequest(
  */
 export const sendWSMessageAtom = atom(
     null,
-    async (get, set, message: string) => {
+    async (get, set, message: string, runIdOverride?: string) => {
         const isPending = get(isWSChatPendingAtom);
         logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
         
@@ -1770,6 +1771,8 @@ export const sendWSMessageAtom = atom(
                 model?.provider,
                 customInstructions,
                 model?.is_custom ? model.custom_model : undefined,
+                undefined, // rewriteFromRunId
+                runIdOverride,
             );
 
             // Set active run - UI now shows user message + spinner
