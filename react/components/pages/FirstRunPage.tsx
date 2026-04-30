@@ -106,7 +106,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
 
             {/* Footer */}
             <OnboardingFooter
-                message={remainingCredits > 0 ? `${remainingCredits} credits to start` : undefined}
+                // message={remainingCredits > 0 ? `${remainingCredits} credits to start` : undefined}
                 buttonLabel="Skip"
                 onButtonClick={handleSkip}
                 isLoading={isLoading || isSkipping}

@@ -16,7 +16,7 @@ import {
 } from './messageComposition';
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { newThreadAtom } from './threads';
-import { profileWithPlanAtom } from './profile';
+import { profileWithPlanAtom, isDeviceAuthorizedAtom, isDatabaseSyncSupportedAtom } from './profile';
 import { logger } from '../../src/utils/logger';
 
 export const firstRunSuggestionsAtom = atom<LibrarySuggestionsResponse | null>(null);
@@ -34,6 +34,23 @@ export const firstRunReturnRequestedAtom = atom<boolean>(false);
  * Session-only — explicitly reset on logout (`logoutAtom` in `auth.ts`).
  */
 export const firstRunOriginRunIdAtom = atom<string | null>(null);
+
+/**
+ * Single source of truth for "should the FirstRunPage be the visible page".
+ */
+export const isFirstRunVisibleAtom = atom((get) => {
+    const firstRunReturnRequested = get(firstRunReturnRequestedAtom);
+    if (firstRunReturnRequested) return true;
+    const profile = get(profileWithPlanAtom);
+    const isDeviceAuthorized = get(isDeviceAuthorizedAtom);
+    const isDatabaseSyncSupported = get(isDatabaseSyncSupportedAtom);
+    return (
+        !!profile?.has_authorized_free_access &&
+        !isDatabaseSyncSupported &&
+        isDeviceAuthorized &&
+        !profile?.first_run_completed_at
+    );
+});
 
 async function fetchAndPersist(set: any): Promise<void> {
     set(firstRunSuggestionsLoadingAtom, true);

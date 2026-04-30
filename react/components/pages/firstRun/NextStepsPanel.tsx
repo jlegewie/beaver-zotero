@@ -7,8 +7,9 @@ import {
 import { newThreadAtom } from '../../../atoms/threads';
 import { currentMessageContentAtom } from '../../../atoms/messageComposition';
 import Button from '../../ui/Button';
-import { CancelIcon } from '../../icons/icons';
+import { CancelIcon, PlusSignIcon } from '../../icons/icons';
 import IconButton from '../../ui/IconButton';
+
 
 interface NextStepsPanelProps {
     onDismiss: () => void;
@@ -17,7 +18,7 @@ interface NextStepsPanelProps {
 /**
  * Rendered once below the first agent run that originated from a
  * first-run suggestion card (matched by run id). Two paths:
- *   1. "Try another starting point" — re-renders the FirstRunPage from
+ *   1. "Try a different prompt" — re-renders the FirstRunPage from
  *      the persisted `profile.library_suggestions` (no regeneration,
  *      no second `complete` call).
  *   2. "Start a new chat" — creates a fresh empty thread.
@@ -43,7 +44,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ onDismiss }) => {
         }
     }, [messageContent, onDismiss]);
 
-    const newChatShortcut = Zotero.isMac ? '⌘⇧N' : 'Ctrl+Shift+N';
+    const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
 
     const handleTryAnother = () => {
         // Clear the origin marker so the just-finished run no longer shows
@@ -85,7 +86,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ onDismiss }) => {
                         style={{ display: 'block' }}
                         onClick={handleTryAnother}
                     >
-                        Try another starting point
+                        Try a different prompt
                     </Button>
                     <Button
                         variant="surface-light"
@@ -93,16 +94,38 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ onDismiss }) => {
                         style={{ display: 'block' }}
                         onClick={() => void handleNewChat()}
                     >
+                        
                         Start a new chat
                     </Button>
-                    <div className="font-color-tertiary text-xs pl-1">
-                        Anytime with + or {newChatShortcut}
+                    <div
+                        className="font-color-tertiary text-sm text-start ml-1"
+                    >
+                        Tip: Start a new chat anytime with
+                        <IconButton
+                            icon={PlusSignIcon}
+                            variant="ghost-tertiary"
+                            onClick={handleNewChat}
+                            className="scale-90"
+                            ariaLabel="New chat"
+                            style={{ padding: '3px' }}
+                        />
+                        (top left) or with{' '}
+                        <span
+                            style={{
+                                background: 'var(--fill-quinary)',
+                                padding: '2px 4px',
+                                borderRadius: '3px',
+                                fontSize: '0.85em',
+                            }}
+                        >
+                            {newChatShortcut}
+                        </span>
                     </div>
                 </div>
 
-                <div className="font-color-secondary text-sm pt-1">
+                {/* <div className="font-color-secondary text-sm pt-1">
                     Ask a follow-up below ↓
-                </div>
+                </div> */}
             </div>
         </div>
     );

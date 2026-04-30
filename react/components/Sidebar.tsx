@@ -40,8 +40,7 @@ import {
 } from '../atoms/profile';
 import UpdateRequiredPage from './pages/UpdateRequiredPage';
 import FirstRunPage from './pages/FirstRunPage';
-import { firstRunReturnRequestedAtom, firstRunOriginRunIdAtom } from '../atoms/firstRun';
-import { profileWithPlanAtom } from '../atoms/profile';
+import { firstRunOriginRunIdAtom, isFirstRunVisibleAtom } from '../atoms/firstRun';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -72,9 +71,8 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const updateRequired = useAtomValue(updateRequiredAtom);
     const allWarnings = useAtomValue(threadWarningsAtom);
     const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
-    const firstRunReturnRequested = useAtomValue(firstRunReturnRequestedAtom);
+    const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
     const firstRunOriginRunId = useAtomValue(firstRunOriginRunIdAtom);
-    const profile = useAtomValue(profileWithPlanAtom);
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -190,18 +188,10 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         );
     }
 
-    {/* First-run suggestions page
+    {/* First-run suggestions page (see isFirstRunVisibleAtom in firstRun.ts):
         - explicit "Try another starting point" return (session atom), or
-        - Free user, device authorized, never completed first-run on this account */}
-    const showFirstRun =
-        firstRunReturnRequested ||
-        (
-            !!profile?.has_authorized_free_access &&
-            !isDatabaseSyncSupported &&
-            isDeviceAuthorized &&
-            !profile?.first_run_completed_at
-        );
-    if (showFirstRun) {
+        - Free user, device authorized, never completed first-run on this account. */}
+    if (isFirstRunVisible) {
         return (
             <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
                 <Header isWindow={isWindow} />
