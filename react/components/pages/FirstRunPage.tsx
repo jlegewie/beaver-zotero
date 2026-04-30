@@ -16,7 +16,15 @@ import SuggestionCardSkeleton from './firstRun/SuggestionCardSkeleton';
 import IconButton from '../ui/IconButton';
 import RepeatIcon from '../icons/RepeatIcon';
 import { OnboardingHeader, OnboardingFooter } from './onboarding';
+import { ChargingPermissions } from '../../../src/services/agentProtocol';
 import { logger } from '../../../src/utils/logger';
+
+// On the first run we suppress confirmation prompts so the suggested action
+// "just works" without surfacing permission UI to a brand-new user.
+const FIRST_RUN_PERMISSIONS_OVERRIDE: Partial<ChargingPermissions> = {
+    confirm_extraction_costs: false,
+    confirm_external_search_costs: false,
+};
 
 interface FirstRunPageProps {
     isWindow?: boolean;
@@ -104,7 +112,11 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
                         </>
                     )}
                     {!showSkeletons && cards.map((card) => (
-                        <SuggestionCardButton key={`${card.kind}-${card.slot_index}`} card={card} />
+                        <SuggestionCardButton
+                            key={`${card.kind}-${card.slot_index}`}
+                            card={card}
+                            permissionsOverride={FIRST_RUN_PERMISSIONS_OVERRIDE}
+                        />
                     ))}
                 </div>
             </div>

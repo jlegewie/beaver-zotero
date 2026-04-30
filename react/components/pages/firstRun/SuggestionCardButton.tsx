@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useSetAtom } from 'jotai';
 import { CardKind, SuggestionCard } from '../../../types/librarySuggestions';
 import { submitFirstRunCardAtom } from '../../../atoms/firstRun';
+import { ChargingPermissions } from '../../../../src/services/agentProtocol';
 import BookmarkIcon from '../../icons/BookmarkIcon';
 import BrainIcon from '../../icons/BrainIcon';
 import GlobalSearchIcon from '../../icons/GlobalSearchIcon';
@@ -11,6 +12,7 @@ import { logger } from '../../../../src/utils/logger';
 
 interface SuggestionCardButtonProps {
     card: SuggestionCard;
+    permissionsOverride?: Partial<ChargingPermissions>;
 }
 
 const ICON_BY_KIND: Record<CardKind, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
@@ -21,7 +23,7 @@ const ICON_BY_KIND: Record<CardKind, React.ComponentType<React.SVGProps<SVGSVGEl
     organize_tags: TagIcon,
 };
 
-const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card }) => {
+const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card, permissionsOverride }) => {
     const submit = useSetAtom(submitFirstRunCardAtom);
     const Icon = ICON_BY_KIND[card.kind] ?? BookmarkIcon;
     const [isPending, setIsPending] = useState(false);
@@ -30,7 +32,7 @@ const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card }) => 
         if (isPending) return;
         setIsPending(true);
         try {
-            await submit(card);
+            await submit({ card, permissionsOverride });
         } catch (err) {
             // markFirstRunCompleteAtom (or sendWSMessageAtom) failed.
             // Stay on the FirstRunPage with the card clickable for retry.

@@ -17,6 +17,7 @@ import {
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { newThreadAtom } from './threads';
 import { profileWithPlanAtom, isDeviceAuthorizedAtom, isDatabaseSyncSupportedAtom } from './profile';
+import { ChargingPermissions } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 
 export const firstRunSuggestionsAtom = atom<LibrarySuggestionsResponse | null>(null);
@@ -203,11 +204,18 @@ async function hydrateAttachments(
 
 /**
  * Hydrate items/collections from a SuggestionCard's attachments and submit
- * the prompt.
+ * the prompt. `permissionsOverride` is forwarded to the agent run so the
+ * first-run flow can opt out of confirmation prompts.
  */
 export const submitFirstRunCardAtom = atom(
     null,
-    async (_get, set, card: SuggestionCard) => {
+    async (
+        _get,
+        set,
+        params: { card: SuggestionCard; permissionsOverride?: Partial<ChargingPermissions> },
+    ) => {
+        const { card, permissionsOverride } = params;
+
         // Step 1: stamp first_run_completed_at on the server. If this throws,
         // nothing else runs — caller should catch + surface a toast.
         await set(markFirstRunCompleteAtom, card.kind);
@@ -231,6 +239,6 @@ export const submitFirstRunCardAtom = atom(
         set(firstRunOriginRunIdAtom, runId);
         set(firstRunReturnRequestedAtom, false);
 
-        return set(sendWSMessageAtom, card.prompt, runId);
+        return set(sendWSMessageAtom, card.prompt, runId, permissionsOverride);
     },
 );
