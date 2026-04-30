@@ -18,7 +18,7 @@ import { zoteroContextAtom } from './zoteroContext';
 import { isActionVisible, ActionContext } from '../utils/actionVisibility';
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
 import { sendWSMessageAtom } from './agentRunAtoms';
-import { currentMessageItemsAtom, currentMessageCollectionsAtom, CollectionReference } from './messageComposition';
+import { currentMessageContentAtom, currentMessageItemsAtom, currentMessageCollectionsAtom, pendingActionInputFocusAtom, CollectionReference } from './messageComposition';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { itemValidationResultsAtom } from './itemValidation';
 
@@ -226,5 +226,77 @@ export const sendResolvedActionAtom = atom(
         }
 
         return set(sendWSMessageAtom, text);
+    },
+);
+
+// ---------------------------------------------------------------------------
+// Stage an action in the input — used when the action's prompt contains
+// `[[name]]` user-input placeholders. Resolves auto variables, attaches
+// items/collections, sets the message content (with `[[]]` placeholders
+// preserved), and signals the input to select the first placeholder.
+// ---------------------------------------------------------------------------
+
+export const stageActionInInputAtom = atom(
+    null,
+    async (
+        get,
+        set,
+        payload: { action: Action; targetType?: ActionTargetType; pretext?: string },
+    ) => {
+        const { action, targetType, pretext } = payload;
+
+        const { text: resolvedText, items, collection, emptyItemVariables } =
+            await resolvePromptVariables(action.text, targetType);
+
+        if (emptyItemVariables.length > 0) {
+            const hint = EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.';
+            set(addPopupMessageAtom, {
+                type: 'warning',
+                title: 'Action skipped',
+                text: hint,
+                expire: true,
+                duration: 4000,
+            });
+            return;
+        }
+
+        if (items.length > 0) {
+            const validationResults = get(itemValidationResultsAtom);
+            for (const item of items) {
+                const key = `${item.libraryID}-${item.key}`;
+                const cached = validationResults.get(key);
+                if (cached && !cached.isValidating && !cached.isValid) {
+                    set(addPopupMessageAtom, {
+                        type: 'error',
+                        title: 'Action skipped',
+                        text: cached.reason || 'One or more items failed validation.',
+                        expire: true,
+                        duration: 4000,
+                    });
+                    return;
+                }
+            }
+        }
+
+        if (items.length > 0) {
+            const currentItems = get(currentMessageItemsAtom);
+            const existingKeys = new Set(currentItems.map(i => `${i.libraryID}-${i.key}`));
+            const newItems = items.filter(i => !existingKeys.has(`${i.libraryID}-${i.key}`));
+            if (newItems.length > 0) {
+                set(currentMessageItemsAtom, [...currentItems, ...newItems]);
+            }
+        }
+
+        if (collection && (get(currentMessageCollectionsAtom) as CollectionReference[]).length === 0) {
+            set(currentMessageCollectionsAtom, [collection]);
+        }
+
+        const finalText = pretext && pretext.length > 0
+            ? `${pretext}\n\n${resolvedText}`.trim()
+            : resolvedText;
+
+        set(currentMessageContentAtom, finalText);
+        set(markActionUsedAtom, action.id);
+        set(pendingActionInputFocusAtom, (n) => n + 1);
     },
 );
