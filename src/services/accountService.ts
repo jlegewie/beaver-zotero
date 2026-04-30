@@ -395,6 +395,19 @@ export class AccountService extends ApiService {
             zotero_user_id: userID,
         });
     }
+
+    /**
+     * Idempotently stamps `first_run_completed_at` on the user's profile.
+     * Called when a Free user clicks a first-run suggestion card or "Skip"
+     * on the FirstRunPage. Backend treats already-stamped as a no-op.
+     *
+     * @param completionKind 'skip' or a CardKind value
+     */
+    async completeFirstRun(completionKind?: string): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/api/v1/account/first-run/complete', {
+            completion_kind: completionKind ?? null,
+        });
+    }
 }
 
 // Export accountService

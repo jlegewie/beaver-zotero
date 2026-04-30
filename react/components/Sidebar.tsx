@@ -40,7 +40,8 @@ import {
 } from '../atoms/profile';
 import UpdateRequiredPage from './pages/UpdateRequiredPage';
 import FirstRunPage from './pages/FirstRunPage';
-import { firstRunReturnRequestedAtom } from '../atoms/firstRun';
+import { firstRunReturnRequestedAtom, firstRunOriginRunIdAtom } from '../atoms/firstRun';
+import { profileWithPlanAtom } from '../atoms/profile';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -72,6 +73,8 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const allWarnings = useAtomValue(threadWarningsAtom);
     const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
     const firstRunReturnRequested = useAtomValue(firstRunReturnRequestedAtom);
+    const firstRunOriginRunId = useAtomValue(firstRunOriginRunIdAtom);
+    const profile = useAtomValue(profileWithPlanAtom);
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -187,8 +190,18 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         );
     }
 
-    {/* First-run suggestions page */}
-    if (firstRunReturnRequested) {
+    {/* First-run suggestions page
+        - explicit "Try another starting point" return (session atom), or
+        - Free user, device authorized, never completed first-run on this account */}
+    const showFirstRun =
+        firstRunReturnRequested ||
+        (
+            !!profile?.has_authorized_free_access &&
+            !isDatabaseSyncSupported &&
+            isDeviceAuthorized &&
+            !profile?.first_run_completed_at
+        );
+    if (showFirstRun) {
         return (
             <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
                 <Header isWindow={isWindow} />
@@ -201,6 +214,13 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const handleCloseThreadList = () => {
         setIsThreadListView(false);
     };
+
+    // First-run thread → swap input placeholder once the originating run is in this thread.
+    // `runs` is the union of completed (threadRunsAtom) + active runs; checking by run id
+    // means we don't depend on the thread id arriving from the WS callback.
+    const isFirstRunThread =
+        !!firstRunOriginRunId && runs.some((r) => r.id === firstRunOriginRunId);
+    const inputPlaceholder = isFirstRunThread ? 'Ask a follow-up question' : undefined;
 
     {/* Main page */}
     return (
@@ -224,7 +244,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                         <PreviewAndPopupContainer />
                         <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
                         <DragDropWrapper>
-                            <InputArea inputRef={inputRef} />
+                            <InputArea inputRef={inputRef} placeholder={inputPlaceholder} />
                         </DragDropWrapper>
                     </div>
                 )}

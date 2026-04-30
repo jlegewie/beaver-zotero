@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
     firstRunSuggestionsAtom,
@@ -6,6 +6,7 @@ import {
     loadFirstRunSuggestionsAtom,
     refreshFirstRunSuggestionsAtom,
     firstRunReturnRequestedAtom,
+    markFirstRunCompleteAtom,
 } from '../../atoms/firstRun';
 import { remainingBeaverCreditsAtom } from '../../atoms/profile';
 import SuggestionCardButton from './firstRun/SuggestionCardButton';
@@ -13,6 +14,7 @@ import SuggestionCardSkeleton from './firstRun/SuggestionCardSkeleton';
 import IconButton from '../ui/IconButton';
 import RepeatIcon from '../icons/RepeatIcon';
 import { OnboardingHeader, OnboardingFooter } from './onboarding';
+import { logger } from '../../../src/utils/logger';
 
 interface FirstRunPageProps {
     isWindow?: boolean;
@@ -28,10 +30,28 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
     const load = useSetAtom(loadFirstRunSuggestionsAtom);
     const refresh = useSetAtom(refreshFirstRunSuggestionsAtom);
     const setReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
+    const markComplete = useSetAtom(markFirstRunCompleteAtom);
+    const [isSkipping, setIsSkipping] = useState(false);
 
     useEffect(() => {
         void load();
     }, [load]);
+
+    const handleSkip = async () => {
+        if (isSkipping) return;
+        setIsSkipping(true);
+        try {
+            await markComplete('skip');
+            // Routing will fall through to HomePage on next render once
+            // first_run_completed_at is set on the profile.
+            setReturnRequested(false);
+        } catch (err) {
+            logger(`FirstRunPage: Skip failed: ${err}`, 1);
+            // Stay on the page; user can retry.
+        } finally {
+            setIsSkipping(false);
+        }
+    };
 
     const cards = suggestions?.cards ?? [];
     const showSkeletons = isLoading && cards.length === 0;
@@ -88,8 +108,9 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
             <OnboardingFooter
                 message={remainingCredits > 0 ? `${remainingCredits} credits to start` : undefined}
                 buttonLabel="Skip"
-                onButtonClick={() => setReturnRequested(false)}
-                isLoading={isLoading}
+                onButtonClick={handleSkip}
+                isLoading={isLoading || isSkipping}
+                disabled={isSkipping}
             />
         </div>
     );

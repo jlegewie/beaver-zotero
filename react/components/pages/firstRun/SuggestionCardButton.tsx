@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useSetAtom } from 'jotai';
 import { CardKind, SuggestionCard } from '../../../types/librarySuggestions';
 import { submitFirstRunCardAtom } from '../../../atoms/firstRun';
@@ -7,6 +7,7 @@ import BrainIcon from '../../icons/BrainIcon';
 import GlobalSearchIcon from '../../icons/GlobalSearchIcon';
 import FolderDetailIcon from '../../icons/FolderDetailIcon';
 import TagIcon from '../../icons/TagIcon';
+import { logger } from '../../../../src/utils/logger';
 
 interface SuggestionCardButtonProps {
     card: SuggestionCard;
@@ -23,28 +24,42 @@ const ICON_BY_KIND: Record<CardKind, React.ComponentType<React.SVGProps<SVGSVGEl
 const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card }) => {
     const submit = useSetAtom(submitFirstRunCardAtom);
     const Icon = ICON_BY_KIND[card.kind] ?? BookmarkIcon;
+    const [isPending, setIsPending] = useState(false);
 
-    const handleClick = () => {
-        void submit(card);
+    const handleClick = async () => {
+        if (isPending) return;
+        setIsPending(true);
+        try {
+            await submit(card);
+        } catch (err) {
+            // markFirstRunCompleteAtom (or sendWSMessageAtom) failed.
+            // Stay on the FirstRunPage with the card clickable for retry.
+            logger(`SuggestionCardButton: submit failed: ${err}`, 1);
+            setIsPending(false);
+        }
+        // On success the page unmounts (routing falls through to HomePage / ThreadView)
+        // so we don't need to clear isPending in the happy path.
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
         if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            handleClick();
+            void handleClick();
         }
     };
 
-    const baseClass = 'p-3 rounded-md cursor-pointer first-run-card';
+    const baseClass = 'p-3 rounded-md first-run-card';
     const emphasisClass = 'bg-quinary border-popup';
+    const interactionClass = isPending ? 'pointer-events-none opacity-60' : 'cursor-pointer';
 
     return (
         <div
             role="button"
-            tabIndex={0}
-            onClick={handleClick}
+            tabIndex={isPending ? -1 : 0}
+            aria-busy={isPending || undefined}
+            onClick={() => void handleClick()}
             onKeyDown={handleKeyDown}
-            className={`${baseClass} ${emphasisClass}`}
+            className={`${baseClass} ${emphasisClass} ${interactionClass}`}
         >
             <style>
                 {`

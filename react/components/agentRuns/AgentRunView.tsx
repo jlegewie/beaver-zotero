@@ -1,5 +1,5 @@
 import React, { forwardRef, useMemo, useState, useCallback } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRun, ModelResponse, ToolCallPart } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
@@ -9,9 +9,11 @@ import { AgentActionsReview } from './AgentActionsReview';
 import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
+import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { getToolCallStatus, toolResultsMapAtom, resumedRunIdsAtom } from '../../agents/atoms';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { firstRunOriginRunIdAtom } from '../../atoms/firstRun';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -100,6 +102,19 @@ export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(functi
     const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
     const handleDismissSuggestions = useCallback(() => setSuggestionsDismissed(true), []);
 
+    // First-run "Next steps" panel
+    const firstRunOriginRunId = useAtomValue(firstRunOriginRunIdAtom);
+    const setFirstRunOriginRunId = useSetAtom(firstRunOriginRunIdAtom);
+    const handleDismissNextSteps = useCallback(
+        () => setFirstRunOriginRunId(null),
+        [setFirstRunOriginRunId],
+    );
+    const showNextSteps =
+        isLastRun &&
+        !!firstRunOriginRunId &&
+        run.id === firstRunOriginRunId &&
+        run.status === 'completed';
+
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && (run.status === 'completed' || run.status === 'error' || run.status === 'canceled');
 
@@ -152,6 +167,9 @@ export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(functi
                     ))}
                 </div>
             )}
+
+            {/* First-run next steps (only for the run that originated from a first-run card) */}
+            {showNextSteps && <NextStepsPanel onDismiss={handleDismissNextSteps} />}
 
             {/* Resuming failed request display */}
             {wasResumed && <RunResumeDisplay runId={run.id} />}
