@@ -17,6 +17,7 @@ import {
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { newThreadAtom } from './threads';
 import { profileWithPlanAtom, isDeviceAuthorizedAtom, isDatabaseSyncSupportedAtom } from './profile';
+import { libraryHasItemsAtom } from './zoteroContext';
 import { ChargingPermissions } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 
@@ -115,6 +116,62 @@ export const isFirstRunVisibleAtom = atom((get) => {
     );
 });
 
+/**
+ * Set when the first-run loader sees an empty library and skips the backend
+ * call. FirstRunPage uses this to render non-clickable info cards instead of
+ * suggestion cards. Cleared once the library has items and we fetch normally.
+ */
+export const firstRunLibraryEmptyAtom = atom<boolean>(false);
+
+/**
+ * Hand-authored cards shown when the user's library is empty on first run.
+ * Non-clickable — they explain what Beaver can do once items are added.
+ */
+export const EMPTY_LIBRARY_FIRST_RUN_CARDS: SuggestionCard[] = [
+    {
+        kind: 'discover_research',
+        slot_index: 0,
+        is_emphasized: false,
+        title: 'Discover research in any field',
+        description: 'Ask Beaver to find recent, highly-cited papers on any topic you are exploring.',
+        description_segments: [
+            { text: 'Ask Beaver to find ', emphasized: false },
+            { text: 'recent, highly-cited papers', emphasized: true },
+            { text: ' on any topic you are exploring.', emphasized: false },
+        ],
+        prompt: '',
+        attachments: null,
+    },
+    {
+        kind: 'literature_review',
+        slot_index: 1,
+        is_emphasized: false,
+        title: 'Explore a research question',
+        description: 'Describe what you are working on — Beaver surfaces key papers and themes.',
+        description_segments: [
+            { text: 'Describe what you are working on — Beaver surfaces ', emphasized: false },
+            { text: 'key papers and themes', emphasized: true },
+            { text: '.', emphasized: false },
+        ],
+        prompt: '',
+        attachments: null,
+    },
+    {
+        kind: 'reading_assistant',
+        slot_index: 2,
+        is_emphasized: false,
+        title: 'Save items, then dive deeper',
+        description: 'Use the Zotero connector to add papers. Beaver helps you read, compare, and organize.',
+        description_segments: [
+            { text: 'Use the Zotero connector to add papers. Beaver helps you ', emphasized: false },
+            { text: 'read, compare, and organize', emphasized: true },
+            { text: '.', emphasized: false },
+        ],
+        prompt: '',
+        attachments: null,
+    },
+];
+
 async function fetchAndPersist(set: any): Promise<void> {
     set(firstRunSuggestionsLoadingAtom, true);
     set(firstRunSuggestionsErrorAtom, null);
@@ -133,11 +190,21 @@ async function fetchAndPersist(set: any): Promise<void> {
 }
 
 /**
- * Hydrate first-run suggestions: prefs cache (24h TTL, same install) → network.
+ * Hydrate first-run suggestions: empty-library short-circuit → prefs cache
+ * (24h TTL, same install) → network.
  */
 export const loadFirstRunSuggestionsAtom = atom(null, async (get, set) => {
     if (get(firstRunSuggestionsLoadingAtom)) return;
     if (get(firstRunSuggestionsAtom)) return;
+
+    // Empty library: skip the backend entirely and render static info cards.
+    // The notifier-driven libraryHasItemsAtom flips to true when the user adds
+    // their first item; FirstRunPage re-invokes this loader on that change.
+    if (!get(libraryHasItemsAtom)) {
+        set(firstRunLibraryEmptyAtom, true);
+        return;
+    }
+    set(firstRunLibraryEmptyAtom, false);
 
     const cached = readCachedSuggestions();
     if (cached) {

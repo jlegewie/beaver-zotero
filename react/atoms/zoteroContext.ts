@@ -42,6 +42,9 @@ export const currentNoteItemAtom = atom<Zotero.Item | null>(null);
 // --- Recently Added Items (today) ---
 export const recentlyAddedTodayCountAtom = atom<number>(0);
 
+// --- Library has any regular items (across non-feed libraries) ---
+export const libraryHasItemsAtom = atom<boolean>(false);
+
 // --- Derived Context ---
 export type ZoteroContextType =
     | 'reader' | 'note' | 'items_selected' | 'tag_filtered'

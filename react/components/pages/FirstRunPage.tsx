@@ -4,12 +4,15 @@ import {
     firstRunSuggestionsAtom,
     firstRunSuggestionsLoadingAtom,
     firstRunSuggestionsErrorAtom,
+    firstRunLibraryEmptyAtom,
     loadFirstRunSuggestionsAtom,
     refreshFirstRunSuggestionsAtom,
     firstRunReturnRequestedAtom,
     markFirstRunCompleteAtom,
     padWithFallbackCards,
+    EMPTY_LIBRARY_FIRST_RUN_CARDS,
 } from '../../atoms/firstRun';
+import { libraryHasItemsAtom } from '../../atoms/zoteroContext';
 import { remainingBeaverCreditsAtom } from '../../atoms/profile';
 import SuggestionCardButton from './firstRun/SuggestionCardButton';
 import SuggestionCardSkeleton from './firstRun/SuggestionCardSkeleton';
@@ -37,37 +40,43 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
     const suggestions = useAtomValue(firstRunSuggestionsAtom);
     const isLoading = useAtomValue(firstRunSuggestionsLoadingAtom);
     const error = useAtomValue(firstRunSuggestionsErrorAtom);
+    const isLibraryEmpty = useAtomValue(firstRunLibraryEmptyAtom);
+    const libraryHasItems = useAtomValue(libraryHasItemsAtom);
     const remainingCredits = useAtomValue(remainingBeaverCreditsAtom);
     const load = useSetAtom(loadFirstRunSuggestionsAtom);
     const refresh = useSetAtom(refreshFirstRunSuggestionsAtom);
     const setReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
     const markComplete = useSetAtom(markFirstRunCompleteAtom);
-    const [isSkipping, setIsSkipping] = useState(false);
+    const [isCompleting, setIsCompleting] = useState(false);
 
+    // Re-run the loader when libraryHasItems flips so an empty-library user
+    // who adds their first item transitions out of the static info-card state.
     useEffect(() => {
         void load();
-    }, [load]);
+    }, [load, libraryHasItems]);
 
-    const handleSkip = async () => {
-        if (isSkipping) return;
-        setIsSkipping(true);
+    const handleFooterClick = async () => {
+        if (isCompleting) return;
+        setIsCompleting(true);
         try {
-            await markComplete('skip');
+            await markComplete(isLibraryEmpty ? 'empty_library_continue' : 'skip');
             // Routing will fall through to HomePage on next render once
             // first_run_completed_at is set on the profile.
             setReturnRequested(false);
         } catch (err) {
-            logger(`FirstRunPage: Skip failed: ${err}`, 1);
+            logger(`FirstRunPage: complete failed: ${err}`, 1);
             // Stay on the page; user can retry.
         } finally {
-            setIsSkipping(false);
+            setIsCompleting(false);
         }
     };
 
     const backendCards = suggestions?.cards ?? [];
-    const showSkeletons = isLoading && backendCards.length === 0;
-    const useFallback = !isLoading && (!!error || backendCards.length < 3);
-    const cards = useFallback ? padWithFallbackCards(backendCards) : backendCards;
+    const showSkeletons = !isLibraryEmpty && isLoading && backendCards.length === 0;
+    const useFallback = !isLibraryEmpty && !isLoading && (!!error || backendCards.length < 3);
+    const cards = isLibraryEmpty
+        ? EMPTY_LIBRARY_FIRST_RUN_CARDS
+        : useFallback ? padWithFallbackCards(backendCards) : backendCards;
 
     const headerMessage = (
         <div className="display-flex flex-col gap-2 py-2 mt-3">
@@ -116,6 +125,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
                             key={`${card.kind}-${card.slot_index}`}
                             card={card}
                             permissionsOverride={FIRST_RUN_PERMISSIONS_OVERRIDE}
+                            disabled={isLibraryEmpty}
                         />
                     ))}
                 </div>
@@ -124,10 +134,10 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
             {/* Footer */}
             <OnboardingFooter
                 // message={remainingCredits > 0 ? `${remainingCredits} credits to start` : undefined}
-                buttonLabel="Skip"
-                onButtonClick={handleSkip}
-                isLoading={isLoading || isSkipping}
-                disabled={isSkipping}
+                buttonLabel={isLibraryEmpty ? 'Continue' : 'Skip'}
+                onButtonClick={handleFooterClick}
+                isLoading={(isLoading && !isLibraryEmpty) || isCompleting}
+                disabled={isCompleting}
             />
         </div>
     );

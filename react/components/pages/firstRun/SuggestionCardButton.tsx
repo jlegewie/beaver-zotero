@@ -13,6 +13,11 @@ import { logger } from '../../../../src/utils/logger';
 interface SuggestionCardButtonProps {
     card: SuggestionCard;
     permissionsOverride?: Partial<ChargingPermissions>;
+    /**
+     * Render the card as a non-interactive info display (no click/keyboard,
+     * no hover/focus styling). Used by the empty-library first-run state.
+     */
+    disabled?: boolean;
 }
 
 const ICON_BY_KIND: Record<CardKind, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
@@ -23,7 +28,7 @@ const ICON_BY_KIND: Record<CardKind, React.ComponentType<React.SVGProps<SVGSVGEl
     organize_tags: TagIcon,
 };
 
-const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card, permissionsOverride }) => {
+const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card, permissionsOverride, disabled = false }) => {
     const submit = useSetAtom(submitFirstRunCardAtom);
     const Icon = ICON_BY_KIND[card.kind] ?? BookmarkIcon;
     const [isPending, setIsPending] = useState(false);
@@ -52,7 +57,35 @@ const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card, permi
 
     const baseClass = 'p-3 rounded-md first-run-card';
     const emphasisClass = 'bg-quinary border-popup';
-    const interactionClass = isPending ? 'pointer-events-none opacity-60' : 'cursor-pointer';
+    const interactionClass = disabled
+        ? 'first-run-card-static'
+        : isPending ? 'pointer-events-none opacity-60' : 'cursor-pointer';
+
+    const cardContent = (
+        <div className="display-flex flex-col gap-2">
+            <div className="display-flex flex-row items-center gap-2">
+                <Icon width={17} height={17} className="font-color-primary" />
+                <div className="font-medium" style={{ fontSize: '1.075rem' }}>{card.title}</div>
+            </div>
+            <div className="text-base font-color-secondary">
+                {card.description_segments && card.description_segments.length > 0
+                    ? card.description_segments.map((seg, i) =>
+                        seg.emphasized
+                            ? <span key={i} className="font-medium font-color-primary">{seg.text}</span>
+                            : <span key={i}>{seg.text}</span>
+                    )
+                    : card.description}
+            </div>
+        </div>
+    );
+
+    if (disabled) {
+        return (
+            <div className={`${baseClass} ${emphasisClass} ${interactionClass}`} aria-disabled>
+                {cardContent}
+            </div>
+        );
+    }
 
     return (
         <div
@@ -68,12 +101,12 @@ const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card, permi
                 .first-run-card {
                     transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
                 }
-                .first-run-card:hover {
+                .first-run-card:not(.first-run-card-static):hover {
                     background-color: var(--fill-quinary);
                     transform: translateY(-1px);
                     box-shadow: 0 2px 6px rgba(0,0,0,0.08);
                 }
-                .first-run-card:active {
+                .first-run-card:not(.first-run-card-static):active {
                     transform: translateY(0);
                     box-shadow: none;
                 }
@@ -83,21 +116,7 @@ const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card, permi
                 }
                 `}
             </style>
-            <div className="display-flex flex-col gap-2">
-                <div className="display-flex flex-row items-center gap-2">
-                    <Icon width={17} height={17} className="font-color-primary" />
-                    <div className="font-medium" style={{ fontSize: '1.075rem' }}>{card.title}</div>
-                </div>
-                <div className="text-base font-color-secondary">
-                    {card.description_segments && card.description_segments.length > 0
-                        ? card.description_segments.map((seg, i) =>
-                            seg.emphasized
-                                ? <span key={i} className="font-medium font-color-primary">{seg.text}</span>
-                                : <span key={i}>{seg.text}</span>
-                        )
-                        : card.description}
-                </div>
-            </div>
+            {cardContent}
         </div>
     );
 };
