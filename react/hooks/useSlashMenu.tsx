@@ -38,7 +38,12 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
         setSlashSearchQuery('');
 
         if (hasUserInputVariables(action.text)) {
-            await stageActionInInput({ action, targetType: groupTargetType, pretext: pre });
+            await stageActionInInput({
+                actionId: action.id,
+                text: action.text,
+                targetType: groupTargetType,
+                pretext: pre,
+            });
             setTimeout(() => inputRef.current?.focus(), 0);
             return;
         }

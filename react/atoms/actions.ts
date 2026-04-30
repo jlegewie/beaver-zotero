@@ -232,8 +232,14 @@ export const sendResolvedActionAtom = atom(
 // ---------------------------------------------------------------------------
 // Stage an action in the input — used when the action's prompt contains
 // `[[name]]` user-input placeholders. Resolves auto variables, attaches
-// items/collections, sets the message content (with `[[]]` placeholders
-// preserved), and signals the input to select the first placeholder.
+// items/collections, appends the prompt to the existing message content
+// (separated by a blank line) with `[[]]` placeholders preserved, and
+// signals the input to select the first placeholder.
+//
+// `pretext` overrides the existing message content as the prefix (used by
+// the slash menu, where the live content includes the trailing `/query`
+// that the menu has already consumed). When omitted, the current
+// `currentMessageContentAtom` value is used as the prefix.
 // ---------------------------------------------------------------------------
 
 export const stageActionInInputAtom = atom(
@@ -241,12 +247,12 @@ export const stageActionInInputAtom = atom(
     async (
         get,
         set,
-        payload: { action: Action; targetType?: ActionTargetType; pretext?: string },
+        payload: { actionId: string; text: string; targetType?: ActionTargetType; pretext?: string },
     ) => {
-        const { action, targetType, pretext } = payload;
+        const { actionId, text: actionText, targetType, pretext } = payload;
 
         const { text: resolvedText, items, collection, emptyItemVariables } =
-            await resolvePromptVariables(action.text, targetType);
+            await resolvePromptVariables(actionText, targetType);
 
         if (emptyItemVariables.length > 0) {
             const hint = EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.';
@@ -291,12 +297,13 @@ export const stageActionInInputAtom = atom(
             set(currentMessageCollectionsAtom, [collection]);
         }
 
-        const finalText = pretext && pretext.length > 0
-            ? `${pretext}\n\n${resolvedText}`.trim()
+        const prefix = pretext !== undefined ? pretext : get(currentMessageContentAtom);
+        const finalText = prefix.length > 0
+            ? `${prefix}\n\n${resolvedText}`
             : resolvedText;
 
         set(currentMessageContentAtom, finalText);
-        set(markActionUsedAtom, action.id);
+        set(markActionUsedAtom, actionId);
         set(pendingActionInputFocusAtom, (n) => n + 1);
     },
 );

@@ -184,7 +184,11 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     const handleAction = async (action: Action) => {
         if (isPending || isStreaming || action.text.length === 0) return;
         if (hasUserInputVariables(action.text)) {
-            await stageActionInInput({ action, targetType: action.targetType });
+            await stageActionInInput({
+                actionId: action.id,
+                text: action.text,
+                targetType: action.targetType,
+            });
             return;
         }
         markActionUsed(action.id);
