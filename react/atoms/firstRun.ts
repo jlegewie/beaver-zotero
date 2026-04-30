@@ -41,7 +41,7 @@ const FALLBACK_FIRST_RUN_CARDS: SuggestionCard[] = [
             { text: 'recent papers', emphasized: true },
             { text: ' in the topics you are working on.', emphasized: false },
         ],
-        prompt: "Look at my recent additions to identify what I'm currently working on. Search for notable recent papers in these areas, prioritizing highly-cited and relevant results. Return up to 10 papers. Indicate which ones I already have.{{recent_items}}",
+        prompt: "Look at my recent additions to identify what I'm currently working on. Search for notable recent papers in these areas, prioritizing highly-cited and relevant results. Return up to 10 papers. Indicate which ones I already have.",
         attachments: null,
     },
     {
@@ -55,7 +55,7 @@ const FALLBACK_FIRST_RUN_CARDS: SuggestionCard[] = [
             { text: 'last 7 days', emphasized: true },
             { text: '.', emphasized: false },
         ],
-        prompt: "Look at items I've added in the last 7 days. For each one, assign appropriate tags and add them to the appropriate collection. If no existing collection fits, suggest creating a new one.{{recent_items}}",
+        prompt: "Look at items I've added in the last 7 days. For each one, assign appropriate tags and add them to the appropriate collection. If no existing collection fits, suggest creating a new one.",
         attachments: null,
     },
     {
