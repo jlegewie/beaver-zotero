@@ -315,14 +315,16 @@ function createAgentRunShell(
     customModel?: ModelConfig['custom_model'],
     rewriteFromRunId?: string,
     runIdOverride?: string,
+    permissionsOverride?: Partial<ChargingPermissions>,
 ): { run: AgentRun; request: AgentRunRequest } {
     const runId = runIdOverride ?? uuidv4();
-    
-    // Get user preferences for charging permissions
+
+    // Get user preferences for charging permissions, then apply any partial override
     const permissions: ChargingPermissions = {
         confirm_extraction_costs: getPref('confirmExtractionCosts'),
         confirm_external_search_costs: getPref('confirmExternalSearchCosts'),
         pause_long_running_agent: getPref('pauseLongRunningAgent'),
+        ...permissionsOverride,
     };
 
     // Send request_plus_tools when pref is enabled and request uses a user API key
@@ -1522,7 +1524,7 @@ async function executeWSRequest(
  */
 export const sendWSMessageAtom = atom(
     null,
-    async (get, set, message: string, runIdOverride?: string) => {
+    async (get, set, message: string, runIdOverride?: string, permissionsOverride?: Partial<ChargingPermissions>) => {
         const isPending = get(isWSChatPendingAtom);
         logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
         
@@ -1773,6 +1775,7 @@ export const sendWSMessageAtom = atom(
                 model?.is_custom ? model.custom_model : undefined,
                 undefined, // rewriteFromRunId
                 runIdOverride,
+                permissionsOverride,
             );
 
             // Set active run - UI now shows user message + spinner
