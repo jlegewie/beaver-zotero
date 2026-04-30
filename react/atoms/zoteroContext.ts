@@ -43,7 +43,8 @@ export const currentNoteItemAtom = atom<Zotero.Item | null>(null);
 export const recentlyAddedTodayCountAtom = atom<number>(0);
 
 // --- Library has any regular items (across non-feed libraries) ---
-export const libraryHasItemsAtom = atom<boolean>(false);
+// null means the async DB probe has not completed yet.
+export const libraryHasItemsAtom = atom<boolean | null>(null);
 
 // --- Derived Context ---
 export type ZoteroContextType =

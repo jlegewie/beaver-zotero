@@ -72,7 +72,8 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
     };
 
     const backendCards = suggestions?.cards ?? [];
-    const showSkeletons = !isLibraryEmpty && isLoading && backendCards.length === 0;
+    const isWaitingForLibraryProbe = libraryHasItems === null;
+    const showSkeletons = !isLibraryEmpty && (isWaitingForLibraryProbe || isLoading) && backendCards.length === 0;
     const useFallback = !isLibraryEmpty && !isLoading && (!!error || backendCards.length < 3);
     const cards = isLibraryEmpty
         ? EMPTY_LIBRARY_FIRST_RUN_CARDS
@@ -136,8 +137,8 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
                 // message={remainingCredits > 0 ? `${remainingCredits} credits to start` : undefined}
                 buttonLabel={isLibraryEmpty ? 'Continue' : 'Skip'}
                 onButtonClick={handleFooterClick}
-                isLoading={(isLoading && !isLibraryEmpty) || isCompleting}
-                disabled={isCompleting}
+                isLoading={isWaitingForLibraryProbe || (isLoading && !isLibraryEmpty) || isCompleting}
+                disabled={isWaitingForLibraryProbe || isCompleting}
             />
         </div>
     );

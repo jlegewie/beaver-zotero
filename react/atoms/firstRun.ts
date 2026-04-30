@@ -197,10 +197,19 @@ export const loadFirstRunSuggestionsAtom = atom(null, async (get, set) => {
     if (get(firstRunSuggestionsLoadingAtom)) return;
     if (get(firstRunSuggestionsAtom)) return;
 
+    const libraryHasItems = get(libraryHasItemsAtom);
+
+    // The library item probe is still pending. FirstRunPage keeps the existing
+    // loading surface visible until this resolves.
+    if (libraryHasItems === null) {
+        set(firstRunLibraryEmptyAtom, false);
+        return;
+    }
+
     // Empty library: skip the backend entirely and render static info cards.
     // The notifier-driven libraryHasItemsAtom flips to true when the user adds
     // their first item; FirstRunPage re-invokes this loader on that change.
-    if (!get(libraryHasItemsAtom)) {
+    if (!libraryHasItems) {
         set(firstRunLibraryEmptyAtom, true);
         return;
     }
@@ -219,9 +228,20 @@ export const loadFirstRunSuggestionsAtom = atom(null, async (get, set) => {
 /**
  * Force a refetch, bypassing the prefs cache. Used by the dev refresh button.
  */
-export const refreshFirstRunSuggestionsAtom = atom(null, async (_get, set) => {
+export const refreshFirstRunSuggestionsAtom = atom(null, async (get, set) => {
+    const libraryHasItems = get(libraryHasItemsAtom);
+    if (libraryHasItems === null) {
+        set(firstRunLibraryEmptyAtom, false);
+        return;
+    }
+    if (!libraryHasItems) {
+        set(firstRunLibraryEmptyAtom, true);
+        return;
+    }
+
     clearCachedSuggestions();
     set(firstRunSuggestionsAtom, null);
+    set(firstRunLibraryEmptyAtom, false);
     await fetchAndPersist(set);
 });
 
