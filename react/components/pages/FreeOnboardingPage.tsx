@@ -79,6 +79,8 @@ const FreeOnboardingPage: React.FC = () => {
                 email_notifications: emailNotifications,
                 zotero_user_id: userID || profileWithPlan.zotero_user_id,
                 zotero_local_ids: [localUserKey],
+                first_run_completed_at: profileWithPlan.first_run_completed_at ?? new Date().toISOString(),
+                first_run_completion_kind: profileWithPlan.first_run_completion_kind ?? 'legacy_onboarding',
                 // Note: has_completed_onboarding is NOT set for free users
             });
 
