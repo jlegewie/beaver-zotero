@@ -48,6 +48,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
     const setReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
     const markComplete = useSetAtom(markFirstRunCompleteAtom);
     const [isCompleting, setIsCompleting] = useState(false);
+    const [footerError, setFooterError] = useState<string | null>(null);
 
     // Re-run the loader when libraryHasItems flips so an empty-library user
     // who adds their first item transitions out of the static info-card state.
@@ -58,6 +59,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
     const handleFooterClick = async () => {
         if (isCompleting) return;
         setIsCompleting(true);
+        setFooterError(null);
         try {
             await markComplete(isLibraryEmpty ? 'empty_library_continue' : 'skip');
             // Routing will fall through to HomePage on next render once
@@ -65,7 +67,9 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
             setReturnRequested(false);
         } catch (err) {
             logger(`FirstRunPage: complete failed: ${err}`, 1);
-            // Stay on the page; user can retry.
+            setFooterError(
+                "Failed to connect to Beaver. Please try again.",
+            );
         } finally {
             setIsCompleting(false);
         }
@@ -135,6 +139,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
             {/* Footer */}
             <OnboardingFooter
                 // message={remainingCredits > 0 ? `${remainingCredits} credits to start` : undefined}
+                message={footerError ? footerError : undefined}
                 buttonLabel={isLibraryEmpty ? 'Continue' : 'Skip'}
                 onButtonClick={handleFooterClick}
                 isLoading={isWaitingForLibraryProbe || (isLoading && !isLibraryEmpty) || isCompleting}
