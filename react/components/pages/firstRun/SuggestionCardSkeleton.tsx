@@ -5,14 +5,22 @@ const SuggestionCardSkeleton: React.FC = () => {
         <div className="p-3 rounded-md bg-senary first-run-skeleton-card">
             <style>
                 {`
-                @keyframes firstRunSkeletonPulse {
-                    0%, 100% { opacity: 1; }
-                    50% { opacity: 0.45; }
+                @keyframes firstRunSkeletonShimmer {
+                    0% { background-position: 200% 0; }
+                    100% { background-position: -200% 0; }
                 }
                 .first-run-skeleton-bar {
-                    background-color: var(--fill-quinary);
                     border-radius: 4px;
-                    animation: firstRunSkeletonPulse 1.6s ease-in-out infinite;
+                    background-color: var(--fill-quinary);
+                    background-image: linear-gradient(
+                        90deg,
+                        transparent 0%,
+                        var(--fill-tertiary) 50%,
+                        transparent 100%
+                    );
+                    background-size: 200% 100%;
+                    background-repeat: no-repeat;
+                    animation: firstRunSkeletonShimmer 1.8s linear infinite;
                 }
                 `}
             </style>
