@@ -29,6 +29,7 @@ import {
     CurrentLibrary,
     CurrentCollection,
     ChargingPermissions,
+    IndexingStatus,
 } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
@@ -37,7 +38,10 @@ import { MessageAttachment, NoteState, ReaderState, SourceAttachment } from '../
 import { toMessageAttachment } from '../types/attachments/converters';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '../types/profile';
-import { isDatabaseSyncSupportedAtom } from './profile';
+import { isDatabaseSyncSupportedAtom, processingModeAtom } from './profile';
+import { embeddingIndexStateAtom } from './embeddingIndex';
+import { BeaverDB } from '../../src/services/database';
+import { EmbeddingIndexer } from '../../src/services/embeddingIndexer';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import {
     currentMessageItemsAtom,
@@ -47,11 +51,8 @@ import {
     readerTextSelectionAtom,
     currentMessageContentAtom,
 } from './messageComposition';
-import { isSidebarVisibleAtom, isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
+import { isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
-import { addFloatingPopupMessageAtom } from './floatingPopup';
-import { BeaverUIFactory } from '../../src/ui/ui';
-import { eventManager } from '../events/eventManager';
 import { isAnnotationAttachment } from '../types/attachments/apiTypes';
 import { getCurrentPage } from '../utils/readerUtils';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
@@ -1721,6 +1722,58 @@ export const sendWSMessageAtom = atom(
             }
         }
 
+        // Frontend embedding index status
+        const processingMode = get(processingModeAtom);
+        const localIndexingActive = processingMode !== ProcessingMode.BACKEND;
+        let indexingStatus: IndexingStatus | undefined;
+        if (localIndexingActive && searchableLibraryIds.length > 0) {
+            const indexState = get(embeddingIndexStateAtom);
+
+            let isComplete: boolean;
+            if (indexState.phase === 'incremental') {
+                isComplete = true;
+            } else {
+                try {
+                    const db = Zotero.Beaver?.db as BeaverDB | undefined;
+                    if (db) {
+                        const indexer = new EmbeddingIndexer(db);
+                        let allUpToDate = true;
+                        for (const libId of searchableLibraryIds) {
+                            const diffCheck = await indexer.shouldRunFullDiff(libId);
+                            if (diffCheck.needsDiff) {
+                                logger(`indexing_status: library ${libId} not complete: ${diffCheck.reason}`, 4);
+                                allUpToDate = false;
+                                break;
+                            }
+                        }
+                        isComplete = allUpToDate;
+                    } else {
+                        isComplete = false;
+                    }
+                } catch (err) {
+                    logger(`indexing_status: state probe failed: ${err}`, 2);
+                    isComplete = false;
+                }
+            }
+
+            let percentComplete: number | undefined;
+            let totalItems: number | undefined;
+            let itemsPending: number | undefined;
+            if (!isComplete && indexState.totalItems > 0) {
+                percentComplete = Math.min(100, Math.max(0, Math.round((indexState.indexedItems / indexState.totalItems) * 100)));
+                totalItems = indexState.totalItems;
+                itemsPending = Math.max(0, indexState.totalItems - indexState.indexedItems);
+            }
+
+            indexingStatus = {
+                is_complete: isComplete,
+                ...(!isComplete && percentComplete !== undefined ? { percent_complete: percentComplete } : {}),
+                ...(!isComplete && totalItems !== undefined ? { total_items: totalItems } : {}),
+                ...(!isComplete && itemsPending !== undefined && itemsPending > 0 ? { items_pending: itemsPending } : {}),
+                ...(indexState.failedItems > 0 ? { items_failed: indexState.failedItems } : {}),
+            };
+        }
+
         // Application state
         const applicationState = {
             current_view: currentView,
@@ -1728,6 +1781,7 @@ export const sendWSMessageAtom = atom(
             ...(noteState ? { note_state: noteState } : {}),
             ...(currentLibrary ? { current_library: currentLibrary } : {}),
             ...(currentCollection ? { current_collection: currentCollection } : {}),
+            ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
         };
 
         // Build the message
