@@ -57,7 +57,7 @@ import { isAnnotationAttachment } from '../types/attachments/apiTypes';
 import { getCurrentPage } from '../utils/readerUtils';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
-import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, ToolRequest } from '../agents/types';
+import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptOrigin, ToolRequest } from '../agents/types';
 import {
     threadRunsAtom,
     activeRunAtom,
@@ -1525,7 +1525,14 @@ async function executeWSRequest(
  */
 export const sendWSMessageAtom = atom(
     null,
-    async (get, set, message: string, runIdOverride?: string, permissionsOverride?: Partial<ChargingPermissions>) => {
+    async (
+        get,
+        set,
+        message: string,
+        runIdOverride?: string,
+        permissionsOverride?: Partial<ChargingPermissions>,
+        origin?: PromptOrigin,
+    ) => {
         const isPending = get(isWSChatPendingAtom);
         logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
         
@@ -1798,7 +1805,8 @@ export const sendWSMessageAtom = atom(
             // attachments: [{library_id: 1, zotero_key: '6U4SGES3', type: 'source', include: 'fulltext'}], // UNSYNCED ATTACHMENT
             application_state: applicationState,
             filters: filtersPayload,
-            ...(toolRequests ? { tool_requests: toolRequests } : {})
+            ...(toolRequests ? { tool_requests: toolRequests } : {}),
+            ...(origin ? { origin } : {}),
         };
 
         // Get current thread ID (null for new thread)

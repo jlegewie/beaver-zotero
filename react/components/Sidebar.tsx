@@ -41,7 +41,7 @@ import {
 } from '../atoms/profile';
 import UpdateRequiredPage from './pages/UpdateRequiredPage';
 import FirstRunPage from './pages/FirstRunPage';
-import { firstRunOriginRunIdAtom, isFirstRunVisibleAtom } from '../atoms/firstRun';
+import { isFirstRunVisibleAtom } from '../atoms/firstRun';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -73,7 +73,6 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const allWarnings = useAtomValue(threadWarningsAtom);
     const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
-    const firstRunOriginRunId = useAtomValue(firstRunOriginRunIdAtom);
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -206,11 +205,13 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         setIsThreadListView(false);
     };
 
-    // First-run thread → swap input placeholder once the originating run is in this thread.
-    // `runs` is the union of completed (threadRunsAtom) + active runs; checking by run id
-    // means we don't depend on the thread id arriving from the WS callback.
-    const isFirstRunThread =
-        !!firstRunOriginRunId && runs.some((r) => r.id === firstRunOriginRunId);
+    // First-run thread → swap input placeholder once a first-run-card-originated
+    // run lives in this thread. `runs` is the union of completed (threadRunsAtom)
+    // + active runs, and `user_prompt.origin` is set at submit time so we don't
+    // depend on the thread id arriving from the WS callback.
+    const isFirstRunThread = runs.some(
+        (r) => r.user_prompt?.origin?.kind === 'first_run_card',
+    );
     const inputPlaceholder = isFirstRunThread ? 'Ask a follow-up question' : undefined;
 
     {/* Main page */}

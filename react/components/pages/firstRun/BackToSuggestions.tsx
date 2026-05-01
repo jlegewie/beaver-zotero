@@ -1,9 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import {
-    firstRunReturnRequestedAtom,
-    firstRunOriginRunIdAtom,
-} from '../../../atoms/firstRun';
+import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
 import { currentMessageContentAtom } from '../../../atoms/messageComposition';
 import { PlusSignIcon } from '../../icons/icons';
 import ArrowLeftIcon from '../../icons/ArrowLeftIcon';
@@ -28,7 +25,6 @@ interface BackToSuggestionsProps {
  */
 const BackToSuggestions: React.FC<BackToSuggestionsProps> = ({ onDismiss }) => {
     const setReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
-    const setOriginRunId = useSetAtom(firstRunOriginRunIdAtom);
     const messageContent = useAtomValue(currentMessageContentAtom);
 
     // Auto-dismiss when the user types a follow-up. Capture the initial value
@@ -44,9 +40,6 @@ const BackToSuggestions: React.FC<BackToSuggestionsProps> = ({ onDismiss }) => {
     const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
 
     const handleBack = () => {
-        // Clear the origin marker so the just-finished run no longer shows
-        // this panel even if the user navigates back to its thread.
-        setOriginRunId(null);
         setReturnRequested(true);
         onDismiss();
     };

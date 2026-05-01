@@ -71,6 +71,12 @@ export interface MessageSearchFilters {
 }
 
 /**
+ * Discriminated origin describing why a prompt was sent. Mirrors `PromptOrigin` in `app/models/agent_run.py`.
+ */
+export type PromptOrigin =
+    | { kind: 'first_run_card'; card_kind: string };
+
+/**
  * Chat message content sent by the client.
  * Contains all user input for a chat completion request.
  */
@@ -91,6 +97,8 @@ export interface BeaverAgentPrompt {
     resumes_run_id?: string;
     /** Custom system instructions for this request */
     custom_instructions?: string;
+    /** Where this prompt came from */
+    origin?: PromptOrigin;
 }
 
 // ============================================================================

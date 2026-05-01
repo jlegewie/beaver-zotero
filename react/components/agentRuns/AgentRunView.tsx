@@ -13,7 +13,7 @@ import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { getToolCallStatus, toolResultsMapAtom, resumedRunIdsAtom } from '../../agents/atoms';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
-import { firstRunOriginRunIdAtom } from '../../atoms/firstRun';
+import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -102,18 +102,24 @@ export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(functi
     const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
     const handleDismissSuggestions = useCallback(() => setSuggestionsDismissed(true), []);
 
-    // First-run "Next steps" panel
-    const firstRunOriginRunId = useAtomValue(firstRunOriginRunIdAtom);
-    const setFirstRunOriginRunId = useSetAtom(firstRunOriginRunIdAtom);
+    // First-run "Next steps" panel — driven by persisted origin on the run,
+    // with session-only dismissal tracked in a Set atom.
+    const nextStepsDismissedRunIds = useAtomValue(firstRunNextStepsDismissedAtom);
+    const setNextStepsDismissedRunIds = useSetAtom(firstRunNextStepsDismissedAtom);
     const handleDismissNextSteps = useCallback(
-        () => setFirstRunOriginRunId(null),
-        [setFirstRunOriginRunId],
+        () => setNextStepsDismissedRunIds((prev) => {
+            if (prev.has(run.id)) return prev;
+            const next = new Set(prev);
+            next.add(run.id);
+            return next;
+        }),
+        [setNextStepsDismissedRunIds, run.id],
     );
     const showNextSteps =
         isLastRun &&
-        !!firstRunOriginRunId &&
-        run.id === firstRunOriginRunId &&
-        run.status === 'completed';
+        run.user_prompt.origin?.kind === 'first_run_card' &&
+        run.status === 'completed' &&
+        !nextStepsDismissedRunIds.has(run.id);
 
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && (run.status === 'completed' || run.status === 'error' || run.status === 'canceled');

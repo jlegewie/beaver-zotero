@@ -1,9 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import {
-    firstRunReturnRequestedAtom,
-    firstRunOriginRunIdAtom,
-} from '../../../atoms/firstRun';
+import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
 import { newThreadAtom } from '../../../atoms/threads';
 import { currentMessageContentAtom } from '../../../atoms/messageComposition';
 import Button from '../../ui/Button';
@@ -30,7 +27,6 @@ interface NextStepsPanelProps {
  */
 const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ onDismiss }) => {
     const setReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
-    const setOriginRunId = useSetAtom(firstRunOriginRunIdAtom);
     const newThread = useSetAtom(newThreadAtom);
     const messageContent = useAtomValue(currentMessageContentAtom);
 
@@ -47,15 +43,11 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ onDismiss }) => {
     const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
 
     const handleTryAnother = () => {
-        // Clear the origin marker so the just-finished run no longer shows
-        // this panel even if the user navigates back to its thread.
-        setOriginRunId(null);
         setReturnRequested(true);
         onDismiss();
     };
 
     const handleNewChat = async () => {
-        setOriginRunId(null);
         await newThread();
         onDismiss();
     };

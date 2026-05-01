@@ -3,7 +3,7 @@ import { Session } from '@supabase/supabase-js';
 import { supabase } from '../../src/services/supabaseClient';
 import { isProfileLoadedAtom, profileWithPlanAtom } from './profile';
 import {
-    firstRunOriginRunIdAtom,
+    firstRunNextStepsDismissedAtom,
     firstRunReturnRequestedAtom,
     firstRunSuggestionsAtom,
     firstRunSuggestionsErrorAtom,
@@ -162,9 +162,9 @@ export const logoutAtom = atom(
         set(isProfileLoadedAtom, false);
 
         // Reset first-run session state — plain Jotai atoms don't auto-reset.
-        // Without this, a stale firstRunOriginRunIdAtom from a previous user
-        // could mount NextStepsPanel under the next user's first run.
-        set(firstRunOriginRunIdAtom, null);
+        // The origin itself lives on persisted run data, but session-only
+        // dismissal/return flags must be cleared so the next user starts fresh.
+        set(firstRunNextStepsDismissedAtom, new Set<string>());
         set(firstRunReturnRequestedAtom, false);
         set(firstRunSuggestionsAtom, null);
         set(firstRunSuggestionsErrorAtom, null);

@@ -93,11 +93,9 @@ export function padWithFallbackCards(cards: SuggestionCard[]): SuggestionCard[] 
 export const firstRunReturnRequestedAtom = atom<boolean>(false);
 
 /**
- * Run id of the agent run started from a first-run card click. Used by
- * AgentRunView to mount the NextStepsPanel on the matching completed run.
- * Session-only — explicitly reset on logout (`logoutAtom` in `auth.ts`).
+ * Session-only set of run ids whose NextStepsPanel the user has dismissed.
  */
-export const firstRunOriginRunIdAtom = atom<string | null>(null);
+export const firstRunNextStepsDismissedAtom = atom<Set<string>>(new Set<string>());
 
 /**
  * Single source of truth for "should the FirstRunPage be the visible page".
@@ -320,12 +318,19 @@ export const submitFirstRunCardAtom = atom(
             set(currentMessageCollectionsAtom, collections);
         }
 
-        // Generate the run id up front so we can recognize this exact run
-        // when the NextStepsPanel needs to mount in AgentRunView.
+        // Generate the run id up front so we can address this exact run later
+        // (e.g. NextStepsPanel dismissal). The "first-run card" identity is
+        // carried on `user_prompt.origin` so consumers don't need a parallel
+        // session atom to recognize it.
         const runId = uuidv4();
-        set(firstRunOriginRunIdAtom, runId);
         set(firstRunReturnRequestedAtom, false);
 
-        return set(sendWSMessageAtom, card.prompt, runId, permissionsOverride);
+        return set(
+            sendWSMessageAtom,
+            card.prompt,
+            runId,
+            permissionsOverride,
+            { kind: 'first_run_card', card_kind: card.kind },
+        );
     },
 );
