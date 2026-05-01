@@ -15,6 +15,7 @@ import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { externalReferenceMappingAtom, formatExternalCitation } from './externalReferences';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
+import { firstRunOriginRunIdAtom, isFirstRunVisibleAtom } from './firstRun';
 
 /**
  * Thread-scoped citation marker assignment.
@@ -216,8 +217,15 @@ export const citationDataListAtom = atom(
 /**
  * One-time citation tip: shown when the first external or page-locator citation
  * is processed. Persistent pref ensures it fires at most once.
+ *
+ * Suppressed without setting the pref while: (1) FirstRunPage is visible, or
+ * (2) a first-run card run is in flight / NextStepsPanel may show
+ * (`firstRunOriginRunIdAtom` set until the user dismisses next steps or clears
+ * it). Avoids overlapping the citation popup with that panel.
  */
-function maybeTriggerCitationTip(set: (...args: any[]) => any) {
+function maybeTriggerCitationTip(get: (...args: any[]) => any, set: (...args: any[]) => any) {
+    if (get(isFirstRunVisibleAtom)) return;
+    if (get(firstRunOriginRunIdAtom)) return;
     if (getPref('onboardingCitationTipShown')) return;
     setPref('onboardingCitationTipShown', true);
 
@@ -290,7 +298,7 @@ export const updateCitationDataAtom = atom(
 
             // Handle external citations differently
             if (isExternalCitation(citation)) {
-                maybeTriggerCitationTip(set);
+                maybeTriggerCitationTip(get, set);
 
                 // Look up additional data from external reference mapping
                 const externalRef = citation.external_source_id
@@ -324,7 +332,7 @@ export const updateCitationDataAtom = atom(
 
                 // Trigger citation tip for Zotero citations with page locators (green)
                 if (getCitationPages(citation).length > 0) {
-                    maybeTriggerCitationTip(set);
+                    maybeTriggerCitationTip(get, set);
                 }
 
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(citation.library_id, citation.zotero_key);
