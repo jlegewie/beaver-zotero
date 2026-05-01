@@ -255,6 +255,21 @@
     color: var(--fill-secondary);
 }
 
+/* Embedding-index status bar below composer */
+[id^="beaver-pane-"] .embedding-index-bar {
+    margin-top: 0.25rem;
+    padding: 0.15rem 0.35rem;
+    border-radius: 4px;
+}
+
+[id^="beaver-pane-"] .embedding-index-bar:hover .embedding-index-bar-text {
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .embedding-index-bar:hover .embedding-index-bar-icon {
+    color: var(--fill-primary);
+}
+
 /* UserRequestView - Clickable user message display */
 [id^="beaver-pane-"] .user-request-view {
     cursor: pointer;
