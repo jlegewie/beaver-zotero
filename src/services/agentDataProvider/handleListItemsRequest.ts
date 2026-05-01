@@ -23,6 +23,74 @@ function isAnnotationItem(item: Zotero.Item): boolean {
 }
 
 /**
+ * Zotero exposes a handful of "virtual" collections that aren't real
+ * Zotero.Collection rows: Unfiled Items, My Publications, Duplicate Items,
+ * Retracted Items, and Recently Read (Zotero 9+). Agents commonly request
+ * these by name (e.g. "Unfiled Items"), so resolve them here to the
+ * appropriate Zotero.Search condition instead of failing as
+ * `collection_not_found`.
+ */
+type SpecialCollectionType = 'unfiled' | 'publications' | 'duplicates' | 'retracted' | 'recentlyRead';
+
+interface SpecialCollectionInfo {
+    type: SpecialCollectionType;
+    displayName: string;
+}
+
+function detectSpecialCollection(input: string): SpecialCollectionInfo | null {
+    const normalized = input.trim().toLowerCase();
+    switch (normalized) {
+        case 'unfiled':
+        case 'unfiled items':
+            return { type: 'unfiled', displayName: 'Unfiled Items' };
+        case 'publications':
+        case 'my publications':
+            return { type: 'publications', displayName: 'My Publications' };
+        case 'duplicates':
+        case 'duplicate items':
+            return { type: 'duplicates', displayName: 'Duplicate Items' };
+        case 'retracted':
+        case 'retracted items':
+            return { type: 'retracted', displayName: 'Retracted Items' };
+        case 'recently read':
+        case 'recentlyread':
+            return { type: 'recentlyRead', displayName: 'Recently Read' };
+        default:
+            return null;
+    }
+}
+
+/**
+ * Apply the special-collection filter to a Zotero.Search.
+ * Mirrors the conditions used by Zotero's collection tree (collectionTree.jsx).
+ */
+function applySpecialCollectionCondition(
+    search: ZoteroSearchWritable,
+    type: SpecialCollectionType
+): void {
+    switch (type) {
+        case 'unfiled':
+            search.addCondition('unfiled', 'true', '');
+            break;
+        case 'publications':
+            search.addCondition('publications', 'true', '');
+            break;
+        case 'retracted':
+            search.addCondition('retracted', 'true', '');
+            break;
+        case 'recentlyRead':
+            // Matches the collection tree definition: items with a lastRead
+            // timestamp within the last 14 days (Zotero 9+).
+            search.addCondition('lastRead', 'isInTheLast', '14 days');
+            break;
+        case 'duplicates':
+            // Handled separately by the caller — Duplicate Items requires
+            // Zotero.Duplicates and isn't expressible as a simple search.
+            break;
+    }
+}
+
+/**
  * Handle list_items request from backend.
  * Lists items in a library, collection, or by tag.
  */
@@ -48,41 +116,62 @@ export async function handleListItemsRequest(
         let library = validation.library!;
         let collectionName: string | null = null;
         let resolvedCollectionId: number | null = null;
-        
+        let specialCollection: SpecialCollectionType | null = null;
+
         // Resolve collection if specified (supports both key and name)
         if (request.collection_key) {
-            const result = getCollectionByIdOrName(request.collection_key, library.libraryID);
-            
-            if (!result) {
-                return {
-                    type: 'list_items',
-                    request_id: request.request_id,
-                    items: [],
-                    total_count: 0,
-                    error: `Collection not found: ${request.collection_key}`,
-                    error_code: 'collection_not_found',
-                };
-            }
-            
-            // Update library scope if collection was found in a different library
-            if (result.libraryID !== library.libraryID) {
-                const resolvedLib = Zotero.Libraries.get(result.libraryID);
-                if (!resolvedLib || !isLibrarySearchable(result.libraryID)) {
+            // Virtual collections (Unfiled Items, My Publications, Recently
+            // Read, Retracted Items, Duplicate Items) aren't real
+            // Zotero.Collection rows. Detect by name first so the agent can
+            // request them naturally without hitting `collection_not_found`.
+            const special = detectSpecialCollection(request.collection_key);
+            if (special) {
+                if (special.type === 'duplicates') {
                     return {
                         type: 'list_items',
                         request_id: request.request_id,
                         items: [],
                         total_count: 0,
-                        error: `Collection "${result.collection.name}" is in library "${(resolvedLib && resolvedLib.name) || result.libraryID}" which is not synced with Beaver.`,
-                        error_code: 'library_not_searchable',
-                        available_libraries: getSearchableLibraries(),
+                        error: `"Duplicate Items" is a virtual Zotero collection and isn't supported by list_items. To find potential duplicates, use search_items with conditions on title/creator/year, or ask the user to review duplicates in Zotero directly.`,
+                        error_code: 'collection_not_found',
                     };
                 }
-                library = resolvedLib;
+                specialCollection = special.type;
+                collectionName = special.displayName;
+            } else {
+                const result = getCollectionByIdOrName(request.collection_key, library.libraryID);
+
+                if (!result) {
+                    return {
+                        type: 'list_items',
+                        request_id: request.request_id,
+                        items: [],
+                        total_count: 0,
+                        error: `Collection not found: ${request.collection_key}. Special collections like "Unfiled Items", "My Publications", "Recently Read", and "Retracted Items" are supported by name.`,
+                        error_code: 'collection_not_found',
+                    };
+                }
+
+                // Update library scope if collection was found in a different library
+                if (result.libraryID !== library.libraryID) {
+                    const resolvedLib = Zotero.Libraries.get(result.libraryID);
+                    if (!resolvedLib || !isLibrarySearchable(result.libraryID)) {
+                        return {
+                            type: 'list_items',
+                            request_id: request.request_id,
+                            items: [],
+                            total_count: 0,
+                            error: `Collection "${result.collection.name}" is in library "${(resolvedLib && resolvedLib.name) || result.libraryID}" which is not synced with Beaver.`,
+                            error_code: 'library_not_searchable',
+                            available_libraries: getSearchableLibraries(),
+                        };
+                    }
+                    library = resolvedLib;
+                }
+
+                collectionName = result.collection.name;
+                resolvedCollectionId = result.collection.id;
             }
-            
-            collectionName = result.collection.name;
-            resolvedCollectionId = result.collection.id;
         }
         
         const libraryName = library.name;
@@ -97,6 +186,8 @@ export async function handleListItemsRequest(
             if (request.recursive !== false) {
                 search.addCondition('recursive', 'true', '');
             }
+        } else if (specialCollection) {
+            applySpecialCollectionCondition(search, specialCollection);
         }
         
         // Validate and add tag filter if specified
@@ -164,15 +255,19 @@ export async function handleListItemsRequest(
             itemCategory === 'attachment' ||
             itemCategory === 'all';
 
-        if (resolvedCollectionId !== null && wantsChildItems) {
+        if ((resolvedCollectionId !== null || specialCollection) && wantsChildItems) {
             const wantNotes = itemCategory === 'note' || itemCategory === 'all';
             const wantAttachments = itemCategory === 'attachment' || itemCategory === 'all';
 
             const parentSearch = new Zotero.Search() as unknown as ZoteroSearchWritable;
             parentSearch.libraryID = library.libraryID;
-            parentSearch.addCondition('collectionID', 'is', String(resolvedCollectionId));
-            if (request.recursive !== false) {
-                parentSearch.addCondition('recursive', 'true', '');
+            if (resolvedCollectionId !== null) {
+                parentSearch.addCondition('collectionID', 'is', String(resolvedCollectionId));
+                if (request.recursive !== false) {
+                    parentSearch.addCondition('recursive', 'true', '');
+                }
+            } else if (specialCollection) {
+                applySpecialCollectionCondition(parentSearch, specialCollection);
             }
             parentSearch.addCondition('noChildren', 'true', '');
             parentSearch.addCondition('itemType', 'isNot', 'note');
