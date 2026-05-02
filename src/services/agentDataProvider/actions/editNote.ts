@@ -73,8 +73,12 @@ function mergeInsertNewString(
     oldString: string,
     newString: string,
 ): string {
-    if (operation === 'insert_after') return oldString + newString;
-    if (operation === 'insert_before') return newString + oldString;
+    if (operation === 'insert_after') {
+        return newString.startsWith(oldString) ? newString : oldString + newString;
+    }
+    if (operation === 'insert_before') {
+        return newString.endsWith(oldString) ? newString : newString + oldString;
+    }
     return newString;
 }
 

@@ -1603,6 +1603,62 @@ describe('citation ref enrichment — validate', () => {
         expect(response.normalized_action_data!.new_string).toBe('prepended See CITATION_WITH_REF');
     });
 
+    it('insert_before skips merge when new_string already ends with old_string', async () => {
+        // Model sometimes pre-copies old_string into the relevant end of
+        // new_string. For insert_before, the merge step would otherwise append
+        // old_string again and produce duplicated content.
+        const noteHtml = '<div data-schema-version="9"><p>Main paragraph</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<p>Main paragraph</p>',
+                // Model pre-copied old_string at the end of new_string.
+                new_string: '<p>New intro</p>\n<p>Main paragraph</p>',
+                operation: 'insert_before',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        // No duplication: merged new_string equals the model's input verbatim.
+        expect(response.normalized_action_data!.new_string).toBe(
+            '<p>New intro</p>\n<p>Main paragraph</p>'
+        );
+    });
+
+    it('insert_after skips merge when new_string already starts with old_string', async () => {
+        const noteHtml = '<div data-schema-version="9"><p>Main paragraph</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<p>Main paragraph</p>',
+                // Model pre-copied old_string at the start of new_string.
+                new_string: '<p>Main paragraph</p>\n<p>New tail</p>',
+                operation: 'insert_after',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data!.new_string).toBe(
+            '<p>Main paragraph</p>\n<p>New tail</p>'
+        );
+    });
+
     it('rejects empty insert_before payloads as no-op edits', async () => {
         const req = makeValidateRequest({
             action_data: {
