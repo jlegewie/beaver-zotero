@@ -103,7 +103,6 @@ export interface DescriptionSegment {
 export interface SuggestionCard {
     kind: CardKind;
     slot_index: number;
-    is_emphasized: boolean;
     title: string;
     description: string;
     description_segments: DescriptionSegment[];

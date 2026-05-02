@@ -34,7 +34,6 @@ const FALLBACK_FIRST_RUN_CARDS: SuggestionCard[] = [
     {
         kind: 'discover_research',
         slot_index: 0,
-        is_emphasized: false,
         title: "What's new in my research areas?",
         description: 'Find recent papers in the topics you are working on.',
         description_segments: [
@@ -48,7 +47,6 @@ const FALLBACK_FIRST_RUN_CARDS: SuggestionCard[] = [
     {
         kind: 'organize_library',
         slot_index: 1,
-        is_emphasized: false,
         title: 'Organize my recent additions',
         description: 'Tag and file the items you added in the last 7 days.',
         description_segments: [
@@ -62,7 +60,6 @@ const FALLBACK_FIRST_RUN_CARDS: SuggestionCard[] = [
     {
         kind: 'organize_tags',
         slot_index: 2,
-        is_emphasized: false,
         title: 'Tag all untagged items',
         description: 'Assign consistent subject tags to items that have none.',
         description_segments: [
@@ -129,7 +126,6 @@ export const EMPTY_LIBRARY_FIRST_RUN_CARDS: SuggestionCard[] = [
     {
         kind: 'discover_research',
         slot_index: 0,
-        is_emphasized: false,
         title: 'Discover research in any field',
         description: 'Ask Beaver to find recent, highly-cited papers on any topic you are exploring.',
         description_segments: [
@@ -143,7 +139,6 @@ export const EMPTY_LIBRARY_FIRST_RUN_CARDS: SuggestionCard[] = [
     {
         kind: 'literature_review',
         slot_index: 1,
-        is_emphasized: false,
         title: 'Explore a research question',
         description: 'Describe what you are working on — Beaver surfaces key papers and themes.',
         description_segments: [
@@ -157,7 +152,6 @@ export const EMPTY_LIBRARY_FIRST_RUN_CARDS: SuggestionCard[] = [
     {
         kind: 'reading_assistant',
         slot_index: 2,
-        is_emphasized: false,
         title: 'Save items, then dive deeper',
         description: 'Use the Zotero connector to add papers. Beaver helps you read, compare, and organize.',
         description_segments: [
