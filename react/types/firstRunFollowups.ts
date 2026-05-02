@@ -19,60 +19,56 @@ export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
         {
             id: 'related_in_library',
             title: 'Find related papers in my library',
-            prompt: 'Find papers in my library related to this one. Briefly compare their findings and methodology.',
+            prompt: 'Find papers in my library related to this one. Briefly compare their findings and methodology. Add a section at the end of the note.',
         },
         {
             id: 'extract_citations',
             title: 'Extract key citations',
-            prompt: 'Extract the key citations from this paper. For each, summarize how the paper uses it.',
+            prompt: 'Extract the key 2-4 citations from this paper. For each, summarize how the paper uses it. Add a section at the end of the note that briefly covers key citations.',
+        },
+        {
+            id: 'review_citations',  // only included when DOI present
+            title: 'Review how this has been cited',
+            prompt: 'Use external search to find papers that cite this one. Group the citing papers by topic and surface the most influential among them. Add a section at the end of the note that briefly covers summarizes the results.',
         },
     ],
     literature_review: [
         {
-            id: 'expand_disagreements',
-            title: 'Expand on the disagreements',
-            titleWithTopic: 'Expand on the disagreements about {topic}',
-            prompt: "Going deeper on the disagreements you identified above, explain each side's argument and supporting evidence.",
-            promptWithTopic: "Going deeper on the disagreements about {topic} you identified above, explain each side's argument and supporting evidence.",
+            id: 'discover_external',
+            title: 'Find new research on this topic',
+            titleWithTopic: 'Find new research on {topic}',
+            prompt: 'Use external search to find recent papers on this topic that go beyond what I already have in my library. Prefer the last 5 years and highly-cited work.',
         },
         {
-            id: 'methodology_comparison',
-            title: 'Compare methodologies',
-            titleWithTopic: 'Compare methods used to study {topic}',
-            prompt: 'Add a section comparing the research methodologies used across these papers.',
-            promptWithTopic: 'Add a section comparing the research methodologies used to study {topic} across these papers.',
+            id: 'create_collection', // only if the lit review is NOT collection based!!!
+            title: 'Organize items on this topic into a collection',
+            titleWithTopic: 'Organize papers on {topic} into a collection',
+            prompt: "Create a new collection for research on this topic. Move relevant items into the new collection, along with the synthesis note.",
         },
     ],
     discover_research: [
         {
             id: 'narrow_recent',
-            title: 'Narrow to the last 2 years',
+            title: 'Save the top results to a new collection',
             titleWithTopic: 'Recent research on {topic} (last 2 years)',
-            prompt: 'From the results above, keep only papers published in the last 2 years.',
-            promptWithTopic: 'From the {topic} results above, keep only papers published in the last 2 years.',
+            prompt: "Create a new collection for this research and add the top 5 results that are not already in my library. Also add relevant papers from my existing library to the new collection, so the collection has both new and known work side by side.",
         },
         {
-            id: 'highly_cited',
-            title: 'Show only highly-cited results',
-            titleWithTopic: 'Highly-cited papers on {topic}',
-            prompt: 'From the results above, keep only the most highly-cited papers.',
-            promptWithTopic: 'From the {topic} results above, keep only the most highly-cited papers.',
+            id: 'compare_to_library',
+            title: 'Compare these to research in my library',
+            titleWithTopic: 'Compare these to research in my library',
+            prompt: 'For the top results above, briefly compare how each relates to or extends the work already in my library on this topic.',
+            promptWithTopic: 'For the top results above, briefly compare how each relates to or extends the work already in my library on {topic}.',
         },
     ],
     organize_library: [
-        {
-            id: 'next_batch',
-            title: 'Continue with the next batch',
-            prompt: 'Continue sorting the next 30 unfiled papers using the same approach.',
-        },
+        // {
+        //     id: 'next_batch',
+        //     title: 'Continue with the next batch',
+        //     prompt: 'Continue sorting the next 30 unfiled papers using the same approach.',
+        // },
     ],
-    organize_tags: [
-        {
-            id: 'more_candidates',
-            title: 'Show more merge candidates',
-            prompt: 'Look for additional overlapping tags I could merge, beyond the ones you proposed above.',
-        },
-    ],
+    organize_tags: [],
 };
 
 function fillTemplate(
