@@ -4,7 +4,8 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { isStreamingAtom } from "../agents/atoms";
 import { isWSChatPendingAtom } from "../atoms/agentRunAtoms";
 import { Action, ActionTargetType } from "../types/actions";
-import { actionsForContextAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom } from "../atoms/actions";
+import { actionsForContextAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom, stageActionInInputAtom } from "../atoms/actions";
+import { hasUserInputVariables } from "../utils/userInputVariables";
 import { getDisplayNameFromItem } from "../utils/sourceUtils";
 import { truncateText } from "../utils/stringUtils";
 import { ActionContext, GroupIconInfo, getIconInfoForItem, isActionableItem } from "../utils/actionVisibility";
@@ -154,6 +155,7 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     const isPending = useAtomValue(isWSChatPendingAtom);
     const contextActions = useAtomValue(actionsForContextAtom);
     const sendResolvedAction = useSetAtom(sendResolvedActionAtom);
+    const stageActionInInput = useSetAtom(stageActionInInputAtom);
     const markActionUsed = useSetAtom(markActionUsedAtom);
     const ctx = useAtomValue(actionContextAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
@@ -181,6 +183,14 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
 
     const handleAction = async (action: Action) => {
         if (isPending || isStreaming || action.text.length === 0) return;
+        if (hasUserInputVariables(action.text)) {
+            await stageActionInInput({
+                actionId: action.id,
+                text: action.text,
+                targetType: action.targetType,
+            });
+            return;
+        }
         markActionUsed(action.id);
         await sendResolvedAction({ text: action.text, targetType: action.targetType });
     };

@@ -110,6 +110,13 @@ export interface CollectionReference {
 export const currentMessageCollectionsAtom = atom<CollectionReference[]>([]);
 
 /**
+ * Counter that increments whenever an action with user-input variables is
+ * staged in the input. The InputArea listens for changes and selects the
+ * first `[[name]]` placeholder so the user can start typing immediately.
+ */
+export const pendingActionInputFocusAtom = atom<number>(0);
+
+/**
 * Current reader attachment
 */
 export const currentReaderAttachmentAtom = atom<Zotero.Item | null>(null);

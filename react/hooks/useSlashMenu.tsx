@@ -4,8 +4,9 @@ import { PlusSignIcon } from '../components/icons/icons';
 import { CSSIcon, CSSItemTypeIcon } from '../components/icons/zotero';
 import { currentMessageContentAtom, currentMessageItemsAtom } from '../atoms/messageComposition';
 import { isWSChatPendingAtom } from '../atoms/agentRunAtoms';
-import { actionsAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom } from '../atoms/actions';
+import { actionsAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom, stageActionInInputAtom } from '../atoms/actions';
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
+import { hasUserInputVariables } from '../utils/userInputVariables';
 import { computeActionGroups, GroupIconInfo } from '../utils/actionVisibility';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
@@ -20,6 +21,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
     const ctx = useAtomValue(actionContextAtom);
     const markActionUsed = useSetAtom(markActionUsedAtom);
     const sendResolvedAction = useSetAtom(sendResolvedActionAtom);
+    const stageActionInInput = useSetAtom(stageActionInInputAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
@@ -34,6 +36,17 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
             : action.text.trim();
         setIsSlashMenuOpen(false);
         setSlashSearchQuery('');
+
+        if (hasUserInputVariables(action.text)) {
+            await stageActionInInput({
+                actionId: action.id,
+                text: action.text,
+                targetType: groupTargetType,
+                pretext: pre,
+            });
+            setTimeout(() => inputRef.current?.focus(), 0);
+            return;
+        }
 
         if (isPending) {
             const { text: resolvedText, items, emptyItemVariables } = await resolvePromptVariables(fullPromptText, groupTargetType);
@@ -57,7 +70,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
             sendResolvedAction({ text: fullPromptText, targetType: groupTargetType });
         }
         setTimeout(() => inputRef.current?.focus(), 0);
-    }, [isPending, sendResolvedAction, markActionUsed]);
+    }, [isPending, sendResolvedAction, stageActionInInput, markActionUsed]);
 
     const handleSlashDismiss = useCallback(() => {
         setIsSlashMenuOpen(false);

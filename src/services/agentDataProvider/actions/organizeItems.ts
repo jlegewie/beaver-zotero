@@ -241,68 +241,87 @@ export async function validateOrganizeItemsAction(
             return null;
         };
 
-        // Validate collection keys exist (for add operations)
-        if (collections?.add && collections.add.length > 0) {
-            for (const collKey of collections.add) {
-                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
-                if (!collection) {
-                    const otherLibraryId = await findCollectionLibrary(collKey);
-                    if (otherLibraryId !== null) {
-                        const otherLibrary = Zotero.Libraries.get(otherLibraryId);
-                        const otherLibraryName = otherLibrary ? otherLibrary.name : `library ${otherLibraryId}`;
-                        const currentLibrary = Zotero.Libraries.get(libraryId);
-                        const currentLibraryName = currentLibrary ? currentLibrary.name : `library ${libraryId}`;
-                        return {
-                            type: 'agent_action_validate_response',
-                            request_id: request.request_id,
-                            valid: false,
-                            error: `Collection '${collKey}' belongs to '${otherLibraryName}' (library ${otherLibraryId}), but the items are in '${currentLibraryName}' (library ${libraryId}). Collections are library-scoped; create a separate collection in library ${libraryId} or only pass items from library ${otherLibraryId}.`,
-                            error_code: 'collection_in_different_library',
-                            preference: 'always_ask',
-                        };
-                    }
-                    return {
-                        type: 'agent_action_validate_response',
-                        request_id: request.request_id,
-                        valid: false,
-                        error: `Collection not found: ${collKey}. Use create_collection first.`,
-                        error_code: 'collection_not_found',
-                        preference: 'always_ask',
-                    };
-                }
-            }
-        }
+        // Collect ALL invalid collection keys (across add and remove) before
+        // returning, so the agent sees the full picture in one shot. Reporting
+        // only the first failure caused models to "fix" one key per retry while
+        // missing the systematic pattern (e.g. mistakenly pasting item keys
+        // into add_to_collections).
+        type InvalidColl = { key: string; otherLibraryId: number | null };
+        const invalidColls: InvalidColl[] = [];
+        const seenInvalid = new Set<string>();
 
-        // Validate collection keys exist (for remove operations)
-        if (collections?.remove && collections.remove.length > 0) {
-            for (const collKey of collections.remove) {
+        const checkKeys = async (keys: string[]) => {
+            for (const collKey of keys) {
+                if (seenInvalid.has(collKey)) continue;
                 const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
                 if (!collection) {
-                    const otherLibraryId = await findCollectionLibrary(collKey);
-                    if (otherLibraryId !== null) {
-                        const otherLibrary = Zotero.Libraries.get(otherLibraryId);
-                        const otherLibraryName = otherLibrary ? otherLibrary.name : `library ${otherLibraryId}`;
-                        const currentLibrary = Zotero.Libraries.get(libraryId);
-                        const currentLibraryName = currentLibrary ? currentLibrary.name : `library ${libraryId}`;
-                        return {
-                            type: 'agent_action_validate_response',
-                            request_id: request.request_id,
-                            valid: false,
-                            error: `Collection '${collKey}' belongs to '${otherLibraryName}' (library ${otherLibraryId}), but the items are in '${currentLibraryName}' (library ${libraryId}). Collections are library-scoped.`,
-                            error_code: 'collection_in_different_library',
-                            preference: 'always_ask',
-                        };
-                    }
-                    return {
-                        type: 'agent_action_validate_response',
-                        request_id: request.request_id,
-                        valid: false,
-                        error: `Collection not found: ${collKey}`,
-                        error_code: 'collection_not_found',
-                        preference: 'always_ask',
-                    };
+                    seenInvalid.add(collKey);
+                    invalidColls.push({
+                        key: collKey,
+                        otherLibraryId: await findCollectionLibrary(collKey),
+                    });
                 }
             }
+        };
+
+        if (collections?.add && collections.add.length > 0) await checkKeys(collections.add);
+        if (collections?.remove && collections.remove.length > 0) await checkKeys(collections.remove);
+
+        if (invalidColls.length > 0) {
+            const notFound = invalidColls.filter(x => x.otherLibraryId === null).map(x => x.key);
+            const inOtherLib = invalidColls.filter(x => x.otherLibraryId !== null);
+
+            // Detect the common model failure mode: collection keys that are
+            // actually item zotero-keys copy-pasted from item_ids.
+            const itemZoteroKeys = new Set(item_ids.map(id => id.split('-').slice(1).join('-')));
+            const overlapWithItemKeys = invalidColls
+                .map(x => x.key)
+                .filter(key => itemZoteroKeys.has(key));
+
+            const currentLibrary = Zotero.Libraries.get(libraryId);
+            const currentLibraryName = currentLibrary ? currentLibrary.name : `library ${libraryId}`;
+
+            const parts: string[] = [];
+            if (notFound.length > 0) {
+                parts.push(
+                    `Collection${notFound.length === 1 ? '' : 's'} not found in '${currentLibraryName}' (library ${libraryId}): ${notFound.join(', ')}.`
+                );
+            }
+            if (inOtherLib.length > 0) {
+                const byLib = new Map<number, string[]>();
+                for (const { key, otherLibraryId } of inOtherLib) {
+                    if (otherLibraryId === null) continue;
+                    const arr = byLib.get(otherLibraryId) ?? [];
+                    arr.push(key);
+                    byLib.set(otherLibraryId, arr);
+                }
+                for (const [otherLibId, keys] of byLib) {
+                    const otherLibrary = Zotero.Libraries.get(otherLibId);
+                    const otherLibraryName = otherLibrary ? otherLibrary.name : `library ${otherLibId}`;
+                    parts.push(
+                        `Collection${keys.length === 1 ? '' : 's'} ${keys.join(', ')} belong${keys.length === 1 ? 's' : ''} to '${otherLibraryName}' (library ${otherLibId}), not '${currentLibraryName}'. Collections are library-scoped.`
+                    );
+                }
+            }
+            if (overlapWithItemKeys.length > 0) {
+                parts.push(
+                    `Note: ${overlapWithItemKeys.length === 1 ? 'key' : 'keys'} ${overlapWithItemKeys.join(', ')} also appear in item_ids — collection keys must come from list_collections (or a prior create_collection), not from item IDs.`
+                );
+            }
+            parts.push('Use list_collections to find valid collection keys, or create_collection to make a new one.');
+
+            const errorCode = notFound.length === 0 && inOtherLib.length > 0
+                ? 'collection_in_different_library'
+                : 'collection_not_found';
+
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: parts.join(' '),
+                error_code: errorCode,
+                preference: 'always_ask',
+            };
         }
     }
 

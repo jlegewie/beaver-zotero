@@ -8,10 +8,11 @@ import { useSetAtom, useAtomValue } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { newThreadAtom } from '../atoms/threads';
 import { currentMessageItemsAtom, currentMessageCollectionsAtom } from '../atoms/messageComposition';
-import { sendResolvedActionAtom, markActionUsedAtom } from '../atoms/actions';
+import { sendResolvedActionAtom, markActionUsedAtom, stageActionInInputAtom } from '../atoms/actions';
 import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
 import { logger } from '../../src/utils/logger';
+import { hasUserInputVariables } from '../utils/userInputVariables';
 
 export function useContextMenuActionHandler() {
     const user = useAtomValue(userAtom);
@@ -19,6 +20,7 @@ export function useContextMenuActionHandler() {
     const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
     const setCurrentMessageCollections = useSetAtom(currentMessageCollectionsAtom);
     const sendResolvedAction = useSetAtom(sendResolvedActionAtom);
+    const stageActionInInput = useSetAtom(stageActionInInputAtom);
     const markActionUsed = useSetAtom(markActionUsedAtom);
 
     useEventSubscription('contextMenuAction', async (detail) => {
@@ -66,14 +68,21 @@ export function useContextMenuActionHandler() {
                     }
                 }
 
-                // 4. Send the action
-                await sendResolvedAction({ text: actionText, targetType });
-
-                // 5. Mark as used
-                markActionUsed(actionId);
+                // 4. Stage if the prompt has [[name]] placeholders, otherwise send
+                if (hasUserInputVariables(actionText)) {
+                    await stageActionInInput({
+                        actionId,
+                        text: actionText,
+                        targetType,
+                        pretext: '',
+                    });
+                } else {
+                    await sendResolvedAction({ text: actionText, targetType });
+                    markActionUsed(actionId);
+                }
             } catch (error) {
                 logger(`useContextMenuActionHandler: Error executing action: ${error}`, 1);
             }
         }, 0);
-    }, [user, newThread, setCurrentMessageItems, setCurrentMessageCollections, sendResolvedAction, markActionUsed]);
+    }, [user, newThread, setCurrentMessageItems, setCurrentMessageCollections, sendResolvedAction, stageActionInInput, markActionUsed]);
 }
