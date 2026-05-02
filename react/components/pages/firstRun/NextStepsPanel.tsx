@@ -20,6 +20,30 @@ interface NextStepsPanelProps {
     onDismiss: () => void;
 }
 
+const titleWithTrailingArrow = (title: string) => {
+    const trimmedTitle = title.trimEnd();
+    const lastSpaceIndex = trimmedTitle.search(/\s+\S+$/);
+
+    if (lastSpaceIndex === -1) {
+        return (
+            <span className="whitespace-nowrap">
+                {trimmedTitle}
+                <Icon icon={ArrowRightIcon} className="ml-1" style={{ transform: 'translateY(0.2em)' }} />
+            </span>
+        );
+    }
+
+    return (
+        <>
+            {trimmedTitle.slice(0, lastSpaceIndex)}
+            <span className="whitespace-nowrap">
+                {trimmedTitle.slice(lastSpaceIndex)}
+                <Icon icon={ArrowRightIcon} className="ml-1" style={{ transform: 'translateY(0.2em)' }} />
+            </span>
+        </>
+    );
+};
+
 /**
  * Rendered once below the first agent run that originated from a
  * first-run suggestion card (matched by run id). Three paths:
@@ -109,8 +133,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                                 onClick={() => void handleFollowup(fu)}
                             >
                                 <span>
-                                    {title}
-                                    <Icon icon={ArrowRightIcon} className="ml-1" style={{ transform: 'translateY(0.2em)' }} />
+                                    {titleWithTrailingArrow(title)}
                                 </span>
                             </Button>
                         );
