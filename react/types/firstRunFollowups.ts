@@ -37,7 +37,7 @@ export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
             id: 'discover_external',
             title: 'Find new research on this topic',
             titleWithTopic: 'Find new research on {topic}',
-            prompt: 'Use external search to find recent papers on this topic that go beyond what I already have in my library. Prefer the last 5 years and highly-cited work.',
+            prompt: 'Use external search to find recent papers on this topic that go beyond what I already have in my library. Briefly summarize and cite the most relevant papers including how they extend work in my library. Prefer the last 5 years and highly-cited work.',
         },
         {
             id: 'create_collection', // only if the lit review is NOT collection based!!!
@@ -50,7 +50,7 @@ export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
         {
             id: 'narrow_recent',
             title: 'Save the top results to a new collection',
-            titleWithTopic: 'Recent research on {topic} (last 2 years)',
+            titleWithTopic: 'Save the top results to a new collection',
             prompt: "Create a new collection for this research and add the top 5 results that are not already in my library. Also add relevant papers from my existing library to the new collection, so the collection has both new and known work side by side.",
         },
         {
