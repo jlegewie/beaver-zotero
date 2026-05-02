@@ -1,6 +1,6 @@
 import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRun, ModelResponse, ToolCallPart } from '../../agents/types';
+import { AgentRun, ModelResponse, ToolCallPart, PromptOrigin } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
@@ -10,6 +10,7 @@ import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
+import BackToSuggestions from '../pages/firstRun/BackToSuggestions';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { getToolCallStatus, toolResultsMapAtom, resumedRunIdsAtom } from '../../agents/atoms';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
@@ -121,6 +122,12 @@ export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(functi
         run.status === 'completed' &&
         !nextStepsDismissedRunIds.has(run.id);
 
+    const showBackToSuggestions =
+        isLastRun &&
+        run.user_prompt.origin?.kind === 'first_run_followup' &&
+        run.status === 'completed' &&
+        !nextStepsDismissedRunIds.has(run.id);
+
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && (run.status === 'completed' || run.status === 'error' || run.status === 'canceled');
 
@@ -175,7 +182,15 @@ export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(functi
             )}
 
             {/* First-run next steps (only for the run that originated from a first-run card) */}
-            {showNextSteps && <NextStepsPanel onDismiss={handleDismissNextSteps} />}
+            {showNextSteps && (
+                <NextStepsPanel
+                    origin={run.user_prompt.origin as Extract<PromptOrigin, { kind: 'first_run_card' }>}
+                    onDismiss={handleDismissNextSteps}
+                />
+            )}
+
+            {/* After a first-run follow-up run, offer a path back to the suggestion grid */}
+            {showBackToSuggestions && <BackToSuggestions onDismiss={handleDismissNextSteps} />}
 
             {/* Resuming failed request display */}
             {wasResumed && <RunResumeDisplay runId={run.id} />}

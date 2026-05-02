@@ -3,32 +3,45 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
 import { newThreadAtom } from '../../../atoms/threads';
 import { currentMessageContentAtom } from '../../../atoms/messageComposition';
+import { sendWSMessageAtom } from '../../../atoms/agentRunAtoms';
+import { PromptOrigin } from '../../../agents/types';
+import {
+    FIRST_RUN_FOLLOWUPS,
+    FirstRunFollowup,
+    renderFollowupTemplate,
+} from '../../../types/firstRunFollowups';
 import Button from '../../ui/Button';
-import { CancelIcon, PlusSignIcon } from '../../icons/icons';
+import { PlusSignIcon, ArrowRightIcon, ArrowLeftIcon, IdeaIcon, Icon } from '../../icons/icons';
 import IconButton from '../../ui/IconButton';
 
 
 interface NextStepsPanelProps {
+    origin: Extract<PromptOrigin, { kind: 'first_run_card' }>;
     onDismiss: () => void;
 }
 
 /**
  * Rendered once below the first agent run that originated from a
- * first-run suggestion card (matched by run id). Two paths:
- *   1. "Try a different prompt" — re-renders the FirstRunPage from
+ * first-run suggestion card (matched by run id). Three paths:
+ *   1. Kind-specific follow-up prompts — submit a second run in the same
+ *      thread with origin `first_run_followup`.
+ *   2. "Back to suggestions" — re-renders the FirstRunPage from
  *      the persisted `profile.library_suggestions` (no regeneration,
  *      no second `complete` call).
- *   2. "Start a new chat" — creates a fresh empty thread.
+ *   3. The tip line below documents the new-chat shortcut + icon.
  *
  * Auto-dismisses when:
- *   - either button is clicked
+ *   - any button is clicked
  *   - the user types in the input (follow-up path)
  *   - parent stops rendering it (origin run id changes / new run starts)
  */
-const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ onDismiss }) => {
+const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) => {
     const setReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
     const newThread = useSetAtom(newThreadAtom);
+    const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const messageContent = useAtomValue(currentMessageContentAtom);
+
+    const followups = FIRST_RUN_FOLLOWUPS[origin.card_kind] ?? [];
 
     // Auto-dismiss when the user types a follow-up. Capture the initial value
     // so we don't dismiss on the first render if the input is already non-empty
@@ -52,72 +65,87 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ onDismiss }) => {
         onDismiss();
     };
 
+    const handleFollowup = async (fu: FirstRunFollowup) => {
+        const prompt = renderFollowupTemplate(
+            fu.prompt,
+            origin.topic_label,
+            origin.collection_name,
+        );
+        onDismiss();
+        await sendWSMessage(prompt, undefined, undefined, {
+            kind: 'first_run_followup',
+            card_kind: origin.card_kind,
+            followup_id: fu.id,
+            topic_label: origin.topic_label ?? null,
+            collection_name: origin.collection_name ?? null,
+        });
+    };
+
     return (
         <div className="px-4">
             <div className="display-flex flex-col gap-2 pt-3">
                 <div className="display-flex flex-row items-center justify-between gap-2">
                     <div
-                        className="font-color-tertiary text-xs font-semibold uppercase"
+                        className="font-color-primary text-sm font-semibold uppercase"
                         style={{ letterSpacing: '0.05em' }}
                     >
                         Next steps
                     </div>
-                    <IconButton
-                        icon={CancelIcon}
-                        onClick={onDismiss}
-                        ariaLabel="Dismiss next steps"
-                        variant="ghost-secondary"
-                        className="scale-80"
-                    />
                 </div>
 
-                <div className="display-flex flex-col gap-1">
-                    <Button
-                        variant="surface-light"
-                        className="truncate text-left w-full"
-                        style={{ display: 'block' }}
-                        onClick={handleTryAnother}
-                    >
-                        Try a different prompt
-                    </Button>
-                    <Button
-                        variant="surface-light"
-                        className="truncate text-left w-full"
-                        style={{ display: 'block' }}
-                        onClick={() => void handleNewChat()}
-                    >
-                        
-                        Start a new chat
-                    </Button>
-                    <div
-                        className="font-color-tertiary text-sm text-start ml-1"
-                    >
-                        Tip: Start a new chat anytime with
-                        <IconButton
-                            icon={PlusSignIcon}
-                            variant="ghost-tertiary"
-                            onClick={handleNewChat}
-                            className="scale-90"
-                            ariaLabel="New chat"
-                            style={{ padding: '3px' }}
-                        />
-                        (top left) or with{' '}
-                        <span
-                            style={{
-                                background: 'var(--fill-quinary)',
-                                padding: '2px 4px',
-                                borderRadius: '3px',
-                                fontSize: '0.85em',
-                            }}
+                <div className="display-flex flex-col gap-15 items-start">
+                    {followups.map((fu) => (
+                        <Button
+                            key={fu.id}
+                            variant="ghost"
+                            rightIcon={ArrowRightIcon}
+                            iconClassName="-ml-1"
+                            style={{fontSize: '1rem'}}
+                            onClick={() => void handleFollowup(fu)}
                         >
-                            {newChatShortcut}
-                        </span>
+                            {renderFollowupTemplate(
+                                fu.title,
+                                origin.topic_label,
+                                origin.collection_name,
+                            )}
+                        </Button>
+                    ))}
+                    <div className="display-flex flex-col gap-1 items-start">
+                        <Button
+                            variant="ghost"
+                            icon={ArrowLeftIcon}
+                            className="mt-3 -mr-1"
+                            iconClassName="-mr-1"
+                            style={{fontSize: '1rem', paddingLeft: '0px'}}
+                            onClick={handleTryAnother}
+                        >
+                            Back to suggestions
+                        </Button>
+                        <div
+                            className="display-flex flex-row items-center gap-1 ml-1 text-start font-color-secondary"
+                            style={{fontSize: '0.875rem'}}
+                        >
+                            <Icon icon={IdeaIcon} size={10}/>
+                            <span>
+                                Start a new chat anytime with
+                            </span>
+                            <Icon icon={PlusSignIcon} size={10}/>
+                            <span>
+                                (top left) or with
+                            </span>
+                            <span
+                                style={{
+                                    background: 'var(--fill-quinary)',
+                                    padding: '1px 3px',
+                                    borderRadius: '3px',
+                                    fontSize: '0.8em',
+                                }}
+                            >
+                                {newChatShortcut}
+                            </span>
+                        </div>
                     </div>
                 </div>
-
-                {/* <div className="font-color-secondary text-sm pt-1">
-                    Ask a follow-up below ↓
-                </div> */}
             </div>
         </div>
     );

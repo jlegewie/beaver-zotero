@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { LibrarySuggestionsResponse, SuggestionCard } from '../types/librarySuggestions';
-import { MessageAttachment } from '../types/attachments/apiTypes';
+import { MessageAttachment, isCollectionAttachment } from '../types/attachments/apiTypes';
 import { librarySuggestionsService } from '../../src/services/librarySuggestionsService';
 import { accountService } from '../../src/services/accountService';
 import {
@@ -319,12 +319,22 @@ export const submitFirstRunCardAtom = atom(
         const runId = uuidv4();
         set(firstRunReturnRequestedAtom, false);
 
+        // Carry topic + collection on origin so NextStepsPanel follow-up
+        // templates can reference them without a second suggestions lookup.
+        const collectionAttachment = card.attachments?.find(isCollectionAttachment);
+        const collectionName = collectionAttachment?.name ?? null;
+
         return set(
             sendWSMessageAtom,
             card.prompt,
             runId,
             permissionsOverride,
-            { kind: 'first_run_card', card_kind: card.kind },
+            {
+                kind: 'first_run_card',
+                card_kind: card.kind,
+                topic_label: card.topic_label ?? null,
+                collection_name: collectionName,
+            },
         );
     },
 );

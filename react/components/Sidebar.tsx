@@ -5,6 +5,7 @@ import { useEventSubscription } from '../hooks/useEventSubscription';
 import { ThreadView } from "./agentRuns";
 import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
 import { allRunsAtom } from '../agents/atoms';
+import { isFirstRunOrigin } from '../agents/types';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
@@ -205,12 +206,14 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         setIsThreadListView(false);
     };
 
-    // First-run thread → swap input placeholder once a first-run-card-originated
-    // run lives in this thread. `runs` is the union of completed (threadRunsAtom)
-    // + active runs, and `user_prompt.origin` is set at submit time so we don't
-    // depend on the thread id arriving from the WS callback.
+    // First-run thread → swap input placeholder once a run with a first-run
+    // origin lives in this thread (either the original card run, or a
+    // follow-up triggered from NextStepsPanel). `runs` is the union of
+    // completed (threadRunsAtom) + active runs, and `user_prompt.origin` is
+    // set at submit time so we don't depend on the thread id arriving from
+    // the WS callback.
     const isFirstRunThread = runs.some(
-        (r) => r.user_prompt?.origin?.kind === 'first_run_card',
+        (r) => isFirstRunOrigin(r.user_prompt?.origin),
     );
     const inputPlaceholder = isFirstRunThread ? 'Ask a follow-up question' : undefined;
 
