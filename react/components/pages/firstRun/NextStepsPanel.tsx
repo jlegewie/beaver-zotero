@@ -104,13 +104,14 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                             <Button
                                 key={fu.id}
                                 variant="ghost"
-                                rightIcon={ArrowRightIcon}
                                 className="text-left"
-                                iconClassName="-ml-1"
                                 style={{fontSize: '1rem'}}
                                 onClick={() => void handleFollowup(fu)}
                             >
-                                {title}
+                                <span>
+                                    {title}
+                                    <Icon icon={ArrowRightIcon} className="ml-1" style={{ transform: 'translateY(0.2em)' }} />
+                                </span>
                             </Button>
                         );
                     })}
