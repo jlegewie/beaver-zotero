@@ -122,11 +122,84 @@ async function validateCreateNoteAction(
     // queue ever stalls before dispatch this captures it.
     ta.record('pre_resolve_ms', Date.now() - start);
 
+    // Detect collection key passed as parent_id.
+    let parentItemIdInput: string | null | undefined = rawParentItemId;
+    let collectionInput: string | null | undefined = collectionNameOrKey;
+    let parentToCollectionWarning: string | null = null;
+    let collectionDerivedLibraryId: number | null = null;
+
+    if (parentItemIdInput) {
+        const dashIdx = parentItemIdInput.indexOf('-');
+        let candidateKey: string;
+        let candidateLibraryId: number | null = null;
+        if (dashIdx > 0) {
+            const libIdPart = parentItemIdInput.substring(0, dashIdx);
+            const keyPart = parentItemIdInput.substring(dashIdx + 1);
+            const parsedLibId = parseInt(libIdPart, 10);
+            if (!isNaN(parsedLibId) && keyPart) {
+                candidateLibraryId = parsedLibId;
+                candidateKey = keyPart;
+            } else {
+                candidateKey = parentItemIdInput;
+            }
+        } else {
+            candidateKey = parentItemIdInput;
+        }
+
+        if (Zotero.Utilities.isValidObjectKey(candidateKey)) {
+            await ta.track('parent_collection_swap_ms', async () => {
+                let itemExists = false;
+                if (candidateLibraryId !== null) {
+                    try {
+                        const item = await Zotero.Items.getByLibraryAndKeyAsync(candidateLibraryId, candidateKey);
+                        itemExists = !!item;
+                    } catch {
+                        itemExists = false;
+                    }
+                }
+                if (itemExists) return;
+
+                const collectionMatch = getCollectionByIdOrName(
+                    parentItemIdInput!,
+                    candidateLibraryId ?? undefined,
+                );
+                if (!collectionMatch) return;
+
+                // If the caller already supplied an explicit collection, defer
+                // to it
+                if (collectionInput) {
+                    logger(
+                        `validateCreateNoteAction: parent_id "${parentItemIdInput}" looks like collection "${collectionMatch.collection.name}", but an explicit collection was supplied; clearing parent_id and keeping the explicit collection`,
+                        1,
+                    );
+                    parentToCollectionWarning =
+                        `parent_id "${parentItemIdInput}" was a collection key, not an item ID, and was ignored. ` +
+                        `The explicit 'collection' parameter was used instead. ` +
+                        `Use the 'collection' parameter for collections.`;
+                    parentItemIdInput = null;
+                    return;
+                }
+
+                logger(
+                    `validateCreateNoteAction: parent_id "${parentItemIdInput}" resolved as collection "${collectionMatch.collection.name}"; swapping to collection`,
+                    1,
+                );
+                parentToCollectionWarning =
+                    `parent_id "${parentItemIdInput}" was a collection key, not an item ID. ` +
+                    `The note was added to collection "${collectionMatch.collection.name}" as a standalone note instead of as a child item. ` +
+                    `Use the 'collection' parameter for collections.`;
+                parentItemIdInput = null;
+                collectionInput = collectionMatch.collection.key;
+                collectionDerivedLibraryId = collectionMatch.libraryID;
+            });
+        }
+    }
+
     // Resolve parent item if parent_item_id provided (format: "<library_id>-<zotero_key>").
     // The shared helper walks the item chain up to a regular item, or falls
     // back to standalone-with-related-item when the chain ends at a standalone.
     const parentResolution = await ta.track('parent_resolution_ms', () =>
-        resolveCreateNoteParent(rawParentItemId)
+        resolveCreateNoteParent(parentItemIdInput)
     );
     if (!parentResolution.ok) {
         return {
@@ -169,6 +242,31 @@ async function validateCreateNoteAction(
         if (libraryResult.library) {
             resolvedLibraryId = libraryResult.library.libraryID;
         }
+    }
+
+    // If parent_id was a collection key, the note must end up in that
+    // collection's library
+    if (collectionDerivedLibraryId != null && resolvedLibraryId != null && resolvedLibraryId !== collectionDerivedLibraryId) {
+        ta.record('library_resolution_ms', Date.now() - tLib);
+        const collectionLibrary = Zotero.Libraries.get(collectionDerivedLibraryId);
+        const explicitLibrary = Zotero.Libraries.get(resolvedLibraryId);
+        const collectionLibraryName = collectionLibrary ? collectionLibrary.name : String(collectionDerivedLibraryId);
+        const explicitLibraryName = explicitLibrary ? explicitLibrary.name : String(resolvedLibraryId);
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error:
+                `parent_id "${rawParentItemId}" is a collection in library "${collectionLibraryName}", ` +
+                `but library "${explicitLibraryName}" was also requested. ` +
+                `Use the 'collection' parameter for collections, and ensure 'library' matches.`,
+            error_code: 'library_collection_mismatch',
+            preference: 'always_ask',
+            timing: buildTiming(),
+        };
+    }
+    if (resolvedLibraryId == null && collectionDerivedLibraryId != null) {
+        resolvedLibraryId = collectionDerivedLibraryId;
     }
 
     // Default to user's library
@@ -227,23 +325,23 @@ async function validateCreateNoteAction(
     // so silently drop the collection when a parent is set — the note
     // inherits collection membership from the parent.
     let resolvedCollectionKey: string | null = null;
-    if (collectionNameOrKey && !parentKey) {
+    if (collectionInput && !parentKey) {
         const tColl = Date.now();
-        const collectionResult = getCollectionByIdOrName(collectionNameOrKey, resolvedLibraryId);
+        const collectionResult = getCollectionByIdOrName(collectionInput, resolvedLibraryId);
         ta.record('collection_resolution_ms', Date.now() - tColl);
         if (collectionResult) {
             resolvedCollectionKey = collectionResult.collection.key;
         } else {
-            logger(`validateCreateNoteAction: Collection "${collectionNameOrKey}" not found, will skip collection assignment`, 1);
+            logger(`validateCreateNoteAction: Collection "${collectionInput}" not found, will skip collection assignment`, 1);
         }
-    } else if (collectionNameOrKey && parentKey) {
-        logger(`validateCreateNoteAction: Ignoring collection "${collectionNameOrKey}" because note has parent_key ${parentKey}`, 1);
+    } else if (collectionInput && parentKey) {
+        logger(`validateCreateNoteAction: Ignoring collection "${collectionInput}" because note has parent_key ${parentKey}`, 1);
     }
 
     // Standalone fallback: if parent resolution dropped to a standalone related
     // item and no collection was explicitly provided, inherit the related item's
     // first collection so the note stays near it in the library tree.
-    if (relatedItemKey && !resolvedCollectionKey && !collectionNameOrKey) {
+    if (relatedItemKey && !resolvedCollectionKey && !collectionInput) {
         await ta.track('collection_inherit_ms', async () => {
             const sourceItem = await Zotero.Items.getByLibraryAndKeyAsync(resolvedLibraryId!, relatedItemKey);
             if (sourceItem) {
@@ -268,15 +366,24 @@ async function validateCreateNoteAction(
     // Get user preference
     const preference = getDeferredToolPreference('create_note');
 
+    // Combine the parent→collection swap warning with any standalone-fallback
+    // warning so the agent gets one coherent message about what we did.
+    const combinedWarning =
+        parentToCollectionWarning && parentFallbackWarning
+            ? `${parentToCollectionWarning} ${parentFallbackWarning}`
+            : parentToCollectionWarning || parentFallbackWarning;
+
     // Build normalized action data with resolved values
     const normalizedActionData: Record<string, any> = {
         title: title.trim(),
         content,
         library_id: resolvedLibraryId,
+        parent_item_id: parentItemIdInput ?? null,
+        collection: collectionInput ?? null,
         parent_key: parentKey,
         collection_key: resolvedCollectionKey,
         related_item_key: relatedItemKey,
-        warning: parentFallbackWarning,
+        warning: combinedWarning,
     };
 
     return {
