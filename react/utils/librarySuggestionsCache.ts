@@ -1,7 +1,12 @@
 import { getPref, setPref } from '../../src/utils/prefs';
-import { LibrarySuggestionsResponse } from '../types/librarySuggestions';
+import { CardKind, LibrarySuggestionsResponse } from '../types/librarySuggestions';
 
 const LIBRARY_SUGGESTIONS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+// Kinds whose backend builders always set `topic_label`. Used by the schema
+// guard in `readCachedSuggestions` to invalidate cache entries from before
+// the field existed.
+const TOPIC_ANCHORED_KINDS: Set<CardKind> = new Set(['literature_review', 'discover_research']);
 
 /**
  * Slim shape persisted to prefs.
@@ -35,6 +40,13 @@ export function readCachedSuggestions(): LibrarySuggestionsResponse | null {
         const hasSegments = parsed.cards.length === 0
             || parsed.cards.every((c) => Array.isArray((c as any).description_segments));
         if (!hasSegments) return null;
+        // Cards built before topic_label was added have no `topic_label` field;
+        // the topic-anchored followups in NextStepsPanel would silently fall back
+        // to generic copy. Invalidate so the next call hydrates the new shape.
+        const hasTopicShape = parsed.cards.every(
+            (c) => !TOPIC_ANCHORED_KINDS.has(c.kind) || 'topic_label' in (c as any),
+        );
+        if (!hasTopicShape) return null;
         return parsed;
     } catch (err) {
         Zotero.logError(err as Error);

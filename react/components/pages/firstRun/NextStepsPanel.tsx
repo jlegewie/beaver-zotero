@@ -8,7 +8,7 @@ import { PromptOrigin } from '../../../agents/types';
 import {
     FIRST_RUN_FOLLOWUPS,
     FirstRunFollowup,
-    renderFollowupTemplate,
+    renderFollowup,
 } from '../../../types/firstRunFollowups';
 import Button from '../../ui/Button';
 import { PlusSignIcon, ArrowRightIcon, ArrowLeftIcon, IdeaIcon, Icon } from '../../icons/icons';
@@ -66,8 +66,8 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
     };
 
     const handleFollowup = async (fu: FirstRunFollowup) => {
-        const prompt = renderFollowupTemplate(
-            fu.prompt,
+        const { prompt } = renderFollowup(
+            fu,
             origin.topic_label,
             origin.collection_name,
         );
@@ -94,22 +94,26 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                 </div>
 
                 <div className="display-flex flex-col gap-15 items-start">
-                    {followups.map((fu) => (
-                        <Button
-                            key={fu.id}
-                            variant="ghost"
-                            rightIcon={ArrowRightIcon}
-                            iconClassName="-ml-1"
-                            style={{fontSize: '1rem'}}
-                            onClick={() => void handleFollowup(fu)}
-                        >
-                            {renderFollowupTemplate(
-                                fu.title,
-                                origin.topic_label,
-                                origin.collection_name,
-                            )}
-                        </Button>
-                    ))}
+                    {followups.map((fu) => {
+                        const { title } = renderFollowup(
+                            fu,
+                            origin.topic_label,
+                            origin.collection_name,
+                        );
+                        return (
+                            <Button
+                                key={fu.id}
+                                variant="ghost"
+                                rightIcon={ArrowRightIcon}
+                                className="text-left"
+                                iconClassName="-ml-1"
+                                style={{fontSize: '1rem'}}
+                                onClick={() => void handleFollowup(fu)}
+                            >
+                                {title}
+                            </Button>
+                        );
+                    })}
                     <div className="display-flex flex-col gap-1 items-start">
                         <Button
                             variant="ghost"
