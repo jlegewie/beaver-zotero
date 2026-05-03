@@ -62,7 +62,13 @@ export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
         //     prompt: 'Continue sorting the next 30 unfiled papers using the same approach.',
         // },
     ],
-    organize_tags: [],
+    organize_tags: [
+        {
+            id: 'approve_plan',
+            title: 'Looks good, apply the plan',
+            prompt: 'Looks good. Apply the plan as proposed.',
+        },
+    ],
 };
 
 function fillTemplate(
