@@ -244,23 +244,18 @@ const ProOnboardingPage: React.FC = () => {
             // Call the service to complete onboarding
             await accountService.completeOnboarding(overallSyncStatus, updatedLibraries);
 
-            // Update local state with updated libraries if they were updated
-            if (updatedLibraries) {
-                setProfileWithPlan({
-                    ...profileWithPlan,
-                    libraries: updatedLibraries
-                });
-            }
-
             // Show indexing complete message
             setPref("showIndexingCompleteMessage", true);
 
             // Update profile atom for immediate UI feedback
             setProfileWithPlan({
                 ...profileWithPlan,
-                has_completed_onboarding: true
+                libraries: updatedLibraries ?? profileWithPlan.libraries,
+                has_completed_onboarding: true,
+                first_run_completed_at: profileWithPlan.first_run_completed_at ?? new Date().toISOString(),
+                first_run_completion_kind: profileWithPlan.first_run_completion_kind ?? 'legacy_onboarding',
             });
-            
+
         } catch (error) {
             logger(`ProOnboardingPage: Error completing onboarding: ${error}`);
             // Revert optimistic update on error

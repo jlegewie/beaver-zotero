@@ -82,6 +82,7 @@ pref("onboardingReaderTipShown", false);
 pref("onboardingNoteTipShown", false);
 pref("onboardingCitationTipShown", false);
 pref("onboardingWelcomeShownAt", "");
+pref("onboardingSignInTextShown", false);
 
 // MCP server
 pref("mcpServerEnabled", false);
@@ -92,3 +93,7 @@ pref("runCollectionSync", false);
 pref("runWebDAVSync", false);
 pref("runEmbeddingFullDiff", false);
 pref("pendingVersionNotifications", "[]");
+
+// Library suggestions cache (JSON-encoded LibrarySuggestionsResponse + ISO timestamp)
+pref("librarySuggestions", "");
+pref("librarySuggestionsGeneratedAt", "");

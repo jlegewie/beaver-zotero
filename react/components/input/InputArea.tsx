@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
@@ -19,7 +19,11 @@ import Tooltip from '../ui/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import SoftCapWarningBar from './SoftCapWarningBar';
+import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
+import BackToSuggestions from '../pages/firstRun/BackToSuggestions';
 import { allRunsAtom } from '../../agents/atoms';
+import { PromptOrigin } from '../../agents/types';
+import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, dismissSoftCapWarningForThreadAtom, dismissedSoftCapWarningByThreadAtom, backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
 import { getPref, setPref } from '../../../src/utils/prefs';
@@ -30,11 +34,17 @@ const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
 interface InputAreaProps {
     inputRef: React.RefObject<HTMLTextAreaElement | null>;
     verticalPosition?: 'above' | 'below';
+    placeholder?: string;
+    hideModelSelector?: boolean;
+    hideAttachmentMenu?: boolean;
 }
 
 const InputArea: React.FC<InputAreaProps> = ({
     inputRef,
     verticalPosition = 'above',
+    placeholder,
+    hideModelSelector = false,
+    hideAttachmentMenu = false,
 }) => {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const [currentMessageItems, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
@@ -94,6 +104,43 @@ const InputArea: React.FC<InputAreaProps> = ({
         pauseLongRunningAgent &&
         dismissedSoftCapRunId !== lastRun.id
     );
+
+    // First-run next steps — driven by persisted origin on the last run, with
+    // session-only dismissal tracked in a Set atom. Mirrors the predicates
+    // previously used in AgentRunView.
+    const nextStepsDismissedRunIds = useAtomValue(firstRunNextStepsDismissedAtom);
+    const setNextStepsDismissedRunIds = useSetAtom(firstRunNextStepsDismissedAtom);
+    const lastRunId = lastRun?.id;
+    const handleDismissNextSteps = useCallback(() => {
+        if (!lastRunId) return;
+        setNextStepsDismissedRunIds((prev) => {
+            if (prev.has(lastRunId)) return prev;
+            const next = new Set(prev);
+            next.add(lastRunId);
+            return next;
+        });
+    }, [setNextStepsDismissedRunIds, lastRunId]);
+    const showNextSteps = Boolean(
+        !isAwaitingApproval &&
+        lastRun &&
+        lastRun.user_prompt.origin?.kind === 'first_run_card' &&
+        lastRun.status === 'completed' &&
+        !nextStepsDismissedRunIds.has(lastRun.id)
+    );
+    const showBackToSuggestions = Boolean(
+        !isAwaitingApproval &&
+        lastRun &&
+        lastRun.user_prompt.origin?.kind === 'first_run_followup' &&
+        lastRun.status === 'completed' &&
+        !nextStepsDismissedRunIds.has(lastRun.id)
+    );
+
+    // Mutual exclusion: NextSteps/BackToSuggestions take precedence over the
+    // token/soft-cap warning bars; HighToken takes precedence over SoftCap.
+    const firstRunPanelVisible = showNextSteps || showBackToSuggestions;
+    const showHighTokenWarningBar = shouldShowHighTokenWarning && !firstRunPanelVisible;
+    const canRenderHighTokenWarningBar = showHighTokenWarningBar && lastRequestInputTokens !== null;
+    const showSoftCapWarningBar = shouldShowSoftCapWarning && !firstRunPanelVisible && !canRenderHighTokenWarningBar;
 
     // Slash menu hook
     const {
@@ -245,8 +292,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     };
 
     const getPlaceholderText = () => {
+        if (placeholder !== undefined) return placeholder;
         if (isAwaitingApproval) return "Add instructions to reject";
-        if (shouldShowSoftCapWarning && !shouldShowHighTokenWarning) return "Yes to continue, or add instructions to adjust";
+        if (showSoftCapWarningBar) return "Yes to continue, or add instructions to adjust";
         if (isLibraryTab) return "@ to add a source, / for actions";
         if (currentNoteItem) return "@ to add a source, / for actions";
         return "@ to add a source, / for actions, drag to add annotations";
@@ -260,7 +308,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         >
             {/* Pending actions bar - shown when awaiting approval */}
             <PendingActionsBar />
-            {shouldShowHighTokenWarning && lastRequestInputTokens !== null && (
+            {canRenderHighTokenWarningBar && (
                 <HighTokenUsageWarningBar
                     onNewThread={(e) => {
                         e.preventDefault();
@@ -271,23 +319,42 @@ const InputArea: React.FC<InputAreaProps> = ({
                     isUsingBeaverCredits={isUsingBeaverCredits}
                 />
             )}
-            {shouldShowSoftCapWarning && (
+            {showSoftCapWarningBar && (
                 <SoftCapWarningBar
                     onEnableLongRunning={handleEnableLongRunning}
                     onDismiss={handleDismissSoftCapWarning}
                 />
             )}
 
+            {/* First-run "Next steps" panel — shown after a run that originated
+                from a first-run suggestion card. Auto-dismisses on type. */}
+            {showNextSteps && lastRun && (
+                <NextStepsPanel
+                    origin={lastRun.user_prompt.origin as Extract<PromptOrigin, { kind: 'first_run_card' }>}
+                    onDismiss={handleDismissNextSteps}
+                />
+            )}
+
+            {/* After a first-run follow-up run, offer a path back to the
+                suggestion grid. */}
+            {showBackToSuggestions && (
+                <div className="next-steps-panel px-3 py-2">
+                    <BackToSuggestions onDismiss={handleDismissNextSteps} />
+                </div>
+            )}
+
             {/* Message attachments */}
-            <MessageAttachmentDisplay
-                isAddAttachmentMenuOpen={isAddAttachmentMenuOpen}
-                setIsAddAttachmentMenuOpen={setIsAddAttachmentMenuOpen}
-                menuPosition={menuPosition}
-                setMenuPosition={setMenuPosition}
-                inputRef={inputRef as React.RefObject<HTMLTextAreaElement>}
-                disabled={isAwaitingApproval}
-                verticalPosition={verticalPosition}
-            />
+            {!hideAttachmentMenu && (
+                <MessageAttachmentDisplay
+                    isAddAttachmentMenuOpen={isAddAttachmentMenuOpen}
+                    setIsAddAttachmentMenuOpen={setIsAddAttachmentMenuOpen}
+                    menuPosition={menuPosition}
+                    setMenuPosition={setMenuPosition}
+                    inputRef={inputRef as React.RefObject<HTMLTextAreaElement>}
+                    disabled={isAwaitingApproval}
+                    verticalPosition={verticalPosition}
+                />
+            )}
 
             {/* Slash command menu */}
             <SearchMenu
@@ -323,8 +390,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                             // Detect `/` trigger: at start or after whitespace/newline
                             if (!isAddAttachmentMenuOpen && handleSlashTrigger(value, e.currentTarget.getBoundingClientRect())) return;
 
-                            // Don't open attachment menu when awaiting approval
-                            if (e.target.value.endsWith('@') && !isAwaitingApproval) {
+                            // Don't open attachment menu when awaiting approval, or when explicitly hidden
+                            if (e.target.value.endsWith('@') && !isAwaitingApproval && !hideAttachmentMenu) {
                                 const rect = e.currentTarget.getBoundingClientRect();
                                 const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
                                 setMenuPosition({
@@ -361,7 +428,9 @@ const InputArea: React.FC<InputAreaProps> = ({
 
                 {/* Button Row */}
                 <div className="display-flex flex-row items-center pt-2">
-                    <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} disabled={isAwaitingApproval} />
+                    {!hideModelSelector && (
+                        <ModelSelectionButton inputRef={inputRef as React.RefObject<HTMLTextAreaElement>} disabled={isAwaitingApproval} />
+                    )}
                     <div className="flex-1" />
                     <div className="display-flex flex-row items-center gap-4">
                         <Tooltip

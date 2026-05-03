@@ -5,6 +5,7 @@ import { useEventSubscription } from '../hooks/useEventSubscription';
 import { ThreadView } from "./agentRuns";
 import { currentThreadScrollPositionAtom, windowScrollPositionAtom } from '../atoms/threads';
 import { allRunsAtom } from '../agents/atoms';
+import { isFirstRunOrigin } from '../agents/types';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { ScrollDownButton } from './ui/buttons/ScrollDownButton';
 import { scrollToBottom } from '../utils/scrollToBottom';
@@ -18,6 +19,7 @@ import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
 import ThreadListView from './ThreadListView';
 import CreditInfoBar from './input/CreditInfoBar';
+import EmbeddingIndexBar from './input/EmbeddingIndexBar';
 import UpgradeConsentPage from './pages/UpgradeConsentPage';
 import DowngradeAcknowledgmentPage from './pages/DowngradeAcknowledgmentPage';
 import { store } from '../store';
@@ -39,6 +41,8 @@ import {
     updateRequiredAtom
 } from '../atoms/profile';
 import UpdateRequiredPage from './pages/UpdateRequiredPage';
+import FirstRunPage from './pages/FirstRunPage';
+import { isFirstRunVisibleAtom } from '../atoms/firstRun';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -69,6 +73,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const updateRequired = useAtomValue(updateRequiredAtom);
     const allWarnings = useAtomValue(threadWarningsAtom);
     const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
+    const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
 
     useEffect(() => {
         setIsSkippedFilesDialogVisible(false);
@@ -184,9 +189,33 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         );
     }
 
+    {/* First-run suggestions page (see isFirstRunVisibleAtom in firstRun.ts):
+        - explicit "Try another starting point" return (session atom), or
+        - Free user, device authorized, never completed first-run on this account. */}
+    if (isFirstRunVisible) {
+        return (
+            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                <Header isWindow={isWindow} />
+                <FirstRunPage isWindow={isWindow} inputRef={inputRef} />
+                <DialogContainer />
+            </div>
+        );
+    }
+
     const handleCloseThreadList = () => {
         setIsThreadListView(false);
     };
+
+    // First-run thread → swap input placeholder once a run with a first-run
+    // origin lives in this thread (either the original card run, or a
+    // follow-up triggered from NextStepsPanel). `runs` is the union of
+    // completed (threadRunsAtom) + active runs, and `user_prompt.origin` is
+    // set at submit time so we don't depend on the thread id arriving from
+    // the WS callback.
+    const isFirstRunThread = runs.some(
+        (r) => isFirstRunOrigin(r.user_prompt?.origin),
+    );
+    const inputPlaceholder = isFirstRunThread ? 'Ask a follow-up question' : undefined;
 
     {/* Main page */}
     return (
@@ -210,7 +239,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                         <PreviewAndPopupContainer />
                         <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
                         <DragDropWrapper>
-                            <InputArea inputRef={inputRef} />
+                            <InputArea inputRef={inputRef} placeholder={inputPlaceholder} />
                         </DragDropWrapper>
                     </div>
                 )}
@@ -225,6 +254,9 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                     </div>
                 )}
             </div>
+
+            {/* Embedding index status bar - visible while indexing */}
+            <EmbeddingIndexBar />
 
             {/* Credit info bar - always visible at bottom */}
             {creditInfoWarning && (

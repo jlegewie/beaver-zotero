@@ -8,6 +8,7 @@ import { SessionExpiredError, ZoteroInstanceMismatchError, ServerError } from '.
 import { setModelsAtom } from '../atoms/models';
 import { isSidebarVisibleAtom, isPreferencePageVisibleAtom } from '../atoms/ui';
 import { serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
+import { getPref, setPref } from '../../src/utils/prefs';
 import {
     isProfileInvalidAtom,
     isProfileLoadedAtom,
@@ -98,6 +99,13 @@ export const useProfileSync = () => {
             } else {
                 setProfileWithPlan(profileData.profile);
                 setModels(profileData.model_configs);
+            }
+
+            // Back-fill: mark sign-in privacy notice as shown for users who already completed onboarding,
+            // so it only appears for genuinely new users on the LoginPage.
+            const isAuthorized = profileData.profile.has_authorized_access || profileData.profile.has_authorized_free_access;
+            if (isAuthorized && !getPref("onboardingSignInTextShown")) {
+                setPref("onboardingSignInTextShown", true);
             }
 
             setIsProfileLoaded(true);

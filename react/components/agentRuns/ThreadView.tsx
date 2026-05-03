@@ -248,10 +248,19 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 // Re-evaluate scroll state when container height changes (window resize)
                 // Only trigger if already visible (not on visibility transition)
                 else if (!wasHidden && isVisible && prevHeight > 0 && currentHeight !== prevHeight) {
-                    const { scrollHeight, scrollTop } = container;
-                    const distanceFromBottom = scrollHeight - scrollTop - currentHeight;
-                    const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
-                    store.set(scrolledAtom, !isNearBottom);
+                    const containerShrunk = currentHeight < prevHeight;
+                    const wasAtBottom = !store.get(scrolledAtom);
+
+                    // If the container shrunk and the user was at the bottom,
+                    // pin to the new bottom
+                    if (containerShrunk && wasAtBottom && !isProtocolScrollLocked()) {
+                        container.scrollTop = Math.max(container.scrollHeight - currentHeight, 0);
+                    } else {
+                        const { scrollHeight, scrollTop } = container;
+                        const distanceFromBottom = scrollHeight - scrollTop - currentHeight;
+                        const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
+                        store.set(scrolledAtom, !isNearBottom);
+                    }
                 }
                 
                 wasHiddenRef.current = !isVisible;
@@ -265,7 +274,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     win.clearTimeout(restoreDebounceRef.current);
                 }
             };
-        }, [restoreScrollPosition, scrolledAtom, tryScrollToPendingRun, win]);
+        }, [restoreScrollPosition, scrolledAtom, tryScrollToPendingRun, isProtocolScrollLocked, win]);
 
         // Scroll to bottom when runs change
         useEffect(() => {

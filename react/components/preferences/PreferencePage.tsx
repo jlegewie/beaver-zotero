@@ -28,6 +28,7 @@ import BillingSection from "./BillingSection";
 import ApiKeysSection from "./ApiKeysSection";
 import AdvancedSection from "./AdvancedSection";
 import PermissionsSection from "./PermissionsSection";
+import EmbeddingIndexProgress from "../pages/onboarding/EmbeddingIndexProgress";
 
 
 const PreferencePage: React.FC = () => {
@@ -753,6 +754,9 @@ const PreferencePage: React.FC = () => {
                         </span>
                     ) : (
                         <SettingsGroup>
+                            {isEmbeddingIndexing && embeddingIndexState.phase === 'initial' && embeddingIndexState.totalItems > 0 && (
+                                <EmbeddingIndexProgress />
+                            )}
                             <SettingsRow
                                 title="Search Index"
                                 description={

@@ -15,6 +15,9 @@ import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { externalReferenceMappingAtom, formatExternalCitation } from './externalReferences';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
+import { isFirstRunVisibleAtom } from './firstRun';
+import { activeRunAtom, threadRunsAtom } from '../agents/atoms';
+import { isFirstRunOrigin } from '../agents/types';
 
 /**
  * Thread-scoped citation marker assignment.
@@ -216,8 +219,20 @@ export const citationDataListAtom = atom(
 /**
  * One-time citation tip: shown when the first external or page-locator citation
  * is processed. Persistent pref ensures it fires at most once.
+ *
+ * Suppressed without setting the pref while: (1) FirstRunPage is visible, or
+ * (2) the active thread is a first-run thread (any run carries a first-run
+ * origin — `first_run_card` or `first_run_followup`). Avoids overlapping the
+ * citation popup with the NextStepsPanel / BackToSuggestions panels.
  */
-function maybeTriggerCitationTip(set: (...args: any[]) => any) {
+function maybeTriggerCitationTip(get: (...args: any[]) => any, set: (...args: any[]) => any) {
+    if (get(isFirstRunVisibleAtom)) return;
+    const activeRun = get(activeRunAtom);
+    const threadRuns = get(threadRunsAtom);
+    const isFirstRunThread =
+        isFirstRunOrigin(activeRun?.user_prompt?.origin) ||
+        threadRuns.some((r: any) => isFirstRunOrigin(r.user_prompt?.origin));
+    if (isFirstRunThread) return;
     if (getPref('onboardingCitationTipShown')) return;
     setPref('onboardingCitationTipShown', true);
 
@@ -290,7 +305,7 @@ export const updateCitationDataAtom = atom(
 
             // Handle external citations differently
             if (isExternalCitation(citation)) {
-                maybeTriggerCitationTip(set);
+                maybeTriggerCitationTip(get, set);
 
                 // Look up additional data from external reference mapping
                 const externalRef = citation.external_source_id
@@ -324,7 +339,7 @@ export const updateCitationDataAtom = atom(
 
                 // Trigger citation tip for Zotero citations with page locators (green)
                 if (getCitationPages(citation).length > 0) {
-                    maybeTriggerCitationTip(set);
+                    maybeTriggerCitationTip(get, set);
                 }
 
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(citation.library_id, citation.zotero_key);

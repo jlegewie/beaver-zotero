@@ -29,6 +29,7 @@ import {
     CurrentLibrary,
     CurrentCollection,
     ChargingPermissions,
+    IndexingStatus,
 } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
@@ -37,7 +38,10 @@ import { MessageAttachment, NoteState, ReaderState, SourceAttachment } from '../
 import { toMessageAttachment } from '../types/attachments/converters';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '../types/profile';
-import { isDatabaseSyncSupportedAtom } from './profile';
+import { isDatabaseSyncSupportedAtom, processingModeAtom } from './profile';
+import { embeddingIndexStateAtom } from './embeddingIndex';
+import { BeaverDB } from '../../src/services/database';
+import { EmbeddingIndexer } from '../../src/services/embeddingIndexer';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import {
     currentMessageItemsAtom,
@@ -47,16 +51,13 @@ import {
     readerTextSelectionAtom,
     currentMessageContentAtom,
 } from './messageComposition';
-import { isSidebarVisibleAtom, isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
+import { isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
-import { addFloatingPopupMessageAtom } from './floatingPopup';
-import { BeaverUIFactory } from '../../src/ui/ui';
-import { eventManager } from '../events/eventManager';
 import { isAnnotationAttachment } from '../types/attachments/apiTypes';
 import { getCurrentPage } from '../utils/readerUtils';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
-import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, ToolRequest } from '../agents/types';
+import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptOrigin, ToolRequest } from '../agents/types';
 import {
     threadRunsAtom,
     activeRunAtom,
@@ -314,14 +315,17 @@ function createAgentRunShell(
     customInstructions?: string,
     customModel?: ModelConfig['custom_model'],
     rewriteFromRunId?: string,
+    runIdOverride?: string,
+    permissionsOverride?: Partial<ChargingPermissions>,
 ): { run: AgentRun; request: AgentRunRequest } {
-    const runId = uuidv4();
-    
-    // Get user preferences for charging permissions
+    const runId = runIdOverride ?? uuidv4();
+
+    // Get user preferences for charging permissions, then apply any partial override
     const permissions: ChargingPermissions = {
         confirm_extraction_costs: getPref('confirmExtractionCosts'),
         confirm_external_search_costs: getPref('confirmExternalSearchCosts'),
         pause_long_running_agent: getPref('pauseLongRunningAgent'),
+        ...permissionsOverride,
     };
 
     // Send request_plus_tools when pref is enabled and request uses a user API key
@@ -1521,7 +1525,14 @@ async function executeWSRequest(
  */
 export const sendWSMessageAtom = atom(
     null,
-    async (get, set, message: string) => {
+    async (
+        get,
+        set,
+        message: string,
+        runIdOverride?: string,
+        permissionsOverride?: Partial<ChargingPermissions>,
+        origin?: PromptOrigin,
+    ) => {
         const isPending = get(isWSChatPendingAtom);
         logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
         
@@ -1718,6 +1729,58 @@ export const sendWSMessageAtom = atom(
             }
         }
 
+        // Frontend embedding index status
+        const processingMode = get(processingModeAtom);
+        const localIndexingActive = processingMode !== ProcessingMode.BACKEND;
+        let indexingStatus: IndexingStatus | undefined;
+        if (localIndexingActive && searchableLibraryIds.length > 0) {
+            const indexState = get(embeddingIndexStateAtom);
+
+            let isComplete: boolean;
+            if (indexState.phase === 'incremental') {
+                isComplete = true;
+            } else {
+                try {
+                    const db = Zotero.Beaver?.db as BeaverDB | undefined;
+                    if (db) {
+                        const indexer = new EmbeddingIndexer(db);
+                        let allUpToDate = true;
+                        for (const libId of searchableLibraryIds) {
+                            const diffCheck = await indexer.shouldRunFullDiff(libId);
+                            if (diffCheck.needsDiff) {
+                                logger(`indexing_status: library ${libId} not complete: ${diffCheck.reason}`, 4);
+                                allUpToDate = false;
+                                break;
+                            }
+                        }
+                        isComplete = allUpToDate;
+                    } else {
+                        isComplete = false;
+                    }
+                } catch (err) {
+                    logger(`indexing_status: state probe failed: ${err}`, 2);
+                    isComplete = false;
+                }
+            }
+
+            let percentComplete: number | undefined;
+            let totalItems: number | undefined;
+            let itemsPending: number | undefined;
+            if (!isComplete && indexState.totalItems > 0) {
+                percentComplete = Math.min(100, Math.max(0, Math.round((indexState.indexedItems / indexState.totalItems) * 100)));
+                totalItems = indexState.totalItems;
+                itemsPending = Math.max(0, indexState.totalItems - indexState.indexedItems);
+            }
+
+            indexingStatus = {
+                is_complete: isComplete,
+                ...(!isComplete && percentComplete !== undefined ? { percent_complete: percentComplete } : {}),
+                ...(!isComplete && totalItems !== undefined ? { total_items: totalItems } : {}),
+                ...(!isComplete && itemsPending !== undefined && itemsPending > 0 ? { items_pending: itemsPending } : {}),
+                ...(indexState.failedItems > 0 ? { items_failed: indexState.failedItems } : {}),
+            };
+        }
+
         // Application state
         const applicationState = {
             current_view: currentView,
@@ -1725,6 +1788,7 @@ export const sendWSMessageAtom = atom(
             ...(noteState ? { note_state: noteState } : {}),
             ...(currentLibrary ? { current_library: currentLibrary } : {}),
             ...(currentCollection ? { current_collection: currentCollection } : {}),
+            ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
         };
 
         // Build the message
@@ -1741,7 +1805,8 @@ export const sendWSMessageAtom = atom(
             // attachments: [{library_id: 1, zotero_key: '6U4SGES3', type: 'source', include: 'fulltext'}], // UNSYNCED ATTACHMENT
             application_state: applicationState,
             filters: filtersPayload,
-            ...(toolRequests ? { tool_requests: toolRequests } : {})
+            ...(toolRequests ? { tool_requests: toolRequests } : {}),
+            ...(origin ? { origin } : {}),
         };
 
         // Get current thread ID (null for new thread)
@@ -1770,6 +1835,9 @@ export const sendWSMessageAtom = atom(
                 model?.provider,
                 customInstructions,
                 model?.is_custom ? model.custom_model : undefined,
+                undefined, // rewriteFromRunId
+                runIdOverride,
+                permissionsOverride,
             );
 
             // Set active run - UI now shows user message + spinner

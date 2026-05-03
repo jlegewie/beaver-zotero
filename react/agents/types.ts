@@ -2,6 +2,7 @@ import { ApplicationStateInput } from "../../src/services/agentProtocol";
 import { CitationMetadata } from "../types/citations";
 import { MessageAttachment } from "../types/attachments/apiTypes";
 import { ZoteroLibrary, ZoteroCollection, ZoteroTag } from "../types/zotero";
+import type { CardKind } from "../types/librarySuggestions";
 
 /**
  * LLM usage associated with an agent run.
@@ -71,6 +72,32 @@ export interface MessageSearchFilters {
 }
 
 /**
+ * Discriminated origin describing why a prompt was sent. Mirrors `PromptOrigin` in `app/models/agent_run.py`.
+ *
+ * `topic_label` and `collection_name` ride along on first-run origins so the
+ * NextStepsPanel follow-up templates can reference the originating card's
+ * topic / collection without re-fetching the suggestions response.
+ */
+export type PromptOrigin =
+    | {
+        kind: 'first_run_card';
+        card_kind: CardKind;
+        topic_label?: string | null;
+        collection_name?: string | null;
+    }
+    | {
+        kind: 'first_run_followup';
+        card_kind: CardKind;
+        followup_id: string;
+        topic_label?: string | null;
+        collection_name?: string | null;
+    };
+
+export function isFirstRunOrigin(origin: PromptOrigin | undefined | null): boolean {
+    return origin?.kind === 'first_run_card' || origin?.kind === 'first_run_followup';
+}
+
+/**
  * Chat message content sent by the client.
  * Contains all user input for a chat completion request.
  */
@@ -91,6 +118,8 @@ export interface BeaverAgentPrompt {
     resumes_run_id?: string;
     /** Custom system instructions for this request */
     custom_instructions?: string;
+    /** Where this prompt came from */
+    origin?: PromptOrigin;
 }
 
 // ============================================================================
