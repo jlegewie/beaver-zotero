@@ -77,18 +77,6 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
         }
     }, [messageContent, onDismiss]);
 
-    const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
-
-    const handleTryAnother = () => {
-        setReturnRequested(true);
-        onDismiss();
-    };
-
-    const handleNewChat = async () => {
-        await newThread();
-        onDismiss();
-    };
-
     const handleFollowup = async (fu: FirstRunFollowup) => {
         const { prompt } = renderFollowup(
             fu,
@@ -107,7 +95,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
 
     return (
         <div className="next-steps-panel px-3 py-3">
-            <div className="display-flex flex-col gap-1">
+            <div className="display-flex flex-col gap-15">
                 <div
                     className="font-color-primary text-sm font-semibold uppercase"
                     style={{ letterSpacing: '0.05em' }}
@@ -115,7 +103,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                     Next steps
                 </div>
 
-                <div className="display-flex flex-col gap-05 items-start">
+                <div className="display-flex flex-col gap-1 items-start">
                     {followups.map((fu) => {
                         const { title } = renderFollowup(
                             fu,
@@ -128,6 +116,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                                 variant="ghost"
                                 className="text-left"
                                 onClick={() => void handleFollowup(fu)}
+                                style={{fontSize: '1rem'}}
                             >
                                 <span>
                                     {titleWithTrailingArrow(title)}
@@ -135,8 +124,8 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                             </Button>
                         );
                     })}
-                    <BackToSuggestions onDismiss={onDismiss} />
                 </div>
+                <BackToSuggestions onDismiss={onDismiss} />
             </div>
         </div>
     );
