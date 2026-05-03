@@ -135,6 +135,12 @@ const InputArea: React.FC<InputAreaProps> = ({
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
 
+    // Mutual exclusion: NextSteps/BackToSuggestions take precedence over the
+    // token/soft-cap warning bars; HighToken takes precedence over SoftCap.
+    const firstRunPanelVisible = showNextSteps || showBackToSuggestions;
+    const showHighTokenWarningBar = shouldShowHighTokenWarning && !firstRunPanelVisible;
+    const showSoftCapWarningBar = shouldShowSoftCapWarning && !firstRunPanelVisible && !showHighTokenWarningBar;
+
     // Slash menu hook
     const {
         isSlashMenuOpen,
@@ -287,7 +293,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const getPlaceholderText = () => {
         if (placeholder !== undefined) return placeholder;
         if (isAwaitingApproval) return "Add instructions to reject";
-        if (shouldShowSoftCapWarning && !shouldShowHighTokenWarning) return "Yes to continue, or add instructions to adjust";
+        if (showSoftCapWarningBar) return "Yes to continue, or add instructions to adjust";
         if (isLibraryTab) return "@ to add a source, / for actions";
         if (currentNoteItem) return "@ to add a source, / for actions";
         return "@ to add a source, / for actions, drag to add annotations";
@@ -301,7 +307,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         >
             {/* Pending actions bar - shown when awaiting approval */}
             <PendingActionsBar />
-            {shouldShowHighTokenWarning && lastRequestInputTokens !== null && (
+            {showHighTokenWarningBar && lastRequestInputTokens !== null && (
                 <HighTokenUsageWarningBar
                     onNewThread={(e) => {
                         e.preventDefault();
@@ -312,7 +318,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                     isUsingBeaverCredits={isUsingBeaverCredits}
                 />
             )}
-            {shouldShowSoftCapWarning && (
+            {showSoftCapWarningBar && (
                 <SoftCapWarningBar
                     onEnableLongRunning={handleEnableLongRunning}
                     onDismiss={handleDismissSoftCapWarning}
