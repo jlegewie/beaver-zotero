@@ -782,6 +782,7 @@
 [id^="beaver-pane-"] .text-underline { text-decoration: underline; }
 [id^="beaver-pane-"] .font-medium { font-weight: 500; }
 [id^="beaver-pane-"] .font-semibold { font-weight: 600; }
+[id^="beaver-pane-"] .font-italic { font-style: italic; }
 [id^="beaver-pane-"] .font-bold { font-weight: 700; }
 [id^="beaver-pane-"] .font-color-primary { color: var(--fill-primary); }
 [id^="beaver-pane-"] .font-color-secondary { color: var(--fill-secondary); }

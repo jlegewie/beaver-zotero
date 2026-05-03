@@ -64,14 +64,14 @@ const SuggestionCardButton: React.FC<SuggestionCardButtonProps> = ({ card, permi
     const cardContent = (
         <div className="display-flex flex-col gap-2">
             <div className="display-flex flex-row items-center gap-2">
-                <Icon width={16} height={16} className="font-color-primary" />
-                <div className="font-medium" style={{ fontSize: '1.05rem' }}>{card.title}</div>
+                <Icon width={14} height={14} className="font-color-primary" />
+                <div className="font-semibold">{card.title}</div>
             </div>
             <div className="text-base font-color-secondary">
                 {card.description_segments && card.description_segments.length > 0
                     ? card.description_segments.map((seg, i) =>
                         seg.emphasized
-                            ? <span key={i} className="font-medium font-color-primary">{seg.text}</span>
+                            ? <span key={i} className="font-semibold">{seg.text}</span>
                             : <span key={i}>{seg.text}</span>
                     )
                     : card.description}
