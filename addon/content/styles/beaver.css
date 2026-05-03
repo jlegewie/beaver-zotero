@@ -2559,16 +2559,6 @@
     gap: 6px;
     font-size: 0.9rem;
     font-weight: 600;
-    color: var(--fill-tertiary);
-}
-
-[id^="beaver-pane-"] .recent-chats-view-all {
-    font-size: 0.85rem;
-    color: var(--fill-tertiary);
-    cursor: pointer;
-}
-
-[id^="beaver-pane-"] .recent-chats-view-all:hover {
     color: var(--fill-secondary);
 }
 
@@ -2595,7 +2585,7 @@
 
 [id^="beaver-pane-"] .recent-chats-item-time {
     font-size: 0.85rem;
-    color: var(--fill-tertiary);
+    color: var(--fill-secondary);
     flex-shrink: 0;
     margin-left: 8px;
 }
