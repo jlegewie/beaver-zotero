@@ -39,20 +39,18 @@ export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
             id: 'create_collection', // only if the lit review is NOT collection based!!!
             title: 'Organize items on this topic into a collection',
             titleWithTopic: 'Organize papers on {topic} into a collection',
-            prompt: "Create a new collection for research on this topic. Move relevant items into the new collection, along with the synthesis note.",
+            prompt: "Create a new collection for research on this topic. Move papers cited in the synthesis into the collection along with the synthesis note.",
         },
     ],
     discover_research: [
         {
-            id: 'narrow_recent',
+            id: 'save_top_to_collection',
             title: 'Save the top results to a new collection',
-            titleWithTopic: 'Save the top results to a new collection',
             prompt: "Create a new collection for this research and add the top 5 results that are not already in my library. Also add relevant papers from my existing library to the new collection, so the collection has both new and known work side by side.",
         },
         {
             id: 'compare_to_library',
             title: 'Compare these to research in my library',
-            titleWithTopic: 'Compare these to research in my library',
             prompt: 'For the top results above, briefly compare how each relates to or extends the work already in my library on this topic.',
             promptWithTopic: 'For the top results above, briefly compare how each relates to or extends the work already in my library on {topic}.',
         },
