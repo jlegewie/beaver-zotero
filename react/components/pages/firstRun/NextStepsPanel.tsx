@@ -138,7 +138,9 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                         );
                     })}
                 </div>
-                <BackToSuggestions onDismiss={onDismiss} />                
+                <div className="mt-3">
+                    <BackToSuggestions onDismiss={onDismiss} />
+                </div>
             </div>
         </div>
     );

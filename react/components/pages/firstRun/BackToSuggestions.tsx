@@ -45,7 +45,7 @@ const BackToSuggestions: React.FC<BackToSuggestionsProps> = ({ onDismiss }) => {
     };
 
     return (
-        <div className="display-flex flex-col gap-1 items-start mt-3">
+        <div className="display-flex flex-col gap-1 items-start">
             <Button
                 variant="ghost"
                 icon={ArrowLeftIcon}
