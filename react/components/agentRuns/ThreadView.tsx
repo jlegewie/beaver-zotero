@@ -248,22 +248,17 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 // Re-evaluate scroll state when container height changes (window resize)
                 // Only trigger if already visible (not on visibility transition)
                 else if (!wasHidden && isVisible && prevHeight > 0 && currentHeight !== prevHeight) {
-                    const { scrollHeight, scrollTop } = container;
-                    const distanceFromBottom = scrollHeight - scrollTop - currentHeight;
-                    const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
-
-                    // If the container shrunk and the user was at
-                    // the bottom, keep them pinned to the bottom.
                     const containerShrunk = currentHeight < prevHeight;
                     const wasAtBottom = !store.get(scrolledAtom);
-                    if (
-                        containerShrunk &&
-                        wasAtBottom &&
-                        !isAnimatingRef.current &&
-                        !isProtocolScrollLocked()
-                    ) {
-                        container.scrollTop = Math.max(scrollHeight - currentHeight, 0);
+
+                    // If the container shrunk and the user was at the bottom,
+                    // pin to the new bottom
+                    if (containerShrunk && wasAtBottom && !isProtocolScrollLocked()) {
+                        container.scrollTop = Math.max(container.scrollHeight - currentHeight, 0);
                     } else {
+                        const { scrollHeight, scrollTop } = container;
+                        const distanceFromBottom = scrollHeight - scrollTop - currentHeight;
+                        const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
                         store.set(scrolledAtom, !isNearBottom);
                     }
                 }
