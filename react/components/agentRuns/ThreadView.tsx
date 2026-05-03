@@ -251,7 +251,21 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     const { scrollHeight, scrollTop } = container;
                     const distanceFromBottom = scrollHeight - scrollTop - currentHeight;
                     const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
-                    store.set(scrolledAtom, !isNearBottom);
+
+                    // If the container shrunk and the user was at
+                    // the bottom, keep them pinned to the bottom.
+                    const containerShrunk = currentHeight < prevHeight;
+                    const wasAtBottom = !store.get(scrolledAtom);
+                    if (
+                        containerShrunk &&
+                        wasAtBottom &&
+                        !isAnimatingRef.current &&
+                        !isProtocolScrollLocked()
+                    ) {
+                        container.scrollTop = Math.max(scrollHeight - currentHeight, 0);
+                    } else {
+                        store.set(scrolledAtom, !isNearBottom);
+                    }
                 }
                 
                 wasHiddenRef.current = !isVisible;
@@ -265,7 +279,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     win.clearTimeout(restoreDebounceRef.current);
                 }
             };
-        }, [restoreScrollPosition, scrolledAtom, tryScrollToPendingRun, win]);
+        }, [restoreScrollPosition, scrolledAtom, tryScrollToPendingRun, isProtocolScrollLocked, win]);
 
         // Scroll to bottom when runs change
         useEffect(() => {
