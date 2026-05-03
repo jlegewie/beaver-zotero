@@ -103,7 +103,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
                 <OnboardingHeader message={headerMessage} />
 
                 {/* Intro line */}
-                <div className="display-flex flex-row items-center justify-between gap-3">
+                <div className="display-flex flex-row items-center justify-between gap-4">
                     <div className="text-base font-semibold mt-2 mb-3">
                         A few ideas based on your library
                     </div>
@@ -119,7 +119,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
                 </div>
                 
                 {/* Cards */}
-                <div className="display-flex flex-col gap-3">
+                <div className="display-flex flex-col gap-4">
                     {showSkeletons && (
                         <>
                             <SuggestionCardSkeleton />
