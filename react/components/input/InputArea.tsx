@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
@@ -19,7 +19,11 @@ import Tooltip from '../ui/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import SoftCapWarningBar from './SoftCapWarningBar';
+import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
+import BackToSuggestions from '../pages/firstRun/BackToSuggestions';
 import { allRunsAtom } from '../../agents/atoms';
+import { PromptOrigin } from '../../agents/types';
+import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, dismissSoftCapWarningForThreadAtom, dismissedSoftCapWarningByThreadAtom, backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
 import { getPref, setPref } from '../../../src/utils/prefs';
@@ -99,6 +103,36 @@ const InputArea: React.FC<InputAreaProps> = ({
         softCapTriggeredRuns[lastRun.id] &&
         pauseLongRunningAgent &&
         dismissedSoftCapRunId !== lastRun.id
+    );
+
+    // First-run next steps — driven by persisted origin on the last run, with
+    // session-only dismissal tracked in a Set atom. Mirrors the predicates
+    // previously used in AgentRunView.
+    const nextStepsDismissedRunIds = useAtomValue(firstRunNextStepsDismissedAtom);
+    const setNextStepsDismissedRunIds = useSetAtom(firstRunNextStepsDismissedAtom);
+    const lastRunId = lastRun?.id;
+    const handleDismissNextSteps = useCallback(() => {
+        if (!lastRunId) return;
+        setNextStepsDismissedRunIds((prev) => {
+            if (prev.has(lastRunId)) return prev;
+            const next = new Set(prev);
+            next.add(lastRunId);
+            return next;
+        });
+    }, [setNextStepsDismissedRunIds, lastRunId]);
+    const showNextSteps = Boolean(
+        !isAwaitingApproval &&
+        lastRun &&
+        lastRun.user_prompt.origin?.kind === 'first_run_card' &&
+        lastRun.status === 'completed' &&
+        !nextStepsDismissedRunIds.has(lastRun.id)
+    );
+    const showBackToSuggestions = Boolean(
+        !isAwaitingApproval &&
+        lastRun &&
+        lastRun.user_prompt.origin?.kind === 'first_run_followup' &&
+        lastRun.status === 'completed' &&
+        !nextStepsDismissedRunIds.has(lastRun.id)
     );
 
     // Slash menu hook
@@ -283,6 +317,23 @@ const InputArea: React.FC<InputAreaProps> = ({
                     onEnableLongRunning={handleEnableLongRunning}
                     onDismiss={handleDismissSoftCapWarning}
                 />
+            )}
+
+            {/* First-run "Next steps" panel — shown after a run that originated
+                from a first-run suggestion card. Auto-dismisses on type. */}
+            {showNextSteps && lastRun && (
+                <NextStepsPanel
+                    origin={lastRun.user_prompt.origin as Extract<PromptOrigin, { kind: 'first_run_card' }>}
+                    onDismiss={handleDismissNextSteps}
+                />
+            )}
+
+            {/* After a first-run follow-up run, offer a path back to the
+                suggestion grid. */}
+            {showBackToSuggestions && (
+                <div className="next-steps-panel px-3 py-2">
+                    <BackToSuggestions onDismiss={handleDismissNextSteps} />
+                </div>
             )}
 
             {/* Message attachments */}

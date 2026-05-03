@@ -106,18 +106,16 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
     };
 
     return (
-        <div className="px-4">
-            <div className="display-flex flex-col gap-2 pt-3">
-                <div className="display-flex flex-row items-center justify-between gap-2">
-                    <div
-                        className="font-color-primary text-sm font-semibold uppercase"
-                        style={{ letterSpacing: '0.05em' }}
-                    >
-                        Next steps
-                    </div>
+        <div className="next-steps-panel px-3 py-3">
+            <div className="display-flex flex-col gap-1">
+                <div
+                    className="font-color-primary text-sm font-semibold uppercase"
+                    style={{ letterSpacing: '0.05em' }}
+                >
+                    Next steps
                 </div>
 
-                <div className="display-flex flex-col gap-15 items-start">
+                <div className="display-flex flex-col gap-05 items-start">
                     {followups.map((fu) => {
                         const { title } = renderFollowup(
                             fu,
@@ -129,7 +127,6 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                                 key={fu.id}
                                 variant="ghost"
                                 className="text-left"
-                                style={{fontSize: '1rem'}}
                                 onClick={() => void handleFollowup(fu)}
                             >
                                 <span>
