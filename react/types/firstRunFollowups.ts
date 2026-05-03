@@ -19,12 +19,12 @@ export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
         {
             id: 'related_in_library',
             title: 'Find related papers in my library',
-            prompt: 'Find papers in my library related to this one. Briefly compare their findings and methodology. Add a section at the end of the note.',
+            prompt: 'Find papers in my library related to this one. Briefly compare their findings and methodology.',
         },
         {
             id: 'find_recent_external',
             title: 'Find related papers online',
-            prompt: 'Use external search to find recent papers on the topic of this paper. Prefer the last 5 years and highly-cited work. Return up to 8 results, each with title, first author, year, citation count, and a one-line note on how it relates to this paper. Mark any results I already have in my library. Add a section at the end of the note summarizing the most relevant ones.',
+            prompt: 'Use external search to find recent papers on the topic of this paper. Prefer the last 5 years and highly-cited work. Return up to 8 results, each with title, first author, year, citation count, and a brief description of how it relates to this paper.',
             
         },
     ],
