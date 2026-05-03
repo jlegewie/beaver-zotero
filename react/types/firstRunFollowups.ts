@@ -21,11 +21,11 @@ export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
             title: 'Find related papers in my library',
             prompt: 'Find papers in my library related to this one. Briefly compare their findings and methodology. Add a section at the end of the note.',
         },
-        {
-            id: 'extract_citations',
-            title: 'Extract key citations',
-            prompt: 'Extract the key 2-4 citations from this paper. For each, summarize how the paper uses it. Add a section at the end of the note that briefly covers key citations.',
-        },
+        // {
+        //     id: 'extract_citations',
+        //     title: 'Extract key citations',
+        //     prompt: 'Extract the key 2-4 citations from this paper. For each, summarize how the paper uses it. Add a section at the end of the note that briefly covers key citations.',
+        // },
         {
             id: 'review_citations',  // only included when DOI present
             title: 'Review how this has been cited',
