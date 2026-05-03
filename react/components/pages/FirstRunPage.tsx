@@ -11,6 +11,7 @@ import {
     markFirstRunCompleteAtom,
     padWithFallbackCards,
     EMPTY_LIBRARY_FIRST_RUN_CARDS,
+    MAX_VISIBLE_FIRST_RUN_CARDS,
 } from '../../atoms/firstRun';
 import { libraryHasItemsAtom } from '../../atoms/zoteroContext';
 import { remainingBeaverCreditsAtom } from '../../atoms/profile';
@@ -79,9 +80,10 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
     const isWaitingForLibraryProbe = libraryHasItems === null;
     const showSkeletons = !isLibraryEmpty && (isWaitingForLibraryProbe || isLoading) && backendCards.length === 0;
     const useFallback = !isLibraryEmpty && !isLoading && (!!error || backendCards.length < 3);
-    const cards = isLibraryEmpty
+    const cards = (isLibraryEmpty
         ? EMPTY_LIBRARY_FIRST_RUN_CARDS
-        : useFallback ? padWithFallbackCards(backendCards) : backendCards;
+        : useFallback ? padWithFallbackCards(backendCards) : backendCards
+    ).slice(0, MAX_VISIBLE_FIRST_RUN_CARDS);
 
     const headerMessage = (
         <div className="display-flex flex-col gap-2 py-2 mt-3">

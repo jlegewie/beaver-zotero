@@ -25,6 +25,10 @@ export const firstRunSuggestionsAtom = atom<LibrarySuggestionsResponse | null>(n
 export const firstRunSuggestionsLoadingAtom = atom<boolean>(false);
 export const firstRunSuggestionsErrorAtom = atom<string | null>(null);
 
+
+/** Max number of suggestion cards rendered on FirstRunPage */
+export const MAX_VISIBLE_FIRST_RUN_CARDS = 5;
+
 /**
  * Hand-authored fallback cards used when the backend fails or returns fewer
  * than 3 cards. Prompts must work without item/collection attachments — they
