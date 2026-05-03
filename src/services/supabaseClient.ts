@@ -98,6 +98,7 @@ interface AuthLockState {
     lockName: string | null;
     lockToken: number | null;  // Unique token to verify lock ownership
     tokenCounter: number;      // Counter for generating unique lock tokens
+    inFlight: Promise<unknown> | null;  // Currently running fn() promise, for drain-on-dispose
 }
 
 // Persist auth lock on the current window so it survives webpack module reloads
@@ -107,8 +108,13 @@ const authLock: AuthLockState = previousLock ?? {
     queue: [],
     lockName: null,
     lockToken: null,
-    tokenCounter: 0
+    tokenCounter: 0,
+    inFlight: null
 };
+// Backfill inFlight on locks created by an older bundle that didn't have it
+if (!('inFlight' in (authLock as object))) {
+    authLock.inFlight = null;
+}
 // Preserve the existing queue when the bundle reloads. If an auth operation is
 // already waiting behind an in-flight refresh, the old holder can still release
 // this shared lock and let that waiter continue under the new module instance.
@@ -156,8 +162,11 @@ async function acquireAuthLock<T>(
         logger(`Auth lock: Acquired "${name}" after waiting ${waitTime}ms`);
     }
 
+    const opPromise = fn();
+    authLock.inFlight = opPromise;
+
     try {
-        const result = await fn();
+        const result = await opPromise;
         // Log when auto-refresh operations complete — helps diagnose silent token failures
         if (name.includes('refresh') || name.includes('initialize')) {
             logger(`Auth lock: "${name}" completed successfully`);
@@ -167,7 +176,32 @@ async function acquireAuthLock<T>(
         handleAuthError(error, name);
         throw error;
     } finally {
+        if (authLock.inFlight === opPromise) {
+            authLock.inFlight = null;
+        }
         releaseLock(lockToken);
+    }
+}
+
+/**
+ * Wait for any in-flight auth lock operation (and queued waiters) to settle.
+ */
+async function drainAuthLock(timeoutMs = 5000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while ((authLock.locked || authLock.queue.length > 0) && Date.now() < deadline) {
+        if (authLock.inFlight) {
+            try {
+                await authLock.inFlight;
+            } catch {
+                // Errors are surfaced to the original caller; here we only sequence.
+            }
+        } else {
+            // Lock momentarily transitioning between queue entries — yield and re-check.
+            await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+    }
+    if (authLock.locked || authLock.queue.length > 0) {
+        logger(`Auth lock: drain timed out after ${timeoutMs}ms (locked=${authLock.locked}, queued=${authLock.queue.length})`, 2);
     }
 }
 
@@ -334,5 +368,9 @@ if (currentWindow) {
     currentWindow.__beaverDisposeSupabase = async () => {
         disposed = true;
         await stopDisposedSupabaseClient();
+        // Wait for any in-flight refresh to finish writing the new tokens to
+        // EncryptedStorage before a fresh client (e.g. on dev reload) reads
+        // from that storage.
+        await drainAuthLock();
     };
 }
