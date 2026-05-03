@@ -231,101 +231,86 @@ function parseContentIntoSegments(content: string): Segment[] {
 }
 
 
-const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
-    content, 
-    className = 'markdown', 
+/**
+ * Process partial tags at the end of content (streaming-safe).
+ * Pure function \u2014 extracted so it can be called from useMemo.
+ */
+function processPartialContent(content: string, exportRendering: boolean): string {
+    let processed = content;
+
+    // Remove invisible or control characters
+    // Includes: zero-width space, zero-width non-joiner, soft hyphen, etc.
+    processed = exportRendering
+        ? processed.normalize("NFC").replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '')
+        : processed.normalize("NFKC").replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '');
+
+    // Complete unclosed bold formatting for rendering during streaming
+    // Strategy: Count ** pairs and if there's an odd number, temporarily add closing **
+    const boldMarkers = (processed.match(/\*\*/g) || []).length;
+    if (boldMarkers % 2 === 1) {
+        if (!processed.endsWith('**')) {
+            processed = processed + '**';
+        }
+    }
+
+    // Clean up backticks around complete citations (handles both /> and > endings)
+    processed = processed.replace(/`(<citation[^>]*\/?>)`/g, '$1');
+
+    // Filter out other partial tags
+    const partialTagPatterns = [
+        /<citation[^>]*$/,                // Partial citation tag
+        /<note[^>]*$/,                    // Partial note opening tag
+        /<\/note$/,                       // Partial note closing tag
+        /<[a-z][a-z0-9]*(?:\s+[^>]*)?$/i, // Any partial HTML tag
+        /\$\$[^$]*$/                      // Unclosed math equation
+    ];
+
+    for (const pattern of partialTagPatterns) {
+        const match = processed.match(pattern);
+        if (match && match.index !== undefined && match.index + match[0].length === processed.length) {
+            processed = processed.substring(0, match.index);
+            break;
+        }
+    }
+
+    return processed;
+}
+
+const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function MarkdownRenderer({
+    content,
+    className = 'markdown',
     exportRendering = false,
     messageId,
     runId,
     enableNoteBlocks = true
-}) => {
-    // Process partial tags at the end of content
-    const processPartialContent = (content: string): string => {
-        let processed = content;
+}) {
+    // Heavy preprocessing: skip when content/flags are unchanged (e.g. parent re-render).
+    const processedSegments = React.useMemo(() => {
+        const processedContent = processPartialContent(content, exportRendering);
 
-        // Remove invisible or control characters
-        // Includes: zero-width space, zero-width non-joiner, soft hyphen, etc.
-        processed = exportRendering
-            ? processed.normalize("NFC").replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '')
-            : processed.normalize("NFKC").replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '');
-            
-        // Complete unclosed code blocks
-        // const codeBlockRegex = /```(?:\w+)?\s+[^`]*$/;
-        // const codeBlockMatch = processed.match(codeBlockRegex);
-        // if (codeBlockMatch && codeBlockMatch.index !== undefined && 
-        //     codeBlockMatch.index + codeBlockMatch[0].length === processed.length) {
-        //     // Add closing ``` for proper formatting during streaming
-        //     return processed + "\n```";
-        // }
+        const segments = enableNoteBlocks
+            ? parseContentIntoSegments(processedContent)
+            : [{ type: 'markdown' as const, content: processedContent }];
 
-        // Complete unclosed bold formatting for rendering during streaming
-        // Strategy: Count ** pairs and if there's an odd number, temporarily add closing **
-        const boldMarkers = (processed.match(/\*\*/g) || []).length;
-        if (boldMarkers % 2 === 1) {
-            if (!processed.endsWith('**')) {
-                processed = processed + '**';
+        // Track citation state across all markdown segments for consecutive detection
+        const preprocessState = createPreprocessState();
+
+        return segments.map((segment) => {
+            if (segment.type === 'note') {
+                return segment;
             }
-        }
 
-        // Clean up backticks around complete citations (handles both /> and > endings)
-        processed = processed.replace(/`(<citation[^>]*\/?>)`/g, '$1');
+            let markdownContent = segment.content;
+            markdownContent = preprocessCitations(markdownContent, preprocessState);
+            markdownContent = markdownContent
+                .replace(/```plaintext\s*([\s\S]*?)\s*```/, '$1')
+                .replace(/(?<!\\)\\\(((?:\\.|[^\\])*?)\\\)/g, (_, match) => `$${match}$`)
+                .replace(/(?<!\\)\\\[((?:\\.|[^\\])*?)\\\]/g, (_, match) => `$$${match}$$`)
+                .replace(/\$\$([^$]+)\$\$/g, (_, equation) => `\n$$\n${equation.trim()}\n$$\n`);
 
-        // Filter out other partial tags
-        const partialTagPatterns = [
-            /<citation[^>]*$/,                // Partial citation tag
-            /<note[^>]*$/,                    // Partial note opening tag
-            /<\/note$/,                       // Partial note closing tag
-            /<[a-z][a-z0-9]*(?:\s+[^>]*)?$/i, // Any partial HTML tag
-            /\$\$[^$]*$/                      // Unclosed math equation
-        ];
-        
-        // Check if content ends with any of our partial tag patterns
-        for (const pattern of partialTagPatterns) {
-            const match = processed.match(pattern);
-            if (match && match.index !== undefined && match.index + match[0].length === processed.length) {
-                // Remove the partial tag if it's at the end of the content
-                processed = processed.substring(0, match.index);
-                break; // Only apply one filter
-            }
-        }
-        
-        return processed;
-    };
-    
-    const processedContent = processPartialContent(content);
-    
-    // Parse into segments if note blocks are enabled
-    const segments = enableNoteBlocks 
-        ? parseContentIntoSegments(processedContent)
-        : [{ type: 'markdown' as const, content: processedContent }];
-    
-    // Track citation state across all markdown segments for consecutive detection
-    const preprocessState = createPreprocessState();
-    
-    // Process each segment
-    const processedSegments = segments.map((segment, index) => {
-        if (segment.type === 'note') {
-            return segment;
-        }
-        
-        // Apply citation preprocessing to markdown segments
-        let markdownContent = segment.content;
-        
-        // Preprocess citations (state is mutated to track consecutive citations)
-        markdownContent = preprocessCitations(markdownContent, preprocessState);
-        
-        // Apply other markdown preprocessing
-        markdownContent = markdownContent
-            // Fix common formatting issues
-            .replace(/```plaintext\s*([\s\S]*?)\s*```/, '$1')
-            // Convert \(...\) and \[...\] to $...$ and $$...$$ BEFORE newline-padding
-            .replace(/(?<!\\)\\\(((?:\\.|[^\\])*?)\\\)/g, (_, match) => `$${match}$`)
-            .replace(/(?<!\\)\\\[((?:\\.|[^\\])*?)\\\]/g, (_, match) => `$$${match}$$`)
-            // Ensure display math ($$...$$) has surrounding newlines for remark-math
-            .replace(/\$\$([^$]+)\$\$/g, (_, equation) => `\n$$\n${equation.trim()}\n$$\n`);
-        
-        return { type: 'markdown' as const, content: markdownContent };
-    });
+            return { type: 'markdown' as const, content: markdownContent };
+        });
+    }, [content, exportRendering, enableNoteBlocks]);
 
     // Render segments
     return (
@@ -366,6 +351,6 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             })}
         </div>
     );
-};
+});
 
 export default MarkdownRenderer;

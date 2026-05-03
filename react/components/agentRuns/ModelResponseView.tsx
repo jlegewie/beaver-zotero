@@ -31,14 +31,14 @@ interface ModelResponseViewProps {
  * All edit_note runs are routed through EditNoteGroupView, including
  * single-call runs, so note edits have one container path.
  */
-export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
+export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(function ModelResponseView({
     message,
     isStreaming,
     previousMessageHasToolCall,
     runId,
     responseIndex,
     runStatus,
-}) => {
+}) {
     const contentRef = useRef<HTMLDivElement | null>(null);
     
     const { 
@@ -149,6 +149,6 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = ({
             />
         </div>
     );
-};
+});
 
 export default ModelResponseView;
