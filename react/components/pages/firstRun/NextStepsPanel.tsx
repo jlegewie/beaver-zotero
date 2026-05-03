@@ -96,7 +96,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
     };
 
     return (
-        <div className="next-steps-panel px-3 py-3">
+        <div className="next-steps-panel px-4 py-3">
             <div className="display-flex flex-col gap-15">
                 <div className="display-flex flex-row items-center justify-between gap-2">
                     <div
@@ -129,7 +129,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                                 variant="ghost"
                                 className="text-left"
                                 onClick={() => void handleFollowup(fu)}
-                                style={{fontSize: '1rem'}}
+                                style={{fontSize: '1rem', padding: '2px 0px'}}
                             >
                                 <span>
                                     {titleWithTrailingArrow(title)}
@@ -138,7 +138,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                         );
                     })}
                 </div>
-                <BackToSuggestions onDismiss={onDismiss} />
+                <BackToSuggestions onDismiss={onDismiss} />                
             </div>
         </div>
     );

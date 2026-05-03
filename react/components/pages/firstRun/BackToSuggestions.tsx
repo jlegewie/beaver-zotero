@@ -45,11 +45,11 @@ const BackToSuggestions: React.FC<BackToSuggestionsProps> = ({ onDismiss }) => {
     };
 
     return (
-        <div className="display-flex flex-col gap-1 items-start">
+        <div className="display-flex flex-col gap-1 items-start mt-3">
             <Button
                 variant="ghost"
                 icon={ArrowLeftIcon}
-                className="mt-3 -mr-1"
+                className="-mr-1"
                 iconClassName="-mr-1"
                 style={{fontSize: '1rem', paddingLeft: '0px'}}
                 onClick={handleTryAnother}
