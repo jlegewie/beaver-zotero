@@ -94,6 +94,14 @@ export function padWithFallbackCards(cards: SuggestionCard[]): SuggestionCard[] 
 export const firstRunReturnRequestedAtom = atom<boolean>(false);
 
 /**
+ * When true, the suggestions page is opened in "returning user" mode (no
+ * first-run framing, no completion stamp on dismiss). Set together with
+ * `firstRunReturnRequestedAtom` from entry points like the user-account
+ * menu so existing users can browse library-aware ideas.
+ */
+export const firstRunSuggestionsModeAtom = atom<boolean>(false);
+
+/**
  * Session-only set of run ids whose NextStepsPanel the user has dismissed.
  */
 export const firstRunNextStepsDismissedAtom = atom<Set<string>>(new Set<string>());
@@ -322,6 +330,10 @@ export const submitFirstRunCardAtom = atom(
         // session atom to recognize it.
         const runId = uuidv4();
         set(firstRunReturnRequestedAtom, false);
+        // Intentionally do NOT clear firstRunSuggestionsModeAtom here:
+        // it must survive the round-trip so that BackToSuggestions reopens
+        // the page in the same mode the card was launched from. The footer
+        // "Cancel" path and logout reset this flag.
 
         // Carry topic + collection on origin so NextStepsPanel follow-up
         // templates can reference them without a second suggestions lookup.

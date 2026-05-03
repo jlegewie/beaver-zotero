@@ -7,6 +7,7 @@ import {
     firstRunReturnRequestedAtom,
     firstRunSuggestionsAtom,
     firstRunSuggestionsErrorAtom,
+    firstRunSuggestionsModeAtom,
 } from './firstRun';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '../../src/utils/logger';
@@ -166,6 +167,7 @@ export const logoutAtom = atom(
         // dismissal/return flags must be cleared so the next user starts fresh.
         set(firstRunNextStepsDismissedAtom, new Set<string>());
         set(firstRunReturnRequestedAtom, false);
+        set(firstRunSuggestionsModeAtom, false);
         set(firstRunSuggestionsAtom, null);
         set(firstRunSuggestionsErrorAtom, null);
 

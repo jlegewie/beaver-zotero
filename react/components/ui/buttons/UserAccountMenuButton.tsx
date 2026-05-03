@@ -1,11 +1,12 @@
 import React from 'react';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
-import { SettingsIcon, UserIcon, LogoutIcon, BugIcon, InformationCircleIcon } from '../../icons/icons';
+import { SettingsIcon, UserIcon, LogoutIcon, BugIcon, InformationCircleIcon, IdeaIcon } from '../../icons/icons';
 import { isErrorReportDialogVisibleAtom } from '../../../atoms/ui';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { hasCompletedOnboardingAtom, updateRequiredAtom } from '../../../atoms/profile';
+import { hasCompletedOnboardingAtom, updateRequiredAtom, profileWithPlanAtom } from '../../../atoms/profile';
 import { logoutAtom, userAtom } from '../../../atoms/auth';
+import { firstRunReturnRequestedAtom, firstRunSuggestionsModeAtom } from '../../../atoms/firstRun';
 import { openPreferencesWindow } from '../../../../src/ui/openPreferencesWindow';
 
 interface UserAccountMenuButtonProps {
@@ -22,9 +23,18 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
 }) => {
     const hasCompletedOnboarding = useAtomValue(hasCompletedOnboardingAtom);
     const updateRequired = useAtomValue(updateRequiredAtom);
+    const profile = useAtomValue(profileWithPlanAtom);
     const setErrorReportDialogVisible = useSetAtom(isErrorReportDialogVisibleAtom);
     const logout = useSetAtom(logoutAtom);
     const user = useAtomValue(userAtom);
+    const setFirstRunReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
+    const setFirstRunSuggestionsMode = useSetAtom(firstRunSuggestionsModeAtom);
+    const hasCompletedFirstRun = !!profile?.first_run_completed_at;
+
+    const handleShowIdeas = () => {
+        setFirstRunSuggestionsMode(true);
+        setFirstRunReturnRequested(true);
+    };
 
     // Create menu items (filter out settings when update is required)
     const menuItems: MenuItem[] = [
@@ -41,6 +51,12 @@ const UserAccountMenuButton: React.FC<UserAccountMenuButtonProps> = ({
             icon: UserIcon,
             disabled: false,
         },
+        ...(!updateRequired && hasCompletedOnboarding && hasCompletedFirstRun ? [{
+            label: "Get ideas",
+            onClick: handleShowIdeas,
+            icon: IdeaIcon,
+            disabled: false,
+        }] : []),
         {
             label: "Get Help",
             onClick: () => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/docs/getting-started`),

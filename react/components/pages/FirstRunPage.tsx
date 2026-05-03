@@ -8,6 +8,7 @@ import {
     loadFirstRunSuggestionsAtom,
     refreshFirstRunSuggestionsAtom,
     firstRunReturnRequestedAtom,
+    firstRunSuggestionsModeAtom,
     markFirstRunCompleteAtom,
     padWithFallbackCards,
     EMPTY_LIBRARY_FIRST_RUN_CARDS,
@@ -44,9 +45,11 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
     const isLibraryEmpty = useAtomValue(firstRunLibraryEmptyAtom);
     const libraryHasItems = useAtomValue(libraryHasItemsAtom);
     const remainingCredits = useAtomValue(remainingBeaverCreditsAtom);
+    const isSuggestionsMode = useAtomValue(firstRunSuggestionsModeAtom);
     const load = useSetAtom(loadFirstRunSuggestionsAtom);
     const refresh = useSetAtom(refreshFirstRunSuggestionsAtom);
     const setReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
+    const setSuggestionsMode = useSetAtom(firstRunSuggestionsModeAtom);
     const markComplete = useSetAtom(markFirstRunCompleteAtom);
     const [isCompleting, setIsCompleting] = useState(false);
     const [footerError, setFooterError] = useState<string | null>(null);
@@ -62,9 +65,13 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
         setIsCompleting(true);
         setFooterError(null);
         try {
-            await markComplete(isLibraryEmpty ? 'empty_library_continue' : 'skip');
-            // Routing will fall through to HomePage on next render once
-            // first_run_completed_at is set on the profile.
+            // Returning users opening the page from the account menu skip the
+            // completion stamp — they've already finished first-run. Routing
+            // returns to HomePage when both session flags are cleared.
+            if (!isSuggestionsMode) {
+                await markComplete(isLibraryEmpty ? 'empty_library_continue' : 'skip');
+            }
+            setSuggestionsMode(false);
             setReturnRequested(false);
         } catch (err) {
             logger(`FirstRunPage: complete failed: ${err}`, 1);
@@ -85,12 +92,20 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
         : useFallback ? padWithFallbackCards(backendCards) : backendCards
     ).slice(0, MAX_VISIBLE_FIRST_RUN_CARDS);
 
-    const headerMessage = (
+    const headerMessage = isSuggestionsMode ? (
+        <div className="display-flex flex-col gap-2 py-2 mt-3">
+            <div className="text-lg font-semibold">Ideas for your library</div>
+        </div>
+    ) : (
         <div className="display-flex flex-col gap-2 py-2 mt-3">
             <div className="text-lg font-semibold">Your AI research assistant in Zotero</div>
             <div>Search across your library, read papers faster, compare findings, and discover relevant new research.</div>
         </div>
     );
+
+    const footerLabel = isSuggestionsMode
+        ? 'Cancel'
+        : isLibraryEmpty ? 'Continue' : 'Skip';
 
     return (
         <div
@@ -103,20 +118,22 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
                 <OnboardingHeader message={headerMessage} />
 
                 {/* Intro line */}
-                <div className="display-flex flex-row items-center justify-between gap-4">
-                    <div className="text-base font-semibold mt-2 mb-3">
-                        A few ideas based on your library
+                {!isSuggestionsMode && (
+                    <div className="display-flex flex-row items-center justify-between gap-4">
+                        <div className="text-base font-semibold mt-2 mb-3">
+                            A few ideas based on your library
+                        </div>
+                        {isDev && (
+                            <IconButton
+                                icon={RepeatIcon}
+                                variant="ghost-secondary"
+                                onClick={() => void refresh()}
+                                disabled={isLoading}
+                                ariaLabel="Refresh suggestions (dev)"
+                            />
+                        )}
                     </div>
-                    {isDev && (
-                        <IconButton
-                            icon={RepeatIcon}
-                            variant="ghost-secondary"
-                            onClick={() => void refresh()}
-                            disabled={isLoading}
-                            ariaLabel="Refresh suggestions (dev)"
-                        />
-                    )}
-                </div>
+                )}
                 
                 {/* Cards */}
                 <div className="display-flex flex-col gap-4">
@@ -131,7 +148,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
                         <SuggestionCardButton
                             key={`${card.kind}-${card.slot_index}`}
                             card={card}
-                            permissionsOverride={FIRST_RUN_PERMISSIONS_OVERRIDE}
+                            permissionsOverride={isSuggestionsMode ? undefined : FIRST_RUN_PERMISSIONS_OVERRIDE}
                             disabled={isLibraryEmpty}
                         />
                     ))}
@@ -142,7 +159,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
             <OnboardingFooter
                 // message={remainingCredits > 0 ? `${remainingCredits} credits to start` : undefined}
                 message={footerError ? footerError : undefined}
-                buttonLabel={isLibraryEmpty ? 'Continue' : 'Skip'}
+                buttonLabel={footerLabel}
                 onButtonClick={handleFooterClick}
                 isLoading={isWaitingForLibraryProbe || (isLoading && !isLibraryEmpty) || isCompleting}
                 disabled={isWaitingForLibraryProbe || isCompleting}
