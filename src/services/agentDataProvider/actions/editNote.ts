@@ -73,8 +73,12 @@ function mergeInsertNewString(
     oldString: string,
     newString: string,
 ): string {
-    if (operation === 'insert_after') return oldString + newString;
-    if (operation === 'insert_before') return newString + oldString;
+    if (operation === 'insert_after') {
+        return newString.startsWith(oldString) ? newString : oldString + newString;
+    }
+    if (operation === 'insert_before') {
+        return newString.endsWith(oldString) ? newString : newString + oldString;
+    }
     return newString;
 }
 
@@ -178,6 +182,7 @@ function buildValidateSuccess(
     zotero_key: string,
     matchCount: number,
     normalized_action_data: EditNoteProposedData | undefined,
+    warnings: string[] | undefined,
 ): WSAgentActionValidateResponse {
     const noteTitle = item.getNoteTitle() || '(untitled)';
     const totalLines = simplified.split('\n').length;
@@ -193,7 +198,60 @@ function buildValidateSuccess(
         },
         normalized_action_data,
         preference,
+        ...(warnings && warnings.length > 0 ? { warnings } : {}),
     };
+}
+
+/**
+ * Head-tail truncate a snippet for inclusion in a warning string. Keeps the
+ * first and last `headTail` chars when the input exceeds `2 * headTail + 5`,
+ * joined by `…`. Newlines are escaped so the warning stays single-line.
+ */
+function truncateForWarning(s: string, headTail = 30): string {
+    const escaped = s.replace(/\n/g, '\\n');
+    const threshold = headTail * 2 + 5;
+    if (escaped.length <= threshold) return escaped;
+    return `${escaped.slice(0, headTail)}…${escaped.slice(-headTail)}`;
+}
+
+/**
+ * When the model pre-copied old_string into the relevant end of new_string
+ * for an insert operation, `mergeInsertNewString` silently dedupes. Emit a
+ * warning so the model learns the correct shape, including a head-tail
+ * snippet of the offending old_string copy so the model can identify
+ * exactly what was deduplicated.
+ * Returns null if no dedup applies.
+ */
+function buildInsertDedupWarning(
+    operation: EditNoteOperation,
+    oldString: string,
+    newString: string,
+): string | null {
+    if (!oldString) return null;
+    const snippet = truncateForWarning(oldString);
+    if (operation === 'insert_after' && newString.startsWith(oldString)) {
+        return (
+            'For operation="insert_after", new_string should contain ONLY the '
+            + 'content to insert — old_string is preserved automatically. '
+            + `new_string started with a copy of old_string ("${snippet}"). `
+            + 'Only the trailing content was inserted after that anchor (no '
+            + 'duplication). To duplicate content, use operation="str_replace" '
+            + 'with new_string set to old_string followed by your inserted '
+            + 'content (or the full final shape) instead.'
+        );
+    }
+    if (operation === 'insert_before' && newString.endsWith(oldString)) {
+        return (
+            'For operation="insert_before", new_string should contain ONLY the '
+            + 'content to insert — old_string is preserved automatically. '
+            + `new_string ended with a copy of old_string ("${snippet}"). `
+            + 'Only the leading content was inserted before that anchor (no '
+            + 'duplication). To duplicate content, use operation="str_replace" '
+            + 'with new_string set to your inserted content followed by '
+            + 'old_string (or the full final shape) instead.'
+        );
+    }
+    return null;
 }
 
 function buildAmbiguousMatchError(matchCount: number): string {
@@ -500,7 +558,12 @@ async function validateEditNoteAction(
     // 15. Compose new_string: merge for insert operations, otherwise carry
     //     any matcher rewrite. mergeInsertNewString is a no-op for
     //     str_replace / str_replace_all.
+    const warnings: string[] = [];
     if (operation === 'insert_after' || operation === 'insert_before') {
+        const dedupWarning = buildInsertDedupWarning(
+            operation, match.oldString, match.newString,
+        );
+        if (dedupWarning) warnings.push(dedupWarning);
         overrides.new_string = mergeInsertNewString(operation, match.oldString, match.newString);
     } else if (match.newString !== new_string) {
         overrides.new_string = match.newString;
@@ -514,6 +577,7 @@ async function validateEditNoteAction(
         zotero_key,
         match.matchCount,
         buildNormalizedActionData(overrides),
+        warnings.length > 0 ? warnings : undefined,
     );
 }
 

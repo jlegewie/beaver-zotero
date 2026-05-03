@@ -1603,6 +1603,169 @@ describe('citation ref enrichment — validate', () => {
         expect(response.normalized_action_data!.new_string).toBe('prepended See CITATION_WITH_REF');
     });
 
+    it('insert_before emits a warning when new_string already ends with old_string', async () => {
+        const noteHtml = '<div data-schema-version="9"><p>Main paragraph</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<p>Main paragraph</p>',
+                new_string: '<p>New intro</p>\n<p>Main paragraph</p>',
+                operation: 'insert_before',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        expect(response.warnings).toBeDefined();
+        expect(response.warnings).toHaveLength(1);
+        expect(response.warnings![0]).toContain('insert_before');
+        expect(response.warnings![0]).toContain('Only the leading content');
+        expect(response.warnings![0]).toContain('str_replace');
+        // Short old_string is included verbatim (under truncation threshold).
+        expect(response.warnings![0]).toContain('"<p>Main paragraph</p>"');
+    });
+
+    it('insert_after emits a warning when new_string already starts with old_string', async () => {
+        const noteHtml = '<div data-schema-version="9"><p>Main paragraph</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<p>Main paragraph</p>',
+                new_string: '<p>Main paragraph</p>\n<p>New tail</p>',
+                operation: 'insert_after',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        expect(response.warnings).toBeDefined();
+        expect(response.warnings).toHaveLength(1);
+        expect(response.warnings![0]).toContain('insert_after');
+        expect(response.warnings![0]).toContain('Only the trailing content');
+        expect(response.warnings![0]).toContain('str_replace');
+        expect(response.warnings![0]).toContain('"<p>Main paragraph</p>"');
+    });
+
+    it('insert_before warning truncates long old_string snippets head-tail', async () => {
+        const longOld = '<p>' + 'A'.repeat(80) + 'Z'.repeat(80) + '</p>';
+        const noteHtml = `<div data-schema-version="9">${longOld}</div>`;
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: longOld,
+                new_string: '<p>New intro</p>\n' + longOld,
+                operation: 'insert_before',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        expect(response.warnings).toBeDefined();
+        // Truncation marker present, full string is not.
+        expect(response.warnings![0]).toContain('…');
+        expect(response.warnings![0]).not.toContain(longOld);
+        // Quoted snippet body is short — well under the 200-char raw old_string.
+        const quoted = response.warnings![0].match(/"([^"]+)"/);
+        expect(quoted).not.toBeNull();
+        expect(quoted![1].length).toBeLessThan(80);
+    });
+
+    it('insert_before omits warnings when new_string does not pre-copy old_string', async () => {
+        const noteHtml = '<div data-schema-version="9"><p>Main paragraph</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<p>Main paragraph</p>',
+                new_string: '<p>New intro</p>',
+                operation: 'insert_before',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        expect(response.warnings).toBeUndefined();
+    });
+
+    it('insert_before skips merge when new_string already ends with old_string', async () => {
+        // Model sometimes pre-copies old_string into the relevant end of
+        // new_string. For insert_before, the merge step would otherwise append
+        // old_string again and produce duplicated content.
+        const noteHtml = '<div data-schema-version="9"><p>Main paragraph</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<p>Main paragraph</p>',
+                // Model pre-copied old_string at the end of new_string.
+                new_string: '<p>New intro</p>\n<p>Main paragraph</p>',
+                operation: 'insert_before',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        // No duplication: merged new_string equals the model's input verbatim.
+        expect(response.normalized_action_data!.new_string).toBe(
+            '<p>New intro</p>\n<p>Main paragraph</p>'
+        );
+    });
+
+    it('insert_after skips merge when new_string already starts with old_string', async () => {
+        const noteHtml = '<div data-schema-version="9"><p>Main paragraph</p></div>';
+        mockItem = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked(Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+
+        const req = makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<p>Main paragraph</p>',
+                // Model pre-copied old_string at the start of new_string.
+                new_string: '<p>Main paragraph</p>\n<p>New tail</p>',
+                operation: 'insert_after',
+            },
+        });
+
+        const response = await handleAgentActionValidateRequest(req);
+
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data).toBeDefined();
+        expect(response.normalized_action_data!.new_string).toBe(
+            '<p>Main paragraph</p>\n<p>New tail</p>'
+        );
+    });
+
     it('rejects empty insert_before payloads as no-op edits', async () => {
         const req = makeValidateRequest({
             action_data: {

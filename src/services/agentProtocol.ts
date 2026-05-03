@@ -1046,6 +1046,8 @@ export interface WSAgentActionValidateResponse {
      */
     normalized_action_data?: Record<string, any>;
     preference: DeferredToolPreference;
+    /** Optional warnings surfaced during validation */
+    warnings?: string[];
     /**
      * Optional plugin-side timing breakdown in milliseconds. Free-form keys
      * scoped to action_type. Backend logs as-is — do not interpret.
