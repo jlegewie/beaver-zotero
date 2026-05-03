@@ -38,7 +38,7 @@ const hasVisibleContent = (run: AgentRun): boolean => {
  * Container component for a single agent run.
  * Renders the user's request, model messages, status indicator, and usage footer.
  */
-export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(function AgentRunView({ run, isLastRun }, ref) {
+export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewProps>(function AgentRunView({ run, isLastRun }, ref) {
     const isStreaming = run.status === 'in_progress';
     const hasError = run.status === 'error';
     const allWarnings = useAtomValue(threadWarningsAtom);
@@ -158,7 +158,7 @@ export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(functi
 
         </div>
     );
-});
+}));
 
 AgentRunView.displayName = 'AgentRunView';
 

@@ -62,7 +62,9 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         // Select the correct atoms based on whether we're in the separate window
         const scrollPositionAtom = isWindow ? windowScrollPositionAtom : currentThreadScrollPositionAtom;
         const scrolledAtom = isWindow ? windowUserScrolledAtom : userScrolledAtom;
-        const storedScrollTop = useAtomValue(scrollPositionAtom);
+        // Read scroll position imperatively inside restoreScrollPosition rather than subscribing.
+        // The atom is updated every ~10px of scroll, so subscribing would cause ThreadView to
+        // re-render constantly while the user scrolls, cascading through all message components.
         
         // Watch expansion state to re-evaluate scroll button visibility after expand/collapse
         // Track multiple expansion states: tool calls, sources, and agent actions
@@ -169,7 +171,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 return;
             }
 
-            const targetScrollTop = storedScrollTop ?? container.scrollHeight;
+            const targetScrollTop = store.get(scrollPositionAtom) ?? container.scrollHeight;
             const delta = Math.abs(container.scrollTop - targetScrollTop);
             
             // Check if this is a thread switch
@@ -202,7 +204,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     }
                 }
             }
-        }, [pendingRunId, isProtocolScrollLocked, storedScrollTop, scrolledAtom, scrollContainerRef, currentThreadId, isLoadingThread]);
+        }, [pendingRunId, isProtocolScrollLocked, scrollPositionAtom, scrolledAtom, scrollContainerRef, currentThreadId]);
 
         // Restore scroll position from atom (only for thread switching, not during streaming)
         // Note: userScrolledAtom is managed by useAutoScroll.handleScroll, not here
