@@ -11,8 +11,10 @@ import {
     renderFollowup,
 } from '../../../types/firstRunFollowups';
 import Button from '../../ui/Button';
-import { ArrowRightIcon, Icon } from '../../icons/icons';
+import { ArrowRightIcon, Icon, CancelIcon } from '../../icons/icons';
 import BackToSuggestions from './BackToSuggestions';
+import IconButton from '../../ui/IconButton';
+import Tooltip from '../../ui/Tooltip';
 
 
 interface NextStepsPanelProps {
@@ -96,12 +98,23 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
     return (
         <div className="next-steps-panel px-3 py-3">
             <div className="display-flex flex-col gap-15">
-                <div
-                    className="font-color-primary text-sm font-semibold uppercase"
-                    style={{ letterSpacing: '0.05em' }}
-                >
-                    Next steps
+                <div className="display-flex flex-row items-center justify-between gap-2">
+                    <div
+                        className="font-color-primary text-sm font-semibold uppercase"
+                        style={{ letterSpacing: '0.05em' }}
+                    >
+                        Next steps
+                    </div>
+                    <Tooltip content="Dismiss next steps" showArrow singleLine>
+                        <IconButton
+                            icon={CancelIcon}
+                            onClick={onDismiss}
+                            ariaLabel="Dismiss next steps"
+                            variant="ghost-secondary"
+                        />
+                    </Tooltip>
                 </div>
+                
 
                 <div className="display-flex flex-col gap-1 items-start">
                     {followups.map((fu) => {
