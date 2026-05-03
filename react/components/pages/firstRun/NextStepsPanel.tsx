@@ -15,36 +15,13 @@ import { ArrowRightIcon, Icon, CancelIcon } from '../../icons/icons';
 import BackToSuggestions from './BackToSuggestions';
 import IconButton from '../../ui/IconButton';
 import Tooltip from '../../ui/Tooltip';
+import { textWithTrailingNoWrap } from '../../../utils/textWithTrailingNoWrap';
 
 
 interface NextStepsPanelProps {
     origin: Extract<PromptOrigin, { kind: 'first_run_card' }>;
     onDismiss: () => void;
 }
-
-const titleWithTrailingArrow = (title: string) => {
-    const trimmedTitle = title.trimEnd();
-    const lastSpaceIndex = trimmedTitle.search(/\s+\S+$/);
-
-    if (lastSpaceIndex === -1) {
-        return (
-            <span className="whitespace-nowrap">
-                {trimmedTitle}
-                <Icon icon={ArrowRightIcon} className="ml-1" style={{ transform: 'translateY(0.2em)' }} />
-            </span>
-        );
-    }
-
-    return (
-        <>
-            {trimmedTitle.slice(0, lastSpaceIndex)}
-            <span className="whitespace-nowrap">
-                {trimmedTitle.slice(lastSpaceIndex)}
-                <Icon icon={ArrowRightIcon} className="ml-1" style={{ transform: 'translateY(0.2em)' }} />
-            </span>
-        </>
-    );
-};
 
 /**
  * Rendered once below the first agent run that originated from a
@@ -132,7 +109,10 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                                 style={{fontSize: '1rem', padding: '2px 0px'}}
                             >
                                 <span>
-                                    {titleWithTrailingArrow(title)}
+                                    {textWithTrailingNoWrap(
+                                        title,
+                                        <Icon icon={ArrowRightIcon} className="ml-1" style={{ transform: 'translateY(0.2em)' }} />,
+                                    )}
                                 </span>
                             </Button>
                         );

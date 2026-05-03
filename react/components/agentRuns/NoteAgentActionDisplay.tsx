@@ -40,6 +40,7 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { isLibraryTabAtom } from '../../atoms/ui';
 import { logger } from '../../../src/utils/logger';
 import Button from '../ui/Button';
+import { textWithTrailingNoWrap } from '../../utils/textWithTrailingNoWrap';
 
 interface NoteAgentActionRowProps {
     action: AgentAction;
@@ -232,13 +233,15 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
                             className={`${!inGroup ? 'ml-15' : ''} ${isHovered ? 'font-color-primary' : 'font-color-secondary'}`}
                             style={{ transition: 'color 0.15s ease' }}
                         >
-                            {title}
+                            {isApplied
+                                ? textWithTrailingNoWrap(
+                                    title,
+                                    <span className="font-color-secondary scale-10" style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer', marginLeft: '1px' }}>
+                                        <Icon icon={ArrowUpRightIcon} />
+                                    </span>,
+                                )
+                                : title}
                         </span>
-                        {isApplied && (
-                            <span className="font-color-secondary scale-10" style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer', marginLeft: '1px' }}>
-                                <Icon icon={ArrowUpRightIcon} />
-                            </span>
-                        )}
                     </div>
                 </div>
 
