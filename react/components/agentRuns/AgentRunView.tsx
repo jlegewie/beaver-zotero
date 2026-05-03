@@ -190,7 +190,11 @@ export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(functi
             )}
 
             {/* After a first-run follow-up run, offer a path back to the suggestion grid */}
-            {showBackToSuggestions && <BackToSuggestions onDismiss={handleDismissNextSteps} />}
+            {showBackToSuggestions &&
+                <div className="px-4 pt-3">
+                    <BackToSuggestions onDismiss={handleDismissNextSteps} />
+                </div>
+            }
 
             {/* Resuming failed request display */}
             {wasResumed && <RunResumeDisplay runId={run.id} />}

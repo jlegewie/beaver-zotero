@@ -11,8 +11,8 @@ import {
     renderFollowup,
 } from '../../../types/firstRunFollowups';
 import Button from '../../ui/Button';
-import { PlusSignIcon, ArrowRightIcon, ArrowLeftIcon, IdeaIcon, Icon } from '../../icons/icons';
-import IconButton from '../../ui/IconButton';
+import { ArrowRightIcon, Icon } from '../../icons/icons';
+import BackToSuggestions from './BackToSuggestions';
 
 
 interface NextStepsPanelProps {
@@ -138,41 +138,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                             </Button>
                         );
                     })}
-                    <div className="display-flex flex-col gap-1 items-start">
-                        <Button
-                            variant="ghost"
-                            icon={ArrowLeftIcon}
-                            className="mt-3 -mr-1"
-                            iconClassName="-mr-1"
-                            style={{fontSize: '1rem', paddingLeft: '0px'}}
-                            onClick={handleTryAnother}
-                        >
-                            Back to suggestions
-                        </Button>
-                        <div
-                            className="display-flex flex-row items-center gap-1 ml-1 text-start font-color-secondary"
-                            style={{fontSize: '0.875rem'}}
-                        >
-                            <Icon icon={IdeaIcon} size={10}/>
-                            <span>
-                                Start a new chat anytime with
-                            </span>
-                            <Icon icon={PlusSignIcon} size={10}/>
-                            <span>
-                                (top left) or with
-                            </span>
-                            <span
-                                style={{
-                                    background: 'var(--fill-quinary)',
-                                    padding: '1px 3px',
-                                    borderRadius: '3px',
-                                    fontSize: '0.8em',
-                                }}
-                            >
-                                {newChatShortcut}
-                            </span>
-                        </div>
-                    </div>
+                    <BackToSuggestions onDismiss={onDismiss} />
                 </div>
             </div>
         </div>
