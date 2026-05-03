@@ -21,15 +21,11 @@ export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
             title: 'Find related papers in my library',
             prompt: 'Find papers in my library related to this one. Briefly compare their findings and methodology. Add a section at the end of the note.',
         },
-        // {
-        //     id: 'extract_citations',
-        //     title: 'Extract key citations',
-        //     prompt: 'Extract the key 2-4 citations from this paper. For each, summarize how the paper uses it. Add a section at the end of the note that briefly covers key citations.',
-        // },
         {
-            id: 'review_citations',  // only included when DOI present
-            title: 'Review how this has been cited',
-            prompt: 'Use external search to find papers that cite this one. Group the citing papers by topic and surface the most influential among them. Add a section at the end of the note that briefly covers summarizes the results.',
+            id: 'find_recent_external',
+            title: 'Find related papers online',
+            prompt: 'Use external search to find recent papers on the topic of this paper. Prefer the last 5 years and highly-cited work. Return up to 8 results, each with title, first author, year, citation count, and a one-line note on how it relates to this paper. Mark any results I already have in my library. Add a section at the end of the note summarizing the most relevant ones.',
+            
         },
     ],
     literature_review: [
