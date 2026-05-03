@@ -139,7 +139,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     // token/soft-cap warning bars; HighToken takes precedence over SoftCap.
     const firstRunPanelVisible = showNextSteps || showBackToSuggestions;
     const showHighTokenWarningBar = shouldShowHighTokenWarning && !firstRunPanelVisible;
-    const showSoftCapWarningBar = shouldShowSoftCapWarning && !firstRunPanelVisible && !showHighTokenWarningBar;
+    const canRenderHighTokenWarningBar = showHighTokenWarningBar && lastRequestInputTokens !== null;
+    const showSoftCapWarningBar = shouldShowSoftCapWarning && !firstRunPanelVisible && !canRenderHighTokenWarningBar;
 
     // Slash menu hook
     const {
@@ -307,7 +308,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         >
             {/* Pending actions bar - shown when awaiting approval */}
             <PendingActionsBar />
-            {showHighTokenWarningBar && lastRequestInputTokens !== null && (
+            {canRenderHighTokenWarningBar && (
                 <HighTokenUsageWarningBar
                     onNewThread={(e) => {
                         e.preventDefault();
