@@ -240,6 +240,14 @@
     border-bottom: 1px solid var(--fill-quinary);
 }
 
+/* First-run "Next steps" panel above composer */
+[id^="beaver-pane-"] .next-steps-panel {
+    margin: -0.65rem -0.65rem 0.65rem -0.65rem;
+    border-radius: 5px 5px 0 0;
+    border-bottom: 1px solid var(--fill-quarternary);
+    /* background-color: var(--material-mix-quarternary); */
+}
+
 /* Credit info bar below composer */
 [id^="beaver-pane-"] .credit-info-bar {
     margin-top: 0.25rem;

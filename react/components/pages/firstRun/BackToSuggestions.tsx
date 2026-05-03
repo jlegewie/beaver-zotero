@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
 import { currentMessageContentAtom } from '../../../atoms/messageComposition';
-import { PlusSignIcon } from '../../icons/icons';
+import { Icon, IdeaIcon, PlusSignIcon } from '../../icons/icons';
 import ArrowLeftIcon from '../../icons/ArrowLeftIcon';
 import Button from '../../ui/Button';
 
@@ -39,42 +39,45 @@ const BackToSuggestions: React.FC<BackToSuggestionsProps> = ({ onDismiss }) => {
 
     const newChatShortcut = Zotero.isMac ? '⌘N' : 'Ctrl+N';
 
-    const handleBack = () => {
+    const handleTryAnother = () => {
         setReturnRequested(true);
         onDismiss();
     };
 
     return (
-        <div className="px-4 pt-3">
-            <div className="font-color-tertiary text-sm display-flex flex-col gap-1">
-                <Button
-                    variant="ghost-secondary"
-                    icon={ArrowLeftIcon}
-                    onClick={handleBack}
-                    className="-ml-2"
-                    style={{ fontSize: '1rem' }}
+        <div className="display-flex flex-col gap-1 items-start">
+            <Button
+                variant="ghost"
+                icon={ArrowLeftIcon}
+                className="-mr-1"
+                iconClassName="-mr-1"
+                style={{fontSize: '1rem', paddingLeft: '0px'}}
+                onClick={handleTryAnother}
+            >
+                Back to suggestions
+            </Button>
+            <div
+                className="display-flex flex-row items-center gap-1 ml-1 text-start font-color-secondary"
+                style={{fontSize: '0.875rem'}}
+            >
+                <Icon icon={IdeaIcon} size={10}/>
+                <span>
+                    Start a new chat anytime with
+                </span>
+                <Icon icon={PlusSignIcon} size={10}/>
+                <span>
+                    (top left) or with
+                </span>
+                <span
+                    style={{
+                        background: 'var(--fill-quinary)',
+                        padding: '1px 3px',
+                        borderRadius: '3px',
+                        fontSize: '0.8em',
+                    }}
                 >
-                    Back to suggestions
-                </Button>
-                <div className="ml-1">
-                    Tip: Start a new chat with{' '}
-                    <PlusSignIcon
-                        width={12}
-                        height={12}
-                        style={{ verticalAlign: 'middle', color: 'var(--fill-tertiary)' }}
-                    />
-                    {' '}(top left) or{' '}
-                    <span
-                        style={{
-                            background: 'var(--fill-quinary)',
-                            padding: '2px 4px',
-                            borderRadius: '3px',
-                            fontSize: '0.85em',
-                        }}
-                    >
-                        {newChatShortcut}
-                    </span>
-                </div>
+                    {newChatShortcut}
+                </span>
             </div>
         </div>
     );

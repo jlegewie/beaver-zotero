@@ -17,6 +17,7 @@ import { getPref, setPref } from '../../src/utils/prefs';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { isFirstRunVisibleAtom } from './firstRun';
 import { activeRunAtom, threadRunsAtom } from '../agents/atoms';
+import { isFirstRunOrigin } from '../agents/types';
 
 /**
  * Thread-scoped citation marker assignment.
@@ -220,17 +221,17 @@ export const citationDataListAtom = atom(
  * is processed. Persistent pref ensures it fires at most once.
  *
  * Suppressed without setting the pref while: (1) FirstRunPage is visible, or
- * (2) the active thread is a first-run thread (any run carries
- * `user_prompt.origin.kind === 'first_run_card'`). Avoids overlapping the
- * citation popup with the NextStepsPanel.
+ * (2) the active thread is a first-run thread (any run carries a first-run
+ * origin — `first_run_card` or `first_run_followup`). Avoids overlapping the
+ * citation popup with the NextStepsPanel / BackToSuggestions panels.
  */
 function maybeTriggerCitationTip(get: (...args: any[]) => any, set: (...args: any[]) => any) {
     if (get(isFirstRunVisibleAtom)) return;
     const activeRun = get(activeRunAtom);
     const threadRuns = get(threadRunsAtom);
     const isFirstRunThread =
-        activeRun?.user_prompt?.origin?.kind === 'first_run_card' ||
-        threadRuns.some((r: any) => r.user_prompt?.origin?.kind === 'first_run_card');
+        isFirstRunOrigin(activeRun?.user_prompt?.origin) ||
+        threadRuns.some((r: any) => isFirstRunOrigin(r.user_prompt?.origin));
     if (isFirstRunThread) return;
     if (getPref('onboardingCitationTipShown')) return;
     setPref('onboardingCitationTipShown', true);

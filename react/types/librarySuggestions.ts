@@ -108,6 +108,7 @@ export interface SuggestionCard {
     description_segments: DescriptionSegment[];
     prompt: string;
     attachments?: MessageAttachment[] | null;
+    topic_label?: string | null;
 }
 
 export interface LibrarySuggestionsResponse {

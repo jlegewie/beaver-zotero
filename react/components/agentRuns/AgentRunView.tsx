@@ -1,5 +1,5 @@
 import React, { forwardRef, useMemo, useState, useCallback } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue } from 'jotai';
 import { AgentRun, ModelResponse, ToolCallPart } from '../../agents/types';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
@@ -9,11 +9,9 @@ import { AgentActionsReview } from './AgentActionsReview';
 import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
-import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { getToolCallStatus, toolResultsMapAtom, resumedRunIdsAtom } from '../../agents/atoms';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
-import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -102,25 +100,6 @@ export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(functi
     const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
     const handleDismissSuggestions = useCallback(() => setSuggestionsDismissed(true), []);
 
-    // First-run "Next steps" panel — driven by persisted origin on the run,
-    // with session-only dismissal tracked in a Set atom.
-    const nextStepsDismissedRunIds = useAtomValue(firstRunNextStepsDismissedAtom);
-    const setNextStepsDismissedRunIds = useSetAtom(firstRunNextStepsDismissedAtom);
-    const handleDismissNextSteps = useCallback(
-        () => setNextStepsDismissedRunIds((prev) => {
-            if (prev.has(run.id)) return prev;
-            const next = new Set(prev);
-            next.add(run.id);
-            return next;
-        }),
-        [setNextStepsDismissedRunIds, run.id],
-    );
-    const showNextSteps =
-        isLastRun &&
-        run.user_prompt.origin?.kind === 'first_run_card' &&
-        run.status === 'completed' &&
-        !nextStepsDismissedRunIds.has(run.id);
-
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && (run.status === 'completed' || run.status === 'error' || run.status === 'canceled');
 
@@ -173,9 +152,6 @@ export const AgentRunView = forwardRef<HTMLDivElement, AgentRunViewProps>(functi
                     ))}
                 </div>
             )}
-
-            {/* First-run next steps (only for the run that originated from a first-run card) */}
-            {showNextSteps && <NextStepsPanel onDismiss={handleDismissNextSteps} />}
 
             {/* Resuming failed request display */}
             {wasResumed && <RunResumeDisplay runId={run.id} />}
