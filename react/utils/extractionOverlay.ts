@@ -23,15 +23,26 @@ import {
     lineBBoxToRect,
     MarginFilter,
     DEFAULT_MARGINS,
+    DEFAULT_MARGIN_ZONE,
     StyleAnalyzer,
     Rect,
     RawPageData,
     RawPageDataDetailed,
     SentenceBBox,
 } from "../../src/services/pdf";
-import type { SentenceSplitter } from "../../src/services/pdf";
+import type {
+    SentenceSplitter,
+    MarginPosition,
+    MarginRemovalResult,
+} from "../../src/services/pdf";
 
-export type OverlayLevel = "columns" | "lines" | "paragraphs" | "sentences";
+export type OverlayLevel =
+    | "columns"
+    | "lines"
+    | "paragraphs"
+    | "sentences"
+    | "raw-lines"
+    | "margins";
 
 // Color palette — kept in one place so the visualizer and the canvas
 // overlay agree on what each level looks like.
@@ -46,6 +57,21 @@ export const OVERLAY_COLORS = {
     // Fallback sentences (unmapped / invariant violation / empty split)
     // render in a muted color so they stand out against precise ones.
     sentenceDegraded: "#8e8e93",
+    // Raw-lines view: one shade per margin zone so an agent can see at a
+    // glance which lines the simple margin filter would treat as marginalia
+    // vs. content. Inside-content lines reuse the line color.
+    rawLineInside: "#ff9500",
+    rawLineMarginTop: "#5ac8fa",
+    rawLineMarginBottom: "#5ac8fa",
+    rawLineMarginLeft: "#ff3b30",
+    rawLineMarginRight: "#ff3b30",
+    // Margins view: zones drawn very faintly; lines colored by removal
+    // outcome. Page-numbers gray (matches degraded), repeats purple,
+    // marginalia kept-but-not-removed in yellow as a "watch this" cue.
+    marginZone: "#cccccc",
+    marginCandidatePageNumber: "#8e8e93",
+    marginCandidateRepeat: "#af52de",
+    marginKeptInZone: "#ffcc00",
 } as const;
 
 /**
@@ -70,6 +96,12 @@ export interface OverlayRect {
     group: number;
     /** True for fallback / degraded fallbacks (sentences only today). */
     degraded?: boolean;
+    /**
+     * Margin-zone classification (raw-lines / margins overlays only).
+     * `null` means the bbox overlaps the content area; otherwise the
+     * bbox is fully inside that margin zone under the chosen thresholds.
+     */
+    marginPosition?: MarginPosition | null;
 }
 
 export interface OverlayResult {
@@ -294,4 +326,242 @@ function computeDegradedSentenceIndices(
         flatIdx += pws.sentences.length;
     }
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// Debug-oriented collectors
+// ---------------------------------------------------------------------------
+
+/**
+ * Raw-lines overlay: every line MuPDF emitted, *before* margin filtering,
+ * color-coded by margin-zone classification (top/bottom/left/right/inside).
+ */
+export function getRawLinesOverlay(rawPage: RawPageData): OverlayResult {
+    const rects: OverlayRect[] = [];
+    const counts = {
+        lines: 0,
+        inContent: 0,
+        inMarginTop: 0,
+        inMarginBottom: 0,
+        inMarginLeft: 0,
+        inMarginRight: 0,
+    };
+
+    for (const block of rawPage.blocks) {
+        if (block.type !== "text" || !block.lines) continue;
+        for (const line of block.lines) {
+            const position = MarginFilter.getMarginPosition(
+                line.bbox,
+                rawPage.width,
+                rawPage.height,
+                DEFAULT_MARGINS,
+            );
+            counts.lines++;
+            let color: string;
+            switch (position) {
+                case "top":
+                    color = OVERLAY_COLORS.rawLineMarginTop;
+                    counts.inMarginTop++;
+                    break;
+                case "bottom":
+                    color = OVERLAY_COLORS.rawLineMarginBottom;
+                    counts.inMarginBottom++;
+                    break;
+                case "left":
+                    color = OVERLAY_COLORS.rawLineMarginLeft;
+                    counts.inMarginLeft++;
+                    break;
+                case "right":
+                    color = OVERLAY_COLORS.rawLineMarginRight;
+                    counts.inMarginRight++;
+                    break;
+                default:
+                    color = OVERLAY_COLORS.rawLineInside;
+                    counts.inContent++;
+            }
+            rects.push({
+                rect: {
+                    x: line.bbox.x,
+                    y: line.bbox.y,
+                    w: line.bbox.w,
+                    h: line.bbox.h,
+                },
+                color,
+                label: `L${counts.lines}`,
+                group: counts.lines - 1,
+                marginPosition: position,
+            });
+        }
+    }
+
+    return {
+        level: "raw-lines",
+        pageIndex: rawPage.pageIndex,
+        pageWidth: rawPage.width,
+        pageHeight: rawPage.height,
+        groupCount: rects.length,
+        rects,
+        stats: counts,
+    };
+}
+
+/**
+ * Margins overlay: the four simple-margin zones drawn as faint outlines,
+ * plus lines colored by smart-removal outcome (cross-page analysis):
+ *  - page-number candidates → gray
+ *  - repeating-text candidates → purple
+ *  - lines in margin zone but not flagged for removal → yellow ("watch this")
+ */
+export function getMarginsOverlay(
+    pages: RawPageData[],
+    pageIndex: number,
+): OverlayResult {
+    const targetPage = pages.find((p) => p.pageIndex === pageIndex);
+    if (!targetPage) {
+        throw new Error(
+            `getMarginsOverlay: page ${pageIndex} not present in supplied pages`,
+        );
+    }
+
+    const analysis = MarginFilter.collectMarginElements(
+        pages,
+        DEFAULT_MARGIN_ZONE,
+    );
+    const removal: MarginRemovalResult = MarginFilter.identifyElementsToRemove(
+        analysis,
+        3,
+        true,
+    );
+
+    const rects: OverlayRect[] = [];
+    let groupIdx = 0;
+
+    // 1. Margin zones — drawn first so lines render on top
+    const buildZoneRects = (
+        margins: typeof DEFAULT_MARGIN_ZONE,
+    ): Array<{ pos: MarginPosition; rect: Rect }> => [
+        {
+            pos: "top",
+            rect: { x: 0, y: 0, w: targetPage.width, h: margins.top },
+        },
+        {
+            pos: "bottom",
+            rect: {
+                x: 0,
+                y: targetPage.height - margins.bottom,
+                w: targetPage.width,
+                h: margins.bottom,
+            },
+        },
+        {
+            pos: "left",
+            rect: { x: 0, y: 0, w: margins.left, h: targetPage.height },
+        },
+        {
+            pos: "right",
+            rect: {
+                x: targetPage.width - margins.right,
+                y: 0,
+                w: margins.right,
+                h: targetPage.height,
+            },
+        },
+    ];
+    for (const z of buildZoneRects(DEFAULT_MARGIN_ZONE)) {
+        rects.push({
+            rect: z.rect,
+            color: OVERLAY_COLORS.marginZone,
+            label: `M-${z.pos}-zone`,
+            group: groupIdx++,
+        });
+    }
+    for (const z of buildZoneRects(DEFAULT_MARGINS)) {
+        rects.push({
+            rect: z.rect,
+            color: OVERLAY_COLORS.marginZone,
+            label: `M-${z.pos}-simple`,
+            group: groupIdx++,
+        });
+    }
+
+    // 2. Lines on this page that landed in a smart-margin zone (wider than
+    //    the simple filter) — color by smart-removal outcome.
+    let pageNumberCount = 0;
+    let repeatCount = 0;
+    let keptInZoneCount = 0;
+    const pageRemovals = removal.removalsByPage.get(pageIndex) ?? new Set();
+
+    // Build a lookup of which candidates apply to this page → reason, so
+    // we can color page-number vs repeat differently. Candidates carry
+    // pageIndices (so we can check membership per-line via normalized text).
+    const reasonByText = new Map<string, "page_number" | "repeat">();
+    for (const c of removal.candidates) {
+        if (c.pageIndices.includes(pageIndex)) {
+            reasonByText.set(c.text, c.reason);
+        }
+    }
+
+    for (const block of targetPage.blocks) {
+        if (block.type !== "text" || !block.lines) continue;
+        for (const line of block.lines) {
+            const trimmed = (line.text || "").trim();
+            if (!trimmed) continue;
+            const zonePosition = MarginFilter.getMarginPosition(
+                line.bbox,
+                targetPage.width,
+                targetPage.height,
+                DEFAULT_MARGIN_ZONE,
+            );
+            if (!zonePosition) continue;
+
+            const normalized = trimmed.toLowerCase();
+            const reason = reasonByText.get(normalized);
+            const willBeRemoved = pageRemovals.has(normalized);
+
+            let color: string;
+            let label: string;
+            if (reason === "page_number") {
+                color = OVERLAY_COLORS.marginCandidatePageNumber;
+                label = `PN`;
+                pageNumberCount++;
+            } else if (reason === "repeat" || willBeRemoved) {
+                color = OVERLAY_COLORS.marginCandidateRepeat;
+                label = `R`;
+                repeatCount++;
+            } else {
+                color = OVERLAY_COLORS.marginKeptInZone;
+                label = `?`;
+                keptInZoneCount++;
+            }
+
+            rects.push({
+                rect: {
+                    x: line.bbox.x,
+                    y: line.bbox.y,
+                    w: line.bbox.w,
+                    h: line.bbox.h,
+                },
+                color,
+                label,
+                group: groupIdx++,
+                marginPosition: zonePosition,
+            });
+        }
+    }
+
+    return {
+        level: "margins",
+        pageIndex: targetPage.pageIndex,
+        pageWidth: targetPage.width,
+        pageHeight: targetPage.height,
+        groupCount: rects.length,
+        rects,
+        stats: {
+            marginCandidates: removal.candidates.length,
+            pageNumbers: pageNumberCount,
+            repeats: repeatCount,
+            keptInMargin: keptInZoneCount,
+            analysisPagesScanned: pages.length,
+        },
+    };
 }

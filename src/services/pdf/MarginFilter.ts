@@ -159,6 +159,22 @@ export class MarginFilter {
     }
 
     /**
+     * Classify a bbox by which margin zone it falls *entirely* within, or
+     * `null` if it overlaps the content area.
+     *
+     * Public surface for debug/agent endpoints — same logic the simple
+     * filter uses, exposed without forcing callers to instantiate a Line.
+     */
+    static getMarginPosition(
+        bbox: RawBBox,
+        pageWidth: number,
+        pageHeight: number,
+        margins: MarginSettings
+    ): MarginPosition | null {
+        return getMarginPosition(bbox, pageWidth, pageHeight, margins);
+    }
+
+    /**
      * Simple filter: Filter a page's lines to exclude those entirely in margins.
      */
     static filterPageByMargins(

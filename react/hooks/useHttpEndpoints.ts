@@ -45,6 +45,8 @@ import {
     getLineOverlay,
     getParagraphOverlay,
     getSentenceOverlay,
+    getRawLinesOverlay,
+    getMarginsOverlay,
 } from '../utils/extractionOverlay';
 import { drawBBoxOverlayPNG } from '../utils/canvasOverlay';
 import type { AgentAction } from '../agents/agentActions';
@@ -151,8 +153,10 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-search-scored',
     '/beaver/test/pdf-sentence-bboxes',
     '/beaver/test/pdf-render-page',
-    // Bbox-overlay debugging (sentences/lines/paragraphs/columns)
+    // Bbox-overlay debugging (sentences/lines/paragraphs/columns/raw-lines/margins)
     '/beaver/test/pdf-render-overlay',
+    // Per-page pipeline trace (every stage, JSON-only)
+    '/beaver/test/pdf-pipeline-trace',
 ] as const;
 
 /**
@@ -1574,9 +1578,14 @@ async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
  *     page_index: number,
- *     level: "columns" | "lines" | "paragraphs" | "sentences",
- *     dpi?: number,                // default 144
- *     language?: string }          // sentences only; falls back to item lang
+ *     level: "columns" | "lines" | "paragraphs" | "sentences"
+ *          | "raw-lines" | "margins",
+ *     dpi?: number,                       // default 144
+ *     language?: string,                  // sentences only; falls back to item lang
+ *     analysis_page_window?: number }     // margins only: ±N pages around
+ *                                         // page_index for cross-page repeat /
+ *                                         // page-number detection. 0 (default)
+ *                                         // = whole document. Capped at 50.
  *
  * Response: `{ ok: true, image_base64, width, height, page_width,
  *   page_height, group_count, stats, rects }`. `rects` carries the
@@ -1606,13 +1615,16 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
         level !== 'columns' &&
         level !== 'lines' &&
         level !== 'paragraphs' &&
-        level !== 'sentences'
+        level !== 'sentences' &&
+        level !== 'raw-lines' &&
+        level !== 'margins'
     ) {
         return {
             ok: false,
             error: {
                 name: 'Error',
-                message: 'level must be one of: columns | lines | paragraphs | sentences',
+                message:
+                    'level must be one of: columns | lines | paragraphs | sentences | raw-lines | margins',
             },
         };
     }
@@ -1622,15 +1634,16 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
 
     // Level dispatch:
     //  - sentences: needs the per-character detailed walk.
-    //  - columns / lines / paragraphs: use the JSON-pass `RawPageData`.
-    //    The detailed walker zeroes out `RawLine.font` (see
-    //    worker/docHelpers.ts), and `getParagraphOverlay` feeds those font
-    //    fields through `StyleAnalyzer` to separate body text from
-    //    headers — passing the detailed page would silently mis-classify
-    //    headers and produce overlays that disagree with the live
-    //    visualizer. Lines/columns don't read `font` today, but we keep
-    //    the same input source for all non-sentence levels so the visual
-    //    parity guarantee is uniform.
+    //  - margins: needs *multiple* pages (cross-page repeating-text /
+    //    page-number detection). Window controlled by analysis_page_window
+    //    (default = whole document, capped at 50).
+    //  - columns / lines / paragraphs / raw-lines: the JSON-pass
+    //    `RawPageData` for the single requested page. The detailed walker
+    //    zeroes out `RawLine.font` (see worker/docHelpers.ts), and
+    //    `getParagraphOverlay` feeds those font fields through
+    //    `StyleAnalyzer` to separate body text from headers — passing the
+    //    detailed page would silently mis-classify headers and produce
+    //    overlays that disagree with the live visualizer.
     let overlay;
     if (level === 'sentences') {
         const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
@@ -1652,6 +1665,49 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             normalizeLanguageCode(language),
         );
         overlay = getSentenceOverlay(detailed, splitter);
+    } else if (level === 'margins') {
+        // Cross-page analysis
+        const totalPages = await client.getPageCount(pdfData);
+        if (pageIndex >= totalPages) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
+            };
+        }
+        const window = Number(request?.analysis_page_window);
+        let analysisIndices: number[];
+        if (Number.isInteger(window) && window > 0) {
+            const lo = Math.max(0, pageIndex - window);
+            const hi = Math.min(totalPages - 1, pageIndex + window);
+            analysisIndices = [];
+            for (let i = lo; i <= hi; i++) analysisIndices.push(i);
+        } else {
+            analysisIndices = [];
+            for (let i = 0; i < totalPages; i++) analysisIndices.push(i);
+        }
+        if (analysisIndices.length > 50) {
+            // Center the cap on the requested page.
+            const half = 25;
+            const lo = Math.max(0, pageIndex - half);
+            const hi = Math.min(totalPages - 1, lo + 49);
+            analysisIndices = [];
+            for (let i = lo; i <= hi; i++) analysisIndices.push(i);
+        }
+        // Make sure the requested page is in the set (edge cases at doc start/end).
+        if (!analysisIndices.includes(pageIndex)) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
+            };
+        }
+        const rawDoc = await client.extractRawPages(pdfData, analysisIndices);
+        if (!rawDoc.pages.find((p) => p.pageIndex === pageIndex)) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
+            };
+        }
+        overlay = getMarginsOverlay(rawDoc.pages, pageIndex);
     } else {
         const rawDoc = await client.extractRawPages(pdfData, [pageIndex]);
         const rawPage = rawDoc.pages[0];
@@ -1663,6 +1719,7 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
         }
         if (level === 'columns') overlay = getColumnOverlay(rawPage);
         else if (level === 'lines') overlay = getLineOverlay(rawPage);
+        else if (level === 'raw-lines') overlay = getRawLinesOverlay(rawPage);
         else overlay = getParagraphOverlay(rawPage);
     }
 
@@ -1696,6 +1753,481 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
         rects: overlay.rects,
         image_base64: uint8ToBase64ForTest(overlayed),
         image_byte_length: overlayed.byteLength,
+    };
+}
+
+/**
+ * Dev-only pipeline-trace endpoint
+ *
+ * Request body:
+ *   { library_id, zotero_key | raw_bytes_base64,
+ *     page_index: number,
+ *     language?: string,                 // for sentence splitter
+ *     analysis_page_window?: number,     // ±N pages for smart removal;
+ *                                        // 0 (default) = whole doc, capped 50
+ *     include_chars?: boolean }          // include per-char quads on raw_lines
+ *
+ * Response shape (selected fields):
+ *   { ok: true, page_index, page_width, page_height,
+ *     raw_lines: [{ id, text, bbox, font, marginPosition, marginFilter,
+ *                   role, finalParagraphId, chars? }],
+ *     smart_removal: { analysisRange, candidates },
+ *     style_profile: { primaryBodyStyle, bodyStyles, topStyles },
+ *     columns: [{ idx, rect, lineIds }],
+ *     lines_dropped_by_columns: [...],
+ *     paragraphs: [{ id, type, columnIdx, lineIds, text, bbox, role }],
+ *     sentences: [{ idx, text, paragraphId, bboxes, degraded }],
+ *     sentence_stats }
+ */
+async function handleTestPdfPipelineTraceHttpRequest(request: any) {
+    const { getMuPDFWorkerClient } = await import(
+        '../../src/services/pdf/MuPDFWorkerClient'
+    );
+    const {
+        MarginFilter,
+        StyleAnalyzer,
+        detectColumns,
+        detectLinesOnPage,
+        detectParagraphs,
+        extractPageSentenceBBoxes,
+        DEFAULT_MARGINS,
+        DEFAULT_MARGIN_ZONE,
+    } = await import('../../src/services/pdf');
+    const { getSentenceSplitterWithFallback, normalizeLanguageCode } = await import(
+        '../../src/services/pdf/SentencexSplitter'
+    );
+
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    const { pdfData } = loaded;
+
+    const pageIndex = Number(request?.page_index);
+    if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+        return {
+            ok: false,
+            error: { name: 'Error', message: 'page_index (non-negative integer) is required' },
+        };
+    }
+    const includeChars = request?.include_chars === true;
+
+    const client = getMuPDFWorkerClient();
+
+    // ------------------------------------------------------------------
+    // Decide analysis window for cross-page smart removal
+    // ------------------------------------------------------------------
+    const totalPages = await client.getPageCount(pdfData);
+    if (pageIndex >= totalPages) {
+        return {
+            ok: false,
+            error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
+        };
+    }
+    const window = Number(request?.analysis_page_window);
+    let analysisIndices: number[];
+    if (Number.isInteger(window) && window > 0) {
+        const lo = Math.max(0, pageIndex - window);
+        const hi = Math.min(totalPages - 1, pageIndex + window);
+        analysisIndices = [];
+        for (let i = lo; i <= hi; i++) analysisIndices.push(i);
+    } else {
+        analysisIndices = [];
+        for (let i = 0; i < totalPages; i++) analysisIndices.push(i);
+    }
+    if (analysisIndices.length > 50) {
+        const half = 25;
+        const lo = Math.max(0, pageIndex - half);
+        const hi = Math.min(totalPages - 1, lo + 49);
+        analysisIndices = [];
+        for (let i = lo; i <= hi; i++) analysisIndices.push(i);
+    }
+    if (analysisIndices.length === 0) {
+        return {
+            ok: false,
+            error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
+        };
+    }
+
+    // ------------------------------------------------------------------
+    // Pull the analysis range as plain pages and the target page detailed
+    // (the latter only used for sentence-level mapping).
+    // ------------------------------------------------------------------
+    const rawDoc = await client.extractRawPages(pdfData, analysisIndices);
+    const targetPage = rawDoc.pages.find((p) => p.pageIndex === pageIndex);
+    if (!targetPage) {
+        return {
+            ok: false,
+            error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
+        };
+    }
+
+    // ------------------------------------------------------------------
+    // Stage 1: smart-removal analysis (cross-page).
+    // ------------------------------------------------------------------
+    const marginAnalysis = MarginFilter.collectMarginElements(
+        rawDoc.pages,
+        DEFAULT_MARGIN_ZONE,
+    );
+    const smartRemoval = MarginFilter.identifyElementsToRemove(
+        marginAnalysis,
+        3,
+        true,
+    );
+    const reasonByText = new Map<string, 'page_number' | 'repeat'>();
+    for (const c of smartRemoval.candidates) {
+        reasonByText.set(c.text, c.reason);
+    }
+    const targetPageRemovals =
+        smartRemoval.removalsByPage.get(pageIndex) ?? new Set<string>();
+
+    // ------------------------------------------------------------------
+    // Stage 2: enumerate raw lines on the target page with stable IDs and
+    // margin-filter classification. This is the spine that everything
+    // else hangs off — paragraphs reference these IDs.
+    // ------------------------------------------------------------------
+    type RawLineEntry = {
+        id: string;
+        text: string;
+        bbox: { x: number; y: number; w: number; h: number };
+        font: { name: string; family: string; size: number; weight: string; style: string };
+        marginPosition: 'top' | 'bottom' | 'left' | 'right' | null;
+        marginFilter: {
+            keptBySimple: boolean;
+            inSmartZone: boolean;
+            smartRemoval: 'page_number' | 'repeat' | null;
+            finalKept: boolean;
+        };
+        role: 'heading' | 'body' | 'caption' | 'footnote';
+        finalParagraphId: string | null;
+        chars?: Array<{ c: string; bbox: { x: number; y: number; w: number; h: number } }>;
+    };
+
+    const rawLineEntries: RawLineEntry[] = [];
+    // Map raw RawBBox object → entry index, for cross-stage linking via
+    // bbox object identity. The line detector preserves the same RawBBox
+    // reference (see ColumnDetector.extractFilteredBlocks → DetectedSpan
+    // construction), so this is safe within a single pipeline run.
+    const bboxToEntryIdx = new Map<object, number>();
+
+    let rawIdx = 0;
+    for (const block of targetPage.blocks) {
+        if (block.type !== 'text' || !block.lines) continue;
+        for (const line of block.lines) {
+            const id = `RL${rawIdx++}`;
+            const trimmed = (line.text || '').trim();
+            const normalized = trimmed.toLowerCase();
+            const marginPosition = MarginFilter.getMarginPosition(
+                line.bbox,
+                targetPage.width,
+                targetPage.height,
+                DEFAULT_MARGINS,
+            );
+            const inSmartZone =
+                MarginFilter.getMarginPosition(
+                    line.bbox,
+                    targetPage.width,
+                    targetPage.height,
+                    DEFAULT_MARGIN_ZONE,
+                ) !== null;
+            const keptBySimple = MarginFilter.isInsideContentArea(
+                line,
+                targetPage.width,
+                targetPage.height,
+                DEFAULT_MARGINS,
+            );
+            const smartReason = inSmartZone
+                ? targetPageRemovals.has(normalized)
+                    ? reasonByText.get(normalized) ?? 'repeat'
+                    : null
+                : null;
+            const finalKept = keptBySimple && smartReason === null;
+
+            const entry: RawLineEntry = {
+                id,
+                text: line.text,
+                bbox: { x: line.bbox.x, y: line.bbox.y, w: line.bbox.w, h: line.bbox.h },
+                font: {
+                    name: line.font.name,
+                    family: line.font.family,
+                    size: line.font.size,
+                    weight: line.font.weight,
+                    style: line.font.style,
+                },
+                marginPosition,
+                marginFilter: {
+                    keptBySimple,
+                    inSmartZone,
+                    smartRemoval: smartReason,
+                    finalKept,
+                },
+                role: 'body', // filled in once style profile exists
+                finalParagraphId: null,
+            };
+            bboxToEntryIdx.set(line.bbox, rawLineEntries.length);
+            rawLineEntries.push(entry);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Stage 3: style profile + per-line role classification.
+    // ------------------------------------------------------------------
+    const styleProfile = new StyleAnalyzer().analyze(
+        [targetPage],
+        4,
+        0.15,
+        0,
+    );
+    {
+        let i = 0;
+        for (const block of targetPage.blocks) {
+            if (block.type !== 'text' || !block.lines) continue;
+            for (const line of block.lines) {
+                rawLineEntries[i].role = StyleAnalyzer.classifyRole(line, styleProfile);
+                i++;
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Stage 4: columns, lines, paragraphs.
+    // ------------------------------------------------------------------
+    const filtered = MarginFilter.filterPageWithSmartRemoval(
+        targetPage,
+        DEFAULT_MARGINS,
+        DEFAULT_MARGIN_ZONE,
+        smartRemoval,
+    );
+    const columnResult = detectColumns(filtered);
+
+    // Stage 5: lines per column.
+    const lineResult =
+        columnResult.columns.length > 0
+            ? detectLinesOnPage(filtered, columnResult.columns)
+            : { columnResults: [], allLines: [], pageIndex, width: targetPage.width, height: targetPage.height };
+
+    // Map columnIndex → array of raw line IDs that contributed.
+    const columnLineIds: string[][] = columnResult.columns.map(() => []);
+    const linesUsed = new Set<number>();
+    for (const colResult of lineResult.columnResults) {
+        const colIdx = colResult.columnIndex;
+        for (const pageLine of colResult.lines) {
+            for (const span of pageLine.spans) {
+                const idx = bboxToEntryIdx.get(span.bbox);
+                if (idx !== undefined) {
+                    if (!columnLineIds[colIdx].includes(rawLineEntries[idx].id)) {
+                        columnLineIds[colIdx].push(rawLineEntries[idx].id);
+                    }
+                    linesUsed.add(idx);
+                }
+            }
+        }
+    }
+    // Lines that survived margin filtering (simple + smart) but weren't
+    // claimed by any column — useful when an agent wonders "why didn't
+    // this body line make it into a paragraph?"
+    const linesDroppedByColumns: string[] = [];
+    rawLineEntries.forEach((e, i) => {
+        if (e.marginFilter.finalKept && !linesUsed.has(i)) {
+            linesDroppedByColumns.push(e.id);
+        }
+    });
+
+    // ------------------------------------------------------------------
+    // Stage 6: paragraphs (with itemLines for raw-line linkage).
+    // Uses the real-font JSON-pass `lineResult`, so role / header
+    // detection works correctly.
+    // ------------------------------------------------------------------
+    const paragraphResult =
+        lineResult.allLines.length > 0
+            ? detectParagraphs(
+                  lineResult,
+                  styleProfile.bodyStyles,
+                  {},
+                  { paragraph: 0, header: 0 },
+                  { trackItemLines: true },
+              )
+            : { items: [], itemLines: [], paragraphCount: 0, headerCount: 0, pageContent: '', pageIndex, width: targetPage.width, height: targetPage.height };
+
+    const paragraphsOut = paragraphResult.items.map((item, i) => {
+        const lineIds: string[] = [];
+        const constituentLines = paragraphResult.itemLines?.[i] ?? [];
+        for (const pageLine of constituentLines) {
+            for (const span of pageLine.spans) {
+                const idx = bboxToEntryIdx.get(span.bbox);
+                if (idx !== undefined) {
+                    if (!lineIds.includes(rawLineEntries[idx].id)) {
+                        lineIds.push(rawLineEntries[idx].id);
+                    }
+                    rawLineEntries[idx].finalParagraphId = item.id;
+                }
+            }
+        }
+        return {
+            id: item.id,
+            type: item.type,
+            columnIdx: item.columnIndex,
+            lineIds,
+            text: item.text,
+            bbox: {
+                l: item.bbox.l,
+                t: item.bbox.t,
+                r: item.bbox.r,
+                b: item.bbox.b,
+                width: item.bbox.width,
+                height: item.bbox.height,
+            },
+        };
+    });
+
+    // ------------------------------------------------------------------
+    // Stage 7: sentences (paragraph-scoped). Needs the detailed walk.
+    // ------------------------------------------------------------------
+    let language: string | undefined =
+        typeof request?.language === 'string' ? request.language : undefined;
+    if (!language && request?.library_id != null && request?.zotero_key != null) {
+        try {
+            const { getItemLanguage } = await import('../../src/utils/zoteroUtils');
+            const raw = await getItemLanguage(request.library_id, request.zotero_key);
+            if (raw) language = raw;
+        } catch {
+            // Best effort.
+        }
+    }
+    const splitter = await getSentenceSplitterWithFallback(
+        normalizeLanguageCode(language),
+    );
+    // Detailed walk now (only the sentence-mapping step needs it)
+    const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
+    // Always prefer the precomputed (filtered) paragraph result when `itemLines` is set, even if `items` is empty
+    const sentenceResult = paragraphResult.itemLines
+        ? extractPageSentenceBBoxes(detailed, {
+              splitter,
+              precomputed: { paragraphResult },
+          })
+        : extractPageSentenceBBoxes(detailed, { splitter });
+
+    // Mark which paragraphs degraded so we can flag fallback sentences.
+    const degradedItemIndices = new Set(
+        sentenceResult.degradationNotes.map((n) => n.itemIndex),
+    );
+    const sentencesOut: Array<{
+        idx: number;
+        text: string;
+        paragraphId: string | null;
+        bboxes: Array<{ x: number; y: number; w: number; h: number }>;
+        degraded: boolean;
+    }> = [];
+    let flatSentenceIdx = 0;
+    sentenceResult.paragraphs.forEach((pws, paragraphArrayIdx) => {
+        const isDegradedItem = degradedItemIndices.has(paragraphArrayIdx);
+        for (const sentence of pws.sentences) {
+            const isFallback =
+                isDegradedItem &&
+                pws.sentences.length === 1 &&
+                pws.sentences[0].text === pws.item.text;
+            sentencesOut.push({
+                idx: flatSentenceIdx++,
+                text: sentence.text,
+                paragraphId: pws.item.id ?? null,
+                bboxes: sentence.bboxes.map((b) => ({
+                    x: b.x,
+                    y: b.y,
+                    w: b.w,
+                    h: b.h,
+                })),
+                degraded: isFallback,
+            });
+        }
+    });
+
+    // ------------------------------------------------------------------
+    // Optionally include per-character quads on raw_lines.
+    // Bridge by 3-decimal-rounded bbox key
+    // ------------------------------------------------------------------
+    if (includeChars) {
+        const detailedByBboxKey = new Map<string, typeof detailed.blocks[0]['lines'] extends (infer L)[] | undefined ? L : never>();
+        const keyOf = (b: { x: number; y: number; w: number; h: number }) =>
+            `${b.x.toFixed(3)}|${b.y.toFixed(3)}|${b.w.toFixed(3)}|${b.h.toFixed(3)}`;
+        for (const block of detailed.blocks) {
+            if (block.type !== 'text' || !block.lines) continue;
+            for (const line of block.lines) {
+                detailedByBboxKey.set(keyOf(line.bbox), line);
+            }
+        }
+        for (const entry of rawLineEntries) {
+            const detailedLine = detailedByBboxKey.get(keyOf(entry.bbox));
+            if (detailedLine && detailedLine.chars) {
+                entry.chars = detailedLine.chars.map((ch) => ({
+                    c: ch.c,
+                    bbox: { x: ch.bbox.x, y: ch.bbox.y, w: ch.bbox.w, h: ch.bbox.h },
+                }));
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Build the response.
+    // ------------------------------------------------------------------
+    // Top styles for the snapshot — Maps don't survive JSON, so flatten.
+    const topStyles = Array.from(styleProfile.styleCounts.values())
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10)
+        .map((entry) => ({
+            count: entry.count,
+            style: entry.style,
+            isBody: styleProfile.bodyStyles.some(
+                (s) =>
+                    s.size === entry.style.size &&
+                    s.font === entry.style.font &&
+                    s.bold === entry.style.bold &&
+                    s.italic === entry.style.italic,
+            ),
+        }));
+
+    return {
+        ok: true,
+        page_index: pageIndex,
+        page_width: targetPage.width,
+        page_height: targetPage.height,
+        page_label: targetPage.label,
+        raw_lines: rawLineEntries,
+        smart_removal: {
+            analysisRange: [
+                analysisIndices[0],
+                analysisIndices[analysisIndices.length - 1],
+            ],
+            analysisPagesScanned: analysisIndices.length,
+            candidates: smartRemoval.candidates.map((c) => ({
+                text: c.text,
+                originalText: c.originalText,
+                reason: c.reason,
+                position: c.position,
+                pageIndices: c.pageIndices,
+            })),
+        },
+        style_profile: {
+            primaryBodyStyle: styleProfile.primaryBodyStyle,
+            bodyStyles: styleProfile.bodyStyles,
+            topStyles,
+        },
+        columns: columnResult.columns.map((rect, i) => ({
+            idx: i,
+            rect,
+            lineIds: columnLineIds[i],
+        })),
+        column_detection: {
+            isBroken: columnResult.isBroken,
+            columnCount: columnResult.columnCount,
+        },
+        lines_dropped_by_columns: linesDroppedByColumns,
+        paragraphs: paragraphsOut,
+        sentences: sentencesOut,
+        sentence_stats: {
+            sentences: sentenceResult.sentences.length,
+            paragraphs: sentenceResult.paragraphs.length,
+            degradedParagraphs: sentenceResult.degradedParagraphs,
+            unmappedParagraphs: sentenceResult.unmappedParagraphs,
+            degradationNotes: sentenceResult.degradationNotes,
+        },
     };
 }
 
@@ -1896,10 +2428,17 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/pdf-render-page'] =
             createEndpoint(handleTestPdfRenderPageHttpRequest);
 
-        // Bbox overlay endpoint — paints columns/lines/paragraphs/sentences
-        // on a rendered page PNG for headless agent debugging.
+        // Bbox overlay endpoint — paints columns/lines/paragraphs/sentences/
+        // raw-lines/margins on a rendered page PNG for headless agent
+        // debugging.
         Zotero.Server.Endpoints['/beaver/test/pdf-render-overlay'] =
             createEndpoint(handleTestPdfRenderOverlayHttpRequest);
+
+        // Per-page pipeline trace — emits every stage of the extraction
+        // pipeline as JSON with cross-stage IDs, so an agent can trace
+        // one piece of text from raw line through paragraphs to sentences.
+        Zotero.Server.Endpoints['/beaver/test/pdf-pipeline-trace'] =
+            createEndpoint(handleTestPdfPipelineTraceHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
