@@ -359,11 +359,38 @@ export async function pdfSearchScored(
     });
 }
 
+/**
+ * Precise response shape for `/beaver/test/pdf-sentence-bboxes`. Mirrors
+ * `PageSentenceBBoxResult` from `src/services/pdf/ParagraphSentenceMapper.ts`
+ * (with the relevant subset for fixture diffs).
+ */
+export interface PdfSentenceBBoxResult {
+    pageIndex: number;
+    width: number;
+    height: number;
+    paragraphs: unknown[];
+    sentences: Array<{
+        pageIndex: number;
+        text: string;
+        bboxes: Array<{ x: number; y: number; w: number; h: number }>;
+        fragments?: unknown[];
+    }>;
+    unmappedParagraphs: number;
+    degradedParagraphs: number;
+    degradationNotes?: unknown[];
+}
+
+export interface PdfSentenceBBoxesResponse {
+    ok: boolean;
+    result?: PdfSentenceBBoxResult;
+    error?: PdfErrorEnvelope;
+}
+
 export async function pdfSentenceBBoxes(
     attachment: AttachmentFixture,
     body: { page_index: number; options?: Record<string, unknown> },
-): Promise<PdfExtractResponse> {
-    return post<PdfExtractResponse>('/beaver/test/pdf-sentence-bboxes', {
+): Promise<PdfSentenceBBoxesResponse> {
+    return post<PdfSentenceBBoxesResponse>('/beaver/test/pdf-sentence-bboxes', {
         library_id: attachment.library_id,
         zotero_key: attachment.zotero_key,
         ...body,

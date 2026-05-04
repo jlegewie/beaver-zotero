@@ -16,6 +16,7 @@ import {
     visualizeCurrentPageLines,
     visualizeCurrentPageParagraphs,
     visualizeCurrentPageSentences,
+    captureCurrentPageSentenceFixture,
     clearVisualizationAnnotations,
     extractCurrentPageContent
 } from '../../../utils/extractionVisualizer';
@@ -276,6 +277,17 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             }
         } else {
             console.warn(`[PDF Visualizer] ${result.message}`);
+        }
+    };
+
+    // Capture sentence-extraction fixture for the current PDF reader page
+    const handleCaptureSentenceFixture = async () => {
+        console.log("[FixtureCapture] Capturing current page sentence fixture...");
+        const result = await captureCurrentPageSentenceFixture();
+        if (result.success) {
+            console.log(`[FixtureCapture] ${result.message}`);
+        } else {
+            console.warn(`[FixtureCapture] ${result.message}`);
         }
     };
 
@@ -774,6 +786,12 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         {
             label: "Visualize Sentences",
             onClick: handleVisualizeSentences,
+            icon: PdfIcon,
+            disabled: false,
+        },
+        {
+            label: "Capture Sentence Fixture (current page)",
+            onClick: handleCaptureSentenceFixture,
             icon: PdfIcon,
             disabled: false,
         },

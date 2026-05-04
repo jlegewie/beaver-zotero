@@ -247,6 +247,66 @@ Integration tests exercise full pipelines. Same prerequisites as live tests plus
 - Run: `npm run test:live` (or target just this file: `npx vitest run --config vitest.live.config.ts tests/live/editNote.live.test.ts`).
 - Each test seeds and deletes its own notes — no manual fixture setup required.
 
+## Sentence-extraction fixtures
+
+A regression net for the sentence-level PDF pipeline
+(`extractPageSentenceBBoxes` in
+`src/services/pdf/ParagraphSentenceMapper.ts`). Each fixture is a
+JSON snapshot of the pipeline's output for one PDF page; the live
+runner replays it through the existing
+`/beaver/test/pdf-sentence-bboxes` endpoint and reports per-fixture
+diffs.
+
+### Capturing a fixture
+
+1. Run a dev build (`npm run build:dev`) and load it in Zotero.
+2. Open a PDF in the reader and navigate to the target page.
+3. In the Beaver chat, click the Dev Tools menu →
+   "Capture Sentence Fixture (current page)".
+4. The console logs `fixture saved: …`. The file appears at
+   `tests/fixtures/sentence-extraction/{zoteroKey}-page-{pageIndex}.json`.
+5. Re-clicking on the same page overwrites the existing file.
+
+The output directory can be overridden with the pref
+`extensions.zotero.beaver.devSentenceFixturesDir`. Default is
+`${HOME}/Developer/beaver/beaver-zotero/tests/fixtures/sentence-extraction`.
+
+### Running the regression suite
+
+```bash
+npm run test:live -- sentenceExtractionFixtures
+```
+
+Each fixture becomes a discrete `it()` case named after its slug. An
+empty fixtures dir collapses to a single `it.skip` placeholder so the
+suite never errors at module load.
+
+### Reading a failure
+
+A mismatch prints the fixture metadata, a reproduce-curl, and a list
+of structured diffs:
+
+```
+Fixture: 2YWA8DTZ-page-0
+  zoteroKey:  2YWA8DTZ
+  libraryId:  1
+  page:       0 (label "1")
+  file:       /Users/.../storage/2YWA8DTZ/paper.pdf
+
+Reproduce:
+  curl -sS -X POST http://127.0.0.1:23119/beaver/test/pdf-sentence-bboxes \
+    -H 'Content-Type: application/json' \
+    -d '{"library_id":1,"zotero_key":"2YWA8DTZ","page_index":0}'
+
+Differences (3):
+  - stats.sentences: expected 23, got 24
+  - sentence[5].text: expected "However, prior models …", got "However, prior models. (2023) …"
+  - sentence[5].bboxes[0].w: expected 412.30, got 458.10 (diff 45.80 > 0.50)
+```
+
+BBox tolerance defaults to `0.5pt` absolute on every coord; tune it via
+`BBOX_TOLERANCE_PT` in `tests/helpers/sentenceFixtures.ts`.
+
 ## Conventions
 
 - **File placement**: One file per logical module/concern, in the appropriate subdirectory.

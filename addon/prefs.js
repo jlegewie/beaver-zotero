@@ -97,3 +97,9 @@ pref("pendingVersionNotifications", "[]");
 // Library suggestions cache (JSON-encoded LibrarySuggestionsResponse + ISO timestamp)
 pref("librarySuggestions", "");
 pref("librarySuggestionsGeneratedAt", "");
+
+// Dev-only: directory used by the "Capture Sentence Fixture" menu item to save
+// snapshots for the live regression suite at
+// tests/live/sentenceExtractionFixtures.live.test.ts. Empty string falls back
+// to ${HOME}/Developer/beaver/beaver-zotero/tests/fixtures/sentence-extraction.
+pref("devSentenceFixturesDir", "");

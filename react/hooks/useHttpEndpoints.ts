@@ -39,6 +39,7 @@ import {
 import { wrapWithSchemaVersion } from '../utils/noteActions';
 import { undoEditNoteAction } from '../utils/editNoteActions';
 import { getLatestNoteHtml } from '../../src/utils/noteEditorIO';
+import { getPref } from '../../src/utils/prefs';
 import type { AgentAction } from '../agents/agentActions';
 import type {
     WSZoteroDataRequest,
@@ -143,6 +144,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-search-scored',
     '/beaver/test/pdf-sentence-bboxes',
     '/beaver/test/pdf-render-page',
+    // Test-only endpoint (sentence-extraction fixture capture)
+    '/beaver/test/save-sentence-fixture',
 ] as const;
 
 /**
@@ -1509,6 +1512,105 @@ async function handleTestPdfSearchScoredHttpRequest(request: any) {
     );
 }
 
+/**
+ * Dev-only fixture-save endpoint for the sentence-extraction regression
+ * suite. Writes the request body verbatim to
+ * `${dir}/${name}.json`, where `dir` is `extensions.zotero.beaver.devSentenceFixturesDir`
+ * (or a hardcoded default under the user's home dir), and `name` is a
+ * `${zoteroKey}-page-${pageIndex}` slug.
+ *
+ * Path-traversal-safe: rejects any `name` that doesn't match the slug
+ * regex `^[A-Z0-9]{8,}-page-\d+$`.
+ *
+ * Paired with `captureCurrentPageSentenceFixture()` in
+ * `react/utils/extractionVisualizer.ts` and the
+ * `tests/live/sentenceExtractionFixtures.live.test.ts` runner.
+ */
+async function handleTestSaveSentenceFixtureHttpRequest(request: any) {
+    const name = request?.name;
+    if (typeof name !== 'string' || !/^[A-Z0-9]{8,}-page-\d+$/.test(name)) {
+        return {
+            ok: false,
+            error: {
+                name: 'Error',
+                message: `name must match /^[A-Z0-9]{8,}-page-\\d+$/, got: ${JSON.stringify(name)}`,
+            },
+        };
+    }
+
+    let targetDir = '';
+    try {
+        const pref = getPref('devSentenceFixturesDir');
+        if (typeof pref === 'string' && pref.trim().length > 0) {
+            targetDir = pref.trim();
+        }
+    } catch {
+        // ignore — fall through to default
+    }
+
+    if (!targetDir) {
+        let homeDir = '';
+        try {
+            const dir = (Services as any).dirsvc?.get(
+                'Home',
+                Components.interfaces.nsIFile,
+            );
+            homeDir = dir?.path ?? '';
+        } catch {
+            // fall through
+        }
+        if (!homeDir) {
+            return {
+                ok: false,
+                error: {
+                    name: 'Error',
+                    message:
+                        'Could not resolve home directory; set extensions.zotero.beaver.devSentenceFixturesDir',
+                },
+            };
+        }
+        targetDir = PathUtils.join(
+            homeDir,
+            'Developer',
+            'beaver',
+            'beaver-zotero',
+            'tests',
+            'fixtures',
+            'sentence-extraction',
+        );
+    }
+
+    try {
+        await IOUtils.makeDirectory(targetDir, {
+            ignoreExisting: true,
+            createAncestors: true,
+        });
+    } catch (e: any) {
+        return {
+            ok: false,
+            error: {
+                name: 'Error',
+                message: `Could not create dir ${targetDir}: ${e?.message ?? String(e)}`,
+            },
+        };
+    }
+
+    const path = PathUtils.join(targetDir, `${name}.json`);
+    try {
+        await IOUtils.writeJSON(path, request, { mode: 'overwrite' });
+    } catch (e: any) {
+        return {
+            ok: false,
+            error: {
+                name: 'Error',
+                message: `Could not write ${path}: ${e?.message ?? String(e)}`,
+            },
+        };
+    }
+
+    return { ok: true, path, slug: name };
+}
+
 /** Dev-only `extractSentenceBBoxes` parity endpoint. */
 async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
     const { PDFExtractor } = await import('../../src/services/pdf');
@@ -1718,6 +1820,9 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/pdf-render-page'] =
             createEndpoint(handleTestPdfRenderPageHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/save-sentence-fixture'] =
+            createEndpoint(handleTestSaveSentenceFixtureHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

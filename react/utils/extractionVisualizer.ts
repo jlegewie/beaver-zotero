@@ -1136,6 +1136,174 @@ export async function visualizeCurrentPageSentences(): Promise<{
 }
 
 /**
+ * Capture the current PDF reader page as a sentence-extraction fixture.
+ *
+ * Runs the same `extractPageSentenceBBoxes` pipeline the visualizer
+ * uses, then POSTs the result to the dev-only
+ * `/beaver/test/save-sentence-fixture` endpoint, which writes it to the
+ * configured fixtures directory. Re-clicking on the same page
+ * overwrites the file (slug is `${zoteroKey}-page-${pageIndex}`).
+ *
+ * Used by the live regression suite
+ * (`tests/live/sentenceExtractionFixtures.live.test.ts`).
+ */
+export async function captureCurrentPageSentenceFixture(): Promise<{
+    success: boolean;
+    message: string;
+    path?: string;
+    slug?: string;
+    sentences?: number;
+    paragraphs?: number;
+    pageIndex?: number;
+}> {
+    try {
+        const reader = await getCurrentReaderAndWaitForView(undefined, true);
+        if (!reader || !reader._internalReader) {
+            return { success: false, message: "No active PDF reader found" };
+        }
+        if (reader.type !== "pdf") {
+            return { success: false, message: "Current reader is not a PDF" };
+        }
+
+        const pdfViewer =
+            reader._internalReader._primaryView?._iframeWindow
+                ?.PDFViewerApplication?.pdfViewer;
+        if (!pdfViewer) {
+            return { success: false, message: "Could not access PDF viewer" };
+        }
+        const currentPageIndex = pdfViewer.currentPageNumber - 1;
+        const pageLabel: string | null =
+            (pdfViewer as any).currentPageLabel ?? null;
+
+        const item = Zotero.Items.get(reader.itemID);
+        if (!item) {
+            return { success: false, message: "Could not find Zotero item" };
+        }
+        const filePath = await item.getFilePathAsync();
+        if (!filePath) {
+            return { success: false, message: "Could not find PDF file" };
+        }
+
+        logger(
+            `[FixtureCapture] Loading PDF and mapping sentences on page ${
+                currentPageIndex + 1
+            }...`,
+        );
+        const pdfData = await IOUtils.read(filePath);
+
+        const mupdf = new MuPDFService();
+        await mupdf.open(pdfData);
+
+        let detailedPage;
+        let rawPage: RawPageData;
+        try {
+            rawPage = mupdf.extractRawPage(currentPageIndex);
+            detailedPage = mupdf.extractRawPageDetailed(currentPageIndex);
+        } finally {
+            mupdf.close();
+        }
+
+        const result = extractPageSentenceBBoxes(detailedPage);
+
+        const slug = `${item.key}-page-${currentPageIndex}`;
+        const body = {
+            schemaVersion: 1,
+            name: slug,
+            source: {
+                libraryId: item.libraryID,
+                zoteroKey: item.key,
+                filePath,
+                pageIndex: currentPageIndex,
+                pageLabel,
+            },
+            capturedAt: new Date().toISOString(),
+            extractionOptions: {
+                splitter: "simpleRegexSentenceSplit",
+            },
+            expected: {
+                pageWidth: rawPage.width,
+                pageHeight: rawPage.height,
+                stats: {
+                    sentences: result.sentences.length,
+                    paragraphs: result.paragraphs.length,
+                    degradedParagraphs: result.degradedParagraphs,
+                    unmappedParagraphs: result.unmappedParagraphs,
+                },
+                sentences: result.sentences.map((s) => ({
+                    text: s.text,
+                    bboxes: s.bboxes.map((b) => ({
+                        x: b.x,
+                        y: b.y,
+                        w: b.w,
+                        h: b.h,
+                    })),
+                })),
+            },
+        };
+
+        // Reach the dev save-fixture endpoint via the local Zotero server.
+        // Same process, same port the test endpoints run on.
+        let port = 23119;
+        try {
+            const prefPort = Zotero.Prefs.get("httpServer.port");
+            if (typeof prefPort === "number" && prefPort > 0) port = prefPort;
+        } catch {
+            // keep default
+        }
+
+        const res = await fetch(
+            `http://127.0.0.1:${port}/beaver/test/save-sentence-fixture`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            },
+        );
+        if (!res.ok) {
+            const text = await res.text();
+            return {
+                success: false,
+                message: `save-sentence-fixture HTTP ${res.status}: ${text}`,
+            };
+        }
+        const saveResp = (await res.json()) as {
+            ok?: boolean;
+            path?: string;
+            slug?: string;
+            error?: { name: string; message: string };
+        };
+        if (!saveResp.ok || !saveResp.path) {
+            const errMsg = saveResp.error?.message ?? "unknown error";
+            return {
+                success: false,
+                message: `save-sentence-fixture failed: ${errMsg}`,
+            };
+        }
+
+        const message = `fixture saved: ${saveResp.path} — ${result.sentences.length} sentences, ${result.degradedParagraphs} degraded`;
+        logger(`[FixtureCapture] ${message}`);
+
+        return {
+            success: true,
+            message,
+            path: saveResp.path,
+            slug: saveResp.slug,
+            sentences: result.sentences.length,
+            paragraphs: result.paragraphs.length,
+            pageIndex: currentPageIndex,
+        };
+    } catch (error) {
+        const errorMessage =
+            error instanceof Error ? error.message : String(error);
+        logger(`[FixtureCapture] Error: ${errorMessage}`);
+        return {
+            success: false,
+            message: `Sentence fixture capture failed: ${errorMessage}`,
+        };
+    }
+}
+
+/**
  * Clear all visualization annotations
  */
 export async function clearVisualizationAnnotations(): Promise<void> {

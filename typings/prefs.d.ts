@@ -65,6 +65,7 @@ declare namespace _ZoteroTypes {
       "pendingVersionNotifications": string;
       "librarySuggestions": string;
       "librarySuggestionsGeneratedAt": string;
+      "devSentenceFixturesDir": string;
     };
   }
 }
