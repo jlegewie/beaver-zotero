@@ -205,7 +205,7 @@ function onCreateAnnotationContextMenu(event: any): void {
 // Cleanup helper
 // ---------------------------------------------------------------------------
 
-function removeListenerSafely(type: string, handler: Function): boolean {
+function removeListenerSafely(type: string, handler: (...args: unknown[]) => unknown): boolean {
     const reader = Zotero?.Reader as any;
     const listeners = reader?._registeredListeners;
     if (!Array.isArray(listeners)) return false;
