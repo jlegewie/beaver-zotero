@@ -1,0 +1,297 @@
+/**
+ * Extraction Overlay — shared bbox source-of-truth.
+ *
+ * Computes per-level bounding-box overlays (columns / lines / paragraphs /
+ * sentences) for a single PDF page, returning plain rect data in MuPDF
+ * top-left point coordinates. No DOM, no Zotero reader, no annotations.
+ *
+ * Two consumers:
+ *   1. `extractionVisualizer.ts` — converts these rects into Zotero
+ *      annotations on the live reader.
+ *   2. `useHttpEndpoints.ts` (`/beaver/test/pdf-render-overlay`) — passes
+ *      them to `canvasOverlay.ts` to draw on a rendered page PNG for
+ *      headless agent debugging.
+ *
+ * Keeping both consumers on a single helper guarantees the visualizer and
+ * the agent see the exact same boxes.
+ */
+import {
+    detectColumns,
+    detectLinesOnPage,
+    detectParagraphs,
+    extractPageSentenceBBoxes,
+    lineBBoxToRect,
+    MarginFilter,
+    DEFAULT_MARGINS,
+    StyleAnalyzer,
+    Rect,
+    RawPageData,
+    RawPageDataDetailed,
+    SentenceBBox,
+} from "../../src/services/pdf";
+import type { SentenceSplitter } from "../../src/services/pdf";
+
+export type OverlayLevel = "columns" | "lines" | "paragraphs" | "sentences";
+
+// Color palette — kept in one place so the visualizer and the canvas
+// overlay agree on what each level looks like.
+export const OVERLAY_COLORS = {
+    column: "#00bbff",
+    line: "#ff9500",
+    paragraph: "#34c759",
+    header: "#af52de",
+    // Adjacent sentences alternate between these so they're easy to tell
+    // apart at a glance.
+    sentence: ["#ff2d55", "#ffcc00"] as const,
+    // Fallback sentences (unmapped / invariant violation / empty split)
+    // render in a muted color so they stand out against precise ones.
+    sentenceDegraded: "#8e8e93",
+} as const;
+
+/**
+ * One rectangle to draw on top of a rendered page.
+ *
+ * Coordinates are in MuPDF point space (top-left origin). Consumers are
+ * responsible for converting to their own coordinate system (Zotero uses
+ * bottom-left origin; canvas uses pixel space scaled from points).
+ */
+export interface OverlayRect {
+    /** Bbox in MuPDF top-left point coordinates. */
+    rect: Rect;
+    /** Hex fill color. */
+    color: string;
+    /** Optional short label drawn near the rect (group label only). */
+    label?: string;
+    /**
+     * Group index — multiple rects with the same group form one logical
+     * highlight (e.g. a sentence that wraps across two lines). Sequential
+     * within a level, starting at 0.
+     */
+    group: number;
+    /** True for fallback / degraded fallbacks (sentences only today). */
+    degraded?: boolean;
+}
+
+export interface OverlayResult {
+    level: OverlayLevel;
+    pageIndex: number;
+    /** Page width in MuPDF points (used by canvas overlay to compute scale). */
+    pageWidth: number;
+    /** Page height in MuPDF points. */
+    pageHeight: number;
+    /** Number of logical groups (columns, lines, paragraphs, or sentences). */
+    groupCount: number;
+    /** Flat list of rects, ordered by group then by reading order. */
+    rects: OverlayRect[];
+    /** Level-specific summary stats for logging / endpoint response. */
+    stats: Record<string, number | string | undefined>;
+}
+
+// ---------------------------------------------------------------------------
+// Per-level collectors
+// ---------------------------------------------------------------------------
+
+/**
+ * Column overlay: one rect per detected column, labelled C1..Cn in reading
+ * order. Uses the unfiltered raw page (matches the visualizer).
+ */
+export function getColumnOverlay(rawPage: RawPageData): OverlayResult {
+    const columnResult = detectColumns(rawPage);
+    const rects: OverlayRect[] = columnResult.columns.map((col, i) => ({
+        rect: col,
+        color: OVERLAY_COLORS.column,
+        label: `C${i + 1}`,
+        group: i,
+    }));
+    return {
+        level: "columns",
+        pageIndex: rawPage.pageIndex,
+        pageWidth: rawPage.width,
+        pageHeight: rawPage.height,
+        groupCount: rects.length,
+        rects,
+        stats: {
+            columns: rects.length,
+            broken: columnResult.isBroken ? 1 : 0,
+        },
+    };
+}
+
+/**
+ * Line overlay: one rect per detected line, labelled L1..Ln across all
+ * columns. Mirrors the visualizer's pipeline (margin filter → column
+ * detection → line detection).
+ */
+export function getLineOverlay(rawPage: RawPageData): OverlayResult {
+    const filtered = MarginFilter.filterPageByMargins(rawPage, DEFAULT_MARGINS);
+    const columnResult = detectColumns(filtered);
+    const rects: OverlayRect[] = [];
+    let groupCount = 0;
+
+    if (columnResult.columns.length > 0) {
+        const lineResult = detectLinesOnPage(filtered, columnResult.columns);
+        for (const colResult of lineResult.columnResults) {
+            for (const line of colResult.lines) {
+                groupCount++;
+                rects.push({
+                    rect: lineBBoxToRect(line.bbox),
+                    color: OVERLAY_COLORS.line,
+                    label: `L${groupCount}`,
+                    group: groupCount - 1,
+                });
+            }
+        }
+    }
+
+    return {
+        level: "lines",
+        pageIndex: rawPage.pageIndex,
+        pageWidth: rawPage.width,
+        pageHeight: rawPage.height,
+        groupCount,
+        rects,
+        stats: {
+            lines: groupCount,
+            columns: columnResult.columns.length,
+        },
+    };
+}
+
+/**
+ * Paragraph overlay: one rect per detected paragraph (green) or header
+ * (purple). Style analysis is run on this single page only — multi-page
+ * style profiling isn't available in a per-page overlay.
+ */
+export function getParagraphOverlay(rawPage: RawPageData): OverlayResult {
+    const filtered = MarginFilter.filterPageByMargins(rawPage, DEFAULT_MARGINS);
+    const columnResult = detectColumns(filtered);
+    const rects: OverlayRect[] = [];
+    let paragraphCount = 0;
+    let headerCount = 0;
+
+    if (columnResult.columns.length > 0) {
+        const lineResult = detectLinesOnPage(filtered, columnResult.columns);
+        if (lineResult.allLines.length > 0) {
+            const styleProfile = new StyleAnalyzer().analyze([filtered], 4, 0.15, 0);
+            const bodyStyles = styleProfile?.bodyStyles || null;
+            const paragraphResult = detectParagraphs(lineResult, bodyStyles);
+            paragraphCount = paragraphResult.paragraphCount;
+            headerCount = paragraphResult.headerCount;
+
+            paragraphResult.items.forEach((item, i) => {
+                const isHeader = item.type === "header";
+                rects.push({
+                    rect: {
+                        x: item.bbox.l,
+                        y: item.bbox.t,
+                        w: item.bbox.width,
+                        h: item.bbox.height,
+                    },
+                    color: isHeader ? OVERLAY_COLORS.header : OVERLAY_COLORS.paragraph,
+                    label: `${isHeader ? "H" : "P"}${item.idx + 1}`,
+                    group: i,
+                });
+            });
+        }
+    }
+
+    return {
+        level: "paragraphs",
+        pageIndex: rawPage.pageIndex,
+        pageWidth: rawPage.width,
+        pageHeight: rawPage.height,
+        groupCount: rects.length,
+        rects,
+        stats: {
+            paragraphs: paragraphCount,
+            headers: headerCount,
+        },
+    };
+}
+
+/**
+ * Sentence overlay: one logical group per sentence, with multiple rects
+ * for sentences that wrap across line-fragments. Adjacent sentences get
+ * alternating pink/yellow colors. Degraded fallback sentences (one note
+ * per paragraph in `degradationNotes`) are colored gray.
+ *
+ * `splitter` is required by the caller — production callers pass a
+ * sentencex-backed splitter; tests can pass `simpleRegexSentenceSplit`
+ * via the mapper's default.
+ */
+export function getSentenceOverlay(
+    detailedPage: RawPageDataDetailed,
+    splitter?: SentenceSplitter,
+): OverlayResult {
+    const result = extractPageSentenceBBoxes(detailedPage, { splitter });
+    const degradedItemIndices = new Set(result.degradationNotes.map((n) => n.itemIndex));
+    const degradedSentenceIndices = computeDegradedSentenceIndices(
+        result.paragraphs,
+        degradedItemIndices,
+    );
+
+    const rects: OverlayRect[] = [];
+    result.sentences.forEach((sentence, sentenceIdx) => {
+        if (sentence.bboxes.length === 0) return;
+        const isDegraded = degradedSentenceIndices.has(sentenceIdx);
+        const color = isDegraded
+            ? OVERLAY_COLORS.sentenceDegraded
+            : OVERLAY_COLORS.sentence[sentenceIdx % OVERLAY_COLORS.sentence.length];
+
+        sentence.bboxes.forEach((bb, fragIdx) => {
+            rects.push({
+                rect: { x: bb.x, y: bb.y, w: bb.w, h: bb.h },
+                color,
+                // Only the first fragment carries the sentence label so the
+                // overlay isn't visually noisy on multi-line sentences.
+                label: fragIdx === 0 ? `S${sentenceIdx + 1}` : undefined,
+                group: sentenceIdx,
+                degraded: isDegraded,
+            });
+        });
+    });
+
+    return {
+        level: "sentences",
+        pageIndex: detailedPage.pageIndex,
+        pageWidth: detailedPage.width,
+        pageHeight: detailedPage.height,
+        groupCount: result.sentences.length,
+        rects,
+        stats: {
+            sentences: result.sentences.length,
+            paragraphs: result.paragraphs.length,
+            degradedParagraphs: result.degradedParagraphs,
+            unmappedParagraphs: result.unmappedParagraphs,
+        },
+    };
+}
+
+/**
+ * Find which sentences in the flat list are degradation fallbacks.
+ *
+ * The fallback path emits exactly one sentence per degraded paragraph,
+ * whose text equals the paragraph's whole text. We walk paragraphs in
+ * lockstep with their sentences and tag the first sentence of any
+ * paragraph that matches that pattern. This mirrors the heuristic in
+ * `extractionVisualizer.ts` — a more direct mapping would require the
+ * mapper to expose a per-sentence "isFallback" flag.
+ */
+function computeDegradedSentenceIndices(
+    paragraphs: Array<{ item: { text: string }; sentences: SentenceBBox[] }>,
+    degradedItemIndices: Set<number>,
+): Set<number> {
+    const out = new Set<number>();
+    if (degradedItemIndices.size === 0) return out;
+    let flatIdx = 0;
+    for (const pws of paragraphs) {
+        if (
+            pws.sentences.length === 1 &&
+            pws.sentences[0].text === pws.item.text
+        ) {
+            out.add(flatIdx);
+        }
+        flatIdx += pws.sentences.length;
+    }
+    return out;
+}

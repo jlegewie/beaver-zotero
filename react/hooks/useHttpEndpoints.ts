@@ -143,6 +143,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-search-scored',
     '/beaver/test/pdf-sentence-bboxes',
     '/beaver/test/pdf-render-page',
+    // Bbox-overlay debugging (sentences/lines/paragraphs/columns)
+    '/beaver/test/pdf-render-overlay',
 ] as const;
 
 /**
@@ -1555,6 +1557,135 @@ async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
 }
 
 /**
+ * Dev-only render-with-overlay endpoint.
+ *
+ * Renders one page via MuPDF and paints column/line/paragraph/sentence
+ * bboxes on top, returning a base64 PNG. Lets headless agents iterate on
+ * extraction code: edit → wait for plugin reload → POST → inspect image.
+ *
+ * Request body:
+ *   { library_id, zotero_key | raw_bytes_base64,
+ *     page_index: number,
+ *     level: "columns" | "lines" | "paragraphs" | "sentences",
+ *     dpi?: number,                // default 144
+ *     language?: string }          // sentences only; falls back to item lang
+ *
+ * Response: `{ ok: true, image_base64, width, height, page_width,
+ *   page_height, group_count, stats, rects }`. `rects` carries the
+ *   underlying bbox data so callers can also debug numerically.
+ */
+async function handleTestPdfRenderOverlayHttpRequest(request: any) {
+    const { getMuPDFWorkerClient } = await import(
+        '../../src/services/pdf/MuPDFWorkerClient'
+    );
+    const {
+        getColumnOverlay,
+        getLineOverlay,
+        getParagraphOverlay,
+        getSentenceOverlay,
+    } = await import('../utils/extractionOverlay');
+    const { drawBBoxOverlayPNG } = await import('../utils/canvasOverlay');
+    const { getSentenceSplitterWithFallback, normalizeLanguageCode } = await import(
+        '../../src/services/pdf'
+    );
+
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    const { pdfData } = loaded;
+
+    const pageIndex = Number(request?.page_index);
+    if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+        return {
+            ok: false,
+            error: { name: 'Error', message: 'page_index (non-negative integer) is required' },
+        };
+    }
+    const level = String(request?.level ?? '');
+    if (
+        level !== 'columns' &&
+        level !== 'lines' &&
+        level !== 'paragraphs' &&
+        level !== 'sentences'
+    ) {
+        return {
+            ok: false,
+            error: {
+                name: 'Error',
+                message: 'level must be one of: columns | lines | paragraphs | sentences',
+            },
+        };
+    }
+    const dpi = typeof request?.dpi === 'number' && request.dpi > 0 ? request.dpi : 144;
+
+    const client = getMuPDFWorkerClient();
+
+    // Sentences need the per-character detailed walk; the simpler levels
+    // happily accept the same data because RawPageDataDetailed is
+    // structurally a RawPageData (it just carries extra `chars`).
+    const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
+
+    let overlay;
+    if (level === 'columns') {
+        overlay = getColumnOverlay(detailed);
+    } else if (level === 'lines') {
+        overlay = getLineOverlay(detailed);
+    } else if (level === 'paragraphs') {
+        overlay = getParagraphOverlay(detailed);
+    } else {
+        // Resolve the splitter on the main thread (sentencex WASM is loaded
+        // there). Best-effort language lookup — falls back to "en" inside
+        // normalizeLanguageCode when nothing is provided.
+        let language: string | undefined =
+            typeof request?.language === 'string' ? request.language : undefined;
+        if (!language && request?.library_id != null && request?.zotero_key != null) {
+            try {
+                const { getItemLanguage } = await import('../../src/utils/zoteroUtils');
+                const raw = await getItemLanguage(request.library_id, request.zotero_key);
+                if (raw) language = raw;
+            } catch {
+                // Best effort.
+            }
+        }
+        const splitter = await getSentenceSplitterWithFallback(
+            normalizeLanguageCode(language),
+        );
+        overlay = getSentenceOverlay(detailed, splitter);
+    }
+
+    const rendered = await client.renderPageToImage(pdfData, pageIndex, {
+        dpi,
+        format: 'png',
+    });
+
+    const overlayed = await drawBBoxOverlayPNG(
+        rendered.data,
+        rendered.width,
+        rendered.height,
+        overlay.pageWidth,
+        overlay.pageHeight,
+        overlay.rects,
+    );
+
+    return {
+        ok: true,
+        level: overlay.level,
+        page_index: overlay.pageIndex,
+        page_width: overlay.pageWidth,
+        page_height: overlay.pageHeight,
+        image_width: rendered.width,
+        image_height: rendered.height,
+        dpi: rendered.dpi,
+        group_count: overlay.groupCount,
+        stats: overlay.stats,
+        // Echo the bbox data so a caller debugging numerically doesn't
+        // need a second request.
+        rects: overlay.rects,
+        image_base64: uint8ToBase64ForTest(overlayed),
+        image_byte_length: overlayed.byteLength,
+    };
+}
+
+/**
  * Dev-only single-page render endpoint — required for the carry-forward
  * `renderPageToImage` PAGE_OUT_OF_RANGE parity case (the plural endpoint
  * silently filters invalid indices and cannot exercise the throw).
@@ -1750,6 +1881,11 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/pdf-render-page'] =
             createEndpoint(handleTestPdfRenderPageHttpRequest);
+
+        // Bbox overlay endpoint — paints columns/lines/paragraphs/sentences
+        // on a rendered page PNG for headless agent debugging.
+        Zotero.Server.Endpoints['/beaver/test/pdf-render-overlay'] =
+            createEndpoint(handleTestPdfRenderOverlayHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
