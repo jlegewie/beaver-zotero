@@ -305,12 +305,65 @@ describe('sentencexBoundariesToCharRanges', () => {
 
         const ranges = sentencexBoundariesToCharRanges(text, boundaries);
         expect(ranges).toEqual([
-            { start: 0, end: firstEnd },
+            { start: 0, end: firstEnd - 1 },
             { start: firstEnd, end: text.length },
         ]);
         expect(ranges.map((r) => text.slice(r.start, r.end))).toEqual([
-            'Black–White gap. ',
+            'Black–White gap.',
             'Café test.',
+        ]);
+    });
+
+    it('trims separator whitespace from sentencex char-index ranges', () => {
+        const text = 'First. Second.';
+        const boundaries = [
+            fakeBoundary('First. ', 0, 'First. '.length),
+            fakeBoundary('Second.', 'First. '.length, text.length),
+        ];
+
+        const ranges = sentencexBoundariesToCharRanges(text, boundaries);
+        expect(ranges.map((r) => text.slice(r.start, r.end))).toEqual([
+            'First.',
+            'Second.',
+        ]);
+        expect(ranges).toEqual([
+            { start: 0, end: 'First.'.length },
+            { start: 'First. '.length, end: text.length },
+        ]);
+    });
+
+    it('trims leading indentation from sentencex ranges', () => {
+        const text = '  Indented sentence. Next.';
+        const firstText = '  Indented sentence. ';
+        const boundaries = [
+            fakeBoundary(firstText, 0, firstText.length),
+            fakeBoundary('Next.', firstText.length, text.length),
+        ];
+
+        const ranges = sentencexBoundariesToCharRanges(text, boundaries);
+        expect(ranges.map((r) => text.slice(r.start, r.end))).toEqual([
+            'Indented sentence.',
+            'Next.',
+        ]);
+        expect(ranges[0]).toEqual({ start: 2, end: firstText.length - 1 });
+    });
+
+    it('drops whitespace-only paragraph-break ranges', () => {
+        const text = 'First.\n\nSecond.';
+        const paragraphBreak = {
+            ...fakeBoundary('\n\n', 'First.'.length, 'First.\n\n'.length),
+            is_paragraph_break: true,
+        };
+        const boundaries = [
+            fakeBoundary('First.', 0, 'First.'.length),
+            paragraphBreak,
+            fakeBoundary('Second.', 'First.\n\n'.length, text.length),
+        ];
+
+        const ranges = sentencexBoundariesToCharRanges(text, boundaries);
+        expect(ranges.map((r) => text.slice(r.start, r.end))).toEqual([
+            'First.',
+            'Second.',
         ]);
     });
 
@@ -335,7 +388,7 @@ describe('sentencexBoundariesToCharRanges', () => {
 
         const ranges = sentencexBoundariesToCharRanges(text, boundaries);
         expect(ranges.map((r) => text.slice(r.start, r.end))).toEqual([
-            'Café test. ',
+            'Café test.',
             'Next.',
         ]);
     });

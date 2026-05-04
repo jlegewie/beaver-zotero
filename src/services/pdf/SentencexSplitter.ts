@@ -238,13 +238,28 @@ function textMatchesBoundary(
     );
 }
 
+function trimWhitespaceFromRange(
+    text: string,
+    range: SentenceRange,
+): SentenceRange | null {
+    let { start, end } = range;
+
+    while (start < end && /\s/.test(text[start])) start++;
+    while (end > start && /\s/.test(text[end - 1])) end--;
+
+    if (end <= start) return null;
+    return { start, end };
+}
+
 /**
  * Normalize sentencex boundary objects to JS string ranges.
  *
  * `sentencex_wasm.js` exposes both `start_index`/`end_index` and
  * `start_byte`/`end_byte`. In the current build, the former are
  * already JS string indices. We therefore prefer validated char
- * indices and only use byte conversion as a fallback.
+ * indices and only use byte conversion as a fallback. Sentencex includes
+ * separator/indentation whitespace in some boundaries, so returned ranges
+ * are trimmed before downstream bbox mapping.
  *
  * @internal Exported for unit testing.
  */
@@ -281,7 +296,8 @@ export function sentencexBoundariesToCharRanges(
             end > start &&
             textMatchesBoundary(text, boundary, start, end)
         ) {
-            ranges.push({ start, end });
+            const trimmed = trimWhitespaceFromRange(text, { start, end });
+            if (trimmed) ranges.push(trimmed);
             continue;
         }
 
@@ -289,7 +305,10 @@ export function sentencexBoundariesToCharRanges(
         if (!byteBoundary) continue;
         byteOffsetAt ??= buildByteOffsetTable(text);
         const fallback = byteRangesToCharRanges([byteBoundary], byteOffsetAt);
-        ranges.push(...fallback);
+        for (const range of fallback) {
+            const trimmed = trimWhitespaceFromRange(text, range);
+            if (trimmed) ranges.push(trimmed);
+        }
     }
 
     return ranges;
