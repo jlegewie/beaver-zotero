@@ -1620,19 +1620,20 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
 
     const client = getMuPDFWorkerClient();
 
-    // Sentences need the per-character detailed walk; the simpler levels
-    // happily accept the same data because RawPageDataDetailed is
-    // structurally a RawPageData (it just carries extra `chars`).
-    const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
-
+    // Level dispatch:
+    //  - sentences: needs the per-character detailed walk.
+    //  - columns / lines / paragraphs: use the JSON-pass `RawPageData`.
+    //    The detailed walker zeroes out `RawLine.font` (see
+    //    worker/docHelpers.ts), and `getParagraphOverlay` feeds those font
+    //    fields through `StyleAnalyzer` to separate body text from
+    //    headers — passing the detailed page would silently mis-classify
+    //    headers and produce overlays that disagree with the live
+    //    visualizer. Lines/columns don't read `font` today, but we keep
+    //    the same input source for all non-sentence levels so the visual
+    //    parity guarantee is uniform.
     let overlay;
-    if (level === 'columns') {
-        overlay = getColumnOverlay(detailed);
-    } else if (level === 'lines') {
-        overlay = getLineOverlay(detailed);
-    } else if (level === 'paragraphs') {
-        overlay = getParagraphOverlay(detailed);
-    } else {
+    if (level === 'sentences') {
+        const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
         // Resolve the splitter on the main thread (sentencex WASM is loaded
         // there). Best-effort language lookup — falls back to "en" inside
         // normalizeLanguageCode when nothing is provided.
@@ -1651,6 +1652,18 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             normalizeLanguageCode(language),
         );
         overlay = getSentenceOverlay(detailed, splitter);
+    } else {
+        const rawDoc = await client.extractRawPages(pdfData, [pageIndex]);
+        const rawPage = rawDoc.pages[0];
+        if (!rawPage) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
+            };
+        }
+        if (level === 'columns') overlay = getColumnOverlay(rawPage);
+        else if (level === 'lines') overlay = getLineOverlay(rawPage);
+        else overlay = getParagraphOverlay(rawPage);
     }
 
     const rendered = await client.renderPageToImage(pdfData, pageIndex, {

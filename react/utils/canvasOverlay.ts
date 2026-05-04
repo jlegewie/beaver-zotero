@@ -34,7 +34,15 @@ export async function drawBBoxOverlayPNG(
 ): Promise<Uint8Array> {
     const win = Zotero.getMainWindow() as any;
 
-    const blob = new Blob([pngBytes.buffer as ArrayBuffer], { type: "image/png" });
+    // Slice out exactly the PNG byte range. Handing `pngBytes.buffer`
+    // directly to Blob would serialize the entire backing buffer (and
+    // ignore non-zero `byteOffset`), corrupting the image whenever the
+    // input is a view onto a larger buffer.
+    const pngArrayBuffer = pngBytes.buffer.slice(
+        pngBytes.byteOffset,
+        pngBytes.byteOffset + pngBytes.byteLength,
+    ) as ArrayBuffer;
+    const blob = new Blob([pngArrayBuffer], { type: "image/png" });
     const bitmap = await win.createImageBitmap(blob);
 
     try {
