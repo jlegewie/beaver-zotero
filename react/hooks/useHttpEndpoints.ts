@@ -45,6 +45,7 @@ import {
     getLineOverlay,
     getParagraphOverlay,
     getSentenceOverlay,
+    getSentenceOverlayFiltered,
     getRawLinesOverlay,
     getMarginsOverlay,
 } from '../utils/extractionOverlay';
@@ -157,6 +158,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-render-overlay',
     // Per-page pipeline trace (every stage, JSON-only)
     '/beaver/test/pdf-pipeline-trace',
+    // Cross-page smart-removal candidate summary (no rendering)
+    '/beaver/test/pdf-smart-removal-summary',
 ] as const;
 
 /**
@@ -1616,6 +1619,7 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
         level !== 'lines' &&
         level !== 'paragraphs' &&
         level !== 'sentences' &&
+        level !== 'sentences-filtered' &&
         level !== 'raw-lines' &&
         level !== 'margins'
     ) {
@@ -1624,7 +1628,7 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             error: {
                 name: 'Error',
                 message:
-                    'level must be one of: columns | lines | paragraphs | sentences | raw-lines | margins',
+                    'level must be one of: columns | lines | paragraphs | sentences | sentences-filtered | raw-lines | margins',
             },
         };
     }
@@ -1644,12 +1648,10 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
     //    `StyleAnalyzer` to separate body text from headers — passing the
     //    detailed page would silently mis-classify headers and produce
     //    overlays that disagree with the live visualizer.
-    let overlay;
-    if (level === 'sentences') {
-        const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
-        // Resolve the splitter on the main thread (sentencex WASM is loaded
-        // there). Best-effort language lookup — falls back to "en" inside
-        // normalizeLanguageCode when nothing is provided.
+    // Helper: resolve language for sentence splitter. Best-effort —
+    // explicit `request.language` wins, then item language lookup,
+    // finally English fallback inside `normalizeLanguageCode`.
+    const resolveLanguage = async (): Promise<string | undefined> => {
         let language: string | undefined =
             typeof request?.language === 'string' ? request.language : undefined;
         if (!language && request?.library_id != null && request?.zotero_key != null) {
@@ -1661,10 +1663,59 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 // Best effort.
             }
         }
+        return language;
+    };
+
+    let overlay;
+    if (level === 'sentences') {
+        const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
+        const language = await resolveLanguage();
         const splitter = await getSentenceSplitterWithFallback(
             normalizeLanguageCode(language),
         );
         overlay = getSentenceOverlay(detailed, splitter);
+    } else if (level === 'sentences-filtered') {
+        // Filtered counterpart: applies cross-page smart removal + simple
+        // margin filter before sentence detection. Same window/cap logic
+        // as the `margins` level.
+        const totalPages = await client.getPageCount(pdfData);
+        if (pageIndex >= totalPages) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
+            };
+        }
+        const window = Number(request?.analysis_page_window);
+        let analysisIndices: number[];
+        if (Number.isInteger(window) && window > 0) {
+            const lo = Math.max(0, pageIndex - window);
+            const hi = Math.min(totalPages - 1, pageIndex + window);
+            analysisIndices = [];
+            for (let i = lo; i <= hi; i++) analysisIndices.push(i);
+        } else {
+            analysisIndices = [];
+            for (let i = 0; i < totalPages; i++) analysisIndices.push(i);
+        }
+        if (analysisIndices.length > 50) {
+            const half = 25;
+            const lo = Math.max(0, pageIndex - half);
+            const hi = Math.min(totalPages - 1, lo + 49);
+            analysisIndices = [];
+            for (let i = lo; i <= hi; i++) analysisIndices.push(i);
+        }
+        if (!analysisIndices.includes(pageIndex)) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
+            };
+        }
+        const rawDoc = await client.extractRawPages(pdfData, analysisIndices);
+        const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
+        const language = await resolveLanguage();
+        const splitter = await getSentenceSplitterWithFallback(
+            normalizeLanguageCode(language),
+        );
+        overlay = getSentenceOverlayFiltered(rawDoc.pages, detailed, splitter);
     } else if (level === 'margins') {
         // Cross-page analysis
         const totalPages = await client.getPageCount(pdfData);
@@ -1765,7 +1816,13 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
  *     language?: string,                 // for sentence splitter
  *     analysis_page_window?: number,     // ±N pages for smart removal;
  *                                        // 0 (default) = whole doc, capped 50
- *     include_chars?: boolean }          // include per-char quads on raw_lines
+ *     include_chars?: boolean,           // include per-char quads on raw_lines
+ *     summary?: boolean }                 // omit text bodies / chars / topStyles,
+ *                                         // keep only triage facts (counts,
+ *                                         // candidates, finalKept=false lines,
+ *                                         // lines_dropped_by_columns,
+ *                                         // degradationNotes). Typical 10–50×
+ *                                         // smaller payload.
  *
  * Response shape (selected fields):
  *   { ok: true, page_index, page_width, page_height,
@@ -1809,6 +1866,7 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
         };
     }
     const includeChars = request?.include_chars === true;
+    const summary = request?.summary === true;
 
     const client = getMuPDFWorkerClient();
 
@@ -2167,6 +2225,73 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
     // ------------------------------------------------------------------
     // Build the response.
     // ------------------------------------------------------------------
+    const candidatesOut = smartRemoval.candidates.map((c) => ({
+        text: c.text,
+        originalText: c.originalText,
+        reason: c.reason,
+        position: c.position,
+        pageIndices: c.pageIndices,
+    }));
+
+    if (summary) {
+        // Triage view
+        const finalDropped = rawLineEntries
+            .filter((e) => !e.marginFilter.finalKept)
+            .map((e) => ({
+                id: e.id,
+                bbox: e.bbox,
+                marginPosition: e.marginPosition,
+                marginFilter: e.marginFilter,
+                role: e.role,
+                textPreview: e.text.slice(0, 80),
+            }));
+        return {
+            ok: true,
+            mode: 'summary',
+            page_index: pageIndex,
+            page_width: targetPage.width,
+            page_height: targetPage.height,
+            page_label: targetPage.label,
+            counts: {
+                rawLines: rawLineEntries.length,
+                rawLinesFinalKept: rawLineEntries.filter((e) => e.marginFilter.finalKept)
+                    .length,
+                rawLinesDroppedBySimple: rawLineEntries.filter(
+                    (e) => !e.marginFilter.keptBySimple,
+                ).length,
+                rawLinesDroppedBySmart: rawLineEntries.filter(
+                    (e) => e.marginFilter.smartRemoval !== null,
+                ).length,
+                columns: columnResult.columns.length,
+                paragraphs: paragraphsOut.length,
+                headers: paragraphsOut.filter((p) => p.type === 'header').length,
+                sentences: sentencesOut.length,
+            },
+            smart_removal: {
+                analysisRange: [
+                    analysisIndices[0],
+                    analysisIndices[analysisIndices.length - 1],
+                ],
+                analysisPagesScanned: analysisIndices.length,
+                candidates: candidatesOut,
+            },
+            primaryBodyStyle: styleProfile.primaryBodyStyle,
+            column_detection: {
+                isBroken: columnResult.isBroken,
+                columnCount: columnResult.columnCount,
+            },
+            raw_lines_final_dropped: finalDropped,
+            lines_dropped_by_columns: linesDroppedByColumns,
+            sentence_stats: {
+                sentences: sentenceResult.sentences.length,
+                paragraphs: sentenceResult.paragraphs.length,
+                degradedParagraphs: sentenceResult.degradedParagraphs,
+                unmappedParagraphs: sentenceResult.unmappedParagraphs,
+                degradationNotes: sentenceResult.degradationNotes,
+            },
+        };
+    }
+
     // Top styles for the snapshot — Maps don't survive JSON, so flatten.
     const topStyles = Array.from(styleProfile.styleCounts.values())
         .sort((a, b) => b.count - a.count)
@@ -2196,13 +2321,7 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
                 analysisIndices[analysisIndices.length - 1],
             ],
             analysisPagesScanned: analysisIndices.length,
-            candidates: smartRemoval.candidates.map((c) => ({
-                text: c.text,
-                originalText: c.originalText,
-                reason: c.reason,
-                position: c.position,
-                pageIndices: c.pageIndices,
-            })),
+            candidates: candidatesOut,
         },
         style_profile: {
             primaryBodyStyle: styleProfile.primaryBodyStyle,
@@ -2228,6 +2347,112 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
             unmappedParagraphs: sentenceResult.unmappedParagraphs,
             degradationNotes: sentenceResult.degradationNotes,
         },
+    };
+}
+
+/**
+ * Dev-only smart-removal summary endpoint. Cross-page repeating-text /
+ * page-number analysis only — no column / line / paragraph detection,
+ * no rendering. Useful for "is this watermark present on N pages?"
+ * triage in a single call without paying for full extraction.
+ *
+ * Request body:
+ *   { library_id, zotero_key | raw_bytes_base64,
+ *     page_indices?: number[],            // explicit list to scan; if
+ *                                         //   omitted, all pages (capped 50)
+ *     page_range?: { start, end },        // alternative to page_indices
+ *     repeat_threshold?: number,          // min pages for "repeat"
+ *                                         //   classification (default 3)
+ *     detect_page_sequences?: boolean }   // run page-number sequence
+ *                                         //   detection (default true)
+ *
+ * Response:
+ *   { ok: true,
+ *     analysis_pages: number[],
+ *     candidates: [{ text, originalText, reason, position, pageIndices }],
+ *     removalsByPage: { [pageIndex]: string[] } }
+ */
+async function handleTestPdfSmartRemovalSummaryHttpRequest(request: any) {
+    const { getMuPDFWorkerClient } = await import(
+        '../../src/services/pdf/MuPDFWorkerClient'
+    );
+    const { MarginFilter, DEFAULT_MARGIN_ZONE } = await import(
+        '../../src/services/pdf'
+    );
+
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    const { pdfData } = loaded;
+
+    const repeatThreshold =
+        Number.isInteger(request?.repeat_threshold) && request.repeat_threshold > 0
+            ? request.repeat_threshold
+            : 3;
+    const detectPageSequences = request?.detect_page_sequences !== false;
+
+    const client = getMuPDFWorkerClient();
+    const totalPages = await client.getPageCount(pdfData);
+
+    // Resolve which pages to scan.
+    let analysisIndices: number[];
+    if (Array.isArray(request?.page_indices)) {
+        analysisIndices = (request.page_indices as unknown[])
+            .map((n) => Number(n))
+            .filter((n) => Number.isInteger(n) && n >= 0 && n < totalPages);
+    } else if (request?.page_range && typeof request.page_range === 'object') {
+        const start = Math.max(0, Number(request.page_range.start) || 0);
+        const end = Math.min(
+            totalPages - 1,
+            Number(
+                request.page_range.end ?? request.page_range.endIndex ?? totalPages - 1,
+            ),
+        );
+        analysisIndices = [];
+        for (let i = start; i <= end; i++) analysisIndices.push(i);
+    } else {
+        analysisIndices = [];
+        for (let i = 0; i < totalPages; i++) analysisIndices.push(i);
+    }
+    // Cap at 50 to bound latency. Center on the requested range start so
+    // an explicit narrow request isn't reduced.
+    if (analysisIndices.length > 50) {
+        analysisIndices = analysisIndices.slice(0, 50);
+    }
+    if (analysisIndices.length === 0) {
+        return {
+            ok: false,
+            error: { name: 'Error', message: 'No valid pages to analyze' },
+        };
+    }
+
+    const rawDoc = await client.extractRawPages(pdfData, analysisIndices);
+    const marginAnalysis = MarginFilter.collectMarginElements(
+        rawDoc.pages,
+        DEFAULT_MARGIN_ZONE,
+    );
+    const removal = MarginFilter.identifyElementsToRemove(
+        marginAnalysis,
+        repeatThreshold,
+        detectPageSequences,
+    );
+
+    const removalsByPage: Record<string, string[]> = {};
+    for (const [pageIdx, texts] of removal.removalsByPage) {
+        removalsByPage[String(pageIdx)] = Array.from(texts);
+    }
+
+    return {
+        ok: true,
+        total_pages: totalPages,
+        analysis_pages: analysisIndices,
+        candidates: removal.candidates.map((c) => ({
+            text: c.text,
+            originalText: c.originalText,
+            reason: c.reason,
+            position: c.position,
+            pageIndices: c.pageIndices,
+        })),
+        removalsByPage,
     };
 }
 
@@ -2439,6 +2664,11 @@ function registerEndpoints(): boolean {
         // one piece of text from raw line through paragraphs to sentences.
         Zotero.Server.Endpoints['/beaver/test/pdf-pipeline-trace'] =
             createEndpoint(handleTestPdfPipelineTraceHttpRequest);
+
+        // Cross-page smart-removal summary — no extraction, no rendering;
+        // just the candidates + per-page removal map.
+        Zotero.Server.Endpoints['/beaver/test/pdf-smart-removal-summary'] =
+            createEndpoint(handleTestPdfSmartRemovalSummaryHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);
