@@ -8,6 +8,7 @@ import { threadService, ThreadRunMatch } from '../../src/services/threadService'
 import { convertUTCToLocal } from '../utils/dateUtils';
 import Spinner from './icons/Spinner';
 import { logger } from '../../src/utils/logger';
+import Button from './ui/Button';
 
 const MAX_RECENT = 3;
 const CACHE_TTL = 60_000; // 1 minute
@@ -301,7 +302,13 @@ const RecentChats: React.FC = () => {
                         <Spinner size={11} />
                     )}
                 </span>
-                <span className="recent-chats-view-all" onClick={handleViewAll}>View All</span>
+                <Button
+                    variant="ghost-secondary"
+                    onClick={handleViewAll}
+                    style={{ padding: '0px' }}
+                >
+                    View All
+                </Button>
             </div>
             {threads.map(thread => (
                 <div

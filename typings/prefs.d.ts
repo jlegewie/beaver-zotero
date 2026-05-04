@@ -43,6 +43,7 @@ declare namespace _ZoteroTypes {
       "citationFormat": string;
       "citationStyle": string;
       "citationLocale": string;
+      "usePageLabels": boolean;
       "customPrompts": string;
       "customPromptsLastUsed": string;
       "actions": string;
@@ -55,12 +56,15 @@ declare namespace _ZoteroTypes {
       "onboardingNoteTipShown": boolean;
       "onboardingCitationTipShown": boolean;
       "onboardingWelcomeShownAt": string;
+      "onboardingSignInTextShown": boolean;
       "mcpServerEnabled": boolean;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;
       "runWebDAVSync": boolean;
       "runEmbeddingFullDiff": boolean;
       "pendingVersionNotifications": string;
+      "librarySuggestions": string;
+      "librarySuggestionsGeneratedAt": string;
     };
   }
 }

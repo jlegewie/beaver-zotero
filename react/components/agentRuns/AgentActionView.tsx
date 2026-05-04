@@ -692,6 +692,19 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             </Button>
                         )}
 
+                        {toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key && (
+                            <Button
+                                variant="outline"
+                                onClick={() => revealSource({
+                                    library_id: action.result_data!.library_id,
+                                    zotero_key: action.result_data!.zotero_key,
+                                })}
+                                disabled={isProcessing}
+                            >
+                                Reveal
+                            </Button>
+                        )}
+
                         {(config.showUndo || (isProcessing && clickedButton === 'undo')) && (
                             <Button
                                 variant="outline"
@@ -699,7 +712,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 loading={isProcessing && clickedButton === 'undo'}
                                 disabled={isProcessing}
                             >
-                                Undo
+                                {toolName === 'create_note' ? 'Delete' : 'Undo'}
                             </Button>
                         )}
 

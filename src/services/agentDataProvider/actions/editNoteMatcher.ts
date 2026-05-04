@@ -19,12 +19,16 @@
  *   7. json_unescape            — convert literal `\n`, `\"`, `\\` etc.
  *   8. partial_element_strip    — strip malformed `<citation.../>` fragments
  *   9. spurious_wrap_strip      — unwrap surrounding `<p>…</p>` etc.
- *  10. markdown_to_html         — convert `**bold**` / `## h` to HTML equivalents
- *  11. whitespace_relaxed       — allow whitespace runs to vary between needle
- *                                 and note (NBSP vs space, extra newlines,
- *                                 tab/space drift). Gated on uniqueness and a
- *                                 non-ws character floor; conservative last
- *                                 resort.
+ *  10. tag_attribute_strip      — drop attributes from block tags (`<p style=…>`,
+ *                                 `<h2 class=…>`, `<blockquote …>`) so the
+ *                                 needle matches the bare form PM stored after
+ *                                 normalizing the model's rewrite payload.
+ *  11. markdown_to_html         — convert `**bold**` / `## h` to HTML equivalents
+ *  12. whitespace_relaxed       — allow whitespace runs to vary between needle
+ *                                 and note (NBSP vs space, literal `&nbsp;`
+ *                                 entity vs space, extra newlines, tab/space
+ *                                 drift). Gated on uniqueness and a non-ws
+ *                                 character floor; conservative last resort.
  */
 
 import {
@@ -41,7 +45,9 @@ import {
     encodeTextEntities,
     ENTITY_FORMS,
     foldTypographicQuotes,
+    hasWhitespaceOrNbsp,
     normalizeWS,
+    WS_OR_NBSP_CLASS,
 } from '../../../utils/noteHtmlEntities';
 import {
     stripPartialSimplifiedElements,
@@ -63,6 +69,7 @@ export type MatchStrategyName =
     | 'json_unescape'
     | 'partial_element_strip'
     | 'spurious_wrap_strip'
+    | 'tag_attribute_strip'
     | 'markdown_to_html'
     | 'whitespace_relaxed';
 
@@ -586,6 +593,106 @@ const spuriousWrapStripStrategy: Strategy = {
     },
 };
 
+/**
+ * Drop attributes from block-level structural tags so a needle that carries
+ * `<p style="…">` or `<h2 class="…">` matches the bare `<p>` / `<h2>` form
+ * Zotero's note editor produces after PM normalizes the model's create_note /
+ * rewrite payload.
+ *
+ * Conservative tag list: only `<p>`, `<h1>`–`<h6>`, `<blockquote>`. Excludes
+ * `<span>`, `<div>`, `<a>` because those legitimately carry attributes that PM
+ * preserves (e.g. `<span class="citation" data-citation="…">`, anchor `href`).
+ * Stripping their attributes would let the matcher silently drop citation data
+ * from the executor's replacement.
+ *
+ * Operates in simplified-space on `oldString` / `newString` (mutates *both*
+ * sides symmetrically). Identity `normalizeAnchor` because validator-supplied
+ * context anchors come from raw `strippedHtml`, which already lacks the
+ * attributes we just stripped.
+ */
+const STRIPPABLE_TAG_PATTERN = /<(p|h[1-6]|blockquote)(\s+[^>]*?)(\/?)>/gi;
+function stripBlockTagAttributes(s: string): string {
+    return s.replace(STRIPPABLE_TAG_PATTERN, (_m, tag, _attrs, slash) => `<${tag.toLowerCase()}${slash}>`);
+}
+
+const tagAttributeStripStrategy: Strategy = {
+    name: 'tag_attribute_strip',
+    tryMatch(input) {
+        if (!input.oldString) return null;
+        const strippedOld = stripBlockTagAttributes(input.oldString);
+        if (strippedOld === input.oldString) return null;
+
+        let expandedOld: string;
+        try {
+            expandedOld = expandToRawHtml(strippedOld, input.metadata, 'old');
+        } catch {
+            return null;
+        }
+        const matchCount = countOccurrences(input.strippedHtml, expandedOld);
+        if (matchCount === 0) return null;
+
+        // Strip new_string symmetrically so the executor's splice produces
+        // attribute-free block tags too. For insert ops the merged
+        // `oldString + injected` form (execute-time normalized_action_data)
+        // contains both attribute-laden segments; stripping wholesale
+        // collapses both at once.
+        const strippedNew = stripBlockTagAttributes(input.newString);
+
+        // Build expandedNew. For insert ops on validate-time inputs (or when
+        // the executor receives a raw `new_string` without the validator's
+        // merged normalized_action_data), `input.newString` is just the
+        // injected payload — splicing it directly would replace the anchor
+        // with the payload instead of preserving it. Mirror the insert
+        // handling in `whitespaceRelaxedStrategy` / `quoteNormalizedStrategy`:
+        // construct `actualRawSlice + injected` (insert_after) or
+        // `injected + actualRawSlice` (insert_before) so the anchor survives.
+        // For execute-time merged inputs the prefix-strip is a no-op and the
+        // splice keeps the merged form intact.
+        let expandedNew: string;
+        try {
+            if (input.operation === 'insert_after') {
+                const injected = strippedNew.startsWith(strippedOld)
+                    ? strippedNew.substring(strippedOld.length)
+                    : strippedNew;
+                const expandedInjected = expandToRawHtml(
+                    injected, input.metadata, 'new', input.externalRefContext,
+                );
+                expandedNew = expandedOld + expandedInjected;
+            } else if (input.operation === 'insert_before') {
+                const injected = strippedNew.endsWith(strippedOld)
+                    ? strippedNew.substring(0, strippedNew.length - strippedOld.length)
+                    : strippedNew;
+                const expandedInjected = expandToRawHtml(
+                    injected, input.metadata, 'new', input.externalRefContext,
+                );
+                expandedNew = expandedInjected + expandedOld;
+            } else {
+                expandedNew = expandToRawHtml(
+                    strippedNew, input.metadata, 'new', input.externalRefContext,
+                );
+            }
+        } catch {
+            return null;
+        }
+
+        // Post-hoc invariant for insert ops (mirrors whitespaceRelaxedStrategy):
+        // the splice result must start/end with the actual raw slice so the
+        // executor's str_replace genuinely behaves as an insertion.
+        if (input.operation === 'insert_after' && !expandedNew.startsWith(expandedOld)) return null;
+        if (input.operation === 'insert_before' && !expandedNew.endsWith(expandedOld)) return null;
+
+        return {
+            strategy: 'tag_attribute_strip',
+            oldString: strippedOld,
+            newString: strippedNew,
+            expandedOld,
+            expandedNew,
+            matchCount,
+            normalizeAnchor: identity,
+        };
+    },
+};
+
 const markdownToHtmlStrategy: Strategy = {
     name: 'markdown_to_html',
     tryMatch(input) {
@@ -666,13 +773,17 @@ function escapeRegExp(s: string): string {
 
 /**
  * Build a regex that matches the needle with any non-empty whitespace run
- * substituted for each `\s+` span. Non-whitespace segments are regex-escaped
+ * substituted for each whitespace span. The whitespace class includes both
+ * regex `\s` and the literal HTML entity `&nbsp;` so the strategy folds drift
+ * between regular spaces and `&nbsp;`-encoded spaces in either direction
+ * (model needle vs. note haystack). Non-whitespace segments are regex-escaped
  * and must match byte-for-byte. Caller guarantees first/last char of `needle`
  * is non-whitespace; the split never yields leading/trailing empties.
  */
+const NEEDLE_WS_SPLIT = new RegExp(`${WS_OR_NBSP_CLASS}+`, 'g');
 function buildWhitespaceRelaxedPattern(needle: string): RegExp {
-    const segments = needle.split(/\s+/).map(escapeRegExp);
-    return new RegExp(segments.join('\\s+'), 'g');
+    const segments = needle.split(NEEDLE_WS_SPLIT).map(escapeRegExp);
+    return new RegExp(segments.join(`${WS_OR_NBSP_CLASS}+`), 'g');
 }
 
 const whitespaceRelaxedStrategy: Strategy = {
@@ -691,9 +802,12 @@ const whitespaceRelaxedStrategy: Strategy = {
         const last = needle.charAt(needle.length - 1);
         if (!/\S/.test(first) || !/\S/.test(last)) return null;
 
-        // Defensive: if the needle has no whitespace at all, `exact` would
-        // already have matched. Skip to keep the strategy focused.
-        if (!/\s/.test(needle)) return null;
+        // Defensive: if the needle has no whitespace at all (and no literal
+        // `&nbsp;`), `exact` would already have matched. Skip to keep the
+        // strategy focused. Using `hasWhitespaceOrNbsp` here matters for the
+        // symmetric direction where the needle's only whitespace is `&nbsp;`
+        // and the haystack uses regular spaces.
+        if (!hasWhitespaceOrNbsp(needle)) return null;
 
         const normalizedOld = normalizeWS(needle);
         if (normalizedOld.length < MIN_WS_RELAXED_NORMALIZED_LENGTH) return null;
@@ -789,6 +903,7 @@ const STRATEGIES: Strategy[] = [
     jsonUnescapeStrategy,
     partialElementStripStrategy,
     spuriousWrapStripStrategy,
+    tagAttributeStripStrategy,
     markdownToHtmlStrategy,
     whitespaceRelaxedStrategy,
 ];

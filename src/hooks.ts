@@ -10,7 +10,7 @@ import { uiManager } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
-import { disposeMuPDF } from "./utils/mupdf";
+import { disposeMuPDF, disposeMuPDFWorker } from "./utils/mupdf";
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { initContextMenus, cleanupContextMenus } from "./modules/zoteroContextMenu";
@@ -335,8 +335,27 @@ async function onMainWindowLoad(win: Window): Promise<void> {
  */
 async function onMainWindowUnload(win: Window): Promise<void> {
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
-    
+
     try {
+        // Worker-window hygiene: the MuPDF worker is owned by the realm that
+        // spawned it. If the closing window is that realm, terminate the
+        // worker now — even on early-return paths — otherwise the singleton
+        // on Zotero outlives its parent window and the next postMessage
+        // throws. The next caller will lazily respawn against the new window.
+        try {
+            const client = (Zotero as any).__beaverMuPDFWorkerClient as
+                | { spawnedFromWindow: Window | null }
+                | undefined;
+            if (client?.spawnedFromWindow === win) {
+                await withShutdownTimeout(
+                    disposeMuPDFWorker(),
+                    "disposeMuPDFWorker",
+                );
+            }
+        } catch (_e) {
+            // best-effort
+        }
+
         // Determine cleanup scope BEFORE unmounting React, so we can set
         // the shutdown flag before React cleanup effects run.
         const remainingWindows = Zotero.getMainWindows().filter(w => w !== win && !w.closed);
@@ -401,7 +420,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         await cleanupSupabaseWindowState(win);
 
         // 2. Dispose MuPDF WASM module to release native resources
-        await withShutdownTimeout(disposeMuPDF(), "disposeMuPDF");
+        await Promise.all([
+            withShutdownTimeout(disposeMuPDF(), "disposeMuPDF"),
+            withShutdownTimeout(disposeMuPDFWorker(), "disposeMuPDFWorker"),
+        ]);
 
         // 3. Clear attachment file cache
         if (addon.attachmentFileCache) {
@@ -455,6 +477,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
         // 14. Unregister protocol handler
         unregisterBeaverProtocolHandler();
+
+        // 15. Drop React-bundle cross-bundle globals attached to Zotero
+        Zotero.__beaverJotaiStore = undefined;
+        Zotero.__beaverShuttingDown = undefined;
 
         ztoolkit.log("onMainWindowUnload: Cleanup completed successfully");
     } catch (error: any) {
@@ -571,7 +597,7 @@ async function onShutdown(): Promise<void> {
         try {
             await cleanupSupabaseWindowState(Zotero.getMainWindow());
         } catch (_e) { /* may not be available during shutdown */ }
-        await disposeMuPDF();
+        await Promise.all([disposeMuPDF(), disposeMuPDFWorker()]);
 
         if (addon.attachmentFileCache) {
             addon.attachmentFileCache.clearMemoryCache();
@@ -616,7 +642,13 @@ async function onShutdown(): Promise<void> {
         ztoolkit.unregisterAll();
         addon.data.dialog?.window?.close();
         addon.data.alive = false;
-        delete Zotero[addon.data.config.addonInstance as keyof typeof Zotero];
+
+        // Drop React-bundle cross-bundle globals so plugin disable doesn't
+        // leak the Jotai store (dead atom-keyed entries) or leave a stale
+        // shutdown flag that would short-circuit the next onStartup().
+        Zotero.__beaverJotaiStore = undefined;
+        Zotero.__beaverShuttingDown = undefined;
+        // Note: the singleton is removed from Zotero in addon/bootstrap.js's
     } catch (error) {
         ztoolkit.log("onShutdown: Error during cleanup:", error);
     }

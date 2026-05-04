@@ -83,6 +83,18 @@ export const isSupportedItem = (item: Zotero.Item | false) => {
 };
 
 /**
+ * True iff `item` is a regular item with at least one Beaver-processable
+ * child attachment.
+ */
+export const hasSupportedAttachment = async (item: Zotero.Item): Promise<boolean> => {
+    if (!item.isRegularItem()) return false;
+    const attachmentIds = item.getAttachments();
+    if (!attachmentIds || attachmentIds.length === 0) return false;
+    const attachments = await Zotero.Items.getAsync(attachmentIds);
+    return attachments.some((a) => isSupportedItem(a) && !a.deleted);
+};
+
+/**
  * Filter function for syncing items based on item type and trash status
  * 
  * This filter only checks for item type and trash status.

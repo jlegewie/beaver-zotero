@@ -5,8 +5,30 @@
  * live and integration tests.
  */
 
-export const ZOTERO_PORT = parseInt(process.env.ZOTERO_HTTP_PORT || '23119', 10);
-export const BASE_URL = `http://127.0.0.1:${ZOTERO_PORT}`;
+// Candidate ports probed by `isZoteroAvailable()`. The env var (if set) wins;
+// otherwise we try Zotero 7's default (23119) and the Zotero 10 beta default
+// (23124). The first port that answers `/beaver/test/ping` becomes the
+// resolved port for the rest of the run.
+const ENV_PORT = process.env.ZOTERO_HTTP_PORT
+    ? parseInt(process.env.ZOTERO_HTTP_PORT, 10)
+    : null;
+export const ZOTERO_PORT_CANDIDATES: number[] = Array.from(
+    new Set(
+        [ENV_PORT, 23119, 23124].filter(
+            (p): p is number => typeof p === 'number' && Number.isFinite(p),
+        ),
+    ),
+);
+
+let resolvedPort: number = ZOTERO_PORT_CANDIDATES[0] ?? 23119;
+
+export function setZoteroPort(port: number): void {
+    resolvedPort = port;
+}
+
+export function getBaseUrl(): string {
+    return `http://127.0.0.1:${resolvedPort}`;
+}
 
 export interface AttachmentFixture {
     library_id: number;
@@ -35,14 +57,14 @@ function parseFixtureRef(
 // Normal 15-page PDF
 export const NORMAL_PDF: AttachmentFixture = {
     library_id: 1,
-    zotero_key: 'QEB4INKW',
+    zotero_key: '2YWA8DTZ',
     description: 'Normal 15-page PDF',
 };
 
 // Small 2-page PDF
 export const SMALL_PDF: AttachmentFixture = {
     library_id: 1,
-    zotero_key: 'E5GP8455',
+    zotero_key: 'G7TTJKFH',
     description: '2-page PDF',
 };
 
@@ -63,35 +85,35 @@ export const NO_TEXT_PDF: AttachmentFixture = {
 // Large 316-page PDF
 export const LARGE_PDF: AttachmentFixture = {
     library_id: 1,
-    zotero_key: 'SKZIZVMT',
+    zotero_key: 'D4WGZFFX',
     description: '316-page PDF',
 };
 
 // Missing local file (attachment exists but file is not available locally)
 export const MISSING_FILE_PDF: AttachmentFixture = {
     library_id: 1,
-    zotero_key: 'VA3DZY5Y',
+    zotero_key: 'SIUWE9HE',
     description: 'PDF attachment with missing local file',
 };
 
 // Group library PDF
 export const GROUP_LIB_PDF: AttachmentFixture = {
     library_id: 3,
-    zotero_key: '2UXUSC8M',
-    description: 'Group library PDF (38 pages)',
+    zotero_key: 'WTY4J27Q',
+    description: 'Group library PDF (11 pages)',
 };
 
 // Another group library PDF
 export const GROUP_LIB2_PDF: AttachmentFixture = {
-    library_id: 2,
-    zotero_key: '5YTGTKGL',
+    library_id: 3,
+    zotero_key: 'ZY9ZUTKA',
     description: 'Group library 2 PDF',
 };
 
 // Parent item (regular item, not attachment) — should auto-resolve
 export const PARENT_ITEM: AttachmentFixture = {
     library_id: 1,
-    zotero_key: 'YDNNR2UB',
+    zotero_key: 'IYI5SMYM',
     description: 'Parent item (auto-resolves to attachment)',
 };
 
@@ -112,13 +134,15 @@ export const LINKED_URL: AttachmentFixture = {
 // Image attachment (PNG)
 export const IMAGE: AttachmentFixture = {
     library_id: 1,
-    zotero_key: 'K3XGEA2S',
+    zotero_key: 'MBWJYPPI',
     description: 'PNG image attachment',
 };
 
-// Optional invalid/corrupted PDF fixture. Set env var:
+// Invalid/corrupted PDF fixture. Override with env var if needed:
 //   ZOTERO_INVALID_PDF_REF="1-ABCDEFGH"
-export const INVALID_PDF_FIXTURE = parseFixtureRef(
-    process.env.ZOTERO_INVALID_PDF_REF,
-    'Invalid/corrupted PDF',
-);
+export const INVALID_PDF_FIXTURE: AttachmentFixture =
+    parseFixtureRef(process.env.ZOTERO_INVALID_PDF_REF, 'Invalid/corrupted PDF') ?? {
+        library_id: 1,
+        zotero_key: 'XQ6M9NDM',
+        description: 'Invalid/corrupted PDF',
+    };

@@ -432,6 +432,26 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         ],
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.18.0" target='_blank'>Full changelog</a>`
     },
+    {
+        version: "0.19.0",
+        title: "Beaver 0.19: Performance and maintenance",
+        inPanel: true,
+        featureList: [
+            {
+                title: "Faster, more responsive UI",
+                description: "PDF processing runs in the background and scrolling is smoother in long threads.",
+            },
+            {
+                title: "User input in actions",
+                description: "Define user inputs in actions to ask for input each time the action runs. <a href='https://www.beaverapp.ai/docs/actions#user-input-variables'>Learn more</a>",
+            },
+            {
+                title: "Many more stability and performance improvements",
+                description: "Resolved a wide range of reliability issues.",
+            },
+        ],
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.19.0" target='_blank'>Full changelog</a>`,
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));

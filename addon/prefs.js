@@ -19,7 +19,7 @@ pref("maxAddAttachmentToMessage", 10);
 pref("readerExplainPrompt", "Explain the selected passage or annotation(s) from this paper in plain language. Provide context for any technical terms, statistical methods, or domain-specific concepts. If it references other work, briefly explain that context too.");
 
 // Beaver Free file limits
-pref("maxFileSizeMB", 50);
+pref("maxFileSizeMB", 70);
 pref("maxPageCount", 300);
 pref("accessRemoteFiles", true);
 
@@ -53,6 +53,9 @@ pref("recentItems", "[]");
 pref("citationFormat", "numeric");
 pref("citationStyle", "http://www.zotero.org/styles/chicago-author-date");
 pref("citationLocale", "en-US");
+// When true, in-text citations display PDF page labels (e.g., Roman numerals
+// for front matter) instead of raw 1-based page numbers.
+pref("usePageLabels", true);
 
 // Custom Prompts (versioned format: { version, prompts }; each prompt has a stable id)
 // Variables supported in prompt text: {{recent_items}}, {{recent_item}}, {{open_attachment}}, {{active_item}}, {{selected_items}}, {{current_collection}}
@@ -79,6 +82,7 @@ pref("onboardingReaderTipShown", false);
 pref("onboardingNoteTipShown", false);
 pref("onboardingCitationTipShown", false);
 pref("onboardingWelcomeShownAt", "");
+pref("onboardingSignInTextShown", false);
 
 // MCP server
 pref("mcpServerEnabled", false);
@@ -89,3 +93,7 @@ pref("runCollectionSync", false);
 pref("runWebDAVSync", false);
 pref("runEmbeddingFullDiff", false);
 pref("pendingVersionNotifications", "[]");
+
+// Library suggestions cache (JSON-encoded LibrarySuggestionsResponse + ISO timestamp)
+pref("librarySuggestions", "");
+pref("librarySuggestionsGeneratedAt", "");

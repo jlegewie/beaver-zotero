@@ -121,6 +121,28 @@ const ENDPOINT_PATHS = [
     '/beaver/test/note-undo',
     // Test-only endpoints (sentence bbox feasibility probe)
     '/beaver/test/sentence-bboxes',
+    // Test-only endpoints (MuPDF worker singleton stats / lifecycle)
+    '/beaver/test/worker-stats',
+    '/beaver/test/worker-mark-stale',
+    '/beaver/test/worker-cache-clear',
+    // Test-only endpoint (file-status side-effect trigger)
+    '/beaver/test/file-status',
+    // Test-only endpoints (MuPDF worker plumbing)
+    '/beaver/test/pdf-page-count',
+    '/beaver/test/pdf-page-labels',
+    '/beaver/test/pdf-render-pages',
+    '/beaver/test/pdf-render-pages-with-meta',
+    '/beaver/test/pdf-extract-raw',
+    '/beaver/test/pdf-extract-raw-detailed',
+    '/beaver/test/pdf-search',
+    // orchestration parity endpoints
+    '/beaver/test/pdf-extract',
+    '/beaver/test/pdf-extract-by-lines',
+    '/beaver/test/pdf-has-text-layer',
+    '/beaver/test/pdf-analyze-ocr',
+    '/beaver/test/pdf-search-scored',
+    '/beaver/test/pdf-sentence-bboxes',
+    '/beaver/test/pdf-render-page',
 ] as const;
 
 /**
@@ -255,8 +277,10 @@ async function handleAttachmentPagesHttpRequest(request: any) {
         start_page: request.start_page,
         end_page: request.end_page,
         skip_local_limits: request.skip_local_limits,
+        prefer_page_labels: request.prefer_page_labels,
+        max_pages: request.max_pages,
     };
-    
+
     const response = await handleZoteroAttachmentPagesRequest(wsRequest);
     
     return {
@@ -279,6 +303,7 @@ async function handleAttachmentPageImagesHttpRequest(request: any) {
         format: request.format,
         jpeg_quality: request.jpeg_quality,
         skip_local_limits: request.skip_local_limits,
+        prefer_page_labels: request.prefer_page_labels,
     };
     
     const response = await handleZoteroAttachmentPageImagesRequest(wsRequest);
@@ -764,6 +789,92 @@ async function handleTestNoteUndoHttpRequest(request: any) {
     }
 }
 
+/**
+ * Dev-only: snapshot of MuPDFWorkerClient dispatch / spawn counters and
+ * the worker-side document cache.
+ *
+ * Lets manual-test runners (`docs-zotero/manual-tests-fused-worker-ops.md`)
+ * verify "exactly one extractWithMeta dispatch", "no extra spawns", etc.
+ * without log grepping. POST `{ reset: true }` to zero counters first.
+ *
+ * `cacheStats` is `null` when no worker has spawned yet — the call must
+ * never spawn one or pollute `dispatchCounts`, so the doc-cache fields stay
+ * absent until a real op has run.
+ */
+async function handleTestWorkerStatsHttpRequest(request: any) {
+    const { getMuPDFWorkerClient } = await import(
+        '../../src/services/pdf/MuPDFWorkerClient'
+    );
+    const client = getMuPDFWorkerClient();
+    if (request?.reset === true) {
+        client.resetStats();
+    }
+    const stats = client.getStats();
+    const cacheStats = await client.getCacheStats();
+    return { ok: true, stats, cacheStats };
+}
+
+/**
+ * Dev-only: terminate the current MuPDF worker as if it had died mid-flight.
+ *
+ * Drives the same `markStale` code path as a real worker death, so the next
+ * `call()` either retries (if a request is in-flight) or respawns on the
+ * next dispatch. Used by manual test 1.3.
+ */
+async function handleTestWorkerMarkStaleHttpRequest(request: any) {
+    const { getMuPDFWorkerClient } = await import(
+        '../../src/services/pdf/MuPDFWorkerClient'
+    );
+    const reason = typeof request?.reason === 'string' ? request.reason : 'test';
+    const client = getMuPDFWorkerClient();
+    const before = client.getStats();
+    client.markStaleForTest(reason);
+    return { ok: true, before, after: client.getStats() };
+}
+
+/**
+ * Dev-only: clear the worker-side document cache. By default also resets
+ * the cache hit/miss/eviction counters so live tests can assert exact
+ * values; pass `{ resetCounters: false }` to keep history.
+ *
+ * No-op when no worker has spawned yet (returns `cacheStats: null`).
+ */
+async function handleTestWorkerCacheClearHttpRequest(request: any) {
+    const { getMuPDFWorkerClient } = await import(
+        '../../src/services/pdf/MuPDFWorkerClient'
+    );
+    const client = getMuPDFWorkerClient();
+    const resetCounters = request?.resetCounters !== false;
+    const cacheStats = await client.clearWorkerCacheForTest({ resetCounters });
+    return { ok: true, cacheStats };
+}
+
+/**
+ * Dev-only: invoke `getAttachmentFileStatus(item, isPrimary)` directly.
+ *
+ * Manual tests 2.3 (step 3), 5.4, and 7.2 need to trigger the file-status
+ * side-effect that, in production, runs from agent or sidebar flows. This
+ * endpoint short-circuits the trigger so a runner can assert on the cache
+ * write / log output that follows.
+ */
+async function handleTestFileStatusHttpRequest(request: any) {
+    const { getAttachmentFileStatus } = await import(
+        '../../src/services/agentDataProvider/utils'
+    );
+    const { library_id, zotero_key, is_primary } = request || {};
+    if (library_id == null || zotero_key == null) {
+        return { ok: false, error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(
+        library_id,
+        zotero_key,
+    );
+    if (!item) return { ok: false, error: 'not_found' };
+    if (!item.isAttachment()) return { ok: false, error: 'not_an_attachment' };
+    const status = await getAttachmentFileStatus(item, is_primary !== false);
+    return { ok: true, status };
+}
+
 async function handleTestResolveItemHttpRequest(request: any) {
     const { library_id, zotero_key } = request;
     if (library_id == null || zotero_key == null) {
@@ -866,6 +977,578 @@ async function handleTestSentenceBBoxesHttpRequest(request: any) {
     }
 }
 
+/**
+ * Dev-only PDF page-count endpoint.
+ *
+ * Bypasses `createEndpoint`'s thrown-error → HTTP 500 path so live tests can
+ * see structured `{ ok: false, error: { code } }` responses for parity checks
+ * (encrypted vs invalid PDFs).
+ *
+ * Request body:
+ *   { library_id, zotero_key }     // read attachment bytes
+ *   { raw_bytes_base64 }            // bypass attachment-type check
+ */
+async function handleTestPdfPageCountHttpRequest(request: any) {
+    const { PDFExtractor, ExtractionError } = await import(
+        '../../src/services/pdf'
+    );
+
+    let pdfData: Uint8Array;
+    if (typeof request?.raw_bytes_base64 === 'string') {
+        try {
+            const binary = atob(request.raw_bytes_base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            pdfData = bytes;
+        } catch (e) {
+            return {
+                ok: false,
+                error: {
+                    name: 'Error',
+                    message: `Invalid raw_bytes_base64: ${e instanceof Error ? e.message : String(e)}`,
+                },
+            };
+        }
+    } else {
+        const { library_id, zotero_key } = request || {};
+        if (library_id == null || zotero_key == null) {
+            return {
+                ok: false,
+                error: {
+                    name: 'Error',
+                    message: 'Provide library_id + zotero_key, or raw_bytes_base64',
+                },
+            };
+        }
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(
+            library_id,
+            zotero_key,
+        );
+        if (!item || !item.isAttachment() || !item.isPDFAttachment()) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: 'Item is not a PDF attachment' },
+            };
+        }
+        const filePath = await item.getFilePathAsync();
+        if (!filePath) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: 'PDF file not available locally' },
+            };
+        }
+        pdfData = await IOUtils.read(filePath);
+    }
+
+    try {
+        const count = await new PDFExtractor().getPageCount(pdfData);
+        return { ok: true, count };
+    } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                },
+            };
+        }
+        throw e;
+    }
+}
+
+/**
+ * Resolve a request body to PDF bytes — accepts either an attachment ref
+ * `{ library_id, zotero_key }` or raw `{ raw_bytes_base64 }`.
+ *
+ * Returns a discriminated result so callers can return a structured
+ * `{ ok: false, error: { name, message } }` response without throwing.
+ */
+async function loadPdfBytesForTestEndpoint(
+    request: any,
+): Promise<
+    | { ok: true; pdfData: Uint8Array }
+    | { ok: false; error: { name: string; message: string } }
+> {
+    if (typeof request?.raw_bytes_base64 === 'string') {
+        try {
+            const binary = atob(request.raw_bytes_base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return { ok: true, pdfData: bytes };
+        } catch (e) {
+            return {
+                ok: false,
+                error: {
+                    name: 'Error',
+                    message: `Invalid raw_bytes_base64: ${e instanceof Error ? e.message : String(e)}`,
+                },
+            };
+        }
+    }
+    const { library_id, zotero_key } = request || {};
+    if (library_id == null || zotero_key == null) {
+        return {
+            ok: false,
+            error: {
+                name: 'Error',
+                message: 'Provide library_id + zotero_key, or raw_bytes_base64',
+            },
+        };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(
+        library_id,
+        zotero_key,
+    );
+    if (!item || !item.isAttachment() || !item.isPDFAttachment()) {
+        return {
+            ok: false,
+            error: { name: 'Error', message: 'Item is not a PDF attachment' },
+        };
+    }
+    const filePath = await item.getFilePathAsync();
+    if (!filePath) {
+        return {
+            ok: false,
+            error: { name: 'Error', message: 'PDF file not available locally' },
+        };
+    }
+    const pdfData = await IOUtils.read(filePath);
+    return { ok: true, pdfData };
+}
+
+function uint8ToBase64ForTest(bytes: Uint8Array): string {
+    const CHUNK = 0x8000;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+        const chunk = bytes.subarray(i, i + CHUNK);
+        binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+    }
+    return btoa(binary);
+}
+
+/**
+ * Dev-only PDF page labels endpoint. Routes through `PDFExtractor`, which
+ * delegates to the MuPDF worker.
+ */
+async function handleTestPdfPageLabelsHttpRequest(request: any) {
+    const { PDFExtractor, ExtractionError } = await import(
+        '../../src/services/pdf'
+    );
+
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    const { pdfData } = loaded;
+
+    try {
+        const { count, labels } = await new PDFExtractor().getPageCountAndLabels(
+            pdfData,
+        );
+        return { ok: true, count, labels };
+    } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                },
+            };
+        }
+        throw e;
+    }
+}
+
+/**
+ * Dev-only PDF render endpoint. Routes through `PDFExtractor`. Image bytes
+ * are base64-encoded for JSON transport; live tests decode for parity.
+ */
+async function handleTestPdfRenderPagesHttpRequest(request: any) {
+    const { PDFExtractor, ExtractionError } = await import(
+        '../../src/services/pdf'
+    );
+
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    const { pdfData } = loaded;
+
+    const pageIndices: number[] | undefined = Array.isArray(request?.page_indices)
+        ? request.page_indices
+        : undefined;
+    const options = request?.options || {};
+
+    try {
+        const results = await new PDFExtractor().renderPagesToImages(
+            pdfData,
+            pageIndices,
+            options,
+        );
+        const pages = results.map((r) => ({
+            pageIndex: r.pageIndex,
+            format: r.format,
+            width: r.width,
+            height: r.height,
+            scale: r.scale,
+            dpi: r.dpi,
+            data_base64: uint8ToBase64ForTest(r.data),
+            data_byte_length: r.data.byteLength,
+        }));
+        return { ok: true, pages };
+    } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                },
+            };
+        }
+        throw e;
+    }
+}
+
+/**
+ * Dev-only fused render-pages endpoint exercising
+ * `PDFExtractor.renderPagesToImagesWithMeta`. Returns metadata alongside
+ * rendered pages so live tests can verify the fused-op shape end-to-end.
+ */
+async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) {
+    const { PDFExtractor, ExtractionError } = await import(
+        '../../src/services/pdf'
+    );
+
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    const { pdfData } = loaded;
+
+    const pageIndices: number[] | undefined = Array.isArray(request?.page_indices)
+        ? request.page_indices
+        : undefined;
+    const pageRange = request?.page_range && typeof request.page_range === 'object'
+        ? request.page_range
+        : undefined;
+    const options = request?.options || {};
+
+    try {
+        const result = await new PDFExtractor().renderPagesToImagesWithMeta(pdfData, {
+            pageIndices,
+            pageRange,
+            options,
+        });
+        const pages = result.pages.map((r) => ({
+            pageIndex: r.pageIndex,
+            format: r.format,
+            width: r.width,
+            height: r.height,
+            scale: r.scale,
+            dpi: r.dpi,
+            data_base64: uint8ToBase64ForTest(r.data),
+            data_byte_length: r.data.byteLength,
+        }));
+        return {
+            ok: true,
+            pageCount: result.pageCount,
+            pageLabels: result.pageLabels,
+            pages,
+        };
+    } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                    pageCount: e.pageCount,
+                },
+            };
+        }
+        throw e;
+    }
+}
+
+/**
+ * Dev-only PDF raw-extract endpoint. Routes through `PDFExtractor`.
+ */
+async function handleTestPdfExtractRawHttpRequest(request: any) {
+    const { PDFExtractor, ExtractionError } = await import(
+        '../../src/services/pdf'
+    );
+
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    const { pdfData } = loaded;
+
+    const pageIndices: number[] | undefined = Array.isArray(request?.page_indices)
+        ? request.page_indices
+        : undefined;
+
+    try {
+        const result = await new PDFExtractor().extractRaw(pdfData, pageIndices);
+        return { ok: true, result };
+    } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                },
+            };
+        }
+        throw e;
+    }
+}
+
+/**
+ * Dev-only PDF detailed-extract endpoint — primitive level.
+ *
+ * Calls `getMuPDFWorkerClient().extractRawPageDetailed` directly (the worker
+ * validates `pageIndex` and emits PAGE_OUT_OF_RANGE). Bypasses
+ * `PDFExtractor.extractSentenceBBoxes` so the test exercises the raw
+ * detailed page, not the sentence mapper.
+ */
+async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
+    const { ExtractionError } = await import('../../src/services/pdf');
+    const { getMuPDFWorkerClient } = await import(
+        '../../src/services/pdf/MuPDFWorkerClient'
+    );
+
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    const { pdfData } = loaded;
+
+    const pageIndex: unknown = request?.page_index;
+    if (typeof pageIndex !== 'number') {
+        return {
+            ok: false,
+            error: { name: 'Error', message: 'page_index (number) is required' },
+        };
+    }
+    const includeImages = request?.include_images === true;
+
+    try {
+        const result = await getMuPDFWorkerClient().extractRawPageDetailed(
+            pdfData,
+            pageIndex,
+            { includeImages },
+        );
+        return { ok: true, result };
+    } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                },
+            };
+        }
+        throw e;
+    }
+}
+
+/**
+ * Dev-only PDF search endpoint — primitive level (no SearchScorer).
+ *
+ * Calls `getMuPDFWorkerClient().searchPages` directly. Bypasses
+ * `PDFExtractor.search` so the test exercises the raw `searchPages`
+ * primitive, not the scored search pipeline.
+ */
+async function handleTestPdfSearchHttpRequest(request: any) {
+    const { ExtractionError } = await import('../../src/services/pdf');
+    const { getMuPDFWorkerClient } = await import(
+        '../../src/services/pdf/MuPDFWorkerClient'
+    );
+
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    const { pdfData } = loaded;
+
+    const query: unknown = request?.query;
+    if (typeof query !== 'string' || query.length === 0) {
+        return {
+            ok: false,
+            error: { name: 'Error', message: 'query (non-empty string) is required' },
+        };
+    }
+    const pageIndices: number[] | undefined = Array.isArray(request?.page_indices)
+        ? request.page_indices
+        : undefined;
+    const maxHitsPerPage =
+        typeof request?.max_hits_per_page === 'number'
+            ? request.max_hits_per_page
+            : undefined;
+
+    try {
+        const pages = await getMuPDFWorkerClient().searchPages(
+            pdfData,
+            query,
+            pageIndices,
+            maxHitsPerPage,
+        );
+        return { ok: true, pages };
+    } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                },
+            };
+        }
+        throw e;
+    }
+}
+
+/**
+ * Helper that wraps a PDFExtractor call and serializes ExtractionError
+ * (including the `details` payload) into the structured wire shape used by
+ * live parity tests.
+ */
+async function runPdfExtractorCall<T>(
+    request: any,
+    fn: (pdfData: Uint8Array) => Promise<T>,
+    onSuccess: (result: T) => any,
+): Promise<any> {
+    const { ExtractionError } = await import('../../src/services/pdf');
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    try {
+        const result = await fn(loaded.pdfData);
+        return onSuccess(result);
+    } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                    // ExtractionError stores OCR data on `e.details`
+                    // (types.ts:599); the wire field is named `ocrAnalysis`
+                    // for self-documenting JSON. Live tests assert the
+                    // wire shape; the rehydrated client-side instance
+                    // carries the same data on `error.details`.
+                    payload: {
+                        ocrAnalysis: e.details,
+                        pageLabels: e.pageLabels,
+                        pageCount: e.pageCount,
+                    },
+                },
+            };
+        }
+        throw e;
+    }
+}
+
+/** Dev-only `extract` parity endpoint. Routes through PDFExtractor. */
+async function handleTestPdfExtractHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    const settings = request?.settings || {};
+    return runPdfExtractorCall(
+        request,
+        (pdfData) => new PDFExtractor().extract(pdfData, settings),
+        (result) => ({ ok: true, result }),
+    );
+}
+
+/** Dev-only `extractByLines` parity endpoint. */
+async function handleTestPdfExtractByLinesHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    const settings = request?.settings || {};
+    return runPdfExtractorCall(
+        request,
+        (pdfData) => new PDFExtractor().extractByLines(pdfData, settings),
+        (result) => ({ ok: true, result }),
+    );
+}
+
+/** Dev-only `hasTextLayer` parity endpoint. */
+async function handleTestPdfHasTextLayerHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    return runPdfExtractorCall(
+        request,
+        (pdfData) => new PDFExtractor().hasTextLayer(pdfData),
+        (hasTextLayer) => ({ ok: true, hasTextLayer }),
+    );
+}
+
+/** Dev-only `analyzeOCRNeeds` parity endpoint. */
+async function handleTestPdfAnalyzeOcrHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    const options = request?.options || {};
+    return runPdfExtractorCall(
+        request,
+        (pdfData) => new PDFExtractor().analyzeOCRNeeds(pdfData, options),
+        (result) => ({ ok: true, result }),
+    );
+}
+
+/** Dev-only scored-search parity endpoint. */
+async function handleTestPdfSearchScoredHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    const query = String(request?.query ?? '');
+    const options = request?.options || {};
+    return runPdfExtractorCall(
+        request,
+        (pdfData) => new PDFExtractor().search(pdfData, query, options),
+        (result) => ({ ok: true, result }),
+    );
+}
+
+/** Dev-only `extractSentenceBBoxes` parity endpoint. */
+async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    const pageIndex = Number(request?.page_index);
+    const options = request?.options || {};
+    return runPdfExtractorCall(
+        request,
+        (pdfData) =>
+            new PDFExtractor().extractSentenceBBoxes(pdfData, pageIndex, options),
+        (result) => ({ ok: true, result }),
+    );
+}
+
+/**
+ * Dev-only single-page render endpoint — required for the carry-forward
+ * `renderPageToImage` PAGE_OUT_OF_RANGE parity case (the plural endpoint
+ * silently filters invalid indices and cannot exercise the throw).
+ */
+async function handleTestPdfRenderPageHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../src/services/pdf');
+    const pageIndex = Number(request?.page_index);
+    const options = request?.options || {};
+    return runPdfExtractorCall(
+        request,
+        (pdfData) => new PDFExtractor().renderPageToImage(pdfData, pageIndex, options),
+        (r) => ({
+            ok: true,
+            result: {
+                pageIndex: r.pageIndex,
+                format: r.format,
+                width: r.width,
+                height: r.height,
+                scale: r.scale,
+                dpi: r.dpi,
+                data_base64: uint8ToBase64ForTest(r.data),
+                data_byte_length: r.data.byteLength,
+            },
+        }),
+    );
+}
 
 // =============================================================================
 // Registration Functions
@@ -935,8 +1618,8 @@ function registerEndpoints(): boolean {
     Zotero.Server.Endpoints['/beaver/note/read'] =
         createEndpoint(handleReadNoteHttpRequest);
 
-    // Test-only endpoints (cache inspection/manipulation) — dev builds only
-    if (Zotero.Beaver?.data?.env === 'development') {
+    // Test-only endpoints (dev builds only)
+    if (process.env.NODE_ENV === 'development') {
         Zotero.Server.Endpoints['/beaver/test/ping'] =
             createEndpoint(handleTestPingHttpRequest);
 
@@ -954,6 +1637,20 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);
+
+        // MuPDF worker singleton stats / lifecycle (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/worker-stats'] =
+            createEndpoint(handleTestWorkerStatsHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/worker-mark-stale'] =
+            createEndpoint(handleTestWorkerMarkStaleHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/worker-cache-clear'] =
+            createEndpoint(handleTestWorkerCacheClearHttpRequest);
+
+        // File-status side-effect trigger (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/file-status'] =
+            createEndpoint(handleTestFileStatusHttpRequest);
 
         // Note-specific test endpoints (seeding/teardown/inspection/undo)
         Zotero.Server.Endpoints['/beaver/test/note-create'] =
@@ -977,6 +1674,50 @@ function registerEndpoints(): boolean {
         // Sentence bbox feasibility probe (dev-only)
         Zotero.Server.Endpoints['/beaver/test/sentence-bboxes'] =
             createEndpoint(handleTestSentenceBBoxesHttpRequest);
+
+        // MuPDF worker plumbing (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/pdf-page-count'] =
+            createEndpoint(handleTestPdfPageCountHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-page-labels'] =
+            createEndpoint(handleTestPdfPageLabelsHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-render-pages'] =
+            createEndpoint(handleTestPdfRenderPagesHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-render-pages-with-meta'] =
+            createEndpoint(handleTestPdfRenderPagesWithMetaHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-extract-raw'] =
+            createEndpoint(handleTestPdfExtractRawHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-extract-raw-detailed'] =
+            createEndpoint(handleTestPdfExtractRawDetailedHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-search'] =
+            createEndpoint(handleTestPdfSearchHttpRequest);
+
+        // orchestration parity endpoints
+        Zotero.Server.Endpoints['/beaver/test/pdf-extract'] =
+            createEndpoint(handleTestPdfExtractHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-extract-by-lines'] =
+            createEndpoint(handleTestPdfExtractByLinesHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-has-text-layer'] =
+            createEndpoint(handleTestPdfHasTextLayerHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-analyze-ocr'] =
+            createEndpoint(handleTestPdfAnalyzeOcrHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-search-scored'] =
+            createEndpoint(handleTestPdfSearchScoredHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-sentence-bboxes'] =
+            createEndpoint(handleTestPdfSentenceBBoxesHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-render-page'] =
+            createEndpoint(handleTestPdfRenderPageHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

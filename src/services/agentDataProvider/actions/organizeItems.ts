@@ -5,6 +5,7 @@ import { getDeferredToolPreference } from '../utils';
 import { TimeoutContext, checkAborted } from '../timeout';
 import { TimeoutError } from '../timeout';
 import { logger } from '../../../utils/logger';
+import { TimingAccumulator } from '../../../utils/timing';
 
 
 /**
@@ -240,68 +241,87 @@ export async function validateOrganizeItemsAction(
             return null;
         };
 
-        // Validate collection keys exist (for add operations)
-        if (collections?.add && collections.add.length > 0) {
-            for (const collKey of collections.add) {
-                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
-                if (!collection) {
-                    const otherLibraryId = await findCollectionLibrary(collKey);
-                    if (otherLibraryId !== null) {
-                        const otherLibrary = Zotero.Libraries.get(otherLibraryId);
-                        const otherLibraryName = otherLibrary ? otherLibrary.name : `library ${otherLibraryId}`;
-                        const currentLibrary = Zotero.Libraries.get(libraryId);
-                        const currentLibraryName = currentLibrary ? currentLibrary.name : `library ${libraryId}`;
-                        return {
-                            type: 'agent_action_validate_response',
-                            request_id: request.request_id,
-                            valid: false,
-                            error: `Collection '${collKey}' belongs to '${otherLibraryName}' (library ${otherLibraryId}), but the items are in '${currentLibraryName}' (library ${libraryId}). Collections are library-scoped; create a separate collection in library ${libraryId} or only pass items from library ${otherLibraryId}.`,
-                            error_code: 'collection_in_different_library',
-                            preference: 'always_ask',
-                        };
-                    }
-                    return {
-                        type: 'agent_action_validate_response',
-                        request_id: request.request_id,
-                        valid: false,
-                        error: `Collection not found: ${collKey}. Use create_collection first.`,
-                        error_code: 'collection_not_found',
-                        preference: 'always_ask',
-                    };
-                }
-            }
-        }
+        // Collect ALL invalid collection keys (across add and remove) before
+        // returning, so the agent sees the full picture in one shot. Reporting
+        // only the first failure caused models to "fix" one key per retry while
+        // missing the systematic pattern (e.g. mistakenly pasting item keys
+        // into add_to_collections).
+        type InvalidColl = { key: string; otherLibraryId: number | null };
+        const invalidColls: InvalidColl[] = [];
+        const seenInvalid = new Set<string>();
 
-        // Validate collection keys exist (for remove operations)
-        if (collections?.remove && collections.remove.length > 0) {
-            for (const collKey of collections.remove) {
+        const checkKeys = async (keys: string[]) => {
+            for (const collKey of keys) {
+                if (seenInvalid.has(collKey)) continue;
                 const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
                 if (!collection) {
-                    const otherLibraryId = await findCollectionLibrary(collKey);
-                    if (otherLibraryId !== null) {
-                        const otherLibrary = Zotero.Libraries.get(otherLibraryId);
-                        const otherLibraryName = otherLibrary ? otherLibrary.name : `library ${otherLibraryId}`;
-                        const currentLibrary = Zotero.Libraries.get(libraryId);
-                        const currentLibraryName = currentLibrary ? currentLibrary.name : `library ${libraryId}`;
-                        return {
-                            type: 'agent_action_validate_response',
-                            request_id: request.request_id,
-                            valid: false,
-                            error: `Collection '${collKey}' belongs to '${otherLibraryName}' (library ${otherLibraryId}), but the items are in '${currentLibraryName}' (library ${libraryId}). Collections are library-scoped.`,
-                            error_code: 'collection_in_different_library',
-                            preference: 'always_ask',
-                        };
-                    }
-                    return {
-                        type: 'agent_action_validate_response',
-                        request_id: request.request_id,
-                        valid: false,
-                        error: `Collection not found: ${collKey}`,
-                        error_code: 'collection_not_found',
-                        preference: 'always_ask',
-                    };
+                    seenInvalid.add(collKey);
+                    invalidColls.push({
+                        key: collKey,
+                        otherLibraryId: await findCollectionLibrary(collKey),
+                    });
                 }
             }
+        };
+
+        if (collections?.add && collections.add.length > 0) await checkKeys(collections.add);
+        if (collections?.remove && collections.remove.length > 0) await checkKeys(collections.remove);
+
+        if (invalidColls.length > 0) {
+            const notFound = invalidColls.filter(x => x.otherLibraryId === null).map(x => x.key);
+            const inOtherLib = invalidColls.filter(x => x.otherLibraryId !== null);
+
+            // Detect the common model failure mode: collection keys that are
+            // actually item zotero-keys copy-pasted from item_ids.
+            const itemZoteroKeys = new Set(item_ids.map(id => id.split('-').slice(1).join('-')));
+            const overlapWithItemKeys = invalidColls
+                .map(x => x.key)
+                .filter(key => itemZoteroKeys.has(key));
+
+            const currentLibrary = Zotero.Libraries.get(libraryId);
+            const currentLibraryName = currentLibrary ? currentLibrary.name : `library ${libraryId}`;
+
+            const parts: string[] = [];
+            if (notFound.length > 0) {
+                parts.push(
+                    `Collection${notFound.length === 1 ? '' : 's'} not found in '${currentLibraryName}' (library ${libraryId}): ${notFound.join(', ')}.`
+                );
+            }
+            if (inOtherLib.length > 0) {
+                const byLib = new Map<number, string[]>();
+                for (const { key, otherLibraryId } of inOtherLib) {
+                    if (otherLibraryId === null) continue;
+                    const arr = byLib.get(otherLibraryId) ?? [];
+                    arr.push(key);
+                    byLib.set(otherLibraryId, arr);
+                }
+                for (const [otherLibId, keys] of byLib) {
+                    const otherLibrary = Zotero.Libraries.get(otherLibId);
+                    const otherLibraryName = otherLibrary ? otherLibrary.name : `library ${otherLibId}`;
+                    parts.push(
+                        `Collection${keys.length === 1 ? '' : 's'} ${keys.join(', ')} belong${keys.length === 1 ? 's' : ''} to '${otherLibraryName}' (library ${otherLibId}), not '${currentLibraryName}'. Collections are library-scoped.`
+                    );
+                }
+            }
+            if (overlapWithItemKeys.length > 0) {
+                parts.push(
+                    `Note: ${overlapWithItemKeys.length === 1 ? 'key' : 'keys'} ${overlapWithItemKeys.join(', ')} also appear in item_ids — collection keys must come from list_collections (or a prior create_collection), not from item IDs.`
+                );
+            }
+            parts.push('Use list_collections to find valid collection keys, or create_collection to make a new one.');
+
+            const errorCode = notFound.length === 0 && inOtherLib.length > 0
+                ? 'collection_in_different_library'
+                : 'collection_not_found';
+
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: parts.join(' '),
+                error_code: errorCode,
+                preference: 'always_ask',
+            };
         }
     }
 
@@ -330,6 +350,18 @@ export async function executeOrganizeItemsAction(
     request: WSAgentActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
+    const start = Date.now();
+    const ta = new TimingAccumulator();
+    // tx_total_ms (wall-clock around executeTransaction) minus tx_work_ms
+    // (time inside the callback) = SQLite write-queue wait. Concurrent
+    // organize_items calls serialize on the single writer, so this gap is
+    // the answer to "is the slowness queue-wait or actual work?"
+    const buildTiming = (extra?: Record<string, number>): Record<string, number> => ({
+        total_ms: Date.now() - start,
+        ...ta.getAll(),
+        ...(extra ?? {}),
+    });
+
     const { item_ids, tags, collections } = request.action_data as {
         item_ids: string[];
         tags?: { add?: string[]; remove?: string[] } | null;
@@ -353,19 +385,55 @@ export async function executeOrganizeItemsAction(
         collections: number[];
     }>();
 
+    // Resolve collection keys to objects once, before opening the write transaction.
+    // Validation guarantees all items share a library when collection changes are
+    // requested, and that every key in add/remove resolves — so a miss here is a
+    // benign race (collection deleted between validate and execute) and is skipped.
+    const addCollections = new Map<string, { id: number }>();
+    const removeCollections = new Map<string, { id: number }>();
+    const hasCollectionChanges = !!(collections && ((collections.add && collections.add.length > 0) || (collections.remove && collections.remove.length > 0)));
+    if (hasCollectionChanges && item_ids.length > 0) {
+        const collectionLibraryId = parseInt(item_ids[0].split('-')[0], 10);
+        await ta.track('collection_resolve_ms', async () => {
+            for (const collKey of collections?.add ?? []) {
+                checkAborted(ctx, 'organize_items:collection_resolve');
+                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId, collKey);
+                if (collection) addCollections.set(collKey, collection);
+            }
+            for (const collKey of collections?.remove ?? []) {
+                checkAborted(ctx, 'organize_items:collection_resolve');
+                const collection = await Zotero.Collections.getByLibraryAndKeyAsync(collectionLibraryId, collKey);
+                if (collection) removeCollections.set(collKey, collection);
+            }
+        });
+    }
+
     try {
         // Checkpoint: abort before starting the transaction
         checkAborted(ctx, 'organize_items:before_transaction');
 
+        // pre_tx_ms: time from function entry to awaiting executeTransaction.
+        // Includes collection_resolve_ms; non-tracked remainder is sync setup.
+        ta.record('pre_tx_ms', Date.now() - start);
+
         // Batch all modifications in a single transaction for performance.
         // If any save fails (including TimeoutError), the entire transaction rolls back.
-        await Zotero.DB.executeTransaction(async () => {
+        //
+        // tx_total_ms wraps the await; tx_work_ms is recorded inside the
+        // callback. The difference = SQLite write-lock queue wait. Concurrent
+        // organize_items calls serialize on the single writer, so that gap
+        // tells us whether slowness is queue-wait or actual work.
+        await ta.track('tx_total_ms', () => Zotero.DB.executeTransaction(async () => {
+            const txWorkStart = Date.now();
+            try {
             for (const itemId of item_ids) {
                 const parts = itemId.split('-');
                 const libraryId = parseInt(parts[0], 10);
                 const zoteroKey = parts.slice(1).join('-');
 
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+                const item = await ta.track('item_lookup_ms', () =>
+                    Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey)
+                );
                 if (!item) {
                     // Item not found - skip but don't fail the transaction
                     skippedItems.push(itemId);
@@ -421,7 +489,7 @@ export async function executeOrganizeItemsAction(
                 if (isTopLevel && collections?.add && collections.add.length > 0) {
                     for (const collKey of collections.add) {
                         if (!existingCollections.has(collKey)) {
-                            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                            const collection = addCollections.get(collKey);
                             if (collection) {
                                 item.addToCollection(collection.id);
                                 actualCollectionsAdded.add(collKey);
@@ -435,7 +503,7 @@ export async function executeOrganizeItemsAction(
                 if (isTopLevel && collections?.remove && collections.remove.length > 0) {
                     for (const collKey of collections.remove) {
                         if (existingCollections.has(collKey)) {
-                            const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
+                            const collection = removeCollections.get(collKey);
                             if (collection) {
                                 item.removeFromCollection(collection.id);
                                 actualCollectionsRemoved.add(collKey);
@@ -449,11 +517,14 @@ export async function executeOrganizeItemsAction(
                 // executeTransaction triggers full rollback
                 if (modified) {
                     checkAborted(ctx, 'organize_items:before_item_save');
-                    await item.save();
+                    await ta.track('item_save_ms', () => item.save());
                     itemsModified++;
                 }
             }
-        });
+            } finally {
+                ta.record('tx_work_ms', Date.now() - txWorkStart);
+            }
+        }));
     } catch (error) {
         // Restore in-memory state for all snapshotted items.
         // The DB transaction rolled back, but in-memory item objects still
@@ -470,6 +541,11 @@ export async function executeOrganizeItemsAction(
             success: false,
             error: `Failed to organize items: ${error}`,
             error_code: 'transaction_failed',
+            timing: buildTiming({
+                item_count: item_ids.length,
+                items_modified: itemsModified,
+                items_skipped: skippedItems.length,
+            }),
         };
     }
 
@@ -488,5 +564,10 @@ export async function executeOrganizeItemsAction(
             collections_removed: actualCollectionsRemoved.size > 0 ? [...actualCollectionsRemoved] : undefined,
             skipped_items: skippedItems.length > 0 ? skippedItems : undefined,
         },
+        timing: buildTiming({
+            item_count: item_ids.length,
+            items_modified: itemsModified,
+            items_skipped: skippedItems.length,
+        }),
     };
 }

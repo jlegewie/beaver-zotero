@@ -11,6 +11,7 @@ import { store } from '../store';
 import { userIdAtom } from '../atoms/auth';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
 import { safeFileExists } from '../../src/utils/zoteroUtils';
+import { getNoteContentPreviewText } from './noteText';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -48,14 +49,11 @@ export function getDisplayNameFromItem(item: Zotero.Item, count: number | null =
 export function getReferenceFromItem(item: Zotero.Item): string {
     let formatted_citation: string;
     if (item.isNote()) {
-        // @ts-ignore unescapeHTML exists
-        let plainText: string = Zotero.Utilities.unescapeHTML(item.getNote());
-        // Strip the title from the beginning of the content to avoid duplication
-        const noteTitle = item.getNoteTitle();
-        if (noteTitle && plainText.startsWith(noteTitle)) {
-            plainText = plainText.substring(noteTitle.length).trim();
-        }
-        formatted_citation = truncateText(plainText, MAX_NOTE_CONTENT_LENGTH);
+        formatted_citation = getNoteContentPreviewText(
+            item.getNote(),
+            item.getNoteTitle(),
+            MAX_NOTE_CONTENT_LENGTH
+        );
     } else {
         formatted_citation = Zotero.Beaver?.citationService?.formatBibliography(item) ?? '';
     }

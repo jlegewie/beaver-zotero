@@ -9,7 +9,6 @@ import { isAttachmentOnServer, isAttachmentAvailableRemotely, getAttachmentDataI
 import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { MuPDFService } from '../pdf/MuPDFService';
 import { EXTRACTION_VERSION, isRemoteFilePath, makeRemoteFilePath } from '../attachmentFileCache';
 import type { AttachmentFileCacheRecord } from '../attachmentFileCache';
 import { DeferredToolPreference } from '../agentProtocol';
@@ -391,16 +390,16 @@ function fileStatusFromCache(record: AttachmentFileCacheRecord, isPrimary: boole
 /**
  * Extract page labels from PDF data using MuPDF.
  * Returns the label mapping (empty {} if no custom labels or on error).
+ *
+ * Routes through `PDFExtractor.getPageCountAndLabels`, which delegates to
+ * the MuPDF worker.
  */
 async function extractPageLabelsFromData(pdfData: Uint8Array): Promise<Record<number, string>> {
-    const mupdf = new MuPDFService();
     try {
-        await mupdf.open(pdfData);
-        return mupdf.getAllPageLabels();
+        const { labels } = await new PDFExtractor().getPageCountAndLabels(pdfData);
+        return labels;
     } catch {
         return {};
-    } finally {
-        mupdf.close();
     }
 }
 

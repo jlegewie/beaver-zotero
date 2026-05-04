@@ -9,6 +9,7 @@ import {
     selectedTagsAtom,
     currentNoteItemAtom,
     recentlyAddedTodayCountAtom,
+    libraryHasItemsAtom,
     LibraryTreeRowType,
 } from '../atoms/zoteroContext';
 
@@ -28,6 +29,28 @@ let moduleTabNotifierId: string | null = null;
  */
 function isNoteTabType(type: string): boolean {
     return type === 'note' || type === 'note-unloaded' || type === 'note-loading';
+}
+
+/**
+ * Cheap "has any regular item" probe across non-feed libraries. Used by the
+ * first-run gate so we skip FirstRunPage on truly empty libraries (HomePage
+ * has a better empty-state for that case).
+ */
+async function queryLibraryHasItems(): Promise<boolean> {
+    const sql = `SELECT 1 FROM items i
+        JOIN libraries l ON l.libraryID = i.libraryID
+        WHERE l.type != 'feed'
+          AND i.itemTypeID NOT IN (
+              SELECT itemTypeID FROM itemTypes
+              WHERE typeName IN ('note', 'attachment', 'annotation')
+          )
+          AND i.itemID NOT IN (SELECT itemID FROM deletedItems)
+        LIMIT 1`;
+    let found = false;
+    await Zotero.DB.queryAsync(sql, [], {
+        onRow: () => { found = true; },
+    });
+    return found;
 }
 
 /**
@@ -113,6 +136,7 @@ export function useZoteroContext() {
     const setSelectedTags = useSetAtom(selectedTagsAtom);
     const setNoteItem = useSetAtom(currentNoteItemAtom);
     const setRecentlyAddedTodayCount = useSetAtom(recentlyAddedTodayCountAtom);
+    const setLibraryHasItems = useSetAtom(libraryHasItemsAtom);
 
     useEffect(() => {
         const mainWindow = Zotero.getMainWindow();
@@ -176,15 +200,34 @@ export function useZoteroContext() {
             moduleItemNotifierId = null;
         }
 
+        // Tracked locally so 'modify' (frequent) can skip the query when we
+        // already know the library has regular items — modify can only flip
+        // false->true (via restore-from-trash), never true->false.
+        let libraryHasItemsLocal = false;
+        const refreshLibraryHasItems = async () => {
+            libraryHasItemsLocal = await queryLibraryHasItems();
+            setLibraryHasItems(libraryHasItemsLocal);
+        };
+
         const itemObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
             notify: async function (
                 event: _ZoteroTypes.Notifier.Event,
-                _type: _ZoteroTypes.Notifier.Type,
+                type: _ZoteroTypes.Notifier.Type,
                 _ids: string[] | number[],
             ) {
+                if (type !== 'item') return;
                 if (event === 'add') {
                     const count = await queryRecentlyAddedTodayCount();
                     setRecentlyAddedTodayCount(count);
+                    // 'add' fires for notes/attachments/annotations too, which
+                    // don't count as regular items — re-query rather than assume.
+                    await refreshLibraryHasItems();
+                } else if (event === 'delete' || event === 'trash') {
+                    await refreshLibraryHasItems();
+                } else if (event === 'modify' && !libraryHasItemsLocal) {
+                    // Restore-from-trash fires only 'modify' on item (no 'trash'
+                    // event). Skip when already true: modify cannot flip true->false.
+                    await refreshLibraryHasItems();
                 }
             },
         };
@@ -287,6 +330,7 @@ export function useZoteroContext() {
         }
 
         queryRecentlyAddedTodayCount().then(setRecentlyAddedTodayCount);
+        refreshLibraryHasItems();
 
         // --- Cleanup ---
         return () => {
@@ -311,5 +355,6 @@ export function useZoteroContext() {
         setSelectedTags,
         setNoteItem,
         setRecentlyAddedTodayCount,
+        setLibraryHasItems,
     ]);
 }

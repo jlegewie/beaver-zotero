@@ -2,6 +2,13 @@ import { atom } from 'jotai';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '../../src/services/supabaseClient';
 import { isProfileLoadedAtom, profileWithPlanAtom } from './profile';
+import {
+    firstRunNextStepsDismissedAtom,
+    firstRunReturnRequestedAtom,
+    firstRunSuggestionsAtom,
+    firstRunSuggestionsErrorAtom,
+    firstRunSuggestionsModeAtom,
+} from './firstRun';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '../../src/utils/logger';
 
@@ -154,6 +161,15 @@ export const logoutAtom = atom(
         await supabase.auth.signOut();
         set(profileWithPlanAtom, null);
         set(isProfileLoadedAtom, false);
+
+        // Reset first-run session state — plain Jotai atoms don't auto-reset.
+        // The origin itself lives on persisted run data, but session-only
+        // dismissal/return flags must be cleared so the next user starts fresh.
+        set(firstRunNextStepsDismissedAtom, new Set<string>());
+        set(firstRunReturnRequestedAtom, false);
+        set(firstRunSuggestionsModeAtom, false);
+        set(firstRunSuggestionsAtom, null);
+        set(firstRunSuggestionsErrorAtom, null);
 
         // Reset transient form state and restore authMethod to persisted preference
         resetLoginFormState(set);

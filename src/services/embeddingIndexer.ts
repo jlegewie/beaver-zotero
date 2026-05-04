@@ -280,7 +280,9 @@ export class EmbeddingIndexer {
     /**
      * Get lightweight item metadata for a library using direct SQL query.
      * Only returns regular items (excludes notes, annotations, attachments).
-     * Sorted by clientDateModified DESC (most recent first).
+     * Sorted by dateAdded DESC (most recently added first) so the earliest
+     * batches reflect what the user has most recently brought into their
+     * library.
      * @param libraryId The library to query
      * @returns Array of ItemIndexMetadata
      */
@@ -290,12 +292,12 @@ export class EmbeddingIndexer {
         const attachmentItemTypeID = Zotero.ItemTypes.getID('attachment');
 
         const sql = `
-            SELECT itemID, libraryID, clientDateModified 
-            FROM items 
-            WHERE libraryID = ? 
+            SELECT itemID, libraryID, clientDateModified
+            FROM items
+            WHERE libraryID = ?
               AND itemTypeID NOT IN (?, ?, ?)
               AND itemID NOT IN (SELECT itemID FROM deletedItems)
-            ORDER BY clientDateModified DESC
+            ORDER BY dateAdded DESC
         `;
         const params = [libraryId, noteItemTypeID, annotationItemTypeID, attachmentItemTypeID];
 

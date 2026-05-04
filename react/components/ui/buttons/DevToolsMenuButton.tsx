@@ -23,8 +23,9 @@ import { getCurrentReaderAndWaitForView } from '../../../utils/readerUtils';
 import { semanticSearchService } from '../../../../src/services/semanticSearchService';
 import { BeaverDB } from '../../../../src/services/database';
 import { threadService } from '../../../../src/services/threadService';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { zoteroContextAtom } from '../../../atoms/zoteroContext';
+import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
 import { logger } from '../../../../src/utils/logger';
 
 interface DevToolsMenuButtonProps {
@@ -43,6 +44,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
     currentMessageContent = '',
 }) => {
     const zoteroContext = useAtomValue(zoteroContextAtom);
+    const setFirstRunReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
 
     // Log Zotero context state
     const handleLogZoteroContext = () => {
@@ -702,6 +704,11 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
     };
 
+    // Show the first-run suggestions page via the routing atom
+    const handleShowFirstRunPage = () => {
+        setFirstRunReturnRequested(true);
+    };
+
     // Create menu items for dev testing functions
     const menuItems: MenuItem[] = [
         {
@@ -713,6 +720,12 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         {
             label: "Test Semantic Search",
             onClick: handleTestSemanticSearch,
+            icon: SearchIcon,
+            disabled: false,
+        },
+        {
+            label: "Show First Run Page",
+            onClick: handleShowFirstRunPage,
             icon: SearchIcon,
             disabled: false,
         },

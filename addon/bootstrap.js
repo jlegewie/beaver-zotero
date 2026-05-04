@@ -79,11 +79,25 @@ async function shutdown({ id, version, resourceURI, rootURI }, reason) {
       Components.interfaces.nsISupports,
     ).wrappedJSObject;
   }
-  await Zotero.__addonInstance__?.hooks.onShutdown();
+  try {
+    await Zotero.__addonInstance__?.hooks.onShutdown();
+  } finally {
+    // Always drop the singleton off Zotero so the next startup's
+    // `loadSubScript` sees it gone and assigns a fresh Addon. onShutdown's
+    // own `delete` lives inside a try/catch and gets skipped if any
+    // earlier cleanup step throws — without this finally a partial
+    // teardown leaves `Zotero.__addonInstance__` pointing at a stale
+    // instance, breaking the next reload.
+    try {
+      delete Zotero.__addonInstance__;
+    } catch (_) {
+      // best-effort — property may already be gone
+    }
 
-  if (chromeHandle) {
-    chromeHandle.destruct();
-    chromeHandle = null;
+    if (chromeHandle) {
+      chromeHandle.destruct();
+      chromeHandle = null;
+    }
   }
 }
 

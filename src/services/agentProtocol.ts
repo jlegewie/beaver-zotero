@@ -1046,6 +1046,13 @@ export interface WSAgentActionValidateResponse {
      */
     normalized_action_data?: Record<string, any>;
     preference: DeferredToolPreference;
+    /** Optional warnings surfaced during validation */
+    warnings?: string[];
+    /**
+     * Optional plugin-side timing breakdown in milliseconds. Free-form keys
+     * scoped to action_type. Backend logs as-is — do not interpret.
+     */
+    timing?: Record<string, number>;
 }
 
 /** Request from backend to execute an agent action */
@@ -1197,6 +1204,25 @@ export interface ApplicationStateInput {
     current_collection?: CurrentCollection;
     /** Currently selected library items (optional) */
     library_selection?: ZoteroItemReference[];
+    /** Frontend embedding index status */
+    indexing_status?: IndexingStatus;
+}
+
+/** Frontend embedding index status reported with each agent run. */
+export interface IndexingStatus {
+    /** True when the initial indexing pass is complete (semantic search ready). */
+    is_complete: boolean;
+    /**
+     * Percent of items indexed across the initial pass (0-100).
+     * Omitted when complete or when total_items is 0 (no signal to report).
+     */
+    percent_complete?: number;
+    /** Total items expected in the initial pass. Omitted when complete. */
+    total_items?: number;
+    /** Items still pending indexing. Omitted when zero or when complete. */
+    items_pending?: number;
+    /** Items permanently failed (cannot be retried). Omitted when zero. */
+    items_failed?: number;
 }
 
 export interface ChargingPermissions {

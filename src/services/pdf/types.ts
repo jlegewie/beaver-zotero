@@ -654,10 +654,21 @@ export interface PDFSearchOptions {
     pages?: number[];
     /** Scoring options for ranking results */
     scoring?: SearchScoringOptions;
+    /**
+     * Page-count gate. When provided, the worker returns
+     * `{ exceedsPageCountLimit: true, totalPages, pages: [] }` early if the
+     * document has more pages than this — without running the search. Lets
+     * agent handlers skip an upfront `getPageCount` round-trip while still
+     * enforcing `maxPageCount`.
+     */
+    maxPageCount?: number;
 }
 
-/** Default search options */
-export const DEFAULT_PDF_SEARCH_OPTIONS: Required<Omit<PDFSearchOptions, 'scoring'>> & { scoring: SearchScoringOptions } = {
+/** Default search options. `maxPageCount` is intentionally omitted — handlers set it explicitly. */
+export const DEFAULT_PDF_SEARCH_OPTIONS: Required<Omit<PDFSearchOptions, 'scoring' | 'maxPageCount'>> & {
+    scoring: SearchScoringOptions;
+    maxPageCount?: number;
+} = {
     maxHitsPerPage: 100,
     pages: [],
     scoring: {},
@@ -753,11 +764,17 @@ export interface PDFSearchResult {
     pagesWithMatches: number;
     /** Total pages in document */
     totalPages: number;
-    /** 
+    /**
      * Page results ranked by relevance score (highest first).
      * Only includes pages with at least one match.
      */
     pages: ScoredPageSearchResult[];
+    /**
+     * Set when `options.maxPageCount` was provided AND `totalPages` exceeded
+     * it. The worker short-circuits the search; handlers map this to the
+     * `too_many_pages` error response.
+     */
+    exceedsPageCountLimit?: boolean;
     /** Search metadata */
     metadata: {
         searchedAt: string;

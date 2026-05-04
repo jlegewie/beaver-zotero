@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { citationDataByCitationKeyAtom } from '../../atoms/citations';
+import { citationDataByCitationKeyAtom, pageLabelsVersionAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { createZoteroURI } from '../../utils/zoteroURI';
 import {
@@ -12,7 +12,7 @@ import {
     parseItemReference,
     getCitationKey
 } from '../../types/citations';
-import { formatNumberRanges } from '../../utils/stringUtils';
+import { formatNumberRanges, formatPageRangesWithLabels } from '../../utils/stringUtils';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
@@ -93,6 +93,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const citationDataByCitationKey = useAtomValue(citationDataByCitationKeyAtom);
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
+    // Re-render when preloaded page labels become available
+    const pageLabelsVersion = useAtomValue(pageLabelsVersionAtom);
     
     // For opening external reference details dialog
     const setIsDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
@@ -197,6 +199,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";
+    // Whether page locators should be rendered using the PDF's page labels
+    // (e.g., Roman numerals for front matter) instead of raw page numbers.
+    const usePageLabels = getPref("usePageLabels") !== false;
 
     // Use display state for rendering decisions
     const isStreaming = displayState === 'streaming';
@@ -211,7 +216,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
     const { formatted_citation, citation, url, previewText, pages } = useMemo(() => {
         // No metadata yet - return empty values (component will show inactive state)
         if (!citationMetadata) {
-            return { formatted_citation: '', citation: '', url: '', previewText: '', pages: [] };
+            return {
+                formatted_citation: '',
+                citation: '',
+                url: '',
+                previewText: '',
+                pages: [] as number[]
+            };
         }
 
         let formatted_citation = '';
@@ -226,7 +237,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             previewText = citationMetadata.preview
                 ? `"${citationMetadata.preview}"`
                 : formatted_citation;
-            
+
             // If mapped to Zotero item, try to get URL
             if (mappedZoteroItem) {
                 try {
@@ -247,7 +258,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 ? `"${citationMetadata.preview}"`
                 : formatted_citation || '';
         }
-        
+
         // Strip URLs from formatted citation and preview text (they clutter the tooltip)
         const stripUrls = (s: string) => s.replace(/\s*https?:\/\/\S+/g, '').trim();
         // Convert <br> tags to newlines and strip any remaining HTML tags
@@ -265,8 +276,44 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         const firstPage = pages.length > 0 ? pages[0] : null;
         const finalUrl = firstPage ? `${url}?page=${firstPage}` : url;
 
-        return { formatted_citation, citation, url: finalUrl, previewText, pages };
+        return {
+            formatted_citation,
+            citation,
+            url: finalUrl,
+            previewText,
+            pages
+        };
     }, [citationMetadata, mappedZoteroItem]);
+
+    // Resolve page labels separately so a page-label preload (which only bumps
+    // pageLabelsVersion) doesn't force the citation/preview/HTML-stripping work
+    // above to recompute.
+    const isZoteroCitationMetadata = !!citationMetadata && isZoteroCitation(citationMetadata);
+    const citationLibraryId = isZoteroCitationMetadata ? citationMetadata!.library_id : undefined;
+    const citationZoteroKey = isZoteroCitationMetadata ? citationMetadata!.zotero_key : undefined;
+    const { pageLabels, pagesDisplay } = useMemo(() => {
+        // Default labels: raw page numbers as strings.
+        let pageLabels: string[] = pages.map((p) => String(p));
+
+        if (usePageLabels && pages.length > 0 && citationLibraryId && citationZoteroKey) {
+            try {
+                const item = Zotero.Items.getByLibraryAndKey(citationLibraryId, citationZoteroKey);
+                if (item && typeof item !== 'boolean') {
+                    pageLabels = pages.map((p) => resolvePageLabel(item.id, p));
+                }
+            } catch (e) {
+                logger(`ZoteroCitation: Page label resolution failed: ${e}`);
+            }
+        }
+
+        const pagesDisplay = pages.length === 0
+            ? ''
+            : usePageLabels
+                ? formatPageRangesWithLabels(pages, pageLabels)
+                : formatNumberRanges(pages);
+
+        return { pageLabels, pagesDisplay };
+    }, [pages, usePageLabels, citationLibraryId, citationZoteroKey, pageLabelsVersion]);
 
 
     // Render as soon as we have an identifier; citationMetadata may arrive later.
@@ -429,8 +476,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
             displayText = '?';
         } else {
             displayText = consecutive
-                ? (pages.length > 0 ? `p.${formatNumberRanges(pages)}` : 'Ibid')
-                : (pages.length > 0 ? `${citation}, p.${formatNumberRanges(pages)}` : citation);
+                ? (pages.length > 0 ? `p.${pagesDisplay}` : 'Ibid')
+                : (pages.length > 0 ? `${citation}, p.${pagesDisplay}` : citation);
         }
     } else {
         // Numeric markers should be stable and independent of citationMetadata.
@@ -529,7 +576,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                 </span>
                 <span className="flex-1" />
                 {pages && pages.length > 0 && pages[0] && (
-                    <span className="font-color-secondary text-sm">Page {pages[0]}</span>
+                    <span className="font-color-secondary text-sm">Page {pageLabels[0]}</span>
                 )}
             </span>
             <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
@@ -560,7 +607,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={PdfIcon} className="font-color-tertiary" />
                         <span className="text-sm font-color-tertiary">
-                            {pages[0] != null ? `Opens PDF on page ${pages[0]}` : 'Opens PDF at location'}
+                            {pages[0] != null ? `Opens PDF on page ${pageLabels[0]}` : 'Opens PDF at location'}
                         </span>
                     </span>
                 </span>

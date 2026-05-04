@@ -7,7 +7,7 @@
 
 import { logger } from '../../utils/logger';
 import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
-import { getLatestNoteHtml } from '../../utils/noteEditorIO';
+import { getNoteHtmlForRead } from '../../utils/noteEditorIO';
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,
@@ -180,8 +180,12 @@ export async function handleReadNoteRequest(
         // 4. Load note data
         await item.loadDataType('note');
 
-        // 5. Get raw HTML (reads from open editor if available, to capture unsaved changes)
-        const rawHtml = getLatestNoteHtml(item);
+        // 5. Get raw HTML — read-only path. Prefers a non-empty live editor
+        //    snapshot (so unsaved typing is visible to the agent) and falls
+        //    back to item.getNote() when the live snapshot is empty. Critically
+        //    NEVER calls item.setNote() — flushLiveEditorToDB would persist a
+        //    transient empty PM-render snapshot and erase the note's content.
+        const rawHtml = await getNoteHtmlForRead(item);
         if (!rawHtml || rawHtml.trim() === '') {
             return errorResponse(
                 `Note ${note_id} is empty. There is no content to read.`

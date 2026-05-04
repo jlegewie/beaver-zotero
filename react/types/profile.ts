@@ -145,6 +145,10 @@ export interface SafeProfileModel {
     consent_to_share: boolean;
     email_notifications: boolean;
     libraries?: ZoteroLibrary[];
+
+    // First-run state (migration 20260430000001)
+    first_run_completed_at: string | null;
+    first_run_completion_kind: string | null;
     
     // Balances
     standard_page_balance: number;

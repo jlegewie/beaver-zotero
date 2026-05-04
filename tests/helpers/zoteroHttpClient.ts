@@ -4,7 +4,7 @@
  * Shared by live and integration tests.
  */
 
-import { BASE_URL, type AttachmentFixture } from './fixtures';
+import { getBaseUrl, type AttachmentFixture } from './fixtures';
 
 interface RequestOptions {
     timeout?: number;
@@ -16,7 +16,7 @@ export async function post<T>(path: string, body: unknown, opts?: RequestOptions
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-        const res = await fetch(`${BASE_URL}${path}`, {
+        const res = await fetch(`${getBaseUrl()}${path}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),

@@ -18,6 +18,7 @@ import { useCollectionsMenu } from './hooks/useCollectionsMenu';
 import { useTagsMenu } from './hooks/useTagsMenu';
 import { useNotesMenu } from './hooks/useNotesMenu';
 import { ZoteroTag } from '../../../types/zotero';
+import Tooltip from '../Tooltip';
 
 const RECENT_ITEMS_LIMIT = 5;
 
@@ -363,9 +364,10 @@ const AddSourcesMenu: React.FC<{
             // Remove focus from the button after opening the menu
             buttonRef.current.blur();
             
-            // Force any active tooltip to close by triggering a mousedown event on document
+            // Force any active tooltip to close — Tooltip listens on the window,
+            // and our e.stopPropagation() above prevents the real click from reaching it.
             const mainWindow = Zotero.getMainWindow();
-            mainWindow.document.dispatchEvent(new MouseEvent('click'));
+            mainWindow.dispatchEvent(new MouseEvent('click'));
         }
     };
 
@@ -403,19 +405,21 @@ const AddSourcesMenu: React.FC<{
 
     return (
         <>
-            <button
-                className="variant-outline source-button"
-                style={{ height: '22px', paddingRight: '4px', paddingLeft: '4px', paddingTop: '3px', paddingBottom: '3px' }}
-                ref={buttonRef}
-                onClick={handleButtonClick}
-                aria-label="Add Sources"
-                aria-haspopup="menu"
-                aria-expanded={isMenuOpen}
-                disabled={disabled}
-            >
-                <Icon icon={PlusSignIcon} className="scale-12" />
-                {showText && <span>Add Sources</span>}
-            </button>
+            <Tooltip content="Add Sources" showArrow singleLine>
+                <button
+                    className="variant-outline source-button"
+                    style={{ height: '22px', paddingRight: '4px', paddingLeft: '4px', paddingTop: '3px', paddingBottom: '3px' }}
+                    ref={buttonRef}
+                    onClick={handleButtonClick}
+                    aria-label="Add Sources"
+                    aria-haspopup="menu"
+                    aria-expanded={isMenuOpen}
+                    disabled={disabled}
+                >
+                    <Icon icon={PlusSignIcon} className="scale-12" />
+                    {showText && <span>Add Sources</span>}
+                </button>
+            </Tooltip>
             <SearchMenu
                 menuItems={menuItems}
                 isOpen={isMenuOpen}
