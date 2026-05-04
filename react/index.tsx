@@ -23,6 +23,7 @@ import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 import { useContextMenuActionHandler } from './hooks/useContextMenuActionHandler';
 import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActionHandler';
 import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationActionHandler';
+import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 
 
@@ -76,6 +77,9 @@ const GlobalContextInitializer = () => {
 
     // Handle reader annotation context menu actions (Explain / Ask)
     useReaderAnnotationActionHandler();
+
+    // Handle dev-only extraction visualizer actions from the reader menu
+    useReaderVisualizerActionHandler();
 
     // Handle first-install and first-reader onboarding popups
     useOnboardingPopups();

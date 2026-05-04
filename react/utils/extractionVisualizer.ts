@@ -857,9 +857,12 @@ async function createSentenceAnnotations(
                 ? sentence.text.slice(0, 80) + "..."
                 : sentence.text;
 
+        // Comment carries the full extracted sentence so the dev tester can
+        // verify boundaries end-to-end. The `text` field stays a preview to
+        // keep the Zotero annotations sidebar readable.
         const label = isDegraded
-            ? `Sentence ${i + 1} (fallback): ${textPreview}`
-            : `Sentence ${i + 1} (${sentence.bboxes.length} frag${sentence.bboxes.length === 1 ? "" : "s"}): ${textPreview}`;
+            ? `Sentence ${i + 1} (fallback): ${sentence.text}`
+            : `Sentence ${i + 1} (${sentence.bboxes.length} frag${sentence.bboxes.length === 1 ? "" : "s"}): ${sentence.text}`;
 
         const tempAnnotation = {
             id: tempId,

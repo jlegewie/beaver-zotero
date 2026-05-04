@@ -28,6 +28,9 @@ export interface BeaverEvents {
         annotationIds: string[];
         readerItemID: number;
     };
+    readerVisualizerAction: {
+        action: 'columns' | 'lines' | 'paragraphs' | 'sentences' | 'clear';
+    };
     focusInput: {};
 }
 
