@@ -34,6 +34,7 @@ import {
     type SentenceRange,
     type SentenceSplitter,
 } from "./SentenceMapper";
+import { applyPostProcessing } from "./sentencePostprocess";
 
 // ---------------------------------------------------------------------------
 // Types mirroring the vendored sentencex_wasm.d.ts
@@ -323,7 +324,8 @@ export async function getSentencexSplitter(
         if (!text) return [];
         const boundaries = mod.get_sentence_boundaries(lang, text);
         if (!boundaries || boundaries.length === 0) return [];
-        return sentencexBoundariesToCharRanges(text, boundaries);
+        const ranges = sentencexBoundariesToCharRanges(text, boundaries);
+        return applyPostProcessing(ranges, text);
     };
 }
 
@@ -356,7 +358,10 @@ export async function getSentenceSplitterWithFallback(
         // problem is fixed) gets a fresh attempt instead of resolving to
         // the stale failure.
         modulePromise = null;
-        return simpleRegexSentenceSplit;
+        return (text: string): SentenceRange[] => {
+            const ranges = simpleRegexSentenceSplit(text);
+            return applyPostProcessing(ranges, text);
+        };
     }
 }
 
