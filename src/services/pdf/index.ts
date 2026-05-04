@@ -29,6 +29,8 @@ import {
     getSentenceSplitterWithFallback,
     normalizeLanguageCode,
 } from "./SentencexSplitter";
+import { resolveAnalysisPageIndices } from "./AnalysisWindow";
+import { detectFilteredParagraphs } from "./FilteredParagraphPipeline";
 // `getItemLanguage` is intentionally lazy-imported inside
 // `extractSentenceBBoxesFromZoteroItem` to keep the static import surface
 // of this barrel small. `zoteroUtils` transitively pulls in heavy modules
@@ -112,6 +114,15 @@ export {
     byteRangesToCharRanges,
 } from "./SentencexSplitter";
 export type { SentencexBoundary } from "./SentencexSplitter";
+export {
+    resolveAnalysisPageIndices,
+    DEFAULT_ANALYSIS_WINDOW_CAP,
+} from "./AnalysisWindow";
+export { detectFilteredParagraphs } from "./FilteredParagraphPipeline";
+export type {
+    FilteredParagraphContext,
+    FilteredParagraphResult,
+} from "./FilteredParagraphPipeline";
 
 /**
  * PDFExtractor - High-level API for extracting text from PDFs.
@@ -321,16 +332,55 @@ export class PDFExtractor {
         // ChromeUtils.importESModule on the main thread). The sentencex
         // module is cached after first init, so the WASM tax is paid
         // once per session.
-        if (options.splitter) {
-            const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
-            return extractPageSentenceBBoxes(detailed, options);
+        const splitter =
+            options.splitter ??
+            (await getSentenceSplitterWithFallback(
+                normalizeLanguageCode(options.language),
+            ));
+
+        // If the caller already ran their own paragraph pipeline (e.g.
+        // the trace endpoint, or an internal worker call passing a
+        // precomputed result through the worker boundary), keep the
+        // legacy single-page path — the precomputed paragraphResult
+        // already reflects whatever filtering they applied.
+        if (options.precomputed) {
+            const detailed = await client.extractRawPageDetailed(
+                pdfData,
+                pageIndex,
+            );
+            return extractPageSentenceBBoxes(detailed, { ...options, splitter });
         }
 
-        const splitter = await getSentenceSplitterWithFallback(
-            normalizeLanguageCode(options.language),
+        // Otherwise: pull the analysis-window pages, run the shared
+        // filtered paragraph pipeline (same recipe as production line
+        // extraction in `worker/ops.ts`), and pass the result as
+        // `precomputed` so marginalia is excluded from sentences.
+        const pageCount = await client.getPageCount(pdfData);
+        const analysisIndices = resolveAnalysisPageIndices(
+            pageIndex,
+            pageCount,
+            options.analysisPageWindow,
         );
+        const rawDoc = await client.extractRawPages(pdfData, analysisIndices);
         const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
-        return extractPageSentenceBBoxes(detailed, { ...options, splitter });
+        // Substitute the detailed target page into the analysis window
+        // so paragraph detection runs on the same walk the mapper later
+        // looks up (exact bbox identity, no bridge drift).
+        const pagesForFilter = rawDoc.pages.map((p) =>
+            p.pageIndex === pageIndex
+                ? (detailed as unknown as typeof rawDoc.pages[number])
+                : p,
+        );
+        const filtered = detectFilteredParagraphs({
+            pages: pagesForFilter,
+            pageIndex,
+            paragraphSettings: options.paragraphSettings,
+        });
+        return extractPageSentenceBBoxes(detailed, {
+            ...options,
+            splitter,
+            precomputed: { paragraphResult: filtered.paragraphResult },
+        });
     }
 
     /**

@@ -19,6 +19,7 @@ import {
     detectColumns,
     detectLinesOnPage,
     detectParagraphs,
+    detectFilteredParagraphs,
     extractPageSentenceBBoxes,
     lineBBoxToRect,
     MarginFilter,
@@ -41,7 +42,6 @@ export type OverlayLevel =
     | "lines"
     | "paragraphs"
     | "sentences"
-    | "sentences-filtered"
     | "raw-lines"
     | "margins";
 
@@ -254,9 +254,25 @@ export function getParagraphOverlay(rawPage: RawPageData): OverlayResult {
  */
 export function getSentenceOverlay(
     detailedPage: RawPageDataDetailed,
+    pages: RawPageData[],
     splitter?: SentenceSplitter,
 ): OverlayResult {
-    const result = extractPageSentenceBBoxes(detailedPage, { splitter });
+    // Run paragraph detection on the *detailed* page so its line bboxes
+    // exactly match what the sentence mapper will look up (same MuPDF
+    // walk → identical bboxes).
+    const pagesForFilter: RawPageData[] = pages.map((p) =>
+        p.pageIndex === detailedPage.pageIndex
+            ? (detailedPage as unknown as RawPageData)
+            : p,
+    );
+    const filtered = detectFilteredParagraphs({
+        pages: pagesForFilter,
+        pageIndex: detailedPage.pageIndex,
+    });
+    const result = extractPageSentenceBBoxes(detailedPage, {
+        splitter,
+        precomputed: { paragraphResult: filtered.paragraphResult },
+    });
     const degradedItemIndices = new Set(result.degradationNotes.map((n) => n.itemIndex));
     const degradedSentenceIndices = computeDegradedSentenceIndices(
         result.paragraphs,
@@ -286,118 +302,6 @@ export function getSentenceOverlay(
 
     return {
         level: "sentences",
-        pageIndex: detailedPage.pageIndex,
-        pageWidth: detailedPage.width,
-        pageHeight: detailedPage.height,
-        groupCount: result.sentences.length,
-        rects,
-        stats: {
-            sentences: result.sentences.length,
-            paragraphs: result.paragraphs.length,
-            degradedParagraphs: result.degradedParagraphs,
-            unmappedParagraphs: result.unmappedParagraphs,
-        },
-    };
-}
-
-/**
- * Sentence overlay (filtered): same shape as `getSentenceOverlay`, but
- * runs the production filtered pipeline first — simple + smart margin
- * removal, real-font column/line/paragraph detection on the JSON-pass
- * page — and passes the resulting `paragraphResult` to the sentence
- * mapper as `precomputed`. Marginalia (page numbers, watermarks,
- * repeating headers/footers) that the line-extraction pipeline drops
- * will NOT appear in the returned sentences.
- *
- * Intended as a side-by-side counterpart to `getSentenceOverlay` for
- * agent debugging: render both `sentences` and `sentences-filtered` to
- * see at a glance which marginalia the unfiltered sentence pipeline
- * still emits.
- *
- * `pages` must contain the target page; for cross-page smart removal
- * to fire, it should also include the rest of the document (or a
- * window around the target — caller controls the analysis range).
- */
-export function getSentenceOverlayFiltered(
-    pages: RawPageData[],
-    detailedPage: RawPageDataDetailed,
-    splitter?: SentenceSplitter,
-): OverlayResult {
-    const targetPage = pages.find((p) => p.pageIndex === detailedPage.pageIndex);
-    if (!targetPage) {
-        throw new Error(
-            `getSentenceOverlayFiltered: page ${detailedPage.pageIndex} not present in supplied pages`,
-        );
-    }
-
-    // Cross-page smart removal across the supplied window.
-    const marginAnalysis = MarginFilter.collectMarginElements(
-        pages,
-        DEFAULT_MARGIN_ZONE,
-    );
-    const removal = MarginFilter.identifyElementsToRemove(
-        marginAnalysis,
-        3,
-        true,
-    );
-
-    // Filter + columns + lines + paragraphs on the JSON-pass page (real
-    // fonts, so header detection works). The mapper bridges these
-    // PageLines to detailed-walk lines via 3-decimal-rounded bbox keys.
-    const filtered = MarginFilter.filterPageWithSmartRemoval(
-        targetPage,
-        DEFAULT_MARGINS,
-        DEFAULT_MARGIN_ZONE,
-        removal,
-    );
-    const columnResult = detectColumns(filtered);
-    const styleProfile = new StyleAnalyzer().analyze([filtered], 4, 0.15, 0);
-
-    let result;
-    if (columnResult.columns.length === 0) {
-        result = extractPageSentenceBBoxes(detailedPage, { splitter });
-    } else {
-        const lineResult = detectLinesOnPage(filtered, columnResult.columns);
-        const paragraphResult = detectParagraphs(
-            lineResult,
-            styleProfile.bodyStyles,
-            {},
-            { paragraph: 0, header: 0 },
-            { trackItemLines: true },
-        );
-        result = extractPageSentenceBBoxes(detailedPage, {
-            splitter,
-            precomputed: { paragraphResult },
-        });
-    }
-
-    const degradedItemIndices = new Set(result.degradationNotes.map((n) => n.itemIndex));
-    const degradedSentenceIndices = computeDegradedSentenceIndices(
-        result.paragraphs,
-        degradedItemIndices,
-    );
-
-    const rects: OverlayRect[] = [];
-    result.sentences.forEach((sentence, sentenceIdx) => {
-        if (sentence.bboxes.length === 0) return;
-        const isDegraded = degradedSentenceIndices.has(sentenceIdx);
-        const color = isDegraded
-            ? OVERLAY_COLORS.sentenceDegraded
-            : OVERLAY_COLORS.sentence[sentenceIdx % OVERLAY_COLORS.sentence.length];
-
-        sentence.bboxes.forEach((bb, fragIdx) => {
-            rects.push({
-                rect: { x: bb.x, y: bb.y, w: bb.w, h: bb.h },
-                color,
-                label: fragIdx === 0 ? `S${sentenceIdx + 1}` : undefined,
-                group: sentenceIdx,
-                degraded: isDegraded,
-            });
-        });
-    });
-
-    return {
-        level: "sentences-filtered",
         pageIndex: detailedPage.pageIndex,
         pageWidth: detailedPage.width,
         pageHeight: detailedPage.height,

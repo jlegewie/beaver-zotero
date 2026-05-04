@@ -13,8 +13,10 @@
 import { logger } from "../../src/utils/logger";
 import {
     MuPDFService,
+    getMuPDFWorkerClient,
     getSentenceSplitterWithFallback,
     normalizeLanguageCode,
+    resolveAnalysisPageIndices,
     Rect,
     RawPageData,
     RawPageDataDetailed,
@@ -372,17 +374,18 @@ export async function visualizeCurrentPageSentences(): Promise<{
         logger(`[Visualizer] Loading PDF and mapping sentences on page ${pageIndex + 1}...`);
         const pdfData = await IOUtils.read(filePath);
 
-        const mupdf = new MuPDFService();
-        await mupdf.open(pdfData);
-        let detailedPage: RawPageDataDetailed;
-        let rawPage: RawPageData;
-        try {
-            // Both passes — raw for height (matches reader viewport), detailed
-            // for the sentence mapper. Same coord space, so either height works.
-            rawPage = mupdf.extractRawPage(pageIndex);
-            detailedPage = mupdf.extractRawPageDetailed(pageIndex);
-        } finally {
-            mupdf.close();
+        // Route through the worker client so we share the worker doc cache
+        const client = getMuPDFWorkerClient();
+        const pageCount = await client.getPageCount(pdfData);
+        const analysisIndices = resolveAnalysisPageIndices(pageIndex, pageCount);
+        const rawDoc = await client.extractRawPages(pdfData, analysisIndices);
+        const detailedPage = await client.extractRawPageDetailed(pdfData, pageIndex);
+        const rawPage = rawDoc.pages.find((p) => p.pageIndex === pageIndex);
+        if (!rawPage) {
+            return {
+                success: false,
+                message: `Page ${pageIndex + 1} not in analysis window`,
+            };
         }
 
         // Best-effort language lookup; falls through to "en" via normalize.
@@ -397,7 +400,7 @@ export async function visualizeCurrentPageSentences(): Promise<{
             normalizeLanguageCode(language),
         );
 
-        const overlay = getSentenceOverlay(detailedPage, splitter);
+        const overlay = getSentenceOverlay(detailedPage, rawDoc.pages, splitter);
         if (overlay.rects.length === 0) {
             return {
                 success: true,

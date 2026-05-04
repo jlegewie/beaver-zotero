@@ -45,7 +45,6 @@ import {
     getLineOverlay,
     getParagraphOverlay,
     getSentenceOverlay,
-    getSentenceOverlayFiltered,
     getRawLinesOverlay,
     getMarginsOverlay,
 } from '../utils/extractionOverlay';
@@ -1598,9 +1597,11 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
     const { getMuPDFWorkerClient } = await import(
         '../../src/services/pdf/MuPDFWorkerClient'
     );
-    const { getSentenceSplitterWithFallback, normalizeLanguageCode } = await import(
-        '../../src/services/pdf'
-    );
+    const {
+        getSentenceSplitterWithFallback,
+        normalizeLanguageCode,
+        resolveAnalysisPageIndices,
+    } = await import('../../src/services/pdf');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
@@ -1619,7 +1620,6 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
         level !== 'lines' &&
         level !== 'paragraphs' &&
         level !== 'sentences' &&
-        level !== 'sentences-filtered' &&
         level !== 'raw-lines' &&
         level !== 'margins'
     ) {
@@ -1628,7 +1628,7 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             error: {
                 name: 'Error',
                 message:
-                    'level must be one of: columns | lines | paragraphs | sentences | sentences-filtered | raw-lines | margins',
+                    'level must be one of: columns | lines | paragraphs | sentences | raw-lines | margins',
             },
         };
     }
@@ -1667,88 +1667,24 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
     };
 
     let overlay;
-    if (level === 'sentences') {
-        const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
-        const language = await resolveLanguage();
-        const splitter = await getSentenceSplitterWithFallback(
-            normalizeLanguageCode(language),
-        );
-        overlay = getSentenceOverlay(detailed, splitter);
-    } else if (level === 'sentences-filtered') {
-        // Filtered counterpart: applies cross-page smart removal + simple
-        // margin filter before sentence detection. Same window/cap logic
-        // as the `margins` level.
+    if (level === 'sentences' || level === 'margins') {
+        // Both levels need cross-page analysis. Resolve the analysis
+        // window via the shared helper (centralized cap + error path).
         const totalPages = await client.getPageCount(pdfData);
-        if (pageIndex >= totalPages) {
-            return {
-                ok: false,
-                error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
-            };
-        }
-        const window = Number(request?.analysis_page_window);
         let analysisIndices: number[];
-        if (Number.isInteger(window) && window > 0) {
-            const lo = Math.max(0, pageIndex - window);
-            const hi = Math.min(totalPages - 1, pageIndex + window);
-            analysisIndices = [];
-            for (let i = lo; i <= hi; i++) analysisIndices.push(i);
-        } else {
-            analysisIndices = [];
-            for (let i = 0; i < totalPages; i++) analysisIndices.push(i);
-        }
-        if (analysisIndices.length > 50) {
-            const half = 25;
-            const lo = Math.max(0, pageIndex - half);
-            const hi = Math.min(totalPages - 1, lo + 49);
-            analysisIndices = [];
-            for (let i = lo; i <= hi; i++) analysisIndices.push(i);
-        }
-        if (!analysisIndices.includes(pageIndex)) {
+        try {
+            analysisIndices = resolveAnalysisPageIndices(
+                pageIndex,
+                totalPages,
+                Number(request?.analysis_page_window),
+            );
+        } catch (e) {
             return {
                 ok: false,
-                error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
-            };
-        }
-        const rawDoc = await client.extractRawPages(pdfData, analysisIndices);
-        const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
-        const language = await resolveLanguage();
-        const splitter = await getSentenceSplitterWithFallback(
-            normalizeLanguageCode(language),
-        );
-        overlay = getSentenceOverlayFiltered(rawDoc.pages, detailed, splitter);
-    } else if (level === 'margins') {
-        // Cross-page analysis
-        const totalPages = await client.getPageCount(pdfData);
-        if (pageIndex >= totalPages) {
-            return {
-                ok: false,
-                error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
-            };
-        }
-        const window = Number(request?.analysis_page_window);
-        let analysisIndices: number[];
-        if (Number.isInteger(window) && window > 0) {
-            const lo = Math.max(0, pageIndex - window);
-            const hi = Math.min(totalPages - 1, pageIndex + window);
-            analysisIndices = [];
-            for (let i = lo; i <= hi; i++) analysisIndices.push(i);
-        } else {
-            analysisIndices = [];
-            for (let i = 0; i < totalPages; i++) analysisIndices.push(i);
-        }
-        if (analysisIndices.length > 50) {
-            // Center the cap on the requested page.
-            const half = 25;
-            const lo = Math.max(0, pageIndex - half);
-            const hi = Math.min(totalPages - 1, lo + 49);
-            analysisIndices = [];
-            for (let i = lo; i <= hi; i++) analysisIndices.push(i);
-        }
-        // Make sure the requested page is in the set (edge cases at doc start/end).
-        if (!analysisIndices.includes(pageIndex)) {
-            return {
-                ok: false,
-                error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
+                error: {
+                    name: 'Error',
+                    message: e instanceof Error ? e.message : String(e),
+                },
             };
         }
         const rawDoc = await client.extractRawPages(pdfData, analysisIndices);
@@ -1758,7 +1694,16 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
             };
         }
-        overlay = getMarginsOverlay(rawDoc.pages, pageIndex);
+        if (level === 'sentences') {
+            const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
+            const language = await resolveLanguage();
+            const splitter = await getSentenceSplitterWithFallback(
+                normalizeLanguageCode(language),
+            );
+            overlay = getSentenceOverlay(detailed, rawDoc.pages, splitter);
+        } else {
+            overlay = getMarginsOverlay(rawDoc.pages, pageIndex);
+        }
     } else {
         const rawDoc = await client.extractRawPages(pdfData, [pageIndex]);
         const rawPage = rawDoc.pages[0];
@@ -1843,12 +1788,11 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
     const {
         MarginFilter,
         StyleAnalyzer,
-        detectColumns,
-        detectLinesOnPage,
-        detectParagraphs,
         extractPageSentenceBBoxes,
         DEFAULT_MARGINS,
         DEFAULT_MARGIN_ZONE,
+        resolveAnalysisPageIndices,
+        detectFilteredParagraphs,
     } = await import('../../src/services/pdf');
     const { getSentenceSplitterWithFallback, normalizeLanguageCode } = await import(
         '../../src/services/pdf/SentencexSplitter'
@@ -1871,37 +1815,24 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
     const client = getMuPDFWorkerClient();
 
     // ------------------------------------------------------------------
-    // Decide analysis window for cross-page smart removal
+    // Decide analysis window for cross-page smart removal via the shared
+    // helper (centralized cap + error path).
     // ------------------------------------------------------------------
     const totalPages = await client.getPageCount(pdfData);
-    if (pageIndex >= totalPages) {
-        return {
-            ok: false,
-            error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
-        };
-    }
-    const window = Number(request?.analysis_page_window);
     let analysisIndices: number[];
-    if (Number.isInteger(window) && window > 0) {
-        const lo = Math.max(0, pageIndex - window);
-        const hi = Math.min(totalPages - 1, pageIndex + window);
-        analysisIndices = [];
-        for (let i = lo; i <= hi; i++) analysisIndices.push(i);
-    } else {
-        analysisIndices = [];
-        for (let i = 0; i < totalPages; i++) analysisIndices.push(i);
-    }
-    if (analysisIndices.length > 50) {
-        const half = 25;
-        const lo = Math.max(0, pageIndex - half);
-        const hi = Math.min(totalPages - 1, lo + 49);
-        analysisIndices = [];
-        for (let i = lo; i <= hi; i++) analysisIndices.push(i);
-    }
-    if (analysisIndices.length === 0) {
+    try {
+        analysisIndices = resolveAnalysisPageIndices(
+            pageIndex,
+            totalPages,
+            Number(request?.analysis_page_window),
+        );
+    } catch (e) {
         return {
             ok: false,
-            error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
+            error: {
+                name: 'Error',
+                message: e instanceof Error ? e.message : String(e),
+            },
         };
     }
 
@@ -2026,14 +1957,26 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
     }
 
     // ------------------------------------------------------------------
-    // Stage 3: style profile + per-line role classification.
+    // Stages 3-6: style profile + filter + columns + lines + paragraphs,
+    // produced by the shared helper. Note: style profile is now
+    // **window-wide** (built from `rawDoc.pages`), matching production
+    // line extraction (`worker/ops.ts:273-279`). This is an intentional
+    // behavior change vs. the previous trace endpoint which built it
+    // from `[targetPage]` only — agents may see a small number of role
+    // flips on pages whose local sample disagreed with the document-
+    // wide picture.
     // ------------------------------------------------------------------
-    const styleProfile = new StyleAnalyzer().analyze(
-        [targetPage],
-        4,
-        0.15,
-        0,
-    );
+    const filteredResult = detectFilteredParagraphs({
+        pages: rawDoc.pages,
+        pageIndex,
+        marginRemoval: smartRemoval,
+    });
+    const styleProfile = filteredResult.styleProfile;
+    const columnResult = filteredResult.columnResult;
+    const lineResult = filteredResult.lineResult;
+    const paragraphResult = filteredResult.paragraphResult;
+
+    // Per-line role classification using the (window-wide) style profile.
     {
         let i = 0;
         for (const block of targetPage.blocks) {
@@ -2044,23 +1987,6 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
             }
         }
     }
-
-    // ------------------------------------------------------------------
-    // Stage 4: columns, lines, paragraphs.
-    // ------------------------------------------------------------------
-    const filtered = MarginFilter.filterPageWithSmartRemoval(
-        targetPage,
-        DEFAULT_MARGINS,
-        DEFAULT_MARGIN_ZONE,
-        smartRemoval,
-    );
-    const columnResult = detectColumns(filtered);
-
-    // Stage 5: lines per column.
-    const lineResult =
-        columnResult.columns.length > 0
-            ? detectLinesOnPage(filtered, columnResult.columns)
-            : { columnResults: [], allLines: [], pageIndex, width: targetPage.width, height: targetPage.height };
 
     // Map columnIndex → array of raw line IDs that contributed.
     const columnLineIds: string[][] = columnResult.columns.map(() => []);
@@ -2088,22 +2014,6 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
             linesDroppedByColumns.push(e.id);
         }
     });
-
-    // ------------------------------------------------------------------
-    // Stage 6: paragraphs (with itemLines for raw-line linkage).
-    // Uses the real-font JSON-pass `lineResult`, so role / header
-    // detection works correctly.
-    // ------------------------------------------------------------------
-    const paragraphResult =
-        lineResult.allLines.length > 0
-            ? detectParagraphs(
-                  lineResult,
-                  styleProfile.bodyStyles,
-                  {},
-                  { paragraph: 0, header: 0 },
-                  { trackItemLines: true },
-              )
-            : { items: [], itemLines: [], paragraphCount: 0, headerCount: 0, pageContent: '', pageIndex, width: targetPage.width, height: targetPage.height };
 
     const paragraphsOut = paragraphResult.items.map((item, i) => {
         const lineIds: string[] = [];
