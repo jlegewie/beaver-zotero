@@ -4,7 +4,6 @@
 [![Beaver Documentation](https://img.shields.io/badge/Documentation-blue)](https://www.beaverapp.ai/docs)
 
 [![zotero target version](https://img.shields.io/badge/Zotero-7+-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
-
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
 Welcome to Beaver, an academic research assistant with native Zotero integration. Beaver combines two parts:
