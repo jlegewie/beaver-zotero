@@ -6,10 +6,13 @@
  *
  *   1. `buildByteOffsetTable` — UTF-16 → UTF-8 byte counter that produces
  *      a cumulative byte offset for every JS string code unit.
- *   2. `byteRangesToCharRanges` — translates the byte-indexed boundaries
- *      that sentencex-wasm returns into JS string code-unit ranges that
- *      align with the char-indexed `PageText.source` map used downstream.
- *   3. `normalizeLanguageCode` — maps free-text Zotero language fields
+ *   2. `byteRangesToCharRanges` — translates byte-indexed boundaries into
+ *      JS string code-unit ranges that align with the char-indexed
+ *      `PageText.source` map used downstream.
+ *   3. `sentencexBoundariesToCharRanges` — prefers the char-indexed
+ *      `start_index` / `end_index` that the vendored WASM actually returns
+ *      and only falls back to byte offsets when needed.
+ *   4. `normalizeLanguageCode` — maps free-text Zotero language fields
  *      into ISO 639-1 codes for sentencex.
  *
  * These tests run hermetically (no WASM, no ChromeUtils, no Zotero).
@@ -22,9 +25,10 @@ import { describe, it, expect } from 'vitest';
 import {
     buildByteOffsetTable,
     byteRangesToCharRanges,
+    sentencexBoundariesToCharRanges,
     normalizeLanguageCode,
     type SentencexBoundary,
-} from '../src/services/pdf/SentencexSplitter';
+} from '../../../src/services/pdf/SentencexSplitter';
 
 // ---------------------------------------------------------------------------
 // buildByteOffsetTable
@@ -124,11 +128,13 @@ function fakeBoundary(
     text: string,
     start_index: number,
     end_index: number,
+    byteRange?: { start_byte: number; end_byte: number },
 ): SentencexBoundary {
     return {
         text,
         start_index,
         end_index,
+        ...byteRange,
         boundary_symbol: null,
         is_paragraph_break: false,
     };
@@ -185,7 +191,7 @@ describe('byteRangesToCharRanges', () => {
 
         // Two sentences in byte space
         const boundaries = [
-            fakeBoundary('a café. ', 0, 8),  // ends after the first '. '
+            fakeBoundary('a café. ', 0, 8), // ends after the first '. '
             fakeBoundary('Bye 你好.', 9, 20),
         ];
         const ranges = byteRangesToCharRanges(boundaries, t);
@@ -272,6 +278,65 @@ describe('byteRangesToCharRanges', () => {
             .map((r) => text.slice(r.start, r.end))
             .join('');
         expect(reconstructed).toBe(text);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// sentencexBoundariesToCharRanges
+// ---------------------------------------------------------------------------
+
+describe('sentencexBoundariesToCharRanges', () => {
+    it('prefers validated char indices over byte indices from the vendored WASM', () => {
+        const text = 'Black–White gap. Café test.';
+        const firstText = 'Black–White gap. ';
+        const firstEnd = firstText.length;
+        const firstEndBytes = new TextEncoder().encode(firstText).length;
+        const boundaries = [
+            fakeBoundary(firstText, 0, firstEnd, {
+                start_byte: 0,
+                end_byte: firstEndBytes,
+            }),
+            fakeBoundary('Café test.', firstEnd, text.length, {
+                start_byte: firstEndBytes,
+                end_byte: new TextEncoder().encode(text).length,
+            }),
+        ];
+
+        const ranges = sentencexBoundariesToCharRanges(text, boundaries);
+        expect(ranges).toEqual([
+            { start: 0, end: firstEnd },
+            { start: firstEnd, end: text.length },
+        ]);
+        expect(ranges.map((r) => text.slice(r.start, r.end))).toEqual([
+            'Black–White gap. ',
+            'Café test.',
+        ]);
+    });
+
+    it('falls back to explicit byte offsets when char indices do not match boundary text', () => {
+        const text = 'Café test. Next.';
+        const firstText = 'Café test. ';
+        const firstEndBytes = new TextEncoder().encode(firstText).length;
+        const totalBytes = new TextEncoder().encode(text).length;
+        const boundaries = [
+            // Simulate a byte-only/byte-indexed build: the end_index is too
+            // large for JS char space, so validation fails and byte fallback
+            // must recover the correct range.
+            fakeBoundary(firstText, 0, firstEndBytes, {
+                start_byte: 0,
+                end_byte: firstEndBytes,
+            }),
+            fakeBoundary('Next.', firstEndBytes, totalBytes, {
+                start_byte: firstEndBytes,
+                end_byte: totalBytes,
+            }),
+        ];
+
+        const ranges = sentencexBoundariesToCharRanges(text, boundaries);
+        expect(ranges.map((r) => text.slice(r.start, r.end))).toEqual([
+            'Café test. ',
+            'Next.',
+        ]);
     });
 });
 

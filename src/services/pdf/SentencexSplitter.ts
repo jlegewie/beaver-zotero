@@ -14,14 +14,13 @@
  *      `await` it once and receive a purely synchronous splitter they
  *      can hand to `extractPageSentenceBBoxes`.
  *
- *   2. **Offset domain conversion.** `get_sentence_boundaries` returns
- *      `start_index`/`end_index` as **UTF-8 byte offsets**, but every
- *      downstream consumer in this codebase — most importantly
- *      `PageText.source` in `SentenceMapper.ts` — indexes by **JS string
- *      code units**. For pure ASCII paragraphs these coincide; anything
- *      else (é, ñ, ö, CJK, math symbols, ligature code points) diverges.
- *      We do a single linear walk over the input string to build a
- *      char→byte map and translate each boundary in O(text + sentences).
+ *   2. **Offset domain normalization.** sentencex-wasm currently returns
+ *      `start_index`/`end_index` as JS string indices and also exposes
+ *      `start_byte`/`end_byte` as UTF-8 byte offsets. The vendored
+ *      TypeScript comments say the former are byte indices, so the adapter
+ *      validates every reported char range against `boundary.text` before
+ *      trusting it. If a future build only reports byte offsets, we fall
+ *      back to the byte→JS-index conversion helpers below.
  *
  * Fallback policy: `getSentenceSplitterWithFallback` catches WASM init
  * failures and degrades to `simpleRegexSentenceSplit`. The lower-level
@@ -44,10 +43,14 @@ import {
 
 /** A single sentence boundary returned by `get_sentence_boundaries`. */
 export interface SentencexBoundary {
-    /** UTF-8 byte offset where the sentence starts (inclusive). */
+    /** JS string index where the sentence starts (inclusive). */
     start_index: number;
-    /** UTF-8 byte offset where the sentence ends (exclusive). */
+    /** JS string index where the sentence ends (exclusive). */
     end_index: number;
+    /** UTF-8 byte offset where the sentence starts (inclusive), when exposed. */
+    start_byte?: number;
+    /** UTF-8 byte offset where the sentence ends (exclusive), when exposed. */
+    end_byte?: number;
     /** The sentence text exactly as it appears in the source string. */
     text: string;
     /** Punctuation that ended the sentence, if any. */
@@ -217,6 +220,80 @@ export function byteRangesToCharRanges(
     return ranges;
 }
 
+function isFiniteOffset(value: unknown): value is number {
+    return typeof value === "number" && Number.isFinite(value);
+}
+
+function textMatchesBoundary(
+    text: string,
+    boundary: SentencexBoundary,
+    start: number,
+    end: number,
+): boolean {
+    if (start < 0 || end < start || end > text.length) return false;
+    return (
+        typeof boundary.text !== "string" ||
+        text.slice(start, end) === boundary.text
+    );
+}
+
+/**
+ * Normalize sentencex boundary objects to JS string ranges.
+ *
+ * `sentencex_wasm.js` exposes both `start_index`/`end_index` and
+ * `start_byte`/`end_byte`. In the current build, the former are
+ * already JS string indices. We therefore prefer validated char
+ * indices and only use byte conversion as a fallback.
+ *
+ * @internal Exported for unit testing.
+ */
+export function sentencexBoundariesToCharRanges(
+    text: string,
+    boundaries: ReadonlyArray<SentencexBoundary>,
+): SentenceRange[] {
+    const ranges: SentenceRange[] = [];
+    if (!text || boundaries.length === 0) return ranges;
+
+    let byteOffsetAt: Uint32Array | null = null;
+    const byteBoundaryFor = (
+        boundary: SentencexBoundary,
+    ): SentencexBoundary | null => {
+        const start = isFiniteOffset(boundary.start_byte)
+            ? boundary.start_byte
+            : boundary.start_index;
+        const end = isFiniteOffset(boundary.end_byte)
+            ? boundary.end_byte
+            : boundary.end_index;
+        if (!isFiniteOffset(start) || !isFiniteOffset(end)) return null;
+        return {
+            ...boundary,
+            start_index: start,
+            end_index: end,
+        };
+    };
+
+    for (const boundary of boundaries) {
+        const { start_index: start, end_index: end } = boundary;
+        if (
+            isFiniteOffset(start) &&
+            isFiniteOffset(end) &&
+            end > start &&
+            textMatchesBoundary(text, boundary, start, end)
+        ) {
+            ranges.push({ start, end });
+            continue;
+        }
+
+        const byteBoundary = byteBoundaryFor(boundary);
+        if (!byteBoundary) continue;
+        byteOffsetAt ??= buildByteOffsetTable(text);
+        const fallback = byteRangesToCharRanges([byteBoundary], byteOffsetAt);
+        ranges.push(...fallback);
+    }
+
+    return ranges;
+}
+
 // ---------------------------------------------------------------------------
 // Public factory
 // ---------------------------------------------------------------------------
@@ -246,8 +323,7 @@ export async function getSentencexSplitter(
         if (!text) return [];
         const boundaries = mod.get_sentence_boundaries(lang, text);
         if (!boundaries || boundaries.length === 0) return [];
-        const table = buildByteOffsetTable(text);
-        return byteRangesToCharRanges(boundaries, table);
+        return sentencexBoundariesToCharRanges(text, boundaries);
     };
 }
 
@@ -359,9 +435,7 @@ const NAME_TO_ISO6391: Readonly<Record<string, string>> = {
  *
  * Returns `"en"` for null / empty / undefined input.
  */
-export function normalizeLanguageCode(
-    raw: string | null | undefined,
-): string {
+export function normalizeLanguageCode(raw: string | null | undefined): string {
     if (!raw) return "en";
     const trimmed = raw.trim().toLowerCase();
     if (!trimmed) return "en";
