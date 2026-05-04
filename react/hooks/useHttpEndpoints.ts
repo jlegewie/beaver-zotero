@@ -39,6 +39,14 @@ import {
 import { wrapWithSchemaVersion } from '../utils/noteActions';
 import { undoEditNoteAction } from '../utils/editNoteActions';
 import { getLatestNoteHtml } from '../../src/utils/noteEditorIO';
+// Statically import the bbox-overlay helpers
+import {
+    getColumnOverlay,
+    getLineOverlay,
+    getParagraphOverlay,
+    getSentenceOverlay,
+} from '../utils/extractionOverlay';
+import { drawBBoxOverlayPNG } from '../utils/canvasOverlay';
 import type { AgentAction } from '../agents/agentActions';
 import type {
     WSZoteroDataRequest,
@@ -1578,13 +1586,6 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
     const { getMuPDFWorkerClient } = await import(
         '../../src/services/pdf/MuPDFWorkerClient'
     );
-    const {
-        getColumnOverlay,
-        getLineOverlay,
-        getParagraphOverlay,
-        getSentenceOverlay,
-    } = await import('../utils/extractionOverlay');
-    const { drawBBoxOverlayPNG } = await import('../utils/canvasOverlay');
     const { getSentenceSplitterWithFallback, normalizeLanguageCode } = await import(
         '../../src/services/pdf'
     );
