@@ -80,7 +80,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                         className="font-color-primary text-sm font-semibold uppercase"
                         style={{ letterSpacing: '0.05em' }}
                     >
-                        Next steps
+                        Guided next steps
                     </div>
                     <Tooltip content="Dismiss next steps" showArrow singleLine>
                         <IconButton
